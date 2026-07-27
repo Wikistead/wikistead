@@ -2,6 +2,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { writeTuples, deleteTuples } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
 import { withTenantTx } from '../db/with-tenant.js'
+import type { Sql } from 'postgres'
 import type { TenantDb } from '../db/index.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { emit } from '@wikistead/events'
@@ -37,16 +38,34 @@ async function promote(
   emit({ type: 'member.role_changed', tenantId: tenant.id, actorId: sub, targetSub: sub, role: 'admin' })
 }
 
+// The demotion itself, against a transaction handle, so the login path (db.tx) and the drift sweep
+// (withTenantTx) run the SAME code — including the audit entry, which the sweep previously skipped.
+//
+// The tuple delete tolerates "already absent". OpenFGA throws when asked to delete a tuple that is not
+// there, and a member CAN legitimately be role='admin' + admin_origin='mapping' with no tuple: SCIM
+// deprovision (ee-server scim/provision.ts) removes the admin tuple and empties the member's groups but
+// leaves the role columns alone. Treating that as a failure is what let ONE such row stop the whole
+// sweep — and the sweep is the only revocation path for an admin who never signs in again. Absent is
+// the state we wanted, so it counts as done. (The share-link sweeper takes the same "did not exist =
+// cleared" position for the same reason.)
+async function demoteInTx(
+  tx: Sql, fga: OpenFgaClient, tenant: { id: string; plan: string }, sub: string,
+): Promise<void> {
+  // admin_origin returns to its default: the column describes how the CURRENT admin status was
+  // produced, and this member no longer has one. If they are later appointed by hand it stays manual.
+  await tx`UPDATE members SET role = 'member', admin_origin = 'manual', updated_at = now() WHERE sub = ${sub}`
+  try {
+    await deleteTuples(fga, [{ user: `user:${sub}`, relation: 'admin', object: `tenant:${tenant.id}` }])
+  } catch (err) {
+    if (!/does not exist|did not exist/i.test(String((err as Error)?.message ?? err))) throw err
+  }
+  await auditIfEntitled(tx, tenant, { actor: `user:${sub}`, action: 'member.role_changed', target: `user:${sub}` })
+}
+
 async function demote(
   db: TenantDb, fga: OpenFgaClient, tenant: { id: string; plan: string }, sub: string,
 ): Promise<void> {
-  await db.tx(async (tx) => {
-    // admin_origin returns to its default: the column describes how the CURRENT admin status was
-    // produced, and this member no longer has one. If they are later appointed by hand it stays manual.
-    await tx`UPDATE members SET role = 'member', admin_origin = 'manual', updated_at = now() WHERE sub = ${sub}`
-    await deleteTuples(fga, [{ user: `user:${sub}`, relation: 'admin', object: `tenant:${tenant.id}` }])
-    await auditIfEntitled(tx, tenant, { actor: `user:${sub}`, action: 'member.role_changed', target: `user:${sub}` })
-  })
+  await db.tx((tx) => demoteInTx(tx, fga, tenant, sub))
   emit({ type: 'member.role_changed', tenantId: tenant.id, actorId: sub, targetSub: sub, role: 'member' })
 }
 
@@ -118,20 +137,25 @@ export async function reconcileMaterialisedAdmins(fga: OpenFgaClient): Promise<n
             WHERE g.group_name = ANY(COALESCE(m.groups, ARRAY[]::text[]))
           )`)
       for (const row of rows) {
-        // Re-check the last-admin guard per row inside the loop: demoting several in one sweep must not
-        // walk the tenant down to zero admins.
-        const others = await withTenantTx(tenant.id, async (tx) => tx<{ n: number }[]>`
-          SELECT count(*)::int AS n FROM members WHERE role = 'admin' AND sub <> ${row.sub}`)
-        if ((others[0]?.n ?? 0) === 0) continue
-        await withTenantTx(tenant.id, async (tx) => {
-          await tx`UPDATE members SET role = 'member', admin_origin = 'manual', updated_at = now() WHERE sub = ${row.sub}`
-          await deleteTuples(fga, [{ user: `user:${row.sub}`, relation: 'admin', object: `tenant:${tenant.id}` }])
-        })
-        emit({ type: 'member.role_changed', tenantId: tenant.id, actorId: row.sub, targetSub: row.sub, role: 'member' })
-        demoted++
+        // PER ROW, not per tenant. One member the sweep cannot process must not cost every OTHER member
+        // in the tenant their revocation — that is exactly how a single SCIM-deprovisioned row silently
+        // turned the whole sweep into a no-op, leaving real drifted admins in place indefinitely.
+        try {
+          // Re-check the last-admin guard inside the loop: demoting several in one sweep must not walk
+          // the tenant down to zero admins.
+          const others = await withTenantTx(tenant.id, async (tx) => tx<{ n: number }[]>`
+            SELECT count(*)::int AS n FROM members WHERE role = 'admin' AND sub <> ${row.sub}`)
+          if ((others[0]?.n ?? 0) === 0) continue
+          await withTenantTx(tenant.id, (tx) => demoteInTx(tx, fga, tenant, row.sub))
+          emit({ type: 'member.role_changed', tenantId: tenant.id, actorId: row.sub, targetSub: row.sub, role: 'member' })
+          demoted++
+        } catch (err) {
+          console.error('[reconcileMaterialisedAdmins] could not demote; next sweep retries', { tenantId: tenant.id, sub: row.sub, err })
+        }
       }
     } catch {
-      // Leave this tenant to the next sweep (FGA down, or a transient DB error). Never abort the others.
+      // Leave this tenant to the next sweep (its member list was unreadable — FGA/DB down, or the tenant
+      // vanished between the registry read and now). Never abort the others.
     }
   }
   return demoted
