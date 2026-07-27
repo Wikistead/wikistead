@@ -22,10 +22,17 @@ export interface RegistryEntryMeta {
 // The set of host-mediated capabilities a community macro may DISCLOSE (ADR-075 sandbox surface). A submission
 // requesting anything outside this set is rejected in CI (an out-of-sandbox capability can never be install-time
 // consented to). Kept small + explicit; extended only by an ADR that widens the sandbox.
+// #450 / ADR-177 rev2 (user ruling 2026-07-27): the vocabulary is exactly what the host actually brokers.
+// `net.fetch` and `storage.local` were listed as FUTURE sandbox surfaces with no implementation and no
+// consumer, and a capability nobody can be granted is not a promise — it is a hole waiting for someone to
+// read the list as a menu. The four below are the seams that exist: the ADR-024 `{theme}` host-API, the
+// sub-render the host performs on a macro's behalf, the host-resolved dynamic list, and the design tokens.
+// Widening this set is an ADR decision, not a code-review one.
 export const ALLOWED_CAPABILITIES: ReadonlySet<string> = new Set([
-  "theme", // the ADR-024 host-API (the only capability a first-party macro gets today)
-  "net.fetch", // a sandboxed, host-brokered fetch (future sandbox surface — disclosed, consented)
-  "storage.local", // per-macro sandboxed storage (future)
+  "theme", // ADR-024: the narrow host-API a macro receives
+  "render-markdown", // the host renders nested markdown for the macro (it never imports the renderer)
+  "host-list", // the host resolves a dynamic list (tagged/children); see the fidelity rule below
+  "design-tokens", // read the token vocabulary rather than hard-coding colour/spacing
 ]);
 
 // OSI-approved license ids accepted for the COMMUNITY tier. A curated allowlist (not every SPDX id) so a
