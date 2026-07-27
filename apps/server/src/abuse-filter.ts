@@ -11,9 +11,11 @@ export interface AbuseConfig {
   // (e.g. 0.2 → reject when the new page is under 20% of the old). NULL = off (default). Only fires when there
   // is published text to shrink from.
   readonly shrinkRatio: number | null
-  // Banned words: a flag fires only when a banned word is ADDED (present in the new text but not the published
-  // text — a token-set difference), so a benign edit to a page that already contains a flagged word is not
-  // blocked and an existing word is not re-flagged (reviewer I3). Empty = off (default).
+  // Banned words: a flag fires only when a banned word is ADDED, so a benign edit to a page that already
+  // contains a flagged word is not blocked and an existing word is not re-flagged (reviewer I3). How a word
+  // is matched follows the word's own script (#531): CJK words match as SUBSTRINGS (those languages are not
+  // word-segmented) and "added" then means a HIGHER OCCURRENCE COUNT than the published text; every other
+  // word matches whole tokens and "added" means absent from the published token set. Empty = off (default).
   readonly bannedWords: readonly string[]
 }
 
@@ -28,6 +30,22 @@ function tokenSet(s: string): Set<string> {
   return set
 }
 
+// #531: banned words were matched ONLY as whole tokens, and Japanese/Chinese/Korean are not written with
+// spaces — so is ONE token and banning never fired. The filter was effectively dead for
+// non-word-segmented languages, which is the moderation surface's whole point. Ruled fix: pick the matching
+// mode from the WORD's own script, so nobody has to configure it.
+// - a word containing CJK → SUBSTRING match ( catches )
+// - a Latin-only word → token match, unchanged (banning "ass" must not flag "classic" — Scunthorpe)
+const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+const isSubstringWord = (w: string): boolean => CJK_RE.test(w)
+
+// Non-overlapping occurrence count of `needle` in `hay` (both already lowercased).
+function countOccurrences(hay: string, needle: string): number {
+  let n = 0
+  for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) n += 1
+  return n
+}
+
 // Evaluate the publish against the tenant's abuse policy. Pure — no I/O. Returns `{ ok: true }` when nothing
 // trips (the common case, and always for an all-permissive config).
 export function evaluatePublishAbuse(publishedMd: string | null, md: string, config: AbuseConfig): AbuseVerdict {
@@ -38,13 +56,30 @@ export function evaluatePublishAbuse(publishedMd: string | null, md: string, con
   if (config.shrinkRatio != null && config.shrinkRatio > 0 && config.shrinkRatio <= 1 && publishedMd != null && publishedMd.length > 0 && md.length < publishedMd.length * config.shrinkRatio) {
     return { ok: false, reason: 'mass_delete' }
   }
-  // Banned words on ADDED content only (token-set difference).
+  // Banned words on ADDED content only. Two modes, chosen per word by its script (#531).
   if (config.bannedWords.length > 0) {
-    const banned = new Set(config.bannedWords.map((w) => w.toLowerCase()).filter((w) => w.length > 0))
-    if (banned.size > 0) {
-      const before = publishedMd ? tokenSet(publishedMd) : new Set<string>()
-      for (const m of md.toLowerCase().matchAll(WORD_RE)) {
-        if (banned.has(m[0]) && !before.has(m[0])) return { ok: false, reason: 'banned_content' }
+    const banned = [...new Set(config.bannedWords.map((w) => w.toLowerCase()).filter((w) => w.length > 0))]
+    if (banned.length > 0) {
+      const after = md.toLowerCase()
+      const beforeText = (publishedMd ?? '').toLowerCase()
+      const tokenBanned = new Set(banned.filter((w) => !isSubstringWord(w)))
+      const substringBanned = banned.filter(isSubstringWord)
+
+      // Token mode (Latin & friends): unchanged token-set difference — a word already in the published text
+      // is not re-flagged, so an unrelated edit to a page that already contains it still publishes (I3).
+      if (tokenBanned.size > 0) {
+        const before = publishedMd ? tokenSet(publishedMd) : new Set<string>()
+        for (const m of after.matchAll(WORD_RE)) {
+          if (tokenBanned.has(m[0]) && !before.has(m[0])) return { ok: false, reason: 'banned_content' }
+        }
+      }
+
+      // Substring mode (CJK): "already present" cannot be decided per token here, so ADDED is defined by
+      // OCCURRENCE COUNT — the publish is rejected only when the new text contains the word MORE times than
+      // the published one did. That keeps the added-only semantics intact (republishing a page that already
+      // says it, or even removing occurrences, still goes through) while catching every fresh insertion.
+      for (const w of substringBanned) {
+        if (countOccurrences(after, w) > countOccurrences(beforeText, w)) return { ok: false, reason: 'banned_content' }
       }
     }
   }
