@@ -8,7 +8,7 @@ export { HEADINGS, footnoteRefLabel } from "./md-nodes.js"; // #384: shared head
 export { parseDirectiveOpen, isDirectiveClose, directiveExtension, resolveDirectiveRanges, parseDirectiveAttrs, serializeDirectiveAttrs, type ResolvedDirective } from "./directive-parser.js";
 export { highlightExtension } from "./highlight-ext.js"; // #334 / ADR-129: shared `==` → <mark> grammar
 export { footnoteExtension } from "./footnote-ext.js"; // #335 / ADR-130: shared `[^1]` / `[^1]:` grammar
-export { renderMarkdownToHtml, mdParser } from "./render.js";
+export { renderMarkdownToHtml, renderMarkdownToHtmlWithReport, mdParser } from "./render.js";
 export { findMathSpans, renderMathHtml, type MathSpan } from "./math.js"; // #505/ADR-191: math on the static path
 export type { MacroHtmlDescriptor, MacroHtmlRegistry } from "./render.js";
 // #384 / ADR-160: the ONE markdown tree-walk; the DOM sink (apps/web md-render.ts) and the SafeHtml sink

@@ -1,6 +1,6 @@
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check } from '@wikistead/authz'
-import { renderMarkdownToHtml, builtinMacroRegistry, escapeHtml } from '@wikistead/macro-render'
+import { renderMarkdownToHtmlWithReport, builtinMacroRegistry, escapeHtml } from '@wikistead/macro-render'
 import type { TenantDb } from '../db/index.js'
 import { resolveListSnapshotForViewer, substituteListSnapshots } from '../routes/pages.js'
 import { sanitizeExportHtml } from './sanitize.js'
@@ -88,6 +88,7 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 .tabs>.tab{margin:.5em 0;}.tab-label{margin:0 0 .3em;}
 .embed-link{word-break:break-all;}
 .wks-fidelity-degrade{position:relative;border:1px dashed color-mix(in srgb,var(--fg-dim) 55%,transparent);border-radius:6px;padding:.4em .6em;margin:.5em 0;}
+.wks-export-summary{margin:0 0 1rem;padding:.4em .7em;border-radius:6px;border:1px dashed color-mix(in srgb,var(--fg-dim) 55%,transparent);color:var(--fg-dim);font-size:.9em;}
 .wks-fidelity-badge{float:right;margin-left:.5em;color:#b8860b;font-size:1.1em;line-height:1;cursor:help;}
 /* #207 part 2: this document IS the print/PDF source (the app prints it from an offscreen frame — the
    whole doc rendered statically, every macro, no raw ::: leak). Make it print well: a compact even
@@ -102,8 +103,13 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 }
 `
 
-function htmlDocument(title: string, safeBody: string): string {
+function htmlDocument(title: string, safeBody: string, degradedCount = 0): string {
   const t = escapeHtml(title || 'Untitled')
+  // #85 (c) / ADR-022 Part 6: the one-line export summary. Each degraded block already wears its badge,
+  // but a badge only speaks to a reader who is looking at that block; someone handed this file needs to
+  // know from the top that parts of the page are a simplification. Server-authored text over a NUMBER —
+  // no user content reaches this line. Absent entirely when the page came through whole.
+  const note = degradedCount === 0 ? '' : `<p class="wks-export-summary">◐ ${degradedCount} block${degradedCount === 1 ? '' : 's'} simplified for this export — the interactive version is in the app.</p>\n`
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -115,7 +121,7 @@ function htmlDocument(title: string, safeBody: string): string {
 <body>
 <main class="wks-export">
 <h1 class="wks-export-title">${t}</h1>
-${safeBody}
+${note}${safeBody}
 </main>
 </body>
 </html>
@@ -147,13 +153,13 @@ export async function buildHtmlExport(
   // Shared renderer (single source of truth with the editor) → SafeHtml, then the final sanitizer.
   // renderMarkdownToHtml already produces SafeHtml (dynamic values escaped; `:::table` uses the
   // table-model allowlist), but the sanitizer re-checks the WHOLE output so raw passthrough is zero.
-  const rendered = renderMarkdownToHtml(resolved, builtinMacroRegistry())
-  const safeBody = sanitizeExportHtml(rendered.value)
+  const rendered = renderMarkdownToHtmlWithReport(resolved, builtinMacroRegistry())
+  const safeBody = sanitizeExportHtml(rendered.html.value)
 
   const title = row.title ?? 'Untitled'
   return {
     filename: `${title}.html`,
     contentType: 'text/html; charset=utf-8',
-    body: htmlDocument(title, safeBody),
+    body: htmlDocument(title, safeBody, rendered.degraded.length),
   }
 }

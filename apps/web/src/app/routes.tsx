@@ -649,11 +649,8 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     onRelated: pageId ? toggleRelated : undefined,
     onAnalytics: page?.canManage && pageId ? toggleAnalytics : undefined, // #464: manager-only analytics right panel
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
-    // #85 bounce: the HTML-export UI entry is SEALED until the post-launch Option-A redesign (a
-    // DOM-free render core shared by client + SSR). The current renderMarkdownToHtml output is
-    // low-fidelity (math `$$` leaks as raw text, table/callout/embed diverge, dark theme). Per the
-    // user, the menu item stays VISIBLE but GRAYED OUT (disabled) rather than hidden — see
-    // PageControls (export-html item is disabled). The handler is kept for when the redesign re-enables it.
+    // #85: unsealed. The seal named three defects — raw `$$`, table/callout/embed divergence, a dark
+    // sheet — and the shared DOM-free renderer now closes all three (see PageControls).
     onExportHtml: () => { if (pageId) void downloadPageExport(token, pageId, "html"); },
     // #207 part 2: print the full server-rendered HTML (all macros static, no raw ::: leak) rather
     // than window.print on the virtualised CM surface. Fall back to the live-surface print only when

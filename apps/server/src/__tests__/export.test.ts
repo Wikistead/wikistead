@@ -462,4 +462,24 @@ describe('buildHtmlExport', () => {
     expect(html).toContain('.wks-fidelity-badge') // ...and the document ships the CSS so it's visible
     expect(html).toContain('Diagram') // the surrounding prose still renders
   })
+
+  // #85 (c) / ADR-022 Part 6: "a placeholder + a one-line export summary". The badge tells a reader who
+  // is already looking at the block; the summary is what tells someone HANDED the file that part of the
+  // page is a simplification. It counts blocks — including one nested in a container, which renders
+  // through its own sink and would otherwise be badged but uncounted — and is absent for a whole page.
+  it('states up front how many blocks were simplified (and says nothing when none were)', async () => {
+    const [before] = await admin<[{ published_md: string | null }]>`SELECT published_md FROM pages WHERE id = ${CHILD}`
+    try {
+      await admin`UPDATE pages SET published_md = ${'```plantuml\n@startuml\n@enduml\n```\n\n:::columns\n:::column\n```mermaid\nA-->B\n```\n:::\n:::\n'} WHERE id = ${CHILD}`
+      const many = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD }))!.body
+      expect(many, 'both the top-level and the nested degraded block are counted').toContain('2 blocks simplified for this export')
+      expect(many).toContain('.wks-export-summary{') // the document ships the CSS for it
+
+      await admin`UPDATE pages SET published_md = ${'# Just prose\n\nnothing simplified here.\n'} WHERE id = ${CHILD}`
+      const clean = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD }))!.body
+      expect(clean, 'a page that came through whole carries no note at all').not.toContain('wks-export-summary">')
+    } finally {
+      await admin`UPDATE pages SET published_md = ${before!.published_md} WHERE id = ${CHILD}`
+    }
+  })
 })
