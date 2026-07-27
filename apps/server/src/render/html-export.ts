@@ -107,11 +107,17 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 
 function htmlDocument(title: string, safeBody: string, degradedCount = 0): string {
   const t = escapeHtml(title || 'Untitled')
-  // #85 (c) / ADR-022 Part 6: the one-line export summary. Each degraded block already wears its badge,
-  // but a badge only speaks to a reader who is looking at that block; someone handed this file needs to
-  // know from the top that parts of the page are a simplification. Server-authored text over a NUMBER —
-  // no user content reaches this line. Absent entirely when the page came through whole.
-  const note = degradedCount === 0 ? '' : `<p class="wks-export-summary">◐ ${degradedCount} block${degradedCount === 1 ? '' : 's'} simplified for this export — the interactive version is in the app.</p>\n`
+  // #85 (c) / ADR-022 Part 6 + ADR-194 acceptance 3: what this file is, said at the top.
+  //
+  // Since ADR-194 the app's own export is built by the BROWSER, from the document it has already drawn —
+  // diagrams are figures there and code is highlighted. This route is what remains for callers with no
+  // browser to draw with (the API), and it is therefore the lower-fidelity render, always. That has to be
+  // stated rather than quietly be true: someone handed this file otherwise has no way to know a diagram
+  // was a diagram. The per-block count rides along when there is one.
+  //
+  // Server-authored text over a NUMBER — no user content reaches this line.
+  const simplified = degradedCount === 0 ? '' : ` ${degradedCount} block${degradedCount === 1 ? '' : 's'} in it could not be drawn statically.`
+  const note = `<p class="wks-export-summary">◐ This is the API export — the lower-fidelity render.${simplified} Exporting from the app produces the full document, with diagrams drawn and code highlighted.</p>\n`
   return `<!doctype html>
 <html lang="en">
 <head>
