@@ -46,8 +46,11 @@ export function MemberSearchInput(props: {
                 data-testid={props.itemTestId}
                 onClick={() => onPick(c)}
               >
+                {/* #532: the row shows the NAME. The sub used to sit under it as a second line, from when
+                    it was the only identifier a member could see — #523 canonicalised display names from
+                    the IdP, so the opaque id is now just noise in a picker. It is still what gets SENT
+                    (`user:<sub>`), and still the fallback text for a member who has no name yet. */}
                 <span className="text-sm">{c.displayName || c.sub}</span>
-                {c.displayName && <span className="text-[11px] text-fg-dim">{c.sub}</span>}
               </button>
             </li>
           ))}
