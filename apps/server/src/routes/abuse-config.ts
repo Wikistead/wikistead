@@ -2,8 +2,9 @@
 // tenant_settings knobs (abuse_shrink_ratio, abuse_banned_words) that until now were DB-direct-only.
 // Authz is the existing tenant#admin gate (requireTenantAdmin — OpenFGA is the one truth; no new model,
 // no per-member axis). The knobs are moderation POLICY the admin owns for their own tenant, so there is
-// no cross-tenant / oracle concern; the banned-word matcher is a token-SET membership test (abuse-filter.ts),
-// never a regex compiled from input, so a word can never inject a pattern. Read is admin-gated too — the
+// no cross-tenant / oracle concern; the banned-word matcher is a token-SET membership test, or for a CJK word
+// a plain `indexOf` substring scan (#531, abuse-filter.ts) — never a regex compiled from input, so a word can
+// never inject a pattern (and no input-driven backtracking). Read is admin-gated too — the
 // banned-word list is moderation intelligence, not shown to ordinary members.
 import type { FastifyInstance } from 'fastify'
 import { requireTenantAdmin, check } from '@wikistead/authz'
