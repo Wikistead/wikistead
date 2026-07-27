@@ -141,7 +141,7 @@ test("#528: only the INNERMOST block shows an entry affordance (no ancestor hint
 // geometry the row comes back with. The fix is to keep placing from the block's own rectangle rather than
 // from whichever affordances happen to be in the DOM at that instant. Marked fixme so the failure is a
 // recorded defect instead of a permanently red suite (#528 ①).
-test.fixme("#528 the affordances stay apart WHILE the pointer moves", async ({ page }) => {
+test("#528 the affordances stay apart WHILE the pointer moves", async ({ page }) => {
   await openScratch(page, `aff528m-${Date.now().toString(36)}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
