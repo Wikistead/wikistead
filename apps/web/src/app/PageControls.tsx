@@ -134,12 +134,15 @@ export interface WatchItems { page: WatchItem }
 // the ⋯ menu offers without mounting the page.
 export function overflowItems(p: PageControlsProps, t: (k: string) => string, watch?: WatchItems): OverflowItem[] {
   const items: OverflowItem[] = [];
-  // #368: Watch lives in the ⋯ menu in VIEW mode (member-only; only for a real page). Eye = watching,
-  // EyeOff = not — a toggle item (trailing ✓ when on). Icon is the EYE glyph per the ticket; the
-  // notification-feed bell (NotificationBell) is a different control and is untouched.
+  // #368: Watch lives in the ⋯ menu in VIEW mode (member-only; only for a real page). A toggle item
+  // (trailing ✓ when on); the notification-feed bell (NotificationBell) is a different control, untouched.
   // #467: exactly ONE watch item — it reads "watch this page" or "unwatch", nothing else.
+  // #542: the label and the icon point at the same thing — the ACTION. The icon used to show the current
+  // STATE (watching → Eye), which read as the exact opposite of the label beside it ("unwatch" + open
+  // eye). The current state is already carried by the trailing ✓, so the icon follows the label: watch →
+  // Eye (start seeing), unwatch → EyeOff (stop seeing).
   if (!p.editing && p.pageId && watch) {
-    items.push({ value: "watch", label: watch.page.watching ? t("watch.unwatch") : t("watch.watch"), icon: watch.page.watching ? <Eye size={14} /> : <EyeOff size={14} />, testId: "watch-toggle", checked: watch.page.watching, disabled: watch.page.disabled });
+    items.push({ value: "watch", label: watch.page.watching ? t("watch.unwatch") : t("watch.watch"), icon: watch.page.watching ? <EyeOff size={14} /> : <Eye size={14} />, testId: "watch-toggle", checked: watch.page.watching, disabled: watch.page.disabled });
   }
   // #212: comments toggle lives here now (was an always-visible bar button). It's a right-panel toggle
   // exactly like history/attachments, so it shows NO ✓ open-state marker (comment 720): the three
