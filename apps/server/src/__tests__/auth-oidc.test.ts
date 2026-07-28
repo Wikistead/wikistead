@@ -224,6 +224,49 @@ describe('#537 login-method ceiling on the routes', () => {
     }
   })
 
+  // Review finding A (review, Slice 1): with no PLATFORM_OIDC_* in the test env, the B3 pin
+  // above 404s through `!resolved` alone — the mode-MISMATCH clause had no effective pin. These two
+  // set up a live platform IdP (same test issuer) so the resolver still resolves after the flip, and
+  // ONLY the `resolved.viaTenantOidc !== st.viaTenantOidc` clause stands between the state and a
+  // cross-IdP code exchange. Both directions.
+  const platformEnv = { PLATFORM_OIDC_ISSUER: () => issuer.url, PLATFORM_OIDC_CLIENT_ID: () => CLIENT_ID, PLATFORM_OIDC_REDIRECT_URI: () => REDIRECT }
+  const withPlatform = async (fn: () => Promise<void>) => {
+    for (const [k, v] of Object.entries(platformEnv)) process.env[k] = v()
+    try { await fn() } finally { for (const k of Object.keys(platformEnv)) delete process.env[k] }
+  }
+
+  it('B3 cross-IdP (tenant→platform): a tenant-minted state cannot be exchanged against the platform IdP', async () => {
+    await withPlatform(async () => {
+      const path = await startLogin() // tenant IdP wins the pick → state.viaTenantOidc = true
+      await db.sql`UPDATE tenant_oidc SET enabled = false WHERE tenant_id = ${tenant.id}`
+      try {
+        // The resolver now RESOLVES (platform is effective) — only the mode-match refuses.
+        const res = await cb(path)
+        expect(res.statusCode).toBe(404)
+        expect(res.json()).toEqual({ error: 'not found' })
+        expect(res.headers['set-cookie']).toBeUndefined()
+      } finally {
+        await db.sql`UPDATE tenant_oidc SET enabled = true WHERE tenant_id = ${tenant.id}`
+      }
+    })
+  })
+
+  it('B3 cross-IdP (platform→tenant): a platform-minted state cannot complete once the tenant IdP is the pick', async () => {
+    await withPlatform(async () => {
+      await db.sql`UPDATE tenant_oidc SET enabled = false WHERE tenant_id = ${tenant.id}`
+      let path: string
+      try {
+        path = await startLogin() // platform pick → state.viaTenantOidc = false
+      } finally {
+        await db.sql`UPDATE tenant_oidc SET enabled = true WHERE tenant_id = ${tenant.id}`
+      }
+      const res = await cb(path) // tenant IdP is back as the pick → mode mismatch → 404
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toEqual({ error: 'not found' })
+      expect(res.headers['set-cookie']).toBeUndefined()
+    })
+  })
+
   it('a ceiling that excludes every OIDC method 404s /auth/login with the unified body', async () => {
     process.env.LOGIN_METHODS = 'saml'
     try {

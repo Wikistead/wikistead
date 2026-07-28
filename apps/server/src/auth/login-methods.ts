@@ -47,7 +47,11 @@ async function tenantOidcEnabled(db: TenantDb): Promise<boolean> {
 async function tenantSamlEnabled(db: TenantDb): Promise<boolean> {
   // The table exists in every deployment (migration 038); the EE code that USES it lives in ee-server.
   // Reading the flag here is data access, not an EE feature — the entitlement gate below still applies.
-  const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml LIMIT 1`.catch(() => [] as { enabled: boolean }[])
+  const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml LIMIT 1`.catch((err: unknown) => {
+    // Fail-closed (saml drops out of the set) — but say so, per B8's "no mysterious 404s" rule.
+    console.warn('[login-methods] tenant_saml read failed; treating saml as unavailable:', err)
+    return [] as { enabled: boolean }[]
+  })
   return !!row?.enabled
 }
 
@@ -88,18 +92,29 @@ export async function resolveAvailableLogin(
   return { methods, oidc }
 }
 
-// #537 lockout guard: "would anything OTHER than tenant-oidc still let someone in?" — asked before a
-// write that disables the tenant IdP. Refusing the transition to an empty effective set is the guard;
-// an ALREADY-empty set is not made worse by a write, so only the transition is refused (the admin's
+// #537 lockout guard: "would anything OTHER than `except` still let someone in?" — asked before a
+// write that disables one method. Refusing the transition to an empty effective set is the guard; an
+// ALREADY-empty set is not made worse by a write, so only the transition is refused (the admin's
 // live cookie session is the recovery path, per the module header of tenant-oidc.ts).
+//
+// Two honest limits (design-review, Slice 1):
+// - TOCTOU: this read and the caller's write are not one transaction, and the sibling method can be
+//   disabled through its own route concurrently — two simultaneous disables can still empty the set.
+//   The guard is a seatbelt against the common accident, not a serializable invariant; break-glass
+//   (Slice 4) is the recovery for the race.
+// - The predicates mirror the resolver's ENABLED checks, not the full login reality (a stored-but-
+//   undecryptable tenant IdP cfg, a corrupt SAML cert): a "remaining" method can still be broken.
+//   That gap is §4's documented one — the guard prevents intentional lockout, not misconfiguration.
 export async function otherLoginMethodsEffective(
   db: TenantDb,
   tenant: { plan: string },
+  except: LoginMethod,
   env?: string | undefined,
 ): Promise<boolean> {
   const ceiling = loginMethodCeiling(env)
-  if (ceiling.has('platform-oidc') && loadPlatformOidc()) return true
-  if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) return true
+  if (except !== 'platform-oidc' && ceiling.has('platform-oidc') && loadPlatformOidc()) return true
+  if (except !== 'saml' && ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) return true
+  if (except !== 'tenant-oidc' && ceiling.has('tenant-oidc') && (await tenantOidcEnabled(db))) return true
   return false
 }
 

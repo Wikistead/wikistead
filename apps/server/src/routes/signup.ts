@@ -56,6 +56,9 @@ export async function signupPlugin(app: FastifyInstance) {
   // SSO-logs-in at the tenant subdomain to get a real member session (the signup
   // session never persists past creation).
   app.post<{ Body: { slug?: string } }>('/signup/tenants', async (req, reply) => {
+    // #537 (review finding F): the create step gates too — a signup session minted before a ceiling
+    // change must not complete into a tenant nobody can ever sign in to.
+    if (!loginMethodCeiling().has('platform-oidc')) return reply.code(404).send({ error: 'signup not available' })
     const sid = req.cookies?.[SIGNUP_COOKIE]
     const su = await readSignupSession(app.valkey, sid)
     if (!su) return reply.code(401).send({ error: 'no signup session' })
