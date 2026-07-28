@@ -4,6 +4,7 @@ import { renderMacroSettings } from "./macro-settings-controls";
 import { codeFenceSettings, fenceInfoOf, withFenceInfo } from "../macros/fence-settings";
 import { codeFenceOpeningAt } from "./context-menu";
 import i18n from "../../i18n";
+import { ICON_CLOSE } from "../macros/md-render"; // #544: trusted constant SVG icons
 
 // #456 S4 (second half): the mounting path for a code fence's declared settings. The panel lives in
 // CodeMirror's TOOLTIP layer, not as a child of the block — CM reconciles its own DOM away, so
@@ -66,7 +67,7 @@ function settingsTooltip(pos: number): Tooltip {
       closeBtn.className = "cm-lp-fence-settings-close";
       closeBtn.setAttribute("data-testid", "fence-settings-close");
       closeBtn.setAttribute("aria-label", i18n.t("common.close"));
-      closeBtn.textContent = "×"; // ×
+      closeBtn.innerHTML = ICON_CLOSE; // #544: trusted constant SVG (glyph rendering is font-dependent); no user input
       closeBtn.addEventListener("click", (e) => { e.preventDefault(); dismiss(); });
       header.append(title, closeBtn);
       dom.append(header);

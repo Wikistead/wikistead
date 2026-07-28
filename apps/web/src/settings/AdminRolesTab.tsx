@@ -14,6 +14,7 @@ import { Input } from "../ui/Input";
 import { MemberSearchInput } from "../ui/MemberSearchInput";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
+import { Pencil, X } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
 
 // #420 / ADR-164 increment 5: the custom-role manager (tenant-admin console). Definitions =
 // named bundles of the atomic capabilities; assignments expand to fixed FGA tuples server-side.
@@ -234,13 +235,13 @@ export function AdminRolesTab() {
                     <span className="font-medium">{r.name}</span>
                     {r.scope === "tenant" && <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim">{t("adminRoles.scopeTenant")}</span>}
                     <IconButton aria-label={t("adminRoles.rename")} data-tip={t("adminRoles.rename")} data-testid="role-rename"
-                      onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}>✎</IconButton>
+                      onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}><Pencil size={14} /></IconButton>
                   </>
                 )}
                 <span className="flex-1" />
                 {/* #504: red at rest + confirm-before-delete (irreversible — assignments die with it) */}
                 <IconButton aria-label={t("adminRoles.delete")} data-testid="role-delete" variant="danger"
-                  onClick={() => setDeletingRole({ id: r.id, name: r.name })}>×</IconButton>
+                  onClick={() => setDeletingRole({ id: r.id, name: r.name })}><X size={14} /></IconButton>
               </div>
               <CapabilityPicker
                 value={r.capabilities}
@@ -342,7 +343,7 @@ export function AdminRolesTab() {
             )}
             {/* #504: deleting a mapping revokes its group assignment — red trigger + confirm. */}
             <IconButton aria-label={t("adminRoles.mappingRemove")} data-testid="mapping-remove" variant="danger"
-              onClick={() => setDeletingMapping({ id: m.id, groupName: m.groupName, roleName: m.roleName })}>×</IconButton>
+              onClick={() => setDeletingMapping({ id: m.id, groupName: m.groupName, roleName: m.roleName })}><X size={14} /></IconButton>
           </div>
         ))}
         {(mappings.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.mappingEmpty")}</p>}

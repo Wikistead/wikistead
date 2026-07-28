@@ -11,6 +11,7 @@ import { Switch } from "./Switch";
 import { RadioGroup } from "./RadioGroup";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { X } from "lucide-react"; // #544: icon component, not a text glyph
 
 type TabKey = "access" | "restrictions" | "advanced";
 
@@ -300,7 +301,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               <IconButton aria-label={t("permissions.revoke")} data-testid="grant-revoke" variant="danger" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
                 onSuccess: () => notify.success(t("toast.accessRevoked")),
                 onError: () => notify.error(t("toast.actionFailed")),
-              })}>×</IconButton>
+              })}><X size={14} /></IconButton>
             </div>
           ))}
           {(grants?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("permissions.empty")}</p>}
@@ -336,7 +337,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
                 <IconButton aria-label={t("permissions.unrestrict")} data-testid="restrict-remove" onClick={() => unrestrict.mutate({ principal: r.principal }, {
                   onSuccess: () => notify.success(t("toast.saved")),
                   onError: () => notify.error(t("toast.actionFailed")),
-                })}>×</IconButton>
+                })}><X size={14} /></IconButton>
               </div>
             ))}
           </div>

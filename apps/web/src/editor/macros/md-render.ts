@@ -194,6 +194,12 @@ export const FENCE_COPY_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" 
 export const FENCE_CHECK_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
 // #502 gear/pencil glyph for the code-settings affordance (trusted constant SVG, XSS-safe like the copy icon).
 export const FENCE_SETTINGS_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+// #544 (the #256 family, again): close/download buttons drawn with TEXT glyphs (✕ / ⤓ / ×) render at the
+// mercy of the platform's font fallback — the reported pencil was a smudge — so every DOM-built control
+// icon is a trusted constant SVG like the fence icons above (no user input → innerHTML is XSS-safe).
+// Shapes are Lucide's X and Download, so DOM-built buttons match the React side's lucide-react icons.
+export const ICON_CLOSE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+export const ICON_DOWNLOAD = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>';
 export function buildFenceHeader(args: { lang: string; title?: string; code: string; canCopy: boolean; onSettings?: () => void; settingsLabel?: string }): HTMLElement {
   const row = document.createElement("div");
   row.className = "cm-lp-code-header";
