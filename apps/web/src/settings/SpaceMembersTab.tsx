@@ -109,9 +109,14 @@ export function SpaceMembersTab() {
     if (pick.startsWith("role:")) {
       const id = pick.slice("role:".length);
       // Groups: the assignment path takes a group PRINCIPAL, the same one the mapping feature uses.
-      const principal = mode === "group" ? (groupName ? `group:${groupName}#member` : "") : (picked?.grantee ?? "");
-      if (!id || !principal) return;
-      assignRole.mutate({ roleId: id, resourceType: "space", resourceId: spaceId, principal }, {
+      // #536 send the group NAME, never a principal we built. The FGA id is a tenant-salted hash
+      // the server derives; guessing it here writes a tuple that no membership points at, and the toast
+      // would say it worked. The mapping feature has always sent the name for this reason.
+      const target = mode === "group"
+        ? (groupName ? { groupName } : null)
+        : (picked ? { principal: picked.grantee } : null);
+      if (!id || !target) return;
+      assignRole.mutate({ roleId: id, resourceType: "space", resourceId: spaceId, ...target }, {
         onSuccess: () => { notify.success(t("toast.accessGranted")); setPicked(null); setQuery(""); setGroupName(""); },
         onError: () => notify.error(t("toast.actionFailed")),
       });
