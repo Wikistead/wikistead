@@ -170,5 +170,5 @@ Edition (EE) features are proprietary, kept in gitignored overlays outside the p
 (two-repo overlay, ADR-084). Every **bundled dependency is permissive** (MIT / Apache-2.0 /
 BSD / ISC; MPL-2.0 only when the file is unmodified) — no AGPL/GPL/SSPL/BSL/source-available
 code is linked, bundled, or integrated into a distributable — enforced by a CI license
-allowlist (`pnpm license:check`, ADR-011). The `LICENSE` file and the final AGPL legal
-review are tracked as a pre-launch item (not yet committed here).
+allowlist (`pnpm license:check`, ADR-011). `LICENSE` carries the AGPL-3.0 text; what remains
+before launch is the copyright-holder line and the legal sign-off, not the licence choice.
