@@ -1889,6 +1889,38 @@ export function useTestTenantOidc() {
   });
 }
 
+// #537 / ADR-195 §5: tenant SAML SP settings (EE — the routes live in packages/ee-server). The cert
+// is write-only (hasCert only). Three server answers, three UI states (samlSectionState in
+// AdminSamlSection): 200 → the form; 403+upgrade → UpgradeNotice (ADR-072 admin surface, NOT 404);
+// 404 → the route is not mounted at all (CE build) → the section renders nothing.
+export interface TenantSamlDTO {
+  idpEntityId: string; ssoUrl: string; spEntityId: string; acsUrl: string
+  attrEmail: string | null; attrName: string | null; attrGroups: string | null
+  enabled: boolean; hasCert: boolean
+}
+export interface TenantSamlInput {
+  idpEntityId: string; ssoUrl: string; idpCert?: string | null
+  spEntityId: string; acsUrl: string
+  attrEmail?: string | null; attrName?: string | null; attrGroups?: string | null; enabled: boolean
+}
+export function useTenantSaml() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["tenant-saml"],
+    queryFn: () => apiFetch<TenantSamlDTO | null>("/admin/saml", token),
+    staleTime: 30_000,
+    retry: false, // 403/404 are stable answers, not transient failures
+  });
+}
+export function useUpdateTenantSaml() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TenantSamlInput) => apiFetch<null>("/admin/saml", token, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tenant-saml"] }),
+  });
+}
+
 // #101 / ADR-034: OIDC enrolment config — which successful logins auto-enrol (policy), the allow-listed
 // groups, and the DNS-verified enrol domains (add → publish TXT → verify). tenant#admin gated server-side.
 export interface EnrollDomainDTO { domain: string; verified: boolean; challengeRecord: string; challengeValue: string }
