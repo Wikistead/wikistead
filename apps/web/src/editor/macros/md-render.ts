@@ -3,6 +3,7 @@ import katex from "katex"; // #505: the print portal / preview draw math too —
 import { parseDirectiveOpen } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro, type MacroContext, type MacroSource, type MacroTheme } from "./registry";
 import { currentMacroTheme } from "./theme";
+import { highlightInto } from "./code-highlight"; // #505: the read surface colours code like the editor
 import { parseFrontmatterRange, parseFmTags, type FmTag } from "../live-preview/frontmatter";
 
 // #267: rendered diagram fences default to CENTER (#255) and can carry an align= attribute — mirror the
@@ -506,6 +507,10 @@ class DomSink implements MdSink {
     const pre = document.createElement("pre"); const code = document.createElement("code");
     code.textContent = body;
     pre.appendChild(code); card.appendChild(pre); into.appendChild(card);
+    // #505 (ruling 2): colour it with the EDITOR's own highlighter. The plain text above is what shows
+    // until the grammar loads (and stays, for a language we do not know) — the fence is never broken by
+    // this, only coloured. Static mode stays plain: the hover card must not pull grammars.
+    if (!staticRender) highlightInto(code, body, fenceMeta.lang);
   }
 
   directive(args: { name: string | null; label: string | null; attrs: Record<string, string> | null; full: string; body: string; nodeFrom: number; resolved: boolean; walkChildren: () => void }): void {

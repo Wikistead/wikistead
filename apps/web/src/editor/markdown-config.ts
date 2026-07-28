@@ -25,7 +25,9 @@ const legacy = (name: string, alias: string[], path: string, exportName: string)
     ),
   });
 
-const codeLanguages: LanguageDescription[] = [
+// #505: exported for the read surface's fence highlighting — the same language set the editor resolves,
+// so a fence coloured on screen is coloured the same way in the reader, in print and in the export.
+export const codeLanguages: LanguageDescription[] = [
   // lezer parsers (rich, incremental)
   lang("javascript", ["js", "jsx", "ts", "tsx", "typescript", "node"], () =>
     import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true, typescript: true }))),

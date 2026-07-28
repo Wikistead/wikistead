@@ -6,7 +6,10 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language"
 import { tags as t } from "@lezer/highlight"
 import type { Extension } from "@codemirror/state"
 
-const everforestHighlightStyle = HighlightStyle.define([
+// #505: exported so the READ surface can colour a code fence with the SAME style the editor uses. One
+// definition of "what colour is a keyword", used by both — the alternative is a second palette that
+// drifts, which is the failure this whole print/export line of work has been about.
+export const everforestHighlightStyle = HighlightStyle.define([
   { tag: [t.keyword, t.modifier, t.controlKeyword, t.operatorKeyword], color: "var(--hl-keyword)" },
   { tag: [t.string, t.special(t.string), t.regexp], color: "var(--hl-string)" },
   { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: "var(--hl-comment)", fontStyle: "italic" },
