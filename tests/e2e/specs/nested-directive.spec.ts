@@ -136,6 +136,11 @@ test("#215: a nested callout selects, edits via its own editUI island, and delet
 
   // (2) RichUI at depth: inside the island the note behaves like TOP-LEVEL — caret on its head line
   // surfaces the entry pill; the pill opens the callout's structured editUI (type chips + label + body).
+  // #543: the island now opens with the note RENDERED (a mount-default caret reveals nothing); a REAL
+  // click on the rendered note is what reveals its raw source (the #543 parity guard), so click that
+  // first, then the revealed head line.
+  await island.locator(".cm-content").getByText("AAA note").click();
+  await sleep(300);
   await island.locator(".cm-content").getByText(/:::note/).click();
   await sleep(300);
   const pill = island.locator("[data-testid=callout-richui-enter]");
@@ -161,6 +166,10 @@ test("#215: a nested callout selects, edits via its own editUI island, and delet
   await page.getByText("AAA note").click();
   await sleep(500);
   await expect(island).toHaveCount(1);
+  // #543: rendered-first here too — reveal the warning's raw source with a real click before aiming
+  // at its head line.
+  await island.locator(".cm-content").getByText("AAA note").click();
+  await sleep(300);
   await island.locator(".cm-content").getByText(/:::warning/).click();
   await sleep(200);
   await page.keyboard.press("Home");
@@ -200,6 +209,9 @@ test("#265: a nested callout island accepts REAL typing + a REAL type-chip click
   await sleep(500);
   const slotIsland = page.locator("[data-testid=slot-edit-island]");
   await expect(slotIsland).toHaveCount(1);
+  // #543: the island opens with the note RENDERED — reveal it with a real click first.
+  await slotIsland.locator(".cm-content").getByText("AAA note").click();
+  await sleep(300);
   await slotIsland.locator(".cm-content").getByText(/:::note/).click();
   await sleep(300);
   const pb265 = (await slotIsland.locator("[data-testid=callout-richui-enter]").boundingBox())!;
@@ -214,7 +226,8 @@ test("#265: a nested callout island accepts REAL typing + a REAL type-chip click
   await expect(island).toHaveCount(1); // still open after clicking into it (not destroyed by a caret-move)
   await page.keyboard.press("End");
   await page.keyboard.type(" EDITED");
-  await expect(body).toHaveValue(/AAA note EDITED/); // the field actually received the keys
+  // #456 S5: the body is a host CM SURFACE now, not a textarea — assert its text, not a value.
+  await expect(body).toContainText(/AAA note EDITED/); // the field actually received the keys
   // Blur the body (real click on the label input) → its change fires → commit → source round-trips.
   await page.locator("[data-testid=callout-edit-label]").click();
   await sleep(300);
