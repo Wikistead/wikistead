@@ -147,7 +147,7 @@ export function dispatchMacroRender(
             list, editable: env?.editable ?? false, label: env?.label ?? null, onMeasure: env?.onMeasure,
           });
         }
-        if (params?.kind === "embed") {
+        if (params?.kind === "embed" && typeof params.url === "string") {
           if (!embed) return null;
           // Synchronous: the allowlist decision needs no fetch. The holder keeps the class/testid the
           // macro's own placeholder carried, so selection/entry affordances and pins see ONE shape.
