@@ -96,3 +96,101 @@ describe("buildRegistryIndex (#310 / ADR-136 slice 2)", () => {
     expect(v).not.toHaveProperty("content"); // the index never ships the code, only its hash
   });
 });
+
+import { vetSubmission, renderRegistrySiteHtml } from "./macro-registry";
+import type { SignedPackage, VerifyDeps } from "./macro-package-verify";
+
+// A deps set where the crypto is trivial but REAL enough to distinguish the cases: the "signature" is
+// the content hash reversed, and the hash is the content reversed.
+const deps = (over: Partial<VerifyDeps> = {}): VerifyDeps => ({
+  hashContent: (c) => `h:${c}`,
+  verifySignature: (keyId, sig, hash) => sig === `sig:${keyId}:${hash}`,
+  trustedKeys: new Map([["author-key-1", "community" as const]]),
+  revokedKeys: new Set(),
+  revokedVersions: new Set(),
+  ...over,
+});
+const pkg = (over: Partial<SignedPackage> = {}, m: Partial<MacroManifest> = {}): SignedPackage => {
+  const content = (over.content ?? "export default {}") as string;
+  const manifest = { id: "cool-macro", version: "1.2.3", license: "MIT", capabilities: ["theme"], contentHash: `h:${content}`, ...m };
+  return { manifest, signatureKeyId: "author-key-1", signature: `sig:author-key-1:${manifest.contentHash}`, content, ...over };
+};
+
+describe("vetSubmission (#310 / ADR-136 — review condition A, enforced in code)", () => {
+  it("accepts a signed, policy-clean submission and reports the tier the KEY implies", () => {
+    expect(vetSubmission(pkg(), meta, deps())).toEqual({ ok: true, tier: "community" });
+  });
+
+  it("refuses at the VERIFY stage when the content does not match the signed hash — before any policy check", () => {
+    // Tampered bytes with an otherwise perfect manifest: the old two-call shape would have reported a
+    // clean policy result about content the author never signed.
+    const r = vetSubmission({ ...pkg(), content: "malicious()" }, meta, deps());
+    expect(r).toEqual({ ok: false, stage: "verify", reason: "hash_mismatch" });
+  });
+
+  it("refuses an untrusted or revoked signer without consulting policy", () => {
+    expect(vetSubmission(pkg({ signatureKeyId: "unknown-key" }), meta, deps())).toEqual({ ok: false, stage: "verify", reason: "untrusted_key" });
+    expect(vetSubmission(pkg(), meta, deps({ revokedKeys: new Set(["author-key-1"]) }))).toEqual({ ok: false, stage: "verify", reason: "revoked" });
+  });
+
+  it("reports policy errors only for bytes that PASSED verification", () => {
+    const p = pkg({}, { capabilities: ["theme", "fs.write"] });
+    const signed = { ...p, signature: `sig:author-key-1:${p.manifest.contentHash}` };
+    const r = vetSubmission(signed, meta, deps());
+    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ stage: "policy" });
+    expect((r as { errors?: string[] }).errors!.join(" ")).toMatch(/outside the sandbox/);
+  });
+
+  it("checks the size cap against the VERIFIED content (not a separately supplied blob)", () => {
+    const big = "x".repeat(300 * 1024);
+    const r = vetSubmission(pkg({ content: big }), meta, deps());
+    expect(r).toMatchObject({ stage: "policy" });
+    expect((r as { errors?: string[] }).errors!.join(" ")).toMatch(/over the/);
+  });
+});
+
+describe("renderRegistrySiteHtml (#310 / ADR-136 §3 — read-only discovery site)", () => {
+  const idx = buildRegistryIndex([accepted("alpha", "1.0.0"), accepted("alpha", "1.1.0")]);
+
+  it("lists each macro with its license and capabilities (the pre-install consent surface)", () => {
+    const html = renderRegistrySiteHtml(idx);
+    expect(html).toContain("alpha 1.1.0");
+    expect(html).toContain("MIT");
+    expect(html).toContain("<code>theme</code>");
+    expect(html).toContain("h-alpha-1.1.0"); // the content hash is shown per version
+  });
+
+  it("never offers install FROM the site (install is the in-app admin flow, ADR-076 consent + audit)", () => {
+    const html = renderRegistrySiteHtml(idx);
+    expect(html).toMatch(/admin console/i);
+    expect(html).not.toMatch(/<form|<button|<script|wikistead:\/\//i);
+  });
+
+  it("escapes hostile discovery metadata rather than emitting it as markup", () => {
+    const hostile = buildRegistryIndex([{
+      manifest: { id: "evil", version: "1.0.0", license: "MIT", capabilities: ["<img src=x onerror=alert(1)>"], contentHash: "h" },
+      meta: { name: '<script>alert("xss")</script>', description: '"><svg onload=alert(1)>' },
+      signatureKeyId: "k", publishedAt: "2026-07-13T00:00:00Z",
+    }]);
+    const html = renderRegistrySiteHtml(hostile);
+    expect(html).not.toContain("<script>alert");
+    expect(html).not.toContain("<svg onload");
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("drops a non-http(s) homepage at RENDER time too (index.json is a file someone can edit)", () => {
+    const idx2 = buildRegistryIndex([accepted("js", "1.0.0", { homepage: "javascript:alert(1)" })]);
+    const html = renderRegistrySiteHtml(idx2);
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("<a href");
+    // ...while a real http(s) homepage IS linked (otherwise the check above would pass vacuously).
+    expect(renderRegistrySiteHtml(buildRegistryIndex([accepted("ok", "1.0.0", { homepage: "https://example.com/m" })])))
+      .toContain('<a href="https://example.com/m"');
+  });
+
+  it("renders an empty registry without pretending it has content", () => {
+    expect(renderRegistrySiteHtml({ formatVersion: 1, macros: [] })).toContain("No macros published yet");
+  });
+});

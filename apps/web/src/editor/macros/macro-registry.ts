@@ -9,7 +9,7 @@
 // ADR-076 §5 declare+consent) — it is "an OSI-approved license", surfaced prominently. The
 // signature/byte-binding (review condition A) is the CALLER's responsibility: verify the ADR-076
 // package FIRST (verifyPackage), THEN run these checks on THOSE EXACT verified bytes — never on unverified input.
-import type { MacroManifest } from "./macro-package-verify";
+import { verifyPackage, type MacroManifest, type SignedPackage, type TrustTier, type VerifyDeps, type VerifyResult } from "./macro-package-verify";
 
 // The discovery metadata a registry entry carries beyond the signed manifest (shown on the site; NOT part of the
 // signed bytes — display only, so it can never grant capability or misrepresent the license the manifest binds).
@@ -87,6 +87,29 @@ export function validateMacroSubmission(
   return errors.length ? { ok: false, errors } : { ok: true };
 }
 
+// ── The one entry point CI should call (review condition A, in code) ────────────────────────
+// Condition A said: CI must verify the signature + content hash and then run the static checks on THE
+// SAME BYTES, so a submitter cannot get one payload verified and a different one inspected. That was
+// written as an instruction to a CI pipeline that does not exist yet — a promise in a comment, which is
+// exactly the shape of gap that gets skipped when the pipeline is finally written under time pressure.
+// This function makes the ordering unskippable: it takes the SIGNED PACKAGE (not a manifest and a
+// separately-supplied blob), verifies it, and then validates `pkg.manifest` and `pkg.content` — the very
+// object it just verified. There is no parameter through which different bytes could enter.
+export type VetResult =
+  | { readonly ok: true; readonly tier: TrustTier }
+  | { readonly ok: false; readonly stage: "verify"; readonly reason: Extract<VerifyResult, { ok: false }>["reason"] }
+  | { readonly ok: false; readonly stage: "policy"; readonly errors: readonly string[] };
+
+export function vetSubmission(pkg: SignedPackage, meta: RegistryEntryMeta, deps: VerifyDeps): VetResult {
+  // Trust FIRST. Running policy checks on unverified bytes would report "looks fine" about content that
+  // is not the content the author signed.
+  const verified = verifyPackage(pkg, deps);
+  if (!verified.ok) return { ok: false, stage: "verify", reason: verified.reason };
+  const policy = validateMacroSubmission(pkg.manifest, meta, pkg.content);
+  if (!policy.ok) return { ok: false, stage: "policy", errors: policy.errors };
+  return { ok: true, tier: verified.tier };
+}
+
 // ── Registry index (index.json) ──────────────────────────────────────────────
 // The static registry's index.json (ADR-136 §1): the read-only view the discovery site renders and the in-app
 // marketplace (#182) reads. It is DERIVED from the accepted, signed submissions — the site/app never re-decide
@@ -158,4 +181,70 @@ export function buildRegistryIndex(accepted: readonly AcceptedVersion[], revoked
     });
   }
   return { formatVersion: 1, macros };
+}
+
+// ── Discovery site (static HTML) ─────────────────────────────────────────────
+// ADR-136 §3: the site is a READ-ONLY view of the index — it holds no distribution or write authority,
+// and it never offers a one-click install (install is always the in-app admin flow, ADR-076's consent +
+// audit path). So the generator is a pure index → HTML string function that the registry repo's static
+// build calls; it does no I/O and reaches nothing.
+//
+// EVERY interpolated value is escaped, and the homepage is re-validated HERE rather than trusted from
+// the index. validateMacroSubmission already rejects a non-http(s) homepage at submission, but the site
+// renders whatever index.json says, and index.json is a file in a repo — a bad edit, an older entry
+// written before the check existed, or a hand-patched index must not become `href="javascript:..."`.
+// Two layers, because this one runs on the machine of everyone browsing the registry.
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
+function safeHref(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:" ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function renderEntry(e: RegistryIndexEntry): string {
+  const latest = e.versions.find((v) => v.version === e.latest) ?? e.versions[0];
+  const href = safeHref(e.homepage);
+  const caps = latest?.capabilities ?? [];
+  return [
+    `<article class="macro" id="${escapeHtml(e.id)}">`,
+    `<h2>${escapeHtml(e.name)} <span class="id">${escapeHtml(e.id)}</span></h2>`,
+    `<p class="description">${escapeHtml(e.description)}</p>`,
+    // License is displayed prominently on purpose: v1 is community tier only, andaccepts any
+    // OSI license (including copyleft), so the licence a user takes on must be visible before install.
+    `<p class="meta">v${escapeHtml(e.latest)} · license <strong>${escapeHtml(latest?.license ?? "unknown")}</strong></p>`,
+    // Capabilities before install, per ADR-136 §3 — the consent surface, shown even when empty.
+    `<p class="capabilities">capabilities: ${caps.length ? caps.map((c) => `<code>${escapeHtml(c)}</code>`).join(", ") : "<em>none</em>"}</p>`,
+    href ? `<p class="homepage"><a href="${escapeHtml(href)}" rel="noopener noreferrer nofollow">${escapeHtml(href)}</a></p>` : "",
+    `<p class="install">Install from your workspace admin console using the id <code>${escapeHtml(e.id)}</code>.</p>`,
+    `<details><summary>${e.versions.length} version(s)</summary><ul>`,
+    ...e.versions.map((v) => `<li><code>${escapeHtml(v.version)}</code> — ${escapeHtml(v.publishedAt)} — sha <code>${escapeHtml(v.contentHash)}</code> — key <code>${escapeHtml(v.signatureKeyId)}</code></li>`),
+    `</ul></details>`,
+    `</article>`,
+  ].filter(Boolean).join("\n");
+}
+
+/** The discovery site's index page: a deterministic, self-contained HTML string (no scripts, no assets). */
+export function renderRegistrySiteHtml(index: RegistryIndex, opts: { title?: string } = {}): string {
+  const title = escapeHtml(opts.title ?? "Wikistead macro registry");
+  const body = index.macros.length
+    ? index.macros.map(renderEntry).join("\n")
+    : "<p>No macros published yet.</p>";
+  return [
+    "<!doctype html>",
+    '<html lang="en"><head><meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    `<title>${title}</title></head>`,
+    `<body><h1>${title}</h1>`,
+    // Say what the site is NOT, so "install" is never assumed to happen here (ADR-136 §3).
+    "<p>Community macros are author-signed and installed from your workspace admin console. This site only lists what the registry contains; it distributes nothing and installs nothing.</p>",
+    body,
+    "</body></html>",
+  ].join("\n");
 }
