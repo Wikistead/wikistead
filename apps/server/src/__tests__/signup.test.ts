@@ -144,6 +144,10 @@ describe('#537 signup honours the login-method ceiling', () => {
       const cb = await app.inject({ method: 'GET', url: '/signup/callback?state=x&code=y', headers: { host: PLATFORM_HOST } })
       expect(cb.statusCode).toBe(404)
       expect(cb.headers['set-cookie']).toBeUndefined()
+      // Review finding F: the create step gates too — a pre-ceiling signup session must not
+      // complete into a tenant nobody can sign in to (gate sits before the session check).
+      const create = await app.inject({ method: 'POST', url: '/signup/tenants', headers: { host: PLATFORM_HOST }, payload: { slug: 'never-lands' } })
+      expect(create.statusCode).toBe(404)
     } finally {
       delete process.env.LOGIN_METHODS
     }

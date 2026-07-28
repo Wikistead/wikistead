@@ -4,7 +4,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
-import { otherLoginMethodsEffective } from '../auth/login-methods.js' // #537 lockout guard
+import { otherLoginMethodsEffective, loginMethodCeiling } from '../auth/login-methods.js' // #537 lockout guard
 import type { TenantDb } from '../db/index.js'
 
 // Tenant OIDC (members' SSO) settings (Phase 5e). tenant#admin gated. Available on
@@ -105,7 +105,9 @@ export async function updateTenantOidc(
   // platform, or no platform IdP configured; SAML unentitled/disabled) would 404 every future login —
   // and unlike a broken issuer, this state looks intentional, so no discovery check catches it.
   // Refuse the TRANSITION to an empty effective set; an already-disabled row may still be edited.
-  if (!args.enabled && existing?.enabled && !(await otherLoginMethodsEffective(db, { plan: args.plan }))) {
+  // When the ceiling itself excludes tenant-oidc the row is already outside the effective set, so
+  // disabling it changes nothing — the guard steps aside (review finding C).
+  if (!args.enabled && existing?.enabled && loginMethodCeiling().has('tenant-oidc') && !(await otherLoginMethodsEffective(db, { plan: args.plan }, 'tenant-oidc'))) {
     throw Object.assign(
       new Error('disabling the tenant IdP would leave this tenant with no way to sign in. Enable another login method first, or use the operator break-glass CLI.'),
       { statusCode: 409, code: 'login_lockout' },
