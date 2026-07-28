@@ -27,12 +27,11 @@ interface SpaceCtx { spaceId: string; name: string }
 // lands at -1 and floats above the rest. A comment grant made through the API (or before this change) has
 // to display correctly.
 const CAP_ORDER: PageRelation[] = ["view", "comment", "edit", "moderate", "manage"];
-// #536 / ADR-188 §6: ONE picker, built-ins beside custom roles. `commenter` was held back because
-// offering it here while the Roles tab did not list it made the product speak with two voices — a name
-// that was a role on one screen and absent from the other. That was a symptom of having two pickers, and
-// this slice is the place the earlier note pointed at: with a single list there is no other list to
-// disagree with, so the capability becomes grantable by the same act that removes the mismatch.
-const GRANTABLE: PageRelation[] = ["view", "comment", "edit", "moderate", "manage"];
+// #552 (user ruling): `comment` leaves the picker with the built-in commenter role — a comment-only
+// grant is composed via a CUSTOM role now. CAP_ORDER above deliberately KEEPS "comment": rows created
+// through the API or before this change must still sort into place instead of floating to the top at
+// index -1 (the"the ordering set ⊇ the offering set" rule).
+const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
 // #445the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.
@@ -44,10 +43,11 @@ const capNoun = (c: string): string => CAP_NOUN[c as PageRelation] ?? c;
 // the server's 3-way OR remains the authority.
 export function commentAudienceSummary(
   t: (k: string, o?: Record<string, unknown>) => string,
-  state: { grantCount: number; members: boolean; guests: boolean },
+  state: { members: boolean; guests: boolean },
 ): string {
+  // #552 (user ruling): the per-grant commenter count left the summary with the built-in role — the
+  // summary now names only editors-always plus whatever the two toggles add.
   const parts = [t("spaceMembers.commentSummaryEditors")];
-  if (state.grantCount > 0) parts.push(t("spaceMembers.commentSummaryGrants", { count: state.grantCount }));
   if (state.members) parts.push(t("spaceMembers.commentSummaryMembers"));
   if (state.guests) parts.push(t("spaceMembers.commentSummaryGuests"));
   return t("spaceMembers.commentSummaryLead") + parts.join(" + ");
@@ -144,10 +144,6 @@ export function SpaceMembersTab() {
   };
 
   const grants = (access.data ?? []).slice().sort((a, b) => CAP_ORDER.indexOf(b.capability) - CAP_ORDER.indexOf(a.capability));
-  // #529the space-level commenter grants — the per-principal comment route the audience toggles
-  // can never touch. Real data from the same manage-gated list the rows above render (no new endpoint,
-  // no roster oracle; names resolve exactly like every grant row).
-  const commenterGrants = grants.filter((g) => g.capability === "comment");
   // #523 / ADR-190 slice D: the server now resolves each user grantee's full name (override ?? OIDC
   // display_name) on the manage-gated grant list (slice A), so an un-customized member reads as their
   // name, not a sub — the #513 root fix. A departed / cross-tenant sub comes back null and falls back to
@@ -290,12 +286,9 @@ export function SpaceMembersTab() {
         <h3 className="mt-0 text-sm font-medium">{t("spaceMembers.commentAudienceTitle")}</h3>
         <p className="mt-0 mb-3 text-sm text-fg-dim">{t("spaceMembers.commentAudienceBody")}</p>
         <div className="mb-3 rounded-md border border-border bg-panel p-2.5 text-sm" data-testid="comment-baseline">
+          {/* #552: the "individually granted commenters: N" line is gone with the built-in role. The
+              editors-always baseline stays — it is the route no toggle can touch (#529). */}
           <p className="m-0">{t("spaceMembers.commentBaselineEditors")}</p>
-          <p className="m-0 mt-1 text-fg-dim" data-testid="comment-baseline-grants">
-            {commenterGrants.length === 0
-              ? t("spaceMembers.commentBaselineGrants_zero")
-              : t("spaceMembers.commentBaselineGrants", { count: commenterGrants.length, names: commenterGrants.map(label).join(", ") })}
-          </p>
         </div>
         {([
           { key: "guests" as const, label: t("spaceMembers.commentGuests"), testId: "comment-open-guests", onKey: "spaceMembers.commentGuestsOn", offKey: "spaceMembers.commentGuestsOff" },
@@ -319,7 +312,6 @@ export function SpaceMembersTab() {
         })}
         <p className="mb-0 mt-3 text-sm" data-testid="comment-effective-summary">
           {commentAudienceSummary(t, {
-            grantCount: commenterGrants.length,
             members: !!commentOpen.data?.members,
             guests: !!commentOpen.data?.guests,
           })}
