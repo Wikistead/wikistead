@@ -8,7 +8,7 @@ import { EditorView, Decoration, WidgetType, type DecorationSet } from "@codemir
 import { StateField, EditorState, RangeSetBuilder, type Range } from "@codemirror/state"
 import { syntaxTree } from "@codemirror/language"
 import katex from "katex"
-import { displayMode, syntaxRevealsAt, motionAtomProvider, observeBlockResize } from "./decorations"
+import { displayMode, syntaxRevealsAt, selectionEverTouched, motionAtomProvider, observeBlockResize } from "./decorations"
 
 interface MathRange { from: number; to: number; tex: string; display: boolean }
 
@@ -98,7 +98,9 @@ function rangeRevealed(state: EditorState, from: number, to: number): boolean {
   return syntaxRevealsAt(
     state.facet(displayMode),
     state.readOnly,
-    state.selection.ranges.some((r) => r.from <= to && r.to >= from),
+    // #543: the mount-default selection is nobody's caret (see selectionTouched) — math and the block
+    // reveal must not diverge on this, per the shared-predicate rule above.
+    selectionEverTouched(state) && state.selection.ranges.some((r) => r.from <= to && r.to >= from),
   )
 }
 

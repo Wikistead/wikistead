@@ -3514,12 +3514,33 @@ function explicitEntryCovers(state: EditorState, from: number, to: number): bool
   const a = state.field(macroRenderActiveField, false);
   return !!a && a.from <= from && a.to >= to;
 }
+// #543: has a selection ever actually been SET on this editor? A freshly-created state carries the mount
+// DEFAULT (an empty caret at 0) that no one chose — yet the caret-in reveal treated it as intent, so any
+// surface whose doc STARTS with a construct opened with that construct's raw markers exposed. The
+// read-only guard in syntaxRevealsAt already acknowledges this artifact ("otherwise the view's default
+// selection would reveal any first-line construct"); this extends the same reasoning to editable
+// surfaces: reveal follows the writer's caret, and until a selection is set (a click, a keystroke, any
+// doc change — all of which dispatch) there is no writer's caret to follow. Measured where it bites: a
+// slot island mounts with its body as the CREATE-time doc and focuses without dispatching, so a column
+// whose body begins with a fence opened with raw backticks showing (#543); the top-level editor's
+// content arrives by dispatch, so it is touched before paint and keeps its behaviour byte-identical.
+// A CREATE-time selection anywhere but the pristine default counts as chosen (callers and tests that
+// place a caret expect reveal to follow it).
+export const selectionTouched = StateField.define<boolean>({
+  create: (state) => state.selection.main.head !== 0 || !state.selection.main.empty,
+  update: (v, tr) => v || tr.selection !== undefined || tr.docChanged,
+});
+// Fail-open for surfaces without the field (states built outside buildLivePreviewExtensions): absent →
+// treated as touched, i.e. exactly the pre-#543 behaviour.
+export function selectionEverTouched(state: EditorState): boolean {
+  return state.field(selectionTouched, false) ?? true;
+}
 function rangeRevealed(state: EditorState, from: number, to: number): boolean {
   if (explicitEntryCovers(state, from, to)) return true; // #358: explicit entry wins in every editable mode
   return syntaxRevealsAt(
     state.facet(displayMode),
     state.readOnly,
-    state.selection.ranges.some((r) => r.from <= to && r.to >= from),
+    selectionEverTouched(state) && state.selection.ranges.some((r) => r.from <= to && r.to >= from),
   );
 }
 
@@ -3571,7 +3592,8 @@ function blockRevealed(state: EditorState, from: number, to: number): boolean {
   return syntaxRevealsAt(
     state.facet(displayMode),
     state.readOnly,
-    state.selection.ranges.some((r) => (r.empty ? r.head >= from && r.head <= to : r.anchor >= from && r.anchor <= to && !containedLinewise(r))),
+    // #543: the mount-default selection is nobody's caret — see selectionTouched above.
+    selectionEverTouched(state) && state.selection.ranges.some((r) => (r.empty ? r.head >= from && r.head <= to : r.anchor >= from && r.anchor <= to && !containedLinewise(r))),
   );
 }
 
