@@ -26,7 +26,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
-import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, dispatchMacroRender, ICON_CLOSE, ICON_DOWNLOAD } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, withEmbedHost, dispatchMacroRender, ICON_CLOSE, ICON_DOWNLOAD } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -2009,6 +2009,34 @@ function isFolded(state: EditorState, from: number, to: number): boolean {
 // A renderable macro = anything with a liveRender (fence macros, and block-form
 // directive macros like :::table). foldable is fence-only (large data bodies).
 type RenderableMacro = { liveRender: (body: string, ctx: { theme: MacroTheme }) => HTMLElement; richEditUI?: import("../macros/registry").RichEditUI; editUI?: import("../macros/registry").EditUI };
+
+// #550: ONE installer for the ambient host seams a nested render resolves through — embed (allowlist →
+// iframe / degrade link), transclude (`:::embed-page`), diagram (plantuml/mermaid via the host renderer)
+// and the list host. The MacroWidget dispatch used to install these inline while the DETAILS and CALLOUT
+// body renders installed ONLY the list host — so an embed nested in a details/callout kept its "…"
+// placeholder even after the container fix: the same "renders top-level only" defect, one container over.
+// Every body-rendering sink on this surface now goes through this single function.
+function withNestedMacroHosts<T>(view: EditorView, theme: MacroTheme, fn: () => T): T {
+  const resolveNested = view.state.facet(transcludeResolver);
+  const renderNestedDiagram = view.state.facet(diagramRenderer);
+  return withEmbedHost(
+    { build: (url: string) => buildEmbedElement(url, view.state.facet(embedAllowlist)) },
+    () => withDiagramHost(
+      renderNestedDiagram === noopDiagramRenderer
+        ? null
+        : {
+            handles: (lang: string) => HOST_RENDERABLE.has(lang),
+            render: (lang: string, source: string) => renderNestedDiagram(lang, source as MacroSource, theme),
+          },
+      () => withTranscludeHost(
+        resolveNested === noopTranscludeResolver
+          ? null
+          : { resolve: resolveNested, deniedLabel: "Cannot display this content" },
+        () => withListHost(view.state.facet(listSource), fn),
+      ),
+    ),
+  );
+}
 // #174 / ADR-087: the single macro-edit affordance is a Lucide SVG pencil (ADR-052 icon system),
 // replacing the ✎ emoji. A trusted constant (no user input) → safe as innerHTML.
 const MACRO_EDIT_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
@@ -2752,22 +2780,11 @@ class MacroWidget extends WidgetType {
       // #450 slice 3: the transclude host rides the same seam as the list host, so a macro NESTED inside
       // this container resolves the way the top-level widget always has instead of sitting at its
       // placeholder. Installed around the render and removed after — no module state outlives the call.
-      const resolveNested = view.state.facet(transcludeResolver);
-      // …and the diagram host alongside it, so a plantuml block nested in this container becomes a picture
-      // rather than showing its source next to an identical block one level up that renders (#450 slice 3).
-      const renderNestedDiagram = view.state.facet(diagramRenderer);
-      const rendered = withDiagramHost(
-        renderNestedDiagram === noopDiagramRenderer
-          ? null
-          : {
-              handles: (lang: string) => HOST_RENDERABLE.has(lang),
-              render: (lang: string, source: string) => renderNestedDiagram(lang, source as MacroSource, this.theme),
-            },
-        () => withTranscludeHost(
-        resolveNested === noopTranscludeResolver
-          ? null
-          : { resolve: resolveNested, deniedLabel: "Cannot display this content" },
-        () => withListHost(view.state.facet(listSource), () => dispatchMacroRender(
+      // #550: ONE installer (withNestedMacroHosts) for every ambient seam a nested render needs
+      // embed / transclude / diagram / list. The by-name embed swap that used to follow this call is
+      // gone: an `:::embed-external` at any depth asks the host slot and gets the allowlist-checked
+      // iframe / degrade link.
+      const rendered = withNestedMacroHosts(view, this.theme, () => dispatchMacroRender(
         this.macro,
         this.body,
         {
@@ -2780,14 +2797,13 @@ class MacroWidget extends WidgetType {
           // measure hook is CodeMirror's — an async result changes the block's height.
           slotEnv: {
             list: view.state.facet(listSource),
+            embed: { build: (url: string) => buildEmbedElement(url, view.state.facet(embedAllowlist)) },
             editable: !view.state.readOnly,
             label: directiveLabel(view.state.doc.lineAt(this.from).text, this.name),
             onMeasure: () => view.requestMeasure(),
           },
         },
-      )),
-      ),
-      )!;
+      ))!;
       wrap.appendChild(rendered);
       // #215 / ADR-100 (Consumers 1 & 2): draw the nested-macro ring + edit button on the selected nested
       // subtree, or swap it for its editUI island when nested-edit is active. Only for layout containers,
@@ -2920,16 +2936,11 @@ class MacroWidget extends WidgetType {
           }
         });
       }
-      // #108 / ADR-071 (comment 551): host-mediated external embed. The macro can't read the allowlist
-      // (narrow host-API); the host checks the URL against the injected tenant allowlist and renders a
-      // sandboxed iframe for an allowlisted https host, else a degrade link (Open formats). Synchronous
-      // (client-direct iframe — no server proxy/fetch, so no SSRF surface on this path).
-      if (this.name === "embed-external" && this.body.trim() !== "") {
-        rendered.replaceChildren(buildEmbedElement(this.body, view.state.facet(embedAllowlist)));
-      }
-      // #450 slice 5c: the `:::tagged` / `:::children` branch that used to live here — the host spotting
-      // the macro BY NAME and filling it in — is GONE. The macro asks for a host slot (sdk.hostSlot) and
-      // the dispatch answers with the one lifecycle both surfaces now share (md-render.mountHostList).
+      // #108 / ADR-071 (comment 551) → #550: the host-mediated external embed no longer lives here as a
+      // by-name swap. The macro asks for a host slot ({kind:"embed"}) and the dispatch answers with the
+      // allowlist-checked iframe / degrade link (md-render's embed seam) — the SAME lifecycle top-level
+      // and nested, which is the #450 slice-5c shape (the third by-name branch to make this move, after
+      // tagged/children and the embed-page/diagram seams).
     }
     if (!view.state.readOnly) {
       // ADR-087 (unified editUI model) / #84 comment 696: a body click SELECTS the atom (caret → ring);
@@ -3321,7 +3332,9 @@ class DetailsSummaryWidget extends WidgetType {
     bodyEl.setAttribute("data-testid", "details-body");
     const bodyInner = document.createElement("div");
     bodyInner.className = "cm-lp-details-body-inner cm-lp-md-directive"; // padding + nested-block styling
-    withListHost(view.state.facet(listSource), () => appendMarkdownInto(bodyInner, this.body)); // shared renderer, sanitized DOM; .wks-prose (#381); #370nested-list seam
+    // #550: the FULL seam set (embed/transclude/diagram/list) — a details body is a nested render like
+    // any other; list-only here left a nested embed at its "…" placeholder.
+    withNestedMacroHosts(view, currentMacroTheme(), () => appendMarkdownInto(bodyInner, this.body)); // shared renderer, sanitized DOM; .wks-prose (#381)
     bodyEl.appendChild(bodyInner);
     bodyWrap.appendChild(bodyEl);
     wrap.append(bar, bodyWrap);
@@ -3426,7 +3439,7 @@ class CalloutWidget extends WidgetType {
     return o.containerClass === this.containerClass && o.icon === this.icon && o.label === this.label && o.body === this.body && o.selected === this.selected;
   }
   toDOM(view: EditorView) {
-    const el = withListHost(view.state.facet(listSource), () => renderCalloutPanel(this.containerClass, this.icon, this.label, this.body)); // #370nested-list seam
+    const el = withNestedMacroHosts(view, currentMacroTheme(), () => renderCalloutPanel(this.containerClass, this.icon, this.label, this.body)); // #550: full seam set (was list-only)
     // #438the SHARED atom-selection ring — every other atom (mermaid/details/embeds) rings via
     // cm-lp-atom-sel; the callout panel was the one widget without it. Only ever visible where the
     // caret can rest ON the atom without revealing (WYSIWYG / atom-select contexts) — in Live a

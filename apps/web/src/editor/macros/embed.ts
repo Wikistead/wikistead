@@ -21,11 +21,22 @@ export const embedMacro: DirectiveMacro = {
   // the URL is re-edited via the EmbedUrlModal (Ctrl+Enter / ⇆), never hand-typed in the block. Raw editing stays
   // reachable via Source mode (Open formats). See ADR-024 addendum (atomSelectable)/#366.
   atomSelectable: true,
-  liveRender: (body) => {
+  liveRender: (body, ctx) => {
+    // #550: ONE resolution path (the #450 slice-5c shape). The host used to spot this macro BY NAME in
+    // the top-level MacroWidget only, so a copy nested in tabs/columns/details reached the DOM sink,
+    // nobody swapped the placeholder, and "…" sat there forever on the read AND edit surfaces. Now the
+    // macro asks for a host slot; the host answers with the allowlist-checked iframe / degrade link on
+    // every surface that installs the seam. The allowlist itself never crosses the boundary (ADR-024).
+    const url = body.trim();
+    if (url) {
+      const slot = ctx?.hostSlot?.({ kind: "embed", url });
+      if (slot) return slot;
+    }
+    // No host on this surface (export, hover card) — or an empty body: the placeholder, as before.
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-embed-external";
     el.setAttribute("data-testid", "macro-embed-external");
-    el.textContent = body.trim() ? "…" : i18n.t("macro.embedEmpty"); // host swaps in the iframe / link
+    el.textContent = url ? "…" : i18n.t("macro.embedEmpty");
     return el;
   },
   htmlRender: embedHtmlRender, // server/static: a link (no iframe in exported HTML)
