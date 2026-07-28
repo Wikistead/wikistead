@@ -1,4 +1,4 @@
-import { buildExportDocument } from "./exportDocument";
+import { buildExportDocument, inlineTransientImages } from "./exportDocument";
 
 // #85 / ADR-194 (Option B) slice 3: the ONE way a document leaves this app as a file — download and print
 // take the same road, because two roads to paper is exactly the drift #85/#505/#207 kept re-discovering.
@@ -49,6 +49,9 @@ async function settle(host: HTMLElement, budgetMs = 4000, quietMs = 150): Promis
 async function withDocument<T>(md: string, title: string, hosts: ExportHosts | undefined, use: (html: string) => T | Promise<T>): Promise<T> {
   const host = await renderBody(md, hosts);
   try {
+    // Baked in AFTER settle: a host-rendered diagram lands as `<img src="blob:…">`, which resolves in this
+    // session (so print worked) and in no other (so the saved file opened to a broken image —).
+    await inlineTransientImages(host);
     return await use(buildExportDocument({ title, body: host }));
   } finally {
     host.remove();

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
-import { buildExportDocument } from "./exportDocument";
+import { buildExportDocument, inlineTransientImages } from "./exportDocument";
 
 // #85 / ADR-194 (Option B) acceptance 5: the exported file is INERT, and it carries the document rather
 // than the app. These are the properties that make it safe to write to disk and open later — often by
@@ -59,14 +59,31 @@ describe("#85: the browser-built export document", () => {
     expect(out).toContain("<rect");
   });
 
-  it("keeps raster and inline-image data URLs, drops other data: schemes", () => {
+  it("keeps raster data URLs, drops every other data: scheme", () => {
     const out = buildExportDocument({
       title: "t",
-      body: surface('<img src="data:image/png;base64,AAA"><a href="data:text/html,<b>x</b>">l</a>'),
+      body: surface('<img src="data:image/png;base64,AAA"><a href="data:text/html,<b>x</b>">l</a><img src="data:image/svg+xml,<svg onload=steal()></svg>">'),
       css: "",
     });
     expect(out).toContain("data:image/png;base64,AAA");
     expect(out).not.toContain("data:text/html");
+    // ADR-194 anti-test: no non-raster data: URL. A drawn SVG travels as an inline element, never as a
+    // data: URL, so nothing legitimate is lost by refusing the scheme.
+    expect(out).not.toContain("data:image/svg");
+  });
+
+  // #85 review reject: a blob: URL is a handle into the session that built the file, dead as
+  // soon as the file stands alone — the print frame resolved it, the saved document could not. Whatever was
+  // not baked into a data: URL first must not travel as a reference that is known to be broken.
+  it("drops a blob: URL — it cannot resolve outside the session that minted it", () => {
+    const out = buildExportDocument({
+      title: "t",
+      body: surface('<img src="blob:http://localhost/abc" alt="diagram"><p>doc</p>'),
+      css: "",
+    });
+    expect(out).not.toContain("blob:");
+    expect(out, "the element stays; only the dead reference goes").toContain("<img");
+    expect(out).toContain("doc");
   });
 
   // #85 (user ruling): the tab strip hides every panel but one, so the exported file was missing the other
@@ -131,6 +148,32 @@ describe("#85: the browser-built export document", () => {
     const out = buildExportDocument({ title: "t", body: surface('<div contenteditable="true">live editor</div><p>doc</p>'), css: "" });
     expect(out).not.toContain("live editor");
     expect(out).toContain("doc");
+  });
+
+  // The pair that makes a host-rendered diagram (plantuml) durable: the staging pass bakes each blob image
+  // into a raster data: URL, and what it could not bake is dropped above rather than shipped dead.
+  it("bakes a blob image into a data: URL before the document is built", async () => {
+    const host = surface('<img src="blob:http://localhost/diagram"><img src="/api/att/1">');
+    await inlineTransientImages(host, async () => "data:image/png;base64,BBB");
+    const out = buildExportDocument({ title: "t", body: host, css: "" });
+    expect(out, "the diagram travels as bytes, not as a session handle").toContain("data:image/png;base64,BBB");
+    expect(out).not.toContain("blob:");
+    expect(out, "a non-blob src is not touched").toContain("/api/att/1");
+  });
+
+  it("leaves a blob image it cannot read for the inert pass to drop", async () => {
+    const host = surface('<img src="blob:http://localhost/gone">');
+    await inlineTransientImages(host, async () => null);
+    const out = buildExportDocument({ title: "t", body: host, css: "" });
+    expect(out).not.toContain("blob:");
+  });
+
+  it("refuses a loader result that is not a raster data: URL", async () => {
+    const host = surface('<img src="blob:http://localhost/svg">');
+    await inlineTransientImages(host, async () => "data:image/svg+xml,<svg onload=steal()></svg>");
+    const out = buildExportDocument({ title: "t", body: host, css: "" });
+    expect(out).not.toContain("data:image/svg");
+    expect(out).not.toContain("blob:");
   });
 
   it("does not mutate the surface it was given", () => {
