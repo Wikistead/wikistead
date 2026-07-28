@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
 import { useWebhooks, useCreateWebhook, useDeleteWebhook, type WebhookCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
+import { FormRow } from "../ui/FormRow";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting an endpoint drops its config + secret
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
@@ -36,10 +37,10 @@ export function AdminWebhooksTab() {
       <p className="mt-0 text-sm text-fg-dim">{t("adminWebhooks.body")}</p>
 
       <label className={label}>{t("adminWebhooks.createTitle")}</label>
-      <div className="flex items-center gap-2">
+      <FormRow>
         <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/webhook" aria-label={t("adminWebhooks.url")} data-testid="webhook-url" />
-        <Button variant="primary" size="sm" disabled={!url.trim() || create.isPending} onClick={onCreate} data-testid="webhook-create">{t("adminWebhooks.create")}</Button>
-      </div>
+        <Button variant="primary" disabled={!url.trim() || create.isPending} onClick={onCreate} data-testid="webhook-create">{t("adminWebhooks.create")}</Button>
+      </FormRow>
 
       {created && (
         <div className="my-3.5 rounded-lg border border-[color-mix(in_srgb,var(--accent)_40%,var(--border))] px-3 py-2.5" data-testid="webhook-secret">

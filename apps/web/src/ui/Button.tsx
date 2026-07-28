@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/utils";
+import { useControlScale } from "./FormRow";
 
 // Shared button (Group C-3: now Tailwind/cva instead of CSS Modules). Same API and
 // variant vocabulary as before (default/primary/ghost/danger/dangerGhost · sm/md), so
@@ -41,8 +42,11 @@ export function Button({
   children,
   ...rest
 }: ButtonVariants & ButtonHTMLAttributes<HTMLButtonElement>) {
+  // #535: inside a FormRow the row's scale applies; an explicit `size` still wins, and outside a row the
+  // fallback is the `md` this button always had.
+  const resolved = useControlScale(size, "md");
   return (
-    <button type={type} className={cn(buttonVariants({ variant, size }), className)} {...rest}>
+    <button type={type} className={cn(buttonVariants({ variant, size: resolved }), className)} {...rest}>
       {children as ReactNode}
     </button>
   );
@@ -59,15 +63,19 @@ export function IconButton({
   children,
   ...rest
 }: { "aria-label": string; variant?: "default" | "danger" } & ButtonHTMLAttributes<HTMLButtonElement>) {
+  // #535: a declared square, matching whatever scale its row is on. `sm` is the fallback because 32px is
+  // what this button has been everywhere it is NOT in a form row (sidebars, toolbars, table cells) — so
+  // reading the row's scale changes nothing outside one.
+  const scale = useControlScale(undefined, "sm");
   return (
     <button
       type={type}
       className={cn(
-        // #535: a declared square, same 32px as the `sm` controls it sits beside in a form row. It used to
-        // size itself from p-1.5 + whatever glyph it held (~28px), so any row mixing it with a Select or
-        // Input came out ragged. Callers that need another size still pass one — `cn` lets a caller's class
-        // win, which is how the round page-chrome buttons keep their h-9 w-9.
-        "inline-flex size-8 items-center justify-center rounded-md border border-transparent bg-transparent leading-none cursor-pointer transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] disabled:opacity-50 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+        // It used to size itself from p-1.5 + whatever glyph it held (~28px), so any row mixing it with a
+        // Select or Input came out ragged. Callers that need another size still pass one — `cn` lets a
+        // caller's class win, which is how the round page-chrome buttons keep their h-9 w-9.
+        "inline-flex items-center justify-center rounded-md border border-transparent bg-transparent leading-none cursor-pointer transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] disabled:opacity-50 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+        scale === "sm" ? "size-8" : "size-9",
         variant === "danger"
           ? "text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-destructive"
           : "text-fg-dim hover:bg-panel-2 hover:text-foreground",

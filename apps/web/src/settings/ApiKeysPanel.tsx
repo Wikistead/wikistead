@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
 import { useCreateApiKey, useRevokeApiKey, useAdminRevokeApiKey, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
+import { FormRow } from "../ui/FormRow";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: revoking a key is irreversible — confirm first
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
@@ -71,11 +72,12 @@ export function ApiKeysPanel({
       {canIssue && (
         <>
           <label className="mb-1.5 mt-[18px] block text-sm text-fg-dim">{t("adminApi.createTitle")}</label>
-          <div className="flex items-center gap-2">
+          {/* #535: the row carries the scale, so no control here states its own. */}
+          <FormRow>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} aria-label={t("adminApi.name")} data-testid="api-key-name" />
-            <Select value={effScope} onChange={(v) => setScope(v as ApiScope)} ariaLabel={t("adminApi.scope")} testId="api-key-scope" size="sm" options={scopeOptions} />
-            <Button variant="primary" size="sm" disabled={!name.trim() || create.isPending} onClick={onCreate} data-testid="api-key-create">{t("adminApi.create")}</Button>
-          </div>
+            <Select value={effScope} onChange={(v) => setScope(v as ApiScope)} ariaLabel={t("adminApi.scope")} testId="api-key-scope" options={scopeOptions} />
+            <Button variant="primary" disabled={!name.trim() || create.isPending} onClick={onCreate} data-testid="api-key-create">{t("adminApi.create")}</Button>
+          </FormRow>
         </>
       )}
 

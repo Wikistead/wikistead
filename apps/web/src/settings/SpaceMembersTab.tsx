@@ -10,6 +10,7 @@ import {
   type PageRelation,
 } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
+import { FormRow } from "../ui/FormRow";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
@@ -148,13 +149,12 @@ export function SpaceMembersTab() {
       <h2 className="mt-0">{t("spaceMembers.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("spaceMembers.body")}</p>
 
-      <div className="mb-6 flex items-start gap-2">
+      <FormRow className="mb-6">
         <Select
           value={mode}
           onChange={(v) => setMode(v as "user" | "group")}
           ariaLabel={t("spaceMembers.granteeType")}
           testId="space-grant-type"
-          size="sm"
           options={[
             { value: "user", label: t("spaceMembers.typeUser") },
             { value: "group", label: t("spaceMembers.typeGroup") },
@@ -166,7 +166,6 @@ export function SpaceMembersTab() {
             onChange={(v) => setGroupName(v)}
             ariaLabel={t("spaceMembers.typeGroup")}
             testId="space-grant-group"
-            size="sm"
             options={[
               { value: "", label: t("spaceMembers.selectGroup") },
               ...((groups.data ?? []).map((g) => ({ value: g, label: g }))),
@@ -195,14 +194,13 @@ export function SpaceMembersTab() {
           onChange={setPick}
           ariaLabel={t("spaceMembers.capability")}
           testId="space-grant-capability"
-          size="sm"
           options={[
             ...GRANTABLE.map((c) => ({ value: `builtin:${c}`, label: capNoun(c) })),
             ...customRoles.map((r) => ({ value: `role:${r.id}`, label: r.name })),
           ]}
         />
-        <Button variant="primary" size="sm" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending || assignRole.isPending} onClick={addUnified} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
-      </div>
+        <Button variant="primary" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending || assignRole.isPending} onClick={addUnified} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
+      </FormRow>
 
       {/* #539: the grant list scrolls INSIDE a bounded box — the third instance of the same failure
           (#503 audit ledger, #521 patrol queue), so it takes the same 26rem box rather than a third
