@@ -5,6 +5,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readUserTuplesByType, requireTenantAdmin } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration } from '../title-dict-cache.js' // #534
+import { getTreeConfirm, setTreeConfirm } from '../tree-confirm-cache.js' // #541
 import { docName } from '@wikistead/types'
 import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
@@ -462,7 +463,27 @@ export async function listPages(
   // lanes the title dictionary does (#534) — 4, clamped in filterAuthorized. A 197-page space is 4
   // batch waves; sequentially that is most of a second on a busy checker, for a surface that IS the
   // boot path (the dictionary at least was only an enhancement).
-  const allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context, 'page', 4)
+  //
+  // follow-up: the confirm set is also CACHED per (tenant, viewer, space) for a few seconds
+  // the tree-confirm-cache header carries the safety argument (same discipline, same invalidation and
+  // generation as the #534 dict cache). Pages the entry has never seen (created since) are confirmed
+  // as a DELTA against FGA — never assumed; a cached deny stays hidden for at most the TTL, within the
+  // same trusted-invalidation window the dictionary already accepts.
+  const tenantId = rows[0]?.tenant_id
+  const cached = tenantId ? getTreeConfirm(tenantId, args.subject, args.spaceId) : undefined
+  let allowed: Set<string>
+  if (cached) {
+    const delta = rows.filter((r) => !cached.has(r.id))
+    const deltaAllowed = delta.length > 0
+      ? await filterAuthorized(fga, args.subject, 'view', delta.map((r) => r.id), args.context, 'page', 4)
+      : new Set<string>()
+    for (const r of delta) cached.set(r.id, deltaAllowed.has(r.id))
+    allowed = new Set(rows.filter((r) => cached.get(r.id) === true).map((r) => r.id))
+  } else {
+    const gen = tenantId ? titleDictGeneration(tenantId) : undefined
+    allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context, 'page', 4)
+    if (tenantId) setTreeConfirm(tenantId, args.subject, args.spaceId, new Map(rows.map((r) => [r.id, allowed.has(r.id)])), Date.now(), gen)
+  }
   const visible = rows.filter((r) => allowed.has(r.id))
   // #109 Fix B / #329: annotate each visible page with its private flag (lock badge) and freeze level
   // (snowflake). A read fault falls back to "no badge" — never a false lock.
