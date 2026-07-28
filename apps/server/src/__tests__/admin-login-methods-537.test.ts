@@ -90,16 +90,38 @@ describe('#537 /admin/login-methods', () => {
     expect((await get()).json().methods['platform-oidc'].effective).toBe(true)
   })
 
-  it('the pref BITES on the login surface: options stop offering oidc, /auth/login 404s (two-layer)', async () => {
+  it('the pref BITES on the login surface while an own IdP is effective (two-layer: options AND the start URL)', async () => {
+    setPlatformEnv()
+    // SAML as the own IdP so the OIDC surface shows the bite directly (with tenant-oidc as the own
+    // IdP, /auth/login would simply serve the tenant IdP — indistinguishable from the outside).
+    await admin`INSERT INTO tenant_saml (tenant_id, idp_entity_id, sso_url, idp_cert_enc, sp_entity_id, acs_url, enabled)
+      VALUES (${tenant.id}, 'https://idp.example/meta', 'https://idp.example/sso', 'enc', 'https://wks/sp', 'https://wks/acs', true)`
+    try {
+      await enableTenantOidc()
+      expect((await patch(false)).statusCode).toBe(204)
+      await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${tenant.id}` // saml remains the own IdP
+      const options = await app.inject({ method: 'GET', url: '/auth/login-options', headers: { host: HOST } })
+      expect(options.json().methods, 'only the own IdP is offered').toEqual(['saml'])
+      const login = await app.inject({ method: 'GET', url: '/auth/login', headers: { host: HOST } })
+      expect(login.statusCode, 'the OIDC start refuses — not just the UI').toBe(404)
+      expect(login.json()).toEqual({ error: 'not found' })
+    } finally {
+      await admin`DELETE FROM tenant_saml WHERE tenant_id = ${tenant.id}`.catch(() => {})
+    }
+  })
+
+  it('the pref LAPSES when the last own IdP goes away — platform login re-opens instead of stranding the tenant (review finding 1)', async () => {
     setPlatformEnv()
     await enableTenantOidc()
     expect((await patch(false)).statusCode).toBe(204)
-    await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${tenant.id}` // own IdP gone after the toggle
+    await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${tenant.id}` // the SSO-enforcement premise is gone
     const options = await app.inject({ method: 'GET', url: '/auth/login-options', headers: { host: HOST } })
-    expect(options.json().methods, 'no method is offered').toEqual([])
+    expect(options.json().methods, 'platform is back — never an empty set through the pref').toEqual(['oidc'])
     const login = await app.inject({ method: 'GET', url: '/auth/login', headers: { host: HOST } })
-    expect(login.statusCode, 'the server refuses — not just the UI').toBe(404)
-    expect(login.json()).toEqual({ error: 'not found' })
+    expect(login.statusCode, 'the start URL works again').toBe(302)
+    const view = (await get()).json()
+    expect(view.methods['platform-oidc'].selected, 'the stored intent is untouched').toBe(false)
+    expect(view.methods['platform-oidc'].effective, 'the panel shows the lapse').toBe(true)
   })
 
   it('§1: a ceiling-excluded method reports unavailable-by-policy, not a silently-wiped selection', async () => {

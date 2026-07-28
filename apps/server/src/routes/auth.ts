@@ -96,7 +96,9 @@ export async function authPlugin(app: FastifyInstance) {
       const available = await resolveLogin(db, tenant)
       // #537 §6/§7: the login screen lists what is OPEN, so the method KINDS are published facts
       // (approved secrecy line: what stays hidden is WHY something is absent — off, unconfigured
-      // and unentitled are indistinguishable). `oidc` deliberately does not say tenant-vs-platform.
+      // and unentitled are indistinguishable). `oidc` does not name tenant-vs-platform, though a
+      // non-empty `social` implies the platform path (ADR-121's pre-existing disclosure) — the field
+      // avoids ADDING a distinguisher rather than hiding that one.
       const methods: string[] = []
       if (available.oidc) methods.push('oidc')
       if (available.methods.has('saml')) methods.push('saml')

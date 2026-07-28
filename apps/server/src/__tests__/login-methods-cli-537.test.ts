@@ -97,12 +97,18 @@ describe('tenant:login-methods (break-glass, #537)', () => {
     expect(renderPicture(r.picture)).toContain('LOGIN_METHODS')
   })
 
-  it('--platform-login on/off drives the prefs row (absent row = on)', async () => {
+  it('--platform-login on/off drives the prefs row; the picture mirrors the conditional (bite vs lapse)', async () => {
     const slug = `bg537-pl-${Date.now().toString(36)}`
     const id = await freshTenant(slug)
     process.env.PLATFORM_OIDC_ISSUER = 'https://platform.example'
+    await seedOidc(id, true) // an effective own IdP → the pref BITES
     const off = await recoverLoginMethods(admin, { slug, operator: 'op', platformLogin: 'off' })
     expect(off.picture.methods['platform-oidc']).toMatchObject({ selected: false, effective: false })
+    // Own IdP gone → the pref LAPSES: stored intent still off, but effective again (and rendered).
+    await admin`UPDATE tenant_oidc SET enabled = false WHERE tenant_id = ${id}`
+    const lapsed = await inspectLoginMethods(admin, { slug })
+    expect(lapsed.methods['platform-oidc']).toMatchObject({ selected: false, effective: true })
+    expect(renderPicture(lapsed)).toContain('LAPSED')
     const on = await recoverLoginMethods(admin, { slug, operator: 'op', platformLogin: 'on' })
     expect(on.picture.methods['platform-oidc']).toMatchObject({ selected: true, effective: true })
     expect(await ledgerCount(id)).toBe(2)

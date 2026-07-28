@@ -73,10 +73,21 @@ export async function inspectLoginMethods(sql: postgres.Sql, args: { slug: strin
     return { inCeiling: m.inCeiling, configured: m.configured, selected: m.selected, effective, blocker }
   }
 
+  const tenantOidc = pick({ inCeiling: ceiling.has('tenant-oidc'), configured: oidc != null, selected: !!oidc?.enabled })
+  const samlPic = pick({ inCeiling: ceiling.has('saml'), configured: saml != null, selected: !!saml?.enabled, entitled: entitledSaml })
+  // Mirror the resolver's CONDITIONAL pref (Slice 3 finding 1): "platform off" bites only while an
+  // own IdP is effective; otherwise it LAPSES and platform login is back open (no lockout by pref).
+  const ownIdpEffective = tenantOidc.effective || samlPic.effective
+  const platformSelected = !pref?.platform_login_disabled
+  const platform = pick({
+    inCeiling: ceiling.has('platform-oidc'),
+    configured: platformCfg,
+    selected: platformSelected || !ownIdpEffective, // lapsed pref = effectively selected
+  })
   const methods: Record<LoginMethod, MethodPicture> = {
-    'tenant-oidc': pick({ inCeiling: ceiling.has('tenant-oidc'), configured: oidc != null, selected: !!oidc?.enabled }),
-    'platform-oidc': pick({ inCeiling: ceiling.has('platform-oidc'), configured: platformCfg, selected: !pref?.platform_login_disabled }),
-    saml: pick({ inCeiling: ceiling.has('saml'), configured: saml != null, selected: !!saml?.enabled, entitled: entitledSaml }),
+    'tenant-oidc': tenantOidc,
+    'platform-oidc': { ...platform, selected: platformSelected }, // report the STORED intent, effect includes the lapse
+    saml: samlPic,
   }
   return {
     tenantId: tenant.id,
@@ -170,6 +181,10 @@ export function renderPicture(p: LoginMethodsPicture): string {
       `NOTE: ${ceilingBlocked.map(([n]) => n).join(', ')} blocked ONLY by the deployment ceiling — ` +
         `this command cannot rewrite env; set LOGIN_METHODS to include it (or unset for all) and restart.`,
     )
+  }
+  const pm = p.methods['platform-oidc']
+  if (pm.effective && !pm.selected) {
+    lines.push('NOTE: platform login is OFF by tenant preference but LAPSED back open — no own IdP is effective (SSO enforcement resumes when one is).')
   }
   lines.push('caveat: predicates are enabled-level — a stored-but-broken cfg (bad secret/cert) still shows EFFECTIVE.')
   return lines.join('\n')
