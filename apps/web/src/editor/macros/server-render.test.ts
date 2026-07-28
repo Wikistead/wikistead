@@ -127,12 +127,15 @@ describe("renderMarkdownToHtml — macro dispatch + fidelity (#85)", () => {
     expect(h).not.toContain("wks-fidelity-degrade"); // preserve → plain, no badge
   });
 
-  it("wraps a DEGRADE directive macro with a fidelity badge (ADR-059 (c))", () => {
+  // #85 (user ruling 2026-07-28): a degrade macro is rendered like any other — no wrapper, no badge, no
+  // data-fidelity. The mark existed to be honest about a block that did not render properly, and it became
+  // the reason such blocks were allowed to stay that way. Pinned as an absence so the wrapper cannot return
+  // quietly; the macro's own output is still what lands.
+  it("renders a DEGRADE directive macro plainly — no badge, no wrapper", () => {
     const h = out(":::simplified\nbody text\n:::", macros);
-    expect(h).toContain('data-fidelity="degrade"');
-    expect(h).toContain('data-macro="simplified"');
-    expect(h).toContain("wks-fidelity-badge"); // the "simplified for export" indicator
-    expect(h).toContain('<div class="s">body text</div>'); // the macro's own output, inside the wrapper
+    expect(h).toContain('<div class="s">body text</div>');
+    expect(h).not.toContain("wks-fidelity");
+    expect(h).not.toContain("data-fidelity");
   });
 
   it("a macro that THROWS falls back to plain code and never breaks the render", () => {
@@ -198,16 +201,16 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
     expect(out(":::warning\n<b>careful</b>\n:::", reg)).toContain('<div class="callout callout-warning">');
     expect(out(":::warning\n<b>careful</b>\n:::", reg)).not.toContain("<b>careful</b>"); // escaped
   });
-  it("fence macros dispatch: mermaid/plantuml → <pre>, both degrade-badged", () => {
+  it("fence macros dispatch: mermaid/plantuml → <pre>, with no badge on either", () => {
     const m = out("```mermaid\ngraph TD; A-->B\n```", reg);
     expect(m).toContain('<pre class="mermaid">graph TD; A--&gt;B'); // body escaped inside pre
-    // #85 / ADR-059: what reaches the static document is the diagram's SOURCE, so the block is badged.
-    // It read `not.toContain` here while the export showed source with nothing saying so — a silent
-    // degradation, which is precisely what the fidelity contract exists to rule out.
-    expect(m).toContain("wks-fidelity-degrade");
+    // #85 (user ruling 2026-07-28): the badge is gone. Marking a block that did not render became a way
+    // of not rendering it; the acceptance is that the export looks like the screen. Asserted as an
+    // absence so the wrapper cannot come back unnoticed.
+    expect(m).not.toContain("wks-fidelity");
     const p = out("```plantuml\n@startuml\n@enduml\n```", reg);
     expect(p).toContain('<pre class="plantuml">');
-    expect(p).toContain('data-fidelity="degrade"'); // plantuml = degrade → badged
+    expect(p).not.toContain("wks-fidelity"); // no badge on this one either
   });
   it(":::embed-page → a data-page placeholder (page ref escaped)", () => {
     expect(out(":::embed-page\npage-123\n:::", reg)).toContain('<div class="embed-page" data-page="page-123">');
@@ -216,7 +219,7 @@ describe("renderMarkdownToHtml — built-in M2 directives (#85 slice 2)", () => 
     const h = out(":::embed-external\nhttps://youtube.com/embed/x\n:::", reg);
     expect(h).toContain('<a class="embed-link" href="https://youtube.com/embed/x"');
     expect(h.toLowerCase()).not.toContain("<iframe"); // server export never emits an iframe
-    expect(h).toContain('data-fidelity="degrade"'); // embed = degrade → badged
+    expect(h).not.toContain("data-fidelity"); // #85 ruling: no badge, here or anywhere
   });
   it(":::embed-external with a non-http(s) url renders inert text in a span, never a live link", () => {
     const h = out(":::embed-external\njavascript:alert(1)\n:::", reg);

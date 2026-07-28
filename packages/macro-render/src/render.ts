@@ -34,12 +34,14 @@ export interface MacroHtmlRegistry {
 
 const EMPTY_REGISTRY: MacroHtmlRegistry = { fence: () => undefined, directive: () => undefined };
 
-// #85 fidelity badge (ADR-059 (c)): wrap a DEGRADED macro's export HTML so a reader sees it was
-// simplified. Preserve-fidelity macros render plain (no wrapper). The badge is static, escaped markup.
-function withFidelity(name: string, fidelity: "preserve" | "degrade", body: SafeHtml, note?: (name: string) => void): SafeHtml {
-  if (fidelity === "preserve") return body;
-  note?.(name);
-  return html`<div class="wks-export-macro wks-fidelity-degrade" data-macro="${name}" data-fidelity="degrade"><span class="wks-fidelity-badge" role="img" aria-label="simplified for export" title="Simplified for export — the interactive version is in the app">◐</span>${body}</div>`;
+// #85 (user ruling 2026-07-28): there is NO fidelity badge. It used to wrap a `degrade` macro in a dashed
+// box with a ◐, and the ruling removed it for a reason worth keeping written down: a mark on a block that
+// did not render becomes permission to leave it unrendered. The acceptance is that the export LOOKS like
+// the screen, and a badge is not a step toward that — it is a way of not taking the step. The macro's
+// declared fidelity still exists as a fact about the macro; nothing draws it any more.
+function withFidelity(_name: string, _fidelity: "preserve" | "degrade", body: SafeHtml, note?: (name: string) => void): SafeHtml {
+  void note;
+  return body;
 }
 
 // The role → static tag map for plain containers (fixed literals — never user input — so emitting the
