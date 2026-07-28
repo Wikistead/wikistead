@@ -73,10 +73,6 @@ export function SpaceMembersTab() {
   const roleAssignments = useRoleAssignments("space", spaceId);
   const assignRole = useAssignRole();
   const unassignRole = useUnassignRole();
-  const [roleId, setRoleId] = useState("");
-  const [roleQuery, setRoleQuery] = useState("");
-  const [rolePicked, setRolePicked] = useState<{ sub: string; label: string } | null>(null);
-  const roleCandidates = useMemberCandidates(spaceId, rolePicked ? "" : roleQuery);
   const customRoles = assignable.data?.custom ?? [];
   // #523 / ADR-190 (slice E): the assignment list now arrives with its user principals already NAMED by the
   // server (the same authorization-bounded resolution as the grant list). The old customized-only lookup is
@@ -86,16 +82,6 @@ export function SpaceMembersTab() {
       .filter((a) => a.principal.startsWith("user:"))
       .map((a) => [a.principal.replace(/^user:/, ""), a.displayName ?? null] as const),
   );
-  const addRoleAssignment = () => {
-    if (!roleId || !rolePicked) return;
-    assignRole.mutate(
-      { roleId, resourceType: "space", resourceId: spaceId, principal: `user:${rolePicked.sub}` },
-      {
-        onSuccess: () => { notify.success(t("toast.accessGranted")); setRolePicked(null); setRoleQuery(""); },
-        onError: () => notify.error(t("toast.actionFailed")),
-      },
-    );
-  };
   const rolePrincipalLabel = (principal: string): string => {
     if (principal.startsWith("group:")) return `${principal.replace(/^group:/, "").replace(/#member$/, "")} (${t("spaceMembers.group")})`;
     const sub = principal.replace(/^user:/, "");
@@ -241,41 +227,19 @@ export function SpaceMembersTab() {
         {grants.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
       </div>
 
-      {/* #485 / #514: assign CUSTOM ROLES (defined in the tenant Roles tab) to members of THIS space —
-          the assignment IA the user asked for (create in tenant, assign in space). Only shown when the
-          tenant has custom resource-scope roles to assign; each assignment expands to the role's capability
-          bundle server-side (manage-gated). */}
-      {customRoles.length > 0 && (
+      {/* #485 / #514: custom-role assignments for THIS space (roles are DEFINED in the tenant Roles tab and
+          only ASSIGNED here). Each assignment expands to the role's capability bundle server-side,
+          manage-gated.
+          #536 / ADR-188 §6: this section no longer carries its own add form. Adding is ONE control — the
+          merged picker above, where a custom role sits in the same list as a built-in capability. The
+          second form was strictly weaker (users only, never groups) and it built its principal string
+          itself, which is exactly where the group bug came from: two places constructing a principal
+          means one of them can be wrong while the other is right. What remains here is the LIST, which the
+          grant list above cannot show — an assignment is a role, not a capability. */}
+      {(customRoles.length > 0 || (roleAssignments.data?.length ?? 0) > 0) && (
         <div className="mt-8 border-t border-border pt-4" data-testid="space-role-assign">
           <h3 className="mt-0 text-sm font-medium">{t("spaceMembers.customRolesTitle")}</h3>
           <p className="mt-0 mb-3 text-sm text-fg-dim">{t("spaceMembers.customRolesBody")}</p>
-          <div className="mb-4 flex items-start gap-2">
-            <Select
-              value={roleId}
-              onChange={setRoleId}
-              ariaLabel={t("spaceMembers.selectRole")}
-              testId="space-role-select"
-              size="sm"
-              options={[
-                { value: "", label: t("spaceMembers.selectRole") },
-                ...customRoles.map((r) => ({ value: r.id, label: r.name })),
-              ]}
-            />
-            <MemberSearchInput
-              query={roleQuery}
-              onQueryChange={setRoleQuery}
-              picked={rolePicked ? { grantee: `user:${rolePicked.sub}`, label: rolePicked.label } : null}
-              onPick={(c) => { setRolePicked(c ? { sub: c.sub, label: c.displayName || c.sub } : null); if (c) setRoleQuery(""); }}
-              candidates={roleCandidates.data ?? []}
-              placeholder={t("spaceMembers.addPlaceholder")}
-              ariaLabel={t("spaceMembers.addPlaceholder")}
-              inputSize="sm" // #535: one size variant per row — the Select and Button beside it are `sm`
-              inputTestId="space-role-member-input"
-              listTestId="space-role-member-candidates"
-              itemTestId="space-role-member-candidate"
-            />
-            <Button variant="primary" size="sm" disabled={!roleId || !rolePicked || assignRole.isPending} onClick={addRoleAssignment} data-testid="space-role-assign-add">{t("spaceMembers.add")}</Button>
-          </div>
           {/* #539: same bound for the assignment list — it grows with the same membership. */}
           <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-role-assign-list">
             {(roleAssignments.data ?? []).map((a) => (
