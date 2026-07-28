@@ -17,7 +17,7 @@ const reset = (p: Page) =>
 
 test.afterEach(async ({ page }) => { await reset(page); });
 
-test("account settings: name override persists + resets; keymap syncs; theme switches; avatar upload", async ({ page }) => {
+test("account settings: the IdP name is read-only; keymap syncs; theme switches; avatar upload", async ({ page }) => {
   await openDemo(page);
 
   // open via the header user menu
@@ -25,13 +25,15 @@ test("account settings: name override persists + resets; keymap syncs; theme swi
   await page.click("[data-testid=user-menu-account]");
   await expect(page.getByTestId("account-profile")).toBeVisible();
 
-  // Profile: set a display-name override → it persists server-side
-  await page.fill("[data-testid=account-name-input]", "E2E Name");
-  await page.click("[data-testid=account-name-save]");
-  await expect.poll(() => settings(page).then((s) => s.displayNameOverride), { timeout: 5000 }).toBe("E2E Name");
-  // reset → back to the IdP name (override cleared)
-  await page.click("[data-testid=account-name-reset]");
-  await expect.poll(() => settings(page).then((s) => s.displayNameOverride), { timeout: 5000 }).toBeNull();
+  // Profile: this used to set a display-name OVERRIDE. #523 / ADR-190 made an OIDC-sourced name
+  // authoritative — the field is read-only for such a user and the server refuses the write (403,
+  // "managed by your identity provider") — so the spec had been failing on a control that is gone by
+  // decision. What it pins now is that decision: the dev/OIDC identity sees its name, and no way to
+  // edit it. A LOCAL user still gets the editable field; that path keeps its own coverage in the
+  // account-settings unit tests rather than here, where the identity is fixed by the harness.
+  await expect(page.getByTestId("account-name-readonly"), "the IdP-managed name is shown").toBeVisible();
+  await expect(page.getByTestId("account-name-input"), "…and cannot be edited here").toHaveCount(0);
+  await expect(page.getByTestId("account-name-save")).toHaveCount(0);
 
   // Editor: switching the keymap is persisted (server-synced)
   await page.click("[data-testid=settings-tab-editor]");
