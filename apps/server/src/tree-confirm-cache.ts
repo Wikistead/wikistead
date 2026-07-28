@@ -54,7 +54,36 @@ export function setTreeConfirm(
   cache.set(keyFor(tenantId, subject, spaceId), { verdicts, expires: now + TTL_MS })
 }
 
-// Wired next to invalidateTitleDictCache in app.ts — one signal, both caches.
+// #541 part 6: the badge reads beside the confirm — DISPLAY-ONLY facts (lock / freeze glyphs), one
+// fga.read per page, ~half of a cache-miss tree's wall. Cached per (tenant, page) under the same TTL
+// and the same invalidation; a badge a few seconds stale is a glyph, never an access decision (the
+// confirm above is what admits a page at all).
+interface BadgeEntry { value: { private: boolean; frozen: 'full' | 'guests' | null }; expires: number }
+const badgeCache = new Map<string, BadgeEntry>()
+
+export function getCachedBadge(tenantId: string, pageId: string, now = Date.now()): BadgeEntry['value'] | undefined {
+  const hit = badgeCache.get(`${tenantId} ${pageId}`)
+  if (!hit) return undefined
+  if (hit.expires <= now) { badgeCache.delete(`${tenantId} ${pageId}`); return undefined }
+  return hit.value
+}
+
+export function setCachedBadge(tenantId: string, pageId: string, value: BadgeEntry['value'], now = Date.now()): void {
+  if (badgeCache.size >= 5000) {
+    const oldest = badgeCache.keys().next().value
+    if (oldest !== undefined) badgeCache.delete(oldest)
+  }
+  badgeCache.set(`${tenantId} ${pageId}`, { value, expires: now + TTL_MS })
+}
+
+// #541 part 6: the freeze/private PRIMITIVES call this the moment they write, so a moderation action
+// shows in the tree immediately — the TTL only covers paths with no such signal (none known).
+export function invalidatePageBadge(tenantId: string, pageId: string): void {
+  badgeCache.delete(`${tenantId} ${pageId}`)
+}
+
+// Wired next to invalidateTitleDictCache in app.ts — one signal, all of it.
 export function invalidateTreeConfirmCache(tenantId: string): void {
   for (const k of cache.keys()) if (k.startsWith(`${tenantId} `)) cache.delete(k)
+  for (const k of badgeCache.keys()) if (k.startsWith(`${tenantId} `)) badgeCache.delete(k)
 }

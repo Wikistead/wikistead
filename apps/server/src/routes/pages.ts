@@ -5,7 +5,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readUserTuplesByType, requireTenantAdmin } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration } from '../title-dict-cache.js' // #534
-import { getTreeConfirm, setTreeConfirm } from '../tree-confirm-cache.js' // #541
+import { getTreeConfirm, setTreeConfirm, getCachedBadge, setCachedBadge, invalidatePageBadge } from '../tree-confirm-cache.js' // #541
 import { docName } from '@wikistead/types'
 import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
@@ -493,9 +493,14 @@ export async function listPages(
   // both slowed this response and starved every other authorization consumer of the page-open burst.
   // One read per page now returns the page's whole tuple set and both badges are derived from it, and
   // the fan-out is bounded so the tree never monopolises the store it is reading from.
-  const badges = await mapBounded(visible, 16, (r) =>
-    readPageBadges(fga, r.id).catch(() => ({ private: false, frozen: null as PageFreezeLevel | null })),
-  )
+  // #541 part 6: badge reads ride the same short cache (display-only glyphs — see tree-confirm-cache).
+  const badges = await mapBounded(visible, 16, async (r) => {
+    const hit = tenantId ? getCachedBadge(tenantId, r.id) : undefined
+    if (hit) return hit
+    const fresh = await readPageBadges(fga, r.id).catch(() => ({ private: false, frozen: null as PageFreezeLevel | null }))
+    if (tenantId) setCachedBadge(tenantId, r.id, fresh)
+    return fresh
+  })
   return visible.map((r, i) => ({ ...toPage(r), private: badges[i]!.private, frozen: badges[i]!.frozen }))
 }
 
@@ -1266,6 +1271,7 @@ export async function setPagePrivate(
   // Reindex the whole subtree so is_public flips false (view_base@user:* gone) + space members drop from stage-1.
   subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
   void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {}) // #362 E1: privatise cuts inherited view
+  invalidatePageBadge(args.tenantId, args.pageId) // #541: the lock badge flips immediately
   emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
   // comment 785 #2: emit share_link.revoked ONLY after the DB revoke committed (never on a rolled-back tx).
   for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
@@ -1299,6 +1305,7 @@ export async function unsetPagePrivate(
     return os
   })
   subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
+  invalidatePageBadge(args.tenantId, args.pageId) // #541
   emit({ type: 'page.made_non_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
 }
 
@@ -1353,6 +1360,7 @@ export async function setPageFrozen(
     const other = args.level === 'full' ? FROZEN_GUESTS_MARKERS(args.pageId) : FROZEN_MARKERS(args.pageId)
     await Promise.all(other.map((m) => deleteTuples(fga, [m]).catch(() => {})))
   })
+  invalidatePageBadge(args.tenantId, args.pageId) // #541: the badge shows the new level immediately
   emit({ type: 'page.frozen', tenantId: args.tenantId, pageId: args.pageId, level: args.level, actorId: args.userId })
 }
 
@@ -1373,6 +1381,7 @@ export async function unsetPageFrozen(
       [...FROZEN_MARKERS(args.pageId), ...FROZEN_GUESTS_MARKERS(args.pageId)].map((m) => deleteTuples(fga, [m]).catch(() => {})),
     )
   })
+  invalidatePageBadge(args.tenantId, args.pageId) // #541
   emit({ type: 'page.unfrozen', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
 }
 
