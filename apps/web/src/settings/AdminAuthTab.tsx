@@ -7,6 +7,7 @@ import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
 import { cn } from "../lib/utils";
 import { AdminEnrollmentSection } from "./AdminEnrollmentSection";
+import { AdminSamlSection } from "./AdminSamlSection";
 
 const label = "mb-1 mt-3.5 block text-sm text-fg-dim";
 
@@ -99,6 +100,9 @@ export function AdminAuthTab() {
 
       {/* #101 / ADR-034: auto-enrolment policy for successful OIDC logins (below the IdP config). */}
       <AdminEnrollmentSection />
+
+      {/* #537 / ADR-195 §5: SAML on the same tab — renders nothing on CE, upgrade notice when unentitled. */}
+      <AdminSamlSection />
     </div>
   );
 }
