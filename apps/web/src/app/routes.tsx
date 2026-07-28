@@ -576,23 +576,11 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     return () => { ro.disconnect(); parent.style.removeProperty("--wks-band-h"); };
   }, []);
 
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
-  if (status === "anon") return <LoginScreen />;
-  // A page that doesn't exist or isn't accessible must NOT present an editable phantom surface (it would
-  // have no space → unpublishable). #262: the server now returns a uniform 404 for both "no such page" and
-  // "no view access" (existence-hiding), so the client shows ONE not-found state — a
-  // message would leak that the page exists.
-  if (pageId && pageQ.isError) {
-    return (
-      <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
-        <div style={{ padding: 24 }} data-testid="page-not-found">{t("page.notFound")}</div>
-      </AppShell>
-    );
-  }
-  // #364 / ADR-157 §4: /p/<home-id> canonicalises to the space root (one location for the home).
-  if (homeOwner) return <Navigate to={`/spaces/${homeOwner.id}`} replace />;
-  // #505 / ADR-191: the browser's own Ctrl+P used to take a DIFFERENT road to paper than the app's print
-  // action — the menu item renders the page server-side (export.html, every macro static) while a native
+  // These three are HOOKS and must run on every render, so they sit ABOVE the early returns below. They
+  // were introduced under them, which changed the hook count between the loading render and the loaded one
+  // — React threw "Rendered more hooks than during the previous render" and the app rendered NOTHING in
+  // cookie-auth mode, where the first render is always the loading one. The dev-token path skips that
+  // render, which is why it looked fine.
   // #85 / ADR-194: what the export and print build FROM. The published body when there is one — that is
   // what "export this page" has always meant — and otherwise the live document, so a draft prints as itself
   // instead of falling back to printing the application. Reading the surface (a getter the editor sets) is
@@ -610,6 +598,24 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     if (pub.trim()) return pub;
     return docTextRef.current?.() ?? "";
   }, [published?.publishedMd]);
+
+  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "anon") return <LoginScreen />;
+  // A page that doesn't exist or isn't accessible must NOT present an editable phantom surface (it would
+  // have no space → unpublishable). #262: the server now returns a uniform 404 for both "no such page" and
+  // "no view access" (existence-hiding), so the client shows ONE not-found state — a
+  // message would leak that the page exists.
+  if (pageId && pageQ.isError) {
+    return (
+      <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
+        <div style={{ padding: 24 }} data-testid="page-not-found">{t("page.notFound")}</div>
+      </AppShell>
+    );
+  }
+  // #364 / ADR-157 §4: /p/<home-id> canonicalises to the space root (one location for the home).
+  if (homeOwner) return <Navigate to={`/spaces/${homeOwner.id}`} replace />;
+  // #505 / ADR-191: the browser's own Ctrl+P used to take a DIFFERENT road to paper than the app's print
+  // action — the menu item renders the page server-side (export.html, every macro static) while a native
 
   // Ctrl+P fell to the print stylesheet over the client portal. Two roads means two things to keep in
   // parity, which is exactly the drift this work keeps finding. Send the shortcut down the same road; the
