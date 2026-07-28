@@ -23,6 +23,15 @@ const FIXTURE = [
   ":::",
   "::::",
   "",
+  "::::columns",
+  ":::column",
+  "left column text",
+  ":::",
+  ":::column",
+  "right column text",
+  ":::",
+  "::::",
+  "",
   ":::details[Folded]",
   "folded body text",
   ":::",
@@ -98,6 +107,15 @@ test("#85: the exported document and the app render the same document", async ({
   expect(html, "…and the one they did not").toContain("beta pane text");
   expect(html, "each under its own label").toContain("Alpha");
   expect(html).toContain("Beta");
+
+  // #85 (ruling): columns and the callout were already right; they are pinned so they stay that way while
+  // the rest of the export moves. Both columns' text reaches the file, side by side as on screen (the
+  // container class is what the app's own CSS lays out), and the callout keeps its panel structure.
+  expect(html, "the left column").toContain("left column text");
+  expect(html, "…and the right one").toContain("right column text");
+  expect(html, "laid out by the app's own columns class").toContain("cm-lp-columns");
+  expect(html, "the callout arrives as the panel the app draws").toContain("cm-lp-callout-panel");
+  expect(html, "…keeping its label").toContain("Label");
 
   // #85: the fold keeps its look and its content — a disclosure in the file, open, so nothing is hidden
   // behind a triangle nobody can click on paper.
