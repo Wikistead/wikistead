@@ -24,6 +24,9 @@ const SVIEWER = 'user:tpl_sviewer' // space MEMBER (granted via the write path =
 const PSMEMBER = 'user:tpl_psmember' // a member of the PUBLIC space (viewer_member) → sees its space templates
 const STRANGER = 'user:tpl_stranger' // no grant → sees nothing
 const SHARE = 'share_link:tpl_link'
+// #529the weakest space grant there is. It must NOT reach the space's templates.
+const SCOMMENTER = 'user:tpl_scommenter'
+const SMODERATOR = 'user:tpl_smoderator' // the deliberate widening (#330 / ADR-141 §1b) must survive
 
 const TUPLES = [
   { user: ADMIN, relation: 'admin', object: T },
@@ -31,6 +34,9 @@ const TUPLES = [
   // #258: a member VIEW grant writes BOTH viewer and viewer_member (spaceGrantTuples) — mirror that here.
   { user: SVIEWER, relation: 'viewer', object: S },
   { user: SVIEWER, relation: 'viewer_member', object: S },
+  // #529: a space COMMENTER (the space-scoped per-principal comment grant) and a MODERATOR
+  { user: SCOMMENTER, relation: 'commenter', object: S },
+  { user: SMODERATOR, relation: 'moderator', object: S },
   // the PUBLIC space: public wildcard + a share link on `viewer` (its pages are anon/guest viewable) …
   { user: 'user:*', relation: 'viewer', object: PS },
   { user: SHARE, relation: 'viewer', object: PS },
@@ -74,6 +80,24 @@ describe('#247/#258 template FGA — 3-scope visibility + guest/public hard boun
     expect(await check(SVIEWER, 'view', o)).toBe(true) // viewer_member from space
     expect(await check(MEMBER, 'view', o)).toBe(false)
     expect(await check(STRANGER, 'view', o)).toBe(false)
+  })
+
+  // #529(user ruling B): commenter is the WEAKEST space grant. Letting it read — and, through
+  // routes/templates.ts, SAVE — the space's shared templates does not follow from "may comment". The
+  // moderator widening (#330) stands on its own reasoning: a moderator patrols the space's contents.
+  // Measured before the fix: with `commenter` unioned into `viewer_member`, this check answered ALLOW.
+  it('#529: a space COMMENTER cannot view the space templates (moderator still can)', async () => {
+    const o = tmpl('tpl_space')
+    expect(await check(SCOMMENTER, 'view', o), 'commenter must not reach space templates').toBe(false)
+    expect(await check(SMODERATOR, 'view', o), 'the #330 moderator widening is not collateral').toBe(true)
+  })
+
+  it('#529: the commenter still SEES the space itself (the reason it was widened at all)', async () => {
+    // ruling 1 existed because a commenter could view the PAGES while the space 404'd. That must hold:
+    // space#viewer is what listSpaces / the tree / pins / space-watch consult.
+    expect(await check(SCOMMENTER, 'viewer', S), 'the space is not invisible to a commenter').toBe(true);
+    // …and the narrowing is real: it is not a member-only viewer any more.
+    expect(await check(SCOMMENTER, 'viewer_member', S), 'commenter is no longer in the member-only subset').toBe(false)
   })
 
   it('TENANT: owner, admin, and all tenant members can view (not a bare space member)', async () => {

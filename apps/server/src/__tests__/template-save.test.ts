@@ -8,11 +8,12 @@ import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { fgaClient, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { mintGuestToken } from '@wikistead/auth'
 import { createSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
+import { saveTemplate } from '../routes/templates.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -114,5 +115,56 @@ describe('#248 template save — authz', () => {
     const res = await save({ fromPageId: unpubPage, name, scope: 'personal' })
     expect(res.statusCode).toBe(400)
     expect(await countRows(name)).toBe(0)
+  })
+
+  // #529follow-up (design review): the space-scope save gate used to ask for space `view`
+  // (= `viewer`), while `template#view` reads `viewer_member from space` (#258, templates are
+  // member-only). Anyone the space is merely VISIBLE to could therefore write a template into a set they
+  // could not read — and after #529 put `commenter` on `viewer`, that included a bare space commenter,
+  // which is precisely what the ruling meant to stop. Read and write now name the same relation.
+  describe('#529: space-scope save asks for the same set that can READ the templates', () => {
+    const spaceCommenter = `${tag}-commenter`
+    const spaceMember = `${tag}-member`
+    // Built INSIDE beforeAll: `spaceId` and `pubPage` are assigned by the outer beforeAll, and a describe
+    // body runs at collection time — an array built there would embed `space:` with an empty id, every
+    // write would fail, and the "commenter is refused" test would pass because the commenter had no
+    // grant at all. (Measured: viewer=false for a principal the fixture claimed to have granted.)
+    let tuples: { user: string; relation: string; object: string }[] = []
+    beforeAll(async () => {
+      tuples = [
+        { user: `user:${spaceCommenter}`, relation: 'commenter', object: `space:${spaceId}` },
+        { user: `user:${spaceMember}`, relation: 'viewer', object: `space:${spaceId}` },
+        { user: `user:${spaceMember}`, relation: 'viewer_member', object: `space:${spaceId}` },
+        // Publish shape: a DRAFT is creator-only, so neither principal could view the source page and
+        // both would 404 at the FIRST gate — the test would then pass for the wrong reason.
+        { user: `space:${spaceId}`, relation: 'space', object: `page:${pubPage}` },
+        { user: 'user:*', relation: 'published', object: `page:${pubPage}` },
+        { user: 'share_link:*', relation: 'published', object: `page:${pubPage}` },
+      ]
+      await ensureMembers('tenant_dev', [spaceCommenter, spaceMember])
+      for (const t of tuples) await writeTuples(fgaClient, [t]).catch(() => {})
+    }, 30_000)
+    afterAll(async () => { await deleteTuples(fgaClient, tuples).catch(() => {}) }, 30_000)
+
+    // The route's dev bearer always authenticates `dev-user`, so these call the function with the
+    // subject directly — the same way the moderator pin (#330) exercises this path.
+    it('a bare space COMMENTER cannot save a space-scope template (404, no row)', async () => {
+      const name = `${tag}-commenter-save`
+      await expect(saveTemplate(db, fgaClient, {
+        tenantId: 'tenant_dev', userId: spaceCommenter, fromPageId: pubPage, name, scope: 'space', spaceId,
+      })).rejects.toMatchObject({ statusCode: 404 })
+      expect(await countRows(name)).toBe(0)
+    })
+
+    it('a space MEMBER (viewer_member) still saves one', async () => {
+      const name = `${tag}-member-save`
+      const saved = await saveTemplate(db, fgaClient, {
+        tenantId: 'tenant_dev', userId: spaceMember, fromPageId: pubPage, name, scope: 'space', spaceId,
+      })
+      expect(saved.id).toBeTruthy()
+      expect(await countRows(name)).toBe(1)
+      await admin`DELETE FROM templates WHERE id = ${saved.id}`.catch(() => {})
+      await deleteObjectTuples(fgaClient, `template:${saved.id}`).catch(() => {})
+    })
   })
 })

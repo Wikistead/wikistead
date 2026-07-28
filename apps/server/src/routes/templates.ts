@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples, deleteObjectTuples } from '@wikistead/authz'
+import { check, checkRelation, writeTuples, deleteObjectTuples } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import type { TenantDb } from '../db/index.js'
 import { renderPlantuml } from '../plantuml-render.js' // #267template preview plantuml render (faithful mirror of the page endpoint)
@@ -31,12 +31,18 @@ export async function saveTemplate(
   if (src.published_md == null) throw httpError(400, 'page has no published version')
   const name = (args.name ?? '').trim()
   if (!name) throw httpError(400, 'name is required')
-  // A space-scope template's audience is that space's viewers — the saver must be able to view the space
-  // (else 404), so a template can't be aimed at a space the saver can't see.
+  // A space-scope template's audience is that space's MEMBERS — `template#view` inherits
+  // `viewer_member from space` (#258, so a public/shared space never exposes its templates to guests or
+  // anon). The save gate asks for the SAME relation, deliberately: this used to ask for space `view`
+  // (= `viewer`), which admitted anyone the space is visible to — including a public space's
+  // non-members, and, after #529 moved `commenter` onto `viewer`, a bare commenter. That produced the
+  // asymmetry a review caught (#529follow-up): a principal who cannot READ the space's templates
+  // could still WRITE one into them. Read and write now name the same set. 404, not 403 — a saver who
+  // cannot see the space must not learn it exists.
   if (args.scope === 'space') {
     if (!args.spaceId) throw httpError(400, 'spaceId is required for a space-scope template')
-    const canViewSpace = await check(fga, subject, 'view', { type: 'space', id: args.spaceId })
-    if (!canViewSpace) throw httpError(404, 'not found')
+    const canSaveHere = await checkRelation(fga, subject, 'viewer_member', { type: 'space', id: args.spaceId })
+    if (!canSaveHere) throw httpError(404, 'not found')
   }
   const id = await db.tx(async (tx) => {
     // #252 / ADR-110: maxTemplates entitlement seam. All plans are UNLIMITED for now, so `isFinite` is

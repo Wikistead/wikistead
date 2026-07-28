@@ -89,16 +89,23 @@ type space
     # can read + save the space's templates (deliberate widening; moderator has NO share_link type, so
     # the #258 guest boundary is untouched). The page-view SET is unchanged — moderate already implied
     # page view via edit→comment→viewable; this only adds the space-level and template surfaces.
-    # #529 / ADR-193 ruling 1: `commenter` joins the same union, for the same reason moderator did —
-    # without it a space commenter can view the PAGES (via page#viewable) while the space itself 404s
-    # and its tree is invisible. Someone allowed to comment across a space can see that space.
-    define viewer_member: [user, group#member] or editor_member or moderator or commenter
+    # #529 / ADR-193 ruling 1 said a space commenter must be able to SEE the space (without it, the pages
+    # are viewable via page#viewable while the space itself 404s and its tree is invisible). That was right,
+    # but putting `commenter` HERE granted more than it said: viewer_member's only consumer is
+    # `template#view`, so the weakest grant in the model could READ the space's shared templates.
+    # #529(user ruling B) moves it down to `viewer` — what listSpaces / the tree / pins /
+    # space-watch / page-view inheritance actually consult — so space visibility survives and the
+    # template surface does not. The SAVE side needed a separate fix (a design review measured that
+    # routes/templates.ts gated space-scope saves on space `view`, i.e. on this very relation): it now
+    # asks for `viewer_member`, so writing a space template and reading one name the same set.
+    # The moderator widening stays here on its own reasoning (patrolling a space reaches its contents).
+    define viewer_member: [user, group#member] or editor_member or moderator
     # user:* here means public space — only set this tuple intentionally.
     # space-scoped share links: one tuple (space:S#viewer@share_link:Y) grants
     # view access to every page in S. Revoke = delete that tuple (1 op).
     # Permanent links omit condition; time-bounded links use non_expired.
     # (Issuance API implemented in #104 / ADR-038.)
-    define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or viewer_member
+    define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or viewer_member or commenter
     define admin: admin from tenant
     # Comment AUDIENCE switch at the space level (#100 / ADR-029 Option B). Toggling comments on a
     # space writes/deletes these wildcard tuples (is_public-style; FGA stays the source of truth):
