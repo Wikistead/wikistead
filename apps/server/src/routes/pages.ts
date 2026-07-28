@@ -458,19 +458,60 @@ export async function listPages(
       AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
     ORDER BY p.position, p.created_at
   `
-  const allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context)
+  // #541: the tree is what the sidebar's first paint waits for, so its confirm takes the same bounded
+  // lanes the title dictionary does (#534) — 4, clamped in filterAuthorized. A 197-page space is 4
+  // batch waves; sequentially that is most of a second on a busy checker, for a surface that IS the
+  // boot path (the dictionary at least was only an enhancement).
+  const allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context, 'page', 4)
   const visible = rows.filter((r) => allowed.has(r.id))
-  // #109 Fix B: annotate each visible page with its private flag so the sidebar can render a lock.
-  // Bounded to the space's visible pages; a read fault falls back to "not private" (no false lock).
-  const privateFlags = await Promise.all(
-    visible.map((r) => readPagePrivate(fga, r.id).catch(() => false)),
+  // #109 Fix B / #329: annotate each visible page with its private flag (lock badge) and freeze level
+  // (snowflake). A read fault falls back to "no badge" — never a false lock.
+  //
+  // #541: these used to be THREE fga.read calls per page (private, frozen, frozen_guests), all fired at
+  // once — a 197-page tree put ~600 concurrent point reads on the checker on every sidebar load, which
+  // both slowed this response and starved every other authorization consumer of the page-open burst.
+  // One read per page now returns the page's whole tuple set and both badges are derived from it, and
+  // the fan-out is bounded so the tree never monopolises the store it is reading from.
+  const badges = await mapBounded(visible, 16, (r) =>
+    readPageBadges(fga, r.id).catch(() => ({ private: false, frozen: null as PageFreezeLevel | null })),
   )
-  // #329 rework: annotate the freeze level the same way so the tree can pair a snowflake with the
-  // lock (frozen only removes access, so showing it to a viewer reveals nothing; fault → no badge).
-  const frozenLevels = await Promise.all(
-    visible.map((r) => readPageFrozen(fga, r.id).catch(() => null)),
-  )
-  return visible.map((r, i) => ({ ...toPage(r), private: privateFlags[i], frozen: frozenLevels[i] }))
+  return visible.map((r, i) => ({ ...toPage(r), private: badges[i]!.private, frozen: badges[i]!.frozen }))
+}
+
+// Run `fn` over `items` with at most `limit` in flight. Order-preserving. (#541 — the tree's badge
+// reads; small and local on purpose, not a new utility surface.)
+async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  const worker = async () => {
+    for (;;) {
+      const i = next++
+      if (i >= items.length) return
+      out[i] = await fn(items[i]!)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
+}
+
+// #541: both sidebar badges from ONE paginated read of the page's tuple set (the markers are direct
+// tuples on the page object). Answers exactly what readPagePrivate/readPageFrozen answer — user:* private
+// marker; frozen beats frozen_guests — without three round-trips per page. Paginated so a page carrying
+// many direct grants cannot silently truncate a marker out of the answer.
+async function readPageBadges(fga: OpenFgaClient, pageId: string): Promise<{ private: boolean; frozen: PageFreezeLevel | null }> {
+  const relations = new Set<string>()
+  let continuationToken: string | undefined
+  do {
+    const res = await fga.read({ object: `page:${pageId}` }, continuationToken ? { continuationToken } : undefined)
+    for (const { key } of res.tuples ?? []) {
+      if (key) relations.add(`${key.relation}@${key.user}`)
+    }
+    continuationToken = res.continuation_token || undefined
+  } while (continuationToken)
+  return {
+    private: relations.has('private@user:*'),
+    frozen: relations.has('frozen@user:*') ? 'full' : relations.has('frozen_guests@share_link:*') ? 'guests' : null,
+  }
 }
 
 export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<Page> {

@@ -49,10 +49,18 @@ export function Sidebar() {
   const spaces = useMemo(() => spacesQ.data ?? [], [spacesQ.data]);
 
   // Active space: the stored choice if it still exists, else the first space.
-  const current = useMemo(
-    () => (activeSpaceId && spaces.find((s) => s.id === activeSpaceId) ? activeSpaceId : spaces[0]?.id),
-    [activeSpaceId, spaces],
-  );
+  //
+  // #541: the stored choice counts BEFORE the space list arrives. Requiring `spaces.find(...)` to succeed
+  // meant `current` — and with it the page-tree query below — waited for `/spaces` to resolve, and on a
+  // busy authorization backend that response is what arrives LAST (measured: /spaces answered at 6.5s
+  // while the tree itself then took 0.9s — the sidebar sat empty for 7s serialised behind a list it only
+  // needed for validation). While the list is still loading, the stored id is trusted and the tree fetch
+  // starts immediately; once the list lands, a stale stored id falls back to the first space exactly as
+  // before (and the effect below repairs the stored value).
+  const current = useMemo(() => {
+    if (activeSpaceId && (spacesQ.data === undefined || spaces.some((s) => s.id === activeSpaceId))) return activeSpaceId;
+    return spaces[0]?.id;
+  }, [activeSpaceId, spaces, spacesQ.data]);
   // Seed/repair the stored active space (first load, or the stored one was deleted).
   useEffect(() => {
     if (current && current !== activeSpaceId) setActiveSpaceId(current);
