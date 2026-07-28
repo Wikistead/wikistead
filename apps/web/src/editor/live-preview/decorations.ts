@@ -1714,17 +1714,42 @@ interface EditUIDom extends HTMLDivElement { __editUICtrl?: EditUIController; __
 // the first fix addressed on the first path only. Reading it off the inner editor's DOM (CodeMirror hangs
 // its view off the content element) is what lets one place cover both, since every rebuild goes through
 // mountInto.
+// When the rebuild REPLACES the widget rather than updating it, there is no old surface to read from at
+// mount time — the caret has to have been written down before the old widget was destroyed. Keyed by the
+// block's start offset (what the co-edit anchor uses) and stamped, so a stash left by a teardown is only
+// honoured by a mount that follows it immediately: reopening an island by hand minutes later must not
+// resurrect where the caret happened to be back then.
+const caretStash = new Map<number, { head: number; at: number }>();
+const CARET_STASH_MS = 2000;
+
+// CodeMirror hangs its ContentView off the content element under one of two property names depending on
+// how the surface was built; checking only one of them read null every time (measured through a trace).
+function innerViewOf(dom: HTMLElement): EditorView | null {
+  const el = dom.querySelector(".cm-content") as { cmView?: { view?: EditorView }; cmTile?: { view?: EditorView } } | null;
+  return el?.cmView?.view ?? el?.cmTile?.view ?? null;
+}
+
 function innerCaretOf(dom: HTMLElement): number | null {
   try {
-    const content = dom.querySelector(".cm-content") as { cmView?: { view?: EditorView } } | null;
-    const view = content?.cmView?.view;
-    return view ? view.state.selection.main.head : null;
+    const view = innerViewOf(dom);
+    const h = view ? view.state.selection.main.head : null;
+    return h;
   } catch { return null }
 }
+// The macro builds its surface through `mountSurface`, and there is no promise to await for it: the inner
+// editor can appear a frame or two after mount returns. A single microtask found nothing to restore into
+// (measured), so this looks again for a few frames and then gives up rather than waiting forever.
+function restoreInnerCaretSoon(dom: HTMLElement, head: number, tries = 8): void {
+  if (!innerViewOf(dom)) {
+    if (tries > 0) requestAnimationFrame(() => restoreInnerCaretSoon(dom, head, tries - 1));
+    return;
+  }
+  restoreInnerCaret(dom, head);
+}
+
 function restoreInnerCaret(dom: HTMLElement, head: number): void {
   try {
-    const content = dom.querySelector(".cm-content") as { cmView?: { view?: EditorView } } | null;
-    const view = content?.cmView?.view;
+    const view = innerViewOf(dom);
     if (!view) return;
     // The body may have been merged with a peer's edits, so clamp rather than drop: a caret a few
     // characters off is a far smaller injury than one teleported to the start.
@@ -1742,6 +1767,7 @@ export class EditableEditUIWidget extends WidgetType {
   eq(o: EditableEditUIWidget) { return o.from === this.from && o.to === this.to && o.source === this.source && o.editUI === this.editUI && o.theme === this.theme && o.caretOutOnExit === this.caretOutOnExit && o.diagramLang === this.diagramLang; }
   private mountInto(dom: EditUIDom, view: EditorView) {
     const keptCaret = innerCaretOf(dom); // #502: survive the rebuild (see innerCaretOf)
+    if (keptCaret != null) caretStash.set(this.from, { head: keptCaret, at: Date.now() });
     dom.__editUICtrl?.destroy();
     dom.replaceChildren();
     const save = (newBody: MacroSource) => {
@@ -1809,7 +1835,15 @@ export class EditableEditUIWidget extends WidgetType {
     // Deferred by one microtask: the macro's mount builds its surface through `mountSurface`, which is not
     // guaranteed to have produced the inner editor by the time mount returns — restoring synchronously
     // found nothing to restore into (measured: the caret still landed at 0).
-    if (keptCaret != null) queueMicrotask(() => restoreInnerCaret(dom, keptCaret));
+    // Either this mount read the caret off the surface it just destroyed, or a widget that was destroyed
+    // outright wrote one down a moment ago (the co-edit flush path — measured: no surface survives to be
+    // read there). Both end up here.
+    const stashed = caretStash.get(this.from);
+    const restoreTo = keptCaret ?? (stashed && Date.now() - stashed.at < CARET_STASH_MS ? stashed.head : null);
+    if (restoreTo != null) {
+      caretStash.delete(this.from);
+      queueMicrotask(() => restoreInnerCaretSoon(dom, restoreTo));
+    }
     // #239: re-add the Done affordance after each (re)mount — mountInto's replaceChildren above wipes it.
     const done = document.createElement("button");
     done.type = "button";
@@ -1948,7 +1982,13 @@ export class EditableEditUIWidget extends WidgetType {
     return wrap;
   }
   updateDOM(dom: HTMLElement, view: EditorView) { this.mountInto(dom as EditUIDom, view); return true; }
-  destroy(dom: HTMLElement) { const d = dom as EditUIDom; d.__editUICtrl?.destroy(); d.__editUICtrl = undefined; d.__editUIRo?.disconnect(); d.__editUIRo = undefined; }
+  destroy(dom: HTMLElement) {
+    // #502: write the caret down BEFORE the surface goes. A rebuild that replaces the widget builds its
+    // successor with nothing left to read from, so this is the only moment the position still exists.
+    const head = innerCaretOf(dom);
+    if (head != null) caretStash.set(this.from, { head, at: Date.now() });
+    const d = dom as EditUIDom; d.__editUICtrl?.destroy(); d.__editUICtrl = undefined; d.__editUIRo?.disconnect(); d.__editUIRo = undefined;
+  }
   ignoreEvent() { return true; }
 }
 
