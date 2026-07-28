@@ -396,7 +396,7 @@ describe('buildHtmlExport', () => {
       expect(diagram, 'the diagram fence is aligned too').toContain('class="cm-lp-align-left"')
       expect(diagram).toContain('<pre class="mermaid">')
       // check the BODY, not the whole document — the stylesheet always defines .wks-fidelity-degrade
-      expect(diagram.split('</head>')[1] ?? '', 'a diagram that cannot be drawn statically says so').toContain('wks-fidelity-degrade')
+      expect(diagram.split('</head>')[1] ?? '', 'and wears no badge — #85 ruling: no marks').not.toContain('wks-fidelity')
     } finally {
       await admin`UPDATE pages SET published_md = ${before!.published_md} WHERE id = ${CHILD}`
     }
@@ -490,36 +490,17 @@ describe('buildHtmlExport', () => {
     expect(anon.map((r) => r.title), 'the anonymous surface sees nothing — no public grant exists').toEqual([])
   })
 
-  it('wraps a degrade macro with a VISIBLE fidelity indicator (#85 (c))', async () => {
-    const res = await buildHtmlExport(db, fgaClient, { userId: USER, pageId: DEGRADE })
-    const html = res!.body
-    expect(html).toContain('wks-fidelity-degrade') // the degraded block is wrapped
-    expect(html).toContain('wks-fidelity-badge') // ...with the badge element
-    expect(html).toContain('.wks-fidelity-badge') // ...and the document ships the CSS so it's visible
-    expect(html).toContain('Diagram') // the surrounding prose still renders
-  })
-
-  // #85 (c) / ADR-022 Part 6: "a placeholder + a one-line export summary". The badge tells a reader who
-  // is already looking at the block; the summary is what tells someone HANDED the file that part of the
-  // page is a simplification. It counts blocks — including one nested in a container, which renders
-  // through its own sink and would otherwise be badged but uncounted — and is absent for a whole page.
-  it('says what it is — the API export is the lower-fidelity render, and says so with the count', async () => {
-    const [before] = await admin<[{ published_md: string | null }]>`SELECT published_md FROM pages WHERE id = ${CHILD}`
-    try {
-      await admin`UPDATE pages SET published_md = ${'```plantuml\n@startuml\n@enduml\n```\n\n:::columns\n:::column\n```mermaid\nA-->B\n```\n:::\n:::\n'} WHERE id = ${CHILD}`
-      const many = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD }))!.body
-      expect(many, 'both the top-level and the nested degraded block are counted').toContain('2 blocks in it could not be drawn statically')
-      expect(many, 'and the file says which render it is — ADR-194 acceptance 3').toContain('the lower-fidelity render')
-      expect(many).toContain('.wks-export-summary{') // the document ships the CSS for it
-
-      // Even a page with nothing degraded says what it is: the API path cannot draw a diagram at all, so
-      // "no degraded blocks in THIS page" is not the same as "this file is the full document".
-      await admin`UPDATE pages SET published_md = ${'# Just prose\n\nnothing simplified here.\n'} WHERE id = ${CHILD}`
-      const clean = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: CHILD }))!.body
-      expect(clean, 'the path is still named').toContain('the lower-fidelity render')
-      expect(clean, 'but there is no count to report').not.toContain('could not be drawn statically')
-    } finally {
-      await admin`UPDATE pages SET published_md = ${before!.published_md} WHERE id = ${CHILD}`
-    }
+  // #85 (user ruling 2026-07-28): the fidelity indicator and the export summary are GONE — a mark on a
+  // block that did not render became permission to leave it unrendered, and a note explaining the
+  // shortfall became a substitute for closing it. The acceptance is that the document looks like the
+  // screen. Pinned as absences so neither creeps back.
+  it('carries no fidelity badge and no summary note', async () => {
+    const degraded = (await buildHtmlExport(db, fgaClient, { userId: USER, pageId: DEGRADE }))!.body
+    expect(degraded).not.toContain('wks-fidelity')
+    expect(degraded).not.toContain('data-fidelity')
+    expect(degraded).not.toContain('wks-export-summary')
+    expect(degraded).not.toContain('lower-fidelity')
+    expect(degraded, 'the block itself still renders').toContain('plantuml')
+    expect(degraded, 'and so does the prose around it').toContain('Diagram')
   })
 })

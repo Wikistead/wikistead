@@ -27,9 +27,8 @@ interface PageRow {
 // escaped here (it's the only dynamic value in the static shell). Class-only styling hooks are left
 // for the published/static stylesheet (slice 4) — no inline style (ADR-059 decision-4). The document
 // carries a small STATIC stylesheet (server-authored, not user content) so the export is readable
-// standalone AND the per-block fidelity indicator (#85 (c) / ADR-059) is visible: a `degrade` macro is
-// wrapped by withFidelity in `.wks-fidelity-degrade` with a `.wks-fidelity-badge` ◐, which the reader
-// needs to actually SEE to know a block was simplified for export.
+// standalone. (The per-block fidelity indicator this comment used to describe is gone — user ruling
+// 2026-07-28: no badge, no summary, no note. The acceptance is that the document looks like the screen.)
 const EXPORT_STYLES = `
 /* #85 / ADR-059: the export document reproduces the EDITOR's look (single design language) so a
    downloaded page reads the same as on-screen — callout colours + icons, heading sizes/colour,
@@ -90,9 +89,6 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 .cm-lp-align-center{display:flex;flex-direction:column;align-items:center;}
 .tabs>.tab{margin:.5em 0;}.tab-label{margin:0 0 .3em;}
 .embed-link{word-break:break-all;}
-.wks-fidelity-degrade{position:relative;border:1px dashed color-mix(in srgb,var(--fg-dim) 55%,transparent);border-radius:6px;padding:.4em .6em;margin:.5em 0;}
-.wks-export-summary{margin:0 0 1rem;padding:.4em .7em;border-radius:6px;border:1px dashed color-mix(in srgb,var(--fg-dim) 55%,transparent);color:var(--fg-dim);font-size:.9em;}
-.wks-fidelity-badge{float:right;margin-left:.5em;color:#b8860b;font-size:1.1em;line-height:1;cursor:help;}
 /* #207 part 2: this document IS the print/PDF source (the app prints it from an offscreen frame — the
    whole doc rendered statically, every macro, no raw ::: leak). Make it print well: a compact even
    page margin, and release the narrow on-screen reading column so the print uses the full sheet width
@@ -105,19 +101,12 @@ body{margin:0;background:var(--bg);color:var(--fg);}
 }
 `
 
-function htmlDocument(title: string, safeBody: string, degradedCount = 0): string {
+function htmlDocument(title: string, safeBody: string): string {
   const t = escapeHtml(title || 'Untitled')
-  // #85 (c) / ADR-022 Part 6 + ADR-194 acceptance 3: what this file is, said at the top.
-  //
-  // Since ADR-194 the app's own export is built by the BROWSER, from the document it has already drawn —
-  // diagrams are figures there and code is highlighted. This route is what remains for callers with no
-  // browser to draw with (the API), and it is therefore the lower-fidelity render, always. That has to be
-  // stated rather than quietly be true: someone handed this file otherwise has no way to know a diagram
-  // was a diagram. The per-block count rides along when there is one.
-  //
-  // Server-authored text over a NUMBER — no user content reaches this line.
-  const simplified = degradedCount === 0 ? '' : ` ${degradedCount} block${degradedCount === 1 ? '' : 's'} in it could not be drawn statically.`
-  const note = `<p class="wks-export-summary">◐ This is the API export — the lower-fidelity render.${simplified} Exporting from the app produces the full document, with diagrams drawn and code highlighted.</p>\n`
+  // #85 (user ruling 2026-07-28): no note, no summary, no badge. The export used to open with a line
+  // saying which render it was and how many blocks had been simplified; the ruling removed all of it,
+  // because a document that explains its own shortfall is a document that keeps having one. What is asked
+  // for is that the file look like the screen.
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -129,7 +118,7 @@ function htmlDocument(title: string, safeBody: string, degradedCount = 0): strin
 <body>
 <main class="wks-export">
 <h1 class="wks-export-title">${t}</h1>
-${note}${safeBody}
+${safeBody}
 </main>
 </body>
 </html>
@@ -176,6 +165,6 @@ export async function buildHtmlExport(
   return {
     filename: `${title}.html`,
     contentType: 'text/html; charset=utf-8',
-    body: htmlDocument(title, safeBody, rendered.degraded.length),
+    body: htmlDocument(title, safeBody),
   }
 }
