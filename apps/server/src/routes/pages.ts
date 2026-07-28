@@ -447,7 +447,7 @@ export async function guestCreatePublishPage(
 export async function listPages(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { spaceId: string; subject: string; context?: { current_time: string } },
+  args: { spaceId: string; subject: string; context?: { current_time: string }; firstN?: number },
 ): Promise<Page[]> {
   // #364 / ADR-157 §4: the home renders AT the space root, so the tree (member AND the shared #245
   // guest route) skips it — the one root-listing exclusion. Pins/search/overview deliberately include it.
@@ -479,6 +479,19 @@ export async function listPages(
   // the invalidation below.
   const cacheable = !!tenantId && !args.subject.startsWith('share_link:') && !args.context
   const cached = cacheable ? getTreeConfirm(tenantId!, args.subject, args.spaceId) : undefined
+  // #541 (user ruling): the sidebar must not wait for ALL confirms before painting — the cold
+  // cost is count-proportional (~7ms × pages) and no supply-side lever moves it. `firstN` asks for a
+  // PARTIAL first paint: the first N rows in DISPLAY (DFS) order are confirmed — each id still goes
+  // through the same FGA gate, a deny inside the window is dropped, never backfilled — badges are
+  // skipped entirely (display glyphs, injected by the full response moments later), and the confirm
+  // cache is neither read as authority nor WRITTEN (a partial set must not masquerade as the space's
+  // confirm set). One exception: a WARM full cache is cheaper than any partial — serve full instead.
+  if (args.firstN != null && !(cached && rows.every((r) => cached.has(r.id)))) {
+    const firstIds = dfsOrder(rows).slice(0, Math.max(1, args.firstN))
+    const allowedFirst = await filterAuthorized(fga, args.subject, 'view', firstIds, args.context, 'page', 4)
+    const visibleFirst = rows.filter((r) => allowedFirst.has(r.id))
+    return visibleFirst.map((r) => ({ ...toPage(r), private: false, frozen: null }))
+  }
   let allowed: Set<string>
   if (cached) {
     const delta = rows.filter((r) => !cached.has(r.id))
@@ -510,6 +523,30 @@ export async function listPages(
     return fresh
   })
   return visible.map((r, i) => ({ ...toPage(r), private: badges[i]!.private, frozen: badges[i]!.frozen }))
+}
+
+// #541: the sidebar's DISPLAY order — a DFS over the parent tree with siblings in (position,
+// created_at) order, which is exactly how the client lays the rows out. "The first N rows" for the
+// partial first paint means the first N a user would actually see. Rows whose parent is missing from
+// the set (the excluded home page, a deleted ancestor) count as roots, matching the client's fallback.
+function dfsOrder(rows: readonly PageRow[]): string[] {
+  const byParent = new Map<string | null, PageRow[]>()
+  const ids = new Set(rows.map((r) => r.id))
+  for (const r of rows) {
+    const key = r.parent_id != null && ids.has(r.parent_id) ? r.parent_id : null
+    const list = byParent.get(key)
+    if (list) list.push(r)
+    else byParent.set(key, [r])
+  }
+  const out: string[] = []
+  const walk = (parent: string | null) => {
+    for (const r of byParent.get(parent) ?? []) {
+      out.push(r.id)
+      walk(r.id)
+    }
+  }
+  walk(null)
+  return out
 }
 
 // Run `fn` over `items` with at most `limit` in flight. Order-preserving. (#541 — the tree's badge
@@ -3548,7 +3585,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   // The space page tree — for a member, or a space-link guest (#104). A guest's token is
   // bound to THIS space (resource.type=space, id=spaceId), and listPages only returns the
   // published pages the guest may view (leak-safe). View is the floor (no comment/edit needed).
-  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/pages', { config: { guest: 'view' } }, async (req, reply) => {
+  app.get<{ Params: { spaceId: string }; Querystring: { first?: string } }>('/spaces/:spaceId/pages', { config: { guest: 'view' } }, async (req, reply) => {
     let subject: string
     let context: { current_time: string } | undefined
     if (req.user) {
@@ -3562,7 +3599,10 @@ export async function pagesPlugin(app: FastifyInstance) {
     } else {
       return reply.code(401).send({ error: 'unauthorized' })
     }
-    return listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context })
+    // #541: ?first=N → the partial first paint (clamped; see listPages). The full request follows it.
+    const firstRaw = (req.query as { first?: string } | undefined)?.first
+    const firstN = firstRaw != null ? Math.min(100, Math.max(1, Number.parseInt(firstRaw, 10) || 0)) || undefined : undefined
+    return listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context, firstN })
   })
 
   // #270: the guest reader-chrome's space HEADER (name + public icon only). Guest-capable + resource-bound

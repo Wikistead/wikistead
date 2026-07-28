@@ -82,7 +82,20 @@ function SidebarImpl() {
     // blip self-heals; a hard failure still surfaces the error state below (never a silent empty tree).
     retry: 3,
   });
-  const pages = useMemo(() => pagesQ.data ?? [], [pagesQ.data]);
+  // #541 (user ruling): don't wait for the WHOLE space's confirm before painting. While the full
+  // tree is in flight (cold open of a big space — the count-proportional ~7ms×N confirm), a PARTIAL
+  // first paint (?first=40: the first rows in display order, each still individually FGA-confirmed
+  // server-side, badges deferred) fills the sidebar in small-space time. The full response replaces it
+  // moments later — rows only ever get ADDED and badges appear; nothing the partial showed disappears
+  // unless the full confirm denies it (the server stays the fortress on both requests).
+  const pagesFirstQ = useQuery({
+    queryKey: ["pages-first", current],
+    queryFn: () => apiFetch<Page[]>(`/spaces/${current}/pages?first=40`, token).then((r) => r ?? []),
+    enabled: !!current && pagesQ.data === undefined,
+    staleTime: 0,
+    gcTime: 30_000,
+  });
+  const pages = useMemo(() => pagesQ.data ?? (pagesQ.data === undefined ? pagesFirstQ.data : undefined) ?? [], [pagesQ.data, pagesFirstQ.data]);
   // #492: distinguish "still loading" and "failed to load" from "genuinely empty". `pages` is `data ?? []`,
   // so on error/first-load it is also empty — rendering "No pages yet" then hid a failure and offered no
   // retry. The delayed flag keeps a fast load from flashing a skeleton (the #457 anti-flicker convention).

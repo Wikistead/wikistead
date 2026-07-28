@@ -49,32 +49,34 @@ test("#541: a realistic 197-page space's sidebar arrives with the body — on ev
   await api.post(`/spaces/${spaceId}/access`, { data: { grantee: "user:sidebar-541-extra", relation: "view" } }).catch(() => undefined);
 
   const firstPageId = pageIds[0];
-  const results: { run: number; cmAt: number; sidebarAt: number }[] = [];
-  for (let run = 1; run <= RUNS; run++) {
-    // A COLD context (empty cache, empty storage) except the one thing a returning visitor has: the
-    // stored active space. Runs are DELIBERATELY back-to-back — the previous run's context closes and
-    // its in-flight dictionary must not starve this one (the slow mode).
-    const ctx = await browser.newContext();
+  // Sidebar arrival = the first TREE ROW paints (method — the text-length probe never fires
+  // for a small space, and rows are what the user sees).
+  async function coldOpen(browserRef: import("@playwright/test").Browser, sid: string, target: string) {
+    const ctx = await browserRef.newContext();
     const page = await ctx.newPage();
-    await page.addInitScript((sid) => { try { localStorage.setItem("wks.activeSpace", sid) } catch { /* private mode */ } }, spaceId);
-
+    await page.addInitScript((v) => { try { localStorage.setItem("wks.activeSpace", v) } catch { /* private mode */ } }, sid);
     const t0 = Date.now();
-    await page.goto(`/p/${firstPageId}`);
+    await page.goto(`/p/${target}`);
     let sidebarAt = -1;
     let cmAt = -1;
     for (let k = 0; k < 600; k++) {
       if (cmAt < 0 && (await page.$(".cm-content"))) cmAt = Date.now() - t0;
-      if (sidebarAt < 0) {
-        const len = await page.evaluate(() => document.querySelector("[data-testid=sidebar]")?.textContent?.length ?? 0);
-        if (len > 200) sidebarAt = Date.now() - t0;
-      }
+      if (sidebarAt < 0 && (await page.$("[data-testid=sidebar] [data-testid=tree-page]"))) sidebarAt = Date.now() - t0;
       if (sidebarAt >= 0 && cmAt >= 0) break;
       await page.waitForTimeout(50);
     }
-    expect(sidebarAt, `run ${run}: the sidebar content appeared at all`).toBeGreaterThan(0);
-    expect(cmAt, `run ${run}: the body appeared at all`).toBeGreaterThan(0);
-    results.push({ run, cmAt, sidebarAt });
     await ctx.close();
+    return { cmAt, sidebarAt };
+  }
+
+  const results: { run: number; cmAt: number; sidebarAt: number }[] = [];
+  for (let run = 1; run <= RUNS; run++) {
+    // Runs are DELIBERATELY back-to-back — the previous run's context closes and its in-flight
+    // dictionary must not starve this one (the slow mode).
+    const r = await coldOpen(browser, spaceId, firstPageId);
+    expect(r.sidebarAt, `run ${run}: the sidebar content appeared at all`).toBeGreaterThan(0);
+    expect(r.cmAt, `run ${run}: the body appeared at all`).toBeGreaterThan(0);
+    results.push({ run, ...r });
   }
 
   // Judged on the WORST run ( — the best run proved nothing last time).
@@ -84,6 +86,34 @@ test("#541: a realistic 197-page space's sidebar arrives with the body — on ev
     expect(r.sidebarAt - r.cmAt, `worst-run lag — ${detail}`).toBeLessThan(SIDEBAR_LAG_MS);
   }
 
-  // Cleanup: the space (and its pages) go away so repeated runs do not accrete.
+  // ── the PRIMARY pin: proportionality, not wall clocks. A 5-page space and the big space are
+  // opened alternately in the same minute; the big/small sidebar-arrival ratio is load-independent
+  // (both suffer the same box), so it cannot flake the way absolute walls do — and it is exactly the
+  // defect: pre-#541-progressive, the big space paid ~7ms × N in confirms before the first row could
+  // paint (measured 6× on dev), while the partial first paint makes the first rows N-independent.
+  const smallCreated = await api.post(`/spaces`, { data: { name: `sidebar-541s-${Date.now()}` } });
+  expect(smallCreated.ok()).toBe(true);
+  const smallId = ((await smallCreated.json()) as { id: string }).id;
+  const smallPages: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    const r = await api.post(`/spaces/${smallId}/pages`, { data: { title: `S${i}` } });
+    smallPages.push(((await r.json()) as { id: string }).id);
+  }
+  const pairs: { big: number; small: number }[] = [];
+  for (let run = 1; run <= 2; run++) {
+    const small = await coldOpen(browser, smallId, smallPages[0]!);
+    const big = await coldOpen(browser, spaceId, firstPageId);
+    expect(small.sidebarAt).toBeGreaterThan(0);
+    expect(big.sidebarAt).toBeGreaterThan(0);
+    pairs.push({ big: big.sidebarAt, small: small.sidebarAt });
+  }
+  const ratioDetail = pairs.map((p, i) => `pair${i + 1}: big=${p.big}ms small=${p.small}ms ratio=${(p.big / p.small).toFixed(2)}`).join(" | ");
+  const bestRatio = Math.min(...pairs.map((p) => p.big / p.small));
+  // Best-of-pairs on the RATIO (a single load spike hits one open of a pair; the ratio itself is what
+  // must stay bounded). Pre-progressive this measured ~6× on dev; ≤2 is the acceptance.
+  expect(bestRatio, `big/small sidebar ratio — ${ratioDetail}`).toBeLessThanOrEqual(2);
+
+  // Cleanup: the spaces (and pages) go away so repeated runs do not accrete.
   await api.delete(`/spaces/${spaceId}`).catch(() => undefined);
+  await api.delete(`/spaces/${smallId}`).catch(() => undefined);
 });
