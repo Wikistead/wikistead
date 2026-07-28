@@ -92,6 +92,18 @@ describe("#85: the browser-built export document", () => {
     expect(out, "nor does the strip").not.toContain("cm-lp-tabbar");
   });
 
+  it("keeps the disclosure look but travels open", () => {
+    const out = buildExportDocument({
+      title: "t",
+      body: surface("<details><summary>More</summary><div><p>hidden body</p></div></details>"),
+      css: "",
+    });
+    expect(out, "still a disclosure — the look the ruling asked for").toContain("<details");
+    expect(out).toContain("<summary>More</summary>");
+    expect(out, "…but open, so the body is readable on paper").toMatch(/<details[^>]*\sopen/);
+    expect(out).toContain("hidden body");
+  });
+
   it("does not mutate the surface it was given", () => {
     const live = surface('<div><button class="cm-lp-code-copy">Copy</button><p onclick="x()">p</p></div>');
     buildExportDocument({ title: "t", body: live, css: "" });

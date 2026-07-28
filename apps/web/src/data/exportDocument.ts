@@ -64,6 +64,13 @@ function expandTabs(root: HTMLElement): void {
   }
 }
 
+// #85 (user ruling): a `:::details` keeps its disclosure LOOK in the file — <details>/<summary> are
+// standard elements, so nothing has to be invented — but it travels OPEN. Closed, the body is in the file
+// and invisible, which is the same way the tabs lost text: on paper there is no clicking it open.
+function openDisclosures(root: HTMLElement): void {
+  for (const d of Array.from(root.querySelectorAll("details"))) (d as HTMLDetailsElement).open = true;
+}
+
 function stripChrome(root: HTMLElement): void {
   for (const sel of CHROME_SELECTORS) {
     for (const el of Array.from(root.querySelectorAll(sel))) el.remove();
@@ -113,6 +120,7 @@ const escapeHtml = (s: string): string =>
 export function buildExportDocument(input: ExportDocumentInput): string {
   const clone = input.body.cloneNode(true) as HTMLElement;
   expandTabs(clone); // before the chrome goes: the labels live on the tab BUTTONS
+  openDisclosures(clone);
   stripChrome(clone);
   makeInert(clone);
   const css = input.css ?? collectAppCss();
