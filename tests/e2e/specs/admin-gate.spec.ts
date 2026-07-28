@@ -144,10 +144,21 @@ test("non-admin member is denied: admin → 403 (no menu entry); unviewable spac
   await member.getByRole("button", { name: "Accept invite" }).click();
   await member.waitForURL((u) => !u.pathname.startsWith("/auth/") && u.pathname !== "/invite", { timeout: 20_000 });
 
-  // #436: a BRAND-NEW member gets the editor-onboarding dialog (#347) on first load; its overlay
-  // swallows every click below. Dismiss it (skip → close), waiting bounded for the late mount.
-  await member.getByTestId("onboarding-skip").click({ timeout: 5000 }).catch(() => {});
-  await member.getByTestId("onboarding-close").click({ timeout: 3000 }).catch(() => {});
+  // #436: a BRAND-NEW member gets the editor-onboarding dialog (#347) on first load, and its overlay
+  // swallows every click below. Dismissing it from the UI is a race this spec kept losing — the dialog
+  // mounts after the page settles, so a wait-then-Escape checked an empty page, passed, and the overlay
+  // arrived afterwards to block a click two hundred lines later ("dialog-overlay intercepts pointer
+  // events"). Turn it off at the source instead: mark onboarding complete for this member through their
+  // OWN settings, then load the page that has no dialog to dismiss.
+  await member.evaluate(async () => {
+    await fetch("/api/me/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ onboardingCompleted: true }),
+    });
+  });
+  await member.reload();
+  await expect(member.locator("[data-slot=dialog-overlay]"), "no dialog stands between us and the page").toHaveCount(0, { timeout: 10_000 })
   await expect(member.getByTestId("onboarding-dialog")).toBeHidden();
 
   // Admin console: isAdmin false → 403 banner, and the user menu has no entry.
