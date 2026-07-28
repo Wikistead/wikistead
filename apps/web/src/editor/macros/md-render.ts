@@ -448,11 +448,11 @@ class DomSink implements MdSink {
   fence(args: { blockName: "FencedCode" | "CodeBlock"; info: string | null; body: string; nodeFrom: number }): void {
     const into = this.top();
     const body = args.body;
-    let fenceMeta: { lang: string; title?: string } = { lang: "" }; // for the plain-code header below
+    let fenceMeta: { lang: string; title?: string; showLineNumbers?: boolean; highlight?: readonly (readonly [number, number])[] } = { lang: "" }; // for the plain-code header below
     if (args.blockName === "FencedCode") {
       const fence = args.info != null ? parseFenceInfo(args.info) : null; // #267: full parse for lang + align=
       const lang = fence ? fence.lang : null;
-      if (fence) fenceMeta = { lang: fence.lang, title: fence.title };
+      if (fence) fenceMeta = { lang: fence.lang, title: fence.title, showLineNumbers: fence.showLineNumbers, highlight: fence.highlight };
       const macro = lang ? findFenceMacro(lang) : undefined;
       // #351static mode never dispatches a fence macro (mermaid/plantuml/excalidraw would mount a
       // widget / render async) — a compact chip instead of the (long) raw source keeps the card small.
@@ -504,7 +504,32 @@ class DomSink implements MdSink {
     const card = document.createElement("div");
     card.className = "cm-lp-fence-card";
     card.appendChild(buildFenceHeader({ lang: fenceMeta.lang, title: fenceMeta.title, code: body, canCopy: true }));
-    const pre = document.createElement("pre"); const code = document.createElement("code");
+    const pre = document.createElement("pre");
+    // #85 (user ruling 2026-07-28): the fence's CHROME has to survive too — a `showLineNumbers` fence shows
+    // its numbers and a `{1,3-5}` fence tints those lines on the editing surface, and a file that drops
+    // them is not the same document. The editor draws them as per-LINE decorations, so the same classes go
+    // on per-line elements here (one truth about what a numbered or highlighted line looks like). A fence
+    // that asks for neither keeps the single <code> node it always had.
+    const wantsChrome = !!(fenceMeta.showLineNumbers || (fenceMeta.highlight && fenceMeta.highlight.length));
+    if (wantsChrome) {
+      const hl = new Set<number>();
+      for (const [from, to] of fenceMeta.highlight ?? []) for (let n = from; n <= to; n++) hl.add(n);
+      body.split("\n").forEach((text, i) => {
+        const lineNo = i + 1;
+        const line = document.createElement("div");
+        line.className = "cm-lp-code-line";
+        if (fenceMeta.showLineNumbers) { line.classList.add("cm-lp-code-numbered"); line.setAttribute("data-linenum", String(lineNo)) }
+        if (hl.has(lineNo)) line.classList.add("cm-lp-code-hl");
+        const codeLine = document.createElement("code");
+        codeLine.textContent = text || "\u200b"; // a blank line still occupies one
+        line.appendChild(codeLine);
+        pre.appendChild(line);
+        if (!staticRender && text) highlightInto(codeLine, text, fenceMeta.lang);
+      });
+      card.appendChild(pre); into.appendChild(card);
+      return;
+    }
+    const code = document.createElement("code");
     code.textContent = body;
     pre.appendChild(code); card.appendChild(pre); into.appendChild(card);
     // #505 (ruling 2): colour it with the EDITOR's own highlighter. The plain text above is what shows
