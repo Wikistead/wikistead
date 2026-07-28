@@ -7,7 +7,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, reAnchorAfterReveal, atomClipboard, atomSelectionTint, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, coEditHost, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type CoEditHost, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt } from "./live-preview/decorations";
+import { livePreview, selectionTouched, reAnchorAfterReveal, atomClipboard, atomSelectionTint, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, coEditHost, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type CoEditHost, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt } from "./live-preview/decorations";
 import { deadLinks } from "./live-preview/dead-links"; // #276 / ADR-117: dead-internal-link strikethrough overlay
 import { blockAnchors } from "./live-preview/block-anchor"; // #325 / ADR-137 slice 2: hide trailing ` ^id` markers
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
@@ -167,6 +167,10 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     everforestHighlight,
     livePreviewTheme,
     livePreview,
+    // #543: tracks whether a selection has ever been SET (vs the mount default nobody chose) — the
+    // reveal predicates consult it so a surface whose doc starts with a construct does not open with
+    // that construct's raw markers exposed. Registered here so islands (nested factory) carry it too.
+    selectionTouched,
     // #528 / ADR-192: the ONE owner that places every block affordance (✎ chrome row, raw rich-edit pill,
     // presence box). They used to claim the same corner from three different offset parents, so whichever
     // two were visible together overlapped; the owner measures them all against one origin and resolves the
