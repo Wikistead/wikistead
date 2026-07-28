@@ -173,6 +173,8 @@ import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; 
 import { PageTitle } from "./PageTitle";
 import { PrintSurface } from "./PrintSurface"; // #505 the print-only static (paginating) surface
 import { downloadBrowserExport, printBrowserExport } from "../data/exportBrowser"; // #85 / ADR-194 Option B
+import { makeDiagramRenderer } from "../editor/diagram-renderer"; // #505: the export asks the host for plantuml
+import { currentMacroTheme } from "../editor/macros/theme";
 
 // The editor re-reports these on every document change, which is every keystroke. Setting state with a
 // fresh array each time re-renders the route, and the route hands <Editor> inline callbacks — so its memo
@@ -596,6 +598,13 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // instead of falling back to printing the application. Reading the surface (a getter the editor sets) is
   // what makes that possible without a published version to fetch.
   const docTextRef = useRef<(() => string) | null>(null);
+  // #505 review rejection: the export must be able to ask the host for a diagram it cannot draw itself
+  // (plantuml renders server-side). Without this the file carried the fence source while the screen showed
+  // the picture. Same renderer the editing surface is given.
+  const exportHosts = useMemo(() => (pageId ? { diagram: {
+    handles: (lang: string) => lang === "plantuml",
+    render: (lang: string, source: string) => makeDiagramRenderer(token, pageId)(lang, source, currentMacroTheme()),
+  } } : undefined), [pageId, token]);
   const exportSource = useCallback((): string => {
     const pub = published?.publishedMd ?? "";
     if (pub.trim()) return pub;
@@ -614,7 +623,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
       // #85 / ADR-194: the same document the menu's Print produces, so the shortcut cannot print something
       // else. A page with no published body still falls to the live surface (see onPrint).
       const md = exportSource();
-      if (md.trim()) void printBrowserExport(md, page?.title ?? "Untitled");
+      if (md.trim()) void printBrowserExport(md, page?.title ?? "Untitled", exportHosts);
       else window.print();
     };
     window.addEventListener("keydown", onKey);
@@ -683,7 +692,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     // to draw with), and nothing the server serves to anyone else changes.
     onExportHtml: () => {
       const md = exportSource();
-      if (md.trim()) void downloadBrowserExport(md, page?.title ?? "Untitled");
+      if (md.trim()) void downloadBrowserExport(md, page?.title ?? "Untitled", exportHosts);
       else if (pageId) void downloadPageExport(token, pageId, "html"); // nothing on screen either → the server answers
     },
     // Print takes the SAME road as the download — the sheet and the file are the same document, so there is
@@ -691,7 +700,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     // surface, which is what it did before; giving drafts a rendered export is the next slice.
     onPrint: () => {
       const md = exportSource();
-      if (md.trim()) void printBrowserExport(md, page?.title ?? "Untitled");
+      if (md.trim()) void printBrowserExport(md, page?.title ?? "Untitled", exportHosts);
       else window.print();
     },
     onPermissions: page?.canManage ? () => setPermsOpen(true) : undefined,
