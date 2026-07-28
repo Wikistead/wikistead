@@ -132,7 +132,13 @@ export function useCreatePage() {
         // server-side when omitted). fromPageId (#229 "duplicate") stays supported and mutually exclusive.
         body: JSON.stringify({ title: args.title, parentId: args.parentId ?? null, fromPageId: args.fromPageId ?? null, templateId: args.templateId ?? null }),
       }),
-    onSuccess: (_p, args) => qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }),
+    // #534: do NOT return the invalidation's promise. react-query awaits whatever a mutation's onSuccess
+    // returns before it calls the CALLER's onSuccess — and the caller's is where the sidebar navigates to
+    // the new page. Returning it meant every new page waited for the whole space tree to refetch AND
+    // render before the URL changed. Measured on 200 pages: 1.6s to navigate, ~2.0s to editable, with no
+    // API call over 400ms; on a small tree the same click was 183ms/471ms. `void` lets the refetch land a
+    // moment later, which is exactly when a new row in the tree is wanted.
+    onSuccess: (_p, args) => { void qc.invalidateQueries({ queryKey: ["pages", args.spaceId] }); },
   });
 }
 
