@@ -3309,7 +3309,9 @@ const DICT_CAP = 2000
 // dictionary falls back to asking the question the other way around (DB candidates → batch confirm),
 // which has no such ceiling. If a deployment ever LOWERS the server-side max below this, truncation
 // would go undetected again — this constant must not exceed the deployed listObjects max.
-const LIST_OBJECTS_TRUNCATION_FLOOR = 1000
+// Exported for the public pages listing (#545), which carries the same ListObjects shape and must
+// distrust the same ceiling — one constant, so the two cannot drift.
+export const LIST_OBJECTS_TRUNCATION_FLOOR = 1000
 
 // The viewer-scoped title dictionary (ADR-104 Addendum 3 Finding A, shape (ii) DB + ListObjects).
 // authz model (Addendum 2 point 1): this dictionary IS the primary defence — it must only ever
