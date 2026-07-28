@@ -40,7 +40,7 @@ async function enterIsland(p: Page) {
 }
 
 test("#502: a peer arriving or leaving does not move my caret in the island", async ({ browser }) => {
-  test.setTimeout(120_000); // two browser contexts, a publish-free scratch page, and two occupancy swaps
+  test.setTimeout(120_000);
   const ctxA = await browser.newContext(); const a = await ctxA.newPage();
   const id = await openScratch(a, `coedit502caret-${Date.now()}`);
   await enterEdit(a);
@@ -54,20 +54,48 @@ test("#502: a peer arriving or leaving does not move my caret in the island", as
 
   await enterIsland(a);
   expect(await islandCaret(a), "the island is open on A").toBeGreaterThanOrEqual(0);
-  await setIslandCaret(a, 12); // mid-word, far from 0 — a position only a restore can reproduce
+  await setIslandCaret(a, 12);
   await sleep(200);
 
-  // B arrives → A's surface is re-mounted onto the shared body
   await enterIsland(b);
   await sleep(1400);
   expect(await islandCaret(a), "A's caret survives the peer ARRIVING").toBe(12);
 
-  // B leaves. Escape is the documented exit (it commits and closes); clicking outside does the same thing
-  // through a blur, and both land in the same onUnbind — Escape is used here because it does not depend on
-  // hitting a pixel that is not covered by the island itself.
   await b.keyboard.press("Escape");
   await sleep(1800);
   expect(await islandCaret(a), "A's caret survives the peer LEAVING").toBe(12);
 
+  await ctxA.close(); await ctxB.close();
+});
+
+// STILL FAILING, on purpose and in the open (measured 2026-07-28). When the peer EDITS before leaving, the
+// flush writes a changed body to the outer document and the island is rebuilt — and the caret goes to 0.
+// That rebuild does not come through `updateDOM`/`mountInto`, where the fix in decorations.ts captures and
+// restores the caret (which covers the swap and the in-place re-mount): the widget is replaced outright, so
+// at that moment there is no surface left to read a caret from. Measured either side of the transition: 14
+// while co-editing, 0 after the peer leaves. Kept as `fixme` rather than deleted, because the reproduction
+// is the hard part — the next attempt should start here, probably by stashing the caret per block anchor at
+// teardown instead of trying to carry it through the mount.
+test.fixme("#502: a peer who EDITS then leaves must not move my caret", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const ctxA = await browser.newContext(); const a = await ctxA.newPage();
+  const id = await openScratch(a, `coedit502edit-${Date.now()}`);
+  await enterEdit(a);
+  await a.click("[data-pane=preview] .cm-content");
+  await a.keyboard.insertText(DOC);
+  await sleep(900);
+  const ctxB = await browser.newContext(); const b = await ctxB.newPage();
+  await b.goto(`/p/${id}`); await b.waitForSelector("[data-pane=preview] .cm-content");
+  await enterEdit(b); await sleep(800);
+  await enterIsland(a);
+  await setIslandCaret(a, 12);
+  await enterIsland(b);
+  await sleep(1400);
+  await b.keyboard.type("ZZ");
+  await sleep(600);
+  await b.keyboard.press("Escape");
+  await sleep(1800);
+  const after = await islandCaret(a);
+  expect(after, `A's caret survives the peer editing and leaving (got ${after})`).toBeGreaterThan(8);
   await ctxA.close(); await ctxB.close();
 });

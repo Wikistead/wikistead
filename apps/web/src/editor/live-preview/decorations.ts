@@ -1706,6 +1706,33 @@ interface EditUIDom extends HTMLDivElement { __editUICtrl?: EditUIController; __
 // save (ADR-024 narrow boundary — the macro never sees EditorView/Y.Text). Inert until a macro adopts
 // editUI (no first-party macro does yet), so it adds no behaviour to shipped macros. Exported as the
 // framework primitive the render-path wiring + first macro migration (next slice) will instantiate.
+// #502 (review rejection 2): the caret across a WIDGET REBUILD. `swap` already carries it when the co-edit
+// surface is exchanged inside a living widget, but that is only one of the two re-mount paths. The other
+// the deferred flush writes the merged body to the outer document, the widget's `eq` sees a different
+// source, CM calls `updateDOM` → `mountInto`, and the island is built again from scratch at offset 0. The
+// person typing had their cursor thrown to the top by something the OTHER client did — the same symptom
+// the first fix addressed on the first path only. Reading it off the inner editor's DOM (CodeMirror hangs
+// its view off the content element) is what lets one place cover both, since every rebuild goes through
+// mountInto.
+function innerCaretOf(dom: HTMLElement): number | null {
+  try {
+    const content = dom.querySelector(".cm-content") as { cmView?: { view?: EditorView } } | null;
+    const view = content?.cmView?.view;
+    return view ? view.state.selection.main.head : null;
+  } catch { return null }
+}
+function restoreInnerCaret(dom: HTMLElement, head: number): void {
+  try {
+    const content = dom.querySelector(".cm-content") as { cmView?: { view?: EditorView } } | null;
+    const view = content?.cmView?.view;
+    if (!view) return;
+    // The body may have been merged with a peer's edits, so clamp rather than drop: a caret a few
+    // characters off is a far smaller injury than one teleported to the start.
+    const at = Math.max(0, Math.min(head, view.state.doc.length));
+    view.dispatch({ selection: { anchor: at, head: at } });
+  } catch { /* the surface went away between the two halves — nothing to restore into */ }
+}
+
 export class EditableEditUIWidget extends WidgetType {
   // #525: `diagramLang` is the fence's language when the block is one the HOST renders (plantuml). It
   // only reaches the editUI as a bound `renderDiagram` in editEnv — the macro never learns the lang or
@@ -1714,6 +1741,7 @@ export class EditableEditUIWidget extends WidgetType {
   constructor(readonly from: number, readonly to: number, readonly source: string, readonly editUI: EditUI, readonly wrapSource: (body: string) => string, readonly theme: MacroTheme, readonly tier?: MacroTier, readonly caretOutOnExit = false, readonly diagramLang?: string) { super(); }
   eq(o: EditableEditUIWidget) { return o.from === this.from && o.to === this.to && o.source === this.source && o.editUI === this.editUI && o.theme === this.theme && o.caretOutOnExit === this.caretOutOnExit && o.diagramLang === this.diagramLang; }
   private mountInto(dom: EditUIDom, view: EditorView) {
+    const keptCaret = innerCaretOf(dom); // #502: survive the rebuild (see innerCaretOf)
     dom.__editUICtrl?.destroy();
     dom.replaceChildren();
     const save = (newBody: MacroSource) => {
@@ -1776,6 +1804,12 @@ export class EditableEditUIWidget extends WidgetType {
         ? { renderDiagram: (src: MacroSource) => view.state.facet(diagramRenderer)(this.diagramLang!, src, this.theme) }
         : {}),
     });
+    // #502: put the caret back where the person had it. The mount above built a fresh surface at offset 0;
+    // the rebuild is internal bookkeeping, and it should be invisible to whoever is typing.
+    // Deferred by one microtask: the macro's mount builds its surface through `mountSurface`, which is not
+    // guaranteed to have produced the inner editor by the time mount returns — restoring synchronously
+    // found nothing to restore into (measured: the caret still landed at 0).
+    if (keptCaret != null) queueMicrotask(() => restoreInnerCaret(dom, keptCaret));
     // #239: re-add the Done affordance after each (re)mount — mountInto's replaceChildren above wipes it.
     const done = document.createElement("button");
     done.type = "button";
