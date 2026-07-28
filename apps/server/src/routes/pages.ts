@@ -867,7 +867,7 @@ const PAGE_RELATIONS: PageRelation[] = ['view', 'comment', 'edit', 'manage', 'mo
 // leaf (existing tuples migrated by infra/openfga/migrate-comment-direct.ts). `moderate` (#330) keeps its
 // own direct type on the relation itself ([user, group#member]) — no leaf split needed (it does not
 // cascade down parents; a per-page appointment is deliberate and page-scoped).
-function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment_direct' | 'edit_direct' | 'manage_direct' | 'moderate' | 'delete_direct' | 'share_direct' | 'settings_direct' | 'publish_direct' {
+export function fgaRelationForCap(cap: PageRelation): 'view_direct' | 'comment_direct' | 'edit_direct' | 'manage_direct' | 'moderate' | 'delete_direct' | 'share_direct' | 'settings_direct' | 'publish_direct' {
   if (cap === 'view') return 'view_direct'
   if (cap === 'edit') return 'edit_direct'
   if (cap === 'manage') return 'manage_direct'

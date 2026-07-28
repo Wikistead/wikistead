@@ -99,7 +99,7 @@ const TENANT_CAP_RELATION: Record<TenantRoleCapability, string> = {
 // and the check below is the second layer that refuses it even if a future path reaches here. Routing
 // built-in grants through this mechanism means `manage` now arrives here legitimately — but only from
 // that path, which is why it is a parameter rather than a row added to the vocabulary.
-function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: string, principal: string, cap: AnyRoleCapability, allowSuperset = false): { user: string; relation: string; object: string }[] {
+export function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: string, principal: string, cap: AnyRoleCapability, allowSuperset = false): { user: string; relation: string; object: string }[] {
   if (resourceType === 'tenant') {
     const rel = TENANT_CAP_RELATION[cap as TenantRoleCapability]
     if (!rel) throw Object.assign(new Error(`capability "${cap}" is not assignable at tenant scope`), { statusCode: 400 })
