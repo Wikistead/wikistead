@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { useEmbedProviders, useUpdateEmbedProviders } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
+import { FormRow } from "../ui/FormRow";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 
@@ -55,7 +56,7 @@ export function AdminEmbedsTab() {
       <p className="mt-0 text-sm text-fg-dim">{t("adminEmbeds.body")}</p>
 
       <label className={label}>{t("adminEmbeds.addTitle")}</label>
-      <div className="flex items-center gap-2">
+      <FormRow>
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -64,8 +65,8 @@ export function AdminEmbedsTab() {
           aria-label={t("adminEmbeds.host")}
           data-testid="embed-host-input"
         />
-        <Button variant="default" size="sm" disabled={!draft.trim()} onClick={add} data-testid="embed-host-add">{t("adminEmbeds.add")}</Button>
-      </div>
+        <Button variant="default" disabled={!draft.trim()} onClick={add} data-testid="embed-host-add">{t("adminEmbeds.add")}</Button>
+      </FormRow>
 
       <div className="mt-5 flex flex-col gap-1" data-testid="embed-host-list">
         {hosts.map((h) => (

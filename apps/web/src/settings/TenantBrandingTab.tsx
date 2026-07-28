@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useBranding, useEntitlements, useUpdateTenantBranding, useUploadTenantLogo, useRemoveTenantLogo } from "../data/queries";
 import { Button } from "../ui/Button";
+import { FormRow } from "../ui/FormRow";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
 import { AccentPicker } from "./AccentPicker";
@@ -74,11 +75,11 @@ export function TenantBrandingTab() {
 
       {/* Display name + accent are BASIC — no upgrade notice, never disabled by plan. */}
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("tenantBranding.displayName")}</label>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 28 }}>
+      <FormRow className="mb-7">
         <Input className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)}
           placeholder={t("tenantBranding.displayNamePlaceholder")} aria-label={t("tenantBranding.displayName")} data-testid="tenant-name-input" />
-        <Button variant="primary" size="sm" disabled={update.isPending || name.trim() === (branding.data?.displayName ?? "")} onClick={saveName} data-testid="tenant-name-save">{t("common.save")}</Button>
-      </div>
+        <Button variant="primary" disabled={update.isPending || name.trim() === (branding.data?.displayName ?? "")} onClick={saveName} data-testid="tenant-name-save">{t("common.save")}</Button>
+      </FormRow>
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 10 }}>{t("accent.label")}</label>
       {/* #201: the tenant is the TOP of the accent cascade — always a concrete colour, no inherit chip. */}

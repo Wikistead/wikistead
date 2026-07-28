@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Button } from "../ui/Button";
+import { FormRow } from "../ui/FormRow";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: removal / DSAR erasure / invite revoke confirm first
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
@@ -117,20 +118,19 @@ export function MembersPage() {
       </table>
 
       <h3>{t("members.inviteTitle")}</h3>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <FormRow>
         <Input className="max-w-xs" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("members.emailPlaceholder")} aria-label={t("members.inviteEmail")} type="email" />
         <Select
           value={role}
           onChange={(v) => setRole(v as "admin" | "member")}
           ariaLabel={t("members.inviteRole")}
-          size="sm"
           options={[
             { value: "member", label: t("members.roleMember") },
             { value: "admin", label: t("members.roleAdmin") },
           ]}
         />
         <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>{t("members.sendInvite")}</Button>
-      </div>
+      </FormRow>
       {lastLink && (
         <p style={{ marginTop: 12 }}>
           {t("members.inviteLinkLabel")} <code data-testid="invite-link">{lastLink.url}</code>
