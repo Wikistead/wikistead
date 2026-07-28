@@ -31,8 +31,15 @@ const fakeDiscovery: DiscoveryFetch = async () => ({
 beforeAll(async () => {
   db = await acquireTenantDb(asTenant(TENANT))
   issuer = await startTestIssuer({ clientId: 'wikistead-tenant' })
+  // #537: the lockout guard refuses an enabled→disabled write when NOTHING else is effective. The
+  // write-only-secret / groups tests below toggle enabled freely and are not about lockout, so give
+  // them a platform escape hatch; the dedicated lockout pins remove it explicitly.
+  process.env.PLATFORM_OIDC_ISSUER = 'https://platform.example'
+  process.env.PLATFORM_OIDC_CLIENT_ID = 'pc'
+  process.env.PLATFORM_OIDC_REDIRECT_URI = REDIRECT
 }, 30_000)
 afterAll(async () => {
+  for (const k of ['PLATFORM_OIDC_ISSUER', 'PLATFORM_OIDC_CLIENT_ID', 'PLATFORM_OIDC_REDIRECT_URI']) delete process.env[k]
   await issuer.close()
   await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${TENANT}`.catch(() => {})
   await db.release()
@@ -58,17 +65,17 @@ describe('tenant OIDC settings', () => {
 
   it('a non-admin cannot update (403)', async () => {
     await expect(updateTenantOidc(db, fgaClient, {
-      tenantId: TENANT, userId: STRANGER, issuer: issuer.url, clientId: 'c', redirectUri: REDIRECT, enabled: false,
+      tenantId: TENANT, userId: STRANGER, plan: 'free', issuer: issuer.url, clientId: 'c', redirectUri: REDIRECT, enabled: false,
     })).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('enabling validates discovery: a bad issuer is rejected (400), a real one succeeds', async () => {
     await expect(updateTenantOidc(db, fgaClient, {
-      tenantId: TENANT, userId: 'dev-user', issuer: BAD_ISSUER, clientId: 'c', redirectUri: REDIRECT, enabled: true,
+      tenantId: TENANT, userId: 'dev-user', plan: 'free', issuer: BAD_ISSUER, clientId: 'c', redirectUri: REDIRECT, enabled: true,
     })).rejects.toMatchObject({ statusCode: 400, code: 'oidc_unreachable' }) // real path rejects (http)
 
     await updateTenantOidc(db, fgaClient, {
-      tenantId: TENANT, userId: 'dev-user', issuer: issuer.url, clientId: 'wikistead-tenant',
+      tenantId: TENANT, userId: 'dev-user', plan: 'free', issuer: issuer.url, clientId: 'wikistead-tenant',
       clientSecret: 'top-secret', redirectUri: REDIRECT, enabled: true,
     }, fakeDiscovery)
     const v = await getTenantOidc(db)
@@ -80,24 +87,55 @@ describe('tenant OIDC settings', () => {
   it('the secret is write-only: a blank value keeps it, an explicit null clears it', async () => {
     // No secret supplied → keep the stored one.
     await updateTenantOidc(db, fgaClient, {
-      tenantId: TENANT, userId: 'dev-user', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false,
+      tenantId: TENANT, userId: 'dev-user', plan: 'free', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false,
     })
     expect((await getTenantOidc(db))?.hasSecret).toBe(true)
     // Explicit null → clear (public client).
     await updateTenantOidc(db, fgaClient, {
-      tenantId: TENANT, userId: 'dev-user', issuer: issuer.url, clientId: 'wikistead-tenant', clientSecret: null, redirectUri: REDIRECT, enabled: false,
+      tenantId: TENANT, userId: 'dev-user', plan: 'free', issuer: issuer.url, clientId: 'wikistead-tenant', clientSecret: null, redirectUri: REDIRECT, enabled: false,
     })
     expect((await getTenantOidc(db))?.hasSecret).toBe(false)
   })
 
   it('groups_claim round-trips; blank → null (default groups) (#102)', async () => {
     await updateTenantOidc(db, fgaClient, {
-      tenantId: TENANT, userId: 'dev-user', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false, groupsClaim: 'roles',
+      tenantId: TENANT, userId: 'dev-user', plan: 'free', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false, groupsClaim: 'roles',
     })
     expect((await getTenantOidc(db))?.groupsClaim).toBe('roles')
     await updateTenantOidc(db, fgaClient, {
-      tenantId: TENANT, userId: 'dev-user', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false, groupsClaim: '  ',
+      tenantId: TENANT, userId: 'dev-user', plan: 'free', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false, groupsClaim: '  ',
     })
     expect((await getTenantOidc(db))?.groupsClaim).toBeNull() // blank → null → default 'groups'
+  })
+})
+
+// #537: the lockout guard. Disabling the tenant IdP while no other method is effective would 404
+// every future login and — unlike a broken issuer — pass every discovery check. The TRANSITION is
+// refused (409 login_lockout, write not persisted); an already-disabled row may still be edited.
+describe('#537 tenant-oidc lockout guard', () => {
+  const base = { tenantId: TENANT, userId: 'dev-user', plan: 'free', clientId: 'wikistead-tenant', redirectUri: REDIRECT }
+  it('refuses the disable that would empty the effective set; allows it once another method remains', async () => {
+    await admin`DELETE FROM tenant_saml WHERE tenant_id = ${TENANT}`.catch(() => {}) // deterministic: saml off
+    await updateTenantOidc(db, fgaClient, { ...base, issuer: issuer.url, enabled: true }, fakeDiscovery)
+    const saved = process.env.PLATFORM_OIDC_ISSUER
+    delete process.env.PLATFORM_OIDC_ISSUER // no platform → the tenant IdP is the ONLY door
+    try {
+      await expect(updateTenantOidc(db, fgaClient, { ...base, issuer: issuer.url, enabled: false }))
+        .rejects.toMatchObject({ statusCode: 409, code: 'login_lockout' })
+      expect((await getTenantOidc(db))?.enabled, 'the refused write persisted nothing').toBe(true)
+    } finally {
+      process.env.PLATFORM_OIDC_ISSUER = saved
+    }
+    // With the platform IdP effective again the same disable goes through…
+    await updateTenantOidc(db, fgaClient, { ...base, issuer: issuer.url, enabled: false })
+    expect((await getTenantOidc(db))?.enabled).toBe(false)
+    // …and an already-disabled row may be edited even without the escape hatch (no transition).
+    delete process.env.PLATFORM_OIDC_ISSUER
+    try {
+      await updateTenantOidc(db, fgaClient, { ...base, issuer: issuer.url, enabled: false, groupsClaim: 'roles' })
+      expect((await getTenantOidc(db))?.groupsClaim).toBe('roles')
+    } finally {
+      process.env.PLATFORM_OIDC_ISSUER = saved
+    }
   })
 })

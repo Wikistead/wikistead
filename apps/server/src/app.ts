@@ -26,6 +26,7 @@ import type { StorageDriver } from './storage/index.js'
 import IORedis from 'ioredis'
 import { invalidateTitleDictCache } from './title-dict-cache.js' // #534
 import { invalidateTreeConfirmCache } from './tree-confirm-cache.js' // #541
+import { assertLoginCeilingValid } from './auth/login-methods.js' // #537
 import { SESSION_COOKIE, readSession } from './auth/session.js'
 import { assertSecretKey } from './auth/secret-crypto.js'
 import { spacesPlugin } from './routes/spaces.js'
@@ -106,6 +107,10 @@ declare module 'fastify' {
 // (the auth hook — cookie sessions, cross-tenant rejection — is HTTP-level and
 // must be exercised through real requests). The entry (index.ts) calls listen.
 export async function buildApp(): Promise<FastifyInstance> {
+  // #537 B8: a ceiling that names no valid method would 404 every login and lock everyone out
+  // that is a configuration error, surfaced at boot, never as mysterious 404s.
+  assertLoginCeilingValid()
+
   // Fail-closed at boot: refuse to start without a valid OIDC secret key (would
   // otherwise risk plaintext secret storage). See auth/secret-crypto.ts.
   assertSecretKey()

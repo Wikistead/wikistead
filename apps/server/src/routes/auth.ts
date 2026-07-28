@@ -5,12 +5,13 @@ import type { TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { mintMemberCollabToken } from '@wikistead/auth'
 import { SESSION_COOKIE, destroySession, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
-import { buildLogin, exchangeCode, loadPlatformOidc, loadSocialLogin, type TenantOidcConfig } from '../auth/oidc.js'
+import { buildLogin, exchangeCode, loadSocialLogin, type TenantOidcConfig } from '../auth/oidc.js'
 import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
 import { bootstrapFirstAdmin } from '../auth/provisioning.js'
 import { acceptInvite } from '../auth/invites.js'
+import { resolveAvailableLogin, socialProvidersFor } from '../auth/login-methods.js'
 
 async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   const { slug, domain } = resolveTenantFromHost(host ?? '')
@@ -33,16 +34,11 @@ async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   }
 }
 
-// Resolution order (ADR-016): the tenant's own IdP overrides; else the platform
-// IdP (Cloud); else none (CE without OIDC configured). viaTenantOidc gates the CE
-// first-admin bootstrap — only the tenant's own IdP can bootstrap, never the
-// platform IdP (Cloud admins come from signup).
-async function resolveLoginConfig(db: TenantDb): Promise<{ cfg: TenantOidcConfig; viaTenantOidc: boolean } | null> {
-  const tenantCfg = await loadTenantOidc(db)
-  if (tenantCfg) return { cfg: tenantCfg, viaTenantOidc: true }
-  const platform = loadPlatformOidc()
-  if (platform) return { cfg: platform, viaTenantOidc: false }
-  return null
+// #537 / ADR-195: resolution moved into the single login-methods resolver (ceiling ∩ tenant selection;
+// ADR-016's order — tenant IdP over platform — is preserved inside it, as is the `viaTenantOidc`
+// distinction the CE first-admin bootstrap keys on). This wrapper keeps secret decryption here.
+async function resolveLogin(db: TenantDb, tenant: Tenant) {
+  return resolveAvailableLogin(db, tenant, loadTenantOidc)
 }
 
 // Session-backed auth endpoints (P1.1). /auth/login + /auth/callback are PUBLIC
@@ -56,8 +52,11 @@ export async function authPlugin(app: FastifyInstance) {
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     const db = await acquireTenantDb(tenant)
     try {
-      const resolved = await resolveLoginConfig(db)
-      if (!resolved) return reply.code(404).send({ error: 'login not configured' })
+      // #537 §7: the unified body — a method outside the effective set and a tenant that does not
+      // exist answer identically ('not found'; the old 'login not configured' was a distinguisher).
+      const available = await resolveLogin(db, tenant)
+      const resolved = available.oidc
+      if (!resolved) return reply.code(404).send({ error: 'not found' })
       const redirectUri = `${req.protocol}://${req.headers.host}/auth/callback`
       // #281 / ADR-121 §2: a social button passes ?provider=<slug>. Only ALLOWLISTED slugs
       // (PLATFORM_SOCIAL_PROVIDERS) become the broker's source-hint param, and only on the
@@ -94,9 +93,8 @@ export async function authPlugin(app: FastifyInstance) {
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     const db = await acquireTenantDb(tenant)
     try {
-      const resolved = await resolveLoginConfig(db)
-      const social = resolved && !resolved.viaTenantOidc ? loadSocialLogin().providers : []
-      return reply.send({ social })
+      const available = await resolveLogin(db, tenant)
+      return reply.send({ social: socialProvidersFor(available) })
     } finally {
       await db.release()
     }
@@ -117,8 +115,14 @@ export async function authPlugin(app: FastifyInstance) {
 
     const db = await acquireTenantDb(tenant)
     try {
-      const resolved = await resolveLoginConfig(db)
-      if (!resolved) return reply.code(404).send({ error: 'login not configured' })
+      // #537 B3: the callback is an entry too. The state lives 300s, so gating only the START leaves a
+      // five-minute completion window after a method is switched off; and when the tenant IdP is
+      // disabled mid-flight the old resolver FELL BACK to the platform config — exchanging the code
+      // against a different IdP than the one that issued it. The flow completes only if the method the
+      // state was minted under is STILL the effective one; otherwise the same unified 404.
+      const available = await resolveLogin(db, tenant)
+      const resolved = available.oidc
+      if (!resolved || resolved.viaTenantOidc !== st.viaTenantOidc) return reply.code(404).send({ error: 'not found' })
 
       const currentUrl = `${req.protocol}://${req.headers.host}${req.url}`
       let claims

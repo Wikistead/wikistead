@@ -9,6 +9,7 @@ import {
   signupCookieOptions,
 } from '../auth/signup-session.js'
 import { provisionTenant, isValidSlug } from '../auth/provisioning.js'
+import { loginMethodCeiling } from '../auth/login-methods.js'
 
 // Cloud self-serve signup (P1.2 P2d). All routes are PUBLIC (no tenant — they
 // CREATE one) and skipped by the auth hook. They use the SIGNUP session, which is
@@ -20,7 +21,9 @@ const WORKSPACE_PAGE = '/join/workspace'
 export async function signupPlugin(app: FastifyInstance) {
   // Start signup: platform IdP login (CE has no platform IdP → 404).
   app.get<{ Querystring: { provider?: string } }>('/signup/login', async (req, reply) => {
-    const cfg = loadPlatformOidc()
+    // #537 B4: signup called loadPlatformOidc() directly and never consulted the resolver — a ceiling
+    // that drops platform-oidc must drop Cloud signup with it (signup IS a platform-OIDC login).
+    const cfg = loginMethodCeiling().has('platform-oidc') ? loadPlatformOidc() : null
     if (!cfg) return reply.code(404).send({ error: 'signup not available' })
     const redirectUri = `${req.protocol}://${req.headers.host}/signup/callback`
     const { url, state, nonce, codeVerifier } = await buildLogin(cfg, redirectUri)
@@ -29,7 +32,8 @@ export async function signupPlugin(app: FastifyInstance) {
   })
 
   app.get<{ Querystring: { state?: string; code?: string } }>('/signup/callback', async (req, reply) => {
-    const cfg = loadPlatformOidc()
+    // #537 B3/B4: the callback gates too — the state's 300s TTL must not out-live the ceiling.
+    const cfg = loginMethodCeiling().has('platform-oidc') ? loadPlatformOidc() : null
     if (!cfg) return reply.code(404).send({ error: 'signup not available' })
     const st = await consumeState(app.valkey, req.query?.state ?? '')
     if (!st) return reply.code(400).send({ error: 'invalid signup state' })

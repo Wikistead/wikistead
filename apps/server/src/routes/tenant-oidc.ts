@@ -4,6 +4,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
+import { otherLoginMethodsEffective } from '../auth/login-methods.js' // #537 lockout guard
 import type { TenantDb } from '../db/index.js'
 
 // Tenant OIDC (members' SSO) settings (Phase 5e). tenant#admin gated. Available on
@@ -77,6 +78,7 @@ export async function updateTenantOidc(
     tenantId: string; userId: string;
     issuer: string; clientId: string; clientSecret?: string | null;
     scopes?: string; redirectUri: string; enabled: boolean; groupsClaim?: string | null;
+    plan: string; // #537: the lockout guard consults SAML entitlement
   },
   fetchJson: DiscoveryFetch = safeFetchJson, // injectable for tests; prod uses the hardened default
 ): Promise<void> {
@@ -96,9 +98,19 @@ export async function updateTenantOidc(
   }
   // Secret is write-only: a non-empty value sets it, explicit null clears it
   // (public client), undefined/'' keeps the existing one.
-  const [existing] = await db.sql<{ client_secret_enc: string | null }[]>`
-    SELECT client_secret_enc FROM tenant_oidc WHERE tenant_id = ${args.tenantId}
+  const [existing] = await db.sql<{ client_secret_enc: string | null; enabled: boolean }[]>`
+    SELECT client_secret_enc, enabled FROM tenant_oidc WHERE tenant_id = ${args.tenantId}
   `
+  // #537 lockout guard: disabling the tenant IdP while NOTHING else is effective (ceiling excludes
+  // platform, or no platform IdP configured; SAML unentitled/disabled) would 404 every future login —
+  // and unlike a broken issuer, this state looks intentional, so no discovery check catches it.
+  // Refuse the TRANSITION to an empty effective set; an already-disabled row may still be edited.
+  if (!args.enabled && existing?.enabled && !(await otherLoginMethodsEffective(db, { plan: args.plan }))) {
+    throw Object.assign(
+      new Error('disabling the tenant IdP would leave this tenant with no way to sign in. Enable another login method first, or use the operator break-glass CLI.'),
+      { statusCode: 409, code: 'login_lockout' },
+    )
+  }
   let secretEnc: string | null
   if (args.clientSecret === null) secretEnc = null
   else if (args.clientSecret) secretEnc = encryptSecret(args.clientSecret)
@@ -127,7 +139,7 @@ export async function tenantOidcPlugin(app: FastifyInstance) {
       issuer: req.body?.issuer ?? '', clientId: req.body?.clientId ?? '',
       clientSecret: req.body?.clientSecret, scopes: req.body?.scopes,
       redirectUri: req.body?.redirectUri ?? '', enabled: !!req.body?.enabled,
-      groupsClaim: req.body?.groupsClaim,
+      groupsClaim: req.body?.groupsClaim, plan: req.tenant.plan,
     })
     return reply.code(204).send()
   })
