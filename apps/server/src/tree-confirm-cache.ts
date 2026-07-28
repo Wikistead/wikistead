@@ -18,6 +18,16 @@
 //   - A page id NOT in the cached verdicts (created after the entry) is NEVER assumed — the caller
 //     confirms the delta against FGA. Absent stays absent; a cached DENY stays deny for at most the TTL.
 //   - A miss computes. Nothing is ever served stale in place of a fresh answer.
+//   - GUESTS (share_link principals) and any context-carrying check NEVER ride this cache — the caller
+//     bypasses it (see listPages). A share-link revoke is instant by contract (ADR-028) and does not
+//     travel the reindex outbox, so no invalidation would reach an entry; and the key carries no
+//     current_time, so a `non_expired` Condition could outlive its clock. Design-review finding, #541.
+//
+// Caveats this cache SHARES with #534 (and they weigh more here, because on the member tree this cache
+// answers in place of FGA): the invalidation publisher fires only after a SUCCESSFUL reindex, and the
+// map is in-process — a replica that never saw the signal expires entries on TTL instead. The TTL is
+// the backstop, not the mechanism. The generation guard borrows titleDictGeneration, so every
+// invalidation call site MUST bump the dict cache in the same breath (app.ts does; keep them paired).
 import { titleDictGeneration } from './title-dict-cache.js'
 
 interface Entry { verdicts: Map<string, boolean>; expires: number }
@@ -83,6 +93,12 @@ export function invalidatePageBadge(tenantId: string, pageId: string): void {
 }
 
 // Wired next to invalidateTitleDictCache in app.ts — one signal, all of it.
+// Test hygiene only: drop everything (suites share tenants; TTL bleed-through makes flaky order bugs).
+export function clearTreeConfirmCacheForTests(): void {
+  cache.clear()
+  badgeCache.clear()
+}
+
 export function invalidateTreeConfirmCache(tenantId: string): void {
   for (const k of cache.keys()) if (k.startsWith(`${tenantId} `)) cache.delete(k)
   for (const k of badgeCache.keys()) if (k.startsWith(`${tenantId} `)) badgeCache.delete(k)

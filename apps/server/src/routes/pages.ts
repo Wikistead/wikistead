@@ -470,7 +470,15 @@ export async function listPages(
   // as a DELTA against FGA — never assumed; a cached deny stays hidden for at most the TTL, within the
   // same trusted-invalidation window the dictionary already accepts.
   const tenantId = rows[0]?.tenant_id
-  const cached = tenantId ? getTreeConfirm(tenantId, args.subject, args.spaceId) : undefined
+  // Design review (#541): GUESTS NEVER RIDE THIS CACHE. A share_link's revoke is one tuple delete and
+  // the contract is INSTANT (ADR-028) — but revoke does not travel the reindex outbox, so no
+  // invalidation reaches this cache and a revoked link would keep reading the tree for up to the TTL
+  // (reproduced in review). The same bypass closes the `non_expired` Condition hole: the cache key
+  // carries no current_time, so an expiring link could outlive its clock. Members are covered — their
+  // permission changes ride reindex (revoke/restrict/private/member-removal all enqueue), which fires
+  // the invalidation below.
+  const cacheable = !!tenantId && !args.subject.startsWith('share_link:') && !args.context
+  const cached = cacheable ? getTreeConfirm(tenantId!, args.subject, args.spaceId) : undefined
   let allowed: Set<string>
   if (cached) {
     const delta = rows.filter((r) => !cached.has(r.id))
@@ -482,7 +490,7 @@ export async function listPages(
   } else {
     const gen = tenantId ? titleDictGeneration(tenantId) : undefined
     allowed = await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context, 'page', 4)
-    if (tenantId) setTreeConfirm(tenantId, args.subject, args.spaceId, new Map(rows.map((r) => [r.id, allowed.has(r.id)])), Date.now(), gen)
+    if (cacheable) setTreeConfirm(tenantId!, args.subject, args.spaceId, new Map(rows.map((r) => [r.id, allowed.has(r.id)])), Date.now(), gen)
   }
   const visible = rows.filter((r) => allowed.has(r.id))
   // #109 Fix B / #329: annotate each visible page with its private flag (lock badge) and freeze level
