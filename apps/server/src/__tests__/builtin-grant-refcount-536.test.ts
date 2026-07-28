@@ -290,3 +290,32 @@ describe('#536 review: page grants and page-scope assignments stop deleting each
     expect(await check(fgaClient, p, 'manage', { type: 'page', id: pageId }), 'manage revoked').toBe(false)
   }, 120_000)
 })
+
+// #536 re-review, approval condition 1: the SECOND layer of the manage defence, pinned. The first layer
+// is parseDefinition (the API refuses to create a role carrying `manage` at all); this bypasses it by
+// INSERTing the row directly, so what is on trial is expansionTuples' own refusal — the layer that
+// matters if any future write path forgets the vocabulary check. The claim "custom roles still cannot
+// reach manage" appears in two commit messages; a claim without a pin is a comment.
+describe('#536 review: a smuggled `manage` role is refused at the second layer', () => {
+  it.each(['space', 'page'] as const)('at %s scope: 400, and no tuple was written', async (scope) => {
+    const smuggled = `refc-smuggled-${scope}-${STAMP}`
+    const p = sub(`smuggle-${scope}`)
+    const resourceId = scope === 'space' ? spaceId : pageId
+    await adminPool`INSERT INTO roles (id, tenant_id, name, capabilities, scope)
+                    VALUES (${smuggled}, ${TENANT}, ${smuggled}, ARRAY['manage']::text[], 'resource')`
+    try {
+      await expect(
+        assignRoleInTx(db, fgaClient, app.searchDriver, {
+          tenant, roleId: smuggled, capabilities: ['manage' as never],
+          resourceType: scope, resourceId, principal: p, actorSub: OWNER,
+        }),
+      ).rejects.toMatchObject({ statusCode: 400 })
+      expect(await check(fgaClient, p, 'manage', { type: scope, id: resourceId }), 'and nothing landed').toBe(false)
+      const rows = await adminPool`SELECT id FROM role_assignments WHERE role_id = ${smuggled}`
+      expect(rows.length, 'no assignment row either').toBe(0)
+    } finally {
+      await adminPool`DELETE FROM role_assignments WHERE role_id = ${smuggled}`.catch(() => {})
+      await adminPool`DELETE FROM roles WHERE id = ${smuggled}`.catch(() => {})
+    }
+  }, 120_000)
+})
