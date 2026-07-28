@@ -103,6 +103,8 @@ export interface MacroDispatch {
    * are inside", which is what the nested sinks want; `null` states the document root explicitly.
    */
   caller?: ReadonlySet<string> | null
+  /** What `sdk.hostSlot` resolves through on this surface (#450 slice 5c). Absent = no slot is offered. */
+  slotEnv?: { list?: ListHostSeam | null; editable?: boolean; label?: string | null; onMeasure?: () => void }
 }
 
 export function dispatchMacroRender(
@@ -131,6 +133,21 @@ export function dispatchMacroRender(
     render: (src, absoluteOffset, effective) =>
       withCallerCapabilities(effective, () => renderMarkdownToDom(src, absoluteOffset)),
     instanceKey: instanceKeyFor(opts.baseOffset),
+    // #450 slice 5c: the macro asks for a host slot; the host decides what it is and owns its lifecycle.
+    // The parameters are a fixed schema of VALUES (ruling R3) — never markup, never an element.
+    hostSlot: (() => {
+      const env = opts.slotEnv;
+      const list = env?.list ?? activeListHost; // the seam the surface installed for this render
+      if (!list || staticRender) return undefined; // a hover card stays fetch-free
+      return (params: { kind: "list"; source: "tagged" | "children"; query?: string }) => {
+        if (params?.kind !== "list" || (params.source !== "tagged" && params.source !== "children")) {
+          throw new Error("hostSlot: unsupported request"); // host-defined schema; anything else is refused
+        }
+        return mountHostList(params.source, params.query ?? "", {
+          list, editable: env?.editable ?? false, label: env?.label ?? null, onMeasure: env?.onMeasure,
+        });
+      };
+    })(),
   });
   if (opts.countDepth) nestedDirectiveDepth++;
   try {
@@ -306,6 +323,49 @@ export function withListHost<T>(host: ListHostSeam | null, fn: () => T): T {
   const prev = activeListHost;
   activeListHost = host;
   try { return fn(); } finally { activeListHost = prev; }
+}
+
+// #450 slice 5c: THE host-list slot. Both surfaces used to resolve `:::tagged` / `:::children` by NAME
+// the CM widget in decorations.ts and the nested sink here — each with its own copy of the lifecycle and
+// its own answer for "what does an empty result look like". Two resolution paths for one question is the
+// drift ADR-177 exists to remove, and it is why the nested copy once sat at its placeholder forever.
+//
+// Now the MACRO asks (`sdk.hostSlot`), the host answers here, and there is one lifecycle: placeholder →
+// view-filtered fetch → swap. Emptiness stays surface-dependent because it must be: on the edit surface an
+// author has to be able to see and delete the atom they inserted (a 0-height atom is mouse-unreachable),
+// while a read surface renders nothing at all.
+export interface HostListEnv {
+  readonly list: ListHostSeam;
+  /** Edit surface: keep a dim one-line placeholder when the result is empty. Read surface: collapse. */
+  readonly editable?: boolean;
+  readonly label?: string | null;
+  /** The host's measure hook — an async result changes the block's height (the block-widget rule). */
+  readonly onMeasure?: () => void;
+}
+
+export function mountHostList(source: "tagged" | "children", query: string, env: HostListEnv): HTMLElement {
+  const holder = document.createElement("div");
+  holder.className = "cm-lp-macro cm-lp-query-placeholder";
+  holder.setAttribute("data-testid", `macro-${source}-slot`);
+  // The raw body rides to the server (`tagged` = a tag name; `children` ignores it); anything
+  // unresolvable is 0 results, never a parse error. A denied/absent host → null → nothing.
+  void env.list.fetch(source, query).then((items) => {
+    holder.classList.remove("cm-lp-query-placeholder");
+    holder.replaceChildren();
+    if (items && items.length > 0) {
+      holder.appendChild(buildLinkList(items, env.label ?? null, env.list, source));
+    } else if (env.editable) {
+      const ph = document.createElement("div");
+      ph.className = "cm-lp-backlinks-empty";
+      ph.setAttribute("data-testid", `macro-${source}-empty`);
+      ph.textContent = env.list.emptyLabel;
+      holder.appendChild(ph);
+    } else {
+      holder.style.display = "none"; // read surface: render nothing (collapse to zero height)
+    }
+    env.onMeasure?.();
+  });
+  return holder;
 }
 
 // The rendered list-of-pages DOM (shared by `:::tagged` and `:::children`, top-level widget AND nested
@@ -594,27 +654,9 @@ class DomSink implements MdSink {
     // #215 / ADR-100: absolute base of THIS directive's inner body (drop the ::: open line) — handed to a
     // nested columns/tabs liveRender (pendingBaseOffset) and to renderCalloutPanel. null when untagged.
     const nestedBodyBase = renderBase != null ? renderBase + args.nodeFrom + (nl === -1 ? full.length : nl) + 1 : null;
-    // #370a NESTED `:::tagged`/`:::children` resolves through the list-host seam with the same
-    // placeholder → view-filtered fetch → swap lifecycle as the top-level widget (static mode keeps the
-    // compact chip below — the hover card must stay fetch-free,).
-    if ((parsed?.name === "tagged" || parsed?.name === "children") && activeListHost && !staticRender) {
-      const host = activeListHost;
-      const listName = parsed.name as "tagged" | "children";
-      const holder = document.createElement("div");
-      holder.className = "cm-lp-macro cm-lp-query-placeholder";
-      holder.setAttribute("data-testid", `macro-${listName}-nested`);
-      into.appendChild(holder);
-      void host.fetch(listName, body).then((items) => {
-        holder.classList.remove("cm-lp-query-placeholder");
-        holder.replaceChildren();
-        if (items && items.length > 0) {
-          holder.appendChild(buildLinkList(items, args.label, { navigate: host.navigate, untitledLabel: host.untitledLabel }, listName));
-        } else {
-          holder.style.display = "none"; // nested read render: an empty/denied list shows nothing (top-level read parity)
-        }
-      });
-      return;
-    }
+    // #450 slice 5c: the nested `:::tagged` / `:::children` branch that used to live here is GONE. The
+    // macro now asks for a host slot (sdk.hostSlot) and the dispatch answers, so top-level and nested run
+    // the same lifecycle by construction rather than by two call sites being kept in step.
     // #450 slice 3: a NESTED `:::embed-page` resolves through the transclude-host seam with the same
     // lifecycle the top-level widget has had since #108 — placeholder → host-resolved markdown (authz
     // re-checked server-side on the REFERENCED page) → swap, or the uniform denied placeholder that hides

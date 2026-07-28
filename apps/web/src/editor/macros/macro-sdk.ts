@@ -88,7 +88,27 @@ export interface MacroSdk {
    * position. Not capability-gated — it grants nothing.
    */
   readonly instanceKey?: string;
+  /**
+   * Ask the HOST for a slot it owns and fills (#450 slice 5c, ruling R3).
+   *
+   * The parameters are a fixed, host-defined schema of VALUES — never markup, never an element, and never
+   * a condition the macro assembles. Anything outside the schema is refused here rather than interpreted,
+   * because in Stage 2 this is the one channel out of the sandbox: widening later is easy, narrowing later
+   * breaks whatever already shipped.
+   *
+   * The host owns the slot's whole lifecycle (placeholder, the view-filtered fetch, what an empty result
+   * looks like on this surface, and telling the editor its height changed). The macro places the element
+   * and nothing more — it cannot see the results, let alone fetch them (ADR-024: macros never fetch).
+   */
+  readonly hostSlot?: (params: HostSlotParams) => HTMLElement;
 }
+
+/** The only shapes a macro may ask for (#450 R3). Values only. */
+export type HostSlotParams = {
+  readonly kind: "list";
+  readonly source: "tagged" | "children";
+  readonly query?: string;
+};
 
 export function createMacroSdk(args: {
   declared: ReadonlySet<string>;
@@ -102,6 +122,8 @@ export function createMacroSdk(args: {
   render?: (src: string, absoluteOffset: number | undefined, caller: ReadonlySet<string>) => DocumentFragment;
   /** Opaque per-instance token (see MacroSdk.instanceKey). */
   instanceKey?: string;
+  /** The host's slot factory, already bound to this surface (see MacroSdk.hostSlot). */
+  hostSlot?: (params: HostSlotParams) => HTMLElement;
 }): MacroSdk {
   const effective = intersectCapabilities(args.declared, args.caller);
   const renderMarkdown = effective.has("render-markdown") && args.render
@@ -125,6 +147,9 @@ export function createMacroSdk(args: {
     ...(effective.has("theme") ? { theme: args.theme } : {}),
     ...(renderMarkdown ? { renderMarkdown } : {}),
     ...(args.instanceKey ? { instanceKey: args.instanceKey } : {}),
+    // Capability-gated: a macro that did not declare `host-list` is handed no slot factory at all, so
+    // "may I?" is answered by the object's shape rather than by a check the macro could skip.
+    ...(effective.has("host-list") && args.hostSlot ? { hostSlot: args.hostSlot } : {}),
   };
   // Frozen, not merely readonly-typed: a macro is untrusted code in the same realm, and a type says
   // nothing at runtime. Freezing means one macro cannot widen the object a sibling render receives by

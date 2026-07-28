@@ -15,7 +15,15 @@ export const childrenMacro: DirectiveMacro = {
   // It carried revealOnCursor without atomSelectable (the ADR-156 "straggler"), stranding a caret
   // on a body with nothing to edit.
   atomSelectable: true,
-  liveRender: () => {
+  capabilities: ["host-list"], // #450 slice 5c: the host resolves the list; the macro only asks for the slot
+  liveRender: (body, ctx) => {
+    // #450 slice 5c: ONE resolution path. The host used to spot this macro BY NAME at two different
+    // sinks (the CM widget and the nested renderer) and fill it in — two lifecycles for one question,
+    // which is how the nested copy came to sit at its placeholder forever. Now the macro asks and the
+    // host answers; there is nothing left to keep in step.
+    const slot = ctx?.hostSlot?.({ kind: "list", source: "children", query: body });
+    if (slot) return slot;
+    // No host slot on this surface (export, hover card, anonymous): the placeholder, exactly as before.
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-query-placeholder";
     el.setAttribute("data-testid", "macro-children-placeholder");
