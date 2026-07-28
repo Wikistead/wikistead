@@ -3263,6 +3263,12 @@ const DICT_ANON = 'user:anonymous'
 //condition 2: a hard server-side dictionary cap bounds the client's match cost
 // (matchTitleLinks is O(dict × visible text)). Overflow is a UX gap, never a leak (absent = safe).
 const DICT_CAP = 2000
+// #540: OpenFGA's ListObjects answers at most its configured max results — 1000 by default — and says
+// NOTHING when it truncates. A response this long is therefore treated as possibly incomplete and the
+// dictionary falls back to asking the question the other way around (DB candidates → batch confirm),
+// which has no such ceiling. If a deployment ever LOWERS the server-side max below this, truncation
+// would go undetected again — this constant must not exceed the deployed listObjects max.
+const LIST_OBJECTS_TRUNCATION_FLOOR = 1000
 
 // The viewer-scoped title dictionary (ADR-104 Addendum 3 Finding A, shape (ii) DB + ListObjects).
 // authz model (Addendum 2 point 1): this dictionary IS the primary defence — it must only ever
@@ -3273,6 +3279,18 @@ const DICT_CAP = 2000
 // published-only rows. The share_link principal itself is NEVER given a reverse lookup — that is
 // thebinding closing the #244 re-entry (a space-shared non-public title must not leak).
 // Existence-hiding needs no 404 here: a non-viewable page is simply absent from the response.
+//
+// #540: ListObjects is not trusted past its own ceiling. It truncates silently at the server's max
+// (1000 by default), and the DB-derived `capped` flag knew nothing about it — so a viewer with more
+// than 1000 viewable pages got a dictionary that claimed to be complete (`capped: false`) while titles
+// were missing, which reads exactly like existence-hiding. Two shapes now
+// - result below the floor → it is the complete authoritative view set; keep the original flow. This
+// is the common case, and it is what keeps a low-privilege member of a huge tenant correct: their
+// few viewable pages are found by NAME, not by being among the tenant's newest.
+// - result AT the floor → possibly truncated. Ask the other way around: newest tenant pages from the
+// DB (RLS-scoped) as candidates, then the same fail-closed filterAuthorized confirm decides every
+// entry. No ListObjects ceiling applies, and `capped` means what it says (the candidate window
+// overflowed, so the dictionary MAY be missing older titles).
 export async function getTitleDictionary(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -3282,6 +3300,24 @@ export async function getTitleDictionary(
   const principal = isGuest ? DICT_ANON : args.subject
   const { objects } = await fga.listObjects({ user: principal, relation: 'view', type: 'page' })
   const ids = (objects ?? []).map((o: string) => o.replace(/^page:/, ''))
+
+  if (ids.length >= LIST_OBJECTS_TRUNCATION_FLOOR) {
+    // Possibly-truncated ListObjects → candidates come from the DB instead. Guests still only link
+    // into the published public surface. The confirm below is the sole authz gate on this branch
+    // every candidate that the viewer cannot view is dropped by it (fail-closed, model id pinned).
+    const rows = isGuest
+      ? await db.sql<{ id: string; title: string }[]>`
+          SELECT id, title FROM pages WHERE published_at IS NOT NULL AND deleted_at IS NULL
+          ORDER BY updated_at DESC LIMIT ${DICT_CAP + 1}`
+      : await db.sql<{ id: string; title: string }[]>`
+          SELECT id, title FROM pages WHERE deleted_at IS NULL
+          ORDER BY updated_at DESC LIMIT ${DICT_CAP + 1}`
+    const capped = rows.length > DICT_CAP
+    const windowRows = capped ? rows.slice(0, DICT_CAP) : rows
+    const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id), undefined, 'page', 4)
+    return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped }
+  }
+
   if (ids.length === 0) return { entries: [], capped: false }
   // ListObjects spans the shared FGA store; the tenant-scoped handle (RLS) narrows to this tenant.
   // Guests link only into the published public surface; members may link to viewable drafts too
