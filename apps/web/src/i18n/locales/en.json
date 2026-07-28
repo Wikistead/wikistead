@@ -1067,7 +1067,7 @@
     "changedHidWysiwyg": "Hid the WYSIWYG mode from the switch",
     "changedHidMarkdownModes": "Hid the Live and Source modes from the switch",
     "changedBalancedModes": "Kept Live, Reading and WYSIWYG (Source is in Settings)",
-    "bannerText": "New: tailor the editor to how you write.",
+    "bannerText": "Tailor the editor to how you write.",
     "bannerCta": "Set it up",
     "skippedNote": "We set up a balanced editor for you (vim off, with WYSIWYG). You can change this any time in Settings, or with “redo the questions”.",
     "atomHint": "Tip: reference cards (embeds, transclusions, page lists) select as one unit with an accent ring — Ctrl+Enter changes what they point at. Layouts and callouts open for editing when you click into them; everything else you just type into."
