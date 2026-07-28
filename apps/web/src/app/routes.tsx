@@ -525,13 +525,19 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
 
   // Publish = done: flush the draft (server), drop the dirty flag, return to the rendered
   // view. Shared by the toolbar Publish button and the vim :w/:wq ex commands (Light-3).
+  // #538: depend on `publish.mutate`, NOT on the mutation OBJECT. react-query returns a fresh object every
+  // render, so a callback listing it is rebuilt every render — and this one is handed to the memoised
+  // <Editor>, whose memo then misses. Measured on scroll: `onPublish` and `onToggleTask` were the only two
+  // props changing identity, and they re-rendered the whole editor twice per scroll step. `mutate` /
+  // `mutateAsync` are stable across renders, which is exactly what a dependency list wants.
+  const publishMutate = publish.mutate;
   const publishPage = useCallback(() => {
     if (!canEdit) return;
-    publish.mutate(undefined, {
+    publishMutate(undefined, {
       onSuccess: () => { dirtySig.set(false); setEditing(false); notify.success(t("toast.published")); },
       onError: () => notify.error(t("toast.publishFailed")),
     });
-  }, [canEdit, publish, dirtySig, t]);
+  }, [canEdit, publishMutate, dirtySig, t]);
   const exitEdit = useCallback(() => setEditing(false), []); // vim :q
 
   // View-mode task-checkbox toggle (ADR-019). Edit-capable only (D3 UI layer; the
@@ -539,9 +545,10 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // optimistic draft flip on failure (409 dirty/mixed, 403); a content edit mixed into
   // the draft is rejected, never silently published. Stable so <Editor>'s memo holds.
   const toggleTask = useToggleTask(pageId ?? "");
+  const toggleTaskAsync = toggleTask.mutateAsync; // #538: stable across renders (see publishPage above)
   const onToggleTask = useCallback(
     (index: number, applyFlip: () => void, checked: boolean) =>
-      toggleTask.mutateAsync({ index, applyFlip, checked }).then(() => undefined).catch((e) => {
+      toggleTaskAsync({ index, applyFlip, checked }).then(() => undefined).catch((e) => {
         // #303: a 409 is the EXPECTED outcome when the draft has unpublished changes — the checkbox can't
         // fold into published without mixing in that draft. Show a dedicated message, not the generic error.
         // Read `.status` STRUCTURALLY, not via `instanceof ApiError`: under Vite dev the apiClient module can
@@ -558,7 +565,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
         notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
         throw e; // let the editor revert the optimistic flip
       }),
-    [toggleTask, t],
+    [toggleTaskAsync, t],
   );
   // #212 bounce 3 (comment 720): the header band OVERLAPS the scrolling editor (absolute overlay) so its
   // backdrop-blur has content behind it; the editor clears it via a padding-top equal to the band height,
