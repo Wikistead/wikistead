@@ -493,14 +493,30 @@ export async function grantSpaceAccess(
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  // Durable audit (#177) + FGA in one tx; FGA LAST so a grant failure rolls the audit back.
-  await db.tx(async (tx) => {
-    if (args.plan !== undefined) {
-      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_granted', target: `space:${args.spaceId}` })
-    }
-    await writeTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
+  // #536 / ADR-188 §6 item 1: a built-in grant IS a role assignment now. It goes through the same helper a
+  // custom role does, differing only in which column of the row identifies what was granted -- so a
+  // built-in grant finally participates in the reference count that decides whether a shared leaf may be
+  // deleted. Before this, a grant and an overlapping role assignment were invisible to each other: whoever
+  // was revoked second took the other's access with it.
+  //
+  // The audit action stays `space.access_granted` (not `role.assigned`). The mechanism changed; what
+  // happened did not, and an audit stream that silently renames its events is one nobody can search.
+  const { assignRoleInTx } = await import('./roles.js')
+  await assignRoleInTx(db, fga, driver, {
+    tenant: { id: args.tenantId, plan: args.plan ?? '' },
+    roleId: null,
+    builtinCapability: args.capability,
+    capabilities: [args.capability as never],
+    resourceType: 'space',
+    resourceId: args.spaceId,
+    principal: args.grantee,
+    actorSub: args.userId,
+    // Granting what someone already has is not an error here: the Members control has no "already
+    // granted" state to show, and the pre-#536 path simply wrote the tuple again.
+    onDuplicate: 'ignore',
+    auditAction: 'space.access_granted',
+    skipAudit: args.plan === undefined,
   })
-  await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
 }
 
@@ -512,14 +528,30 @@ export async function revokeSpaceAccess(
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  // Durable audit (#177) + FGA in one tx; FGA LAST so a revoke failure rolls the audit back.
-  await db.tx(async (tx) => {
-    if (args.plan !== undefined) {
-      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
-    }
-    await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
-  })
-  await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+  // #536 / ADR-188 §6 item 1: revoke the ROW when there is one, so the reference count decides which
+  // leaves may go. A principal holding both a `view` grant and a role bundling `view` keeps viewing after
+  // either one is taken away — which is what "still granted" has always meant everywhere else.
+  const { unassignRoleInTx } = await import('./roles.js')
+  const [row] = await db.sql<{ id: string }[]>`
+    SELECT id FROM role_assignments
+    WHERE builtin_capability = ${args.capability} AND resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.grantee}`
+  if (row) {
+    await unassignRoleInTx(db, fga, driver, {
+      tenant: { id: args.tenantId, plan: args.plan ?? '' },
+      assignmentId: row.id, actorSub: args.userId,
+      auditAction: 'space.access_revoked', skipAudit: args.plan === undefined,
+    })
+  } else {
+    // A grant made before this migration has no row (deliberately — see 086: reconstructing rows from
+    // tuples would assert grants nobody made). It stays revocable exactly as it always was.
+    await db.tx(async (tx) => {
+      if (args.plan !== undefined) {
+        await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
+      }
+      await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
+    })
+    await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+  }
   // #362 E1: revocation watch sweep (post-FGA, best-effort; per-watcher view re-check inside — a watcher
   // whose view survives via another path keeps their watch). Space-scoped: sweeps watches ON the space id
   // (page-level fallout is covered by the display gate; page grants have their own sweep).
