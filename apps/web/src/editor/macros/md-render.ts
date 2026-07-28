@@ -460,7 +460,15 @@ class DomSink implements MdSink {
       // to its liveRender — the SINGLE source of truth. Unknown lang / no liveRender / a macro that THROWS
       // → the plain card below (never break the whole render). liveRender only gets `{theme}` (ADR-024).
       if (macro?.liveRender) {
-        const el = dispatchMacroRender(macro, body, { theme: currentMacroTheme() });
+        // #450 / ADR-177 (4), design review: the DIRECTIVE branch has always counted depth; this one never
+        // did, so a fence macro that renders markdown containing its own fence recursed without a floor.
+        // Nothing exercises that today — no fence macro re-renders markdown — but the SDK's `renderMarkdown`
+        // is exactly the handle that would, and the cap has to exist BEFORE the handle does.
+        if (nestedDirectiveDepth >= MAX_NESTED_DIRECTIVE_DEPTH) {
+          into.appendChild(staticMacroChip(lang!)); // same floor the directive branch takes: show, stop recursing
+          return;
+        }
+        const el = dispatchMacroRender(macro, body, { theme: currentMacroTheme(), countDepth: true });
         if (el) {
           tagMacro(el, args.nodeFrom, lang!); // #215: tag for nested hit-test
           // #450 slice 3: a diagram the HOST renders (plantuml today) gets the same swap here as the
