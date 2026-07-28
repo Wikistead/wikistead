@@ -18,18 +18,34 @@ import { SocialIcon } from "./SocialIcon";
 // #281 / ADR-121 §2: which social buttons to render — the PUBLIC login-options endpoint
 // (slugs only; empty on CE / tenant-OIDC tenants, so the buttons simply don't render).
 const SOCIAL_LABELS: Record<string, string> = { google: "Google", github: "GitHub", microsoft: "Microsoft" };
-function useLoginOptions(): string[] {
+// #537 §6: the screen shows what is OPEN — the method kinds are published facts (ADR-195 §7). On
+// fetch failure we fall back to the historical single-button screen (fail-open DISPLAY only; every
+// button is still a server-refused URL — the UI is convenience, the server is the fortress).
+interface LoginOptions { social: string[]; methods: string[] }
+function useLoginOptions(): LoginOptions {
   const q = useQuery({
     queryKey: ["login-options"],
     queryFn: () =>
       fetch(assetUrl("/auth/login-options"))
-        .then((r) => (r.ok ? (r.json() as Promise<{ social?: string[] }>) : null))
-        .then((r) => r?.social ?? [])
-        .catch(() => []),
+        .then((r) => (r.ok ? (r.json() as Promise<{ social?: string[]; methods?: string[] }>) : null))
+        .catch(() => null),
     staleTime: 60_000,
   });
   // Render only KNOWN providers (branding assets exist for these); unknown slugs are ignored.
-  return (q.data ?? []).filter((s) => s in SOCIAL_LABELS);
+  // A pre-#537 server (no `methods` field) or a failed fetch degrades to the plain OIDC button.
+  return {
+    social: (q.data?.social ?? []).filter((s) => s in SOCIAL_LABELS),
+    methods: q.data ? (q.data.methods ?? ["oidc"]) : ["oidc"],
+  };
+}
+
+// §6 layout, pure for tests: the PRIMARY method gets the large button; everything else folds behind
+// "sign in another way". OIDC outranks SAML as primary (the common case); with a single method the
+// fold renders nothing (degrades to today's screen).
+export function loginLayout(methods: string[]): { primary: "oidc" | "saml" | null; secondary: "saml"[] } {
+  const primary = methods.includes("oidc") ? "oidc" : methods.includes("saml") ? "saml" : null;
+  const secondary = primary === "oidc" && methods.includes("saml") ? (["saml"] as "saml"[]) : [];
+  return { primary, secondary };
 }
 
 function useAuthError(): string | null {
@@ -49,7 +65,8 @@ export function LoginScreen() {
   const branding = useBranding();
   const returnTo = window.location.pathname === "/login" ? "/" : window.location.pathname + window.location.search;
   const error = useAuthError();
-  const social = useLoginOptions();
+  const { social, methods } = useLoginOptions();
+  const layout = loginLayout(methods);
   const logoUrl = branding.data?.logoUrl;
   const name = branding.data?.displayName;
   // #371: sign-in navigates top-level to /auth/login (then the IdP), which can take a beat. Show a spinner on the
@@ -86,18 +103,48 @@ export function LoginScreen() {
               {error}
             </div>
           )}
-          <Button
-            variant="primary"
-            className="w-full"
-            data-testid="login-signin"
-            disabled={navigating !== null}
-            onClick={() => go("signin", `/auth/login?returnTo=${encodeURIComponent(returnTo)}`)}
-          >
-            {navigating === "signin" && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
-            {t("auth.signIn")}
-          </Button>
+          {layout.primary !== null && (
+            <Button
+              variant="primary"
+              className="w-full"
+              data-testid="login-signin"
+              disabled={navigating !== null}
+              onClick={() =>
+                go(
+                  "signin",
+                  layout.primary === "saml"
+                    ? `/auth/saml/login?returnTo=${encodeURIComponent(returnTo)}`
+                    : `/auth/login?returnTo=${encodeURIComponent(returnTo)}`,
+                )
+              }
+            >
+              {navigating === "signin" && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
+              {layout.primary === "saml" ? t("auth.signInSaml") : t("auth.signIn")}
+            </Button>
+          )}
+          {layout.primary === null && (
+            <p className="text-sm text-fg-dim" data-testid="login-none">{t("auth.noMethods")}</p>
+          )}
           {/* #281 / ADR-121: Cloud social sign-in — deep-links the platform flow with the provider
               pre-selected (?provider=<slug>; the server allowlists it). Absent on CE / tenant OIDC. */}
+          {/* #537 §6: everything that is not the primary folds behind "sign in another way". */}
+          {layout.secondary.length > 0 && (
+            <details className="mt-4" data-testid="login-more">
+              <summary className="cursor-pointer text-xs text-fg-dim">{t("auth.moreWays")}</summary>
+              <div className="mt-2 flex flex-col gap-2">
+                <Button
+                  variant="default"
+                  className="w-full"
+                  data-testid="login-saml"
+                  disabled={navigating !== null}
+                  onClick={() => go("saml", `/auth/saml/login?returnTo=${encodeURIComponent(returnTo)}`)}
+                >
+                  {navigating === "saml" && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
+                  {t("auth.signInSaml")}
+                </Button>
+              </div>
+            </details>
+          )}
           {social.length > 0 && (
             <div className="mt-4 border-t border-border pt-4" data-testid="login-social">
               <p className="mb-2 text-xs text-fg-dim">{t("auth.socialHint")}</p>

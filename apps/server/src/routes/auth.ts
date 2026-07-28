@@ -37,7 +37,7 @@ async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
 // #537 / ADR-195: resolution moved into the single login-methods resolver (ceiling ∩ tenant selection;
 // ADR-016's order — tenant IdP over platform — is preserved inside it, as is the `viaTenantOidc`
 // distinction the CE first-admin bootstrap keys on). This wrapper keeps secret decryption here.
-async function resolveLogin(db: TenantDb, tenant: Tenant) {
+export async function resolveLogin(db: TenantDb, tenant: Tenant) {
   return resolveAvailableLogin(db, tenant, loadTenantOidc)
 }
 
@@ -94,7 +94,13 @@ export async function authPlugin(app: FastifyInstance) {
     const db = await acquireTenantDb(tenant)
     try {
       const available = await resolveLogin(db, tenant)
-      return reply.send({ social: socialProvidersFor(available) })
+      // #537 §6/§7: the login screen lists what is OPEN, so the method KINDS are published facts
+      // (approved secrecy line: what stays hidden is WHY something is absent — off, unconfigured
+      // and unentitled are indistinguishable). `oidc` deliberately does not say tenant-vs-platform.
+      const methods: string[] = []
+      if (available.oidc) methods.push('oidc')
+      if (available.methods.has('saml')) methods.push('saml')
+      return reply.send({ social: socialProvidersFor(available), methods })
     } finally {
       await db.release()
     }

@@ -348,7 +348,16 @@
     "samlAttrEmail": "email 属性",
     "samlAttrName": "name 属性",
     "samlAttrGroups": "groups 属性",
-    "samlEnabled": "SAML サインインを有効にする"
+    "samlEnabled": "SAML サインインを有効にする",
+    "methodsTitle": "ログイン方式",
+    "methodsBody": "このワークスペースのサインイン画面で提供する方式です。デプロイのポリシーで除外された方式は表示され、設定は保持されます（ポリシーが戻れば再び有効になります）。",
+    "methodTenantOidc": "自前の IdP (OIDC)",
+    "methodPlatformOidc": "プラットフォームログイン",
+    "methodSaml": "SAML SSO",
+    "method_effective": "有効",
+    "method_byPolicy": "デプロイポリシーにより利用不可",
+    "method_off": "オフ",
+    "platformOwnIdpRequired": "プラットフォームログインをオフにする前に、自前の IdP（OIDC または SAML）を有効化・検証してください。"
   },
   "adminEnroll": {
     "title": "自動メンバー登録",
@@ -536,7 +545,10 @@
     "inviteTitle": "招待されています",
     "inviteBody": "サインインして招待を承認し、ワークスペースに参加します。",
     "acceptInvite": "招待を承認",
-    "errorIdpUnavailable": "サインインが一時的に利用できません。しばらくしてからもう一度お試しください。"
+    "errorIdpUnavailable": "サインインが一時的に利用できません。しばらくしてからもう一度お試しください。",
+    "signInSaml": "SSO (SAML) でサインイン",
+    "moreWays": "別の方法でサインイン",
+    "noMethods": "現在サインインできません。管理者に連絡してください。"
   },
   "share": {
     "opening": "共有ページを開いています…",

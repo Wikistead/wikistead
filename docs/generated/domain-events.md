@@ -43,6 +43,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `tenant.branding_updated` | The tenant branding (accent + logo) was changed. |
 | `tenant.embed_providers_updated` | A tenant admin changed the external-embed host allowlist (#108). |
 | `tenant.oidc_updated` | The tenant OIDC login configuration was changed. |
+| `tenant.login_methods_updated` | A tenant admin changed which login methods the tenant offers (#537: the platform-login toggle). |
 | `tenant.oidc_recovered` | An operator disabled a locked-out tenant's OIDC out of band (break-glass). |
 | `tenant.saml_recovered` | An operator disabled a locked-out tenant's SAML out of band (break-glass). |
 | `tenant.custom_domain_added` | A custom domain was added (pending verification). |
