@@ -205,3 +205,33 @@ describe('CE first-admin bootstrap via callback', () => {
     expect(String(res.headers['set-cookie'] ?? '')).not.toContain(`${SESSION_COOKIE}=`)
   })
 })
+
+// #537 / ADR-195 §7: the ceiling and the unified 404. These pin the two route behaviours that the
+// unit matrix (login-methods-537) cannot: the CALLBACK is an entry point of its own (B3 — the state's
+// 300s TTL must not out-live the method's availability), and every "no" on the login surface is the
+// SAME 404 body as a tenant that does not exist.
+describe('#537 login-method ceiling on the routes', () => {
+  it('B3: a callback whose method was disabled mid-flow answers the unified 404 — no session, no exchange window', async () => {
+    const path = await startLogin() // state saved with viaTenantOidc=true
+    await db.sql`UPDATE tenant_oidc SET enabled = false WHERE tenant_id = ${tenant.id}`
+    try {
+      const res = await cb(path)
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toEqual({ error: 'not found' })
+      expect(res.headers['set-cookie']).toBeUndefined()
+    } finally {
+      await db.sql`UPDATE tenant_oidc SET enabled = true WHERE tenant_id = ${tenant.id}`
+    }
+  })
+
+  it('a ceiling that excludes every OIDC method 404s /auth/login with the unified body', async () => {
+    process.env.LOGIN_METHODS = 'saml'
+    try {
+      const res = await app.inject({ method: 'GET', url: '/auth/login', headers: { host: 'dev.localhost' } })
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toEqual({ error: 'not found' })
+    } finally {
+      delete process.env.LOGIN_METHODS
+    }
+  })
+})

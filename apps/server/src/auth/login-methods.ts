@@ -1,0 +1,112 @@
+import { resolveEntitlements } from '@wikistead/entitlements'
+import type { TenantDb } from '../db/index.js'
+import { loadPlatformOidc, loadSocialLogin, type TenantOidcConfig } from './oidc.js'
+
+// #537 / ADR-195: the ONE place that answers "which login methods does this tenant offer right now?".
+// Two layers: the deployment env is a CEILING (`LOGIN_METHODS`), the tenant's own configuration selects
+// within it; the effective set is their intersection, computed at READ time (a lowered ceiling never
+// rewrites tenant rows — raise it back and the old selection returns). Every login entry point — start,
+// CALLBACK (B3: the state TTL would otherwise leave a 5-minute completion window), signup (B4), SAML
+// start/ACS — consults this module; a method that is not in the effective set answers the SAME 404 as a
+// tenant that does not exist ('not found', §7's unified body). "Not in the UI" is never the gate.
+//
+// Invariant (B8): the resolver PRESERVES the tenant-oidc / platform distinction (`viaTenantOidc`) — the
+// CE first-admin bootstrap keys on it, and a resolver refactor that collapses the two is the documented
+// way to break bootstrap. Social is NOT a method here (ruling 3): it is a hint on the platform issuer,
+// silently dropped when unavailable (ADR-121's existing contract).
+
+export type LoginMethod = 'tenant-oidc' | 'platform-oidc' | 'saml'
+const ALL_METHODS: readonly LoginMethod[] = ['tenant-oidc', 'platform-oidc', 'saml']
+
+// The deployment ceiling. Unset = everything (the CE default: no new config required). Tokens are
+// validated; an env that names ONLY unknown tokens is a configuration error, not an empty product —
+// fail fast at boot (assertLoginCeilingValid) instead of serving mysterious 404s (B8: the ceiling must
+// not become a silent lockout).
+export function loginMethodCeiling(env: string | undefined = process.env.LOGIN_METHODS): Set<LoginMethod> {
+  if (env === undefined || env.trim() === '') return new Set(ALL_METHODS)
+  const tokens = env.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  const valid = tokens.filter((t): t is LoginMethod => (ALL_METHODS as readonly string[]).includes(t))
+  return new Set(valid)
+}
+
+export function assertLoginCeilingValid(env: string | undefined = process.env.LOGIN_METHODS): void {
+  if (loginMethodCeiling(env).size === 0) {
+    throw new Error(
+      `LOGIN_METHODS="${env}" resolves to NO login method — every login would 404 and no admin could ever fix it from inside. ` +
+      `Valid tokens: ${ALL_METHODS.join(', ')} (unset = all).`,
+    )
+  }
+}
+
+// The tenant's own IdP row (RLS-scoped; the caller owns decryption via oidc.ts loaders where needed).
+async function tenantOidcEnabled(db: TenantDb): Promise<boolean> {
+  const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc LIMIT 1`
+  return !!row?.enabled
+}
+
+async function tenantSamlEnabled(db: TenantDb): Promise<boolean> {
+  // The table exists in every deployment (migration 038); the EE code that USES it lives in ee-server.
+  // Reading the flag here is data access, not an EE feature — the entitlement gate below still applies.
+  const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml LIMIT 1`.catch(() => [] as { enabled: boolean }[])
+  return !!row?.enabled
+}
+
+export interface AvailableLogin {
+  methods: Set<LoginMethod>
+  // The OIDC pick for /auth/login — tenant IdP wins over platform (ADR-016 order, unchanged).
+  // null when neither OIDC method is effective (SAML may still be).
+  oidc: { cfg: TenantOidcConfig; viaTenantOidc: boolean } | null
+}
+
+// `loadTenantOidcCfg` is injected by the caller (auth.ts owns secret decryption) so this module stays
+// free of crypto concerns; it is only called when tenant-oidc is inside the ceiling AND enabled.
+export async function resolveAvailableLogin(
+  db: TenantDb,
+  tenant: { plan: string },
+  loadTenantOidcCfg: (db: TenantDb) => Promise<TenantOidcConfig | null>,
+  env?: string | undefined,
+): Promise<AvailableLogin> {
+  const ceiling = loginMethodCeiling(env)
+  const methods = new Set<LoginMethod>()
+
+  let tenantCfg: TenantOidcConfig | null = null
+  if (ceiling.has('tenant-oidc') && (await tenantOidcEnabled(db))) {
+    tenantCfg = await loadTenantOidcCfg(db)
+    if (tenantCfg) methods.add('tenant-oidc')
+  }
+  const platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
+  if (platform) methods.add('platform-oidc')
+  if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) {
+    methods.add('saml')
+  }
+
+  const oidc = tenantCfg
+    ? { cfg: tenantCfg, viaTenantOidc: true }
+    : platform
+      ? { cfg: platform, viaTenantOidc: false }
+      : null
+  return { methods, oidc }
+}
+
+// #537 lockout guard: "would anything OTHER than tenant-oidc still let someone in?" — asked before a
+// write that disables the tenant IdP. Refusing the transition to an empty effective set is the guard;
+// an ALREADY-empty set is not made worse by a write, so only the transition is refused (the admin's
+// live cookie session is the recovery path, per the module header of tenant-oidc.ts).
+export async function otherLoginMethodsEffective(
+  db: TenantDb,
+  tenant: { plan: string },
+  env?: string | undefined,
+): Promise<boolean> {
+  const ceiling = loginMethodCeiling(env)
+  if (ceiling.has('platform-oidc') && loadPlatformOidc()) return true
+  if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) return true
+  return false
+}
+
+// Social slugs for the login screen: only on the platform issuer path (ADR-121), and only when
+// platform-oidc is effective — a ceiling that drops platform-oidc drops the buttons with it.
+export function socialProvidersFor(available: AvailableLogin): string[] {
+  return available.methods.has('platform-oidc') && (!available.oidc || !available.oidc.viaTenantOidc)
+    ? loadSocialLogin().providers
+    : []
+}

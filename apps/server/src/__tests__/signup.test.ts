@@ -131,3 +131,21 @@ describe('Cloud signup', () => {
     expect(res.statusCode).toBe(401) // signup session ignored by the member auth path
   })
 })
+
+// #537 B4: signup IS a platform-OIDC login — it used to call loadPlatformOidc() directly and would
+// have ignored a ceiling that dropped the method. Both the start AND the callback gate (a state
+// minted before the ceiling change must not complete after it).
+describe('#537 signup honours the login-method ceiling', () => {
+  it('a ceiling without platform-oidc 404s /signup/login and /signup/callback', async () => {
+    process.env.LOGIN_METHODS = 'tenant-oidc,saml'
+    try {
+      const start = await app.inject({ method: 'GET', url: '/signup/login', headers: { host: PLATFORM_HOST } })
+      expect(start.statusCode).toBe(404)
+      const cb = await app.inject({ method: 'GET', url: '/signup/callback?state=x&code=y', headers: { host: PLATFORM_HOST } })
+      expect(cb.statusCode).toBe(404)
+      expect(cb.headers['set-cookie']).toBeUndefined()
+    } finally {
+      delete process.env.LOGIN_METHODS
+    }
+  })
+})

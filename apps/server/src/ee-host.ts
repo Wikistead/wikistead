@@ -20,6 +20,7 @@ export { resolveTenantFromHost, loadTenant } from './tenant.js'
 export { provisionTenant } from './auth/provisioning.js' // #475: EE tests provision a second tenant to pin RLS scoping
 export { groupFgaId, syncMemberGroups } from './auth/group-sync.js'
 export { evaluateAdminMapping } from './auth/admin-mapping.js' // #497 §2b: SCIM group changes re-materialise admin through the same evaluator as login
+export { loginMethodCeiling } from './auth/login-methods.js' // #537: SAML start/ACS honour the deployment ceiling like every other entry point
 export { billableMemberCount, lockSeats } from './auth/invites.js'
 export { auditIfEntitled, drainAuditOutbox, verifyTenantAuditChain } from './audit/outbox.js'
 export { auditPlugin } from './routes/audit.js' // #401 / ADR-155: the viewer moves to the ee/ overlay with the write side (#178)
