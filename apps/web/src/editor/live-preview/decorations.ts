@@ -5290,7 +5290,14 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // its wrap, overlapping the PREVIOUS line — with pointer-events alive there, hovering that line hit
   // the row (a wrap CHILD), satisfied `.cm-lp-macro-wrap:hover`, and lit the chrome "permanently" in a
   // slot island (where the line above is dense editing text). Interactivity returns with visibility.
-  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none", transform: "translateY(var(--aff-dy-row, 0px))" },
+  // #528the ROW itself is owner-gated, not just the buttons inside it. It used to sit at opacity 1
+  // permanently (only its ✎ faded), so an unrelated block still presented a full-size affordance rectangle
+  // which is what the rejection measured, and which also made the layout owner reserve a slot for chrome
+  // nobody could see. `cm-aff-shown` comes from the same measure pass that positions it.
+  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none", opacity: "0", transition: "opacity 120ms", transform: "translateY(var(--aff-dy-row, 0px))" },
+  // Revealed by the owner, or by the keyboard/atom-selection and table-hover paths that predate it (those
+  // reveal their buttons through the rules further down, and a row at opacity 0 would swallow them).
+  ".cm-lp-macro-btnrow.cm-aff-shown, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow, .cm-lp-table-wrap:hover > .cm-lp-macro-btnrow, .cm-lp-table-edit:hover > .cm-lp-macro-btnrow, .cm-lp-table-wrap.cm-aff-focus > .cm-lp-macro-btnrow, .cm-lp-table-edit.cm-aff-focus > .cm-lp-macro-btnrow": { opacity: "1" },
   // #278① (the FINAL permanent form, superseding theboundary guards): every wrap-state
   // reveal is DIRECT-CHILD (`>`) — a wrap's hover/atom-sel lights ONLY its own top-level chrome and
   // can never reach a NESTED macro's chrome (the atom-selected container leaking the inner warning's

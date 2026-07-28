@@ -10,9 +10,10 @@ import { focusedWrap } from "./affordance-layout";
 
 // A wrap at a known rectangle. happy-dom has no layout, so the rects are stubbed — which is what lets this
 // test state the geometry the browser would otherwise have to produce.
-function wrap(parent: HTMLElement, rect: { top: number; bottom: number; left: number; right: number }) {
+function wrap(parent: HTMLElement, rect: { top: number; bottom: number; left: number; right: number }, cls = "cm-lp-macro-wrap") {
   const el = parent.ownerDocument.createElement("div");
-  el.className = "cm-lp-macro-wrap";
+  el.className = cls;
+  if (cls === "slot") { el.className = "cm-lp-nested-slot"; el.setAttribute("data-mac-pos", "12"); }
   el.getBoundingClientRect = () => ({
     top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right,
     width: rect.right - rect.left, height: rect.bottom - rect.top, x: rect.left, y: rect.top, toJSON: () => ({}),
@@ -30,11 +31,15 @@ function fakeView(dom: HTMLElement, caret: { top: number; bottom: number; left: 
 }
 
 describe("#528which block is focused", () => {
+  // The structure the BROWSER produces, which the first cut of this fixture got wrong (#528): a macro
+  // nested in a layout container has NO wrap of its own — the container tags its slot with `data-mac-pos`.
+  // Nesting one `.cm-lp-macro-wrap` inside another (what this file used to build) made the innermost rule
+  // look satisfied while the real DOM could never express the inner block at all.
   const build = () => {
     const root = document.createElement("div");
-    // outer columns 100..300, inner note 150..200 inside it, and an unrelated tabs block 400..500
+    // outer columns 100..300, inner note 150..200 as a SLOT inside it, unrelated tabs block 400..500
     const outer = wrap(root, { top: 100, bottom: 300, left: 0, right: 500 });
-    const inner = wrap(outer, { top: 150, bottom: 200, left: 20, right: 480 });
+    const inner = wrap(outer, { top: 150, bottom: 200, left: 20, right: 480 }, "slot");
     const unrelated = wrap(root, { top: 400, bottom: 500, left: 0, right: 500 });
     return { root, outer, inner, unrelated };
   };
@@ -76,5 +81,60 @@ describe("#528which block is focused", () => {
     const { root, outer } = build();
     const view = fakeView(root, null); // no caret at all
     expect(focusedWrap(view, { x: 100, y: 90 }), "10px above the container's top edge").toBe(outer);
+  });
+});
+
+describe("#528a nested macro has no wrap of its own", () => {
+  // The rejection's exact scenario: `::::columns > :::column > :::note` with the caret in the note. In the
+  // browser there are two wraps (the columns and an unrelated tabs) and the note is a `data-mac-pos` slot.
+  const build = () => {
+    const root = document.createElement("div");
+    const columns = wrap(root, { top: 100, bottom: 300, left: 0, right: 500 });
+    const noteSlot = wrap(columns, { top: 150, bottom: 220, left: 20, right: 480 }, "slot");
+    const tabs = wrap(root, { top: 400, bottom: 500, left: 0, right: 500 });
+    return { root, columns, noteSlot, tabs };
+  };
+  // While a nested macro is BEING EDITED its slot is not in the document: `mountNestedEditIsland` does
+  // `slot.replaceWith(host)`. The island is then the only element standing for that block.
+  const buildEditing = () => {
+    const root = document.createElement("div");
+    const columns = wrap(root, { top: 100, bottom: 300, left: 0, right: 500 });
+    const island = wrap(columns, { top: 150, bottom: 220, left: 20, right: 480 }, "cm-lp-slot-edit-island");
+    return { root, columns, island };
+  };
+
+  it("the island that REPLACED the slot is the focused block, not the container", () => {
+    const { root, columns, island } = buildEditing();
+    const view = fakeView(root, { top: 170, bottom: 182, left: 100 });
+    const focus = focusedWrap(view, null);
+    expect(focus, "the container must not be focused while its child island holds the caret").not.toBe(columns);
+    expect(focus).toBe(island);
+  });
+
+  it("the caret in the nested note focuses the SLOT, not the container wrap", () => {
+    const { root, columns, noteSlot } = build();
+    const view = fakeView(root, { top: 170, bottom: 182, left: 100 });
+    const focus = focusedWrap(view, null);
+    expect(focus, "the container must not be focused while its child holds the caret").not.toBe(columns);
+    expect(focus).toBe(noteSlot);
+  });
+
+  it("the container is focused again when the caret sits in the container's own area", () => {
+    const { root, columns } = build();
+    const view = fakeView(root, { top: 260, bottom: 272, left: 100 }); // below the slot, inside columns
+    expect(focusedWrap(view, null)).toBe(columns);
+  });
+
+  it("hovering the container's own edge focuses the container, not the child", () => {
+    const { root, columns, noteSlot } = build();
+    const view = fakeView(root, null);
+    expect(focusedWrap(view, { x: 100, y: 280 })).toBe(columns);
+    expect(focusedWrap(view, { x: 100, y: 180 })).toBe(noteSlot);
+  });
+
+  it("the unrelated block is never focused", () => {
+    const { root, tabs } = build();
+    const view = fakeView(root, { top: 170, bottom: 182, left: 100 });
+    expect(focusedWrap(view, null)).not.toBe(tabs);
   });
 });

@@ -20,6 +20,17 @@ right side
 tail line
 `;
 
+// A TOP-LEVEL macro is what puts two affordances of the SAME block on screen at once — its chrome row and
+// its raw-entry pill. That is the collision this ticket exists for (#528measured it at 8px). The
+// nested fixture above no longer produces it, and for the right reason: since #528only the focused
+// block shows chrome, so with the caret in the inner note the container's row is correctly gone.
+const TOPLEVEL = `:::note[Top]
+top body text
+:::
+
+after the block
+`;
+
 const AFFORDANCE_SEL = ".cm-macro-presence-box, .cm-lp-macro-btnrow, .cm-lp-macro-richui-raw";
 
 async function visibleAffordances(page: import("@playwright/test").Page) {
@@ -44,17 +55,22 @@ test("#528: the visible block affordances never overlap (caret inside a nested m
   await openScratch(page, `aff528-${Date.now().toString(36)}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText(NESTED);
+  await page.keyboard.insertText(TOPLEVEL);
   await sleep(600);
 
-  // put the caret on the inner macro — the state that makes both affordances visible at once
-  await page.getByText("inner body text", { exact: false }).first().click();
+  // put the caret on the block — the state that makes both of ITS affordances visible at once
+  await page.getByText("top body text", { exact: false }).first().click();
   await sleep(500);
 
   const rects = await visibleAffordances(page);
-  // the collision only exists when at least two are visible; if the fixture stops producing that, say so
-  // rather than passing vacuously.
-  expect(rects.length, `expected 2+ visible affordances, saw ${JSON.stringify(rects)}`).toBeGreaterThanOrEqual(2);
+  // The scenario must still produce chrome — a fixture that renders nothing would pass this test by
+  // showing nothing at all.
+  expect(rects.length, `the block offers an affordance, saw ${JSON.stringify(rects)}`).toBeGreaterThanOrEqual(1);
+  // NOTE (#528): the pair that used to collide here — a nested block's raw pill and the CONTAINER's
+  // chrome row, 8px apart — can no longer both be on screen, because only the focused block shows chrome.
+  // The collision is prevented by suppression now rather than by displacement, and the pin for that is the
+  // ownership test below; this one still guards the geometry for every state where two DO coexist
+  // (presence + chrome, or any affordance added later).
 
   const collisions: string[] = [];
   for (let i = 0; i < rects.length; i++) {
@@ -72,9 +88,9 @@ test("#528: resolving the collision must not hide anything (discoverability, app
   await openScratch(page, `aff528v-${Date.now().toString(36)}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText(NESTED);
+  await page.keyboard.insertText(TOPLEVEL);
   await sleep(600);
-  await page.getByText("inner body text", { exact: false }).first().click();
+  await page.getByText("top body text", { exact: false }).first().click();
   await sleep(500);
 
   const rects = await visibleAffordances(page);
@@ -145,13 +161,13 @@ test("#528the affordances stay apart WHILE the pointer moves", async ({ page }) 
   await openScratch(page, `aff528m-${Date.now().toString(36)}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText(NESTED);
+  await page.keyboard.insertText(TOPLEVEL);
   await sleep(600);
-  await page.getByText("inner body text", { exact: false }).first().click();
+  await page.getByText("top body text", { exact: false }).first().click();
   await sleep(500);
 
-  const box = await page.getByText("inner body text", { exact: false }).first().boundingBox();
-  expect(box, "the inner macro is on screen").not.toBeNull();
+  const box = await page.getByText("top body text", { exact: false }).first().boundingBox();
+  expect(box, "the macro is on screen").not.toBeNull();
 
   // Sample the DISPLACEMENT, not just the overlap. Filtering on visibility hides the very frames that
   // matter: mid-remount the element can be transparent for a tick, so an overlap check quietly skips it and
@@ -214,31 +230,46 @@ test("#528only the FOCUSED block offers an affordance (asserted by ownership, no
   await page.getByText("inner body text", { exact: false }).first().click();
   await sleep(600);
 
+  // #528rewrote this check. The previous version decided which block was "focused" by looking at
+  // `.cm-lp-macro-wrap` alone — the same assumption the implementation had — so it agreed with the bug and
+  // stayed green while the user measured the container lit up and an unrelated block presenting chrome. A
+  // macro nested in a layout container HAS NO WRAP: it is the `[data-mac-pos]` slot. The three signals the
+  // rejection asked to be read TOGETHER are read together here: ownership, the focus mark, and opacity.
   const report = await page.evaluate(() => {
     const visible = (e: HTMLElement) => {
       const c = getComputedStyle(e);
       return c.display !== "none" && c.visibility !== "hidden" && parseFloat(c.opacity || "1") > 0.01;
     };
-    // which block does the caret sit in? the innermost wrap containing the cursor
-    const cursor = document.querySelector(".cm-cursor-primary") as HTMLElement | null;
-    const cr = cursor?.getBoundingClientRect();
-    const wraps = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap")];
-    const containing = cr
-      ? wraps.filter((w) => { const r = w.getBoundingClientRect(); return cr.top >= r.top - 2 && cr.bottom <= r.bottom + 2; })
-      : [];
-    // innermost = the one contained by all the others
-    const focused = containing.find((w) => containing.every((o) => o === w || o.contains(w))) ?? null;
-    const owners = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-edit")]
+    const cursor = document.querySelector<HTMLElement>(".cm-cursor-primary, .cm-cursor");
+    // the block the caret is in, taken from DOM ancestry (no geometry, no wrap assumption)
+    // A nested macro being edited has NO slot in the document — `mountNestedEditIsland` replaces it with the
+    // island — so the island counts as the block here just as it does in the owner.
+    const holder = cursor?.parentElement?.closest<HTMLElement>(
+      "[data-mac-pos], .cm-lp-slot-edit-island, .cm-lp-nested-edit-island, .cm-lp-macro-wrap",
+    ) ?? null;
+    const containerOfHolder = holder?.parentElement?.closest<HTMLElement>(".cm-lp-macro-wrap") ?? null;
+    const marked = [...document.querySelectorAll<HTMLElement>(".cm-aff-focus")];
+    const strayChrome = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-btnrow, .cm-lp-macro-richui-raw")]
       .filter(visible)
-      .map((b) => {
-        const wrap = b.closest(".cm-lp-macro-wrap");
-        return wrap === focused ? "focused" : wrap ? "other-block" : "no-block";
-      });
-    return { owners, hasFocused: !!focused };
+      .filter((el) => !(holder && holder.contains(el)))
+      .map((el) => `${el.className} @${Math.round(el.getBoundingClientRect().top)}`);
+    return {
+      holderIsNested: !!holder && (holder.hasAttribute("data-mac-pos") || !holder.classList.contains("cm-lp-macro-wrap")),
+      containerMarked: !!containerOfHolder?.classList.contains("cm-aff-focus"),
+      markedCount: marked.length,
+      markedIsHolder: marked.length === 1 && marked[0] === holder,
+      strayChrome,
+    };
   });
 
-  expect(report.hasFocused, "the caret is inside a macro block").toBe(true);
-  expect(report.owners.filter((o) => o !== "focused"), "no block but the focused one offers an affordance").toEqual([]);
+  // the caret really is inside a NESTED macro (else the scenario the user reported is not reproduced)
+  expect(report.holderIsNested, "the fixture puts the caret in a nested macro (slot or its edit island)").toBe(true);
+  // …and the container it lives in is not the one wearing the focus mark (#528measured it was)
+  expect(report.containerMarked, "the container must not be focused while its child holds the caret").toBe(false);
+  expect(report.markedCount, "exactly one block is focused").toBe(1);
+  expect(report.markedIsHolder, "the focused block is the one holding the caret").toBe(true);
+  // no chrome anywhere else on screen — the unrelated tabs block included (its row used to sit at opacity 1)
+  expect(report.strayChrome, "no block but the focused one shows chrome").toEqual([]);
 });
 
 // #528②: the raw pill and the rendered block's ✎ row were the same size, the same corner and the
