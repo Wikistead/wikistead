@@ -3344,12 +3344,17 @@ async function confirmWithinBudget(
   budgetMs: number,
   signal?: AbortSignal,
 ): Promise<{ confirmed: Set<string>; exhausted: boolean }> {
-  const SLICE = 200 // 4 chunks of 50 → one 4-lane wave per slice
+  // Lanes dropped 4 → 1 (measured): dev's FGA datastore and the app DB share one postgres, and
+  // a 4-lane wave = 200 concurrent point checks saturated it — endpoints that never touch FGA at all
+  // /me/settings, /pins) measured 2.1s while a dictionary ran. At 1 lane the instantaneous pressure
+  // quarters and interactive queries interleave between batches; an idle box still completes a full
+  // 2000-id confirm in ~1-2s, and under load the budget above bounds the damage instead of the storm.
+  const SLICE = 200 // 4 chunks of 50, sequential inside the slice; budget checked between slices
   const started = Date.now()
   const confirmed = new Set<string>()
   for (let i = 0; i < ids.length; i += SLICE) {
     if (Date.now() - started > budgetMs) return { confirmed, exhausted: true }
-    const part = await filterAuthorized(fga, principal, 'view', ids.slice(i, i + SLICE), undefined, 'page', 4, signal)
+    const part = await filterAuthorized(fga, principal, 'view', ids.slice(i, i + SLICE), undefined, 'page', 1, signal)
     for (const id of part) confirmed.add(id)
   }
   return { confirmed, exhausted: false }
