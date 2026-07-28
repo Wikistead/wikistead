@@ -148,6 +148,12 @@ export async function filterAuthorized(
   // it is up to 40 SEQUENTIAL round-trips, which is the measured ~14s before the editor opens. Bounded, not
   // unbounded: the point of #489 was never "one at a time", it was "not all at once".
   concurrency = 1,
+  // #541stop asking when nobody is listening. A big confirm whose requester has gone away (the
+  // tab navigated, the cold probe context closed) kept running its remaining batch waves and STARVED the
+  // next page-open's interactive checks — measured as the sidebar's bimodal 2.7s/7.8s. Checked between
+  // waves only; aborting THROWS (the caller's response is dead anyway), it never fabricates a verdict —
+  // no id is allowed or denied by an abort, so authz semantics are untouched.
+  signal?: AbortSignal,
 ): Promise<Set<string>> {
   const hooks = getAuthzHooks()
   // The relation is the same for every id (depends only on capability + type), so resolve once.
@@ -200,6 +206,9 @@ export async function filterAuthorized(
   }
   // Run the chunks `lanes` at a time. With the default of 1 this is exactly the old sequential loop.
   for (let i = 0; i < chunks.length; i += lanes) {
+    // #541: between waves only — an in-flight batch completes; the NEXT wave is what an abandoned
+    // request no longer gets to start.
+    if (signal?.aborted) throw Object.assign(new Error('filterAuthorized aborted: requester gone'), { name: 'AbortError' })
     await Promise.all(chunks.slice(i, i + lanes).map(runChunk))
   }
   return out

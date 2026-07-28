@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useIsFetching, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
 import { useSession } from "../session/SessionProvider";
 
@@ -1339,16 +1339,35 @@ export function useTitleDictionary(pageId: string | undefined) {
   // fan-out a page load fires (a batch-check confirm over up to 2000 ids), and it went out in the same
   // burst as everything else — so on a busy FGA the surfaces someone is actually waiting for (the space
   // list, the page tree, the page itself) queued behind it, and the sidebar sat empty for seconds while
-  // an ENHANCEMENT (auto internal links) hogged the checker. A short hold-back lets the load-bearing
-  // queries take their slots first; links simply fill in a moment later, which they already did anyway
-  // (the dictionary is best-effort by design — see retry:false below).
-  const [yielded, setYielded] = useState(false);
+  // an ENHANCEMENT (auto internal links) hogged the checker.
+  //
+  //a FIXED 1.5s hold-back was the wrong shape, and it is exactly what made the sidebar BIMODAL
+  // (2.7s or 7.8s, nothing between — measured timelines): the tree request takes a variable time, and
+  // whenever it was still in flight at the 1.5s mark the dictionary burst landed on top of it and the
+  // tree crawled (measured: 4.8s for the same request that takes 1.0s uncontended). So the yield now
+  // waits for the thing it is actually yielding TO: while any space-list or page-tree query is in
+  // flight, the dictionary holds. A short floor covers the mount gap before those queries start (the
+  // tree only starts once /spaces resolves, so a bare isFetching==0 at mount would fire straight into
+  // the burst), and a hard cap keeps links from being deferred forever on surfaces where no tree ever
+  // loads. Links simply fill in a moment later, which they already did anyway (the dictionary is
+  // best-effort by design — see retry:false below).
+  const fetchingSpaces = useIsFetching({ queryKey: ["spaces"] });
+  const fetchingTree = useIsFetching({ queryKey: ["pages"] });
+  const [floorPassed, setFloorPassed] = useState(false);
+  const [capPassed, setCapPassed] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setYielded(true), 1500);
-    return () => clearTimeout(t);
+    const floor = setTimeout(() => setFloorPassed(true), 700);
+    const cap = setTimeout(() => setCapPassed(true), 8000);
+    return () => { clearTimeout(floor); clearTimeout(cap); };
   }, []);
+  const yielded = capPassed || (floorPassed && fetchingSpaces === 0 && fetchingTree === 0);
   return useQuery({
-    queryKey: ["title-dictionary", pageId],
+    //(#541): keyed on the VIEWER, not the page. The member dictionary is subject-scoped on the
+    // server (the pageId in the URL is only the existence-gated anchor), so a per-page key made every
+    // navigation refire the most expensive authz fan-out the app has — and a browse session paid it on
+    // each hop. One key = one dictionary per session window (staleTime below); the collab
+    // dict-invalidate ping already invalidates by prefix, so revocation timing is unchanged.
+    queryKey: ["title-dictionary"],
     enabled: !!pageId && yielded,
     queryFn: () => apiFetch<{ entries: { id: string; title: string }[]; capped: boolean; degraded?: boolean }>(`/pages/${encodeURIComponent(pageId!)}/title-dictionary`, token),
     staleTime: 30_000,
