@@ -213,7 +213,12 @@ export function SpaceMembersTab() {
         <Button variant="primary" size="sm" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending || assignRole.isPending} onClick={addUnified} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
       </div>
 
-      <div className="flex flex-col gap-1" data-testid="space-grant-list">
+      {/* #539: the grant list scrolls INSIDE a bounded box — the third instance of the same failure
+          (#503 audit ledger, #521 patrol queue), so it takes the same 26rem box rather than a third
+          bespoke treatment. A space with many members used to push everything below it — the custom-role
+          assignments and the group mappings — past the fold, which is the whole reason those sections
+          were hard to reach. The page keeps its own scroll; only this list scrolls. */}
+      <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-grant-list">
         {grants.map((g) => (
           <div key={`${g.grantee}:${g.capability}`} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-grant-item">
             <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={g.capability}>{capNoun(g.capability)}</span>
@@ -266,7 +271,8 @@ export function SpaceMembersTab() {
             />
             <Button variant="primary" size="sm" disabled={!roleId || !rolePicked || assignRole.isPending} onClick={addRoleAssignment} data-testid="space-role-assign-add">{t("spaceMembers.add")}</Button>
           </div>
-          <div className="flex flex-col gap-1" data-testid="space-role-assign-list">
+          {/* #539: same bound for the assignment list — it grows with the same membership. */}
+          <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-role-assign-list">
             {(roleAssignments.data ?? []).map((a) => (
               <div key={a.id} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-role-assign-item">
                 <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-[var(--accent)]">{a.roleName}</span>
