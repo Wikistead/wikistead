@@ -2561,7 +2561,12 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
     if (ownBarTab && wrapEl?.contains(ownBarTab)) {
       if (!ownBarTab.classList.contains("cm-lp-tab-active")) return;
       e.preventDefault();
-      const startFrom = wrapEl.dataset.layoutFrom;
+      // #527resolved LIVE, not from dataset.layoutFrom — that stamp is build-time, and this wrap
+      // can be a reused DOM whose build predates a doc change above (same staleness as the slot-open
+      // listener). The rebuilt widget stamps its CURRENT start, so the re-lookup below must query with
+      // the current value or it finds nothing and the rename silently never mounts. The commit below
+      // only edits inside this container, so the start read here survives it.
+      const startFrom = String(view.posAtDOM(wrapEl));
       const idx = Array.from(ownBarTab.parentElement?.querySelectorAll(".cm-lp-tab") ?? []).indexOf(ownBarTab);
       commitNow(handle.getValue());
       if (startFrom == null || idx < 0) return;
@@ -2947,9 +2952,17 @@ class MacroWidget extends WidgetType {
         if (isLayout) {
           const anchor = resolveNestedAnchor(e.target);
           if (anchor != null) {
-            const m = innermostMacroAt(view.state, anchor);
+            // #527the data-mac-pos tags (and this closure's `this.from/this.to`) are BUILD-time
+            // offsets, and eq keeps this DOM across an unrelated doc change above — so after an island
+            // in another container committed a changed body, every stamped anchor here pointed N
+            // characters off and the nested select/edit/delete resolved against the wrong range. The
+            // build-time base is exactly `this.from` (the instance that built this DOM), so the click-time
+            // shift is posAtDOM minus that — one uniform delta, because an in-container change always
+            // rebuilds (body is part of eq) and only above-container shifts reuse.
+            const delta = view.posAtDOM(wrap) - this.from;
+            const m = innermostMacroAt(view.state, anchor + delta);
             if (m) {
-              view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)), effects: setNestedSelection.of({ nested: { from: m.from, to: m.to }, anchor, container: { from: this.from, to: this.to } }) });
+              view.dispatch({ selection: EditorSelection.cursor(view.posAtDOM(wrap)), effects: setNestedSelection.of({ nested: { from: m.from, to: m.to }, anchor: anchor + delta, container: { from: this.from + delta, to: this.to + delta } }) });
               view.focus();
               return;
             }
@@ -3118,7 +3131,7 @@ class MacroWidget extends WidgetType {
         // anywhere in the slot (a nested warning included) enters the slot's edit mode, matching how an empty
         // slot already behaves. Until entered, nested macros are not directly touchable; INSIDE the island
         // they get the full top-level behaviour (reveal, pill, ✎/align, editUI) from the shared factory.
-        const from = this.from, to = this.to;
+        const name = this.name;
         wrap.querySelectorAll<HTMLElement>(contentSel).forEach((slot: HTMLElement, i: number) => {
           slot.addEventListener("mousedown", (e) => {
             if ((e.target as HTMLElement).closest(".cm-lp-layout-item-remove, .cm-lp-tab-remove, .cm-lp-layout-item-add, .cm-lp-tab")) return;
@@ -3130,9 +3143,24 @@ class MacroWidget extends WidgetType {
             if (view.state.readOnly || view.state.facet(displayMode) === "reading") return;
             e.preventDefault();
             e.stopPropagation();
+            // #527the container's offsets are resolved at CLICK time, for the same reason the
+            // display-mode gate above is. eq keeps this DOM alive across an unrelated doc change (its
+            // stable-key contract), so a build-time `this.from/this.to` closure goes stale the moment an
+            // island ABOVE commits a changed body — after which every dispatch here named a container
+            // range that no longer existed, and no click could open this widget's slots again (measured
+            // island count stayed 0 across repeated clicks; a same-length commit — no shift — kept
+            // working, which is what singled out the stale closure). posAtDOM answers for the CURRENT
+            // doc, the same way the embed ⇆ handler below and the #361 checkbox listener resolve.
+            const start = view.posAtDOM(wrap);
+            const dirs = resolveDirectiveRanges(view.state.doc.toString());
+            // posAtDOM of a block widget is its decoration start, so an exact match is the normal case;
+            // the containment fallback covers a start that lands just inside (e.g. an indented fence).
+            const dir = dirs.find((r) => r.name === name && r.from === start)
+              ?? dirs.find((r) => r.name === name && r.from <= start && r.to >= start);
+            if (!dir) return;
             // Do NOT view.focus here — the rebuild mounts the island and focuses IT; focusing the outer view
             // would steal focus back (a single click must open AND focus the island). #278 §2a reviewer B.
-            view.dispatch({ effects: setSlotEditActive.of({ container: { from, to }, index: i }) });
+            view.dispatch({ effects: setSlotEditActive.of({ container: { from: dir.from, to: dir.to }, index: i }) });
           });
         });
         }
