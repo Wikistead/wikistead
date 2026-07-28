@@ -4,6 +4,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import Stripe from 'stripe'
 import { pool } from '../db/pool.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
+import { currentPeriodStart, getUsage } from '../usage.js' // #231 slice 1: read the counters back
 import { emit } from '@wikistead/events'
 import { isDowngrade } from '../plan.js'
 
@@ -212,6 +213,31 @@ export async function billingPlugin(app: FastifyInstance) {
   // plan logic in the client.
   app.get('/entitlements', async (req) => {
     return resolveEntitlements(req.tenant.plan)
+  })
+
+  // GET /billing/usage — #231 slice 1: SHOW what has been metered this period, next to the allowance the
+  // plan already carries. Deliberately read-only and number-free: no price, no cap constant, no soft-cap
+  // enforcement — those are #127's rulings, and writing them before the ruling would mean rebuilding them.
+  // What was missing was simply a way to SEE the counters (`recordUsage` has been landing rows for a while
+  // with nothing reading them back). `Infinity` allowances become `null` on the wire — "unlimited" — since
+  // JSON has no Infinity and a serialiser would otherwise turn it into the lie that is `null` meaning zero.
+  app.get('/billing/usage', async (req, reply) => {
+    // tenant#admin: usage is billing information, and the tenant boundary is the RLS-scoped `req.db`.
+    try {
+      await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    } catch {
+      return reply.code(403).send({ error: 'forbidden' })
+    }
+    const period = currentPeriodStart()
+    const ent = resolveEntitlements(req.tenant.plan)
+    const allowance = (v: number) => (Number.isFinite(v) ? v : null) // null = unlimited
+    return {
+      periodStart: period,
+      plan: req.tenant.plan,
+      resources: [
+        { resource: 'ai.tokens', used: await getUsage(req.db, 'ai.tokens', period), allowance: allowance(ent.aiTokenAllowance) },
+      ],
+    }
   })
 
   // GET /billing/status — current plan + whether self-serve billing is active.
