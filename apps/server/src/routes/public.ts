@@ -7,10 +7,10 @@
 // anonymous visitors are NOT admitted to collaboration rooms here.
 import { createHash } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
-import { fgaClient, checkRelation } from '@wikistead/authz'
+import { fgaClient, checkRelation, filterAuthorized } from '@wikistead/authz'
 import { withTenantTx, acquireTenantDb } from '../db/index.js' // #382
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
-import { substituteListSnapshots, type ListSnapshot } from './pages.js' // #353→#370: baked `:::tagged`/`:::children` static lists for anon
+import { substituteListSnapshots, LIST_OBJECTS_TRUNCATION_FLOOR, type ListSnapshot } from './pages.js' // #353→#370: baked `:::tagged`/`:::children` static lists for anon; #545: shared ListObjects ceiling
 import { downloadAttachment, inlineAttachment } from './attachments.js' // #376 / ADR-149 §2: public wrappers
 import { resolveTranscludeRef } from '../transclude-resolve.js'
 import { renderPlantuml } from '../plantuml-render.js'
@@ -174,6 +174,37 @@ const PUBLIC_RENDER_TENANT_MAX = 120
 const PUBLIC_RENDER_IP_MAX = 30
 const PUBLIC_RENDER_CACHE_TTL_S = 600
 
+// #545 (same defect as #540): ListObjects truncates SILENTLY at the server's max results, and it spans
+// the whole shared store — so once every tenant's public pages TOGETHER passed the ceiling, this listing
+// dropped pages non-deterministically (whichever ids the server happened to return). A response at the
+// floor is therefore treated as possibly incomplete and the question is asked the other way around: this
+// tenant's published pages from the RLS-scoped DB as candidates, then the fail-closed anonymous confirm
+// decides every entry. The confirm is the SOLE authz gate on that branch — a published-but-not-public
+// page (or a stale row whose tuple is gone) is dropped by it, never shown — and existence-hiding is
+// unchanged (a non-public page is simply absent). Below the floor nothing changes: the ListObjects set
+// is complete there and the original one-call flow stays. Extracted from the route so the ceiling
+// behaviour is pinnable with client-shaped stubs (a real 1000-page fixture would poison the shared
+// store — same reasoning as the #540 pin).
+export async function listPublicPages(
+  fga: typeof fgaClient,
+  load: {
+    loadByIds: (ids: string[]) => Promise<{ id: string; title: string }[]>
+    loadPublishedCandidates: () => Promise<{ id: string; title: string }[]>
+  },
+): Promise<{ id: string; title: string }[]> {
+  const { objects } = await fga.listObjects({ user: ANON, relation: 'view', type: 'page' })
+  const pageIds = (objects ?? []).map((o: string) => o.replace(/^page:/, ''))
+
+  if (pageIds.length >= LIST_OBJECTS_TRUNCATION_FLOOR) {
+    const candidates = await load.loadPublishedCandidates()
+    const confirmed = await filterAuthorized(fga, ANON, 'view', candidates.map((r) => r.id), undefined, 'page', 4)
+    return candidates.filter((r) => confirmed.has(r.id))
+  }
+
+  if (pageIds.length === 0) return []
+  return load.loadByIds(pageIds)
+}
+
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function publicPlugin(app: FastifyInstance) {
@@ -292,26 +323,25 @@ export async function publicPlugin(app: FastifyInstance) {
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     if (!(await tenantPublicEnabled(tenant.id))) return reply.code(404).send({ error: 'not found' }) // #253: tenant parent switch OFF ⇒ whole public surface hidden
 
-    // list_objects returns public page IDs across the entire shared FGA store.
-    // RLS (withTenant) then narrows to this tenant's pages only.
-    // Same anonymous principal as single-page check for consistency.
-    const { objects } = await fgaClient.listObjects({
-      user: ANON,
-      relation: 'view',
-      type: 'page',
+    const pages = await listPublicPages(fgaClient, {
+      // list_objects returns public page IDs across the entire shared FGA store; the RLS-scoped query
+      // narrows to this tenant's pages only. Same anonymous principal as the single-page check.
+      loadByIds: async (ids) => await withTenantTx(tenant.id, async (tx) => {
+        return tx<{ id: string; title: string }[]>`
+          SELECT id, title FROM pages
+          WHERE id = ANY(${ids})
+            AND published_at IS NOT NULL
+          ORDER BY created_at DESC
+        `
+      }) as { id: string; title: string }[],
+      loadPublishedCandidates: async () => await withTenantTx(tenant.id, async (tx) => {
+        return tx<{ id: string; title: string }[]>`
+          SELECT id, title FROM pages
+          WHERE published_at IS NOT NULL AND deleted_at IS NULL
+          ORDER BY created_at DESC
+        `
+      }) as { id: string; title: string }[],
     })
-    const pageIds = (objects ?? []).map((o: string) => o.replace(/^page:/, ''))
-    if (pageIds.length === 0) return reply.send([])
-
-    const pages = await withTenantTx(tenant.id, async (tx) => {
-      return tx<{ id: string; title: string }[]>`
-        SELECT id, title FROM pages
-        WHERE id = ANY(${pageIds})
-          AND published_at IS NOT NULL
-        ORDER BY created_at DESC
-      `
-    }) as { id: string; title: string }[]
-
     return reply.send(pages)
   })
 
