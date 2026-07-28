@@ -76,7 +76,7 @@ test("#502: a peer arriving or leaving does not move my caret in the island", as
 // while co-editing, 0 after the peer leaves. Kept as `fixme` rather than deleted, because the reproduction
 // is the hard part — the next attempt should start here, probably by stashing the caret per block anchor at
 // teardown instead of trying to carry it through the mount.
-test.fixme("#502: a peer who EDITS then leaves must not move my caret", async ({ browser }) => {
+test("#502: a peer who EDITS then leaves must not move my caret", async ({ browser }) => {
   test.setTimeout(120_000);
   const ctxA = await browser.newContext(); const a = await ctxA.newPage();
   const id = await openScratch(a, `coedit502edit-${Date.now()}`);
