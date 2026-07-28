@@ -23,6 +23,10 @@ const FIXTURE = [
   ":::",
   "::::",
   "",
+  ":::details[Folded]",
+  "folded body text",
+  ":::",
+  "",
   ":::note[Label]",
   "callout body",
   ":::",
@@ -94,6 +98,12 @@ test("#85: the exported document and the app render the same document", async ({
   expect(html, "…and the one they did not").toContain("beta pane text");
   expect(html, "each under its own label").toContain("Alpha");
   expect(html).toContain("Beta");
+
+  // #85: the fold keeps its look and its content — a disclosure in the file, open, so nothing is hidden
+  // behind a triangle nobody can click on paper.
+  expect(html, "the disclosure survives as one").toMatch(/<details[^>]*\sopen/);
+  expect(html).toContain("Folded");
+  expect(html, "…with its body readable").toContain("folded body text");
 
   // Acceptance 2: the diagram is a figure.
   expect(html, "a mermaid block reaches the file as a drawn figure").toContain("<svg");
