@@ -53,6 +53,11 @@ export type RoleScope = 'resource' | 'tenant'
 // rejected as custom names. Their semantics stay the fixed FGA relations, not capability bundles.
 const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
   { name: 'viewer', capabilities: ['view'] },
+  // #536 / ADR-188 §6: `commenter` joins the list. #529 gave comment a per-principal space leaf, and the
+  // Members picker could grant it while this list did not name it — the product spoke with two voices
+  // about what a role IS. §6 merges the two pickers into one, so the fix is to agree rather than to keep
+  // the capability out of a list it is already grantable from.
+  { name: 'commenter', capabilities: ['view', 'comment'] },
   { name: 'editor', capabilities: ['view', 'comment', 'edit', 'publish'] },
   { name: 'moderator', capabilities: ['moderate'] },
   { name: 'manager', capabilities: ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings'] },

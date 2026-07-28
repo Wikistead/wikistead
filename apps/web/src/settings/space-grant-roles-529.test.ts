@@ -19,11 +19,23 @@ const listOf = (name: string): string[] => {
   return m[1]!.split(",").map((s) => s.trim().replace(/["']/g, "")).filter(Boolean);
 };
 
-// The server's built-in roles (apps/server/src/routes/roles.ts BUILT_IN_ROLES) as the Roles tab shows them.
-const BUILT_IN_ROLE_NOUNS = ["viewer", "editor", "moderator", "manager"];
+// The server's built-in roles, READ FROM THE SERVER rather than restated here — #536 added `commenter`
+// to that list, and a hand-copied constant would have gone stale silently, which is the same "two voices"
+// failure this file exists to prevent (just moved into the test). Now the pin compares the two real
+// surfaces, so either one changing alone is what turns it red.
+const ROLES_SRC = readFileSync(
+  fileURLToPath(new URL("../../../../apps/server/src/routes/roles.ts", import.meta.url)),
+  "utf8",
+);
+const BUILT_IN_ROLE_NOUNS = [...ROLES_SRC.matchAll(/\{\s*name:\s*'([a-z]+)',\s*capabilities:/g)].map((m) => m[1]!);
 const NOUN: Record<string, string> = { view: "viewer", comment: "commenter", edit: "editor", moderate: "moderator", manage: "manager" };
 
 describe("#529: the space grant picker offers exactly the roles the Roles tab lists", () => {
+  it("reads a non-empty built-in list from the server (a broken match must not pass vacuously)", () => {
+    expect(BUILT_IN_ROLE_NOUNS.length).toBeGreaterThanOrEqual(4);
+    expect(BUILT_IN_ROLE_NOUNS).toContain("manager");
+  });
+
   it("offers no capability whose noun is absent from the built-in roles", () => {
     const offered = listOf("GRANTABLE").map((c) => NOUN[c] ?? c);
     expect(offered.filter((n) => !BUILT_IN_ROLE_NOUNS.includes(n))).toEqual([]);

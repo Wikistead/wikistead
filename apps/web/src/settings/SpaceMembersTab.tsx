@@ -25,14 +25,12 @@ interface SpaceCtx { spaceId: string; name: string }
 // lands at -1 and floats above the rest. A comment grant made through the API (or before this change) has
 // to display correctly.
 const CAP_ORDER: PageRelation[] = ["view", "comment", "edit", "moderate", "manage"];
-// GRANTABLE is what this picker OFFERS, and it deliberately stops at the four built-in roles the Roles tab
-// lists. Offering `commenter` here made the product speak with two voices: a name that is a role in one
-// screen and absent from the other, while the standing ruling was that the built-in roles are not
-// changing yet — whether `viewer` should include commenting is a question about what viewer MEANS, and it
-// belongs to that decision, not to this dropdown. The capability keeps working server-side; the place it
-// becomes grantable is #514 / ADR-188 §6, where built-in and custom roles merge into ONE assignment UI and
-// the two-lists problem stops existing. Adding it back before then re-creates the mismatch.
-const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
+// #536 / ADR-188 §6: ONE picker, built-ins beside custom roles. `commenter` was held back because
+// offering it here while the Roles tab did not list it made the product speak with two voices — a name
+// that was a role on one screen and absent from the other. That was a symptom of having two pickers, and
+// this slice is the place the earlier note pointed at: with a single list there is no other list to
+// disagree with, so the capability becomes grantable by the same act that removes the mismatch.
+const GRANTABLE: PageRelation[] = ["view", "comment", "edit", "moderate", "manage"];
 // #445the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.
@@ -62,6 +60,9 @@ export function SpaceMembersTab() {
   const [picked, setPicked] = useState<{ grantee: string; label: string } | null>(null);
   const [groupName, setGroupName] = useState("");
   const [capability, setCapability] = useState<PageRelation>("view");
+  // #536: ONE selection for the merged list. The prefix says which mechanism the choice belongs to, so the
+  // add handler dispatches on data rather than inferring it from the shape of an id.
+  const [pick, setPick] = useState<string>("builtin:view");
   const candidates = useMemberCandidates(spaceId, picked ? "" : query);
   const groups = useTenantGroups(spaceId, mode === "group");
 
@@ -101,7 +102,26 @@ export function SpaceMembersTab() {
     return roleNameBySub.get(sub) || sub; // server-resolved name; raw sub only for a departed/cross-tenant one
   };
 
-  const add = () => {
+  // #536 / ADR-188 §6: one control, two mechanisms underneath. A custom role goes through the assignment
+  // path (its bundle expands server-side); a built-in goes through the grant path. Either way the server
+  // re-gates on space `manage` — the merge is a UI convenience and moves no authority.
+  const addUnified = () => {
+    if (pick.startsWith("role:")) {
+      const id = pick.slice("role:".length);
+      // Groups: the assignment path takes a group PRINCIPAL, the same one the mapping feature uses.
+      const principal = mode === "group" ? (groupName ? `group:${groupName}#member` : "") : (picked?.grantee ?? "");
+      if (!id || !principal) return;
+      assignRole.mutate({ roleId: id, resourceType: "space", resourceId: spaceId, principal }, {
+        onSuccess: () => { notify.success(t("toast.accessGranted")); setPicked(null); setQuery(""); setGroupName(""); },
+        onError: () => notify.error(t("toast.actionFailed")),
+      });
+      return;
+    }
+    setCapability(pick.slice("builtin:".length) as PageRelation);
+    addBuiltIn(pick.slice("builtin:".length) as PageRelation);
+  };
+
+  const addBuiltIn = (capability: PageRelation) => {
     if (mode === "group") {
       if (!groupName) return;
       grant.mutate({ groupName, capability }, {
@@ -175,15 +195,22 @@ export function SpaceMembersTab() {
           itemTestId="space-grant-candidate"
         />
         )}
+        {/* #536 / ADR-188 §6: built-in roles and custom roles are ONE list. They remain two mechanisms
+            underneath (a built-in is a capability grant, a custom role expands its bundle), but that is an
+            implementation fact and was never a reason to make someone choose which of two controls to use.
+            The value carries the kind so the click below dispatches without guessing. */}
         <Select
-          value={capability}
-          onChange={(v) => setCapability(v as PageRelation)}
+          value={pick}
+          onChange={setPick}
           ariaLabel={t("spaceMembers.capability")}
           testId="space-grant-capability"
           size="sm"
-          options={GRANTABLE.map((c) => ({ value: c, label: capNoun(c) }))}
+          options={[
+            ...GRANTABLE.map((c) => ({ value: `builtin:${c}`, label: capNoun(c) })),
+            ...customRoles.map((r) => ({ value: `role:${r.id}`, label: r.name })),
+          ]}
         />
-        <Button variant="primary" size="sm" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending} onClick={add} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
+        <Button variant="primary" size="sm" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending || assignRole.isPending} onClick={addUnified} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
       </div>
 
       <div className="flex flex-col gap-1" data-testid="space-grant-list">
