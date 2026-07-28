@@ -62,7 +62,7 @@ export function SpaceGroupMappings({ spaceId }: { spaceId: string }) {
           )}>{t("adminRoles.mappingAdd")}</Button>
       </div>
 
-      <div className="flex flex-col gap-1" data-testid="space-mapping-list">
+      <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-mapping-list">
         {mappings.data?.map((m) => (
           <div key={m.id} className="flex items-center gap-2 text-sm" data-testid="space-mapping-row">
             <span className="min-w-0 truncate font-medium">{m.groupName}</span>
