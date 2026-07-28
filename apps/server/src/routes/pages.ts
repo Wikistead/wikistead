@@ -3334,6 +3334,27 @@ export const LIST_OBJECTS_TRUNCATION_FLOOR = 1000
 // DB (RLS-scoped) as candidates, then the same fail-closed filterAuthorized confirm decides every
 // entry. No ListObjects ceiling applies, and `capped` means what it says (the candidate window
 // overflowed, so the dictionary MAY be missing older titles).
+// #541 confirm `ids` in slices, stopping when the time budget is spent. Every id in the result
+// was individually confirmed (same fail-closed filterAuthorized); ids the budget never reached are
+// simply ABSENT — never allowed by default. `exhausted` tells the caller the answer is partial.
+async function confirmWithinBudget(
+  fga: OpenFgaClient,
+  principal: string,
+  ids: string[],
+  budgetMs: number,
+  signal?: AbortSignal,
+): Promise<{ confirmed: Set<string>; exhausted: boolean }> {
+  const SLICE = 200 // 4 chunks of 50 → one 4-lane wave per slice
+  const started = Date.now()
+  const confirmed = new Set<string>()
+  for (let i = 0; i < ids.length; i += SLICE) {
+    if (Date.now() - started > budgetMs) return { confirmed, exhausted: true }
+    const part = await filterAuthorized(fga, principal, 'view', ids.slice(i, i + SLICE), undefined, 'page', 4, signal)
+    for (const id of part) confirmed.add(id)
+  }
+  return { confirmed, exhausted: false }
+}
+
 export async function getTitleDictionary(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -3341,8 +3362,16 @@ export async function getTitleDictionary(
   // navigated / connection closed). An abandoned dictionary kept flooding the checker for seconds and
   // starved the NEXT page-open's interactive checks — the measured bimodal sidebar. Abort throws (the
   // response is dead), never fabricates a verdict.
-  args: { subject: string; signal?: AbortSignal },
-): Promise<{ entries: TitleDictEntry[]; capped: boolean }> {
+  // `budgetMs` bounds the CONFIRM's checker occupancy (default 2000ms). the slow mode, measured on
+  // the dev log: an abandoned dictionary ran its full confirm for ~4.7s THROUGH the next page-open,
+  // and every interactive check of that open crawled beside it. The socket-close abort above does not
+  // fire behind the vite proxy (the backend socket is the proxy's, and it stays open), so the bound
+  // must be self-imposed: confirm in slices, stop when over budget, and return what has been CONFIRMED
+  // so far with `degraded: true`. A partial dictionary is strictly under-disclosure (fail closed on
+  // content) and the dictionary is an enhancement — a few links filling in on the next refetch beats
+  // the login-path checks starving for seconds.
+  args: { subject: string; signal?: AbortSignal; budgetMs?: number },
+): Promise<{ entries: TitleDictEntry[]; capped: boolean; degraded?: boolean }> {
   const isGuest = args.subject.startsWith('share_link:')
   const principal = isGuest ? DICT_ANON : args.subject
   const { objects } = await fga.listObjects({ user: principal, relation: 'view', type: 'page' })
@@ -3361,8 +3390,8 @@ export async function getTitleDictionary(
           ORDER BY updated_at DESC LIMIT ${DICT_CAP + 1}`
     const capped = rows.length > DICT_CAP
     const windowRows = capped ? rows.slice(0, DICT_CAP) : rows
-    const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id), undefined, 'page', 4, args.signal)
-    return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped }
+    const { confirmed, exhausted } = await confirmWithinBudget(fga, principal, windowRows.map((r) => r.id), args.budgetMs ?? 2000, args.signal)
+    return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped, ...(exhausted ? { degraded: true } : {}) }
   }
 
   if (ids.length === 0) return { entries: [], capped: false }
@@ -3385,8 +3414,8 @@ export async function getTitleDictionary(
   // gate, so it is exactly the caller that may take a few lanes — bounded at 4, which keeps #489's "not all
   // at once" while cutting 40 waves to 10. The confirm itself is unchanged: same relation, same fail-closed
   // handling, so what lands in the dictionary is identical.
-  const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id), undefined, 'page', 4, args.signal)
-  return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped }
+  const { confirmed, exhausted } = await confirmWithinBudget(fga, principal, windowRows.map((r) => r.id), args.budgetMs ?? 2000, args.signal)
+  return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped, ...(exhausted ? { degraded: true } : {}) }
 }
 
 // The hover-card excerpt (ADR-104 Slice B): a thin, view-gated read following the getPublished
