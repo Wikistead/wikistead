@@ -53,13 +53,6 @@ services:
       # checks queue inside FGA instead of starving everything else. Dev/self-host topology only —
       # a production deployment gives FGA its own datastore instance.
       OPENFGA_DATASTORE_MAX_OPEN_CONNS: "10"
-      # #541 part 5 (the measured culprit): during a page-open burst this container burned 440-650% CPU
-      # resolving check storms — starving the app server and vite of the very cores they answer from
-      # (the sidebar's slow mode: node idle, postgres idle, everything waiting). Halve the internal
-      # fan-out per BatchCheck and cap the container's cores so authz resolution can be busy without
-      # taking the machine with it.
-      OPENFGA_MAX_CONCURRENT_CHECKS_PER_BATCH_CHECK: "10"
-    cpus: 2.0
 
   meilisearch:
     image: getmeili/meilisearch:v1.10
