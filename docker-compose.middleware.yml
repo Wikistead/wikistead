@@ -47,6 +47,12 @@ services:
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
       OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
+      # #541: the FGA datastore shares the ONE dev postgres with the app DB. Uncapped (default 30
+      # conns), a 50-check batch saturated the instance and endpoints that never touch FGA measured
+      # 2s. The cap bounds FGA's share of the shared instance so interactive queries keep breathing;
+      # checks queue inside FGA instead of starving everything else. Dev/self-host topology only —
+      # a production deployment gives FGA its own datastore instance.
+      OPENFGA_DATASTORE_MAX_OPEN_CONNS: "10"
 
   meilisearch:
     image: getmeili/meilisearch:v1.10
