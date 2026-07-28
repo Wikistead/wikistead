@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
 import { useSession } from "../session/SessionProvider";
@@ -1334,9 +1335,21 @@ export function useBranding() {
 // connected editors (the security-timing channel).
 export function useTitleDictionary(pageId: string | undefined) {
   const { token } = useSession();
+  // #541: the dictionary yields the road at page-open. It is the single most expensive authorization
+  // fan-out a page load fires (a batch-check confirm over up to 2000 ids), and it went out in the same
+  // burst as everything else — so on a busy FGA the surfaces someone is actually waiting for (the space
+  // list, the page tree, the page itself) queued behind it, and the sidebar sat empty for seconds while
+  // an ENHANCEMENT (auto internal links) hogged the checker. A short hold-back lets the load-bearing
+  // queries take their slots first; links simply fill in a moment later, which they already did anyway
+  // (the dictionary is best-effort by design — see retry:false below).
+  const [yielded, setYielded] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setYielded(true), 1500);
+    return () => clearTimeout(t);
+  }, []);
   return useQuery({
     queryKey: ["title-dictionary", pageId],
-    enabled: !!pageId,
+    enabled: !!pageId && yielded,
     queryFn: () => apiFetch<{ entries: { id: string; title: string }[]; capped: boolean; degraded?: boolean }>(`/pages/${encodeURIComponent(pageId!)}/title-dictionary`, token),
     staleTime: 30_000,
     refetchInterval: 120_000,
