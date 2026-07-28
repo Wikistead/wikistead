@@ -311,6 +311,11 @@ export async function deleteSpace(
     // not depend on this — the pin display gate drops orphans — it's row hygiene.
     await deletePinsForResources(tx, [args.spaceId, ...pages.map((p) => p.id)])
     await sweepWatchesForResources(tx, [args.spaceId, ...pages.map((p) => p.id)]) // #320 / ADR-126: watch row hygiene
+    // #536 review 4: assignment rows on the space (and its pages) go with it. FGA is the authz truth
+    // so orphans confer nothing — this is row hygiene, and it matters more now that every built-in grant
+    // leaves a row (the pre-536 orphan population was custom-role assignments only).
+    await tx`DELETE FROM role_assignments WHERE (resource_type = 'space' AND resource_id = ${args.spaceId})
+             OR (resource_type = 'page' AND resource_id = ANY(${pages.map((p) => p.id)}))`
     await tx`DELETE FROM spaces WHERE id = ${args.spaceId}`
   })
 
@@ -542,13 +547,21 @@ export async function revokeSpaceAccess(
       auditAction: 'space.access_revoked', skipAudit: args.plan === undefined,
     })
   } else {
-    // A grant made before this migration has no row (deliberately — see 086: reconstructing rows from
-    // tuples would assert grants nobody made). It stays revocable exactly as it always was.
+    // A grant made before migration 086 has no row (deliberately — see 086: reconstructing rows from
+    // tuples would assert grants nobody made). It stays revocable — but not refcount-blind (#536 review)
+    // this pre-086 delete path knows nothing about assignment rows, so with a live custom-role assignment
+    // bundling the same capability it deleted the shared leaf out from under it. If any row still covers
+    // the capability, the tuples stay — the rowless grant is subsumed and "revoking" it removes nothing
+    // the surviving assignment does not still confer.
+    const covering = await db.sql`
+      SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+      WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId} AND a.principal = ${args.grantee}
+        AND ${args.capability} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
     await db.tx(async (tx) => {
       if (args.plan !== undefined) {
         await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
       }
-      await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
+      if (covering.length === 0) await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
     })
     await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   }
