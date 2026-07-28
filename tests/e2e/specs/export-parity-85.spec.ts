@@ -105,6 +105,15 @@ test("#85: the exported document and the app render the same document", async ({
   expect(html).toContain("Folded");
   expect(html, "…with its body readable").toContain("folded body text");
 
+  // #85: the fence keeps its chrome — the filename tab, the line numbers, and the highlighted line. The
+  // editor paints those; a file without them is not the same document.
+  // #85 fence chrome (filename tab / line numbers / highlighted lines) is implemented on the read surface
+  // and verified there (see the fence unit pin), but it is NOT asserted from this fixture: typing an info
+  // string like `title="app.js" showLineNumbers {2}` into CodeMirror trips its auto-closing of quotes and
+  // braces, so the document that reaches the page is not the one written here. Measured, not assumed — the
+  // print portal renders the tab and the numbers from a published body carrying that fence. Asserting it
+  // here needs a fixture path that does not go through typing; left undone rather than faked.
+
   // Acceptance 2: the diagram is a figure.
   expect(html, "a mermaid block reaches the file as a drawn figure").toContain("<svg");
   expect(html, "…not as its source").not.toContain("graph TD; A--&gt;B;");

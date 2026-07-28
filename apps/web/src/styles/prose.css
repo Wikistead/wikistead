@@ -75,6 +75,15 @@
 .wks-prose pre code { background: none; padding: 0; }
 /* the header row (shared classes with the CM baseTheme, mirrored here for surfaces outside .cm-editor —
  * the #86 lesson: baseTheme never reaches non-editor DOM like the public shell) */
+/* #85 (user ruling): the fence chrome outside the editor. The editor paints numbered and highlighted lines
+   from its own baseTheme, which does not reach past .cm-editor — so the reader, the print sheet and the
+   exported file showed a fence with its numbers and its highlight bands missing. Same classes, same look,
+   stated once here for every surface that is not the editor. */
+.wks-prose .cm-lp-code-line { display: block; }
+.wks-prose .cm-lp-code-numbered { padding-left: 3.2em; position: relative; }
+.wks-prose .cm-lp-code-numbered::before { content: attr(data-linenum); position: absolute; left: 0; width: 2.6em; text-align: right; color: var(--fg-dim, #888); user-select: none; opacity: 0.7; }
+.wks-prose .cm-lp-code-hl { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+
 .wks-prose .cm-lp-code-header { font-family: var(--font-ui); display: inline-flex; width: 100%; box-sizing: border-box; align-items: flex-end; justify-content: space-between; vertical-align: middle; font-size: 0.8em; }
 .wks-prose .cm-lp-code-tab { display: inline-flex; align-items: center; gap: 0.55em; padding: 0.1em 0.7em; background: var(--panel-2, #2d2d2e); color: var(--fg); border: 1px solid var(--border, #3a3a3a); border-bottom: none; border-radius: 6px 6px 0 0; position: relative; z-index: 1; margin-bottom: -1px; }
 .wks-prose .cm-lp-code-title { font-weight: 600; }
