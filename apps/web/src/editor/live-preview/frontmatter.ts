@@ -1,5 +1,6 @@
 import { WidgetType, type EditorView } from "@codemirror/view";
 import i18n from "../../i18n";
+import { ICON_CLOSE } from "../macros/md-render"; // #544: trusted constant SVG icons
 import { tagSuggestSource } from "./decorations";
 
 // #413 the suggest trigger glyph — Lucide "chevron-down" as a trusted inline constant (the same
@@ -144,7 +145,7 @@ export class FrontmatterWidget extends WidgetType {
         rm.className = "cm-lp-frontmatter-remove";
         rm.setAttribute("data-testid", `fm-tag-remove-${t.tag}`);
         rm.setAttribute("aria-label", `remove ${t.display}`);
-        rm.textContent = "×";
+        rm.innerHTML = ICON_CLOSE; // #544: trusted constant SVG (glyph rendering is font-dependent); no user input
         // interactive DOM inside an atom: stopPropagation on mousedown so CM neither moves the caret nor
         // treats it as an atom click (the #265 lesson); keydown still bubbles (Escape works).
         rm.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });

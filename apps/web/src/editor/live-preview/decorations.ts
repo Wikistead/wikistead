@@ -26,7 +26,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
-import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, dispatchMacroRender } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, dispatchMacroRender, ICON_CLOSE, ICON_DOWNLOAD } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -483,7 +483,7 @@ class TodoDemoteWidget extends WidgetType {
     btn.className = "cm-lp-todo-demote";
     btn.dataset.tip = "Remove the progress ring (back to a plain task list)";
     btn.setAttribute("data-testid", "todo-demote");
-    btn.textContent = "✕";
+    btn.innerHTML = ICON_CLOSE; // #544: trusted constant SVG (glyph rendering is font-dependent); no user input
     btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); demoteTodoToTaskList(view, this.from); });
     return btn;
   }
@@ -1086,10 +1086,10 @@ function openAttachmentLightbox(view: EditorView, id: string, name: string): voi
   title.textContent = `📎 ${name || "attachment"}`;
   const btnCss = "border:none;background:transparent;cursor:pointer;padding:2px 8px;font-size:1.05em;color:inherit;opacity:.75;border-radius:6px";
   const dl = document.createElement("button");
-  dl.type = "button"; dl.style.cssText = btnCss; dl.dataset.tip = "Download"; dl.textContent = "⤓";
+  dl.type = "button"; dl.style.cssText = btnCss; dl.dataset.tip = "Download"; dl.innerHTML = ICON_DOWNLOAD; // #544: trusted constant SVG
   dl.setAttribute("data-testid", "attachment-lightbox-download");
   const close = document.createElement("button");
-  close.type = "button"; close.style.cssText = btnCss; close.dataset.tip = "Close"; close.textContent = "✕";
+  close.type = "button"; close.style.cssText = btnCss; close.dataset.tip = "Close"; close.innerHTML = ICON_CLOSE; // #544: trusted constant SVG
   close.setAttribute("data-testid", "attachment-lightbox-close");
   bar.append(title, dl, close);
   const frame = document.createElement("iframe");
@@ -1154,7 +1154,7 @@ class AttachmentChipWidget extends WidgetType {
     dl.dataset.tip = "Download";
     dl.setAttribute("aria-label", "Download");
     dl.setAttribute("data-testid", "attachment-download");
-    dl.textContent = "⤓";
+    dl.innerHTML = ICON_DOWNLOAD; // #544: trusted constant SVG (glyph rendering is font-dependent); no user input
     dl.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
     dl.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); triggerAttachmentDownload(view, this.id); });
     chip.appendChild(dl);
@@ -1212,7 +1212,7 @@ class AttachmentCardWidget extends WidgetType {
     dl.dataset.tip = "Download";
     dl.setAttribute("aria-label", "Download");
     dl.setAttribute("data-testid", "attachment-download");
-    dl.textContent = "⤓";
+    dl.innerHTML = ICON_DOWNLOAD; // #544: trusted constant SVG (glyph rendering is font-dependent); no user input
     // #265 guard: interactive DOM inside an atom widget must stopPropagation on mousedown
     // (NOT ignoreEvent=true, which would swallow keydown and break Esc).
     dl.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });

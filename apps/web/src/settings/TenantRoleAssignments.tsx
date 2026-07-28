@@ -6,6 +6,7 @@ import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
 import type { Member } from "../data/membersApi";
+import { X } from "lucide-react"; // #544: icon component, not a text glyph
 
 // #514 / ADR-188 slice 4: TENANT-scope role assignment lives with the MEMBERS, not on the Roles tab.
 //
@@ -80,7 +81,7 @@ export function TenantRoleAssignments({ members }: { members: readonly Member[] 
               <span key={h.id} className="inline-flex items-center gap-1 text-xs text-fg-dim">
                 {h.roleName}
                 <IconButton aria-label={t("adminRoles.unassign")} data-testid="tenant-assignment-remove" variant="danger"
-                  onClick={() => unassign.mutate(h.id, { onSuccess: () => notify.success(t("toast.saved")), onError })}>×</IconButton>
+                  onClick={() => unassign.mutate(h.id, { onSuccess: () => notify.success(t("toast.saved")), onError })}><X size={14} /></IconButton>
               </span>
             ))}
           </div>

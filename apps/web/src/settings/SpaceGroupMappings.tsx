@@ -6,6 +6,7 @@ import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { useAssignableRoles, useResourceRoleMappings, useCreateRoleMapping, useDeleteRoleMapping } from "../data/queries";
+import { X } from "lucide-react"; // #544: icon component, not a text glyph
 
 // #514 / ADR-188 §8: a group→role MAPPING is configured with the same scope symmetry as an assignment —
 // a mapping onto a SPACE role belongs to that space's settings, a mapping onto a tenant role to the
@@ -69,7 +70,7 @@ export function SpaceGroupMappings({ spaceId }: { spaceId: string }) {
             {/* #504: deleting a mapping revokes the grant it owns — red trigger AND a confirm, matching
                 the tenant console's treatment of the same action. */}
             <IconButton aria-label={t("adminRoles.mappingRemove")} data-testid="space-mapping-remove" variant="danger"
-              onClick={() => setDeleting({ id: m.id, groupName: m.groupName, roleName: m.roleName })}>×</IconButton>
+              onClick={() => setDeleting({ id: m.id, groupName: m.groupName, roleName: m.roleName })}><X size={14} /></IconButton>
           </div>
         ))}
         {(mappings.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.mappingEmpty")}</p>}

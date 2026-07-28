@@ -5,6 +5,7 @@ import { Button, IconButton } from "../ui/Button";
 import { RadioGroup } from "../ui/RadioGroup";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
+import { X } from "lucide-react"; // #544: icon component, not a text glyph
 
 const label = "mb-1 mt-3.5 block text-sm text-fg-dim";
 
@@ -102,7 +103,7 @@ export function AdminEnrollmentSection() {
                   <span className="min-w-0 flex-1 truncate">{d.domain}</span>
                   <span className={d.verified ? "text-[0.8em] text-[#2da44e]" : "text-[0.8em] text-fg-dim"}>{d.verified ? t("adminEnroll.verifiedBadge") : t("adminEnroll.pendingBadge")}</span>
                   {!d.verified && <Button variant="default" size="sm" disabled={verifyDomain.isPending} onClick={() => onVerify(d.domain)} data-testid="enroll-domain-verify">{t("adminEnroll.verify")}</Button>}
-                  <IconButton aria-label={t("adminEnroll.removeDomain")} data-testid="enroll-domain-remove" onClick={() => removeDomain.mutate(d.domain)}>×</IconButton>
+                  <IconButton aria-label={t("adminEnroll.removeDomain")} data-testid="enroll-domain-remove" onClick={() => removeDomain.mutate(d.domain)}><X size={14} /></IconButton>
                 </div>
                 {!d.verified && (
                   <p className="m-0 mt-1 break-all text-xs text-fg-dim">{t("adminEnroll.dnsHint")} <code>{d.challengeRecord}</code> = <code>{d.challengeValue}</code></p>
