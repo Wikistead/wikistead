@@ -173,6 +173,17 @@ import { useHeadingHashLanding, replaceHashWith } from "../toc/useHashLanding"; 
 import { PageTitle } from "./PageTitle";
 import { PrintSurface } from "./PrintSurface"; // #505the print-only static (paginating) surface
 import { downloadBrowserExport, printBrowserExport } from "../data/exportBrowser"; // #85 / ADR-194 Option B
+
+// The editor re-reports these on every document change, which is every keystroke. Setting state with a
+// fresh array each time re-renders the route, and the route hands <Editor> inline callbacks — so its memo
+// misses and the editor re-renders too, breaking the isolation invariant (ADR-013: content lives in
+// Y.Text/CM, not in React). Measured: 19 typed characters produced 38 editor renders. Keep the previous
+// value when nothing actually changed; React then skips the update entirely.
+const sameHeadings = (a: Heading[], b: Heading[]) =>
+  a.length === b.length && a.every((h, i) => h.from === b[i]!.from && h.text === b[i]!.text && h.level === b[i]!.level);
+// visibleHeadings deliberately keeps NO guard: measured, adding one broke the narrow overlay TOC's
+// two-layer highlight, which depends on that update arriving. It also does not need one — the set changes
+// on SCROLL, not on typing, so it is not part of the keystroke path this is about.
 import { PageMeta } from "./PageMeta";
 import { ProgressRing } from "./ProgressRing"; // #290: title-band page-progress ring
 import { useTheme } from "./ThemeProvider"; // #376: public reader remounts on theme switch (diagram re-render)
@@ -354,7 +365,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
   const [visibleHeadings, setVisibleHeadings] = useState<number[]>([]); // #345light-layer set
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
-  const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
+  const onHeadings = useCallback((h: Heading[]) => setHeadings((prev) => (sameHeadings(prev, h) ? prev : h)), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
   const onVisibleHeadings = useCallback((f: number[]) => setVisibleHeadings(f), []);
   // #313: /p/:id#<slug> deep link — once the doc's headings include the hash slug, land on it via the
@@ -364,7 +375,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // #290 / ADR-114 (A): the page's live GFM-checkbox progress → a ring in the title band. Editor fires this
   // (display-only, dedup'd, like onHeadings — NOT the dirty-signal path), the title band shows it.
   const [taskProgress, setTaskProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
-  const onTaskProgress = useCallback((p: { done: number; total: number }) => setTaskProgress(p), []);
+  const onTaskProgress = useCallback((p: { done: number; total: number }) => setTaskProgress((prev) => (prev.done === p.done && prev.total === p.total ? prev : p)), []);
   // #192: scroll-activity fan-out — the editor fires onScrollActivity on each scroll; the narrow-screen
   // TOC overlay subscribes to show itself while scrolling. A ref'd Set (not state) so scrolling never
   // re-renders the route; the callbacks are stable so <Editor>'s memo holds.
@@ -1077,7 +1088,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
   const [visibleHeadings, setVisibleHeadings] = useState<number[]>([]); // #345light-layer set
   const tocJumpRef = useRef<((from: number) => void) | null>(null);
-  const onHeadings = useCallback((h: Heading[]) => setHeadings(h), []);
+  const onHeadings = useCallback((h: Heading[]) => setHeadings((prev) => (sameHeadings(prev, h) ? prev : h)), []);
   const onActiveHeading = useCallback((f: number | null) => setActiveHeading(f), []);
   const onVisibleHeadings = useCallback((f: number[]) => setVisibleHeadings(f), []);
   // #313: /share/:linkId#<slug> deep link (same device as the member surface).
