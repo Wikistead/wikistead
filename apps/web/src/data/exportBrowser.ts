@@ -10,15 +10,23 @@ import { buildExportDocument } from "./exportDocument";
 // Render `md` into a detached-but-LAID-OUT host. Off-screen rather than display:none on purpose: a diagram
 // renderer measures text, and inside a display:none subtree every measurement is zero, which produces a
 // drawn-but-collapsed figure. Caller removes the host.
-async function renderBody(md: string): Promise<HTMLElement> {
-  const { renderMarkdownToDom } = await import("../editor/macros/md-render");
+export interface ExportHosts {
+  // #505 review rejection: the export rendered `renderMarkdownToDom(md)` with no host seams at all, so a
+  // HOST-rendered diagram (plantuml goes to the server for its picture) had nobody to ask and fell back to
+  // its source. On screen it is a figure. Passing the same seam the editor uses is what makes the file
+  // agree with the page; anything the host cannot render still degrades to its source, as it does live.
+  readonly diagram?: { render(lang: string, source: string): Promise<Blob | { ok: true; blob: Blob } | { ok: false; reason?: string } | null>; handles(lang: string): boolean };
+}
+
+async function renderBody(md: string, hosts?: ExportHosts): Promise<HTMLElement> {
+  const { renderMarkdownToDom, withDiagramHost } = await import("../editor/macros/md-render");
   const host = document.createElement("div");
   host.className = "wks-prose";
   host.setAttribute("data-export-staging", "");
   host.setAttribute("aria-hidden", "true");
   host.style.cssText = "position:fixed;left:-10000px;top:0;width:46rem;pointer-events:none;";
   document.body.appendChild(host);
-  host.appendChild(renderMarkdownToDom(md));
+  withDiagramHost(hosts?.diagram ?? null, () => host.appendChild(renderMarkdownToDom(md)));
   await settle(host);
   return host;
 }
@@ -38,8 +46,8 @@ async function settle(host: HTMLElement, budgetMs = 4000, quietMs = 150): Promis
   }
 }
 
-async function withDocument<T>(md: string, title: string, use: (html: string) => T | Promise<T>): Promise<T> {
-  const host = await renderBody(md);
+async function withDocument<T>(md: string, title: string, hosts: ExportHosts | undefined, use: (html: string) => T | Promise<T>): Promise<T> {
+  const host = await renderBody(md, hosts);
   try {
     return await use(buildExportDocument({ title, body: host }));
   } finally {
@@ -48,8 +56,8 @@ async function withDocument<T>(md: string, title: string, use: (html: string) =>
 }
 
 // Download the page as a standalone .html file.
-export async function downloadBrowserExport(md: string, title: string): Promise<void> {
-  await withDocument(md, title, (html) => {
+export async function downloadBrowserExport(md: string, title: string, hosts?: ExportHosts): Promise<void> {
+  await withDocument(md, title, hosts, (html) => {
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -65,8 +73,8 @@ export async function downloadBrowserExport(md: string, title: string): Promise<
 
 // Print the same document. The frame is the browser's own print path — the document it prints is the file
 // the download produces, byte for byte, so what someone sees on paper is what they would have received.
-export async function printBrowserExport(md: string, title: string): Promise<void> {
-  await withDocument(md, title, async (html) => {
+export async function printBrowserExport(md: string, title: string, hosts?: ExportHosts): Promise<void> {
+  await withDocument(md, title, hosts, async (html) => {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
     iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";

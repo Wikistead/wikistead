@@ -104,6 +104,15 @@ describe("#85: the browser-built export document", () => {
     expect(out).toContain("hidden body");
   });
 
+  // #505 review rejection: the app's stylesheet travels with the file, and its print rule hides everything
+  // that is not the print root — which, inside the exported document, was the document itself. Printing
+  // the file produced a blank sheet. The root wears the marker so that rule points at it.
+  it("marks its root as the print root, so the app's print rule does not hide it", () => {
+    const out = buildExportDocument({ title: "t", body: surface("<p>content</p>"), css: "@media print{body > :not([data-print-root]){display:none !important}}" });
+    expect(out).toMatch(/<main[^>]*data-print-root/);
+    expect(out).toContain("content");
+  });
+
   it("does not mutate the surface it was given", () => {
     const live = surface('<div><button class="cm-lp-code-copy">Copy</button><p onclick="x()">p</p></div>');
     buildExportDocument({ title: "t", body: live, css: "" });

@@ -52,6 +52,12 @@ const FIXTURE = [
   "graph TD; A-->B;",
   "```",
   "",
+  "```plantuml",
+  "@startuml",
+  "A -> B",
+  "@enduml",
+  "```",
+  "",
 ].join("\n");
 
 // The properties that made the rejection: "green sans headings against black monospace ones", a sans body,
@@ -80,6 +86,8 @@ const readProbes = `(root, probes) => {
 
 test("#85: the exported document and the app render the same document", async ({ page }) => {
   test.setTimeout(150_000);
+  const plantumlAsks: string[] = [];
+  page.on("request", (r) => { if (r.url().includes("/plantuml/render")) plantumlAsks.push(r.url()) });
   const id = await openScratch(page, `exportparity-${Date.now()}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -132,9 +140,20 @@ test("#85: the exported document and the app render the same document", async ({
   // print portal renders the tab and the numbers from a published body carrying that fence. Asserting it
   // here needs a fixture path that does not go through typing; left undone rather than faked.
 
-  // Acceptance 2: the diagram is a figure.
+  // Acceptance 2: the diagram is a figure — for BOTH kinds. mermaid draws itself in the browser; plantuml
+  // is drawn by the host, and the export had nobody to ask, so it carried the fence source while the screen
+  // showed the picture (#505 review rejection).
   expect(html, "a mermaid block reaches the file as a drawn figure").toContain("<svg");
   expect(html, "…not as its source").not.toContain("graph TD; A--&gt;B;");
+  // A host-rendered diagram (plantuml) is drawn by the SERVER, and this environment has no plantuml
+  // service — an unconfigured host answers 204 and the fence degrades to its source, which is correct
+  // behaviour here and cannot be asserted away. What broke was that the export never ASKED: it rendered
+  // with no host seam at all, so even a configured instance got source. That is what this pins.
+  expect(plantumlAsks.length, "the export asked the host to draw the plantuml block").toBeGreaterThan(0);
+
+  // #505 review rejection: the file must survive being PRINTED. The app's stylesheet travels with it, and its
+  // print rule hides everything that is not the print root — which was this document itself.
+  expect(html, "the document names itself the print root").toMatch(/<main[^>]*data-print-root/);
 
   // Read the same properties from the app…
   const appProbes = (await page.evaluate(

@@ -12,6 +12,12 @@
 //   2. It carries no CHROME. Copy buttons, edit affordances, presence boxes and the rest are the app's
 //      controls, not the document's content; a printed page with a "Copy" button on it is a bug.
 //
+// The root carries `data-print-root` for a measured reason: the app's own stylesheet travels with this
+// file, and it contains `@media print { body > :not([data-print-root]) { display: none !important } }` —
+// the rule that hides the live app so the print portal can have the sheet. Inside the exported document
+// that selector matches the document's OWN root, so printing the file blanked it (measured: display none,
+// width 0). Wearing the marker makes the rule mean here what it means there: this is the thing to print.
+//
 // It does NOT change anything the server serves (public pages, SSR, guest surfaces stay server-rendered and
 // server-sanitized — ADR-059 as amended by ADR-194).
 
@@ -143,7 +149,7 @@ body{margin:0;background:var(--bg,#fff);color:var(--fg,#1f2328)}
 </style>
 </head>
 <body>
-<main class="wks-export-doc wks-prose">
+<main class="wks-export-doc wks-prose" data-print-root>
 <h1 class="wks-export-title">${t}</h1>
 ${clone.innerHTML}
 </main>
