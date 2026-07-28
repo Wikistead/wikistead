@@ -26,7 +26,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
-import { renderMarkdownToDom, renderCalloutPanel, setPendingBaseOffset, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, dispatchMacroRender } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, dispatchMacroRender } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";

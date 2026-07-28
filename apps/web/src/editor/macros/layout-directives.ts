@@ -1,8 +1,8 @@
-import type { DirectiveMacro, EditUI, EnterTarget } from "./registry";
+import type { DirectiveMacro, EditUI, EnterTarget, MacroContext } from "./registry";
 import { asMacroSource } from "./registry";
 import { parseDirectiveOpen } from "./directive-parser";
 import i18n from "../../i18n";
-import { renderMarkdownToDom, appendMarkdownInto, takePendingBaseOffset } from "./md-render";
+import { renderMarkdownToDom, appendMarkdownInto, instanceKeyFor } from "./md-render";
 // #85 slice 2: the DOM-free export half (parseLayoutItems + the htmlRenders) is the single source of
 // truth in @wikistead/macro-render, shared with the server export renderer. This file adds only the
 // DOM liveRender + editor metadata on top.
@@ -26,8 +26,16 @@ export { parseLayoutItems }; // re-export: existing editor imports (tabs/columns
 // (§1) — so this file no longer exposes an editUI; the container stays a flex-widget ATOM (layout never breaks,
 // #196), the caret never reveals raw, and single Y.Text is preserved by the island's commit-on-blur range edit.
 
-export function columnsLiveRender(body: string): HTMLElement {
-  const base = takePendingBaseOffset(); // #215 / ADR-100: absolute base of `body` (null = untagged render)
+export function columnsLiveRender(body: string, ctx?: MacroContext): HTMLElement {
+  // #450 slice 5b (ruling R1): the container asks the HOST to render each column, passing only an offset
+  // inside its own body. It used to take the absolute base out of a module singleton and do the addition
+  // itself — a macro computing document positions, which is what the ruling closes. `takePendingBaseOffset`
+  // is gone with it.
+  const renderInto = (el: HTMLElement, src: string, relativeOffset: number) => {
+    el.classList.add("wks-prose");
+    if (ctx?.renderMarkdown) el.appendChild(ctx.renderMarkdown(src, relativeOffset));
+    else appendMarkdownInto(el, src); // no host render (static/preview sinks): plain, untagged content
+  };
   const row = document.createElement("div");
   row.className = "cm-lp-columns";
   row.setAttribute("data-testid", "macro-columns");
@@ -37,7 +45,7 @@ export function columnsLiveRender(body: string): HTMLElement {
     if (!c.content.trim()) col.classList.add("cm-lp-column-empty"); // #278 H: hover affordance for an empty slot
     // The column SLOT is not tagged (a click on empty slot area selects the container, ADR-100 §1);
     // only real nested macros inside get data-mac-pos, via renderMarkdownToDom with the column base.
-    appendMarkdownInto(col, c.content, base != null ? base + c.contentOffset : undefined);
+    renderInto(col, c.content, c.contentOffset);
     row.appendChild(col);
   }
   return row;
@@ -195,7 +203,7 @@ export const detailsMacro: DirectiveMacro = {
 // the absolute doc offset of its body — stable while the doc above is unchanged). Pure display state: no
 // doc/offset/presence is touched (same discipline as nestedSelectionField). Safe as a module singleton for
 // the same reason as the render-depth counter — rendering is fully synchronous.
-const tabActiveIndex = new Map<number, number>();
+const tabActiveIndex = new Map<string, number>();
 
 // #278 item 1 (island lifecycle): the slot-island host (decorations.ts) commits + closes an open
 // island when the user switches tabs. Its commit REBUILDS the widget, and the rebuild restores the active
@@ -204,11 +212,17 @@ const tabActiveIndex = new Map<number, number>();
 // the commit can rebuild the widget before activate ever runs). Display-only state, same discipline as
 // the map itself.
 export function setActiveTabIndex(base: number, i: number): void {
-  tabActiveIndex.set(base, i);
+  // The host holds the anchor; both sides convert through the SAME function (md-render.instanceKeyFor),
+  // so the key the macro writes and the key the host writes cannot drift apart (#450 5b).
+  const key = instanceKeyFor(base);
+  if (key) tabActiveIndex.set(key, i);
 }
 
-export function tabsLiveRender(body: string): HTMLElement {
-  const base = takePendingBaseOffset(); // #215 / ADR-100: absolute base of `body` (null = untagged render)
+export function tabsLiveRender(body: string, ctx?: MacroContext): HTMLElement {
+  // #450 slice 5b: no absolute base here any more. The host renders each panel (passing an offset inside
+  // this body), and the open-tab memory is keyed by the host's opaque instance token — display-only state
+  // that survives a re-render without the macro ever holding a document position (ruling R1).
+  const key = ctx?.instanceKey ?? null;
   const items = parseLayoutItems(body, "tab");
   const wrap = document.createElement("div");
   wrap.className = "cm-lp-tabs";
@@ -225,11 +239,12 @@ export function tabsLiveRender(body: string): HTMLElement {
     const panel = document.createElement("div");
     panel.className = "cm-lp-tabpanel";
     if (!t.content.trim()) panel.classList.add("cm-lp-tabpanel-empty"); // #278 H: hover affordance for an empty tab
-    appendMarkdownInto(panel, t.content, base != null ? base + t.contentOffset : undefined);
+    if (ctx?.renderMarkdown) { panel.classList.add("wks-prose"); panel.appendChild(ctx.renderMarkdown(t.content, t.contentOffset)); }
+    else appendMarkdownInto(panel, t.content); // no host render (static/preview sinks): plain, untagged
     const activate = () => {
       for (const b of Array.from(bar.children)) b.classList.toggle("cm-lp-tab-active", b === btn);
       for (const p of Array.from(panels.children)) (p as HTMLElement).classList.toggle("cm-lp-tabpanel-active", p === panel);
-      if (base != null) tabActiveIndex.set(base, i); // #174 point 2: remember across re-renders (display-only)
+      if (key != null) tabActiveIndex.set(key, i); // #174 point 2: remember across re-renders (display-only)
     };
     // Switching tabs is DISPLAY-ONLY local state. stopPropagation so a tab click doesn't enter the atom.
     btn.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); activate(); });
@@ -237,7 +252,7 @@ export function tabsLiveRender(body: string): HTMLElement {
     panels.appendChild(panel);
     // #174 point 2: restore the persisted active tab (keyed by the macro anchor) instead of always the first,
     // so a re-render triggered by a nested-macro click keeps the tab the user was on. Clamp to a valid index.
-    const wantActive = Math.min(base != null ? (tabActiveIndex.get(base) ?? 0) : 0, items.length - 1);
+    const wantActive = Math.min(key != null ? (tabActiveIndex.get(key) ?? 0) : 0, items.length - 1);
     if (i === wantActive) activate();
   });
   wrap.append(bar, panels);
@@ -249,7 +264,8 @@ export function tabsLiveRender(body: string): HTMLElement {
 // makes entry match what the reader is looking at. Without an anchor (an untagged render) it falls
 // back to the first tab.
 export function tabsEnterTarget(source: string, base: number | null): EnterTarget | null {
-  const active = base != null ? (tabActiveIndex.get(base) ?? 0) : 0;
+  const key = instanceKeyFor(base);
+  const active = key != null ? (tabActiveIndex.get(key) ?? 0) : 0;
   return slotEnterTarget(source, "tab", active);
 }
 

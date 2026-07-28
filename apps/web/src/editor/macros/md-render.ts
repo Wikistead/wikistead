@@ -50,15 +50,28 @@ let nestedDirectiveDepth = 0;
 // #215 / ADR-100: source-anchor tagging so a nested macro rendered inside a columns/tabs widget can be
 // hit-tested back to its absolute doc range. `renderBase` is the absolute doc offset of the CURRENT
 // `src` slice (null = untagged / non-nested render — the branch is inert). When set, each nested-macro
-// root element is tagged `data-mac-pos = renderBase + node.from`. Safe as module singletons because
-// rendering is fully SYNCHRONOUS (same justification as nestedDirectiveDepth). `pendingBaseOffset`
-// bridges the ONE gap the narrow liveRender(body,{theme}) API can't cross: md-render stashes a nested
-// container's body base here right before dispatching to columns/tabs, which consume it via
-// takePendingBaseOffset; it is reset after each dispatch so it never leaks.
+// root element is tagged `data-mac-pos = renderBase + node.from`. Safe as a module singleton because
+// rendering is fully SYNCHRONOUS (same justification as nestedDirectiveDepth), and it is HOST state: a
+// macro can neither read nor write it.
+//
+// #450 slice 5b: `pendingBaseOffset` — the take-once singleton that handed columns/tabs the absolute
+// base of their body — IS GONE. It existed because the narrow `liveRender(body, {theme})` API had no way
+// to pass one, and the containers then did the arithmetic themselves. Under ruling R1 that is exactly
+// what a macro must not do, so the SDK's `renderMarkdown` closes over the base instead: the macro asks
+// for a render at an offset inside its own body and the host adds its own number.
 let renderBase: number | null = null;
-let pendingBaseOffset: number | null = null;
-export function setPendingBaseOffset(v: number | null): void { pendingBaseOffset = v; }
-export function takePendingBaseOffset(): number | null { const v = pendingBaseOffset; pendingBaseOffset = null; return v; }
+
+// #450 slice 5b: an opaque, stable token for "this macro instance", derived from its anchor by the HOST.
+// Containers key display-only state (the open tab) by it; it is a Map key and nothing else, so a macro
+// keeps its state across re-renders without ever holding a document position (ruling R1). Both sides
+// macro and host — go through this one function, so their keys cannot drift apart.
+const instanceKeys = new Map<number, string>();
+export function instanceKeyFor(base: number | null | undefined): string | undefined {
+  if (base == null) return undefined;
+  let k = instanceKeys.get(base);
+  if (!k) { k = `mi${instanceKeys.size}`; instanceKeys.set(base, k); }
+  return k;
+}
 
 // ADR-177 §2 (#450): THE macro dispatch. Every surface that turns a registered macro into DOM goes
 // through here — the CM widget, the fence sink and the directive sink — so "a macro that renders at top
@@ -79,7 +92,7 @@ export function takePendingBaseOffset(): number | null { const v = pendingBaseOf
 // greppable instead of implicit.
 export interface MacroDispatch {
   theme: MacroTheme
-  /** Body base handed to columns/tabs through the take-once singleton (the one gap the narrow API can't cross). */
+  /** Absolute doc offset of `body`. The host keeps it; the macro only ever names offsets INSIDE the body. */
   baseOffset?: number | null
   /** Count this render against the nesting cap (the directive sink does; the fence sink never has). */
   countDepth?: boolean
@@ -101,14 +114,25 @@ export function dispatchMacroRender(
   // The sinks hold plain slices of the document; the brand is asserted at this seam, exactly where the
   // call sites asserted it before, so the cast moves rather than multiplies.
   const src = body as MacroSource;
-  const usesBase = opts.baseOffset !== undefined;
+
   // #450 / ADR-177 slice 5a: the SDK is assembled HERE, the one seam every surface already goes through,
   // and nowhere else. effective = declared ∩ caller (the caller being whichever macro's render we are
   // inside), fresh per dispatch and frozen — see macro-sdk.ts for why each of those words is load-bearing.
   const caller = opts.caller !== undefined ? opts.caller : currentCallerCapabilities();
-  const sdk = createMacroSdk({ declared: declaredCapabilities(macro), caller, theme: opts.theme });
+  const sdk = createMacroSdk({
+    declared: declaredCapabilities(macro),
+    caller,
+    theme: opts.theme,
+    // #450 slice 5b: the base and the body are the host's knowledge, closed over here. A container asks
+    // for a render at an offset INSIDE its body; the addition happens on this side of the boundary, so
+    // `data-mac-pos` is still written by the host alone and a macro has no way to name another block.
+    baseOffset: opts.baseOffset ?? null,
+    body,
+    render: (src, absoluteOffset, effective) =>
+      withCallerCapabilities(effective, () => renderMarkdownToDom(src, absoluteOffset)),
+    instanceKey: instanceKeyFor(opts.baseOffset),
+  });
   if (opts.countDepth) nestedDirectiveDepth++;
-  if (usesBase) setPendingBaseOffset(opts.baseOffset ?? null);
   try {
     // The host's own re-entries during THIS render (a container body, the callout panel, the plain
     // fallback) must not hand a deeper macro more than this one holds, so the effective set is published
@@ -124,7 +148,6 @@ export function dispatchMacroRender(
     if (opts.onThrow === "throw") throw err;
     return null; // a macro that throws must never break the surrounding render
   } finally {
-    if (usesBase) setPendingBaseOffset(null);
     if (opts.countDepth) nestedDirectiveDepth--;
   }
 }
