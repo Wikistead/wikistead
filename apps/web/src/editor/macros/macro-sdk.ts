@@ -27,10 +27,21 @@ import type { MacroTheme } from "./registry";
 
 export type MacroCapability = "theme" | "render-markdown" | "host-list" | "design-tokens";
 
-// What a macro that declares nothing gets. Every first-party macro is in this position today (no macro
-// carries a `capabilities` field yet), and it is exactly what they receive now — so introducing the SDK
-// changes no macro's surface. A macro that DOES declare opts into the intersection rule with its list.
-export const DEFAULT_DECLARED: readonly MacroCapability[] = ["theme"];
+// What a macro that declares NOTHING gets — and imposes on what it nests.
+//
+// It is the whole brokered vocabulary, not `["theme"]`, and that was measured rather than chosen: with
+// `["theme"]` the first-party containers (columns/tabs/callout/details, none of which declare) stopped
+// handing their children `renderMarkdown`, so nested macros lost their `data-mac-pos` tags — the #215
+// hit-test data — and `:::children` nested in a column fell back to a placeholder in six browser tests.
+// Every first-party macro is in this position, and today they receive whatever the host installs; the SDK
+// must not change that by existing.
+//
+// The trade, stated plainly: a macro that declares nothing is HOST CODE, and the ladder rule (R2) bites
+// where it is aimed — at a macro that DECLARES, i.e. anything registered through the marketplace manifest
+// (#310 refuses a submission without a vocabulary-valid capability list). A declared macro gets exactly
+// its list intersected with its caller's, so it can neither hold more than it asked for nor more than the
+// macro rendering it.
+export const DEFAULT_DECLARED: readonly MacroCapability[] = ["theme", "render-markdown", "host-list", "design-tokens"];
 
 export function declaredCapabilities(macro: { capabilities?: readonly string[] }): ReadonlySet<string> {
   const raw = macro.capabilities;
