@@ -12,7 +12,7 @@ import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage, getPublished } from '../routes/pages.js'
 import { createShareLink, listShareLinks, revokeShareLink, revokeResourceShareLinks } from '../routes/share-links.js'
-import { drainAuditOutbox } from '../audit/outbox.js'
+import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -41,8 +41,12 @@ afterAll(async () => {
   await driver.deleteDoc(pageId).catch(() => {})
   await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {})
   await admin`DELETE FROM search_outbox WHERE page_id = ${pageId}`.catch(() => {})
-  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT}`.catch(() => {})
-  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${TENANT}`.catch(() => {})
+  // Scoped to THIS file's rows, not the whole tenant chain: `tenant_dev` is shared by several
+  // suite files that write an audit row and then assert on it, so a wholesale DELETE here
+  // deletes rows another running file is about to read (#482).
+  const targets = [`page:${pageId}`, `space:${spaceId}`]
+  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT} AND target = ANY(${targets})`.catch(() => {})
+  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${TENANT} AND target = ANY(${targets})`.catch(() => {})
   await admin`DELETE FROM pages WHERE id = ${pageId}`.catch(() => {})
   await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user' }).catch(() => {})
   await db.release()
@@ -97,7 +101,7 @@ describe('per-page access (grant/revoke/list)', () => {
 
   it('records a durable page.access_granted audit entry when entitled + plan passed (#177)', async () => {
     await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', grantee: 'user:pa-audit', relation: 'view', plan: 'team' })
-    expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
+    await drainAuditFor(admin, TENANT)
     const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
     expect(rows.some((r) => r.action === 'page.access_granted' && r.target === `page:${pageId}` && r.actor === 'user:dev-user')).toBe(true)
     await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) // clean the extra grantee tuple
@@ -298,7 +302,7 @@ describe('per-page private (ADR-098 allowlist)', () => {
 
   it('records a durable page.made_private audit entry when entitled + plan passed (#177)', async () => {
     await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', plan: 'team' })
-    expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
+    await drainAuditFor(admin, TENANT)
     const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
     expect(rows.some((r) => r.action === 'page.made_private' && r.target === `page:${pageId}` && r.actor === 'user:dev-user')).toBe(true)
   })

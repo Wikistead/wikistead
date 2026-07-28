@@ -19,7 +19,7 @@ import { buildApp } from '../app.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import { createSpace, deleteSpace, setSpacePublic, unsetSpacePublic, isSpacePublic } from '../routes/spaces.js'
 import { createPage, setPagePrivate, setPagePublic } from '../routes/pages.js'
-import { drainAuditOutbox } from '../audit/outbox.js'
+import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -135,7 +135,7 @@ describe('#277 exposure = public ∩ published ∩ not-private', () => {
     expect(enqueued).toContain(pubPage)
     expect(enqueued).toContain(privPage) // published (the doc-builder recomputes it to non-public)
     expect(enqueued).not.toContain(draftPage) // a draft has no search doc to update
-    await drainAuditOutbox(fgaClient as never).catch(() => {})
+    await drainAuditFor(admin, TENANT)
     const audit = await admin<{ action: string }[]>`SELECT action FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`space:${spaceId}`}`
     expect(audit.some((a) => a.action === 'space.made_public')).toBe(true)
   })
@@ -189,7 +189,7 @@ describe('#277 unset (non-destructive, one tuple)', () => {
     const res = await app.inject({ method: 'GET', url: `/public/spaces/${spaceId}/pages`, headers: { host: 'dev.localhost' } })
     expect(res.statusCode).toBe(404) // the space is no longer public (existence-hidden)
     expect(await anonSees('page', pubPage)).toBe(true) // the per-page grant survived (non-destructive)
-    await drainAuditOutbox(fgaClient as never).catch(() => {})
+    await drainAuditFor(admin, TENANT)
     const audit = await admin<{ action: string }[]>`SELECT action FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`space:${spaceId}`}`
     expect(audit.some((a) => a.action === 'space.made_non_public')).toBe(true)
   })

@@ -13,7 +13,7 @@ import {
   createPage, setPagePublic, unsetPagePublic, isPagePublic, setPagePrivate, unsetPagePrivate,
   publicSurfaceEnabled,
 } from '../routes/pages.js'
-import { drainAuditOutbox } from '../audit/outbox.js'
+import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -45,8 +45,12 @@ afterAll(async () => {
     await admin`DELETE FROM search_outbox WHERE page_id = ${id}`.catch(() => {})
     await admin`DELETE FROM pages WHERE id = ${id}`.catch(() => {})
   }
-  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT}`.catch(() => {})
-  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${TENANT}`.catch(() => {})
+  // Scoped to THIS file's rows, not the whole tenant chain: `tenant_dev` is shared by several
+  // suite files that write an audit row and then assert on it, so a wholesale DELETE here
+  // deletes rows another running file is about to read (#482).
+  const targets = [`page:${pubPage}`, `page:${draftPage}`, `space:${spaceId}`]
+  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT} AND target = ANY(${targets})`.catch(() => {})
+  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${TENANT} AND target = ANY(${targets})`.catch(() => {})
   await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user' }).catch(() => {})
   await db.release(); await admin.end(); await pool.end()
 }, 30_000)
@@ -70,7 +74,7 @@ describe('#253 setPagePublic guardrails', () => {
     expect(await isPagePublic(db, fgaClient, { pageId: pubPage, userId: 'dev-user' })).toBe(true)
     const [row] = await admin<{ noindex: boolean }[]>`SELECT noindex FROM pages WHERE id = ${pubPage}`
     expect(row!.noindex).toBe(true) // guardrail 4: noindex forced on
-    await drainAuditOutbox(fgaClient as never).catch(() => {})
+    await drainAuditFor(admin, TENANT)
     const audit = await admin<{ action: string }[]>`SELECT action FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`page:${pubPage}`}`
     expect(audit.some((a) => a.action === 'page.made_public')).toBe(true)
   })

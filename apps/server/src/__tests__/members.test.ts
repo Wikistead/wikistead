@@ -12,7 +12,7 @@ import { groupFgaId } from '../auth/group-sync.js'
 import { buildApp } from '../app.js'
 import { provisionTenant } from '../auth/provisioning.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
-import { drainAuditOutbox } from '../audit/outbox.js'
+import { drainAuditFor } from './helpers/audit-drain.js'
 import { acquireTenantDb } from '../db/tenant-db.js' // #474: fixture keys for the removal sweep
 import { createApiKey } from '../routes/api-keys.js'
 import { verifyApiKey } from '../api-key-auth.js'
@@ -277,7 +277,7 @@ describe('member ops → audit log (#177)', () => {
     await seedMember('mem-audit', 'member') // provisionTenant has no cloud resolver → UNLIMITED.auditLog
     const res = await app.inject({ method: 'PATCH', url: '/members/mem-audit', headers: { host, cookie: cookie(adminSid), 'content-type': 'application/json' }, payload: JSON.stringify({ role: 'admin' }) })
     expect(res.statusCode).toBe(200)
-    expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
+    await drainAuditFor(admin, tenantId)
     const rows = await admin<{ actor: string; action: string; target: string }[]>`
       SELECT actor, action, target FROM audit_log WHERE tenant_id = ${tenantId} ORDER BY seq`
     expect(rows.some((r) => r.action === 'member.role_changed' && r.target === 'user:mem-audit' && r.actor === 'user:mem-admin')).toBe(true)
@@ -315,7 +315,7 @@ describe('member ops → audit log (#177)', () => {
     expect(row?.revoked_at, 'the key row survives, marked revoked').not.toBeNull()
 
     // the revocation is in the compliance ledger next to member.removed (same in-tx writer)
-    await drainAuditOutbox()
+    await drainAuditFor(admin, tenantId)
     const audit = await admin<{ action: string; target: string }[]>`
       SELECT action, target FROM audit_log WHERE tenant_id = ${tenantId} AND action = 'api_key.revoked'`
     expect(audit.some((a) => a.target === `api_key:${victim.id}`), 'the revoke is audited').toBe(true)

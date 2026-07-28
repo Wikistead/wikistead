@@ -14,7 +14,7 @@ import { createPage, publishPage } from '../routes/pages.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { listOrphanDrafts, requireTenantAdminOr404, claimOrphanDraft, reassignOrphanDraft, isOrphanPage } from '../routes/orphan-drafts.js'
 import { sweepExpiredClaims } from '../scripts/orphan-claim-sweep.js'
-import { drainAuditOutbox } from '../audit/outbox.js'
+import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
 const NEW_OWNER = 'orphan-new-owner-sub'
@@ -58,8 +58,12 @@ afterAll(async () => {
     await admin`DELETE FROM pages WHERE id = ${id}`.catch(() => {})
   }
   await admin`DELETE FROM orphan_claims WHERE tenant_id = ${TENANT}`.catch(() => {})
-  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT}`.catch(() => {})
-  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${TENANT}`.catch(() => {})
+  // Scoped to THIS file's rows, not the whole tenant chain: `tenant_dev` is shared by several
+  // suite files that write an audit row and then assert on it, so a wholesale DELETE here
+  // deletes rows another running file is about to read (#482).
+  const targets = pageIds.map((id) => `page:${id}`)
+  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT} AND target = ANY(${targets})`.catch(() => {})
+  await admin`DELETE FROM audit_outbox WHERE tenant_id = ${TENANT} AND target = ANY(${targets})`.catch(() => {})
   await admin`DELETE FROM members WHERE tenant_id = ${TENANT} AND sub = ${NEW_OWNER}`.catch(() => {})
   await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user' }).catch(() => {})
   await db.release()
@@ -121,7 +125,7 @@ describe('claimOrphanDraft (#99 / ADR-061 — temp grant + TOCTOU)', () => {
   it('records a durable orphan_draft.claimed audit entry when entitled + plan passed (#177)', async () => {
     const id = await mkOrphan('claim-audited')
     await claimOrphanDraft(db, fgaClient, { tenantId: TENANT, pageId: id, adminSub: 'dev-user', plan: 'team' }) // default UNLIMITED resolver → auditLog
-    expect(await drainAuditOutbox()).toBeGreaterThanOrEqual(1)
+    await drainAuditFor(admin, TENANT)
     const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
     expect(rows.some((r) => r.action === 'orphan_draft.claimed' && r.target === `page:${id}` && r.actor === 'user:dev-user')).toBe(true)
   })
