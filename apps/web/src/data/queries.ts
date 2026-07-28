@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient, useIsFetching, keepPreviousData } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
 import { useSession } from "../session/SessionProvider";
 
@@ -1351,16 +1351,24 @@ export function useTitleDictionary(pageId: string | undefined) {
   // the burst), and a hard cap keeps links from being deferred forever on surfaces where no tree ever
   // loads. Links simply fill in a moment later, which they already did anyway (the dictionary is
   // best-effort by design — see retry:false below).
-  const fetchingSpaces = useIsFetching({ queryKey: ["spaces"] });
-  const fetchingTree = useIsFetching({ queryKey: ["pages"] });
-  const [floorPassed, setFloorPassed] = useState(false);
-  const [capPassed, setCapPassed] = useState(false);
+  // scroll-isolation (#538): NOT useIsFetching — that hook re-renders its host on EVERY query state
+  // change, and this hook lives in the Editor, so widget fetches during scroll re-rendered the editor
+  // (the scroll-isolation pin went red). The watch is a plain cache subscription that only ever calls
+  // setState ONCE (to yield) and unsubscribes itself; after that the editor hears nothing.
+  const qc = useQueryClient();
+  const [yielded, setYielded] = useState(false);
   useEffect(() => {
-    const floor = setTimeout(() => setFloorPassed(true), 700);
-    const cap = setTimeout(() => setCapPassed(true), 8000);
-    return () => { clearTimeout(floor); clearTimeout(cap); };
-  }, []);
-  const yielded = capPassed || (floorPassed && fetchingSpaces === 0 && fetchingTree === 0);
+    if (yielded) return;
+    let floorPassed = false;
+    const check = () => {
+      if (!floorPassed) return;
+      if (qc.isFetching({ queryKey: ["spaces"] }) + qc.isFetching({ queryKey: ["pages"] }) === 0) setYielded(true);
+    };
+    const floor = setTimeout(() => { floorPassed = true; check(); }, 700);
+    const cap = setTimeout(() => setYielded(true), 8000);
+    const unsub = qc.getQueryCache().subscribe(check);
+    return () => { clearTimeout(floor); clearTimeout(cap); unsub(); };
+  }, [yielded, qc]);
   return useQuery({
     //(#541): keyed on the VIEWER, not the page. The member dictionary is subject-scoped on the
     // server (the pageId in the URL is only the existence-gated anchor), so a per-page key made every

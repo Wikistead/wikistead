@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -38,7 +38,13 @@ import { downloadSpaceExport, importSpaceArchive } from "../data/exportApi"; // 
 
 import { buildPageNodes } from "./page-nodes";
 
-export function Sidebar() {
+// #538the route holds the TOC's visibleHeadings state, so every CM-internal scroll tick
+// re-rendered the route — and this whole subtree with it. The profile named react-arborist's
+// componentDidUpdate as the largest long-frame cost DURING EDITOR SCROLL, for a tree whose props had
+// not changed at all. Sidebar takes no props, so memo makes the parent-caused re-render a bail-out;
+// its own state and queries still re-render it as before.
+export const Sidebar = memo(SidebarImpl);
+function SidebarImpl() {
   const { t } = useTranslation();
   const { token } = useSession();
   const navigate = useNavigate();
