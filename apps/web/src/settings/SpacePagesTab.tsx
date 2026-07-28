@@ -191,8 +191,14 @@ export function SpacePagesTab() {
           <thead>
             <tr>
               <th className="w-[32px]">
-                <input type="checkbox" checked={allSelected} onChange={toggleAll}
-                  aria-label={t("spacePages.selectAll")} data-testid="bulk-select-all" className="cursor-pointer" />
+                {/* #511 the bare 13px box was the only clickable spot. The label wraps ONLY the
+                    checkbox with padding pulled back by negative margins, so the hit target grows to
+                    ~33px without moving anything and without touching the title cell (label clicks
+                    keep navigating — the user's ruling). */}
+                <label className="-m-2.5 inline-flex cursor-pointer p-2.5" data-testid="bulk-select-all-hit">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                    aria-label={t("spacePages.selectAll")} data-testid="bulk-select-all" className="cursor-pointer" />
+                </label>
               </th>
               {/* table-fixed: the title column takes the REMAINING width (and truncates); the
                   status/count columns are fixed and never wrap (#439). */}
@@ -207,8 +213,10 @@ export function SpacePagesTab() {
               <tr key={p.id} className="cursor-pointer" data-testid="space-page-row"
                 data-selected={selected.has(p.id) ? "true" : undefined}>
                 <td onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)}
-                    aria-label={t("spacePages.selectRow")} data-testid="bulk-select-row" className="cursor-pointer" />
+                  <label className="-m-2.5 inline-flex cursor-pointer p-2.5" data-testid="bulk-select-row-hit">
+                    <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)}
+                      aria-label={t("spacePages.selectRow")} data-testid="bulk-select-row" className="cursor-pointer" />
+                  </label>
                 </td>
                 <td onClick={() => navigate(`/p/${p.id}`)}><div className="truncate" data-tip={p.title || undefined}>{p.title || t("common.untitled")}</div></td>
                 <td className="whitespace-nowrap" onClick={() => navigate(`/p/${p.id}`)}>
