@@ -395,6 +395,22 @@ export const atomClipboard: Extension = EditorView.domEventHandlers({
 function atomClipboardHandler(e: ClipboardEvent, view: EditorView, isCut: boolean): boolean {
   const sel = view.state.selection.main;
   if (!sel.empty) return false; // a real selection: CM's default (the doc slice = raw source) is correct
+  // #549: a NESTED selection (the ring on a macro inside a container) copies/cuts THAT block, not the
+  // container the caret technically rests on — the same innermost-wins rule as edit/delete (#215).
+  const nestedSel = view.state.field(nestedSelectionField, false);
+  if (nestedSel) {
+    const m = innermostMacroAt(view.state, nestedSel.anchor);
+    if (m) {
+      const doc = view.state.doc;
+      e.clipboardData?.setData("text/plain", view.state.sliceDoc(doc.lineAt(m.from).from, doc.lineAt(Math.min(m.to, doc.length)).to));
+      e.preventDefault();
+      if (isCut && !view.state.readOnly) {
+        const ch = nestedDeleteChange(view.state, nestedSel.anchor); // the same range Backspace/dd take
+        if (ch) view.dispatch({ changes: ch, userEvent: "delete.cut" });
+      }
+      return true;
+    }
+  }
   const blocks = view.state.field(livePreview, false)?.blocks ?? [];
   const b = blocks.find((bl) => sel.head >= bl.from && sel.head <= bl.to);
   if (!b) return false; // not on an atom: keep CM's copy-the-line default

@@ -889,7 +889,8 @@
     "alignCenter": "Align center",
     "alignRight": "Align right",
     "codeSettingsWithKey": "Code block settings (Ctrl+Alt+↵)",
-    "codeSettings": "Code block settings"
+    "codeSettings": "Code block settings",
+    "copyBlock": "Copy block"
   },
   "members": {
     "title": "Members",
