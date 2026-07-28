@@ -11,6 +11,8 @@ import {
   noindexVerdict,
   runHttpPreflight,
   formatReport,
+  setCookiesFrom,
+  firstAssetPath,
   type FetchLike,
 } from '../deploy/preflight.js'
 
@@ -104,9 +106,12 @@ describe('runHttpPreflight (orchestration, injected fetch — no network)', () =
       ? { status: 404, headers: { 'content-type': 'application/json' }, text: async () => '{}' }
       : { status: 200, headers: okHeaders, text: async () => 'ok' }
     const items = await runHttpPreflight('https://t1.example', fetchImpl)
-    const { allPass } = formatReport(items)
+    const { allPass, skipped } = formatReport(items)
     expect(allPass).toBe(true)
-    expect(items.map((i) => i.name)).toEqual(['security-headers', 'api-404-json', 'api-no-cache'])
+    expect(items.map((i) => i.name)).toEqual(['security-headers', 'api-404-json', 'api-no-cache', 'assets-long-cache', 'cookie-host-only', 'public-page-noindex'])
+    // ...but the three probe-dependent rows were NOT observed here, and say so rather than reading green.
+    expect(skipped).toBe(3)
+    expect(items.filter((i) => i.verdict.skipped).map((i) => i.name)).toEqual(['assets-long-cache', 'cookie-host-only', 'public-page-noindex'])
   })
   it('records a FAIL (not a crash) when a row errors, and when a header is wrong', async () => {
     const fetchImpl: FetchLike = async (url) => {
@@ -118,5 +123,92 @@ describe('runHttpPreflight (orchestration, injected fetch — no network)', () =
     expect(allPass).toBe(false)
     expect(items.find((i) => i.name === 'security-headers')!.verdict.detail).toContain('errored')
     expect(items.find((i) => i.name === 'api-404-json')!.verdict.pass).toBe(false)
+  })
+
+  // The three rows added when the pure verdicts were wired in (#148). Each was implemented and tested
+  // as a function but never actually called by the run, so the deployment was never asked the question.
+  const respond = (headers: Record<string, string | string[]>, body = 'ok', status = 200) =>
+    ({ status, headers, text: async () => body })
+
+  it('FAILS the cookie row on a Domain= cookie the operator captured at sign-in', async () => {
+    const fetchImpl: FetchLike = async () => respond(okHeaders)
+    const items = await runHttpPreflight('https://t1.example', fetchImpl, {
+      setCookies: ['wks_session=abc; Domain=.wikistead.example; Path=/; Secure'],
+    })
+    const row = items.find((i) => i.name === 'cookie-host-only')!
+    expect(row.verdict.skipped).toBeFalsy()
+    expect(row.verdict.pass).toBe(false)
+    expect(row.verdict.detail).toContain('wks_session')
+    expect(formatReport(items).allPass).toBe(false)
+  })
+
+  it('catches a Domain= cookie set on an UNAUTHENTICATED response, with no operator input', async () => {
+    const fetchImpl: FetchLike = async () => respond({ ...okHeaders, 'set-cookie': ['aff=1; Domain=.wikistead.example; Path=/'] })
+    const items = await runHttpPreflight('https://t1.example', fetchImpl)
+    const row = items.find((i) => i.name === 'cookie-host-only')!
+    // `skipped` first: a skipped row also carries pass:false, so asserting only `pass` would stay green
+    // if the run stopped collecting cookies altogether (verified by breaking the collector).
+    expect(row.verdict.skipped).toBeFalsy()
+    expect(row.verdict.pass).toBe(false)
+    expect(row.verdict.detail).toContain('aff')
+  })
+
+  it('probes a hashed asset learned from the served HTML, and fails a short max-age', async () => {
+    const fetchImpl: FetchLike = async (url) => {
+      if (url.endsWith('/assets/app-9f2c1.js')) return respond({ ...okHeaders, 'cache-control': 'max-age=60' })
+      if (url === 'https://t1.example/') return respond(okHeaders, '<html><script src="/assets/app-9f2c1.js"></script></html>')
+      return respond(okHeaders)
+    }
+    const items = await runHttpPreflight('https://t1.example', fetchImpl)
+    const row = items.find((i) => i.name === 'assets-long-cache')!
+    expect(row.verdict.skipped).toBeFalsy()
+    expect(row.verdict.pass).toBe(false)
+    expect(row.verdict.detail).toContain('not long-cached')
+  })
+
+  it('FAILS the noindex row when the named public page carries no noindex signal', async () => {
+    const fetchImpl: FetchLike = async (url) =>
+      url.includes('/p/') ? respond(okHeaders, '<html><head><title>public</title></head></html>') : respond(okHeaders)
+    const items = await runHttpPreflight('https://t1.example', fetchImpl, { publicPageUrl: 'https://t1.example/p/abc' })
+    const row = items.find((i) => i.name === 'public-page-noindex')!
+    expect(row.verdict.skipped).toBeFalsy()
+    expect(row.verdict.pass).toBe(false)
+  })
+
+  it('PASSES the noindex row on the X-Robots-Tag header', async () => {
+    const fetchImpl: FetchLike = async (url) =>
+      url.includes('/p/') ? respond({ ...okHeaders, 'X-Robots-Tag': 'noindex' }, '<html></html>') : respond(okHeaders)
+    const items = await runHttpPreflight('https://t1.example', fetchImpl, { publicPageUrl: 'https://t1.example/p/abc' })
+    expect(items.find((i) => i.name === 'public-page-noindex')!.verdict.pass).toBe(true)
+  })
+})
+
+describe('formatReport (a skipped row is not a pass)', () => {
+  it('keeps allPass true but counts the skip, and prints SKIP', () => {
+    const r = formatReport([
+      { name: 'a', verdict: { pass: true, detail: 'ok' } },
+      { name: 'b', verdict: { pass: false, skipped: true, detail: 'not observed' } },
+    ])
+    expect(r.allPass).toBe(true)
+    expect(r.skipped).toBe(1)
+    expect(r.text).toContain('SKIP')
+    expect(r.text).not.toContain('FAIL')
+  })
+  it('reports a real failure as FAIL', () => {
+    const r = formatReport([{ name: 'a', verdict: { pass: false, detail: 'bad' } }])
+    expect(r.allPass).toBe(false)
+    expect(r.skipped).toBe(0)
+  })
+})
+
+describe('setCookiesFrom / firstAssetPath', () => {
+  it('reads repeated Set-Cookie as a list (a joined pair would misattribute Domain=)', () => {
+    expect(setCookiesFrom({ 'Set-Cookie': ['a=1; Path=/', 'b=2; Domain=.x.example'] })).toHaveLength(2)
+    expect(cookieHostOnlyVerdict(setCookiesFrom({ 'set-cookie': ['a=1; Path=/', 'b=2; Domain=.x.example'] })).detail).toContain('b')
+    expect(setCookiesFrom({ 'content-type': 'text/html' })).toEqual([])
+  })
+  it('finds the first hashed asset in the document', () => {
+    expect(firstAssetPath('<link rel="stylesheet" href="/assets/index-a1b2.css"><script src="/assets/x.js">')).toBe('/assets/index-a1b2.css')
+    expect(firstAssetPath('<html>no assets</html>')).toBeUndefined()
   })
 })
