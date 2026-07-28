@@ -54,6 +54,9 @@ export type DomainEvent =
   // hence `operator`, not `actorId`) disabled a locked-out tenant's own OIDC out of
   // band, via the admin-DB CLI. It only flips the login gate; it grants no access.
   | { type: 'tenant.oidc_recovered'; tenantId: string; operator: string }
+  // #537 §10: the whole-picture break-glass (tenant:login-methods) changed a tenant's selection
+  // (enable direction included). Operator action, mirrored durably in the operator ledger.
+  | { type: 'tenant.login_methods_recovered'; tenantId: string; operator: string }
   | { type: 'tenant.saml_recovered'; tenantId: string; operator: string }
   // Orphan-draft admin handoff (#99 / ADR-061): a tenant#admin enumerated the orphaned
   // strict-private drafts (creator gone + no live viewer). Audited per ADR-061 — the
