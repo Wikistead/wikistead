@@ -2,11 +2,11 @@
 //
 // A role is a tenant-scoped NAMED bundle of atomic capabilities. FGA stays the single authz
 // truth — nothing here touches a check path; a role only becomes tuples when the assignment
-// write-path (increment 3) expands it. Gates on every WRITE, in the audit-viewer order:
-//   1. the #383 shared tenant-admin gate,
-//   2. the customRoles ENTITLEMENT (EE / Cloud top tier) via the single resolver — defining is
-//      issuance-gated (a downgrade blocks new definitions; expanded grants are plain FGA tuples
-//      and keep working — the apiAccess/webhooks precedent).
+// write-path (increment 3) expands it. Gates on every WRITE, in the audit-viewer order
+// 1. the #383 shared tenant-admin gate,
+// 2. the customRoles ENTITLEMENT (EE / Cloud top tier) via the single resolver — defining is
+// issuance-gated (a downgrade blocks new definitions; expanded grants are plain FGA tuples
+// and keep working — the apiAccess/webhooks precedent).
 // Listing is tenant-admin only (no entitlement): the UI shows the uniform role picker (built-ins
 // + any custom rows retained from an entitled period) on every plan.
 import type { FastifyInstance } from 'fastify'
@@ -25,13 +25,13 @@ import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-19
 import type { TenantDb } from '../db/index.js'
 import type { Sql } from 'postgres'
 
-// The ADR-164 §1 atomic vocabulary a custom RESOURCE role may bundle. `manage` is deliberately absent —
+// The ADR-164 §1 atomic vocabulary a custom RESOURCE role may bundle. `manage` is deliberately absent
 // it is the built-in SUPERSET (manager); a custom bundle wanting everything lists the atoms.
 export const ROLE_CAPABILITIES = ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings', 'moderate'] as const
 export type RoleCapability = (typeof ROLE_CAPABILITIES)[number]
 
 // #445 / ADR-171: the TENANT-scope vocabulary — tenant-action capabilities (the target resource does
-// not exist yet, so they cannot live on page/space). MUTUALLY EXCLUSIVE with the resource vocabulary:
+// not exist yet, so they cannot live on page/space). MUTUALLY EXCLUSIVE with the resource vocabulary
 // a resource role cannot bundle `createSpaces`, a tenant role cannot bundle `edit` (parseDefinition
 // enforces per scope). Grows later (invite members, manage templates, …).
 // #485 / ADR-171 Addendum 2: the ADMIN-CLASS resource capabilities — the ones the page GRANT CEILING
@@ -125,17 +125,17 @@ const forbidden = () => Object.assign(new Error('forbidden'), { statusCode: 403 
 
 // #485 / ADR-171 Addendum 2: the per-scope AUTHORITY to WRITE a role ASSIGNMENT (assign / unassign).
 // Replaces the flat tenant-admin gate on the assignment paths so a SPACE MANAGER can assign roles inside
-// their own space, at BOTH space and page scope. The gate is the target resource's authority:
-//   - tenant scope  → tenant admin — createSpaces & co. stay closed to a global admin.
-//   - space scope   → space `manage` (= the `manager` relation, the space SUPERSET). No per-capability
-//                     ceiling: a manager already holds every space capability, and the base-tier space
-//                     grant relations (sharer/deleter/…) do NOT union `manager` (model.fga:100-105), so
-//                     the page-style `share`+ceiling would wrongly 403 a legitimate manager.
-//   - page scope    → the page GRANT CEILING extended to the role BUNDLE: always the page `share` verb,
-//                     plus page `manage` iff ANY bundled capability is admin-class (ADMIN_CLASS_ROLE_CAPS).
-//                     This is `requireGrantAuthority` (pages.ts,) applied to every capability at
-//                     once — a partial grant would break theprovenance/ref-count, so ANY
-//                     over-ceiling capability rejects the WHOLE assignment.
+// their own space, at BOTH space and page scope. The gate is the target resource's authority
+// - tenant scope → tenant admin — createSpaces & co. stay closed to a global admin.
+// - space scope → space `manage` (= the `manager` relation, the space SUPERSET). No per-capability
+// ceiling: a manager already holds every space capability, and the base-tier space
+// grant relations (sharer/deleter/…) do NOT union `manager` (model.fga:100-105), so
+// the page-style `share`+ceiling would wrongly 403 a legitimate manager.
+// - page scope → the page GRANT CEILING extended to the role BUNDLE: always the page `share` verb,
+// plus page `manage` iff ANY bundled capability is admin-class (ADMIN_CLASS_ROLE_CAPS).
+// This is `requireGrantAuthority` (pages.ts,) applied to every capability at
+// once — a partial grant would break theprovenance/ref-count, so ANY
+// over-ceiling capability rejects the WHOLE assignment.
 // A TENANT ADMIN short-circuits every resource scope: they could assign anywhere before this change
 // (incl. a private page, from which a space manager is correctly cut via `manage_from_space … but not
 // private`), so the short-circuit preserves that non-regression. `page share` unions `manage`
@@ -186,6 +186,18 @@ export async function assignRoleInTx(
     toWrite.push(...missing)
     if (missing.length === tuples.length) owned.push(cap)
   }
+  // #536 review finding 1 (reproduced): a BUILT-IN grant owns its capability unconditionally. The
+  // presence-based rule above encodes therole semantic — "a leaf someone else already conferred is
+  // not mine to delete" — which is right for a role bundling many capabilities, and wrong here: a rowless
+  // tuple (a pre-086 grant, or the `manager` leaf createSpace writes for the creator) is the SAME grant,
+  // untracked, not a different grantor. Deferring to it produced a row with owned = {}, and the revoke
+  // then deleted the row, deleted nothing in FGA, audited, emitted the webhook, and answered success
+  // on a brand-new space, via the creator path, with no legacy data at all. Shared-leaf protection on
+  // revoke is the reference count's job (other ROWS), not tuple presence's.
+  if (args.builtinCapability !== undefined) {
+    owned.length = 0
+    owned.push(...caps)
+  }
   const id = randomUUID()
   const builtin = args.builtinCapability ?? null
   let existingId: string | null = null
@@ -199,6 +211,11 @@ export async function assignRoleInTx(
       if (args.onDuplicate !== 'ignore') throw Object.assign(new Error('already assigned'), { statusCode: 409 })
       // Idempotent: the row is already there and already owns whatever it owns. Writing the tuples again
       // would be harmless but recomputing `owned` from a stale read would not — leave the row alone.
+      // The AUDIT still happens (#536 review 2): before 086 a duplicate grant audited like any other
+      // successful write, and the caller's webhook still fires — an audit stream that goes quiet for a
+      // subset of the events the webhook stream reports is one nobody can reconcile. The reindex is the
+      // one thing legitimately skipped: nothing changed to index.
+      if (!args.skipAudit) await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: args.auditAction ?? 'role.assigned', target: `${resourceType}:${resourceId}` })
       existingId = dup[0].id
       return null
     }
@@ -758,7 +775,7 @@ export async function rolesPlugin(app: FastifyInstance) {
   // ref-counted unassign. It adds NO new FGA write path — group membership already resolves LIVE at
   // check time (#111 sync). v1 maps CUSTOM roles at SPACE or TENANT scope only (built-ins are
   // virtual — no roles row — so the role lookup 404s them; page scope is out of v1). Per ADR-183 §1
-  // the WRITE surface carries the SAME per-scope authority as assign (`requireAssignmentAuthority`):
+  // the WRITE surface carries the SAME per-scope authority as assign (`requireAssignmentAuthority`)
   // tenant-scope mappings are admin-only; space-scope mappings are open to that space's manager (#485).
 
   app.post<{ Body: { groupName?: string; roleId?: string; resourceType?: string; resourceId?: string } }>(
