@@ -44,6 +44,19 @@ async function tenantOidcEnabled(db: TenantDb): Promise<boolean> {
   return !!row?.enabled
 }
 
+// #537 Slice 3 / ruling 4: the tenant's stance on the DEPLOYMENT's shared IdP (migration 087).
+// Absent row = platform login on (the historical default). Fail-open on read error would re-open a
+// door the tenant closed, so this one fails CLOSED the other way: an error keeps platform login ON
+// (the safe default for "can anyone still sign in") and logs — the toggle is an SSO-enforcement
+// convenience, not a security boundary (the tenant's OWN IdP gate is).
+async function platformLoginDisabled(db: TenantDb): Promise<boolean> {
+  const [row] = await db.sql<{ platform_login_disabled: boolean }[]>`SELECT platform_login_disabled FROM tenant_login_prefs LIMIT 1`.catch((err: unknown) => {
+    console.warn('[login-methods] tenant_login_prefs read failed; keeping platform login on:', err)
+    return [] as { platform_login_disabled: boolean }[]
+  })
+  return !!row?.platform_login_disabled
+}
+
 async function tenantSamlEnabled(db: TenantDb): Promise<boolean> {
   // The table exists in every deployment (migration 038); the EE code that USES it lives in ee-server.
   // Reading the flag here is data access, not an EE feature — the entitlement gate below still applies.
@@ -78,7 +91,10 @@ export async function resolveAvailableLogin(
     tenantCfg = await loadTenantOidcCfg(db)
     if (tenantCfg) methods.add('tenant-oidc')
   }
-  const platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
+  // Ruling 4: the tenant may have turned the platform IdP off (SSO enforcement) — read the pref
+  // only when the ceiling and deployment config would otherwise make it effective (lazy).
+  let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
+  if (platform && (await platformLoginDisabled(db))) platform = null
   if (platform) methods.add('platform-oidc')
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) {
     methods.add('saml')
@@ -112,7 +128,7 @@ export async function otherLoginMethodsEffective(
   env?: string | undefined,
 ): Promise<boolean> {
   const ceiling = loginMethodCeiling(env)
-  if (except !== 'platform-oidc' && ceiling.has('platform-oidc') && loadPlatformOidc()) return true
+  if (except !== 'platform-oidc' && ceiling.has('platform-oidc') && loadPlatformOidc() && !(await platformLoginDisabled(db))) return true
   if (except !== 'saml' && ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) return true
   if (except !== 'tenant-oidc' && ceiling.has('tenant-oidc') && (await tenantOidcEnabled(db))) return true
   return false
@@ -124,4 +140,14 @@ export function socialProvidersFor(available: AvailableLogin): string[] {
   return available.methods.has('platform-oidc') && (!available.oidc || !available.oidc.viaTenantOidc)
     ? loadSocialLogin().providers
     : []
+}
+
+// The admin toggle's write path (upsert). Ruling 4's guard lives in the route (it needs the whole
+// availability picture); this is just the persistence.
+export async function setPlatformLoginDisabled(db: TenantDb, tenantId: string, disabled: boolean): Promise<void> {
+  await db.sql`
+    INSERT INTO tenant_login_prefs (tenant_id, platform_login_disabled)
+    VALUES (${tenantId}, ${disabled})
+    ON CONFLICT (tenant_id) DO UPDATE SET platform_login_disabled = ${disabled}, updated_at = now()
+  `
 }

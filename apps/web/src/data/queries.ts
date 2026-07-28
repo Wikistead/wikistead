@@ -1912,6 +1912,30 @@ export function useTenantSaml() {
     retry: false, // 403/404 are stable answers, not transient failures
   });
 }
+// #537 Slice 3: the admin's login-methods view + the platform-login toggle (ruling 4).
+export interface LoginMethodState { inCeiling: boolean; configured: boolean; selected: boolean; effective: boolean }
+export interface LoginMethodsDTO {
+  methods: { "tenant-oidc": LoginMethodState; "platform-oidc": LoginMethodState; saml: LoginMethodState & { entitled: boolean } }
+}
+export function useLoginMethods() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["login-methods-admin"],
+    queryFn: () => apiFetch<LoginMethodsDTO>("/admin/login-methods", token),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+export function useUpdatePlatformLogin() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (platformLoginEnabled: boolean) =>
+      apiFetch<null>("/admin/login-methods", token, { method: "PATCH", body: JSON.stringify({ platformLoginEnabled }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
+  });
+}
+
 export function useUpdateTenantSaml() {
   const { token } = useSession();
   const qc = useQueryClient();

@@ -348,7 +348,16 @@
     "samlAttrEmail": "email attribute",
     "samlAttrName": "name attribute",
     "samlAttrGroups": "groups attribute",
-    "samlEnabled": "Enable SAML sign-in"
+    "samlEnabled": "Enable SAML sign-in",
+    "methodsTitle": "Login methods",
+    "methodsBody": "What this workspace offers on its sign-in screen. Methods excluded by your deployment's policy are marked — your settings are kept and return when policy allows them.",
+    "methodTenantOidc": "Your identity provider (OIDC)",
+    "methodPlatformOidc": "Platform login",
+    "methodSaml": "SAML SSO",
+    "method_effective": "Active",
+    "method_byPolicy": "Unavailable by deployment policy",
+    "method_off": "Off",
+    "platformOwnIdpRequired": "Enable and verify your own identity provider (OIDC or SAML) before turning platform login off."
   },
   "adminEnroll": {
     "title": "Auto-enrolment",
@@ -536,7 +545,10 @@
     "inviteTitle": "You've been invited",
     "inviteBody": "Sign in to accept your invitation and join the workspace.",
     "acceptInvite": "Accept invite",
-    "errorIdpUnavailable": "Sign-in is temporarily unavailable. Please try again in a moment."
+    "errorIdpUnavailable": "Sign-in is temporarily unavailable. Please try again in a moment.",
+    "signInSaml": "Sign in with SSO (SAML)",
+    "moreWays": "Sign in another way",
+    "noMethods": "Sign-in is not available right now. Contact your administrator."
   },
   "share": {
     "opening": "Opening shared page…",

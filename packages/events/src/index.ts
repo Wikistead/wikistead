@@ -47,6 +47,9 @@ export type DomainEvent =
   // client-direct iframe surface, so the change is recorded (count = number of allowlisted hosts).
   | { type: 'tenant.embed_providers_updated'; tenantId: string; actorId: string; count: number }
   | { type: 'tenant.oidc_updated'; tenantId: string; actorId: string; enabled: boolean }
+  // #537 ruling 4: the platform-login toggle (SSO enforcement). Only flips the shared-IdP door;
+  // the tenant's own IdP config rides tenant.oidc_updated / tenant.saml_updated.
+  | { type: 'tenant.login_methods_updated'; tenantId: string; actorId: string; platformLoginEnabled: boolean }
   // Break-glass recovery (#105 / ADR-060): an OPERATOR (not a tenant principal —
   // hence `operator`, not `actorId`) disabled a locked-out tenant's own OIDC out of
   // band, via the admin-DB CLI. It only flips the login gate; it grants no access.
