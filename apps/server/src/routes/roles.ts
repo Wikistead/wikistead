@@ -53,19 +53,18 @@ export type RoleScope = 'resource' | 'tenant'
 // rejected as custom names. Their semantics stay the fixed FGA relations, not capability bundles.
 const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
   { name: 'viewer', capabilities: ['view'] },
-  // #536 / ADR-188 §6: `commenter` joins the list. #529 gave comment a per-principal space leaf, and the
-  // Members picker could grant it while this list did not name it — the product spoke with two voices
-  // about what a role IS. §6 merges the two pickers into one, so the fix is to agree rather than to keep
-  // the capability out of a list it is already grantable from.
-  // The bundle is `comment` ALONE. Listing `view` too would look harmless, but the expansion writes
-  // `viewer_member`, which reaches `template#view` (model.fga) — the widening #529 deliberately
-  // removed. The model already gives it: `space#viewer: … or commenter`, so a commenter reads by being a
-  // commenter, not by also being granted viewer.
-  { name: 'commenter', capabilities: ['comment'] },
+  // #552 (user ruling, 2026-07-30): the built-in `commenter` role #536 §6 added is GONE again — a
+  // comment-only role is composed as a CUSTOM role when wanted. The `comment` CAPABILITY and its FGA
+  // leaf (`space#commenter`, `comment_from_space`, …) are untouched: removing those would resurrect
+  // #514's symptom (a custom role carrying `comment` refused at space scope with a 400). Only the
+  // named built-in bundle and its grant-count display leave.
   { name: 'editor', capabilities: ['view', 'comment', 'edit', 'publish'] },
   { name: 'moderator', capabilities: ['moderate'] },
   { name: 'manager', capabilities: ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings'] },
 ]
+// #552: RESERVED_NAMES derives from BUILT_IN_ROLES, so dropping `commenter` above deliberately
+// FREES the name for custom roles — reserving a name no built-in carries would be a claim with no
+// referent. (A tenant that wants a role called "commenter" now simply builds one.)
 const RESERVED_NAMES = new Set([...BUILT_IN_ROLES.map((r) => r.name), 'admin', 'owner'])
 
 interface RoleRow { id: string; name: string; capabilities: string[]; scope: RoleScope; created_at: Date; updated_at: Date }

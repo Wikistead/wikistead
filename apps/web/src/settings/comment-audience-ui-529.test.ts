@@ -6,11 +6,10 @@ import { commentAudienceSummary } from "./SpaceMembersTab";
 import en from "../i18n/locales/en.json";
 import ja from "../i18n/locales/ja.json";
 
-// #529 (honest audience UI): the toggles are one of THREE OR'd comment routes. Pinned
-// 1. the effective summary CHANGES with each toggle and never loses the baseline;
-// 2. the baseline copy names the editors-always route and the individual grants (with a zero form);
-// 3. each toggle carries a DELTA in both positions, and the guests-OFF delta does not overclaim
-// ("every guest") — an edit-link guest comments through their edit right (the finding).
+// #529 (honest audience UI) as AMENDED by the #552 ruling: the built-in `commenter` role and
+// its grant-count display are GONE — the baseline names only the editors-always route, and the
+// summary is editors + whatever the two toggles add. The old pins that required the grants line are
+// re-pinned IN REVERSE (their return would be drift, not restoration).
 type Dict = Record<string, unknown>;
 const sm = (loc: Dict) => (loc as { spaceMembers: Record<string, string> }).spaceMembers;
 const tFor = (loc: Dict) => (k: string, o?: Record<string, unknown>) => {
@@ -19,32 +18,18 @@ const tFor = (loc: Dict) => (k: string, o?: Record<string, unknown>) => {
   return s;
 };
 
-describe("#529: the effective comment-audience summary", () => {
+describe("#529/#552: the effective comment-audience summary", () => {
   for (const [name, loc] of [["en", en], ["ja", ja]] as const) {
-    it(`${name}: toggles move the summary; the baseline never leaves it`, () => {
+    it(`${name}: toggles move the summary; the editors baseline never leaves it`, () => {
       const t = tFor(loc);
-      const base = commentAudienceSummary(t, { grantCount: 2, members: false, guests: false });
-      const withMembers = commentAudienceSummary(t, { grantCount: 2, members: true, guests: false });
-      const withBoth = commentAudienceSummary(t, { grantCount: 2, members: true, guests: true });
-      // baseline present in every state
-      for (const s of [base, withMembers, withBoth]) {
-        expect(s).toContain(sm(loc).commentSummaryEditors);
-        expect(s).toContain(sm(loc).commentSummaryGrants.replace("{{count}}", "2"));
-      }
-      // members toggle adds exactly the members clause
+      const base = commentAudienceSummary(t, { members: false, guests: false });
+      const withMembers = commentAudienceSummary(t, { members: true, guests: false });
+      const withBoth = commentAudienceSummary(t, { members: true, guests: true });
+      for (const s of [base, withMembers, withBoth]) expect(s).toContain(sm(loc).commentSummaryEditors);
       expect(base).not.toContain(sm(loc).commentSummaryMembers);
       expect(withMembers).toContain(sm(loc).commentSummaryMembers);
-      // guests toggle adds exactly the guests clause
       expect(withMembers).not.toContain(sm(loc).commentSummaryGuests);
       expect(withBoth).toContain(sm(loc).commentSummaryGuests);
-    });
-
-    it(`${name}: zero grants uses the zero form and drops the grants clause`, () => {
-      const t = tFor(loc);
-      const s = commentAudienceSummary(t, { grantCount: 0, members: false, guests: false });
-      expect(s).toContain(sm(loc).commentSummaryEditors);
-      expect(s).not.toContain("0");
-      expect(sm(loc).commentBaselineGrants_zero.length).toBeGreaterThan(0);
     });
 
     it(`${name}: the toggle deltas exist in both positions and guests-OFF does not overclaim`, () => {
@@ -57,12 +42,27 @@ describe("#529: the effective comment-audience summary", () => {
       // an edit-link guest can still comment with both toggles off — the OFF copy must carry it.
       expect(d.commentGuestsOff.toLowerCase()).toMatch(/edit|編集/);
     });
+
+    it(`${name}: #552 — the grants vocabulary is GONE (its return is drift)`, () => {
+      const d = sm(loc);
+      for (const k of ["commentBaselineGrants", "commentBaselineGrants_zero", "commentSummaryGrants"]) {
+        expect(d[k], `${k} must stay deleted`).toBeUndefined();
+      }
+    });
   }
 
-  it("the component renders the baseline OUTSIDE the toggles (always visible, testid pinned)", () => {
+  it("#552: the baseline renders WITHOUT the grants line; the summary never grows a grants clause", () => {
     const src = readFileSync(resolve(import.meta.dirname, "./SpaceMembersTab.tsx"), "utf8");
-    expect(src).toContain('data-testid="comment-baseline"');
+    expect(src).toContain('data-testid="comment-baseline"'); // the editors-always box stays
+    expect(src).not.toContain("comment-baseline-grants"); // #552: the count line must not come back
+    expect(src).not.toContain("commenterGrants");
     expect(src).toContain('data-testid="comment-effective-summary"');
-    expect(src.indexOf('data-testid="comment-baseline"'), "baseline sits above the toggle map").toBeLessThan(src.indexOf('comment-open-guests'));
+    expect(src.indexOf('data-testid="comment-baseline"'), "baseline sits above the toggle map").toBeLessThan(src.indexOf("comment-open-guests"));
+  });
+
+  it("#552: `comment` left the picker but NOT the ordering (API-made rows must not float to the top)", () => {
+    const src = readFileSync(resolve(import.meta.dirname, "./SpaceMembersTab.tsx"), "utf8");
+    expect(src).toMatch(/CAP_ORDER: PageRelation\[\] = \["view", "comment", "edit", "moderate", "manage"\]/);
+    expect(src).toMatch(/GRANTABLE: PageRelation\[\] = \["view", "edit", "moderate", "manage"\]/);
   });
 });

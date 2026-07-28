@@ -66,10 +66,10 @@ describe('#536: reserving a name must not brick roles that predate the reservati
   }, 120_000)
 
   it('but nothing may TAKE a built-in name — the rule the reservation is for', async () => {
-    // create
+    // #552: `commenter` is no longer built-in, so `editor` carries this pin now.
     const post = await app.inject({
       method: 'POST', url: '/admin/roles', headers,
-      payload: { name: 'commenter', capabilities: ['comment'], scope: 'resource' },
+      payload: { name: 'editor', capabilities: ['comment'], scope: 'resource' },
     })
     expect(post.statusCode, 'a NEW role cannot claim a built-in name').toBe(400)
 
@@ -77,16 +77,31 @@ describe('#536: reserving a name must not brick roles that predate the reservati
     const other = await makeRole(`renamer-${STAMP}`, ['view'])
     const put = await app.inject({
       method: 'PUT', url: `/admin/roles/${other}`, headers,
-      payload: { name: 'commenter', capabilities: ['view'] },
+      payload: { name: 'editor', capabilities: ['view'] },
     })
     expect(put.statusCode, 'a DIFFERENT role cannot rename INTO a built-in name').toBe(400)
   }, 120_000)
 
   it('the exemption is exact, not a substring or case escape hatch', async () => {
     const id = await makeRole(`fussy-${STAMP}`, ['view'])
-    for (const name of ['Commenter', 'MANAGER', 'admin']) {
+    for (const name of ['Editor', 'MANAGER', 'admin']) {
       const res = await app.inject({ method: 'PUT', url: `/admin/roles/${id}`, headers, payload: { name, capabilities: ['view'] } })
       expect(res.statusCode, `renaming to "${name}" is still refused`).toBe(400)
     }
+  }, 120_000)
+
+  it('#552: `commenter` is FREE again — dropping the built-in released the reservation', async () => {
+    // The ruling removed the built-in role; reserving a name no built-in carries would be a claim
+    // with no referent, so a tenant may now build its own role called "commenter". (The shared dev
+    // tenant may already hold one from the exemption test above — clear it so this pins the
+    // RESERVATION, not uniqueness.)
+    await adminPool`DELETE FROM roles WHERE tenant_id = ${TENANT} AND name = 'commenter'`
+    const post = await app.inject({
+      method: 'POST', url: '/admin/roles', headers,
+      payload: { name: `commenter`, capabilities: ['comment'], scope: 'resource' },
+    })
+    expect(post.statusCode, post.body.slice(0, 200)).toBe(201)
+    const id = ((JSON.parse(post.body)) as { id: string }).id
+    await app.inject({ method: 'DELETE', url: `/admin/roles/${id}`, headers })
   }, 120_000)
 })
