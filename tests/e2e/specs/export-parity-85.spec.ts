@@ -85,10 +85,21 @@ const readProbes = `(root, probes) => {
   return out;
 }`;
 
+// A real 1×1 PNG. The e2e stack runs no plantuml service, which is exactly how the blob: defect stayed
+// invisible: the export ASKED the host, got nothing, and the source-card fallback looked like the
+// correct degrade. Answering the render route ourselves puts a picture on the surface, so the gate can
+// require the picture to reach the FILE in a form that outlives this browser session.
+const PLANTUML_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 test("#85: the exported document and the app render the same document", async ({ page }) => {
   test.setTimeout(150_000);
   const plantumlAsks: string[] = [];
   page.on("request", (r) => { if (r.url().includes("/plantuml/render")) plantumlAsks.push(r.url()) });
+  await page.route("**/plantuml/render", (route) =>
+    route.fulfill({ status: 200, contentType: "image/png", body: PLANTUML_PNG }));
   const id = await openScratch(page, `exportparity-${Date.now()}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -157,11 +168,14 @@ test("#85: the exported document and the app render the same document", async ({
   // showed the picture (#505 review rejection).
   expect(html, "a mermaid block reaches the file as a drawn figure").toContain("<svg");
   expect(html, "…not as its source").not.toContain("graph TD; A--&gt;B;");
-  // A host-rendered diagram (plantuml) is drawn by the SERVER, and this environment has no plantuml
-  // service — an unconfigured host answers 204 and the fence degrades to its source, which is correct
-  // behaviour here and cannot be asserted away. What broke was that the export never ASKED: it rendered
-  // with no host seam at all, so even a configured instance got source. That is what this pins.
+  // A host-rendered diagram (plantuml) is drawn by the SERVER; the route above answers for the absent
+  // service so the surface really gets a picture. What broke first was that the export never ASKED (no
+  // host seam at all); what broke second was that the picture travelled as a blob: URL — alive in
+  // the print frame, dead in the saved file. So both halves are pinned: the ask happens, and the picture
+  // reaches the file as bytes, with no blob: reference left anywhere in it.
   expect(plantumlAsks.length, "the export asked the host to draw the plantuml block").toBeGreaterThan(0);
+  expect(html, "the plantuml figure is baked in as bytes that outlive this session").toContain("data:image/png");
+  expect(html, "no image points at a blob: handle that dies with this page").not.toContain('src="blob:');
 
   // #505 review rejection: the file must survive being PRINTED. The app's stylesheet travels with it, and its
   // print rule hides everything that is not the print root — which was this document itself.
@@ -208,8 +222,16 @@ test("#85: the exported document and the app render the same document", async ({
   // #505 ruling 2: and it is HIGHLIGHTED, in the app's own colours. The editor colours code through a
   // HighlightStyle; the read surface now runs the same style over the same grammar, so the keyword colour
   // is read off the running app and required of the file — a literal would just pin today's palette.
-  const keywordColour = await page.evaluate(() =>
-    getComputedStyle(document.documentElement).getPropertyValue("--hl-keyword").trim());
+  // Resolved through a probe element so both sides speak computed rgb() — the raw custom-property text
+  // (`#c678dd` vs `rgb(198, 120, 221)`) would never compare equal even when the colours are the same.
+  const keywordColour = await page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--hl-keyword)";
+    document.body.appendChild(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c;
+  });
   const exportedColours = await page.evaluate(async ({ doc }) => {
     const f = document.createElement("iframe");
     f.style.cssText = "position:fixed;left:-10000px;top:0;width:900px;height:900px;";
@@ -225,6 +247,9 @@ test("#85: the exported document and the app render the same document", async ({
   const constToken = exportedColours.find((c) => c.text.trim() === "const");
   expect(constToken, `the keyword is its own token (got ${JSON.stringify(exportedColours.slice(0, 6))})`).toBeTruthy();
   expect(keywordColour.length, "the app defines a keyword colour to compare against").toBeGreaterThan(0);
+  //gate hole: both colours were read and neither was compared — the export could have highlighted
+  // in anything and stayed green. This is the sentence the two reads were always for.
+  expect(constToken!.colour, "…and it wears the app's own keyword colour").toBe(keywordColour);
 
   for (const probe of PROBES) {
     const a = appProbes[probe.name];
