@@ -27,7 +27,7 @@ type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 // hands over an editor/CRDT/session handle (the checks below still say so), and every one is absent
 // unless the macro's effective capability set carries it. The pin keeps its force: adding a fifth key
 // still fails here, which is the point — widening the trust boundary must be a decision, not a diff.
-const _ctxKeysExact: Exact<keyof MacroContext, "theme" | "capabilities" | "renderMarkdown" | "instanceKey"> = true;
+const _ctxKeysExact: Exact<keyof MacroContext, "theme" | "capabilities" | "renderMarkdown" | "instanceKey" | "hostSlot"> = true;
 // The inline-edit host is EXACTLY its narrow surface — theme + the four source/lifecycle methods.
 const _hostKeysExact: Exact<keyof InnerEditHost, "theme" | "getSource" | "replaceSource" | "exit" | "beginTextEdit"> = true;
 // Neither the context nor the host may expose an editor/CRDT/session handle (spot-check the names a

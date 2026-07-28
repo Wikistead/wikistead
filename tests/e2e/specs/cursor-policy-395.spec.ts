@@ -124,7 +124,15 @@ test("#395 selecting an atom (ring) reveals the Ctrl+Enter entry pill", async ({
   await page.keyboard.insertText(":::children\n:::\n\ntail\n");
   await page.keyboard.press("Control+End");
   await sleep(600);
-  await page.locator("[data-testid=macro-children], [data-testid=macro-children-placeholder]").first().click();
+  // #450 slice 5c: an empty `:::children` is the HOST's slot (`-slot`, with `-empty` inside it on the
+  // edit surface) rather than the macro's own placeholder. The test is about clicking the ATOM and
+  // getting the ring, so it names every shape the atom can have instead of one that used to be there.
+  await page.locator([
+    "[data-testid=macro-children]",
+    "[data-testid=macro-children-slot]",
+    "[data-testid=macro-children-empty]",
+    "[data-testid=macro-children-placeholder]",
+  ].join(", ")).first().click();
   await sleep(400);
   await expect(page.locator(".cm-lp-atom-sel")).toHaveCount(1); // the ring is on
   const pill = page.getByTestId("macro-entry-pill").first();

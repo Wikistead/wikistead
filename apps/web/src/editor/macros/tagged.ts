@@ -17,16 +17,20 @@ export const taggedMacro: DirectiveMacro = {
   // The list is derived, never content — export degrades to the baked static snapshot (meaning-preserving).
   exportFidelity: "degrade",
   revealOnCursor: true, // Ctrl+Enter / caret-in reveals the raw `:::tagged` source (atom, ADR-024)
-  liveRender: () => {
-    // Placeholder only — the HOST swaps in the resolved list, or collapses/placeholders when empty.
+  capabilities: ["host-list"], // #450 slice 5c: the host resolves the list; the macro only asks for the slot
+  liveRender: (body, ctx) => {
+    // #450 slice 5c: ONE resolution path. The host used to spot this macro BY NAME at two different
+    // sinks (the CM widget and the nested renderer) and fill it in — two lifecycles for one question,
+    // which is how the nested copy came to sit at its placeholder forever. Now the macro asks and the
+    // host answers; there is nothing left to keep in step.
+    const slot = ctx?.hostSlot?.({ kind: "list", source: "tagged", query: body });
+    if (slot) return slot;
+    // No host slot on this surface (export, hover card, anonymous): the placeholder, exactly as before.
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-query-placeholder";
     el.setAttribute("data-testid", "macro-tagged-placeholder");
     return el;
   },
-  // Type-contract stub only: the SERVER export deliberately does NOT register tagged
-  // (builtinDirectiveDescriptors), so the published/print/HTML path takes the unregistered-directive
-  // fallback — the public surface substitutes the baked snapshot BEFORE render. Never called on the server.
   htmlRender: () => html``,
   slash: { labelKey: "palette.tagged", keywords: "tagged tag list pages dynamic タグ 一覧 動的", insert: ":::tagged\n\n:::", caret: 10 },
 };

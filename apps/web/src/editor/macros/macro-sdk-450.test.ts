@@ -122,3 +122,58 @@ describe("#450 5a: the dispatch seam assembles it", () => {
     expect([...effectiveOf(sdk)].sort()).toEqual(["render-markdown", "theme"]);
   });
 });
+
+describe("#450 5c: the host slot", () => {
+  const listHost = (items: { id: string; title: string }[] | null) => ({
+    fetch: async () => items,
+    navigate: () => {},
+    emptyLabel: "(nothing here)",
+    untitledLabel: "(untitled)",
+  });
+
+  it("is offered only to a macro that declared host-list", async () => {
+    const { dispatchMacroRender: dispatch } = await import("./md-render");
+    let withCap: unknown = null, withoutCap: unknown = null;
+    const probe = (sink: (v: unknown) => void) => ({
+      liveRender: (_b: MacroSource, ctx: { hostSlot?: unknown }) => { sink(ctx.hostSlot); return document.createElement("div"); },
+    });
+    dispatch({ ...probe((v) => { withCap = v; }), capabilities: ["host-list"] }, "", { theme, slotEnv: { list: listHost([]) } });
+    dispatch({ ...probe((v) => { withoutCap = v; }), capabilities: ["theme"] }, "", { theme, slotEnv: { list: listHost([]) } });
+    expect(typeof withCap, "declared → the factory is there").toBe("function");
+    expect(withoutCap, "did not declare → no factory at all, not a factory that refuses").toBeUndefined();
+  });
+
+  it("refuses a request outside the host's schema (ruling R3: values only, host-defined)", async () => {
+    const { dispatchMacroRender: dispatch } = await import("./md-render");
+    let caught: unknown = null;
+    dispatch(
+      {
+        capabilities: ["host-list"],
+        liveRender: (_b: MacroSource, ctx: { hostSlot?: (p: never) => HTMLElement }) => {
+          // deliberately outside the schema — the point of the test is that the host refuses it
+          try { (ctx.hostSlot as unknown as (p: unknown) => HTMLElement)({ kind: "sql", query: "select 1" }); } catch (e) { caught = e; }
+          return document.createElement("div");
+        },
+      },
+      "", { theme, slotEnv: { list: listHost([]) } },
+    );
+    expect(caught, "an unknown shape is refused, never interpreted").toBeInstanceOf(Error);
+  });
+
+  it("the HOST decides what an empty list looks like — edit surface keeps a handle on the atom", async () => {
+    const { mountHostList } = await import("./md-render");
+    const editable = mountHostList("children", "", { list: listHost([]), editable: true });
+    const read = mountHostList("children", "", { list: listHost([]), editable: false });
+    await Promise.resolve(); await Promise.resolve();
+    expect(editable.querySelector("[data-testid=macro-children-empty]"), "an author must still be able to select and delete it").not.toBeNull();
+    expect(read.style.display, "a read surface renders nothing").toBe("none");
+  });
+
+  it("tells the host to re-measure once the async result lands (block-widget rule)", async () => {
+    const { mountHostList } = await import("./md-render");
+    let measured = 0;
+    mountHostList("tagged", "x", { list: listHost([{ id: "p", title: "T" }]), onMeasure: () => { measured++; } });
+    await Promise.resolve(); await Promise.resolve();
+    expect(measured, "a height change that nobody measures leaves the block overlapping its neighbour").toBe(1);
+  });
+});

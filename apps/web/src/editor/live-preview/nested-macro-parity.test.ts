@@ -181,7 +181,9 @@ describe("#450: a list macro nested in a container resolves through the host sea
     const body = ":::column\n:::children\n:::\n:::\n:::column\nplain\n:::";
     const row = withListHost(host, () => columnsLiveRender(body));
     // the nested list dispatched a placeholder synchronously…
-    const holder = row.querySelector<HTMLElement>("[data-testid=macro-children-nested]");
+    // #450 slice 5c: the nested resolution is no longer a separate branch with its own element — it is
+    // the SAME host slot the top-level widget gets, so the testid names the slot rather than "nested".
+    const holder = row.querySelector<HTMLElement>("[data-testid=macro-children-slot]");
     expect(holder, "the nested :::children dispatched through the host seam").not.toBeNull();
     // …and the host's fetch was the ONLY resolution path (no direct network, ADR-177 authz gate)
     expect(fetched, "the container-nested list resolved through the host, exactly once").toEqual([
@@ -199,7 +201,9 @@ describe("#450: a list macro nested in a container resolves through the host sea
     // make it fire host-free.
     const body = ":::column\n:::children\n:::\n:::";
     const row = columnsLiveRender(body);
-    expect(row.querySelector("[data-testid=macro-children-nested]"), "no host → no host-dispatched list").toBeNull();
+    expect(row.querySelector("[data-testid=macro-children-slot]"), "no host → no host-dispatched list").toBeNull();
+    // …and the macro falls back to its own placeholder, which is what an export/hover surface shows
+    expect(row.querySelector("[data-testid=macro-children-placeholder]"), "the macro still renders something").not.toBeNull();
   });
 });
 

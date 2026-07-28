@@ -2765,7 +2765,21 @@ class MacroWidget extends WidgetType {
         () => withListHost(view.state.facet(listSource), () => dispatchMacroRender(
         this.macro,
         this.body,
-        { theme: this.theme, ...(isLayout ? { baseOffset: this.bodyFrom } : {}), onThrow: "throw" },
+        {
+          theme: this.theme,
+          ...(isLayout ? { baseOffset: this.bodyFrom } : {}),
+          onThrow: "throw",
+          // #450 slice 5c: what a host slot resolves through ON THIS SURFACE. The edit surface keeps a dim
+          // placeholder for an empty list (an author must be able to select and delete the atom they
+          // inserted); a read surface collapses. The label comes from the directive's own line, and the
+          // measure hook is CodeMirror's — an async result changes the block's height.
+          slotEnv: {
+            list: view.state.facet(listSource),
+            editable: !view.state.readOnly,
+            label: directiveLabel(view.state.doc.lineAt(this.from).text, this.name),
+            onMeasure: () => view.requestMeasure(),
+          },
+        },
       )),
       ),
       )!;
@@ -2900,43 +2914,9 @@ class MacroWidget extends WidgetType {
       if (this.name === "embed-external" && this.body.trim() !== "") {
         rendered.replaceChildren(buildEmbedElement(this.body, view.state.facet(embedAllowlist)));
       }
-      // #370 / ADR-145: host-mediated `:::tagged` / `:::children`. The macro can't fetch (narrow host-API);
-      // the host resolves the VIEWER-authorized list and the widget renders it — or, when EMPTY, renders
-      // NOTHING per surface: on a read surface (view / Reading / readOnly) the widget collapses to zero
-      // height; on the EDIT surface it keeps a dim one-line placeholder so the author can still see, select
-      // and delete the atom they inserted (a 0-height atom is mouse-unreachable). Loading shows nothing (no
-      // skeleton). The host resolver is MEMBER-ONLY (absent on anonymous/template surfaces — those render the
-      // baked anonymous snapshot server-side). Height changes as the async result lands → view.requestMeasure
-      // so CM's block ResizeObserver reflows (block-widget motion rule).
-      if (this.name === "tagged" || this.name === "children") {
-        const listName = this.name;
-        const src = view.state.facet(listSource);
-        if (src) {
-          const editable = !view.state.readOnly;
-          const renderResult = (items: { id: string; title: string }[] | null) => {
-            if (this.destroyed) return;
-            rendered.replaceChildren();
-            if (!items || items.length === 0) {
-              if (editable) {
-                const ph = document.createElement("div");
-                ph.className = "cm-lp-backlinks-empty";
-                ph.setAttribute("data-testid", `macro-${listName}-empty`);
-                ph.textContent = src.emptyLabel;
-                rendered.appendChild(ph);
-              } else {
-                wrap.style.display = "none"; // read surface: render nothing (collapse to zero height)
-              }
-            } else {
-              const label = directiveLabel(view.state.doc.lineAt(this.from).text, listName);
-              rendered.appendChild(buildLinkList(items, label, src, listName));
-            }
-            view.requestMeasure();
-          };
-          // The raw body rides to the server (`tagged` = a tag name; `children` ignores it); anything
-          // unresolvable is 0 results (never a parse error). A denied/absent host → null → nothing.
-          void src.fetch(listName, this.body).then(renderResult);
-        }
-      }
+      // #450 slice 5c: the `:::tagged` / `:::children` branch that used to live here — the host spotting
+      // the macro BY NAME and filling it in — is GONE. The macro asks for a host slot (sdk.hostSlot) and
+      // the dispatch answers with the one lifecycle both surfaces now share (md-render.mountHostList).
     }
     if (!view.state.readOnly) {
       // ADR-087 (unified editUI model) / #84 comment 696: a body click SELECTS the atom (caret → ring);

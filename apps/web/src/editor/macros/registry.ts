@@ -56,6 +56,8 @@ export interface MacroContext {
   readonly renderMarkdown?: (src: string, relativeOffset?: number) => DocumentFragment;
   /** Opaque per-instance token for display-only state that must survive a re-render (#450 5b). */
   readonly instanceKey?: string;
+  /** Ask the host for a slot it owns and fills — fixed schema, values only (#450 5c, ruling R3). */
+  readonly hostSlot?: (params: { kind: "list"; source: "tagged" | "children"; query?: string }) => HTMLElement;
 }
 
 // Mouse rich-edit (ADR-022 Part 3). A "modal" editor mounts in a plain-DOM overlay
@@ -255,6 +257,10 @@ export interface FenceMacro {
   // REQUIRED on every macro (ADR-022 — degradation is never silent). "preserve" =
   // the source round-trips verbatim in Markdown (a code fence always does);
   // "degrade" = lossy, export emits a placeholder + warning (M3).
+  // #450 / ADR-177 §4b: the host services this macro asks for. Enforced at registration (validateMacro
+  // refuses anything the host does not broker) and intersected with the caller's set at dispatch, so a
+  // nested macro can never hold more than the one rendering it. Absent = the default narrow surface.
+  readonly capabilities?: readonly string[];
   readonly exportFidelity: "preserve" | "degrade";
   // Mouse rich-edit surface (modal for embedded React editors — keeps React out of
   // CodeMirror, ADR-013).
@@ -290,6 +296,10 @@ interface DirectiveMacroBase {
   // rendered by the server pipeline; this supplies the wrapper. Returns SafeHtml (ADR-045 /
   // #88) — XSS-safety enforced by the type (build via html``/unsafeHtml, never raw concat).
   htmlRender(body: string): SafeHtml;
+  // #450 / ADR-177 §4b: the host services this macro asks for. Enforced at registration (validateMacro
+  // refuses anything the host does not broker) and intersected with the caller's set at dispatch, so a
+  // nested macro can never hold more than the one rendering it. Absent = the default narrow surface.
+  readonly capabilities?: readonly string[];
   readonly exportFidelity: "preserve" | "degrade";
   readonly richEditUI?: RichEditUI;
   readonly editUI?: EditUI; // #174 / ADR-087 — unified edit UI (see FenceMacro.editUI)
