@@ -94,7 +94,12 @@ const TENANT_CAP_RELATION: Record<TenantRoleCapability, string> = {
   issueApiKeys: 'api_key_issue', // #496 / ADR-181 — camelCase token → snake_case relation, same as above
 }
 
-function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: string, principal: string, cap: AnyRoleCapability): { user: string; relation: string; object: string }[] {
+// `allowSuperset` is set ONLY by the built-in grant path (#536 / ADR-188 §6 item 1). `manage` is the
+// built-in superset: it is deliberately absent from ROLE_CAPABILITIES so no custom role can request it,
+// and the check below is the second layer that refuses it even if a future path reaches here. Routing
+// built-in grants through this mechanism means `manage` now arrives here legitimately — but only from
+// that path, which is why it is a parameter rather than a row added to the vocabulary.
+function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: string, principal: string, cap: AnyRoleCapability, allowSuperset = false): { user: string; relation: string; object: string }[] {
   if (resourceType === 'tenant') {
     const rel = TENANT_CAP_RELATION[cap as TenantRoleCapability]
     if (!rel) throw Object.assign(new Error(`capability "${cap}" is not assignable at tenant scope`), { statusCode: 400 })
@@ -108,7 +113,7 @@ function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: 
   // it, so absence from the table no longer refuses a custom role that asks for the superset. The vocabulary
   // check in parseDefinition is the first layer and no write path bypasses it today; this is the second, so
   // a future path that reaches here with `manage` is refused rather than silently granted manager.
-  if (!ROLE_CAPABILITIES.includes(cap as RoleCapability)) {
+  if (!allowSuperset && !ROLE_CAPABILITIES.includes(cap as RoleCapability)) {
     throw Object.assign(new Error(`capability "${cap}" is not assignable at space scope`), { statusCode: 400 })
   }
   const tuples = spaceGrantTuplesFor(principal, cap, resourceId)
@@ -144,9 +149,23 @@ const forbidden = () => Object.assign(new Error('forbidden'), { statusCode: 403 
 export async function assignRoleInTx(
   db: TenantDb, fga: OpenFgaClient, searchDriver: SearchDriver,
   args: {
-    tenant: { id: string; plan: string }; roleId: string; capabilities: AnyRoleCapability[];
+    tenant: { id: string; plan: string }; roleId: string | null; capabilities: AnyRoleCapability[];
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
     actorSub: string; origin?: 'manual' | 'mapping' | 'default';
+    // #536 / ADR-188 §6 item 1: a BUILT-IN grant is the same mechanism with the other column set. A
+    // built-in is virtual (no roles row) so it cannot be pointed at by role_id; the row carries the
+    // capability instead. Set this and roleId must be null.
+    builtinCapability?: string;
+    // A built-in grant is idempotent — granting `view` to someone who already has it is not an error the
+    // way assigning the same role twice is (the Members control offers no "already granted" state, and
+    // the pre-#536 path just wrote the tuple again). 'ignore' returns the existing row's id.
+    onDuplicate?: 'conflict' | 'ignore';
+    // The audit action to record. Defaults to the role vocabulary; the built-in grant path keeps saying
+    // `space.access_granted` so this change does not rewrite anyone's audit stream mid-flight.
+    auditAction?: string;
+    // The grant path is called from places that do not know the plan (no entitlement to resolve), and
+    // audited nothing there before. Keep that rather than auditing under a guessed plan.
+    skipAudit?: boolean;
     // #497: an optional hook run INSIDE the assign tx, right after the role_assignments INSERT, with
     // the new assignment id. The mapping-create path writes its owning group_role_mappings row here so
     // the assignment + its owning row commit ATOMICALLY (no orphaned origin='mapping' assignment on a
@@ -156,7 +175,7 @@ export async function assignRoleInTx(
 ): Promise<string> {
   const { tenant, roleId, capabilities: caps, resourceType, resourceId, principal, actorSub } = args
   const origin = args.origin ?? 'manual'
-  const allTuples = caps.map((c) => ({ cap: c, tuples: expansionTuples(resourceType, resourceId, principal, c) }))
+  const allTuples = caps.map((c) => ({ cap: c, tuples: expansionTuples(resourceType, resourceId, principal, c, args.builtinCapability !== undefined) }))
   // Principal-scoped read (F4): only this principal's tuples, no paging (see the route comment).
   const { tuples: existingTuples } = await fga.read({ user: principal, object: `${resourceType}:${resourceId}` })
   const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
@@ -168,19 +187,31 @@ export async function assignRoleInTx(
     if (missing.length === tuples.length) owned.push(cap)
   }
   const id = randomUUID()
+  const builtin = args.builtinCapability ?? null
+  let existingId: string | null = null
   const oid = await db.tx(async (tx) => {
-    const dup = await tx<{ id: string }[]>`
-      SELECT id FROM role_assignments WHERE role_id = ${roleId} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
-    if (dup.length) throw Object.assign(new Error('already assigned'), { statusCode: 409 })
-    await tx`INSERT INTO role_assignments (id, tenant_id, role_id, resource_type, resource_id, principal, owned_capabilities, origin)
-             VALUES (${id}, ${tenant.id}, ${roleId}, ${resourceType}, ${resourceId}, ${principal}, ${owned as string[]}, ${origin})`
+    const dup = builtin
+      ? await tx<{ id: string }[]>`
+          SELECT id FROM role_assignments WHERE builtin_capability = ${builtin} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
+      : await tx<{ id: string }[]>`
+          SELECT id FROM role_assignments WHERE role_id = ${roleId} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
+    if (dup.length) {
+      if (args.onDuplicate !== 'ignore') throw Object.assign(new Error('already assigned'), { statusCode: 409 })
+      // Idempotent: the row is already there and already owns whatever it owns. Writing the tuples again
+      // would be harmless but recomputing `owned` from a stale read would not — leave the row alone.
+      existingId = dup[0].id
+      return null
+    }
+    await tx`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin)
+             VALUES (${id}, ${tenant.id}, ${roleId}, ${builtin}, ${resourceType}, ${resourceId}, ${principal}, ${owned as string[]}, ${origin})`
     if (args.afterAssign) await args.afterAssign(tx, id)
-    await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: 'role.assigned', target: `${resourceType}:${resourceId}` })
+    if (!args.skipAudit) await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: args.auditAction ?? 'role.assigned', target: `${resourceType}:${resourceId}` })
     const o = resourceType === 'page' ? await enqueueOutbox(tx, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' }) : null
     if (toWrite.length) await writeTuples(fga, toWrite)
     return o
   })
   if (oid) processOutboxAsync(searchDriver, oid, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' })
+  if (existingId) return existingId
   if (resourceType === 'space') await reindexPublishedPages(db, searchDriver, tenant.id, resourceId)
   return id
 }
@@ -190,33 +221,46 @@ export async function assignRoleInTx(
 // Returns true if an assignment was deleted.
 export async function unassignRoleInTx(
   db: TenantDb, fga: OpenFgaClient, searchDriver: SearchDriver,
-  args: { tenant: { id: string; plan: string }; assignmentId: string; actorSub: string },
+  args: {
+    tenant: { id: string; plan: string }; assignmentId: string; actorSub: string;
+    // #536: the built-in grant path revokes through here but keeps its own audit vocabulary (see the
+    // matching note on assignRoleInTx).
+    auditAction?: string; skipAudit?: boolean;
+  },
 ): Promise<boolean> {
   interface AsgRow { id: string; role_id: string; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; principal: string; owned_capabilities: string[]; capabilities: string[] }
   let deleted = false
   let resourceType = 'page' as 'page' | 'space' | 'tenant'
   let resourceId = ''
   const oid = await db.tx(async (tx) => {
+    // #536 / ADR-188 §6 item 1: LEFT join. A built-in grant is a row with no roles entry (built-ins are
+    // virtual), and an inner join would make unassign silently find nothing for it — a revoke that
+    // answers success and deletes neither the row nor the tuples.
     const [asg] = await tx<AsgRow[]>`
-      SELECT a.id, a.role_id, a.resource_type, a.resource_id, a.principal, a.owned_capabilities, r.capabilities
-      FROM role_assignments a JOIN roles r ON r.id = a.role_id WHERE a.id = ${args.assignmentId} FOR UPDATE OF a`
+      SELECT a.id, a.role_id, a.resource_type, a.resource_id, a.principal, a.owned_capabilities,
+             COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS capabilities
+      FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id WHERE a.id = ${args.assignmentId} FOR UPDATE OF a`
     if (!asg) return null
     deleted = true
     resourceType = asg.resource_type
     resourceId = asg.resource_id
+    // Same LEFT join for the refcount: the capabilities a principal still holds through OTHER assignments
+    // now include built-in grants. With the inner join, revoking a custom role that overlapped a built-in
+    // grant deleted the shared leaves outright -- the grant was still there, and the access was not.
     const others = await tx<{ id: string; capabilities: string[] }[]>`
-      SELECT a.id, r.capabilities FROM role_assignments a JOIN roles r ON r.id = a.role_id
+      SELECT a.id, COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS capabilities
+      FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
       WHERE a.id != ${asg.id} AND a.resource_type = ${asg.resource_type} AND a.resource_id = ${asg.resource_id} AND a.principal = ${asg.principal}
       FOR UPDATE OF a`
     const stillCovered = new Set(others.flatMap((o) => o.capabilities))
     const ownedCaps = asg.owned_capabilities as AnyRoleCapability[]
-    const toDelete = ownedCaps.filter((c) => !stillCovered.has(c)).flatMap((c) => expansionTuples(asg.resource_type, asg.resource_id, asg.principal, c))
+    const toDelete = ownedCaps.filter((c) => !stillCovered.has(c)).flatMap((c) => expansionTuples(asg.resource_type, asg.resource_id, asg.principal, c, asg.role_id === null))
     for (const c of ownedCaps.filter((x) => stillCovered.has(x))) {
       const heir = others.find((o) => o.capabilities.includes(c))!
       await tx`UPDATE role_assignments SET owned_capabilities = array_append(owned_capabilities, ${c}) WHERE id = ${heir.id} AND NOT (${c} = ANY(owned_capabilities))`
     }
     await tx`DELETE FROM role_assignments WHERE id = ${asg.id}`
-    await auditIfEntitled(tx, args.tenant, { actor: `user:${args.actorSub}`, action: 'role.unassigned', target: `${asg.resource_type}:${asg.resource_id}` })
+    if (!args.skipAudit) await auditIfEntitled(tx, args.tenant, { actor: `user:${args.actorSub}`, action: args.auditAction ?? 'role.unassigned', target: `${asg.resource_type}:${asg.resource_id}` })
     const o = asg.resource_type === 'page' ? await enqueueOutbox(tx, { tenantId: args.tenant.id, pageId: asg.resource_id, operation: 'upsert' }) : null
     if (toDelete.length) await deleteTuples(fga, toDelete)
     return o
@@ -444,10 +488,13 @@ export async function rolesPlugin(app: FastifyInstance) {
             // (their roles keep the CURRENT capability sets; this role's removal is what we diff).
             for (const c of removed) {
               if (!a.owned_capabilities.includes(c)) continue // never owned (direct grant / other creator)
+              // #536 / ADR-188 §6 item 1: LEFT join here too. A built-in grant of the same capability is a
+              // coverer -- editing a custom role to drop `edit` must not delete `editor_member` from
+              // someone who also holds a plain `edit` grant.
               const covering = await tx<{ id: string }[]>`
-                SELECT a2.id FROM role_assignments a2 JOIN roles r2 ON r2.id = a2.role_id
+                SELECT a2.id FROM role_assignments a2 LEFT JOIN roles r2 ON r2.id = a2.role_id
                 WHERE a2.id != ${a.id} AND a2.resource_type = ${a.resource_type} AND a2.resource_id = ${a.resource_id}
-                  AND a2.principal = ${a.principal} AND ${c} = ANY(r2.capabilities)
+                  AND a2.principal = ${a.principal} AND ${c} = ANY(COALESCE(r2.capabilities, ARRAY[a2.builtin_capability]))
                 FOR UPDATE OF a2`
               if (covering.length) {
                 // ownership transfers to a coverer (the unassign rule — no orphaned leaf later)
