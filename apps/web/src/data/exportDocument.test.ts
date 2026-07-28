@@ -109,6 +109,32 @@ describe("#85: the browser-built export document", () => {
     expect(out, "nor does the strip").not.toContain("cm-lp-tabbar");
   });
 
+  // #207 (review rejection ①: "the tabs have no frame or separation on paper"). `expandTabs` invents
+  // `.cm-lp-tab-label`, and the app stylesheet that travels with the file has no rule for a class the app
+  // never emits — so the titles printed as bare body text. Measured in the real print document: the strip is
+  // gone by design (the #85 ruling), the label was simply unstyled. The document must therefore CARRY the
+  // rule, not merely the class. `css: ""` here stands in for the app sheet, so anything this asserts can only
+  // come from the export's own <style>.
+  it("styles the tab labels it invents, so the panes are told apart on paper", () => {
+    const out = buildExportDocument({
+      title: "t",
+      body: surface(`<div class="cm-lp-tabs">
+        <div class="cm-lp-tabbar"><button class="cm-lp-tab cm-lp-tab-active">One</button><button class="cm-lp-tab">Two</button></div>
+        <div class="cm-lp-tabpanels">
+          <div class="cm-lp-tabpanel cm-lp-tabpanel-active"><p>first pane</p></div>
+          <div class="cm-lp-tabpanel"><p>second pane</p></div>
+        </div>
+      </div>`),
+      css: "",
+    });
+    const style = out.slice(out.indexOf("<style>", out.indexOf("</style>")));
+    expect(style, "the invented label class is styled by the file itself").toContain(".cm-lp-tab-label{");
+    expect(style, "…and it wears the accent underline the on-screen active tab wears").toMatch(
+      /\.cm-lp-tab-label\{[^}]*border-bottom:2px solid var\(--accent\)/,
+    );
+    expect(style, "…and consecutive panes are separated").toMatch(/\.wks-export-tabs>\.cm-lp-tabpanel\+\.cm-lp-tabpanel\{[^}]*margin-top/);
+  });
+
   it("keeps the disclosure look but travels open", () => {
     const out = buildExportDocument({
       title: "t",

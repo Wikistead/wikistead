@@ -184,6 +184,17 @@ export function buildExportDocument(input: ExportDocumentInput): string {
 :root{color-scheme:light}
 body{margin:0;background:var(--bg,#fff);color:var(--fg,#1f2328)}
 .wks-export-doc{max-width:46rem;margin:2rem auto;padding:0 1rem}
+/* #207: expandTabs() replaces the strip with titled sections, and .cm-lp-tab-label is a class this module
+   INVENTS — the app stylesheet has no rule for it, so every tab title printed as bare body text and the tabs
+   arrived with no frame or separation at all (measured in the real print document: the label was
+   indistinguishable from a paragraph). The look is borrowed from the on-screen active tab
+   (.cm-lp-tabs .cm-lp-tab-active: accent underline, full-strength text) and uses the same tokens, so paper
+   and screen stay one palette. Note this block is inside a template literal: no backticks below. */
+.wks-export-tabs>.cm-lp-tabpanel+.cm-lp-tabpanel{margin-top:1.2em}
+.wks-export-tabs>.cm-lp-tabpanel{border-top:1px solid var(--border,#888);padding-top:0.5em}
+.wks-export-tabs>.cm-lp-tabpanel:first-child{border-top:none;padding-top:0}
+.cm-lp-tab-label{display:inline-block;font:inherit;font-weight:600;color:var(--fg);
+  padding:0.2em 0.6em 0.2em 0;border-bottom:2px solid var(--accent);margin-bottom:0.6em}
 @page{margin:14mm}
 @media print{.wks-export-doc{max-width:none;margin:0}}
 </style>
