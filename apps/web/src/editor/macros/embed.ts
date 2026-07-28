@@ -16,9 +16,9 @@ export const embedMacro: DirectiveMacro = {
   name: "embed-external",
   exportFidelity: "degrade", // an external iframe can't round-trip to static HTML → a link is the faithful degrade
   revealOnCursor: true, // paired with atomSelectable below (the URL is edited via the modal, not caret-in raw)
-  // #366: embed-external is a MODAL-completed leaf atom (openEmbedExternalPrompt / the ⇆ retarget enter the URL),
+  // #366: embed-external is a MODAL-completed leaf atom (openEmbedExternalPrompt on insert / Ctrl+Enter to retarget — #548 removed the ⇆ button),
   // so — exactly like embed-page — an empty caret resting on it SELECTS the atom (card + ring, no raw reveal) and
-  // the URL is re-edited via the EmbedUrlModal (Ctrl+Enter / ⇆), never hand-typed in the block. Raw editing stays
+  // the URL is re-edited via the EmbedUrlModal (Ctrl+Enter), never hand-typed in the block. Raw editing stays
   // reachable via Source mode (Open formats). See ADR-024 addendum (atomSelectable)/#366.
   atomSelectable: true,
   liveRender: (body, ctx) => {

@@ -295,7 +295,7 @@ export function pageLinkTrigger(): Extension {
 }
 
 // #210 bounce: open the host URL modal (seeded empty) and, on submit, insert `:::embed-external\n<url>\n:::`.
-// Cancel/empty leaves the doc untouched. Same seam the ⇆ retarget uses, so insert + retarget share the modal.
+// Cancel/empty leaves the doc untouched. Same seam Ctrl+Enter retargeting uses, so insert + retarget share the modal (#548: the ⇆ button is gone).
 // #366: embed-external is now atomSelectable (like embed-page) — the modal completes the URL, so the caret lands
 // on the atom START (card renders SELECTED, not raw), vim drops to NORMAL, and a second-frame re-pin keeps the
 // blank-fatcursor class through CM's focus className rebuild. Mirrors openEmbedPagePicker exactly.

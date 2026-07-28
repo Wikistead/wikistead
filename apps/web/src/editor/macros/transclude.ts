@@ -17,7 +17,7 @@ export const transcludeMacro: DirectiveMacro = {
   exportFidelity: "preserve", // ::: stays plain text → lossless round-trip
   revealOnCursor: true, // Ctrl+Enter reveals the raw block so the id is editable in place
   // #332: an empty caret SELECTS the atom (rendered card + ring) rather than revealing raw — the id is
-  // a completed pick, edited via the ⇆ retarget button or Ctrl+Enter, so there is nothing to type in
+  // a completed pick, edited via Ctrl+Enter (the retarget picker; #548 removed the ⇆ button), so there is nothing to type in
   // place. (Fixes the picker leaving the caret stranded on a blank line in vim insert mode.)
   atomSelectable: true,
   liveRender: (body) => {

@@ -269,7 +269,7 @@ test("#278-10 ① generalized: NO island chrome lights from hovering neutral isl
   await expect(island).toHaveCount(1);
   await island.locator(".cm-content").getByText("lead line").hover();
   await sleep(300);
-  const CHROME = ".cm-lp-macro-edit, .cm-lp-macro-align, .cm-lp-macro-retarget, .cm-lp-macro-richui-raw, .cm-lp-callout-panel-edit";
+  const CHROME = ".cm-lp-macro-edit, .cm-lp-macro-align, .cm-lp-macro-richui-raw, .cm-lp-callout-panel-edit"; // #548: the ⇆ retarget button is gone
   const ops = await island.locator(CHROME).evaluateAll((els) => els.map((el) => ({ c: el.className.slice(0, 60), op: getComputedStyle(el).opacity })));
   for (const { c, op } of ops) expect(parseFloat(op), `chrome [${c}] hidden on neutral hover`).toBeLessThan(0.1);
 });

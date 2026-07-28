@@ -3201,29 +3201,12 @@ class MacroWidget extends WidgetType {
         }
         }
       }
-      // #210 / ADR-087: embed macros have no rich UI, but their TARGET (page id / URL) must be
-      // changeable after insertion — otherwise a mis-picked embed strands the user in raw editing.
-      // This is the first per-macro action in the ADR-087 block menu: a ⇆ button that re-opens the
-      // same picker (embed-page) / prompts a URL (embed-external) and writes the choice back. Shows on
-      // hover / selection (same as ✎). Offset-invariant here — the write happens in changeEmbedTarget.
-      if (this.name === "embed-page" || this.name === "embed-external") {
-        const retarget = document.createElement("button");
-        retarget.type = "button";
-        // #210 bounce: was `cm-lp-macro-edit` (left:4px) — it overlapped the edit button's slot AND sat
-        // under the embed's own content (an embed-external <iframe> is a stacking context + a pointer-
-        // event sink, so a same-plane button never received the click). Give it its OWN class: top-RIGHT
-        // corner (embeds have no fold button there) + a z-index above the rendered embed content, and use
-        // `click` (fires reliably even when a child iframe swallows earlier pointer phases).
-        retarget.className = "cm-lp-macro-retarget";
-        retarget.dataset.tip = "Change embed target";
-        retarget.textContent = "⇆";
-        retarget.setAttribute("data-testid", "embed-change-target");
-        // mousedown only PREVENTS the caret/fall-through (don't open here); `click` does the action, so
-        // it can't double-fire, and click lands even when an intervening pointer phase is swallowed.
-        retarget.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
-        retarget.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); changeEmbedTarget(view, () => view.posAtDOM(wrap), this.name); });
-        wrap.appendChild(retarget);
-      }
+      // #210 / ADR-087 → #548: the ⇆ retarget button is GONE. It duplicated Ctrl+Enter exactly (#332
+      //routes Ctrl+Enter on a selected atomSelectable embed through the SAME changeEmbedTarget),
+      // and its hand-placed top-left slot collided with the Ctrl+Enter hint — the #528 lesson again
+      // every individually-positioned affordance eventually overlaps another. Retargeting is
+      // keyboard-only now (the hover hint advertises Ctrl+Enter); changeEmbedTarget stays, it IS the
+      // Ctrl+Enter path.
       // #174 comment 911: the ⊟ collapse BUTTON is removed from every macro (it cluttered the block
       // affordances and duplicated fold). vim fold (zc / foldEffect) is a SEPARATE mechanism and stays.
     }
@@ -5369,7 +5352,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // a pointer sink that captures clicks regardless of z-index, so a button OVER the iframe was unclickable.
   // A row above the widget (in the block's top margin) is never over the iframe, so every macro's buttons
   // (edit / retarget / fold) are reliably clickable — the Notion block-hover pattern, uniform across macros.
-  ".cm-lp-macro-edit, .cm-lp-macro-retarget, .cm-lp-macro-align": {
+  ".cm-lp-macro-edit, .cm-lp-macro-align": {
     position: "absolute",
     top: "-1.5em", // above the content box (outside the iframe/widget), in the block's top margin — the
     // #424 UNIFIED offset: every edit affordance sits at block top-left with this exact top (btnrow,
@@ -5428,7 +5411,6 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   ".cm-lp-align-seg-btn:last-child": { borderRight: "none" },
   ".cm-lp-align-seg-btn:hover": { background: "color-mix(in srgb, var(--fg-dim, #888) 14%, transparent)", color: "var(--fg, #222)" },
   ".cm-lp-align-seg-on": { background: "color-mix(in srgb, var(--accent, #4ea1ff) 20%, transparent)", color: "var(--accent, #4ea1ff)" },
-  ".cm-lp-macro-retarget": { left: "0" }, // embeds: a separate top-left control (no edit/align co-occur)
   // #216 comment 836: the pipe-table wrap positions the hover-revealed RichUI-entry button at the table's
   // top-left. fit-content keeps the wrap the table's width so the button aligns to the table's left edge
   // (not the full editor width). The button reuses .cm-lp-macro-edit chrome; reveal it on wrap hover.
@@ -5530,7 +5512,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // own btnrow chrome / direct edit / retarget / align, and can never reach a nested macro's or an
   // island's chrome (both are deeper descendants by construction). This retires the
   // `:not(island *)` + island-scoped enumeration entirely: one rule shape everywhere.
-  ".cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-retarget, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-align": { opacity: "1" },
+  ".cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-aff-focus > .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow .cm-lp-macro-align, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-edit, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-align": { opacity: "1" },
   // #393 / ADR-151 addendum 3: same opacity reveal for the pipe table's align segment on hover (its wrap
   // is `.cm-lp-table-wrap` for the rendered widget, `.cm-lp-table-edit` while the RichUI island is open
   //wants the whole-table align visible in BOTH states, orthogonal to the toolbar's per-cell align).

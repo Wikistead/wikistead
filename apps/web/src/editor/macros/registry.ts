@@ -342,7 +342,7 @@ export interface BlockDirectiveMacro extends DirectiveMacroBase {
   // #332: with revealOnCursor, an EMPTY caret resting on the block SELECTS the atom (rendered card +
   // ring, the image-atom model) instead of revealing its raw source; the raw reveals only on explicit
   // entry (Ctrl+Enter → macroRenderActiveField) or a non-empty selection. For a picker-completed atom
-  // (embed-page) whose id is edited via the ⇆ retarget button / Ctrl+Enter — there is nothing to type
+  // (embed-page) whose id is edited via Ctrl+Enter (the retarget picker; #548 removed the ⇆ button) — there is nothing to type
   // in place, so caret-in-reveals-raw would only strand the caret. Omit → caret-in reveals raw (default).
   // #395 / ADR-156 (the codified policy): set this for every macro with NOTHING TO TYPE at the block
   // itself — picker-chosen references, modal-edited scenes, zero-argument dynamic blocks. Registration
