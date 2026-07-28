@@ -42,7 +42,11 @@ const CHROME_SELECTORS = [
 // re-check. Anything not on the allowed URL schemes is dropped rather than rewritten — a broken image in a
 // downloaded file is a smaller problem than a live one.
 const URL_ATTRS = ["href", "src", "xlink:href", "action", "formaction", "poster", "background"];
-const ALLOWED_DATA_IMAGE = /^data:image\/(?:png|jpeg|gif|webp|svg\+xml)[;,]/i;
+// Raster only — the same line ADR-194 pins for the file and ADR-059 pins for the server sink. A drawn SVG
+// travels as an ELEMENT (mermaid/excalidraw render inline), never as a data: URL, so the scheme allowance
+// has no raster-less customer.
+const ALLOWED_DATA_IMAGE = /^data:image\/(?:png|jpeg|gif|webp)[;,]/i;
+const RASTER_BLOB_TYPE = /^image\/(?:png|jpeg|gif|webp)$/i;
 
 // #85 (user ruling 2026-07-28): a tab strip is a way of showing one thing at a time, and on paper there is
 // no "at a time" — every panel but the active one is hidden by CSS, so the export silently lost the other
@@ -97,10 +101,41 @@ function makeInert(root: HTMLElement): void {
       if (name.startsWith("on")) { el.removeAttribute(attr.name); continue }
       if (URL_ATTRS.includes(name)) {
         const v = (attr.value || "").trim();
-        if (/^(javascript|vbscript|data):/i.test(v) && !ALLOWED_DATA_IMAGE.test(v)) el.removeAttribute(attr.name);
+        // blob: is dropped because it CANNOT work here: it is a handle into the session that minted it,
+        // dead the moment this file is opened on its own. Anything worth keeping was already baked into a
+        // data: URL by inlineTransientImages; what remains would only ever render as a broken reference.
+        if (/^(javascript|vbscript|data|blob):/i.test(v) && !ALLOWED_DATA_IMAGE.test(v)) el.removeAttribute(attr.name);
       }
     }
   }
+}
+
+// #85 review reject: a host-rendered diagram (plantuml) reaches the surface as
+// `<img src="blob:…">`, and a blob: URL does not survive the document that created it — the print frame
+// still resolved it, so every print path passed while the DOWNLOADED file opened to a broken image. Before
+// the surface is serialized, each blob image is read back and baked in as a raster data: URL; one that
+// cannot be read (or is not a raster) keeps its src and makeInert drops it, because shipping a reference
+// that is known-dead is worse than shipping nothing.
+async function loadBlobAsDataUrl(src: string): Promise<string | null> {
+  const blob = await (await fetch(src)).blob();
+  if (!RASTER_BLOB_TYPE.test(blob.type)) return null;
+  return await new Promise<string | null>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(typeof r.result === "string" ? r.result : null);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+export async function inlineTransientImages(
+  root: HTMLElement,
+  load: (src: string) => Promise<string | null> = loadBlobAsDataUrl,
+): Promise<void> {
+  const imgs = Array.from(root.querySelectorAll('img[src^="blob:"]'));
+  await Promise.all(imgs.map(async (img) => {
+    const data = await load(img.getAttribute("src")!).catch(() => null);
+    if (data && ALLOWED_DATA_IMAGE.test(data)) img.setAttribute("src", data);
+  }));
 }
 
 // The app's own CSS, read back out of the live document. Same-origin sheets expose their rules; a sheet we
