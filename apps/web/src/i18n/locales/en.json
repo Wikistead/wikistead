@@ -463,7 +463,7 @@
     "title": "Members & permissions",
     "body": "Grant members access to this space. Access flows to every published page in it.",
     "customRolesTitle": "Custom roles",
-    "customRolesBody": "Assign a custom role (defined in tenant settings → Roles) to a member of this space. The role's capabilities apply across the space.",
+    "customRolesBody": "Custom roles assigned in this space. Roles are defined in tenant settings → Roles, and assigned from the picker above — the role's capabilities apply across the space.",
     "customRolesEmpty": "No custom roles assigned in this space yet.",
     "selectRole": "Select a role",
     "addPlaceholder": "Search members…",
