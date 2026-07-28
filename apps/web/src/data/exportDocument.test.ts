@@ -69,6 +69,29 @@ describe("#85: the browser-built export document", () => {
     expect(out).not.toContain("data:text/html");
   });
 
+  // #85 (user ruling): the tab strip hides every panel but one, so the exported file was missing the other
+  // tabs' TEXT — a document losing content, not a document losing interactivity. Every panel survives, each
+  // under its own tab's label, and the strip of buttons does not travel.
+  it("keeps every tab's content, each under its label", () => {
+    const out = buildExportDocument({
+      title: "t",
+      body: surface(`<div class="cm-lp-tabs">
+        <div class="cm-lp-tabbar"><button class="cm-lp-tab cm-lp-tab-active">One</button><button class="cm-lp-tab">Two</button></div>
+        <div class="cm-lp-tabpanels">
+          <div class="cm-lp-tabpanel cm-lp-tabpanel-active"><p>first pane</p></div>
+          <div class="cm-lp-tabpanel"><p>second pane</p></div>
+        </div>
+      </div>`),
+      css: "",
+    });
+    expect(out, "the visible tab's content is there").toContain("first pane");
+    expect(out, "…and so is the one the reader never clicked").toContain("second pane");
+    expect(out, "each pane keeps its label").toContain("One");
+    expect(out).toContain("Two");
+    expect(out, "the buttons themselves do not travel").not.toContain("<button");
+    expect(out, "nor does the strip").not.toContain("cm-lp-tabbar");
+  });
+
   it("does not mutate the surface it was given", () => {
     const live = surface('<div><button class="cm-lp-code-copy">Copy</button><p onclick="x()">p</p></div>');
     buildExportDocument({ title: "t", body: live, css: "" });

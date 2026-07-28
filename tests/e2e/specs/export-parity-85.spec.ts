@@ -14,6 +14,15 @@ const FIXTURE = [
   "",
   "ordinary body text",
   "",
+  "::::tabs",
+  ":::tab[Alpha]",
+  "alpha pane text",
+  ":::",
+  ":::tab[Beta]",
+  "beta pane text",
+  ":::",
+  "::::",
+  "",
   ":::note[Label]",
   "callout body",
   ":::",
@@ -77,6 +86,14 @@ test("#85: the exported document and the app render the same document", async ({
   const html = await page.evaluate(() =>
     Array.from(document.querySelectorAll("iframe")).map((f) => (f as HTMLIFrameElement).srcdoc || "").filter(Boolean).pop() ?? "");
   expect(html.length, "the export document was built").toBeGreaterThan(0);
+
+  // #85 (user ruling 2026-07-28): every tab's content reaches the file. On screen the strip shows one at a
+  // time; on paper there is no "at a time", and the reader must not lose the text behind the tabs they
+  // never clicked.
+  expect(html, "the tab the reader saw").toContain("alpha pane text");
+  expect(html, "…and the one they did not").toContain("beta pane text");
+  expect(html, "each under its own label").toContain("Alpha");
+  expect(html).toContain("Beta");
 
   // Acceptance 2: the diagram is a figure.
   expect(html, "a mermaid block reaches the file as a drawn figure").toContain("<svg");

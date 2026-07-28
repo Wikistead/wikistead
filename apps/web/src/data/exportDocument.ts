@@ -35,6 +35,35 @@ const CHROME_SELECTORS = [
 const URL_ATTRS = ["href", "src", "xlink:href", "action", "formaction", "poster", "background"];
 const ALLOWED_DATA_IMAGE = /^data:image\/(?:png|jpeg|gif|webp|svg\+xml)[;,]/i;
 
+// #85 (user ruling 2026-07-28): a tab strip is a way of showing one thing at a time, and on paper there is
+// no "at a time" — every panel but the active one is hidden by CSS, so the export silently lost the other
+// tabs' content. That is a document losing text, not a document losing interactivity, and the ruling is
+// explicit that all tab content must survive. Each panel becomes a titled section (the tab's own label,
+// taken from its button before the buttons are stripped) and the strip itself goes.
+function expandTabs(root: HTMLElement): void {
+  for (const tabs of Array.from(root.querySelectorAll(".cm-lp-tabs"))) {
+    const labels = Array.from(tabs.querySelectorAll(".cm-lp-tabbar .cm-lp-tab")).map((b) => (b.textContent || "").trim());
+    const panels = Array.from(tabs.querySelectorAll(".cm-lp-tabpanels > .cm-lp-tabpanel")) as HTMLElement[];
+    if (!panels.length) continue;
+    const out = document.createElement("div");
+    out.className = "cm-lp-tabs wks-export-tabs";
+    panels.forEach((panel, i) => {
+      const section = document.createElement("section");
+      section.className = "cm-lp-tabpanel cm-lp-tabpanel-active"; // the class the app styles a shown panel with
+      const label = labels[i];
+      if (label) {
+        const h = document.createElement("div");
+        h.className = "cm-lp-tab-label";
+        h.textContent = label; // text, never markup
+        section.appendChild(h);
+      }
+      while (panel.firstChild) section.appendChild(panel.firstChild);
+      out.appendChild(section);
+    });
+    tabs.replaceWith(out);
+  }
+}
+
 function stripChrome(root: HTMLElement): void {
   for (const sel of CHROME_SELECTORS) {
     for (const el of Array.from(root.querySelectorAll(sel))) el.remove();
@@ -83,6 +112,7 @@ const escapeHtml = (s: string): string =>
 // the user is looking at is untouched.
 export function buildExportDocument(input: ExportDocumentInput): string {
   const clone = input.body.cloneNode(true) as HTMLElement;
+  expandTabs(clone); // before the chrome goes: the labels live on the tab BUTTONS
   stripChrome(clone);
   makeInert(clone);
   const css = input.css ?? collectAppCss();
