@@ -18,15 +18,19 @@ const theme = { mode: "light" } as unknown as MacroTheme;
 const caps = (...c: string[]) => new Set(c);
 
 describe("#450 5a: declared capabilities", () => {
-  it("a macro that declares nothing gets today's narrow surface, unchanged", () => {
+  it("a macro that declares nothing keeps exactly what it receives today", () => {
     expect([...declaredCapabilities({})]).toEqual([...DEFAULT_DECLARED]);
-    expect([...DEFAULT_DECLARED]).toEqual(["theme"]); // every first-party macro is in this position
+    // MEASURED, not chosen: narrowing this to ["theme"] stopped the first-party containers (none of which
+    // declare) from handing their children `renderMarkdown`, which dropped the #215 `data-mac-pos` tags.
+    expect([...DEFAULT_DECLARED].sort()).toEqual(["design-tokens", "host-list", "render-markdown", "theme"]);
   });
 
   it("a declared list outside the vocabulary is dropped rather than trusted", () => {
     // registration already refuses these; a macro object that reached a render without registration
     // must not be handed something the host does not broker.
     expect([...declaredCapabilities({ capabilities: ["theme", "net.fetch"] })]).toEqual(["theme"]);
+    // …and a macro that DOES declare gets exactly its list — the ladder rule bites where it is aimed
+    expect([...declaredCapabilities({ capabilities: ["host-list"] })]).toEqual(["host-list"]);
   });
 });
 
@@ -79,7 +83,7 @@ describe("#450 5a: the dispatch seam assembles it", () => {
     let seen: unknown = null;
     dispatchMacroRender(macro(undefined, (c) => { seen = c; }), "body", { theme });
     expect(Object.isFrozen(seen)).toBe(true);
-    expect((seen as { capabilities: string[] }).capabilities).toEqual(["theme"]);
+    expect((seen as { capabilities: string[] }).capabilities).toEqual([...DEFAULT_DECLARED].sort());
     expect((seen as { theme: MacroTheme }).theme).toBe(theme); // …and the existing surface still works
   });
 
