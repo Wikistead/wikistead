@@ -104,7 +104,7 @@ export interface MacroDispatch {
    */
   caller?: ReadonlySet<string> | null
   /** What `sdk.hostSlot` resolves through on this surface (#450 slice 5c). Absent = no slot is offered. */
-  slotEnv?: { list?: ListHostSeam | null; editable?: boolean; label?: string | null; onMeasure?: () => void }
+  slotEnv?: { list?: ListHostSeam | null; embed?: EmbedHostSeam | null; editable?: boolean; label?: string | null; onMeasure?: () => void }
 }
 
 export function dispatchMacroRender(
@@ -138,14 +138,26 @@ export function dispatchMacroRender(
     hostSlot: (() => {
       const env = opts.slotEnv;
       const list = env?.list ?? activeListHost; // the seam the surface installed for this render
-      if (!list || staticRender) return undefined; // a hover card stays fetch-free
-      return (params: { kind: "list"; source: "tagged" | "children"; query?: string }) => {
-        if (params?.kind !== "list" || (params.source !== "tagged" && params.source !== "children")) {
-          throw new Error("hostSlot: unsupported request"); // host-defined schema; anything else is refused
+      const embed = env?.embed ?? activeEmbedHost; // #550: same install pattern as the other seams
+      if ((!list && !embed) || staticRender) return undefined; // a hover card stays fetch-free
+      return (params: import("./macro-sdk").HostSlotParams): HTMLElement | null => {
+        if (params?.kind === "list" && (params.source === "tagged" || params.source === "children")) {
+          if (!list) return null; // this surface offers no list host → the macro keeps its placeholder
+          return mountHostList(params.source, params.query ?? "", {
+            list, editable: env?.editable ?? false, label: env?.label ?? null, onMeasure: env?.onMeasure,
+          });
         }
-        return mountHostList(params.source, params.query ?? "", {
-          list, editable: env?.editable ?? false, label: env?.label ?? null, onMeasure: env?.onMeasure,
-        });
+        if (params?.kind === "embed") {
+          if (!embed) return null;
+          // Synchronous: the allowlist decision needs no fetch. The holder keeps the class/testid the
+          // macro's own placeholder carried, so selection/entry affordances and pins see ONE shape.
+          const holder = document.createElement("div");
+          holder.className = "cm-lp-macro cm-lp-embed-external";
+          holder.setAttribute("data-testid", "macro-embed-external");
+          holder.appendChild(embed.build(params.url));
+          return holder;
+        }
+        throw new Error("hostSlot: unsupported request"); // host-defined schema; anything else is refused
       };
     })(),
   });
@@ -303,6 +315,14 @@ export interface TranscludeHostSeam {
   readonly resolve: (refId: string) => Promise<string | null>;
   readonly deniedLabel: string;
 }
+// #550: the host-checked external embed, same seam family. The host closes over the tenant allowlist
+// (buildEmbedElement) — the macro asks with a URL VALUE and receives finished DOM. Without this seam a
+// `:::embed-external` nested in a layout container reached the DOM sink, nobody answered, and its "…"
+// placeholder sat there forever on BOTH surfaces (the #450 "renders top-level only" defect, third
+// occurrence after tagged/children and embed-page/diagrams).
+export interface EmbedHostSeam {
+  readonly build: (url: string) => HTMLElement;
+}
 export interface DiagramHostSeam {
   // Mirrors the host's diagram renderer, including its legacy shapes: a bare Blob is a success and `null`
   // is a degrade, which is what existing callers already pass around (decorations.ts DiagramRenderResult).
@@ -311,6 +331,12 @@ export interface DiagramHostSeam {
 }
 let activeTranscludeHost: TranscludeHostSeam | null = null;
 let activeDiagramHost: DiagramHostSeam | null = null;
+let activeEmbedHost: EmbedHostSeam | null = null;
+export function withEmbedHost<T>(host: EmbedHostSeam | null, fn: () => T): T {
+  const prev = activeEmbedHost;
+  activeEmbedHost = host;
+  try { return fn(); } finally { activeEmbedHost = prev; }
+}
 export function withTranscludeHost<T>(host: TranscludeHostSeam | null, fn: () => T): T {
   const prev = activeTranscludeHost;
   activeTranscludeHost = host;

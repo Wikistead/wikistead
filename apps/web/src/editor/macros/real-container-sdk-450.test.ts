@@ -37,6 +37,6 @@ describe("#450: the containers that actually ship still tag what they nest", () 
       { liveRender: (_b: never, ctx: { capabilities?: string[] }) => { caps = [...(ctx.capabilities ?? [])]; return document.createElement("div"); } } as never,
       "x", { theme: {} as never },
     );
-    expect(caps.sort()).toEqual(["design-tokens", "host-list", "render-markdown", "theme"]);
+    expect(caps.sort()).toEqual(["design-tokens", "host-embed", "host-list", "render-markdown", "theme"]); // #550 widened: host-embed
   });
 });

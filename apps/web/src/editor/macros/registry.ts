@@ -56,8 +56,11 @@ export interface MacroContext {
   readonly renderMarkdown?: (src: string, relativeOffset?: number) => DocumentFragment;
   /** Opaque per-instance token for display-only state that must survive a re-render (#450 5b). */
   readonly instanceKey?: string;
-  /** Ask the host for a slot it owns and fills — fixed schema, values only (#450 5c, ruling R3). */
-  readonly hostSlot?: (params: { kind: "list"; source: "tagged" | "children"; query?: string }) => HTMLElement;
+  /** Ask the host for a slot it owns and fills — fixed schema, values only (#450 5c, ruling R3).
+   *  `null` = no host for that kind on this surface → the macro renders its own placeholder (#550). */
+  readonly hostSlot?: (
+    params: { kind: "list"; source: "tagged" | "children"; query?: string } | { kind: "embed"; url: string },
+  ) => HTMLElement | null;
 }
 
 // Mouse rich-edit (ADR-022 Part 3). A "modal" editor mounts in a plain-DOM overlay

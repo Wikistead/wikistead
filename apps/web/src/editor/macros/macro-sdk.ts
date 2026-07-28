@@ -25,7 +25,7 @@
 import { ALLOWED_CAPABILITIES } from "./macro-registry";
 import type { MacroTheme } from "./registry";
 
-export type MacroCapability = "theme" | "render-markdown" | "host-list" | "design-tokens";
+export type MacroCapability = "theme" | "render-markdown" | "host-list" | "host-embed" | "design-tokens";
 
 // What a macro that declares NOTHING gets — and imposes on what it nests.
 //
@@ -41,7 +41,7 @@ export type MacroCapability = "theme" | "render-markdown" | "host-list" | "desig
 // (#310 refuses a submission without a vocabulary-valid capability list). A declared macro gets exactly
 // its list intersected with its caller's, so it can neither hold more than it asked for nor more than the
 // macro rendering it.
-export const DEFAULT_DECLARED: readonly MacroCapability[] = ["theme", "render-markdown", "host-list", "design-tokens"];
+export const DEFAULT_DECLARED: readonly MacroCapability[] = ["theme", "render-markdown", "host-list", "host-embed", "design-tokens"];
 
 export function declaredCapabilities(macro: { capabilities?: readonly string[] }): ReadonlySet<string> {
   const raw = macro.capabilities;
@@ -100,15 +100,24 @@ export interface MacroSdk {
    * looks like on this surface, and telling the editor its height changed). The macro places the element
    * and nothing more — it cannot see the results, let alone fetch them (ADR-024: macros never fetch).
    */
-  readonly hostSlot?: (params: HostSlotParams) => HTMLElement;
+  // `null` = this surface offers no host for THAT kind (export, hover card) — the macro falls back to
+  // its own placeholder, exactly as if the factory were absent.
+  readonly hostSlot?: (params: HostSlotParams) => HTMLElement | null;
 }
 
 /** The only shapes a macro may ask for (#450 R3). Values only. */
-export type HostSlotParams = {
-  readonly kind: "list";
-  readonly source: "tagged" | "children";
-  readonly query?: string;
-};
+export type HostSlotParams =
+  | {
+      readonly kind: "list";
+      readonly source: "tagged" | "children";
+      readonly query?: string;
+    }
+  // #550: the host-checked external embed (allowlist → sandboxed iframe, else degrade link). The macro
+  // hands the URL as a VALUE; the allowlist never crosses the boundary (ADR-024).
+  | {
+      readonly kind: "embed";
+      readonly url: string;
+    };
 
 export function createMacroSdk(args: {
   declared: ReadonlySet<string>;
@@ -123,7 +132,7 @@ export function createMacroSdk(args: {
   /** Opaque per-instance token (see MacroSdk.instanceKey). */
   instanceKey?: string;
   /** The host's slot factory, already bound to this surface (see MacroSdk.hostSlot). */
-  hostSlot?: (params: HostSlotParams) => HTMLElement;
+  hostSlot?: (params: HostSlotParams) => HTMLElement | null;
 }): MacroSdk {
   const effective = intersectCapabilities(args.declared, args.caller);
   const renderMarkdown = effective.has("render-markdown") && args.render
@@ -147,9 +156,19 @@ export function createMacroSdk(args: {
     ...(effective.has("theme") ? { theme: args.theme } : {}),
     ...(renderMarkdown ? { renderMarkdown } : {}),
     ...(args.instanceKey ? { instanceKey: args.instanceKey } : {}),
-    // Capability-gated: a macro that did not declare `host-list` is handed no slot factory at all, so
-    // "may I?" is answered by the object's shape rather than by a check the macro could skip.
-    ...(effective.has("host-list") && args.hostSlot ? { hostSlot: args.hostSlot } : {}),
+    // Capability-gated: a macro that declared no host-slot capability is handed no factory at all, so
+    // "may I?" is answered by the object's shape rather than by a check the macro could skip. With two
+    // kinds (#550) the gate is PER KIND: holding `host-list` does not open `embed` and vice versa —
+    // the wrapper refuses a kind whose capability is missing from the effective set.
+    ...((effective.has("host-list") || effective.has("host-embed")) && args.hostSlot
+      ? {
+          hostSlot: (params: HostSlotParams): HTMLElement | null => {
+            const need = params?.kind === "list" ? "host-list" : params?.kind === "embed" ? "host-embed" : null;
+            if (!need || !effective.has(need)) throw new Error("hostSlot: capability not held");
+            return args.hostSlot!(params);
+          },
+        }
+      : {}),
   };
   // Frozen, not merely readonly-typed: a macro is untrusted code in the same realm, and a type says
   // nothing at runtime. Freezing means one macro cannot widen the object a sibling render receives by

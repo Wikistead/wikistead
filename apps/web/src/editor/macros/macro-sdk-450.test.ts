@@ -22,7 +22,7 @@ describe("#450 5a: declared capabilities", () => {
     expect([...declaredCapabilities({})]).toEqual([...DEFAULT_DECLARED]);
     // MEASURED, not chosen: narrowing this to ["theme"] stopped the first-party containers (none of which
     // declare) from handing their children `renderMarkdown`, which dropped the #215 `data-mac-pos` tags.
-    expect([...DEFAULT_DECLARED].sort()).toEqual(["design-tokens", "host-list", "render-markdown", "theme"]);
+    expect([...DEFAULT_DECLARED].sort()).toEqual(["design-tokens", "host-embed", "host-list", "render-markdown", "theme"]); // #550 widened: host-embed
   });
 
   it("a declared list outside the vocabulary is dropped rather than trusted", () => {
@@ -149,7 +149,7 @@ describe("#450 5c: the host slot", () => {
     dispatch(
       {
         capabilities: ["host-list"],
-        liveRender: (_b: MacroSource, ctx: { hostSlot?: (p: never) => HTMLElement }) => {
+        liveRender: (_b: MacroSource, ctx: { hostSlot?: (p: never) => HTMLElement | null }) => {
           // deliberately outside the schema — the point of the test is that the host refuses it
           try { (ctx.hostSlot as unknown as (p: unknown) => HTMLElement)({ kind: "sql", query: "select 1" }); } catch (e) { caught = e; }
           return document.createElement("div");
