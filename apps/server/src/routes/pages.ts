@@ -3337,7 +3337,11 @@ export const LIST_OBJECTS_TRUNCATION_FLOOR = 1000
 export async function getTitleDictionary(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { subject: string },
+  // #541 `signal` aborts the confirm between batch waves when the requester is gone (tab
+  // navigated / connection closed). An abandoned dictionary kept flooding the checker for seconds and
+  // starved the NEXT page-open's interactive checks — the measured bimodal sidebar. Abort throws (the
+  // response is dead), never fabricates a verdict.
+  args: { subject: string; signal?: AbortSignal },
 ): Promise<{ entries: TitleDictEntry[]; capped: boolean }> {
   const isGuest = args.subject.startsWith('share_link:')
   const principal = isGuest ? DICT_ANON : args.subject
@@ -3357,7 +3361,7 @@ export async function getTitleDictionary(
           ORDER BY updated_at DESC LIMIT ${DICT_CAP + 1}`
     const capped = rows.length > DICT_CAP
     const windowRows = capped ? rows.slice(0, DICT_CAP) : rows
-    const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id), undefined, 'page', 4)
+    const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id), undefined, 'page', 4, args.signal)
     return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped }
   }
 
@@ -3381,7 +3385,7 @@ export async function getTitleDictionary(
   // gate, so it is exactly the caller that may take a few lanes — bounded at 4, which keeps #489's "not all
   // at once" while cutting 40 waves to 10. The confirm itself is unchanged: same relation, same fail-closed
   // handling, so what lands in the dictionary is identical.
-  const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id), undefined, 'page', 4)
+  const confirmed = await filterAuthorized(fga, principal, 'view', windowRows.map((r) => r.id), undefined, 'page', 4, args.signal)
   return { entries: windowRows.filter((r) => confirmed.has(r.id)), capped }
 }
 
@@ -3865,9 +3869,24 @@ export async function pagesPlugin(app: FastifyInstance) {
       // returned to this request but refused as a cache entry. Without that, the stale answer would be
       // written after the invalidation and republished for another TTL (design review, #534).
       const gen = titleDictGeneration(req.tenant.id)
-      const fresh = await getTitleDictionary(req.db, app.fga, { subject })
-      setCachedTitleDict(req.tenant.id, subject, fresh, Date.now(), gen)
-      return fresh
+      // #541 wire the CONNECTION's lifetime into the fan-out. When the requester navigates away
+      // (or a probe context closes) the socket closes, and the remaining confirm waves stop instead of
+      // flooding the checker for seconds and starving the next page-open's interactive checks. The
+      // catch below turns the abort into the same degraded-empty 200 (written to a dead socket).
+      const abort = new AbortController()
+      // The SOCKET, not the message: an IncomingMessage 'close' also fires on normal completion of the
+      // (bodyless) request, which would abort every computation instantly. A socket closing while the
+      // response has not been written is the requester genuinely gone. Listener removed after the
+      // compute so keep-alive sockets do not accumulate one per request.
+      const onGone = () => abort.abort()
+      req.raw.socket?.once('close', onGone)
+      try {
+        const fresh = await getTitleDictionary(req.db, app.fga, { subject, signal: abort.signal })
+        setCachedTitleDict(req.tenant.id, subject, fresh, Date.now(), gen)
+        return fresh
+      } finally {
+        req.raw.socket?.removeListener('close', onGone)
+      }
     } catch (e) {
       req.log.warn({ err: e, pageId: req.params.pageId }, 'title-dictionary degraded: authz backend unavailable')
       return { entries: [], capped: false, degraded: true }
