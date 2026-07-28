@@ -979,17 +979,24 @@ export async function grantPageAccess(
   validateGrant(args.grantee, args.relation)
   await requireGrantAuthority(fga, args.userId, args.pageId, args.relation as PageRelation) // #420 Addendum 3: the ceiling — admin-class grants need manage
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  // One tx: durable audit (#177) + the reindex outbox; FGA LAST so a grant failure rolls both back.
-  const oid = await db.tx(async (tx) => {
-    if (args.plan !== undefined) {
-      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_granted', target: `page:${args.pageId}` })
-    }
-    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-    await writeTuples(fga, [{ user: args.grantee, relation: fgaRelationForCap(args.relation as PageRelation), object: `page:${args.pageId}` }])
-    return o
+  // #536 review 3: the same mechanism as the space grant — a page grant IS a role assignment with the
+  // builtin_capability column set, so it participates in the reference count that decides whether a leaf
+  // shared with a page-scope custom-role assignment may be deleted. Before this, revoking either one took
+  // the other's access with it, exactly the defect item ① fixed for spaces.
+  const { assignRoleInTx } = await import('./roles.js')
+  await assignRoleInTx(db, fga, driver, {
+    tenant: { id: args.tenantId, plan: args.plan ?? '' },
+    roleId: null,
+    builtinCapability: args.relation,
+    capabilities: [args.relation as never],
+    resourceType: 'page',
+    resourceId: args.pageId,
+    principal: args.grantee,
+    actorSub: args.userId,
+    onDuplicate: 'ignore',
+    auditAction: 'page.access_granted',
+    skipAudit: args.plan === undefined,
   })
-  // Reindex so the new grantee appears in the search viewer set (post-commit; FGA now set).
-  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
   emit({ type: 'page.access_granted', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
 }
 
@@ -1002,18 +1009,36 @@ export async function revokePageAccess(
   validateGrant(args.grantee, args.relation)
   await requireGrantAuthority(fga, args.userId, args.pageId, args.relation as PageRelation) // #420 Addendum 3: the ceiling — admin-class grants need manage
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  // One tx: durable audit (#177) + the reindex outbox; FGA LAST so a revoke failure rolls both back.
-  const oid = await db.tx(async (tx) => {
-    if (args.plan !== undefined) {
-      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_revoked', target: `page:${args.pageId}` })
-    }
-    const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-    await deleteTuples(fga, [{ user: args.grantee, relation: fgaRelationForCap(args.relation as PageRelation), object: `page:${args.pageId}` }])
-    return o
-  })
-  // Reindex so the revoked grantee drops out of the search viewer set immediately
-  // (FGA-derived surfaces — tree/comments/attachments/collab — drop on next request).
-  processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  // #536 review 3: revoke the ROW when there is one (refcount decides which leaves go); a rowless
+  // legacy grant falls back to the direct delete — guarded by the same coverage check as the space path,
+  // so it cannot take a live assignment's leaf with it.
+  const { unassignRoleInTx } = await import('./roles.js')
+  const [row] = await db.sql<{ id: string }[]>`
+    SELECT id FROM role_assignments
+    WHERE builtin_capability = ${args.relation} AND resource_type = 'page' AND resource_id = ${args.pageId} AND principal = ${args.grantee}`
+  if (row) {
+    await unassignRoleInTx(db, fga, driver, {
+      tenant: { id: args.tenantId, plan: args.plan ?? '' },
+      assignmentId: row.id, actorSub: args.userId,
+      auditAction: 'page.access_revoked', skipAudit: args.plan === undefined,
+    })
+  } else {
+    const covering = await db.sql`
+      SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+      WHERE a.resource_type = 'page' AND a.resource_id = ${args.pageId} AND a.principal = ${args.grantee}
+        AND ${args.relation} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
+    const oid = await db.tx(async (tx) => {
+      if (args.plan !== undefined) {
+        await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_revoked', target: `page:${args.pageId}` })
+      }
+      const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+      if (covering.length === 0) await deleteTuples(fga, [{ user: args.grantee, relation: fgaRelationForCap(args.relation as PageRelation), object: `page:${args.pageId}` }])
+      return o
+    })
+    // Reindex so the revoked grantee drops out of the search viewer set immediately
+    // (FGA-derived surfaces — tree/comments/attachments/collab — drop on next request).
+    processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
+  }
   // #362 E1: revocation watch sweep (post-FGA, best-effort — the display gate is the bastion). Per-watcher
   // view re-check inside, so a watcher whose view survives via another path keeps their watch.
   void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {})
@@ -2405,6 +2430,9 @@ async function physicalDeletePage(
     // gate drops orphans regardless — this is row hygiene, not correctness.
     await deletePinsForResources(tx, ids)
     await sweepWatchesForResources(tx, ids) // #320 / ADR-126: same row-hygiene sweep for watches (display gate is the backstop)
+    // #536 review 4: assignment rows (custom-role AND built-in grant rows) go with the pages. FGA is
+    // the authz truth so orphans confer nothing — row hygiene, same as pins and watches above.
+    await tx`DELETE FROM role_assignments WHERE resource_type = 'page' AND resource_id = ANY(${ids})`
     await auditIfEntitled(tx, { id: tenantId, plan: tenantRow?.plan ?? '' }, { actor: auditActor, action: 'page.purged', target: `page:${args.pageId}` })
     await tx`DELETE FROM pages WHERE id = ${args.pageId}` // cascade deletes descendants
   })
