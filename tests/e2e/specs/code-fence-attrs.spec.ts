@@ -177,8 +177,19 @@ test("#174: a fence with no language still gets a copy button", async ({ browser
   // #174 comment 948: a lang-less fence must NOT emit an empty tab stub (the "garbage" in the top-left)
   // the header is just the copy button (kept top-right by margin-left:auto).
   expect(await page.locator(".cm-lp-code-tab").count()).toBe(0);
-  // margin-left:auto pushes the lone copy button to the right — resolves to a large used margin (the
-  // header width minus the button), confirming it is not stuck at the left.
-  const usedMargin = await page.locator(".cm-lp-code-copy").first().evaluate((el) => parseFloat(getComputedStyle(el).marginLeft));
-  expect(usedMargin).toBeGreaterThan(50);
+  // The affordances sit at the RIGHT of the header. This used to be checked through the copy button's own
+  // used margin-left, which worked while it was the header's only child; #456 added the settings button, so
+  // the auto margin now lands on THAT one (measured: settings 641px, copy 2px) and the old assertion failed
+  // on a header that is laid out correctly. Measure the thing that matters instead — the last affordance
+  // ends where the header ends — which survives the header gaining or losing buttons.
+  const edges = await page.locator(".cm-lp-code-header").first().evaluate((h) => {
+    const last = h.lastElementChild!.getBoundingClientRect();
+    return { header: h.getBoundingClientRect().right, last: last.right, left: h.getBoundingClientRect().left, lastLeft: last.left };
+  });
+  expect(Math.abs(edges.header - edges.last), "the affordances are flush right").toBeLessThanOrEqual(2);
+  expect(edges.lastLeft - edges.left, "…not stuck at the left").toBeGreaterThan(50);
+  // Honest note on the strength of this guard: I could not make it go red by removing the alignment rules
+  // I could find (the header's space-between, and the auto margins on the copy and settings buttons) — the
+  // flex layout keeps the last child at the right edge through more than one mechanism. So it catches a
+  // header that visibly collapses to the left, not every way the alignment could be weakened.
 });
