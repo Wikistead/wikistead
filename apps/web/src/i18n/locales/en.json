@@ -485,7 +485,19 @@
     "commentAudienceBody": "These toggles open commenting to a whole AUDIENCE — everyone who can view, or guests holding a view link. To let specific people comment instead, give them the commenter role above (space-wide), or grant it on a single page from that page's permissions. The two are independent: turning these toggles off does not take commenting away from someone who holds the commenter role.",
     "commentGuests": "Guests with a view link may comment",
     "commentMembers": "Anyone who can view (public) may comment",
-    "mappingBody": "Confer a role on everyone in an IdP group, for THIS space. Membership resolves live from your identity provider — nobody is added or billed."
+    "mappingBody": "Confer a role on everyone in an IdP group, for THIS space. Membership resolves live from your identity provider — nobody is added or billed.",
+    "commentBaselineEditors": "People with edit rights (editors, moderators, managers) can ALWAYS comment — these toggles never take that away.",
+    "commentBaselineGrants_zero": "Individually granted commenters: none yet.",
+    "commentBaselineGrants": "Individually granted commenters ({{count}}): {{names}} — unaffected by the toggles.",
+    "commentMembersOn": "ON: view-only members can comment too (in addition to editors and individual grants).",
+    "commentMembersOff": "OFF: view-only members cannot comment (editors and individual grants still can).",
+    "commentGuestsOn": "ON: every guest holding a view link can comment.",
+    "commentGuestsOff": "OFF: view-link guests cannot comment (a guest on an EDIT link comments through their edit right).",
+    "commentSummaryLead": "Who can comment right now: ",
+    "commentSummaryEditors": "people with edit rights",
+    "commentSummaryGrants": "{{count}} individually granted",
+    "commentSummaryMembers": "all viewing members",
+    "commentSummaryGuests": "view-link guests"
   },
   "auth": {
     "signInTitle": "Sign in to wikistead",
