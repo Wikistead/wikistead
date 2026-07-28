@@ -35,19 +35,29 @@ test("#366: vim /embed-external modal insert selects the rendered atom; Ctrl+Ent
     const pane = document.querySelector("[data-pane=preview]") as HTMLElement | null;
     const view = pane?.querySelector(".cm-editor") as HTMLElement | null;
     const fat = pane?.querySelector(".cm-fat-cursor") as HTMLElement | null;
+    const cs = fat ? getComputedStyle(fat) : null;
     const w = window as unknown as { __lpHeadLine?: number; __lpBlocks?: { fromLine: number; toLine: number }[] };
     const h = w.__lpHeadLine ?? -1;
     return {
       headLine: h,
       onBlock: (w.__lpBlocks ?? []).some((b) => b.fromLine <= h && h <= b.toLine),
-      blankClass: view?.classList.contains("cm-wys-blank-fatcursor") ?? false,
-      fatGlyphColor: fat ? getComputedStyle(fat).color : null,
+      // #551: a SELECTED atomSelectable embed suppresses the fat cursor via the editorAttributes path
+      // (#332, `cm-atomsel-hide-fatcursor` — it survives CM's focus rebuild by construction);
+      // the classList-toggled `cm-wys-blank-fatcursor` this pin used to require is the TIMING-FRAGILE
+      // sibling for plain block atoms and is NOT expected here. Either class is a valid suppressor;
+      // what the user must never see is the raw glyph or the pink bar — asserted directly below.
+      suppressed:
+        (view?.classList.contains("cm-atomsel-hide-fatcursor") ?? false) ||
+        (view?.classList.contains("cm-wys-blank-fatcursor") ?? false),
+      fatGlyphColor: cs?.color ?? null,
+      fatBg: cs?.backgroundColor ?? null,
     };
   });
   expect(sel.headLine, "the caret is on the atom's opening line").toBe(1);
   expect(sel.onBlock, "the caret's line is inside the rendered macro block (the card), not a bare line").toBe(true);
-  expect(sel.blankClass, "the blank-fatcursor class survives the modal's focus rebuild").toBe(true);
+  expect(sel.suppressed, "a fat-cursor suppression class is on the editor (atomsel or blank)").toBe(true);
   expect(sel.fatGlyphColor, "the fat cursor glyph is transparent (no raw `:` leaks on the cursor)").toBe("rgba(0, 0, 0, 0)");
+  expect(sel.fatBg, "the fat cursor's pink bar is transparent too (no 1-char block on the wide card)").toBe("rgba(0, 0, 0, 0)");
 
   // Ctrl+Enter on the selected atom opens the URL modal (the retarget UI), NOT a raw reveal — and it is seeded
   // with the current URL so the edit is a re-entry, not a blank prompt.
