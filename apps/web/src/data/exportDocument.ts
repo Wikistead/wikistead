@@ -31,7 +31,10 @@ const CHROME_SELECTORS = [
   ".cm-lp-macro-richui-raw",
   ".cm-macro-presence-box",
   ".cm-lp-todo-demote",
-  "[contenteditable]",
+  // `[contenteditable=true]` only. Matching the bare attribute took the fence HEADER with it — the file-name
+  // tab and language chip are marked contenteditable="false" so CodeMirror leaves them alone, and stripping
+  // them dropped the fence's whole chrome from the export (measured: the card arrived with no header at all).
+  "[contenteditable=true]",
   "[data-print-hide]",
 ];
 
@@ -81,6 +84,8 @@ function stripChrome(root: HTMLElement): void {
   for (const sel of CHROME_SELECTORS) {
     for (const el of Array.from(root.querySelectorAll(sel))) el.remove();
   }
+  // The attribute itself has no business in a document nobody can edit; the elements wearing it stay.
+  for (const el of Array.from(root.querySelectorAll("[contenteditable]"))) el.removeAttribute("contenteditable");
 }
 
 function makeInert(root: HTMLElement): void {
