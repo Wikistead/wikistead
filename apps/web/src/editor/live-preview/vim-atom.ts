@@ -287,51 +287,38 @@ const atomSelHideFatCursor: Extension = EditorView.editorAttributes.of((view): R
   return atomSelectableSelectedAt(view.state, s.head) ? { class: "cm-atomsel-hide-fatcursor" } : null;
 });
 
-export const vimWysiwygCaretGuard: Extension = [atomSelHideFatCursor, ViewPlugin.fromClass(
-  class {
-    constructor(readonly view: EditorView) {}
-    update(u: ViewUpdate) {
-      const blank = (on: boolean) => this.view.dom.classList.toggle("cm-wys-blank-fatcursor", on);
-      const mode = u.state.facet(displayMode);
-      const vim = getCM(u.view)?.state.vim;
-      const sel = u.state.selection.main;
-      const head = sel.head;
-      const lp = u.state.field(livePreview, false);
-      // #238 comment 978: the vim fat cursor paints the RAW doc char at head. A BLOCK atom (table / `:::`
-      // fence) is rendered as a WIDGET with its raw source hidden in BOTH Live AND WYSIWYG (and while
-      // RichUI is expanded the CM caret stays on the atom), so the leaked `|`/`:` glyph appears in all of
-      // them — the display mode is NOT the essential condition (the earlier WYSIWYG-only gate was too
-      // narrow). It is NOT hidden in Source (raw text — the char under the cursor is real; blanking it
-      // there would be the opposite bug). So: blank on a rendered block atom in any mode except Source.
-      // The inline nudge below stays WYSIWYG-only (Live reveals inline syntax under the caret).
-      let onBlockAtom = false;
-      if (mode !== "source" && vim && !vim.insertMode && lp) {
-        // #506: an INLINE atom (attachment chip / inline image inside prose) is NOT a caret rest —
-        // treating it as one disabled the inline nudge below, so vim h/l crawled offset-by-offset
-        // through the widget's hidden range (a dead press per hidden char). Only full-line/multi-line
-        // block atoms keep the ADR-024 rest-on-atom semantics; inline ones fall through to the nudge,
-        // which skips their whole hidden run like any invisible inline syntax.
-        for (const b of lp.blocks) if (head >= b.from && head < b.to && !isInlineAtom(u.state.doc, b)) { onBlockAtom = true; break; }
-        // RichUI: Ctrl+Enter expands table-edit but the CM caret can remain on the atom's range.
-        if (!onBlockAtom) {
-          const active = u.state.field(macroRenderActiveField, false);
-          if (active && head >= active.from && head <= active.to) onBlockAtom = true;
-        }
-      }
-      // #278in LIVE, a macro under the caret REVEALS its raw source — so the block drops out of
-      // `lp.blocks` and the test above stops firing, leaving the fat cursor to paint the fence's own `:`
-      // (the user's report: "`:` shows up on the cursor"). The fence line is macro SYNTAX either way:
-      // hidden in WYSIWYG, revealed in Live, but never prose. Blank the glyph on it in both, so the rule
-      // the cursor follows is one rule — "never paint a fence character" — instead of one that happens to
-      // hold only while the widget is rendered. Source mode is exempt: there the fence IS the text.
-      const onFenceLine = mode !== "source" && !!vim && !vim.insertMode
-        && /^\s*(?::{3,}|`{3,})/.test(u.state.doc.lineAt(head).text);
-      blank(onBlockAtom || onFenceLine);
-      // #522: the WYSIWYG-only inline "nudge" (a dispatch that stepped the vim fat cursor off a hidden
-      // inline run) lived here. #512 forces vim OFF in WYSIWYG (vimForcedOff = coarsePointer || wysiwyg),
-      // so `mode === "wysiwyg" && vim` can never hold — the nudge, its #286 multi-range bail, and the
-      // vimMotionActive mirror that told wysiwygInlineSkip to defer to it were all unreachable. Removed.
-      // The block-atom / fence fat-cursor blank() above stays: it runs in Live×vim (a reachable state).
+// #543(vim × Live in a slot island): the blank class used to be classList.toggle'd from a
+// ViewPlugin's update() — TWO timing holes the island exposed at once: (a) an island can mount, focus
+// and PAINT without a single transaction, so update() never ran and the vim fat cursor painted the raw
+// fence char under the mount caret (the user's lone "`"); (b) even after a sync-at-construction patch,
+// CM REBUILDS view.dom's className on the focus update and wipes a manually-toggled class (the
+// fragility this file already names). atomSelHideFatCursor solved the same two holes with
+// EditorView.editorAttributes — evaluated at construction AND re-merged on every rebuild — so the
+// blank guard now rides the same primitive. The predicate is unchanged (#238 block atoms + #278
+// fence lines, never in Source); only the delivery mechanism moved.
+function blankFatCursorAt(view: EditorView): boolean {
+  const state = view.state;
+  const mode = state.facet(displayMode);
+  if (mode === "source") return false; // Source: the char under the cursor is real text
+  const vim = getCM(view)?.state.vim;
+  if (!vim || vim.insertMode) return false;
+  const head = state.selection.main.head;
+  const lp = state.field(livePreview, false);
+  let onBlockAtom = false;
+  if (lp) {
+    // #506: only full-line/multi-line block atoms are caret rests; inline atoms fall through.
+    for (const b of lp.blocks) if (head >= b.from && head < b.to && !isInlineAtom(state.doc, b)) { onBlockAtom = true; break; }
+    // RichUI: Ctrl+Enter expands table-edit but the CM caret can remain on the atom's range.
+    if (!onBlockAtom) {
+      const active = state.field(macroRenderActiveField, false);
+      if (active && head >= active.from && head <= active.to) onBlockAtom = true;
     }
-  },
+  }
+  // #278a fence line is macro syntax whether the widget is rendered or revealed — one rule,
+  // "never paint a fence character" (Source exempt, handled above).
+  const onFenceLine = /^\s*(?::{3,}|`{3,})/.test(state.doc.lineAt(head).text);
+  return onBlockAtom || onFenceLine;
+}
+export const vimWysiwygCaretGuard: Extension = [atomSelHideFatCursor, EditorView.editorAttributes.of(
+  (view): Record<string, string> | null => (blankFatCursorAt(view) ? { class: "cm-wys-blank-fatcursor" } : null),
 )];
