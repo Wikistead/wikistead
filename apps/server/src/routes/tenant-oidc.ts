@@ -109,7 +109,7 @@ export async function updateTenantOidc(
   // disabling it changes nothing — the guard steps aside (review finding C).
   if (!args.enabled && existing?.enabled && loginMethodCeiling().has('tenant-oidc') && !(await otherLoginMethodsEffective(db, { plan: args.plan }, 'tenant-oidc'))) {
     throw Object.assign(
-      new Error('disabling the tenant IdP would leave this tenant with no way to sign in. Enable another login method first, or use the operator break-glass CLI.'),
+      new Error('disabling the tenant IdP would leave this tenant with no way to sign in. Enable another login method first, or have an operator run `pnpm tenant:login-methods`.'),
       { statusCode: 409, code: 'login_lockout' },
     )
   }

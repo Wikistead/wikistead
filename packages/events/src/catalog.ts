@@ -47,6 +47,7 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'tenant.oidc_updated': 'The tenant OIDC login configuration was changed.',
   'tenant.login_methods_updated': 'A tenant admin changed which login methods the tenant offers (#537: the platform-login toggle).',
   'tenant.oidc_recovered': 'An operator disabled a locked-out tenant\'s OIDC out of band (break-glass).',
+  'tenant.login_methods_recovered': 'An operator set a tenant\'s login-method selection out of band (break-glass, enable direction included).',
   'tenant.saml_recovered': 'An operator disabled a locked-out tenant\'s SAML out of band (break-glass).',
   'tenant.custom_domain_added': 'A custom domain was added (pending verification).',
   'tenant.custom_domain_verified': 'A custom domain was verified and activated.',
