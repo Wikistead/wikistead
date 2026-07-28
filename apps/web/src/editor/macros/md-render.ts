@@ -3,6 +3,7 @@ import katex from "katex"; // #505: the print portal / preview draw math too —
 import { parseDirectiveOpen } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro, type MacroContext, type MacroSource, type MacroTheme } from "./registry";
 import { currentMacroTheme } from "./theme";
+import { createMacroSdk, declaredCapabilities, effectiveOf, withCallerCapabilities, currentCallerCapabilities } from "./macro-sdk"; // #450 slice 5a: one place decides what a macro is handed
 import { highlightInto } from "./code-highlight"; // #505: the read surface colours code like the editor
 import { parseFrontmatterRange, parseFmTags, type FmTag } from "../live-preview/frontmatter";
 
@@ -84,10 +85,15 @@ export interface MacroDispatch {
   countDepth?: boolean
   /** How a throwing macro is handled. 'null' = the caller falls back; 'throw' = today's widget behaviour. */
   onThrow?: "null" | "throw"
+  /**
+   * The rendering macro's effective capabilities (#450 slice 5a). Omitted = "ask the host what render we
+   * are inside", which is what the nested sinks want; `null` states the document root explicitly.
+   */
+  caller?: ReadonlySet<string> | null
 }
 
 export function dispatchMacroRender(
-  macro: { liveRender?: (body: MacroSource, ctx: MacroContext) => HTMLElement },
+  macro: { liveRender?: (body: MacroSource, ctx: MacroContext) => HTMLElement; capabilities?: readonly string[] },
   body: string,
   opts: MacroDispatch,
 ): HTMLElement | null {
@@ -96,10 +102,24 @@ export function dispatchMacroRender(
   // call sites asserted it before, so the cast moves rather than multiplies.
   const src = body as MacroSource;
   const usesBase = opts.baseOffset !== undefined;
+  // #450 / ADR-177 slice 5a: the SDK is assembled HERE, the one seam every surface already goes through,
+  // and nowhere else. effective = declared ∩ caller (the caller being whichever macro's render we are
+  // inside), fresh per dispatch and frozen — see macro-sdk.ts for why each of those words is load-bearing.
+  const caller = opts.caller !== undefined ? opts.caller : currentCallerCapabilities();
+  const sdk = createMacroSdk({ declared: declaredCapabilities(macro), caller, theme: opts.theme });
   if (opts.countDepth) nestedDirectiveDepth++;
   if (usesBase) setPendingBaseOffset(opts.baseOffset ?? null);
   try {
-    return macro.liveRender(src, { theme: opts.theme });
+    // The host's own re-entries during THIS render (a container body, the callout panel, the plain
+    // fallback) must not hand a deeper macro more than this one holds, so the effective set is published
+    // as the caller for the duration. Cast: `MacroContext.theme` is required for macros that read it,
+    // while a macro which declared capabilities WITHOUT `theme` deliberately gets a context without one.
+    // Narrowed into a local because the call now happens inside a closure (TypeScript drops property
+    // narrowing there) — and written as a plain property call because the one-dispatch pin counts those
+    // occurrences lexically, so a non-null assertion would make the single dispatch invisible to the very
+    // check that guards it (and this comment must not spell the pattern out, or it counts as a second).
+    const target = macro as { liveRender: (b: MacroSource, ctx: MacroContext) => HTMLElement };
+    return withCallerCapabilities(effectiveOf(sdk), () => target.liveRender(src, sdk as MacroContext));
   } catch (err) {
     if (opts.onThrow === "throw") throw err;
     return null; // a macro that throws must never break the surrounding render
