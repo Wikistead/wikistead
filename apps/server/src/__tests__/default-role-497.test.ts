@@ -54,7 +54,11 @@ afterAll(async () => {
   resetEntitlementsResolver()
   await admin`UPDATE tenant_settings SET default_role_id = NULL WHERE tenant_id = ${tenant.id}`
   await admin`DELETE FROM group_role_mappings WHERE tenant_id = ${tenant.id}`
-  await admin`DELETE FROM role_assignments WHERE tenant_id = ${tenant.id}`
+  // Scoped to the roles THIS file created. The wholesale delete that used to be here also removed the
+  // assignments of every other suite file sharing `tenant_dev` — the shape of defect that made the
+  // audit assertions flake (#482). It was redundant besides: role_assignments.role_id is
+  // ON DELETE CASCADE, so the prefixed `roles` delete on the next line already takes them.
+  await admin`DELETE FROM role_assignments WHERE tenant_id = ${tenant.id} AND role_id IN (SELECT id FROM roles WHERE tenant_id = ${tenant.id} AND name LIKE 'dr497%')`
   await admin`DELETE FROM roles WHERE tenant_id = ${tenant.id} AND name LIKE 'dr497%'`
   await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' }).catch(() => {})
   await app?.close()
