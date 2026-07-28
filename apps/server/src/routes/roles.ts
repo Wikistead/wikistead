@@ -108,7 +108,16 @@ function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: 
   if (TENANT_CAP_RELATION[cap as TenantRoleCapability]) {
     throw Object.assign(new Error(`capability "${cap}" is a tenant capability — not assignable at ${resourceType} scope`), { statusCode: 400 })
   }
-  if (resourceType === 'page') return [{ user: principal, relation: PAGE_CAP_RELATION[cap as RoleCapability], object: `page:${resourceId}` }]
+  if (resourceType === 'page') {
+    // `manage` at page scope exists only for the built-in grant path (allowSuperset): custom roles cannot
+    // request it (absent from ROLE_CAPABILITIES / PAGE_CAP_RELATION), but a direct page grant of `manage`
+    // has always written the `manage_direct` leaf, and #536 review 3 routes those grants through here.
+    if (cap === ('manage' as AnyRoleCapability)) {
+      if (!allowSuperset) throw Object.assign(new Error(`capability "manage" is not assignable at page scope`), { statusCode: 400 })
+      return [{ user: principal, relation: 'manage_direct', object: `page:${resourceId}` }]
+    }
+    return [{ user: principal, relation: PAGE_CAP_RELATION[cap as RoleCapability], object: `page:${resourceId}` }]
+  }
   // Two-layer defence (#514 §6 review): the shared table carries `manage` because the BUILT-IN grant needs
   // it, so absence from the table no longer refuses a custom role that asks for the superset. The vocabulary
   // check in parseDefinition is the first layer and no write path bypasses it today; this is the second, so

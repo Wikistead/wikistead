@@ -19,7 +19,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, writeTuples, deleteTuples } from '@wikistead/authz'
 import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess } from '../routes/spaces.js'
-import { createPage, deletePage, publishPage } from '../routes/pages.js'
+import { createPage, deletePage, publishPage, grantPageAccess, revokePageAccess } from '../routes/pages.js'
 import { assignRoleInTx, unassignRoleInTx } from '../routes/roles.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
@@ -232,5 +232,61 @@ describe('#536 review: a re-granted rowless tuple is still revocable', () => {
       SELECT (SELECT count(*) FROM audit_log    WHERE tenant_id = ${TENANT} AND action = 'space.access_granted' AND target = ${`space:${spaceId}`})
            + (SELECT count(*) FROM audit_outbox WHERE tenant_id = ${TENANT} AND action = 'space.access_granted' AND target = ${`space:${spaceId}`}) AS n`)[0].n
     expect(Number(after), 'the duplicate grant audited too').toBeGreaterThan(Number(before))
+  }, 120_000)
+})
+
+// #536 review 3: the page scope had the identical defect and no pin. A page grant wrote a raw tuple
+// with no row while a page-scope role assignment reference-counted rows — so revoking either deleted the
+// leaf the other still conferred. Routed through the same mechanism now; these are the page-side mirrors
+// of the space pins above.
+describe('#536 review: page grants and page-scope assignments stop deleting each other', () => {
+  const pGrant = (principal: string, relation: string) =>
+    grantPageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: principal, relation, plan: 'business' })
+  const pRevoke = (principal: string, relation: string) =>
+    revokePageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: principal, relation, plan: 'business' })
+  const pAssign = (principal: string) =>
+    assignRoleInTx(db, fgaClient, app.searchDriver, {
+      tenant, roleId, capabilities: ['view'], resourceType: 'page', resourceId: pageId, principal, actorSub: OWNER,
+    })
+
+  it('revoking the page GRANT leaves the page-scope assignment working', async () => {
+    const p = sub('pg-grant-first')
+    await pGrant(p, 'view')
+    await pAssign(p)
+    expect(await canView(p), 'both in force').toBe(true)
+    await pRevoke(p, 'view')
+    expect(await canView(p), 'the assignment still confers view').toBe(true)
+  }, 120_000)
+
+  it('unassigning the page ROLE leaves the page grant working, and the last removal ends at none', async () => {
+    const p = sub('pg-role-first')
+    await pAssign(p)
+    await pGrant(p, 'view')
+    const [row] = await adminPool<{ id: string }[]>`
+      SELECT id FROM role_assignments WHERE role_id = ${roleId} AND resource_type = 'page' AND principal = ${p}`
+    await unassignRoleInTx(db, fgaClient, app.searchDriver, { tenant, assignmentId: row.id, actorSub: OWNER })
+    expect(await canView(p), 'the grant survives the unassign').toBe(true)
+    await pRevoke(p, 'view')
+    expect(await canView(p), 'and the last holder going takes the access with it').toBe(false)
+  }, 120_000)
+
+  it('a rowless legacy page tuple: re-grant then revoke actually revokes', async () => {
+    const p = sub('pg-rowless')
+    await writeTuples(fgaClient, [{ user: p, relation: 'view_direct', object: `page:${pageId}` }])
+    expect(await canView(p), 'legacy tuple confers').toBe(true)
+    await pGrant(p, 'view')
+    await pRevoke(p, 'view')
+    expect(await canView(p), 'revoked means revoked').toBe(false)
+  }, 120_000)
+
+  it('page `manage` still grants and revokes through the superset guard', async () => {
+    // `manage` is absent from PAGE_CAP_RELATION (custom roles cannot request it); the built-in grant path
+    // reaches it via allowSuperset -> manage_direct. A 400 here would mean the routing broke an operation
+    // the direct path always supported.
+    const p = sub('pg-manage')
+    await pGrant(p, 'manage')
+    expect(await check(fgaClient, p, 'manage', { type: 'page', id: pageId }), 'manage granted').toBe(true)
+    await pRevoke(p, 'manage')
+    expect(await check(fgaClient, p, 'manage', { type: 'page', id: pageId }), 'manage revoked').toBe(false)
   }, 120_000)
 })
