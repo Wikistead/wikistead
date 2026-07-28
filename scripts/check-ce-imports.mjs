@@ -107,6 +107,24 @@ if (proprietary.length > 0) {
   console.warn('WARN: no proprietary (private) workspace packages found — invariant 2 has nothing to enforce.')
 }
 
+// 3. #178: every proprietary package must also be FILTERBED from the public repo. The import guard derives
+// the proprietary set from `"private": true`, but prepublish-filter.mjs carries a hand-written list — so a
+// new proprietary package joins this check automatically and is silently MISSED by the filter, shipping EE
+// bytes into the AGPL repo. Deriving both from the same source is the fix; until the filter is rewritten,
+// this makes the divergence loud at the moment the package is added rather than at publish time.
+// Read the filter list as TEXT rather than importing it: prepublish-filter.mjs runs its CLI on import and
+// would exit the process out from under this check.
+{
+  const filterSrc = readFileSync(join(root, 'scripts/prepublish-filter.mjs'), 'utf8')
+  for (const p of packages) {
+    if (p.json.private !== true || !p.name) continue
+    const rel = `${p.dir}/${p.entry}`
+    if (!filterSrc.includes(`'${rel}'`) && !filterSrc.includes(`"${rel}"`)) {
+      fail(`proprietary package ${p.name} (${rel}) is NOT listed in scripts/prepublish-filter.mjs — publishing would ship EE bytes`)
+    }
+  }
+}
+
 if (failed) {
   console.error('\nOpen-core boundary violated (ADR-011 / ADR-069). A CE package must not depend on the EE')
   console.error('namespace or on any proprietary (private) workspace package. Fix the violations above.')
