@@ -108,6 +108,8 @@ const bandScrollMargins = EditorView.scrollMargins.of((view) => ({ top: headerBa
 // presence (layer ii) or host chrome (layer iii). buildLivePreviewExtensions reads only these.
 export interface LivePreviewSharedOpts {
   readOnly?: boolean;
+  /** #549: the page id for the context menu's block-reference entry (outer surface only). */
+  selfPageId?: string;
   resolveImageUrl?: ImageResolver;
   resolveAttachment?: AttachmentResolver;
   renderDiagram?: DiagramRenderer;
@@ -209,6 +211,13 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     } })))) ]),
     // #202: list-editing keys (Tab/Shift-Tab indent, Enter continuation) — editable surface only.
     ...(readOnly ? [] : [listEditing]),
+    // #549: the right-click menu is part of the SHARED surface — a slot island without it had its
+    // right-clicks bubble to the OUTER editor, whose menu then acted on the outer doc at the container
+    // boundary ("Copy block" took the whole container). Island-local mounting gives island-local
+    // resolution for free. Block references stay an outer-surface affordance (the island's doc is a
+    // temporary slice; a marker written there only lands on commit, and the entry's page-id anchor
+    // semantics are defined on the page surface).
+    ...(readOnly ? [] : [contextMenu({ selfPageId: env.nested ? undefined : opts.selfPageId })]),
     // #223: paste a URL / rich link → Markdown [text](url) (editable surface only; Ctrl+Shift+V pastes plain).
     ...(readOnly ? [] : [pasteLinkify()]),
     // #224 / ADR-104: auto internal links. The decoration plugin is always present but INERT until the host
@@ -275,7 +284,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; searchPhrasesCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; coEditHost?: CoEditHost; selfPageId?: string } = {},
+  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; searchPhrasesCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; coEditHost?: CoEditHost } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -432,7 +441,7 @@ export function mountLivePreview(
       // Layer (iii): host chrome (editable surface only; view guests get none). The slash palette itself
       // lives in the shared layer (its vimVisualField still precedes the toolbar's bubble, which reads it
       // to suppress itself in vim visual — the factory sits earlier in this array).
-      ...(!opts.readOnly ? [floatingToolbar(), contextMenu({ selfPageId: opts.selfPageId }), codeFenceSettingsPanel(), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []), // #456 S4/code-fence settings — panel + keyboard opener (Mod-Alt-Enter) + hover ✎, in CM's tooltip layer
+      ...(!opts.readOnly ? [floatingToolbar(), codeFenceSettingsPanel(), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []), // #456 S4/code-fence settings — panel + keyboard opener (Mod-Alt-Enter) + hover ✎, in CM's tooltip layer. #549: contextMenu moved into the shared factory (islands need it too)
       // ADR-122 addendum (b): the nested-editor seam — the slot island builds its decoration/keymap layer
       // from the SAME factory (same opts closure), with nested:true (collab/presence/host chrome excluded).
       nestedLivePreviewConfig.of((env) => buildLivePreviewExtensions(opts, { nested: true, ...env })),

@@ -4,9 +4,10 @@ import { syntaxTree } from "@codemirror/language";
 import i18n from "../../i18n";
 import { INLINE_FORMATS } from "./commands";
 import { linkifyPaste, linkCopyRange } from "./paste-linkify";
-import { diagramFenceAt, setDiagramAlign, imageAlignAt, setImageAlign, tableDirectiveAt, setTableAlign } from "./decorations"; // #255: right-click diagram/image alignment; #393: table block alignment
+import { diagramFenceAt, setDiagramAlign, imageAlignAt, setImageAlign, tableDirectiveAt, setTableAlign, innermostMacroAt, resolveNestedAnchor } from "./decorations"; // #255: right-click diagram/image alignment; #393: table block alignment; #549: block copy
 import { tableBlockAt } from "../macros/fence";
 import { toggleFenceSettings } from "./fence-settings-panel"; // #456 S4: the declared code-fence settings // #393pipe tables get the same align entries
+import { nestedSelectionField } from "./macro-edit"; // #549: an active nested selection anchors "Copy block"
 import type { FenceAlign } from "@wikistead/macro-render";
 
 // M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
@@ -24,7 +25,7 @@ interface LinkRange { from: number; to: number; urlFrom: number; urlTo: number }
 // #325 / ADR-137 slice 2b: the block-reference target for a "Copy block reference" entry — the line-end
 // offset to append the marker at, plus any id already present on that line (so a repeat copy is idempotent).
 interface BlockRef { lineTo: number; existingId: string | null }
-interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number; tableFrom?: number; blockRef?: BlockRef; codeFenceFrom?: number } // #456 S4: codeFenceFrom = a plain code fence at the click // #393: tableFrom = a :::table block at the click
+interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom?: number; imageFrom?: number; tableFrom?: number; blockRef?: BlockRef; codeFenceFrom?: number; macroBlock?: { from: number; to: number } } // #456 S4: codeFenceFrom = a plain code fence at the click // #393: tableFrom = a :::table block at the click
 
 // #325 / ADR-137 slice 2b: the current page's id, provided by the mount (member surface only). Absent on
 // guest / template-preview surfaces — the block-reference entry is then hidden (a ref needs a `pageId#^id`).
@@ -69,6 +70,12 @@ function linkAt(state: EditorState, pos: number): LinkRange | null {
     } while (cur.nextSibling());
   }
   return { from: node.from, to: node.to, urlFrom, urlTo };
+}
+
+// #549: did this event rise out of a DIFFERENT (nested) editor than the one handling it?
+function fromAnotherEditor(t: EventTarget | null, view: EditorView): boolean {
+  const ed = (t as HTMLElement | null)?.closest?.(".cm-editor");
+  return !!ed && ed !== view.dom;
 }
 
 function close(view: EditorView): void {
@@ -214,6 +221,15 @@ function doCopyBlockRef(view: EditorView, target: BlockRef, selfPageId: string):
   close(view);
 }
 
+// #549: copy the WHOLE block's canonical Markdown source (fence/::: markers included — Open formats:
+// what leaves the editor is always standard notation). Read-only operation: the doc is untouched.
+function doCopyBlock(view: EditorView, b: { from: number; to: number }): void {
+  const doc = view.state.doc;
+  const text = view.state.sliceDoc(doc.lineAt(b.from).from, doc.lineAt(Math.min(b.to, doc.length)).to);
+  void navigator.clipboard?.writeText(text).catch(() => { /* clipboard unavailable / denied — best effort */ });
+  close(view);
+}
+
 function menuTooltip(v: MenuState): Tooltip {
   return {
     pos: v.pos,
@@ -260,6 +276,15 @@ function menuTooltip(v: MenuState): Tooltip {
           const selfPageId = view.state.facet(selfPageIdFacet);
           if (selfPageId) { sep(); item("copyblockref", i18n.t("contextMenu.copyBlockRef"), () => doCopyBlockRef(view, v.blockRef!, selfPageId)); }
         }
+      }
+
+      // #549: a macro block at the click (fence or ::: directive, innermost-wins at any depth) offers
+      // "Copy block" — the ONLY non-vim way to take a block's full Markdown source (Ctrl+C on a parked
+      // atom exists but Live-mode reveal makes it unreachable by mouse; this entry works on rendered
+      // AND revealed blocks alike). The fence header's own copy button keeps copying the CONTENT only.
+      if (v.macroBlock) {
+        sep();
+        item("copyblock", i18n.t("contextMenu.copyBlock"), () => doCopyBlock(view, v.macroBlock!));
       }
 
       // #456 S4: a code fence's settings panel — the macro declares the controls, the host renders them
@@ -320,11 +345,17 @@ const menuEvents = Prec.highest(
     // collapse a selection / move the caret on mousedown, before contextmenu fires) so the
     // menu reflects what the user has selected. Editable surface only.
     mousedown(e, view) {
+      if (fromAnotherEditor(e.target, view)) return false; // #549: a nested island's event — ITS menu handles it
       if (e.button === 2 && !view.state.readOnly) { e.preventDefault(); return true; }
       return false;
     },
     contextmenu(e, view) {
       if (view.state.readOnly) return false; // view / read-only → native browser menu
+      // #549: the slot islands are full editors whose events BUBBLE through this (outer) contentDOM.
+      // The island carries its own context menu (the shared factory, ADR-122 addendum b) with island-
+      // local resolution; the outer surface opening a second menu — anchored at the container boundary,
+      // acting on the outer doc — was exactly the "copies the whole container" bug.
+      if (fromAnotherEditor(e.target, view)) return false;
       const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
       if (pos == null) return false;
       const sel = view.state.selection.main;
@@ -366,7 +397,19 @@ const menuEvents = Prec.highest(
       const codeFenceFrom = codeFenceLineAt(view.state, pos) ?? undefined;
       // #325 slice 2b: on a plain (no-selection, no-link) right-click, offer "Copy block reference" for the block under the cursor.
       const blockRef = kind === "plain" ? (blockRefTarget(view.state, pos, view.state.facet(selfPageIdFacet)) ?? undefined) : undefined;
-      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom, tableFrom, blockRef, codeFenceFrom }) });
+      // #549: the innermost macro block at the click. A right-click on a NESTED widget resolves through
+      // its data-mac-pos tag first (innermost-wins by DOM construction, #215); the tall-widget wrapPos
+      // fallback covers boundary clicks, same as the alignment entries above.
+      // The right-click's own mousedown can select the nested macro and re-render the container, so
+      // the contextmenu target may be a ring/overlay node with no data-mac-pos ancestor — the ACTIVE
+      // nested selection (scoped to the clicked container) is the second resolution source.
+      const nestedSel = view.state.field(nestedSelectionField, false);
+      const nestedAnchor = resolveNestedAnchor(e.target)
+        ?? (nestedSel && pos >= nestedSel.container.from && pos <= nestedSel.container.to ? nestedSel.anchor : null);
+      const macroBlock = innermostMacroAt(view.state, nestedAnchor ?? pos)
+        ?? (wrapPos != null ? innermostMacroAt(view.state, wrapPos) : null)
+        ?? undefined;
+      view.dispatch({ effects: openMenu.of({ pos, kind, link, diagramFrom, imageFrom, tableFrom, blockRef, codeFenceFrom, macroBlock }) });
       e.preventDefault();
       return true;
     },

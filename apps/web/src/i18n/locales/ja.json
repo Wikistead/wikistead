@@ -889,7 +889,8 @@
     "alignCenter": "中央揃え",
     "alignRight": "右揃え",
     "codeSettingsWithKey": "コードブロックの設定（Ctrl+Alt+↵）",
-    "codeSettings": "コードブロックの設定"
+    "codeSettings": "コードブロックの設定",
+    "copyBlock": "ブロックをコピー"
   },
   "members": {
     "title": "メンバー",
