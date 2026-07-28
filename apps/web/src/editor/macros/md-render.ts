@@ -212,6 +212,12 @@ export const FENCE_SETTINGS_ICON = '<svg width="13" height="13" viewBox="0 0 24 
 // Shapes are Lucide's X and Download, so DOM-built buttons match the React side's lucide-react icons.
 export const ICON_CLOSE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
 export const ICON_DOWNLOAD = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>';
+// #544the remaining text-glyph icons, replaced with the same trusted-constant Lucide shapes
+// (grip-vertical / corner-up-left / maximize-2). Same XSS rule as the constants above: these strings
+// are TRUSTED CONSTANTS — never interpolate user input into them.
+export const ICON_GRIP = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="9" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>';
+export const ICON_FOOTNOTE_BACK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>';
+export const ICON_EXPAND = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></svg>';
 export function buildFenceHeader(args: { lang: string; title?: string; code: string; canCopy: boolean; onSettings?: () => void; settingsLabel?: string }): HTMLElement {
   const row = document.createElement("div");
   row.className = "cm-lp-code-header";
@@ -571,7 +577,7 @@ class DomSink implements MdSink {
         const back = document.createElement("a"); // ↩ back to the (first) reference
         back.href = `#fnref-${data?.n}`;
         back.className = "cm-lp-footnote-back";
-        back.textContent = "↩";
+        back.innerHTML = ICON_FOOTNOTE_BACK; // trusted constant SVG (#544) — the SAME shape the live renderer uses
         this.top().appendChild(back);
         return;
       }

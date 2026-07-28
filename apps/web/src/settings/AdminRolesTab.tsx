@@ -14,7 +14,7 @@ import { Input } from "../ui/Input";
 import { MemberSearchInput } from "../ui/MemberSearchInput";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
-import { Pencil, X } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
+import { Pencil, X, ArrowRight } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
 
 // #420 / ADR-164 increment 5: the custom-role manager (tenant-admin console). Definitions =
 // named bundles of the atomic capabilities; assignments expand to fixed FGA tuples server-side.
@@ -331,7 +331,7 @@ export function AdminRolesTab() {
         {mappings.data?.map((m) => (
           <div key={m.id} className="flex items-center gap-2 text-sm" data-testid="mapping-row">
             <span className="min-w-0 truncate font-medium">{m.groupName}</span>
-            <span className="text-fg-dim">→</span>
+            <ArrowRight size={12} className="shrink-0 text-fg-dim" aria-hidden />
             {/* #497: a space-scope mapping said only which ROLE it confers, so two mappings of the same
                 role to different spaces read identically — the row could not tell you what it did. The
                 space name comes from the list this tab already holds; nothing new is asked of the server,

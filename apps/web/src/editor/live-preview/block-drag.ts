@@ -8,6 +8,7 @@
 // (near the sidebar), always on — the reviewer couldn't associate it with a block. A handle that appears
 // on hover, adjacent to the hovered block's left edge, is the expected affordance.
 import { EditorView, Decoration, ViewPlugin, type DecorationSet, type PluginValue, type ViewUpdate } from "@codemirror/view"
+import { ICON_GRIP } from "../macros/md-render"
 import { StateField, StateEffect, RangeSet, type Extension } from "@codemirror/state"
 import { blockRangeAt, computeBlockMove } from "./block-move"
 
@@ -102,7 +103,7 @@ class HoverGrip implements PluginValue {
   constructor(private view: EditorView) {
     const grip = document.createElement("div")
     grip.className = "cm-lp-block-grip"
-    grip.textContent = "⠿"
+    grip.innerHTML = ICON_GRIP // trusted constant SVG (#544) — the braille glyph was font-fallback roulette
     grip.dataset.tip = "Drag to move this block" // #530
     grip.setAttribute("data-testid", "block-grip")
     grip.style.display = "none"

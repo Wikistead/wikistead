@@ -26,7 +26,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
-import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, withEmbedHost, dispatchMacroRender, ICON_CLOSE, ICON_DOWNLOAD } from "../macros/md-render";
+import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, withEmbedHost, dispatchMacroRender, ICON_CLOSE, ICON_DOWNLOAD, ICON_FOOTNOTE_BACK, ICON_EXPAND } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
 import { noteCalloutMacro } from "../macros/callout";
@@ -215,7 +215,7 @@ class FootnoteSectionWidget extends WidgetType {
         li.appendChild(document.createTextNode(" "));
         const back = document.createElement("a");
         back.className = "cm-lp-footnote-back";
-        back.textContent = "↩";
+        back.innerHTML = ICON_FOOTNOTE_BACK; // trusted constant SVG (#544) — same shape as the static renderer
         const rp = it.refPos;
         back.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); view.dispatch({ effects: EditorView.scrollIntoView(rp, { y: "center" }) }); });
         li.appendChild(back);
@@ -1341,7 +1341,7 @@ class AttachmentCardWidget extends WidgetType {
         expand.dataset.tip = "Open";
         const hint = document.createElement("span");
         hint.className = "cm-lp-attachment-expand-hint";
-        hint.textContent = "⤢";
+        hint.innerHTML = ICON_EXPAND; // trusted constant SVG (#544)
         expand.appendChild(hint);
         expand.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); });
         expand.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openAttachmentLightbox(view, this.id, this.name); });
