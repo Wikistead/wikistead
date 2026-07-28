@@ -27,6 +27,11 @@ export function SpaceGroupMappings({ spaceId }: { spaceId: string }) {
   const [roleId, setRoleId] = useState("");
   const [deleting, setDeleting] = useState<{ id: string; groupName: string; roleName: string } | null>(null);
 
+  // #497 review rejection asked why the built-in roles are missing here, and the honest answer was not in the
+  // code: they cannot be mapped at all. `group_role_mappings.role_id` is a FK to `roles`, and a built-in
+  // has no row there — it is virtual — so the assign path 404s it (migration 081, ADR-183: "v1 maps CUSTOM
+  // roles only"). Offering them would produce a picker whose entries fail on save. Whether to lift that
+  // v1 limit is a decision on the ticket, not something to work around here.
   const roles = assignable.data?.custom ?? [];
   const onError = () => notify.error(t("toast.actionFailed"));
 
