@@ -39,6 +39,20 @@ const GRANTABLE: PageRelation[] = ["view", "comment", "edit", "moderate", "manag
 const CAP_NOUN: Record<PageRelation, string> = { view: "viewer", comment: "commenter", edit: "editor", moderate: "moderator", manage: "manager" };
 const capNoun = (c: string): string => CAP_NOUN[c as PageRelation] ?? c;
 
+// #529 the one-line effective comment audience — the three OR'd routes said as people. Pure so
+// the composition (what appears and disappears as the toggles move) is unit-testable; display-only,
+// the server's 3-way OR remains the authority.
+export function commentAudienceSummary(
+  t: (k: string, o?: Record<string, unknown>) => string,
+  state: { grantCount: number; members: boolean; guests: boolean },
+): string {
+  const parts = [t("spaceMembers.commentSummaryEditors")];
+  if (state.grantCount > 0) parts.push(t("spaceMembers.commentSummaryGrants", { count: state.grantCount }));
+  if (state.members) parts.push(t("spaceMembers.commentSummaryMembers"));
+  if (state.guests) parts.push(t("spaceMembers.commentSummaryGuests"));
+  return t("spaceMembers.commentSummaryLead") + parts.join(" + ");
+}
+
 // Space Members & Permissions (Phase 5b). manage-gated end-to-end: the screen is
 // only reachable by a manager (SpaceSettingsLayout), and every grant/revoke/list
 // re-checks space#manage server-side. Granting is the inheritance root — it widens
@@ -130,6 +144,10 @@ export function SpaceMembersTab() {
   };
 
   const grants = (access.data ?? []).slice().sort((a, b) => CAP_ORDER.indexOf(b.capability) - CAP_ORDER.indexOf(a.capability));
+  // #529 the space-level commenter grants — the per-principal comment route the audience toggles
+  // can never touch. Real data from the same manage-gated list the rows above render (no new endpoint,
+  // no roster oracle; names resolve exactly like every grant row).
+  const commenterGrants = grants.filter((g) => g.capability === "comment");
   // #523 / ADR-190 slice D: the server now resolves each user grantee's full name (override ?? OIDC
   // display_name) on the manage-gated grant list (slice A), so an un-customized member reads as their
   // name, not a sub — the #513 root fix. A departed / cross-tenant sub comes back null and falls back to
@@ -263,26 +281,49 @@ export function SpaceMembersTab() {
       {customRoles.length > 0 && <SpaceGroupMappings spaceId={spaceId} />}
 
       {/* #100 / ADR-029: comment AUDIENCE toggles — who may comment on this space's pages. A resource
-          setting (space#comment_open), separate from the per-member grants above. Default OFF. */}
+          setting (space#comment_open), separate from the per-member grants above. Default OFF.
+          #529 (honest audience UI): the toggles are only ONE of three OR'd comment routes
+          (per-principal grant / edit subsumption / audience) — so the BASELINE the toggles cannot touch
+          is shown above them, each toggle wears its DELTA (who it adds / removes), and a one-line
+          effective summary tracks the state. Display-only: the server's 3-way OR stays the fortress. */}
       <div className="mt-8 border-t border-border pt-4" data-testid="comment-open">
         <h3 className="mt-0 text-sm font-medium">{t("spaceMembers.commentAudienceTitle")}</h3>
         <p className="mt-0 mb-3 text-sm text-fg-dim">{t("spaceMembers.commentAudienceBody")}</p>
+        <div className="mb-3 rounded-md border border-border bg-panel p-2.5 text-sm" data-testid="comment-baseline">
+          <p className="m-0">{t("spaceMembers.commentBaselineEditors")}</p>
+          <p className="m-0 mt-1 text-fg-dim" data-testid="comment-baseline-grants">
+            {commenterGrants.length === 0
+              ? t("spaceMembers.commentBaselineGrants_zero")
+              : t("spaceMembers.commentBaselineGrants", { count: commenterGrants.length, names: commenterGrants.map(label).join(", ") })}
+          </p>
+        </div>
         {([
-          { key: "guests" as const, label: t("spaceMembers.commentGuests"), testId: "comment-open-guests" },
-          { key: "members" as const, label: t("spaceMembers.commentMembers"), testId: "comment-open-members" },
-        ]).map(({ key, label: lbl, testId }) => {
+          { key: "guests" as const, label: t("spaceMembers.commentGuests"), testId: "comment-open-guests", onKey: "spaceMembers.commentGuestsOn", offKey: "spaceMembers.commentGuestsOff" },
+          { key: "members" as const, label: t("spaceMembers.commentMembers"), testId: "comment-open-members", onKey: "spaceMembers.commentMembersOn", offKey: "spaceMembers.commentMembersOff" },
+        ]).map(({ key, label: lbl, testId, onKey, offKey }) => {
           const on = !!commentOpen.data?.[key];
           return (
-            <label key={key} className="mb-2 flex items-center gap-2 text-sm">
+            <label key={key} className="mb-2 flex items-start gap-2 text-sm">
               {/* #389 / ADR-146: the hand-rolled role=switch button -> the shared DS Switch. data-on kept
                   for existing assertions. */}
               <Switch checked={on} testId={testId} data-on={on}
                 disabled={commentOpen.isLoading || setCommentOpen.isPending}
                 onChange={(v) => toggleCommentOpen(key, v)} />
-              <span>{lbl}</span>
+              <span>
+                {lbl}
+                {/* the DELTA: what this switch position actually changes, said in people terms */}
+                <span className="block text-xs text-fg-dim" data-testid={`${testId}-delta`}>{t(on ? onKey : offKey)}</span>
+              </span>
             </label>
           );
         })}
+        <p className="mb-0 mt-3 text-sm" data-testid="comment-effective-summary">
+          {commentAudienceSummary(t, {
+            grantCount: commenterGrants.length,
+            members: !!commentOpen.data?.members,
+            guests: !!commentOpen.data?.guests,
+          })}
+        </p>
       </div>
     </div>
   );
