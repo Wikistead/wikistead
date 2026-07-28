@@ -1066,7 +1066,7 @@
     "changedHidWysiwyg": "モード切替から WYSIWYG を非表示にしました",
     "changedHidMarkdownModes": "モード切替から Live / Source を非表示にしました",
     "changedBalancedModes": "Live / Reading / WYSIWYG を表示（Source は設定から追加できます）",
-    "bannerText": "新機能：書き方に合わせてエディタを最適化できます。",
+    "bannerText": "書き方に合わせてエディタを最適化できます。",
     "bannerCta": "設定する",
     "skippedNote": "バランス型のエディタ表示にしました（vim オフ・WYSIWYG あり）。設定または「最初の質問をやり直す」でいつでも変更できます。",
     "atomHint": "ヒント：参照カード（埋め込み・トランスクルード・子ページ一覧）はひとかたまりで選択され、アクセント色のリングが付きます — Ctrl+Enter で参照先を変更。レイアウトやコールアウトはクリックして中に入って編集します。それ以外はそのまま書き込めます。"
