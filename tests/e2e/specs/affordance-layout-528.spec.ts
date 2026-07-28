@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit, sleep } from "../helpers";
 
-// #528 / ADR-192: one layout owner for every block affordance. The pin is the PROPERTY the ticket asks for —
-// no two visible affordances of a block overlap — measured the way the collision was found (#528):
+// #528 / ADR-192: one layout owner for every block affordance. The pin is the PROPERTY the ticket asks for
+// no two visible affordances of a block overlap — measured the way the collision was found (#528)
 // a nested macro with the caret inside it shows the raw rich-edit pill AND the ✎ chrome row, and before the
 // owner existed their rectangles intersected by 8px because both claimed `top:-1.5em; left:0` from different
 // offset parents.
@@ -217,7 +217,7 @@ test("#528 the affordances stay apart WHILE the pointer moves", async ({ page })
   expect(collisions, "no overlap at any point during the movement").toEqual([]);
 });
 
-// #528 measured by the user and it overturned the earlier "innermost-only already holds" report —
+// #528 measured by the user and it overturned the earlier "innermost-only already holds" report
 // that check counted VISIBLE affordances without asking which block each belonged to. With the caret in the
 // inner :::note, the affordance on screen belonged to the parent columns, and an unrelated tabs block showed
 // a permanent ✎ as well. The rule: exactly one block offers an entry affordance — the focused one.
@@ -307,5 +307,65 @@ test("#528 the two entry affordances are told apart", async ({ page }) => {
   expect(rep.rowTips, "…and it is not the same words as the pill's").not.toContain(rep.pillTip);
   if (rep.pillSvg && rep.rowSvgs.some((g) => g.length > 0)) {
     expect(rep.rowSvgs.filter((g) => g.length > 0), "nor the same glyph").not.toContain(rep.pillSvg);
+  }
+});
+
+// #528 (user rejection, measured): hovering a macro showed chrome that came and went with the
+// pointer at rest — sampled 8× at 250ms, the visible set alternated between {row, ✎} and {}. Traced in a
+// real browser: the pointer was over a NESTED macro, focus (correctly) went to the slot, the container's
+// chrome was (correctly) suppressed — and in Live mode the slot had nothing of its own to show, because
+// the nested ✎ existed only in WYSIWYG and was hover-CSS-gated besides. The block the user was pointing
+// at offered nothing, and every twitch across the container margin made the container chrome pop back
+// . Two fixes pinned here: the focused slot's own pencil exists in Live
+// and is owner-gated, and the set is STABLE while the pointer rests (the async nested-diagram swap used to
+// wipe the pencil ~1.4s in — md-render replaced the slot's children wholesale).
+test("#528 a nested macro under the pointer offers ITS OWN affordance, steadily", async ({ page }) => {
+  await openScratch(page, `aff528s-${Date.now().toString(36)}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(NESTED);
+  await sleep(700);
+
+  // hover, no caret: the caret sits in the tail line, so focus is decided by the pointer alone
+  await page.getByText("inner body text", { exact: false }).first().hover();
+  await sleep(600);
+
+  const samples: { key: string; entries: { ownsHoveredBlock: boolean; top: number }[] }[] = [];
+  for (let i = 0; i < 8; i++) {
+    samples.push(
+      await page.evaluate(() => {
+        const visible = (e: HTMLElement) => {
+          const c = getComputedStyle(e);
+          return c.display !== "none" && c.visibility !== "hidden" && parseFloat(c.opacity || "1") > 0.01;
+        };
+        const hovered = [...document.querySelectorAll<HTMLElement>("[data-mac-pos]")]
+          .find((el) => el.textContent?.includes("inner body text")) ?? null;
+        const entries = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-edit, .cm-lp-macro-btnrow, .cm-lp-macro-richui-raw")]
+          .filter(visible)
+          // the ✎ inside the chrome row IS the row's content — one control, not two (the probe
+          // measured them as an "overlap"; a container and its child always intersect)
+          .filter((e) => !e.closest(".cm-lp-macro-btnrow") || e.classList.contains("cm-lp-macro-btnrow"))
+          .map((e) => ({
+            // the affordance's host must be the same NODE as the hovered block's host — asserted by
+            // identity, not by testid naming (the note's slot renders as a callout panel, and pinning
+            // the label would re-break every time a renderer renames itself)
+            ownsHoveredBlock: (e.closest("[data-mac-pos]") ?? e.closest(".cm-lp-macro-wrap"))
+              === (hovered?.closest("[data-mac-pos]") ?? null),
+            top: Math.round(e.getBoundingClientRect().top),
+          }));
+        return { key: JSON.stringify(entries.map((x) => `${x.ownsHoveredBlock}@${x.top}`).sort()), entries };
+      }),
+    );
+    await sleep(250);
+  }
+
+  // stable: the pointer did not move, so neither may the affordance set (red-check: distinct = 1)
+  const distinct = new Set(samples.map((s) => s.key));
+  expect([...distinct], "the visible set holds still while the pointer rests").toHaveLength(1);
+  // one affordance, and it belongs to the block under the pointer — not the container, not a neighbour
+  const entries = samples[0]!.entries;
+  expect(entries.length, `the hovered nested macro offers a way in, saw ${samples[0]!.key}`).toBeGreaterThanOrEqual(1);
+  for (const e of entries) {
+    expect(e.ownsHoveredBlock, "every visible affordance belongs to the hovered nested block").toBe(true);
   }
 });

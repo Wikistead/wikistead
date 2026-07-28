@@ -32,6 +32,7 @@ import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
 const AFFORDANCES = [
   ".cm-macro-presence-box",
   ".cm-lp-macro-btnrow",
+  ".cm-lp-nested-macro-edit",
   ".cm-lp-macro-richui-raw",
 ] as const;
 const AFFORDANCE_SEL = AFFORDANCES.join(", ");
@@ -44,9 +45,22 @@ const PINNED = ".cm-macro-presence-box";
 // style saw no row to collide with, gave the pill dy=0, and the write then made both visible on top of each
 // other — the original 8px overlap, reintroduced by the fix for it. Measured, not reasoned: the diagnostic
 // showed both elements inside the focused wrap with `transform: none`.
-const OWNER_GATED = ".cm-lp-macro-richui-raw, .cm-lp-macro-btnrow";
+// The hover-variant nested pencil joins the gate (#528): a focused nested slot is a block like any
+// other, and its entry chrome is shown by the same pass that places it. The SELECTION pencil (the variant
+// without `-hover`) stays out — it is drawn only while the nested macro is selected, a state the owner
+// does not drive, and it is visible from birth so plain isVisible() already measures it.
+const OWNER_GATED = ".cm-lp-macro-richui-raw, .cm-lp-macro-btnrow, .cm-lp-nested-macro-edit-hover";
 
 const GAP = 3; // px between stacked affordance rows
+
+// One displacement variable per affordance KIND, not per element: focus is single, so at most one of each
+// kind is visible at a time and a per-kind variable reaches exactly the element being placed.
+function varFor(el: HTMLElement): string | null {
+  if (el.matches(".cm-lp-macro-richui-raw")) return "--aff-dy-pill";
+  if (el.matches(".cm-lp-macro-btnrow")) return "--aff-dy-row";
+  if (el.matches(".cm-lp-nested-macro-edit")) return "--aff-dy-nested";
+  return null;
+}
 
 interface Placed { readonly el: HTMLElement; top: number; bottom: number; left: number; right: number; dy: number }
 
@@ -105,8 +119,15 @@ export function focusedWrap(view: EditorView, pointer: { x: number; y: number } 
   if (!pointer) return null;
   const under = wraps.filter((w) => {
     const r = w.getBoundingClientRect();
-    // include the gutter above the block, where its chrome row lives
-    return pointer.x >= r.left && pointer.x <= r.right && pointer.y >= r.top - 24 && pointer.y <= r.bottom;
+    // include the gutter above the block, where its chrome row lives — but a NESTED host's gutter stops
+    // at its container's content edge. A slot near the top of a columns block would otherwise project its
+    // gutter into the strip above the container where the CONTAINER's chrome row sits, so the pointer
+    // travelling up to that row flipped focus to the slot halfway there and the row vanished under the
+    // click (#528 "the button is there, then it isn't").
+    let gutterTop = r.top - 24;
+    const container = w.parentElement?.closest(".cm-lp-macro-wrap");
+    if (container) gutterTop = Math.max(gutterTop, container.getBoundingClientRect().top);
+    return pointer.x >= r.left && pointer.x <= r.right && pointer.y >= gutterTop && pointer.y <= r.bottom;
   });
   return innermost(under);
 }
@@ -132,15 +153,19 @@ export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | n
   // OR, not replace: an owner-gated affordance is also shown by its block being in RAW mode, a rule the
   // owner does not drive. Treating "the owner will show it" as the only way to be visible left the raw case
   // unmeasured — and unmeasured means unplaced, which is the original 8px collision all over again.
+  // "Its block is focused" means the element's OWN host is the focus — closest(), not contains(). A
+  // container wrap CONTAINS every nested slot inside it, so a containment test would light up the
+  // container chrome and all of its children's pencils together the moment the pointer touched the
+  // container margin — the many-similar-buttons screen removed, rebuilt one level down.
   const willShow = (el: HTMLElement) =>
-    isVisible(el) || (el.matches(OWNER_GATED) && focus != null && focus.contains(el));
+    isVisible(el) || (el.matches(OWNER_GATED) && focus != null && el.closest(FOCUS_HOSTS) === focus);
   // Measure where each affordance would sit WITHOUT the displacement this owner already applied. A rect
   // reflects the transform, so measuring it raw means reading back our own answer: the pair looks resolved,
   // the pass concludes dy 0, the element snaps home, the next pass displaces it again — an oscillation that
   // showed up as the pair overlapping on every other sampled frame while the pointer moved. Subtracting the
   // current variable turns the reading back into the block's own geometry.
   const applied = (el: HTMLElement): number => {
-    const name = el.matches(".cm-lp-macro-richui-raw") ? "--aff-dy-pill" : el.matches(".cm-lp-macro-btnrow") ? "--aff-dy-row" : null;
+    const name = varFor(el);
     if (!name) return 0;
     return parseFloat(view.dom.style.getPropertyValue(name) || "0") || 0;
   };
@@ -226,14 +251,15 @@ export const affordanceLayout = ViewPlugin.fromClass(
           // one (#528 — the row's own opacity stayed 1 while only its buttons faded, so it read as a
           // permanent affordance and reserved a slot the owner then routed other chrome around).
           for (const el of Array.from(view.dom.querySelectorAll<HTMLElement>(OWNER_GATED))) {
-            el.classList.toggle("cm-aff-shown", focus != null && focus.contains(el));
+            el.classList.toggle("cm-aff-shown", focus != null && el.closest(FOCUS_HOSTS) === focus);
           }
           // Write the displacement as a VARIABLE on the editor root, which no widget rebuild touches, so an
           // element CodeMirror re-creates is already placed the moment it appears (#528). Writing the
           // transform onto the element itself lost the placement on every rebuild.
           const root = view.dom;
           for (const p of placed) {
-            const name = p.el.matches(".cm-lp-macro-richui-raw") ? "--aff-dy-pill" : "--aff-dy-row";
+            const name = varFor(p.el);
+            if (!name) continue; // presence: pinned, never displaced, has no variable
             const v = `${Math.round(p.dy)}px`;
             if (root.style.getPropertyValue(name) !== v) root.style.setProperty(name, v);
           }

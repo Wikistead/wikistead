@@ -590,7 +590,12 @@ class DomSink implements MdSink {
               img.alt = "";
               img.setAttribute("data-testid", "macro-diagram-nested");
               img.className = "cm-lp-macro-diagram";
-              el.replaceChildren(img);
+              // Replace what THIS renderer produced, not everything in the slot. The slot root is the
+              // `data-mac-pos` element the host hangs its entry affordance on (the nested ✎,
+              // decorations.ts), and it lands AFTER this widget was built — so the diagram arriving
+              // ~1.4s later used to wipe it, leaving the focused slot with no way in (#528 the
+              // affordance the user saw at first paint was gone by the time they reached for it).
+              el.replaceChildren(img, ...Array.from(el.children).filter((c) => c.classList.contains("cm-lp-macro-edit")));
             });
           }
           // #267: a rendered diagram is centred by default (#255); this path has no widget wrap, so apply

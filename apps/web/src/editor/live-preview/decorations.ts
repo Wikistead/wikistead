@@ -2815,12 +2815,20 @@ class MacroWidget extends WidgetType {
         }
         // #174 comment 1003 / ADR-100 (WYSIWYG nested parity): in WYSIWYG the raw syntax NEVER reveals, so a
         // nested macro inside a layout container had NO way into its editUI — a top-level callout got a hover
-        // ✎ (comment 894) but the nested equivalent was missing (nested edit was click-to-select only, which
-        // leans on a reveal path WYSIWYG lacks). Give every EDITABLE nested slot the same hover-gated ✎ (→ its
-        // editUI via enterNestedMacroAt), matching the top-level panel. WYSIWYG-only: Live keeps click-to-
-        // select → pencil (its reveal path already reaches the editUI). Skip the slot already carrying the
-        // selection/edit affordance (single pencil). Offset-invariant — the button never edits the doc.
-        if (this.wysiwyg) {
+        // ✎ (comment 894) but the nested equivalent was missing. Originally WYSIWYG-only, on the theory that
+        // Live's click-to-select → pencil path was enough.
+        //
+        // #528 ended that theory. Focus is single (exactly one block offers entry chrome), and
+        // a nested slot can BE the focused block — the pointer resting on a nested macro suppresses the
+        // container's chrome, which is correct, but in Live the slot then had nothing of its own to show
+        // the user hovered a macro and saw zero affordances, and every twitch of the pointer across the
+        // container's margin made the container chrome pop back — the reported "appears somewhere else,
+        // position feels off" flicker. So every editable nested slot carries the ✎ in BOTH modes now, and
+        // its visibility belongs to the layout owner (`cm-aff-shown`, like the chrome row and the pill),
+        // not to `:hover` — CSS deciding visibility behind the owner's back is the exact bug class this
+        // ticket exists to close. Skip the slot already carrying the selection pencil (single pencil).
+        // Offset-invariant — the button never edits the doc.
+        {
           const activeAnchor = this.nestedEdit?.anchor ?? this.nestedSel?.anchor ?? null;
           for (const slot of Array.from(rendered.querySelectorAll<HTMLElement>("[data-mac-pos]"))) {
             const anchor = Number(slot.dataset.macPos);
@@ -5496,18 +5504,23 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // accent ring already marks the focused macro, so tinting the pencil too was redundant.
   // #424: nested macros use the SAME top-left offset as every other edit affordance (the old
   // -0.9em/-0.4em special case made the button wander between nesting levels).
-  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-1.5em", left: "0", opacity: "1", zIndex: "5" },
+  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-1.5em", left: "0", opacity: "1", zIndex: "5", transform: "translateY(var(--aff-dy-nested, 0px))" },
   // #278 point 5: INSIDE a layout cell / tab panel the floated corner controls (-0.9em / -1.55em
   // above their slot) stick out past the container's top edge and get cut (the clipped mermaid toolbar
   // in a tab). Nested contexts pin them INSIDE the slot's top-left corner instead — the container never
   // clips them and they still sit "at the corner" (the user-suggested in-container placement).
   // #424: the old tabpanel/column overrides (top:2px left:2px — an INSIDE-the-block position) are gone;
   // nested affordances sit at the unified block-top-left like everywhere else.
-  // #174 comment 1003: the WYSIWYG hover variant. Unlike the selection pencil (drawn only when selected, so
-  // opacity:1), this one sits on EVERY editable nested slot, so it must be hover-gated — opacity:0 until the
-  // slot itself is hovered. `>` keeps it to the pencil that is a direct child of the hovered [data-mac-pos].
-  ".cm-lp-nested-macro-edit-hover": { opacity: "0", transition: "opacity 120ms" },
-  "[data-mac-pos]:hover > .cm-lp-nested-macro-edit-hover": { opacity: "1" },
+  // #174 comment 1003, re-gated by #528 unlike the selection pencil (drawn only when selected, so
+  // opacity:1), this variant sits on EVERY editable nested slot, so it starts invisible. What shows it is
+  // the LAYOUT OWNER (`cm-aff-shown`, the same gate as the chrome row and the pill) — it used to be the
+  // slot's `:hover`, which meant CSS decided visibility behind the owner's back: the owner would focus a
+  // nested slot and suppress the container chrome while the slot's own pencil stayed at the mercy of an
+  // unrelated selector, leaving the focused block with nothing visible at all. Invisible must also mean
+  // unclickable, so pointer-events follows the same gate (an opacity-0 button parked above the slot used
+  // to swallow clicks meant for the text under it).
+  ".cm-lp-nested-macro-edit-hover": { opacity: "0", transition: "opacity 120ms", pointerEvents: "none" },
+  ".cm-lp-nested-macro-edit-hover.cm-aff-shown": { opacity: "1", pointerEvents: "auto" },
   ".cm-lp-nested-edit-island": { outline: "2px solid var(--accent, #4ea1ff)", outlineOffset: "2px", borderRadius: "4px" },
   ".cm-lp-nested-edit-src": { width: "100%", minHeight: "4em", boxSizing: "border-box", fontFamily: "var(--font-mono, monospace)", fontSize: "0.85em" },
   ".cm-lp-excalidraw svg": { maxWidth: "100%", height: "auto", pointerEvents: "none" },
