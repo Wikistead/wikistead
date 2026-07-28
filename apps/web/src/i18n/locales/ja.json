@@ -357,7 +357,9 @@
     "method_effective": "有効",
     "method_byPolicy": "デプロイポリシーにより利用不可",
     "method_off": "オフ",
-    "platformOwnIdpRequired": "プラットフォームログインをオフにする前に、自前の IdP（OIDC または SAML）を有効化・検証してください。"
+    "platformOwnIdpRequired": "プラットフォームログインをオフにする前に、自前の IdP（OIDC または SAML）を有効化・検証してください。",
+    "method_unentitled": "現在のプランに含まれていません",
+    "methodsSaveFailed": "ログイン方式を変更できませんでした。"
   },
   "adminEnroll": {
     "title": "自動メンバー登録",

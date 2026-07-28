@@ -357,7 +357,9 @@
     "method_effective": "Active",
     "method_byPolicy": "Unavailable by deployment policy",
     "method_off": "Off",
-    "platformOwnIdpRequired": "Enable and verify your own identity provider (OIDC or SAML) before turning platform login off."
+    "platformOwnIdpRequired": "Enable and verify your own identity provider (OIDC or SAML) before turning platform login off.",
+    "method_unentitled": "Not on your plan",
+    "methodsSaveFailed": "Couldn't change the login methods."
   },
   "adminEnroll": {
     "title": "Auto-enrolment",

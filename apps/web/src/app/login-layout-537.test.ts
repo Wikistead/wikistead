@@ -28,6 +28,10 @@ describe("#537 methodBadge (§1 display rule)", () => {
     expect(methodBadge({ ...base, inCeiling: true, effective: true })).toBe("effective");
     expect(methodBadge({ inCeiling: true, configured: false, selected: false, effective: false })).toBe("off");
   });
+  it("a selected-but-unentitled method names the plan (ADR-072 admin surface), not a bare off", () => {
+    expect(methodBadge({ ...base, inCeiling: true, entitled: false })).toBe("unentitled");
+    expect(methodBadge({ inCeiling: true, configured: true, selected: false, effective: false, entitled: false })).toBe("off");
+  });
 });
 
 describe("#537 wiring pins", () => {
@@ -43,7 +47,7 @@ describe("#537 wiring pins", () => {
     expect(tab).toContain("<AdminLoginMethodsSection />");
     for (const loc of [en, ja] as Array<{ auth: Record<string, string>; adminAuth: Record<string, string> }>) {
       for (const k of ["signInSaml", "moreWays", "noMethods"]) expect(loc.auth[k], k).toBeTruthy();
-      for (const k of ["methodsTitle", "method_byPolicy", "platformOwnIdpRequired"]) expect(loc.adminAuth[k], k).toBeTruthy();
+      for (const k of ["methodsTitle", "method_byPolicy", "method_unentitled", "platformOwnIdpRequired", "methodsSaveFailed"]) expect(loc.adminAuth[k], k).toBeTruthy();
     }
   });
 });

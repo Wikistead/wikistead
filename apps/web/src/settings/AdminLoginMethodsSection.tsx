@@ -11,11 +11,13 @@ import { notify } from "../ui/toast";
 //
 // §1's display rule: a method the CEILING excludes is shown as unavailable-BY-POLICY (never
 // silently off) — the tenant's stored selection is untouched and returns with the ceiling.
-export type MethodBadge = "effective" | "byPolicy" | "off";
-export function methodBadge(m: LoginMethodState): MethodBadge {
+export type MethodBadge = "effective" | "byPolicy" | "unentitled" | "off";
+export function methodBadge(m: LoginMethodState & { entitled?: boolean }): MethodBadge {
   if (m.effective) return "effective";
-  // The selection is the tenant's own; when policy is what stops it, say so (§1).
+  // The selection is the tenant's own; when policy is what stops it, say so (§1). Same for the plan
+  // (ADR-072: entitlement loss on an admin surface is named to admins, data preserved).
   if (!m.inCeiling && m.selected) return "byPolicy";
+  if (m.entitled === false && m.selected) return "unentitled";
   return "off";
 }
 
@@ -31,7 +33,9 @@ export function AdminLoginMethodsSection() {
       onSuccess: () => notify.success(t("toast.saved")),
       onError: (e) => {
         const code = e instanceof ApiError ? e.code : undefined;
-        notify.error(code === "own_idp_required" ? t("adminAuth.platformOwnIdpRequired") : t("adminAuth.saveFailed"));
+        // NOT adminAuth.saveFailed — that copy talks about the connection test, which has no
+        // meaning for this toggle (design-review Slice 3, finding 5).
+        notify.error(code === "own_idp_required" ? t("adminAuth.platformOwnIdpRequired") : t("adminAuth.methodsSaveFailed"));
       },
     });
   };

@@ -49,10 +49,13 @@ async function tenantOidcEnabled(db: TenantDb): Promise<boolean> {
 // door the tenant closed, so this one fails CLOSED the other way: an error keeps platform login ON
 // (the safe default for "can anyone still sign in") and logs — the toggle is an SSO-enforcement
 // convenience, not a security boundary (the tenant's OWN IdP gate is).
+// Only the missing-table case (a server running ahead of migration 087) is tolerated — anything
+// else THROWS so a real failure surfaces as a 500 instead of silently un-enforcing SSO
+// (design-review Slice 3, finding 2: a broad catch here was fail-open on the security-relevant side).
 async function platformLoginDisabled(db: TenantDb): Promise<boolean> {
   const [row] = await db.sql<{ platform_login_disabled: boolean }[]>`SELECT platform_login_disabled FROM tenant_login_prefs LIMIT 1`.catch((err: unknown) => {
-    console.warn('[login-methods] tenant_login_prefs read failed; keeping platform login on:', err)
-    return [] as { platform_login_disabled: boolean }[]
+    if ((err as { code?: string }).code === '42P01') return [] as { platform_login_disabled: boolean }[] // undefined_table
+    throw err
   })
   return !!row?.platform_login_disabled
 }
@@ -60,10 +63,10 @@ async function platformLoginDisabled(db: TenantDb): Promise<boolean> {
 async function tenantSamlEnabled(db: TenantDb): Promise<boolean> {
   // The table exists in every deployment (migration 038); the EE code that USES it lives in ee-server.
   // Reading the flag here is data access, not an EE feature — the entitlement gate below still applies.
+  // Same catch discipline as the prefs read: missing-table only; real failures surface.
   const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml LIMIT 1`.catch((err: unknown) => {
-    // Fail-closed (saml drops out of the set) — but say so, per B8's "no mysterious 404s" rule.
-    console.warn('[login-methods] tenant_saml read failed; treating saml as unavailable:', err)
-    return [] as { enabled: boolean }[]
+    if ((err as { code?: string }).code === '42P01') return [] as { enabled: boolean }[] // undefined_table
+    throw err
   })
   return !!row?.enabled
 }
@@ -91,14 +94,23 @@ export async function resolveAvailableLogin(
     tenantCfg = await loadTenantOidcCfg(db)
     if (tenantCfg) methods.add('tenant-oidc')
   }
-  // Ruling 4: the tenant may have turned the platform IdP off (SSO enforcement) — read the pref
-  // only when the ceiling and deployment config would otherwise make it effective (lazy).
-  let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
-  if (platform && (await platformLoginDisabled(db))) platform = null
-  if (platform) methods.add('platform-oidc')
+  // saml is decided BEFORE platform: the platform pref below conditions on "any own IdP effective",
+  // and saml is an own IdP.
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) {
     methods.add('saml')
   }
+  // Ruling 4: the tenant may have turned the platform IdP off (SSO enforcement). The pref is a
+  // CONDITIONAL, re-evaluated at read time exactly like the rest of the effective set: it bites only
+  // WHILE an own IdP (tenant-oidc or saml, above) is effective. When that stops being true — plan
+  // downgrade drops samlSso, the IdP row goes away — platform login LAPSES BACK OPEN instead of
+  // leaving the tenant with an empty set (design-review Slice 3, finding 1: the write-time-only
+  // check made an entitlement downgrade a brand-new full-lockout path). The stored intent is kept;
+  // restore the own IdP and the enforcement resumes. The admin panel shows the lapse as platform
+  // being effective again.
+  const ownIdpEffective = methods.size > 0
+  let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
+  if (platform && ownIdpEffective && (await platformLoginDisabled(db))) platform = null
+  if (platform) methods.add('platform-oidc')
 
   const oidc = tenantCfg
     ? { cfg: tenantCfg, viaTenantOidc: true }
@@ -128,7 +140,10 @@ export async function otherLoginMethodsEffective(
   env?: string | undefined,
 ): Promise<boolean> {
   const ceiling = loginMethodCeiling(env)
-  if (except !== 'platform-oidc' && ceiling.has('platform-oidc') && loadPlatformOidc() && !(await platformLoginDisabled(db))) return true
+  // The platform pref is deliberately NOT consulted here: it is a conditional that lapses the moment
+  // no own IdP is effective (see resolveAvailableLogin), so a configured, in-ceiling platform IdP is
+  // ALWAYS a way back in — either directly, or by lapse once the disable being guarded goes through.
+  if (except !== 'platform-oidc' && ceiling.has('platform-oidc') && loadPlatformOidc()) return true
   if (except !== 'saml' && ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) return true
   if (except !== 'tenant-oidc' && ceiling.has('tenant-oidc') && (await tenantOidcEnabled(db))) return true
   return false
