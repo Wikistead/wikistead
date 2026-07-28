@@ -113,6 +113,26 @@ describe("#85: the browser-built export document", () => {
     expect(out).toContain("content");
   });
 
+  // #85: the fence header is marked contenteditable="false" so CodeMirror leaves it alone, and stripping
+  // every `[contenteditable]` took the whole header — file-name tab and all — out of the export. Only a
+  // genuinely editable surface is chrome; the attribute is dropped from what stays.
+  it("keeps a non-editable decoration, dropping only the attribute", () => {
+    const out = buildExportDocument({
+      title: "t",
+      body: surface('<div class="cm-lp-fence-card"><div class="cm-lp-code-header" contenteditable="false"><span class="cm-lp-code-title">app.js</span></div><pre>x</pre></div>'),
+      css: "",
+    });
+    expect(out, "the file name survives").toContain("app.js");
+    expect(out, "…and its header element with it").toContain("cm-lp-code-header");
+    expect(out, "the attribute does not travel").not.toContain("contenteditable");
+  });
+
+  it("drops a genuinely editable surface", () => {
+    const out = buildExportDocument({ title: "t", body: surface('<div contenteditable="true">live editor</div><p>doc</p>'), css: "" });
+    expect(out).not.toContain("live editor");
+    expect(out).toContain("doc");
+  });
+
   it("does not mutate the surface it was given", () => {
     const live = surface('<div><button class="cm-lp-code-copy">Copy</button><p onclick="x()">p</p></div>');
     buildExportDocument({ title: "t", body: live, css: "" });

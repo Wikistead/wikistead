@@ -44,8 +44,9 @@ const FIXTURE = [
   "| --- | --- |",
   "| a | b |",
   "",
-  "```js",
+  '```js title="app.js" showLineNumbers {2}',
   "const x = 1;",
+  "const y = 2;",
   "```",
   "",
   "```mermaid",
@@ -91,7 +92,17 @@ test("#85: the exported document and the app render the same document", async ({
   const id = await openScratch(page, `exportparity-${Date.now()}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText(FIXTURE);
+  // Written through CodeMirror's own dispatch rather than typed. Typing an info string like
+  // `title="app.js" showLineNumbers {2}` trips CM's auto-closing of quotes and braces, so the document
+  // that reached the page was not the one written here — which is why the fence chrome could not be
+  // asserted from this fixture at all. A programmatic insert has no auto-close, and the doc is exactly
+  // what the spec says it is.
+  await page.evaluate((text) => {
+    const el = document.querySelector("[data-pane=preview] .cm-content") as { cmView?: { view?: unknown }; cmTile?: { view?: unknown } } | null;
+    const view = (el?.cmView?.view ?? el?.cmTile?.view) as { state: { doc: { length: number } }; dispatch(t: unknown): void } | undefined;
+    if (!view) throw new Error("no editor view to write the fixture into");
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+  }, FIXTURE);
   await sleep(1500);
   await page.evaluate(async ({ api, pageId }) => {
     await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
@@ -133,12 +144,13 @@ test("#85: the exported document and the app render the same document", async ({
 
   // #85: the fence keeps its chrome — the filename tab, the line numbers, and the highlighted line. The
   // editor paints those; a file without them is not the same document.
-  // #85 fence chrome (filename tab / line numbers / highlighted lines) is implemented on the read surface
-  // and verified there (see the fence unit pin), but it is NOT asserted from this fixture: typing an info
-  // string like `title="app.js" showLineNumbers {2}` into CodeMirror trips its auto-closing of quotes and
-  // braces, so the document that reaches the page is not the one written here. Measured, not assumed — the
-  // print portal renders the tab and the numbers from a published body carrying that fence. Asserting it
-  // here needs a fixture path that does not go through typing; left undone rather than faked.
+  // #85: the fence keeps its chrome in the file — the filename tab, the line numbers, and the band on the
+  // highlighted line. The editor paints those, and a document without them is not the same document. This
+  // became assertable once the fixture stopped being typed (see the dispatch above).
+  expect(html, "the filename tab").toContain("app.js");
+  expect(html, "line numbers, as the editor renders them").toContain("cm-lp-code-numbered");
+  expect(html, "…with their values").toContain('data-linenum="2"');
+  expect(html, "and the highlighted line keeps its band").toContain("cm-lp-code-hl");
 
   // Acceptance 2: the diagram is a figure — for BOTH kinds. mermaid draws itself in the browser; plantuml
   // is drawn by the host, and the export had nobody to ask, so it carried the fence source while the screen
