@@ -12,6 +12,7 @@ import {
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { Select } from "../ui/Select";
+import { resolveGrantDispatch } from "./grant-dispatch";
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
 import { SpaceGroupMappings } from "./SpaceGroupMappings";
@@ -92,25 +93,21 @@ export function SpaceMembersTab() {
   // #536 / ADR-188 §6: one control, two mechanisms underneath. A custom role goes through the assignment
   // path (its bundle expands server-side); a built-in goes through the grant path. Either way the server
   // re-gates on space `manage` — the merge is a UI convenience and moves no authority.
+  // The DECISION lives in resolveGrantDispatch (a pure function, behaviourally pinned — review 7
+  // the group bug lived in an untestable inline handler); this only executes what it resolved.
   const addUnified = () => {
-    if (pick.startsWith("role:")) {
-      const id = pick.slice("role:".length);
-      // Groups: the assignment path takes a group PRINCIPAL, the same one the mapping feature uses.
-      // #536send the group NAME, never a principal we built. The FGA id is a tenant-salted hash
-      // the server derives; guessing it here writes a tuple that no membership points at, and the toast
-      // would say it worked. The mapping feature has always sent the name for this reason.
-      const target = mode === "group"
-        ? (groupName ? { groupName } : null)
-        : (picked ? { principal: picked.grantee } : null);
-      if (!id || !target) return;
-      assignRole.mutate({ roleId: id, resourceType: "space", resourceId: spaceId, ...target }, {
+    const action = resolveGrantDispatch({ pick, mode, picked, groupName });
+    if (action.path === "none") return;
+    if (action.path === "assign") {
+      const target = action.target.kind === "group" ? { groupName: action.target.groupName } : { principal: action.target.principal };
+      assignRole.mutate({ roleId: action.roleId, resourceType: "space", resourceId: spaceId, ...target }, {
         onSuccess: () => { notify.success(t("toast.accessGranted")); setPicked(null); setQuery(""); setGroupName(""); },
         onError: () => notify.error(t("toast.actionFailed")),
       });
       return;
     }
-    setCapability(pick.slice("builtin:".length) as PageRelation);
-    addBuiltIn(pick.slice("builtin:".length) as PageRelation);
+    setCapability(action.capability as PageRelation);
+    addBuiltIn(action.capability as PageRelation);
   };
 
   const addBuiltIn = (capability: PageRelation) => {
