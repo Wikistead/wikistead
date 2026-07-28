@@ -61,13 +61,26 @@ function isVisible(el: HTMLElement): boolean {
   return parseFloat(cs.opacity || "1") > 0.01;
 }
 
+// What counts as a focusable block. NOT just `.cm-lp-macro-wrap`, and that was the #528 defect: a
+// macro nested inside a layout container HAS NO WRAP OF ITS OWN — measured in a real browser, a
+// `::::columns > :::column > :::note` produced exactly two wraps (the columns and an unrelated tabs), and
+// the caret inside the note therefore resolved to the CONTAINER. The nested unit is the slot the container
+// tags with `data-mac-pos` (decorations.ts, the same handle the hit-test and the nested ✎ use), so the
+// focus rule has to speak in those terms or it can never name the inner block.
+//
+// The edit island counts too, and finding out why took a browser: `mountNestedEditIsland` does
+// `slot.replaceWith(host)`, so WHILE a nested macro is being edited its `data-mac-pos` slot is not in the
+// document at all — the island stands in its place. A rule that knew only about slots would fall back to
+// the container for exactly the state the user reported (caret in the inner note).
+const FOCUS_HOSTS = ".cm-lp-macro-wrap, [data-mac-pos], .cm-lp-slot-edit-island, .cm-lp-nested-edit-island";
+
 // #528 (user measurement, which overturned the earlier "innermost-only already holds" report — that
 // check counted visible affordances without asking which block owned them): exactly ONE block offers entry
-// chrome. The focused block is the innermost wrap holding the caret; with the caret elsewhere it is the
-// innermost wrap under the pointer; caret wins when both apply. Ancestors stay quiet while a descendant is
+// chrome. The focused block is the innermost host holding the caret; with the caret elsewhere it is the
+// innermost host under the pointer; caret wins when both apply. Ancestors stay quiet while a descendant is
 // focused, and an unrelated block shows nothing at all.
 export function focusedWrap(view: EditorView, pointer: { x: number; y: number } | null): HTMLElement | null {
-  const wraps = Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap"));
+  const wraps = Array.from(view.dom.querySelectorAll<HTMLElement>(FOCUS_HOSTS));
   if (wraps.length === 0) return null;
   const innermost = (candidates: HTMLElement[]) =>
     candidates.find((w) => candidates.every((o) => o === w || o.contains(w))) ?? null;
@@ -201,13 +214,18 @@ export const affordanceLayout = ViewPlugin.fromClass(
           return { placed: resolveAffordanceLayout(view, focus), focus };
         },
         write: ({ placed, focus }) => {
-          // one wrap wears the focus mark; the CSS that used to react to `:hover` now reacts to this
-          for (const w of Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-lp-macro-wrap"))) {
+          // exactly one host wears the focus mark; the CSS that used to react to `:hover` reacts to this.
+          // A nested slot can be the host, and then NO wrap carries the mark — which is precisely how the
+          // container stops showing its own chrome while the caret is in its child (#528).
+          for (const w of Array.from(view.dom.querySelectorAll<HTMLElement>(FOCUS_HOSTS))) {
             w.classList.toggle("cm-aff-focus", w === focus);
           }
-          // an affordance is shown only if the focused block owns it — and it is placed in the same pass,
-          // so there is no frame where it is on screen without the owner having measured it (#528)
-          for (const el of Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-lp-macro-richui-raw"))) {
+          // An affordance is shown only if the focused block owns it — placed in the same pass, so there is
+          // no frame where it is on screen without the owner having measured it (#528). The chrome row
+          // is gated the same way as the pill now: leaving it out is why an unrelated block still presented
+          // one (#528 — the row's own opacity stayed 1 while only its buttons faded, so it read as a
+          // permanent affordance and reserved a slot the owner then routed other chrome around).
+          for (const el of Array.from(view.dom.querySelectorAll<HTMLElement>(OWNER_GATED))) {
             el.classList.toggle("cm-aff-shown", focus != null && focus.contains(el));
           }
           // Write the displacement as a VARIABLE on the editor root, which no widget rebuild touches, so an
