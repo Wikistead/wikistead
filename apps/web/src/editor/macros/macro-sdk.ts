@@ -41,6 +41,12 @@ export type MacroCapability = "theme" | "render-markdown" | "host-list" | "host-
 // (#310 refuses a submission without a vocabulary-valid capability list). A declared macro gets exactly
 // its list intersected with its caller's, so it can neither hold more than it asked for nor more than the
 // macro rendering it.
+// NOTE (#550 review): `host-embed` is in DEFAULT_DECLARED (first-party, undeclared macros get it) but
+// deliberately NOT in macro-registry's ALLOWED_CAPABILITIES — a DECLARING (marketplace-shaped) macro
+// cannot obtain it yet. Whether third-party macros may ask the host for allowlist-checked iframes is a
+// trust-boundary ruling, not a code default; until it is made, the split is intentional and pinned
+// (capability-vocabulary test), so "the whole brokered vocabulary" above is true only for the
+// marketplace-grantable subset.
 export const DEFAULT_DECLARED: readonly MacroCapability[] = ["theme", "render-markdown", "host-list", "host-embed", "design-tokens"];
 
 export function declaredCapabilities(macro: { capabilities?: readonly string[] }): ReadonlySet<string> {
