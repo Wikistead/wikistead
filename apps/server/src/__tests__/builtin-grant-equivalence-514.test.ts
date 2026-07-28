@@ -24,6 +24,15 @@ import type { Tenant } from '@wikistead/types'
 const driver = new LogicalSearchDriver()
 const OWNER = 'dev-user'
 const GRANTEE = `builtin-mgr-${Date.now().toString(36)}`
+// One grantee per built-in capability: grants accumulate on a principal, so sharing one would let an
+// earlier grant answer a later assertion and every case after the first would pass for free.
+const STAMP = Date.now().toString(36)
+const BY_CAP: Record<'view' | 'comment' | 'edit' | 'moderate', string> = {
+  view: `builtin-view-${STAMP}`,
+  comment: `builtin-comment-${STAMP}`,
+  edit: `builtin-edit-${STAMP}`,
+  moderate: `builtin-moderate-${STAMP}`,
+}
 
 let tenant: Tenant
 let db: TenantDb
@@ -43,6 +52,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await deleteTuples(fgaClient, [{ user: `user:${GRANTEE}`, relation: 'manager', object: `space:${spaceId}` }]).catch(() => {})
+  for (const [cap, sub] of Object.entries(BY_CAP)) {
+    const { spaceGrantTuplesFor } = await import('../space-grant-expansion.js')
+    await deleteTuples(fgaClient, spaceGrantTuplesFor(`user:${sub}`, cap, spaceId)).catch(() => {})
+  }
   await deletePage(db, fgaClient, driver, { pageId, userId: OWNER }).catch(() => {})
   await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: OWNER }).catch(() => {})
   await db.release()
@@ -99,4 +112,62 @@ describe('#514 §6 — sharing the table does not let a custom role ask for `man
     expect(spaceGrantTuplesFor('user:probe', 'view', 'space-probe').map((t) => t.relation))
       .toEqual(['viewer', 'viewer_member'])
   })
+})
+
+// #536 / ADR-188 §6: the SAME equivalence, for every OTHER built-in. The manager case above exists because
+// it is the dangerous one (a superset leaf that a naive expansion would strip); these exist because the
+// unification has to preserve the quiet ones too, and "quiet" is exactly what nobody re-checks. Each pins
+// what a built-in grant RESOLVES TO today — including the verbs the model confers WITHOUT listing them —
+// so folding the built-in path into the role mechanism has a target to be check-equivalent to.
+describe('#536 §6 — what every other built-in grant confers today', () => {
+  const grant = async (capability: 'view' | 'comment' | 'edit' | 'moderate') =>
+    grantSpaceAccess(db, fgaClient, driver, {
+      spaceId, tenantId: tenant.id, userId: OWNER, grantee: `user:${BY_CAP[capability]}`, capability, plan: tenant.plan,
+    })
+
+  it('viewer: reads the space and its published pages, and nothing more', async () => {
+    const sub = `user:${BY_CAP.view}`
+    expect(await check(fgaClient, sub, 'view', { type: 'space', id: spaceId }), 'nothing before').toBe(false)
+    await grant('view')
+    expect(await check(fgaClient, sub, 'view', { type: 'space', id: spaceId })).toBe(true)
+    expect(await check(fgaClient, sub, 'view', { type: 'page', id: pageId }), 'reaches the space pages').toBe(true)
+    // The boundary is the point: a reader must not gain the write verbs by being a reader.
+    for (const verb of ['edit', 'publish', 'delete', 'share', 'settings', 'manage'] as const) {
+      expect(await check(fgaClient, sub, verb, { type: 'page', id: pageId }), `viewer does NOT get page ${verb}`).toBe(false)
+    }
+    expect(await check(fgaClient, sub, 'moderate', { type: 'space', id: spaceId }), 'nor moderation').toBe(false)
+  }, 120_000)
+
+  it('commenter: comments on the space pages without gaining edit (#529)', async () => {
+    const sub = `user:${BY_CAP.comment}`
+    await grant('comment')
+    expect(await check(fgaClient, sub, 'comment', { type: 'page', id: pageId }), 'the per-principal leaf pages inherit').toBe(true)
+    expect(await check(fgaClient, sub, 'view', { type: 'page', id: pageId }), 'comment implies view').toBe(true)
+    expect(await check(fgaClient, sub, 'edit', { type: 'page', id: pageId }), 'but NOT edit').toBe(false)
+  }, 120_000)
+
+  it('editor: edits, and gets comment WITHOUT the table ever writing a comment leaf', async () => {
+    const sub = `user:${BY_CAP.edit}`
+    await grant('edit')
+    const { spaceGrantTuplesFor } = await import('../space-grant-expansion.js')
+    expect(spaceGrantTuplesFor(sub, 'edit', spaceId).map((t) => t.relation), 'one leaf goes in').toEqual(['editor_member'])
+    expect(await check(fgaClient, sub, 'edit', { type: 'page', id: pageId })).toBe(true)
+    // …yet comment resolves, because the MODEL subsumes it (edit ⊃ comment). An expansion that "helpfully"
+    // wrote the comment leaf too would be adding a grant nobody asked for; one that dropped this check
+    // would let the unification silently narrow what an editor can do.
+    expect(await check(fgaClient, sub, 'comment', { type: 'page', id: pageId }), 'edit subsumes comment').toBe(true)
+    expect(await check(fgaClient, sub, 'view', { type: 'page', id: pageId })).toBe(true)
+    expect(await check(fgaClient, sub, 'manage', { type: 'page', id: pageId }), 'an editor is not a manager').toBe(false)
+    expect(await check(fgaClient, sub, 'moderate', { type: 'space', id: spaceId }), 'nor a moderator').toBe(false)
+  }, 120_000)
+
+  it('moderator: moderates and gains the comment the model gives it, but not edit-by-right', async () => {
+    const sub = `user:${BY_CAP.moderate}`
+    await grant('moderate')
+    expect(await check(fgaClient, sub, 'moderate', { type: 'space', id: spaceId })).toBe(true)
+    // #330: moderate reaches comment through the model (moderate → comment), which is precisely the kind of
+    // conferred-but-unlisted verb the manager case showed an expansion can destroy.
+    expect(await check(fgaClient, sub, 'comment', { type: 'page', id: pageId }), 'moderate ⇒ comment').toBe(true)
+    expect(await check(fgaClient, sub, 'manage', { type: 'space', id: spaceId }), 'a moderator is not a manager').toBe(false)
+  }, 120_000)
 })
