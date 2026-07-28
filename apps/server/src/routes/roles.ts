@@ -57,7 +57,11 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
   // Members picker could grant it while this list did not name it — the product spoke with two voices
   // about what a role IS. §6 merges the two pickers into one, so the fix is to agree rather than to keep
   // the capability out of a list it is already grantable from.
-  { name: 'commenter', capabilities: ['view', 'comment'] },
+  // The bundle is `comment` ALONE. Listing `view` too would look harmless, but the expansion writes
+  // `viewer_member`, which reaches `template#view` (model.fga) — the widening #529deliberately
+  // removed. The model already gives it: `space#viewer: … or commenter`, so a commenter reads by being a
+  // commenter, not by also being granted viewer.
+  { name: 'commenter', capabilities: ['comment'] },
   { name: 'editor', capabilities: ['view', 'comment', 'edit', 'publish'] },
   { name: 'moderator', capabilities: ['moderate'] },
   { name: 'manager', capabilities: ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings'] },
@@ -513,11 +517,19 @@ export async function rolesPlugin(app: FastifyInstance) {
     }
   })
 
-  app.post<{ Params: { roleId: string }; Body: { resourceType?: string; resourceId?: string; principal?: string } }>(
+  app.post<{ Params: { roleId: string }; Body: { resourceType?: string; resourceId?: string; principal?: string; groupName?: string } }>(
     '/admin/roles/:roleId/assignments', async (req, reply) => {
-      const { resourceType, resourceId, principal } = req.body ?? {}
+      const { resourceType, resourceId, groupName } = req.body ?? {}
+      // #536a GROUP is named, never addressed. Its FGA id is a tenant-salted hash the server owns
+      // (group-sync.ts: "the client never hashes"), so a caller that builds `group:<name>#member` itself
+      // writes a tuple no membership points at — the assignment reports success and reaches nobody. The
+      // mapping route already takes the name and derives; this one now does too, so there is one authority
+      // for the id instead of one authority and one guess.
+      const principal = typeof groupName === 'string' && groupName.trim()
+        ? groupGrantee(req.tenant.id, groupName.trim())
+        : req.body?.principal
       if ((resourceType !== 'page' && resourceType !== 'space' && resourceType !== 'tenant') || !resourceId || !principal) {
-        throw Object.assign(new Error('resourceType (page|space|tenant), resourceId, principal required'), { statusCode: 400 })
+        throw Object.assign(new Error('resourceType (page|space|tenant), resourceId, and principal or groupName required'), { statusCode: 400 })
       }
       validatePrincipal(principal)
       // Entitlement (customRoles) up front — a plan gate, not an existence oracle, so it may precede the

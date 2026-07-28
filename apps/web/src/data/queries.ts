@@ -1587,7 +1587,9 @@ export function useAssignRole() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ roleId, ...body }: { roleId: string; resourceType: string; resourceId: string; principal: string }) =>
+    // #536`groupName` is the group form — the server derives its tenant-salted FGA id. A client
+    // that sends a hand-built `group:<name>#member` principal writes a tuple nobody holds.
+    mutationFn: ({ roleId, ...body }: { roleId: string; resourceType: string; resourceId: string; principal?: string; groupName?: string }) =>
       apiFetch<RoleAssignment>(`/admin/roles/${encodeURIComponent(roleId)}/assignments`, token, { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
   });

@@ -41,6 +41,14 @@ describe("#529: the space grant picker offers exactly the roles the Roles tab li
     expect(offered.filter((n) => !BUILT_IN_ROLE_NOUNS.includes(n))).toEqual([]);
   });
 
+  it("…and names every built-in role it lists — the check runs BOTH ways", () => {
+    // One direction only was still one voice able to move alone: adding a built-in on the server kept this
+    // file green while the picker said nothing about it, which is the same mismatch from the other side.
+    const offered = listOf("GRANTABLE").map((c) => NOUN[c] ?? c);
+    expect(BUILT_IN_ROLE_NOUNS.filter((n) => !offered.includes(n)),
+      "a built-in role the picker cannot grant").toEqual([]);
+  });
+
   it("still ORDERS a comment grant, so an existing one does not float to the top", () => {
     expect(listOf("CAP_ORDER")).toContain("comment");
   });
