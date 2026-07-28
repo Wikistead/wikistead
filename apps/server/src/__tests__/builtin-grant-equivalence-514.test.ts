@@ -17,7 +17,7 @@ import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
-import { createSpace, deleteSpace, grantSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess } from '../routes/spaces.js'
 import { createPage, deletePage, publishPage } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -170,4 +170,41 @@ describe('#536 §6 — what every other built-in grant confers today', () => {
     expect(await check(fgaClient, sub, 'comment', { type: 'page', id: pageId }), 'moderate ⇒ comment').toBe(true)
     expect(await check(fgaClient, sub, 'manage', { type: 'space', id: spaceId }), 'a moderator is not a manager').toBe(false)
   }, 120_000)
+})
+
+// #536 grant and revoke must be each other's inverse. The equivalences above only look at what a
+// grant CONFERS — and an expansion that writes more leaves than the revoke deletes passes every one of
+// them while leaving access behind after it is taken away. That asymmetry is exactly what routing built-in
+// grants through the bundle mechanism (§6, still open) would introduce if nothing watched for it, so the
+// round trip is pinned BEFORE that move rather than after someone notices a revoked member still reading.
+describe('#536 §6 — revoking a built-in grant leaves nothing behind', () => {
+  const REVOKE_STAMP = Date.now().toString(36)
+  const subFor = (cap: string) => `user:builtin-rev-${cap}-${REVOKE_STAMP}`
+
+  it.each(['view', 'comment', 'edit', 'moderate', 'manage'] as const)(
+    'a %s grant, revoked, confers nothing it conferred', async (capability) => {
+      const sub = subFor(capability)
+      await grantSpaceAccess(db, fgaClient, driver, {
+        spaceId, tenantId: tenant.id, userId: OWNER, grantee: sub, capability, plan: tenant.plan,
+      })
+      // Non-vacuity: the grant really landed, so the emptiness below is the revoke's doing and not the
+      // grant having quietly failed.
+      const conferred = capability === 'moderate'
+        ? await check(fgaClient, sub, 'moderate', { type: 'space', id: spaceId })
+        : await check(fgaClient, sub, 'view', { type: 'page', id: pageId })
+      expect(conferred, `the ${capability} grant landed first`).toBe(true)
+
+      await revokeSpaceAccess(db, fgaClient, driver, {
+        spaceId, tenantId: tenant.id, userId: OWNER, grantee: sub, capability, plan: tenant.plan,
+      })
+
+      // Every verb, not just the one named: a bundle expansion that writes extra leaves would leave the
+      // EXTRAS behind, and checking only the granted verb would report a clean revoke.
+      for (const verb of ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings', 'manage'] as const) {
+        expect(await check(fgaClient, sub, verb, { type: 'page', id: pageId }), `page ${verb} is gone`).toBe(false)
+      }
+      for (const verb of ['view', 'edit', 'moderate', 'manage'] as const) {
+        expect(await check(fgaClient, sub, verb, { type: 'space', id: spaceId }), `space ${verb} is gone`).toBe(false)
+      }
+    }, 120_000)
 })

@@ -312,12 +312,18 @@ function validatePrincipal(principal: string): void {
 // #445 / ADR-171: scope-aware — a role's capabilities validate against ITS scope's vocabulary only
 // (mutually exclusive sets: a resource role cannot bundle `createSpaces`; a tenant role cannot
 // bundle `edit`). Scope is fixed at creation (PUT keeps the stored scope).
-function parseDefinition(body: { name?: unknown; capabilities?: unknown }, scope: RoleScope): { name: string; capabilities: AnyRoleCapability[] } {
+// `currentName` is the name the role ALREADY has (PUT only). Reserving a name has to stop a new role from
+// taking it, but it must not brick a role that predates the reservation: #536 added `commenter` to the
+// built-ins, and without this every PUT on a tenant's own pre-existing `commenter` role — even one that
+// only edits capabilities — would answer 400 forever, with rename as the sole escape. Blocking the rename
+// TO a reserved name is the actual rule; blocking a row from keeping the name it was legally created with
+// is collateral damage from checking the two cases with one test.
+function parseDefinition(body: { name?: unknown; capabilities?: unknown }, scope: RoleScope, currentName?: string): { name: string; capabilities: AnyRoleCapability[] } {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name || name.length > 64) {
     throw Object.assign(new Error('name (1-64 chars) required'), { statusCode: 400 })
   }
-  if (RESERVED_NAMES.has(name.toLowerCase())) {
+  if (RESERVED_NAMES.has(name.toLowerCase()) && name.toLowerCase() !== currentName?.toLowerCase()) {
     throw Object.assign(new Error('name collides with a built-in role'), { statusCode: 400 })
   }
   if (!Array.isArray(body.capabilities) || body.capabilities.length === 0) {
@@ -378,9 +384,9 @@ export async function rolesPlugin(app: FastifyInstance) {
       await writeGates(req)
       // #445: validate against the STORED scope (scope is immutable; body cannot change it) — read it
       // up front outside the tx for parse, re-read locked inside.
-      const [scopeRow] = await req.db.sql<{ scope: RoleScope }[]>`SELECT scope FROM roles WHERE id = ${req.params.roleId}`
+      const [scopeRow] = await req.db.sql<{ scope: RoleScope; name: string }[]>`SELECT scope, name FROM roles WHERE id = ${req.params.roleId}`
       if (!scopeRow) throw Object.assign(new Error('not found'), { statusCode: 404 })
-      const def = parseDefinition(req.body ?? {}, scopeRow.scope)
+      const def = parseDefinition(req.body ?? {}, scopeRow.scope, scopeRow.name)
       // #420 increment 4 (Fork B1, ruled/): a capability edit RE-EXPANDS every live
       // assignment — added capabilities are granted, removed ones revoked, LIVE. All diffing runs in
       // one tx with the assignments row-locked (the same FOR UPDATE discipline as unassign, so a
