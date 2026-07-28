@@ -3,8 +3,9 @@ import { describe, it, expect } from "vitest";
 import { EditorState, EditorSelection } from "@codemirror/state";
 import { markdownExtension } from "../markdown-config";
 import { innermostMacroAt, nestedDeleteChange, resolveNestedAnchor } from "./decorations";
-import { renderMarkdownToDom, setPendingBaseOffset, takePendingBaseOffset } from "../macros/md-render";
+import { renderMarkdownToDom } from "../macros/md-render";
 import { columnsLiveRender } from "../macros/layout-directives";
+import { dispatchMacroRender } from "../macros/md-render";
 import { parseLayoutItems, resolveDirectiveRanges } from "@wikistead/macro-render";
 import "../macros"; // register columns / callouts / table so the resolver + liveRender see them
 
@@ -98,10 +99,20 @@ describe("nestedDeleteChange (#215 Consumer 4 — one range, three keys)", () =>
 });
 
 describe("source-anchor tagging (#215 hit-test wiring)", () => {
+  // #450 slice 5b: the container no longer takes an absolute base out of a module singleton — the HOST
+  // adds its base to the offset the macro asks for, and tags. So the pin now goes through the dispatch
+  // seam, which is also the path the app uses; testing the macro in isolation was testing a contract
+  // that no longer exists.
+  const renderColumns = (base?: number) =>
+    dispatchMacroRender(
+      { liveRender: (b, ctx) => columnsLiveRender(b, ctx), capabilities: ["theme", "render-markdown"] },
+      innerBody,
+      { theme: {} as never, ...(base === undefined ? {} : { baseOffset: base }) },
+    )!;
+
   it("tags the nested callout with data-mac-pos = its absolute from; the tag re-resolves to that macro", () => {
     const state = mk(DOC);
-    setPendingBaseOffset(bodyFrom);
-    const dom = columnsLiveRender(innerBody);
+    const dom = renderColumns(bodyFrom);
     const tagged = dom.querySelector("[data-mac-pos]") as HTMLElement;
     expect(tagged).toBeTruthy();
     const anchor = Number(tagged.dataset.macPos);
@@ -113,12 +124,37 @@ describe("source-anchor tagging (#215 hit-test wiring)", () => {
   });
 
   it("is INERT without a base (all existing callers): no data-mac-pos, byte-identical output", () => {
-    // no setPendingBaseOffset → takePendingBaseOffset() is null → untagged
-    expect(takePendingBaseOffset()).toBeNull();
-    const dom = columnsLiveRender(innerBody);
+    const dom = renderColumns(undefined);
     expect(dom.querySelector("[data-mac-pos]")).toBeNull();
     const plain = renderMarkdownToDom(":::note\nhi\n:::");
     expect((plain.firstChild as HTMLElement | null)?.dataset?.macPos).toBeUndefined();
+  });
+
+  it("#450 R1: a macro's offset is RELATIVE — the absolute position stays the host's arithmetic", () => {
+    const state = mk(DOC);
+    // A macro that asks for a render at a wild offset cannot reach another block: the host clamps to the
+    // body it dispatched, and adds its own base. Clamping is defence in depth here, not the defence —
+    // the macro has no way to express an absolute position in the first place.
+    let tagged: HTMLElement | null = null;
+    dispatchMacroRender(
+      {
+        capabilities: ["render-markdown"],
+        liveRender: (_b, ctx) => {
+          const el = document.createElement("div");
+          el.appendChild(ctx.renderMarkdown!(":::note\nhi\n:::", 10_000));
+          tagged = el.querySelector("[data-mac-pos]");
+          return el;
+        },
+      },
+      innerBody,
+      { theme: {} as never, baseOffset: bodyFrom },
+    );
+    expect(tagged, "the nested macro still renders and is tagged").toBeTruthy();
+    const anchor = Number((tagged as unknown as HTMLElement).dataset.macPos);
+    expect(anchor, "clamped into the macro's own body, never past it").toBeLessThanOrEqual(bodyFrom + innerBody.length);
+    expect(anchor).toBeGreaterThanOrEqual(bodyFrom);
+    // …and whatever it resolves to is a macro of THIS document, not an invented position
+    expect(() => innermostMacroAt(state, anchor)).not.toThrow();
   });
 });
 

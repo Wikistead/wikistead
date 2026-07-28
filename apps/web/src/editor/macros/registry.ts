@@ -41,8 +41,21 @@ export interface MacroSlash {
 
 // The entire host surface a macro may touch. Keep this minimal — every field added
 // here widens the eventual sandbox's attack surface.
+//
+// #450 slices 5a/5b: this IS the macro SDK. It is assembled per dispatch by `createMacroSdk`
+// (macro-sdk.ts) from the macro's declared capabilities intersected with its caller's, and frozen. The
+// optional members are absent unless the macro's effective set carries them, so "did the host give me
+// this?" is answered by the object rather than by a flag a macro could lie about. `theme` stays
+// required because every macro today reads it (a macro that declares capabilities without `theme`
+// deliberately receives none, which its render sees immediately).
 export interface MacroContext {
   readonly theme: MacroTheme;
+  /** The effective capability set this render was granted (#450 5a). */
+  readonly capabilities?: readonly string[];
+  /** Render markdown from THIS macro's body at an offset inside it (#450 5b, ruling R1). */
+  readonly renderMarkdown?: (src: string, relativeOffset?: number) => DocumentFragment;
+  /** Opaque per-instance token for display-only state that must survive a re-render (#450 5b). */
+  readonly instanceKey?: string;
 }
 
 // Mouse rich-edit (ADR-022 Part 3). A "modal" editor mounts in a plain-DOM overlay
