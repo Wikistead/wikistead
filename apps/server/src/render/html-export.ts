@@ -32,7 +32,7 @@ interface PageRow {
 const EXPORT_STYLES = `
 /* #85 / ADR-059: the export document reproduces the EDITOR's look (single design language) so a
    downloaded page reads the same as on-screen — callout colours + icons, heading sizes/colour,
-   typography — plus the fidelity indicator on degraded blocks. Self-contained (no external CSS). */
+   typography. Self-contained (no external CSS). */
 /* #85 review / #505 ruling: this document is LIGHT-FIXED, and not only when printed. The file is made to
    be SHARED — downloaded, mailed, attached, printed by someone else — and the ruling that fixed print to
    a light base was about exactly that kind of artifact. It used to follow the READER's OS theme, so the
