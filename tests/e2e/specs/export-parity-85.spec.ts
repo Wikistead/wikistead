@@ -120,6 +120,27 @@ test("#85: the exported document and the app render the same document", async ({
   expect(exportedCode, "the exported code block exists").not.toBeNull();
   expect(exportedCode!.replace(/\s+/g, ""), "…and wears the app's code face").toBe(codeFace.replace(/\s+/g, ""));
 
+  // #505 ruling 2: and it is HIGHLIGHTED, in the app's own colours. The editor colours code through a
+  // HighlightStyle; the read surface now runs the same style over the same grammar, so the keyword colour
+  // is read off the running app and required of the file — a literal would just pin today's palette.
+  const keywordColour = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue("--hl-keyword").trim());
+  const exportedColours = await page.evaluate(async ({ doc }) => {
+    const f = document.createElement("iframe");
+    f.style.cssText = "position:fixed;left:-10000px;top:0;width:900px;height:900px;";
+    document.body.appendChild(f);
+    await new Promise<void>((resolve) => { f.addEventListener("load", () => resolve(), { once: true }); f.srcdoc = doc });
+    await new Promise((r) => setTimeout(r, 400));
+    const spans = Array.from(f.contentDocument!.body.querySelectorAll("pre code span"));
+    const out = spans.map((s) => ({ text: s.textContent || "", colour: getComputedStyle(s).color }));
+    f.remove();
+    return out;
+  }, { doc: html });
+  expect(exportedColours.length, "the exported code is tokenised, not one flat run of text").toBeGreaterThan(0);
+  const constToken = exportedColours.find((c) => c.text.trim() === "const");
+  expect(constToken, `the keyword is its own token (got ${JSON.stringify(exportedColours.slice(0, 6))})`).toBeTruthy();
+  expect(keywordColour.length, "the app defines a keyword colour to compare against").toBeGreaterThan(0);
+
   for (const probe of PROBES) {
     const a = appProbes[probe.name];
     const b = exported[probe.name];
