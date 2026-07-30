@@ -3,6 +3,8 @@ import type { Extension, EditorState } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import { getCM } from "@replit/codemirror-vim";
 import { safeHref } from "../macros/md-render";
+import { completeBlockChunk, blockPasteInsert } from "./block-paste";
+import { innermostMacroAt } from "./decorations";
 
 // #223 / ADR-none (rides on ADR-037 + safeHref): auto-linkify a pasted URL / rich link into Markdown
 // `[text](url)`, so the source stays plain Markdown (Open formats) while the live preview shows it clickable.
@@ -137,6 +139,32 @@ export function pasteLinkify(): Extension {
       const inNestedIsland = !!ae && ae !== view.contentDOM && !!ae.closest?.(".cm-lp-table, [data-testid=table-edit], .cm-lp-nested-edit-island, .cm-lp-slot-edit-island");
       if (inNestedIsland) { dbg.result = "skip:nested-focus"; return; }
       const sel = view.state.selection.main;
+      // #558: a COMPLETE block chunk (what #549's atomClipboard copies) pasted at an empty caret is
+      // normalized to a line boundary — the natural follow-up to "click → Ctrl+C the whole block" is
+      // pasting it next door, and the atom-edge caret sits mid-marker-line where a raw splice breaks
+      // the notation (measured: "`````mermaid"). Ordinary text and range pastes fall through untouched.
+      if (sel.empty) {
+        const chunk = completeBlockChunk(cd.getData("text/plain") ?? "");
+        if (chunk != null) {
+          const doc = view.state.doc;
+          const m = innermostMacroAt(view.state, sel.head);
+          const block = m
+            ? { fromLineFrom: doc.lineAt(m.from).from, toLineTo: doc.lineAt(Math.min(m.to, doc.length)).to }
+            : null;
+          const line = doc.lineAt(sel.head);
+          const ins = blockPasteInsert(chunk, sel.head, { from: line.from, to: line.to }, block);
+          e.preventDefault();
+          e.stopImmediatePropagation(); // capture phase → CM's own paste must not also splice it in
+          view.dispatch({
+            changes: { from: ins.at, to: ins.at, insert: ins.insert },
+            selection: { anchor: Math.min(ins.cursor, doc.length + ins.insert.length) },
+            userEvent: "input.paste",
+            scrollIntoView: true,
+          });
+          dbg.result = "block-paste:line-boundary";
+          return;
+        }
+      }
       const md = linkifyPaste({
         text: cd.getData("text/plain"),
         html: cd.getData("text/html"),
