@@ -8,8 +8,9 @@
 
 -- A mapping is a ROW that OWNS a group-principal role assignment (ADR-183 §1). Creating a mapping =
 -- creating the assignment through the existing gated assign path with principal group:<id>#member,
--- tagged origin='mapping'; deleting it = theref-counted unassign. v1 maps CUSTOM roles only
--- (built-ins are virtual — no roles row — so the assign path 404s them). group_name is the IdP group
+-- tagged origin='mapping'; deleting it = theref-counted unassign. v1 mapped CUSTOM roles only
+-- (built-ins were virtual — no roles row); 088 lifts that after #536 gave built-in grants a row shape
+-- (role_id XOR builtin_capability, mirroring 086). group_name is the IdP group
 -- NAME (the FGA id is a tenant-salted hash of the name — #111 group-sync); a rename mints a new id and
 -- orphans the mapping, which the console SURFACES (empty-group badge) but never auto-migrates.
 CREATE TABLE group_role_mappings (

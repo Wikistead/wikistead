@@ -65,6 +65,11 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
 // #552: RESERVED_NAMES derives from BUILT_IN_ROLES, so dropping `commenter` above deliberately
 // FREES the name for custom roles — reserving a name no built-in carries would be a claim with no
 // referent. (A tenant that wants a role called "commenter" now simply builds one.)
+// #497 (088): the built-ins a group mapping may confer, and the noun each renders as (the same
+// vocabulary the Members picker uses). `comment` is deliberately absent — theruling removed
+// the commenter noun from every grant surface; comment-only stays a custom-role composition.
+const BUILTIN_MAPPABLE = new Set(['view', 'edit', 'moderate', 'manage'])
+const BUILTIN_NOUN: Record<string, string> = { view: 'viewer', edit: 'editor', moderate: 'moderator', manage: 'manager' }
 const RESERVED_NAMES = new Set([...BUILT_IN_ROLES.map((r) => r.name), 'admin', 'owner'])
 
 interface RoleRow { id: string; name: string; capabilities: string[]; scope: RoleScope; created_at: Date; updated_at: Date }
@@ -786,17 +791,26 @@ export async function rolesPlugin(app: FastifyInstance) {
   // the WRITE surface carries the SAME per-scope authority as assign (`requireAssignmentAuthority`)
   // tenant-scope mappings are admin-only; space-scope mappings are open to that space's manager (#485).
 
-  app.post<{ Body: { groupName?: string; roleId?: string; resourceType?: string; resourceId?: string } }>(
+  app.post<{ Body: { groupName?: string; roleId?: string; builtinCapability?: string; resourceType?: string; resourceId?: string } }>(
     '/admin/roles/mappings', async (req, reply) => {
       // Entitlement (customRoles) up front — a plan gate, not an existence oracle (mirrors assign).
       requireEntitlement(req)
-      const { groupName, roleId, resourceType, resourceId } = req.body ?? {}
-      if (!groupName || !groupName.trim() || !roleId || (resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
-        throw Object.assign(new Error('groupName, roleId, resourceType (space|tenant), resourceId required'), { statusCode: 400 })
+      const { groupName, roleId, builtinCapability, resourceType, resourceId } = req.body ?? {}
+      if (!groupName || !groupName.trim() || (!roleId && !builtinCapability) || (roleId && builtinCapability) || (resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
+        throw Object.assign(new Error('groupName, roleId XOR builtinCapability, resourceType (space|tenant), resourceId required'), { statusCode: 400 })
       }
-      const [role] = await req.db.sql<RoleRow[]>`SELECT id, name, capabilities, scope, created_at, updated_at FROM roles WHERE id = ${roleId}`
-      if (!role) throw Object.assign(new Error('not found'), { statusCode: 404 }) // custom-only: built-ins have no row
-      if ((role.scope === 'tenant') !== (resourceType === 'tenant')) {
+      // #497 (088): a mapping may name a BUILT-IN. Space scope only (the tenant built-ins — member/
+      // admin — are identity tiers, not mappable roles), and `comment` is NOT in the set: the
+      // ruling removed the commenter noun from every grant surface (comment-only stays a custom-role
+      // composition).
+      if (builtinCapability != null && (resourceType !== 'space' || !BUILTIN_MAPPABLE.has(builtinCapability))) {
+        throw Object.assign(new Error('builtinCapability must be one of view|edit|moderate|manage at space scope'), { statusCode: 400 })
+      }
+      const [role] = roleId
+        ? await req.db.sql<RoleRow[]>`SELECT id, name, capabilities, scope, created_at, updated_at FROM roles WHERE id = ${roleId}`
+        : [undefined]
+      if (roleId && !role) throw Object.assign(new Error('not found'), { statusCode: 404 })
+      if (role && (role.scope === 'tenant') !== (resourceType === 'tenant')) {
         throw Object.assign(new Error(`a ${role.scope} role cannot be mapped at ${resourceType} scope`), { statusCode: 400 })
       }
       // Resource existence bind (RLS) — the same cross-tenant/unknown → uniform 404 as assign.
@@ -806,7 +820,7 @@ export async function rolesPlugin(app: FastifyInstance) {
         const exists = await req.db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${resourceId}`
         if (!exists.length) throw Object.assign(new Error('not found'), { statusCode: 404 })
       }
-      const caps = role.capabilities as AnyRoleCapability[]
+      const caps = (role ? role.capabilities : [builtinCapability]) as AnyRoleCapability[]
       // Per-scope authority AFTER the existence-bind (a cross-tenant/unknown id is a uniform 404, never
       // a 403 that confirms it exists) — space manager for space scope, tenant admin for tenant scope.
       await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps })
@@ -819,16 +833,20 @@ export async function rolesPlugin(app: FastifyInstance) {
       // duplicate group+role+resource 409s on the assignment dup-check — which mirrors the mapping's
       // own UNIQUE — so a concurrent double-create can't slip through; a mapping-row UNIQUE violation
       // rolls the whole assign back (no orphaned origin='mapping' assignment).
+      // For a built-in, a pre-existing assignment for the same (group, capability, space) — e.g. a
+      // DIRECT group grant from the Members tab — 409s here, exactly as a duplicate custom assign
+      // does: a mapping must OWN its assignment, and one it didn't create is not its to own.
       const assignmentId = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
-        tenant: req.tenant, roleId: role.id, capabilities: caps, resourceType, resourceId, principal,
+        tenant: req.tenant, roleId: role ? role.id : null, builtinCapability: role ? undefined : builtinCapability,
+        capabilities: caps, resourceType, resourceId, principal,
         actorSub: req.user.sub, origin: 'mapping',
         afterAssign: async (tx, asgId) => {
-          await tx`INSERT INTO group_role_mappings (id, tenant_id, group_name, role_id, resource_type, resource_id, assignment_id, created_by)
-                   VALUES (${id}, ${req.tenant.id}, ${groupName.trim()}, ${role.id}, ${resourceType}, ${resourceId}, ${asgId}, ${req.user.sub})`
-          await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.mapping_created', target: `role:${role.id}` })
+          await tx`INSERT INTO group_role_mappings (id, tenant_id, group_name, role_id, builtin_capability, resource_type, resource_id, assignment_id, created_by)
+                   VALUES (${id}, ${req.tenant.id}, ${groupName.trim()}, ${role ? role.id : null}, ${role ? null : builtinCapability!}, ${resourceType}, ${resourceId}, ${asgId}, ${req.user.sub})`
+          await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.mapping_created', target: role ? `role:${role.id}` : `role:builtin:${builtinCapability}` })
         },
       })
-      return reply.code(201).send({ id, groupName: groupName.trim(), roleId: role.id, roleName: role.name, resourceType, resourceId, assignmentId })
+      return reply.code(201).send({ id, groupName: groupName.trim(), roleId: role ? role.id : null, builtinCapability: role ? null : builtinCapability, roleName: role ? role.name : BUILTIN_NOUN[builtinCapability!] ?? builtinCapability, resourceType, resourceId, assignmentId })
     })
 
   app.get<{ Querystring: { resourceType?: string; resourceId?: string } }>('/admin/roles/mappings', async (req) => {
@@ -846,17 +864,18 @@ export async function rolesPlugin(app: FastifyInstance) {
     } else {
       await adminGate(req)
     }
-    const rows = await req.db.sql<{ id: string; group_name: string; role_id: string; name: string; resource_type: string; resource_id: string; assignment_id: string | null }[]>`
-      SELECT m.id, m.group_name, m.role_id, r.name, m.resource_type, m.resource_id, m.assignment_id
-      FROM group_role_mappings m JOIN roles r ON r.id = m.role_id
+    const rows = await req.db.sql<{ id: string; group_name: string; role_id: string | null; builtin_capability: string | null; name: string | null; resource_type: string; resource_id: string; assignment_id: string | null }[]>`
+      SELECT m.id, m.group_name, m.role_id, m.builtin_capability, r.name, m.resource_type, m.resource_id, m.assignment_id
+      FROM group_role_mappings m LEFT JOIN roles r ON r.id = m.role_id
       WHERE ${resourceType ? req.db.sql`m.resource_type = ${resourceType} AND m.resource_id = ${resourceId!}` : req.db.sql`TRUE`}
-      ORDER BY m.group_name, r.name`
+      ORDER BY m.group_name, COALESCE(r.name, m.builtin_capability)`
     // Orphan badge (ADR-183 §1): a mapping whose group NAME no longer appears in any member's groups
     // (renamed/emptied at the IdP). It still owns its assignment — surfaced, never auto-migrated.
     const live = await req.db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`
     const liveSet = new Set(live.map((r) => r.g))
     return rows.map((r) => ({
-      id: r.id, groupName: r.group_name, roleId: r.role_id, roleName: r.name,
+      id: r.id, groupName: r.group_name, roleId: r.role_id, builtinCapability: r.builtin_capability,
+      roleName: r.name ?? (r.builtin_capability ? BUILTIN_NOUN[r.builtin_capability] ?? r.builtin_capability : ''),
       resourceType: r.resource_type, resourceId: r.resource_id,
       assignmentId: r.assignment_id, orphaned: !liveSet.has(r.group_name),
     }))
@@ -867,8 +886,9 @@ export async function rolesPlugin(app: FastifyInstance) {
     // Read the mapping + its role's scope/caps on the RLS handle first — a cross-tenant / unknown id is
     // a uniform 404. The mapping's resource/role are immutable, so gating on this pre-read is safe.
     const [m] = await req.db.sql<{ id: string; assignment_id: string | null; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; capabilities: AnyRoleCapability[] }[]>`
-      SELECT m.id, m.assignment_id, m.resource_type, m.resource_id, r.capabilities
-      FROM group_role_mappings m JOIN roles r ON r.id = m.role_id WHERE m.id = ${req.params.mappingId}`
+      SELECT m.id, m.assignment_id, m.resource_type, m.resource_id,
+             COALESCE(r.capabilities, ARRAY[m.builtin_capability]) AS capabilities
+      FROM group_role_mappings m LEFT JOIN roles r ON r.id = m.role_id WHERE m.id = ${req.params.mappingId}`
     if (!m) throw Object.assign(new Error('not found'), { statusCode: 404 })
     // Same per-scope authority as create/assign — a space manager may remove their space's mapping.
     await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: m.resource_type, resourceId: m.resource_id, capabilities: m.capabilities as AnyRoleCapability[] })
