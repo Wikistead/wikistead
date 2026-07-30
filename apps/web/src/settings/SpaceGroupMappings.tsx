@@ -28,11 +28,14 @@ export function SpaceGroupMappings({ spaceId }: { spaceId: string }) {
   const [roleId, setRoleId] = useState("");
   const [deleting, setDeleting] = useState<{ id: string; groupName: string; roleName: string } | null>(null);
 
-  // #497 review rejection asked why the built-in roles are missing here, and the honest answer was not in the
-  // code: they cannot be mapped at all. `group_role_mappings.role_id` is a FK to `roles`, and a built-in
-  // has no row there — it is virtual — so the assign path 404s it (migration 081, ADR-183: "v1 maps CUSTOM
-  // roles only"). Offering them would produce a picker whose entries fail on save. Whether to lift that
-  // v1 limit is a decision on the ticket, not something to work around here.
+  // #497 (088): built-ins are mappable now — #536 gave built-in grants a row shape (builtin_capability)
+  // and 088 mirrors it onto mappings, so the picker offers the four built-in nouns beside the custom
+  // roles. `commenter` is deliberately absent (the ruling: no commenter noun on any grant surface;
+  // comment-only is a custom-role composition). Value carries the kind, same as the Members picker.
+  const BUILTIN_MAPPABLE = [
+    { cap: "view", noun: "viewer" }, { cap: "edit", noun: "editor" },
+    { cap: "moderate", noun: "moderator" }, { cap: "manage", noun: "manager" },
+  ];
   const roles = assignable.data?.custom ?? [];
   const onError = () => notify.error(t("toast.actionFailed"));
 
@@ -51,13 +54,22 @@ export function SpaceGroupMappings({ spaceId }: { spaceId: string }) {
         <label className="flex flex-col gap-1 text-xs text-fg-dim">
           {t("adminRoles.roleLabel")}
           <Select size="sm" value={roleId} ariaLabel={t("adminRoles.roleLabel")} testId="space-mapping-role"
-            options={[{ value: "", label: t("adminRoles.rolePlaceholder") }, ...roles.map((r) => ({ value: r.id, label: r.name }))]}
+            options={[
+              { value: "", label: t("adminRoles.rolePlaceholder") },
+              ...BUILTIN_MAPPABLE.map((b) => ({ value: `builtin:${b.cap}`, label: b.noun })),
+              ...roles.map((r) => ({ value: `role:${r.id}`, label: r.name })),
+            ]}
             onChange={setRoleId} />
         </label>
         <Button variant="primary" size="sm" data-testid="space-mapping-add"
           disabled={!group.trim() || !roleId || createMapping.isPending}
           onClick={() => createMapping.mutate(
-            { groupName: group.trim(), roleId, resourceType: "space", resourceId: spaceId },
+            {
+              groupName: group.trim(),
+              // the prefix names the mechanism (the grant-dispatch-536 rule: dispatch on data, never guess)
+              ...(roleId.startsWith("builtin:") ? { builtinCapability: roleId.slice("builtin:".length) } : { roleId: roleId.slice("role:".length) }),
+              resourceType: "space", resourceId: spaceId,
+            },
             { onSuccess: () => { notify.success(t("toast.saved")); setGroup(""); }, onError },
           )}>{t("adminRoles.mappingAdd")}</Button>
       </div>
