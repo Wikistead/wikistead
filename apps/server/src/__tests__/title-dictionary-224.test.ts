@@ -108,11 +108,18 @@ describe('#224 title dictionary — viewer scope (anti-tests 1/2/3a)', () => {
 
   it('guest token round-trips over HTTP on the dictionary route (binding anchored to their page)', async () => {
     const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: linkId, resource: { type: 'page', id: sharedId }, capability: 'view' })
-    const res = await app.inject({ method: 'GET', url: `/pages/${sharedId}/title-dictionary`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
-    expect(res.statusCode).toBe(200)
-    const t = titles(res.json() as { entries: { id: string; title: string }[] })
-    expect(t).toContain(T_PUBLIC)
-    expect(t).not.toContain(T_SHARED)
+    // #534 cold answers degraded-empty and fills in the background — poll until the guest's fill lands.
+    let t: string[] | null = null
+    for (let i = 0; i < 150; i++) {
+      const res = await app.inject({ method: 'GET', url: `/pages/${sharedId}/title-dictionary`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+      expect(res.statusCode).toBe(200)
+      const j = res.json() as { entries: { id: string; title: string }[]; degraded?: boolean }
+      if (!j.degraded) { t = titles(j); break }
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    expect(t, 'the guest fill landed').not.toBeNull()
+    expect(t!).toContain(T_PUBLIC)
+    expect(t!).not.toContain(T_SHARED)
   })
 })
 

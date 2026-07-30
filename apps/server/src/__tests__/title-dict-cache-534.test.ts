@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   getCachedTitleDict, setCachedTitleDict, invalidateTitleDictCache, clearTitleDictCache, titleDictGeneration,
+  beginTitleDictFill, endTitleDictFill,
 } from '../title-dict-cache.js'
 
 // #534: the title dictionary is cached for a few seconds because confirming it against OpenFGA costs
@@ -86,5 +87,20 @@ describe('#534 title-dictionary cache', () => {
     // the oldest were evicted; the newest are still there
     expect(getCachedTitleDict('t1', 'user:u0')).toBeUndefined()
     expect(getCachedTitleDict('t1', 'user:u599')).toBeDefined()
+  })
+})
+
+// #534 the background fill must be single-flight — every request in the cold window used to kick
+// its own multi-second confirm, and they stacked on the shared FGA/postgres.
+describe('#534 fill single-flight', () => {
+  beforeEach(() => clearTitleDictCache())
+
+  it('one fill per (tenant, subject); other viewers are independent; done or failed re-arms', () => {
+    expect(beginTitleDictFill('t1', 'user:a'), 'first miss starts the fill').toBe(true)
+    expect(beginTitleDictFill('t1', 'user:a'), 'a second miss in the window does NOT stack another').toBe(false)
+    expect(beginTitleDictFill('t1', 'user:b'), 'another viewer fills independently').toBe(true)
+    expect(beginTitleDictFill('t2', 'user:a'), 'another tenant fills independently').toBe(true)
+    endTitleDictFill('t1', 'user:a')
+    expect(beginTitleDictFill('t1', 'user:a'), 'completion (or failure) re-arms the next miss').toBe(true)
   })
 })
