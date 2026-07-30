@@ -8,7 +8,7 @@ import { openDemo } from "../helpers";
 test("#532: the member picker lists names, not subs — and still resolves the principal", async ({ page }) => {
   await openDemo(page);
   await page.goto("/spaces/demo_space/settings/members");
-  await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
 
   await page.getByTestId("space-grant-input").fill("e");
   const row = page.getByTestId("space-grant-candidate").first();

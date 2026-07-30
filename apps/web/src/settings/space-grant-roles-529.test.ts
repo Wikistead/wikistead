@@ -13,6 +13,11 @@ import { fileURLToPath } from "node:url";
 // while the picker must not OFFER anything the roles list does not name.
 const SRC = readFileSync(fileURLToPath(new URL("./SpaceMembersTab.tsx", import.meta.url)), "utf8");
 
+const nounKeys = (): string[] => {
+  const m = SRC.match(/CAP_NOUN: Record<PageRelation, string> = \{([^}]+)\}/);
+  if (!m) throw new Error("CAP_NOUN not found — the display table was renamed; re-aim this pin rather than deleting it");
+  return m[1]!.split(",").map((s) => s.split(":")[0]!.trim()).filter(Boolean);
+};
 const listOf = (name: string): string[] => {
   const m = SRC.match(new RegExp(`const ${name}: PageRelation\\[\\] = \\[([^\\]]*)\\]`));
   if (!m) throw new Error(`${name} not found — the lists were renamed; re-aim this pin rather than deleting it`);
@@ -49,12 +54,15 @@ describe("#529: the space grant picker offers exactly the roles the Roles tab li
       "a built-in role the picker cannot grant").toEqual([]);
   });
 
-  it("still ORDERS a comment grant, so an existing one does not float to the top", () => {
-    expect(listOf("CAP_ORDER")).toContain("comment");
+  // #536①: CAP_ORDER (the capability-power sort) is gone — the merged list sorts by principal
+  // label, which is capability-independent. The surviving invariant is the DISPLAY set: every capability
+  // a row can hold (offered or API-made) must have a noun, or the row renders a raw verb.
+  it("still NAMES a comment grant (an API-made row renders its noun, not a raw verb)", () => {
+    expect(nounKeys()).toContain("comment");
   });
 
-  it("keeps the picker a subset of the orderable set (a row can hold anything it offers)", () => {
-    const order = listOf("CAP_ORDER");
-    expect(listOf("GRANTABLE").filter((c) => !order.includes(c))).toEqual([]);
+  it("keeps the picker a subset of the display set (a row can render anything it offers)", () => {
+    const named = nounKeys();
+    expect(listOf("GRANTABLE").filter((c) => !named.includes(c))).toEqual([]);
   });
 });

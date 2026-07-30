@@ -643,11 +643,26 @@ export async function rolesPlugin(app: FastifyInstance) {
       // grant-ceiling / tenant admin), AFTER the existence-bind (so a cross-tenant/unknown id is a
       // uniform 404, never a 403 that confirms it exists). Entitlement was already checked up front.
       await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps })
+      // #536item 2 (space scope): ONE principal = ONE role. A machine-owned (mapping/default) row
+      // refuses the manual add up front (ADR-183 §1 ownership — 409 before any write); after the new row
+      // lands, the principal's OTHER manual roles (grant rows, other assignments, legacy rowless tuples)
+      // are swept so a direct API double-assign converges to one role. Page/tenant scope unchanged.
+      if (resourceType === 'space') {
+        const { assertNoMachineSpaceRole } = await import('./spaces.js')
+        await assertNoMachineSpaceRole(req.db, { spaceId: resourceId, principal, keep: { roleId: role.id } })
+      }
       // #497: theassign core is now a shared helper (the HTTP route + the mapping create path).
       const id = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
         tenant: req.tenant, roleId: role.id, capabilities: caps, resourceType, resourceId, principal,
         actorSub: req.user.sub, origin: 'manual',
       })
+      if (resourceType === 'space') {
+        const { sweepOtherSpaceRoles } = await import('./spaces.js')
+        await sweepOtherSpaceRoles(req.db, app.fga, app.searchDriver, {
+          spaceId: resourceId, tenantId: req.tenant.id, userId: req.user.sub, principal,
+          keep: { roleId: role.id }, keepCaps: caps as string[], plan: req.tenant.plan,
+        })
+      }
       // Re-read the row's owned_capabilities for the response (the helper computed them internally).
       const [saved] = await req.db.sql<{ owned_capabilities: string[] }[]>`SELECT owned_capabilities FROM role_assignments WHERE id = ${id}`
       return reply.code(201).send({ id, roleId: role.id, resourceType, resourceId, principal, ownedCapabilities: saved?.owned_capabilities ?? [] })

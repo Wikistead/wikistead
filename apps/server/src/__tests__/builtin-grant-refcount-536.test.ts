@@ -92,16 +92,18 @@ describe('#536: a built-in grant and a role assignment stop deleting each other'
     expect(await canView(p), 'and still confers view').toBe(true)
   }, 120_000)
 
-  it('unassigning the ROLE leaves the grant working', async () => {
+  it('a grant AFTER an assignment replaces it (#536one principal, one role) — and access survives the swap', async () => {
+    // This used to pin coexistence ("assign, then grant, both in force").superseded that for the
+    // space surface: a manual add REPLACES the principal's other manual roles, so the assignment row is
+    // swept by the grant — but the refcount hand-off must keep the shared leaf alive through the swap
+    // (the invariant this file exists for: no revoke/replace may strand access that something still confers).
     const p = sub('role-first')
     await assign(p)
     await grant(p, 'view')
-    expect(await canView(p), 'both in force').toBe(true)
 
-    const [row] = await adminPool<{ id: string }[]>`SELECT id FROM role_assignments WHERE role_id = ${roleId} AND principal = ${p}`
-    await unassignRoleInTx(db, fgaClient, app.searchDriver, { tenant, assignmentId: row.id, actorSub: OWNER })
-
-    expect(await canView(p), 'the grant still confers view').toBe(true)
+    const rows = await adminPool<{ id: string }[]>`SELECT id FROM role_assignments WHERE role_id = ${roleId} AND principal = ${p}`
+    expect(rows.length, 'the assignment was replaced by the grant (1 principal = 1 role)').toBe(0)
+    expect(await canView(p), 'the surviving grant still confers view (leaf handed off, not deleted)').toBe(true)
   }, 120_000)
 
   it('and when the LAST holder goes, the leaf really does go', async () => {
