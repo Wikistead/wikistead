@@ -299,7 +299,11 @@ export async function membersPlugin(app: FastifyInstance) {
     let emailed = false
     if (email) {
       try {
-        await req.server.email.send({
+        // #547 / ADR-196 §7: the REQUEST path resolves per tenant too — a resolver consulted only by
+        // the outbox drain would silently drop a managed-sender tenant's invite mail onto the CE
+        // fallback (rev2/N-a). The boot-time app.email stays the fallback.
+        const { resolveTenantEmailDriver } = await import('@wikistead/hooks')
+        await resolveTenantEmailDriver({ tenantId: req.tenant.id, plan: req.tenant.plan }, req.server.email).send({
           to: email,
           subject: `You're invited to ${req.tenant.slug} on wikistead`,
           text: `You've been invited to join ${req.tenant.slug}. Open this link to accept:\n\n${inviteUrl}`,
