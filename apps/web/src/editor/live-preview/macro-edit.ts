@@ -94,7 +94,11 @@ export const nestedEditActiveField = StateField.define<NestedSelection | null>({
 // 0-based child index. Display state only (drives which cell swaps its render for the island); the actual edit
 // is a single offset-invariant Y.Text replace of the slot's body range on commit (single Y.Text untouched —
 // no 2nd CRDT, the island commits via its onCommit only). Cleared on Esc / caret-leave, mapped on doc change.
-export type SlotEdit = { container: { from: number; to: number }; index: number };
+// #556: `caretAnchor` (optional) = the absolute doc position of the nested macro the OPENING CLICK landed
+// on (resolved from its `[data-mac-pos]` tag, shifted to click time). The island mount maps it into the
+// island's own doc so the block the user clicked is the block that comes up selected — without it the
+// island opened with its caret at the top and the FIRST macro in the slot lit up regardless of the target.
+export type SlotEdit = { container: { from: number; to: number }; index: number; caretAnchor?: number | null };
 export const setSlotEditActive = StateEffect.define<SlotEdit | null>();
 export const slotEditField = StateField.define<SlotEdit | null>({
   create: () => null,
@@ -102,7 +106,7 @@ export const slotEditField = StateField.define<SlotEdit | null>({
     for (const e of tr.effects) if (e.is(setSlotEditActive)) return e.value;
     if (!value) return null;
     let v = value;
-    if (tr.docChanged) v = { ...v, container: { from: tr.changes.mapPos(v.container.from, 1), to: tr.changes.mapPos(v.container.to, -1) } };
+    if (tr.docChanged) v = { ...v, container: { from: tr.changes.mapPos(v.container.from, 1), to: tr.changes.mapPos(v.container.to, -1) }, caretAnchor: v.caretAnchor != null ? tr.changes.mapPos(v.caretAnchor) : v.caretAnchor };
     if (tr.selection) {
       // #278 point 3: clear only when the head actually MOVED. A same-position selection
       // re-assert (consumeReAnchor's stale-caret redraw, #340 — fired by the shared block

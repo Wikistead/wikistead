@@ -7,10 +7,17 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 // The fix (selectionTouched) makes the reveal predicates ignore a selection that was never actually
 // SET; the first real interaction (click, keystroke — both dispatch) restores every existing reveal
 // behaviour, which the last test pins as top-level parity.
-const DOC = "::::columns\n:::column\n```mermaid\ngraph TD; A-->B;\n```\n:::\n:::column\nBBB\n:::\n::::\n\n::::tabs\n:::tab[One]\n:::note\nhello\n:::\n:::\n:::tab[Two]\ntwo\n:::\n::::\n";
+//
+// #556 re-aim: the entry clicks land on the slot's plain TEXT, not on the macro. Since #556 the click
+// that opens the island CARRIES ITS TARGET — clicking the nested macro itself is now a deliberate
+// choice, and the macro responds with its top-level behaviour (for a fence, the #243 caret-in reveal;
+// the parity-guard test pins exactly that). What this spec keeps pinning is #543's actual harm: raw
+// markers nobody asked for. The slots still BEGIN with the macro, so the mount-default caret still
+// sits inside it and a selectionTouched regression still goes red here.
+const DOC = "::::columns\n:::column\n```mermaid\ngraph TD; A-->B;\n```\nafter fence\n:::\n:::column\nBBB\n:::\n::::\n\n::::tabs\n:::tab[One]\n:::note\nhello\n:::\nafter note\n:::\n:::tab[Two]\ntwo\n:::\n::::\n";
 
 // Matrix variant: fence inside tabs / table directive inside columns (the ticket's cells).
-const DOC2 = "::::columns\n:::column\n:::table\n<table><tr><td>x</td></tr></table>\n:::\n:::\n:::column\nBBB\n:::\n::::\n\n::::tabs\n:::tab[One]\n```mermaid\ngraph TD; C-->D;\n```\n:::\n:::tab[Two]\ntwo\n:::\n::::\n";
+const DOC2 = "::::columns\n:::column\n:::table\n<table><tr><td>x</td></tr></table>\n:::\nafter table\n:::\n:::column\nBBB\n:::\n::::\n\n::::tabs\n:::tab[One]\n```mermaid\ngraph TD; C-->D;\n```\nafter fence2\n:::\n:::tab[Two]\ntwo\n:::\n::::\n";
 
 async function islandRawMarkers(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
@@ -55,7 +62,7 @@ async function setupPage(browser: import("@playwright/test").Browser, doc: strin
 
 test("#543: a columns island whose slot begins with a fence opens with the fence RENDERED", async ({ browser }) => {
   const page = await setupPage(browser, DOC, "a");
-  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().getByText(/after (fence$|table)/).click(); // #556: non-macro entry point
   await sleep(900);
   const r = await islandRawMarkers(page);
   expect(r, "the island opened").not.toBeNull();
@@ -65,7 +72,7 @@ test("#543: a columns island whose slot begins with a fence opens with the fence
 
 test("#543: a tabs island whose slot begins with a callout opens with the callout RENDERED", async ({ browser }) => {
   const page = await setupPage(browser, DOC, "b");
-  await page.locator("[data-pane=preview] .cm-lp-tabs .cm-lp-tabpanel-active").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-tabs .cm-lp-tabpanel-active").first().getByText(/after (note|fence2)/).click(); // #556: non-macro entry point
   await sleep(900);
   const r = await islandRawMarkers(page);
   expect(r).not.toBeNull();
@@ -75,7 +82,7 @@ test("#543: a tabs island whose slot begins with a callout opens with the callou
 
 test("#543 matrix: table-in-columns and fence-in-tabs enter clean too", async ({ browser }) => {
   const page = await setupPage(browser, DOC2, "c");
-  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().getByText(/after (fence$|table)/).click(); // #556: non-macro entry point
   await sleep(900);
   const r1 = await islandRawMarkers(page);
   expect(r1).not.toBeNull();
@@ -83,7 +90,7 @@ test("#543 matrix: table-in-columns and fence-in-tabs enter clean too", async ({
   // leave the island, then enter the tabs island
   await page.keyboard.press("Escape");
   await sleep(700);
-  await page.locator("[data-pane=preview] .cm-lp-tabs .cm-lp-tabpanel-active").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-tabs .cm-lp-tabpanel-active").first().getByText(/after (note|fence2)/).click(); // #556: non-macro entry point
   await sleep(900);
   const r2 = await islandRawMarkers(page);
   expect(r2).not.toBeNull();
@@ -93,7 +100,7 @@ test("#543 matrix: table-in-columns and fence-in-tabs enter clean too", async ({
 test("#543 parity guard: a real interaction still reveals — in the island and at top level", async ({ browser }) => {
   const page = await setupPage(browser, DOC, "d");
   // Top level: clicking the rendered mermaid reveals its raw source (#243 behaviour, unchanged).
-  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().getByText(/after (fence$|table)/).click(); // #556: non-macro entry point
   await sleep(900);
   // Inside the island: click the rendered nested mermaid → caret lands in the fence → reveal (the
   // very same caret-in behaviour top level has; only the un-chosen mount default is ignored).
@@ -113,7 +120,7 @@ test("#543 parity guard: a real interaction still reveals — in the island and 
 // invariants' lesson, measured here).
 test("#543 vim: columns × fence enters with NO visible raw glyph (the report)", async ({ browser }) => {
   const page = await setupPage(browser, DOC, "va", true);
-  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().getByText(/after (fence$|table)/).click(); // #556: non-macro entry point
   await sleep(900);
   const r = await islandRawMarkers(page);
   expect(r, "the island opened").not.toBeNull();
@@ -123,7 +130,7 @@ test("#543 vim: columns × fence enters with NO visible raw glyph (the report)",
 
 test("#543 vim: tabs × callout enters clean", async ({ browser }) => {
   const page = await setupPage(browser, DOC, "vb", true);
-  await page.locator("[data-pane=preview] .cm-lp-tabs .cm-lp-tabpanel-active").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-tabs .cm-lp-tabpanel-active").first().getByText(/after (note|fence2)/).click(); // #556: non-macro entry point
   await sleep(900);
   const r = await islandRawMarkers(page);
   expect(r).not.toBeNull();
@@ -133,7 +140,7 @@ test("#543 vim: tabs × callout enters clean", async ({ browser }) => {
 
 test("#543 vim matrix: table-in-columns and fence-in-tabs enter clean", async ({ browser }) => {
   const page = await setupPage(browser, DOC2, "vc", true);
-  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().getByText(/after (fence$|table)/).click(); // #556: non-macro entry point
   await sleep(900);
   const r1 = await islandRawMarkers(page);
   expect(r1).not.toBeNull();
@@ -141,7 +148,7 @@ test("#543 vim matrix: table-in-columns and fence-in-tabs enter clean", async ({
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape"); // vim: first Esc may only settle mode — island exit next
   await sleep(700);
-  await page.locator("[data-pane=preview] .cm-lp-tabs .cm-lp-tabpanel-active").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-tabs .cm-lp-tabpanel-active").first().getByText(/after (note|fence2)/).click(); // #556: non-macro entry point
   await sleep(900);
   const r2 = await islandRawMarkers(page);
   expect(r2).not.toBeNull();
@@ -150,7 +157,7 @@ test("#543 vim matrix: table-in-columns and fence-in-tabs enter clean", async ({
 
 test("#543 vim non-regression: island editing still works (i → type lands; motion doesn't leak)", async ({ browser }) => {
   const page = await setupPage(browser, DOC, "vd", true);
-  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().click();
+  await page.locator("[data-pane=preview] .cm-lp-columns .cm-lp-column").first().getByText(/after (fence$|table)/).click(); // #556: non-macro entry point
   await sleep(900);
   const island = page.locator("[data-testid=slot-edit-island]");
   await expect(island).toHaveCount(1);

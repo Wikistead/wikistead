@@ -2569,7 +2569,7 @@ function mountHostSurface(view: EditorView, opts: HostSurfaceOptions, collab?: {
   };
 }
 
-function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { from: number; to: number }, index: number, childName: "column" | "tab", dark: boolean, bodyFrom: number): boolean {
+function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { from: number; to: number }, index: number, childName: "column" | "tab", dark: boolean, bodyFrom: number, caretAnchor?: number | null): boolean {
   const doc = view.state.doc;
   const items = resolveDirectiveRanges(doc.toString()).filter((r) => r.name === childName && r.from >= container.from && r.to <= container.to);
   const it = items[index];
@@ -2752,7 +2752,17 @@ function mountSlotEditIsland(view: EditorView, cell: HTMLElement, container: { f
   }
   // Focus AFTER CM attaches this widget DOM to the document — focusing during toDOM (DOM not yet in the tree)
   // is a no-op, which left the island unfocused so a single click opened but couldn't type (reviewer B).
-  requestAnimationFrame(() => handle.focus());
+  // #556: and land the island's caret on the block the opening click actually hit. The island's doc is the
+  // body lines verbatim, so the mapping is one subtraction off the body's absolute start; without it the
+  // caret sat at 0 and the FIRST macro in the slot took the selection ring whichever block was clicked
+  // (measured: clicking the lower of two stacked macros lit the upper one).
+  const islandCaret = caretAnchor != null && hasBody
+    ? Math.max(0, Math.min(caretAnchor - doc.line(fb).from, bodyText.length))
+    : null;
+  requestAnimationFrame(() => {
+    handle.focus();
+    if (islandCaret != null) handle.view.dispatch({ selection: EditorSelection.cursor(islandCaret) });
+  });
   return true;
 }
 
@@ -2812,7 +2822,11 @@ class MacroWidget extends WidgetType {
     // `selected` is true), but the FOCUS is the inner macro. Show the container as an achromatic
     // CONTEXT highlight (grey) so the accent ring on the inner nested subtree reads as the focus
     // two-level highlight (outer = context, inner = focus) makes the nesting depth legible at a glance.
-    const nestedActive = !!(this.nestedSel || this.nestedEdit);
+    // #556: slot-edit counts as "the focus is inside" too. The outer caret parks on this container while
+    // an island is open, so `selected` is true — without this the container kept its accent ring (and its
+    // edit buttons below) NEXT TO the island's own selection: two rings, two pills, for one focus. The
+    // selected block is always exactly one; the container drops to the grey context highlight.
+    const nestedActive = !!(this.nestedSel || this.nestedEdit || this.slotEdit);
     if (nestedActive) wrap.classList.add("cm-lp-nested-host");
     else if (this.selected) wrap.classList.add("cm-lp-atom-sel");
     // #3: an empty macro renders NOTHING from some liveRenders (e.g. mermaid) → it looks
@@ -3227,7 +3241,7 @@ class MacroWidget extends WidgetType {
           // the edit; the plain flow (blur commits, then the next click opens) stays the safe path.
           wrap.classList.add("cm-lp-slot-edit-host");
           const slotCell = wrap.querySelectorAll<HTMLElement>(contentSel)[this.slotEdit.index];
-          if (slotCell) mountSlotEditIsland(view, slotCell, { from: this.from, to: this.to }, this.slotEdit.index, child, this.theme === "dark", this.bodyFrom);
+          if (slotCell) mountSlotEditIsland(view, slotCell, { from: this.from, to: this.to }, this.slotEdit.index, child, this.theme === "dark", this.bodyFrom, this.slotEdit.caretAnchor);
         } else {
         // (#278 E part 1: the is rendered above, unconditionally, so a nested-select doesn't reflow.)
         // #278 §2a: clicking a slot's CONTENT enters inline edit for THAT slot (the CM6 island). Ignore clicks
@@ -3238,6 +3252,7 @@ class MacroWidget extends WidgetType {
         // slot already behaves. Until entered, nested macros are not directly touchable; INSIDE the island
         // they get the full top-level behaviour (reveal, pill, ✎/align, editUI) from the shared factory.
         const name = this.name;
+        const buildFrom = this.from; // #556: the base the build-time [data-mac-pos] tags were stamped against
         wrap.querySelectorAll<HTMLElement>(contentSel).forEach((slot: HTMLElement, i: number) => {
           slot.addEventListener("mousedown", (e) => {
             if ((e.target as HTMLElement).closest(".cm-lp-layout-item-remove, .cm-lp-tab-remove, .cm-lp-layout-item-add, .cm-lp-tab")) return;
@@ -3264,9 +3279,14 @@ class MacroWidget extends WidgetType {
             const dir = dirs.find((r) => r.name === name && r.from === start)
               ?? dirs.find((r) => r.name === name && r.from <= start && r.to >= start);
             if (!dir) return;
+            // #556: if the click landed ON a nested macro (its innermost [data-mac-pos] subtree), carry
+            // its position into the mount so the island comes up with THAT block selected. The tag is a
+            // build-time offset (#527), shifted by the same uniform delta the nested-select handler uses.
+            const anchorTag = resolveNestedAnchor(e.target);
+            const caretAnchor = anchorTag != null ? anchorTag + (start - buildFrom) : null;
             // Do NOT view.focus here — the rebuild mounts the island and focuses IT; focusing the outer view
             // would steal focus back (a single click must open AND focus the island). #278 §2a reviewer B.
-            view.dispatch({ effects: setSlotEditActive.of({ container: { from: dir.from, to: dir.to }, index: i }) });
+            view.dispatch({ effects: setSlotEditActive.of({ container: { from: dir.from, to: dir.to }, index: i, caretAnchor }) });
           });
         });
         }
