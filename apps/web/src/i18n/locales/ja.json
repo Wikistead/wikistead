@@ -522,7 +522,9 @@
     "commentSummaryLead": "現在コメント可：",
     "commentSummaryEditors": "編集権を持つ人",
     "commentSummaryMembers": "閲覧できる全メンバー",
-    "commentSummaryGuests": "閲覧リンクのゲスト"
+    "commentSummaryGuests": "閲覧リンクのゲスト",
+    "managedBadge": "マッピング",
+    "managedByMapping": "グループマッピング由来の付与です。下の「グループマッピング」から削除してください。"
   },
   "auth": {
     "signInTitle": "wikistead にサインイン",

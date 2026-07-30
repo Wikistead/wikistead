@@ -522,7 +522,9 @@
     "commentSummaryLead": "Who can comment right now: ",
     "commentSummaryEditors": "people with edit rights",
     "commentSummaryMembers": "all viewing members",
-    "commentSummaryGuests": "view-link guests"
+    "commentSummaryGuests": "view-link guests",
+    "managedBadge": "mapping",
+    "managedByMapping": "Conferred by a group mapping - remove it in Group mappings below."
   },
   "auth": {
     "signInTitle": "Sign in to wikistead",

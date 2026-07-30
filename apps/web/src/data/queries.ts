@@ -1260,7 +1260,7 @@ export function usePage(pageId: string) {
 // #523 / ADR-190 slice A: the server resolves a USER grantee's full name (override ?? OIDC display_name)
 // over this manage-gated set, so an un-customized member reads as their name, not a sub. null for a
 // departed / cross-tenant sub (client keeps the sub); absent for group grantees.
-export interface SpaceGrant { grantee: string; capability: PageRelation; groupName?: string; displayName?: string | null }
+export interface SpaceGrant { grantee: string; capability: PageRelation; groupName?: string; displayName?: string | null; managed?: boolean }
 export interface MemberCandidate { sub: string; displayName: string | null }
 
 export function useSpaceAccess(spaceId: string, enabled = true) {

@@ -507,6 +507,15 @@ export async function grantSpaceAccess(
   // The audit action stays `space.access_granted` (not `role.assigned`). The mechanism changed; what
   // happened did not, and an audit stream that silently renames its events is one nobody can search.
   const { assignRoleInTx } = await import('./roles.js')
+  // #497 (088): the idempotent dup path ('ignore') would silently ADOPT a mapping-owned row — a 204
+  // that grants nothing and later confuses both surfaces about who owns the assignment. Same refusal
+  // as revoke: the mapping is the owner; manage the grant through it.
+  const [held] = await db.sql<{ origin: string }[]>`
+    SELECT origin FROM role_assignments
+    WHERE builtin_capability = ${args.capability} AND resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.grantee}`
+  if (held?.origin === 'mapping') {
+    throw Object.assign(new Error('managed by a group mapping — edit the mapping instead'), { statusCode: 409 })
+  }
   await assignRoleInTx(db, fga, driver, {
     tenant: { id: args.tenantId, plan: args.plan ?? '' },
     roleId: null,
@@ -537,9 +546,17 @@ export async function revokeSpaceAccess(
   // leaves may go. A principal holding both a `view` grant and a role bundling `view` keeps viewing after
   // either one is taken away — which is what "still granted" has always meant everywhere else.
   const { unassignRoleInTx } = await import('./roles.js')
-  const [row] = await db.sql<{ id: string }[]>`
-    SELECT id FROM role_assignments
+  const [row] = await db.sql<{ id: string; origin: string }[]>`
+    SELECT id, origin FROM role_assignments
     WHERE builtin_capability = ${args.capability} AND resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.grantee}`
+  // #497 (088): a mapping OWNS its assignment (ADR-183 §1). Before 088 a mapping row could never match
+  // this builtin lookup (its builtin_capability was always NULL), so the Members revoke could not reach
+  // one; with built-in mappings it can — and revoking it here would strand the mapping as a console row
+  // that claims access nobody holds, with its own delete a silent no-op. Machine-managed rows are
+  // removed where the machine is: delete the MAPPING.
+  if (row?.origin === 'mapping') {
+    throw Object.assign(new Error('managed by a group mapping — delete the mapping instead'), { statusCode: 409 })
+  }
   if (row) {
     await unassignRoleInTx(db, fga, driver, {
       tenant: { id: args.tenantId, plan: args.plan ?? '' },
@@ -576,20 +593,27 @@ export async function listSpaceAccess(
   fga: OpenFgaClient,
   db: TenantDb,
   args: { spaceId: string; tenantId: string; userId: string },
-): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null }[]> {
+): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null; managed?: boolean }[]> {
   await requireSpaceManage(fga, args.userId, args.spaceId)
   const { tuples } = await fga.read({ object: `space:${args.spaceId}` })
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
   const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
   const byId = groupNameByFgaId(args.tenantId, names)
-  const out: { grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null }[] = []
+  // #497 (088): a row conferred BY A MAPPING is machine-managed (ADR-183 §1) — the list says so, and
+  // the UI drops the revoke affordance for it (the server refuses anyway; two layers, UI convenience).
+  const managed = new Set((await db.sql<{ builtin_capability: string; principal: string }[]>`
+    SELECT builtin_capability, principal FROM role_assignments
+    WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND origin = 'mapping' AND builtin_capability IS NOT NULL`)
+    .map((r) => `${r.principal} ${r.builtin_capability}`))
+  const out: { grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null; managed?: boolean }[] = []
   for (const { key } of tuples ?? []) {
     if (!key || !(key.relation in RELATION_TO_CAP)) continue
     // Direct member/group grants only — never expose share_link, user:* (public)
     // or the structural tenant link.
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
     const groupName = resolveGroupName(key.user, byId)
-    out.push({ grantee: key.user, capability: RELATION_TO_CAP[key.relation]!, ...(groupName ? { groupName } : {}) })
+    const cap = RELATION_TO_CAP[key.relation]!
+    out.push({ grantee: key.user, capability: cap, ...(groupName ? { groupName } : {}), ...(managed.has(`${key.user} ${cap}`) ? { managed: true } : {}) })
   }
   // #523 / ADR-190: FULL name resolution (override ?? OIDC display_name) for the USER grantees. This is a
   // server-set, VIEW-GATED result set — the caller already passed requireSpaceManage, so these are grants

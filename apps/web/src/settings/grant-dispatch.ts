@@ -43,3 +43,23 @@ export function resolveGrantDispatch(args: {
   // an unrecognised value grants nothing rather than guessing a mechanism
   return { path: "none" };
 }
+
+// #497 (088): the same decision-as-a-value rule for the space MAPPING picker. A mapping confers either
+// a built-in (space scope, four nouns — no commenter, theruling lives server-side too) or a
+// custom role; the wire carries builtinCapability XOR roleId. An unrecognised value maps nothing.
+export type MappingAction =
+  | { kind: "builtin"; builtinCapability: string }
+  | { kind: "role"; roleId: string }
+  | { kind: "none" };
+
+export function resolveMappingDispatch(pick: string): MappingAction {
+  if (pick.startsWith("builtin:")) {
+    const builtinCapability = pick.slice("builtin:".length);
+    return builtinCapability ? { kind: "builtin", builtinCapability } : { kind: "none" };
+  }
+  if (pick.startsWith("role:")) {
+    const roleId = pick.slice("role:".length);
+    return roleId ? { kind: "role", roleId } : { kind: "none" };
+  }
+  return { kind: "none" };
+}
