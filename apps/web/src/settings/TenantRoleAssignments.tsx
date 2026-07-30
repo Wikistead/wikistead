@@ -51,17 +51,22 @@ export function TenantRoleAssignments({ members }: { members: readonly Member[] 
   // with three roles used to appear three times. Removal stays per-assignment (the server's unassign is
   // reference-counted), so each role keeps its own ×.
   const byPrincipal = new Map<string, { id: string; roleName: string }[]>();
+  const groupNameOf = new Map<string, string>(); // #536 ⑥: server-resolved group names
   for (const a of assignments.data ?? []) {
     const list = byPrincipal.get(a.principal) ?? [];
     list.push({ id: a.id, roleName: a.roleName });
     byPrincipal.set(a.principal, list);
+    if (a.groupName) groupNameOf.set(a.principal, a.groupName);
   }
   // #513: show the person, not the hash. The member list is already loaded here, so the sub only
-  // surfaces when it belongs to nobody on it (a group principal, or a member since removed).
+  // surfaces when it belongs to nobody on it (a member since removed). A group principal shows the
+  // server-resolved name; an orphan id (group gone at the IdP) gets the explicit label, never the hash,
+  // and its × stays (#536 ⑥).
   const nameOf = (principal: string): string => {
+    if (principal.startsWith("group:")) return `${groupNameOf.get(principal) ?? t("spaceMembers.unknownGroup")} (${t("spaceMembers.group")})`;
     const s = principal.replace(/^user:/, "");
     const m = members.find((x) => x.sub === s);
-    return m ? (m.display_name || m.email || s) : principal;
+    return m ? (m.display_name || m.email || s) : s;
   };
   const onError = () => notify.error(t("toast.actionFailed"));
 

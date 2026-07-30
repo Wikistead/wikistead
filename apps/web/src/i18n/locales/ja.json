@@ -504,6 +504,7 @@
     "revoke": "取り消し",
     "empty": "直接付与はまだありません。",
     "group": "グループ",
+    "unknownGroup": "不明なグループ",
     "granteeType": "付与先",
     "typeUser": "メンバー",
     "typeGroup": "グループ",

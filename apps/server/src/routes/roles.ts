@@ -20,7 +20,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { reindexPublishedPages } from './spaces.js'
 import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
-import { groupGrantee } from '../auth/group-sync.js' // #497: mappings assign the group principal
+import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js' // #497: mappings assign the group principal; #536 names for display
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: name user principals on the gated list
 import type { TenantDb } from '../db/index.js'
 import type { Sql } from 'postgres'
@@ -576,10 +576,24 @@ export async function rolesPlugin(app: FastifyInstance) {
     // falls back to the raw sub. Group principals are never resolved (they carry their own name).
     const userSubs = rows.filter((r) => r.principal.startsWith('user:')).map((r) => r.principal.slice(5))
     const names = userSubs.length ? await resolveAuthorIdentities(req.db, userSubs) : new Map()
-    return rows.map((r) => ({
-      id: r.id, roleId: r.role_id, roleName: r.name, principal: r.principal,
-      ...(r.principal.startsWith('user:') ? { displayName: names.get(r.principal.slice(5))?.displayName ?? null } : {}),
-    }))
+    // #536 (6): a GROUP principal is a hash (groupFgaId is one-way) — resolve it back to the human
+    // name server-side, the same way listSpaceAccess does (group-sync.ts stays the single id authority;
+    // the client never sees a reverse table). A group that no longer appears in any member's groups
+    // (renamed / emptied at the IdP) gets no groupName — the client shows its explicit orphan label and
+    // the row stays revocable.
+    const hasGroups = rows.some((r) => r.principal.startsWith('group:'))
+    const groupNames = hasGroups
+      ? (await req.db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
+      : []
+    const byId = groupNameByFgaId(req.tenant.id, groupNames)
+    return rows.map((r) => {
+      const groupName = resolveGroupName(r.principal, byId)
+      return {
+        id: r.id, roleId: r.role_id, roleName: r.name, principal: r.principal,
+        ...(r.principal.startsWith('user:') ? { displayName: names.get(r.principal.slice(5))?.displayName ?? null } : {}),
+        ...(groupName ? { groupName } : {}),
+      }
+    })
   })
 
   // #485 / #514: a space MANAGER (not just a tenant admin) needs the role DEFINITION list to populate the
