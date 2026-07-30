@@ -385,7 +385,7 @@ const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'm
 // #514 / ADR-188 §6: the built-in grant no longer keeps its own capability→relation table. Both this path
 // and the custom-role assignment expand through space-grant-expansion.ts, so the two cannot drift (the gap
 // between them is where the #485 bug lived).
-const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', commenter: 'comment', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage' }
+export const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', commenter: 'comment', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage' }
 
 // #258 / ADR-110: a member VIEW grant writes BOTH `viewer` (unchanged — pages inherit view via
 // view_base_from_space = viewer from space, and existing readers of `viewer` are untouched) AND
