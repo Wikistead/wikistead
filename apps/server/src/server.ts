@@ -4,6 +4,7 @@ import { startOutboxWorker } from './search/index.js'
 import { startAuditDrainWorker } from './audit/outbox.js'
 import { startWebhookDrainWorker } from './routes/webhooks.js'
 import { startAnalyticsDrainWorker } from './analytics/outbox.js'
+import { startEmailDrainWorker } from './email/outbox.js'
 import { startShareLinkSweepWorker } from './routes/share-links.js'
 import { startAdminDriftWorker } from './auth/admin-mapping.js' // #497 / ADR-183 2b
 import { startTrashRetentionWorker } from './routes/pages.js'
@@ -59,6 +60,12 @@ export async function startServer(): Promise<FastifyInstance> {
   // called the drain directly, so nothing noticed the worker was never started. Started here (not
   // buildApp) so inject-driven tests don't spawn a timer.
   startAnalyticsDrainWorker(Number(process.env.ANALYTICS_OUTBOX_POLL_MS ?? 5000))
+
+  // Background email delivery (#547 / ADR-196 §5): drains the email outbox — messages are BUILT at
+  // send time behind the send-time authz gates, per-tenant transport via the §7 resolver. Started
+  // here (not buildApp) so inject-driven tests don't spawn a timer; the lesson says name it:
+  // tests drive drainEmailOutbox directly, THIS is what delivers in production.
+  startEmailDrainWorker({ fallback: app.email, log: (m) => app.log.info(m) }, Number(process.env.EMAIL_OUTBOX_POLL_MS ?? 5000))
 
   // Background trash retention purge (#411 / ADR-153): permanently deletes trash entries older than
   // TRASH_RETENTION_DAYS (30). Hourly is plenty for a 30-day horizon; started here (not buildApp) so

@@ -27,3 +27,27 @@ export function registerEmailDriver(driver: EmailDriver): void {
 export function getEmailDriver(fallback: EmailDriver): EmailDriver {
   return _driver ?? fallback
 }
+
+// #547 / ADR-196 §7: the TENANT-AWARE form of the seam. registerEmailDriver is a boot-time global —
+// an EE registration through it would capture every tenant on the instance, so "the plan picks the
+// transport" needs a per-tenant answer. A resolver sees {tenantId, plan} and returns a driver for
+// THAT tenant, or null to decline; resolution order is resolver → registered global → the caller's
+// fallback (CE SMTP/no-op). Every send site — the request path (invites) and the outbox drain alike —
+// must resolve through resolveTenantEmailDriver, or a managed-sender tenant silently falls back to
+// the CE default on that path.
+export interface EmailDriverContext {
+  tenantId: string
+  plan: string
+}
+
+export type EmailDriverResolver = (ctx: EmailDriverContext) => EmailDriver | null
+
+let _resolver: EmailDriverResolver | null = null
+
+export function registerEmailDriverResolver(resolver: EmailDriverResolver): void {
+  _resolver = resolver
+}
+
+export function resolveTenantEmailDriver(ctx: EmailDriverContext, fallback: EmailDriver): EmailDriver {
+  return _resolver?.(ctx) ?? _driver ?? fallback
+}
