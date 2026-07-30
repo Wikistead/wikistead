@@ -24,8 +24,10 @@ test("#505: print shows the static portal (title + callout, exact colour) and hi
   await sleep(400);
   await authed.getByTestId("publish-page").click();
   await sleep(1000);
-  await makePublic(id);
+  // The parent switch FIRST: POST /pages/:id/public is 403 while the tenant public surface is OFF
+  // (ADR-113 guardrail). The old order only passed when an earlier spec left the switch on.
   await setPublicSurface(authed, true);
+  await makePublic(id);
 
   // off-print: the portal is inert (display:none)
   expect(await authed.locator("[data-print-root]").evaluate((el) => getComputedStyle(el).display), "off-print: portal hidden").toBe("none");
