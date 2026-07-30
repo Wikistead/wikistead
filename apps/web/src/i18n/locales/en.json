@@ -1239,7 +1239,7 @@
     "tenantAssignTitle": "Tenant role assignments",
     "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
     "memberLabel": "Member",
-    "memberPlaceholder": "Select member",
+    "memberPlaceholder": "Search members…",
     "mappingTenantBody": "Confer a TENANT role (like creating spaces) on everyone in an IdP group. Membership resolves live from your identity provider — nobody is added or billed. A mapping onto a space's role is made in that space's Members tab.",
     "mixedScopeHint": "A role is either a space/page role or a tenant role - uncheck one side to save.",
     "sectionTenant": "Tenant",

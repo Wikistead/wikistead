@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
 import { Select } from "../ui/Select";
+import { MemberSearchInput } from "../ui/MemberSearchInput";
 import { notify } from "../ui/toast";
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
 import type { Member } from "../data/membersApi";
@@ -27,7 +28,19 @@ export function TenantRoleAssignments({ members }: { members: readonly Member[] 
   const assign = useAssignRole();
   const unassign = useUnassignRole();
   const [roleId, setRoleId] = useState("");
-  const [sub, setSub] = useState("");
+  // #557: the member field is the shared #416 search picker, not an every-member dropdown. The member
+  // list is already loaded on this page, so the candidates are a local filter over it — same component,
+  // same look as the space picker; only the candidate source differs (no extra endpoint).
+  const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<{ grantee: string; label: string } | null>(null);
+  const sub = picked ? picked.grantee.replace(/^user:/, "") : "";
+  const q = query.trim().toLowerCase();
+  const candidates = q
+    ? members
+        .filter((m) => [m.display_name, m.email, m.sub].some((f) => f && f.toLowerCase().includes(q)))
+        .slice(0, 8)
+        .map((m) => ({ sub: m.sub, displayName: m.display_name || m.email || null }))
+    : [];
 
   const tenantRoles = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
   // Nothing to assign and nothing assigned → the section would be an empty box on every tenant that
@@ -61,15 +74,24 @@ export function TenantRoleAssignments({ members }: { members: readonly Member[] 
         <Select size="sm" value={roleId} ariaLabel={t("adminRoles.roleLabel")} testId="tenant-assign-role"
           options={[{ value: "", label: t("adminRoles.rolePlaceholder") }, ...tenantRoles.map((r) => ({ value: r.id, label: r.name }))]}
           onChange={setRoleId} />
-        <Select size="sm" value={sub} ariaLabel={t("adminRoles.memberLabel")} testId="tenant-assign-member"
-          options={[{ value: "", label: t("adminRoles.memberPlaceholder") },
-            ...members.map((m) => ({ value: m.sub, label: m.display_name || m.email || m.sub }))]}
-          onChange={setSub} />
+        <MemberSearchInput
+          query={query}
+          onQueryChange={setQuery}
+          picked={picked}
+          onPick={(c) => { setPicked(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null); if (c) setQuery(""); }}
+          candidates={candidates}
+          placeholder={t("adminRoles.memberPlaceholder")}
+          ariaLabel={t("adminRoles.memberLabel")}
+          inputSize="sm"
+          inputTestId="tenant-assign-member"
+          listTestId="tenant-assign-candidates"
+          itemTestId="tenant-assign-candidate"
+        />
         <Button variant="primary" size="sm" data-testid="tenant-assign-add"
           disabled={!roleId || !sub || assign.isPending}
           onClick={() => assign.mutate(
             { roleId, resourceType: "tenant", resourceId: tenantId, principal: `user:${sub}` },
-            { onSuccess: () => { notify.success(t("toast.saved")); setSub(""); }, onError },
+            { onSuccess: () => { notify.success(t("toast.saved")); setPicked(null); setQuery(""); }, onError },
           )}>{t("adminRoles.assign")}</Button>
       </div>
 
