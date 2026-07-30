@@ -150,8 +150,10 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.getByTestId("tenant-assign-role").click();
   await page.getByRole("option", { name }).click();
   await expect(page.getByRole("option")).toHaveCount(0);
-  await page.getByTestId("tenant-assign-member").click();
-  await page.getByRole("option").nth(1).click(); // skip the placeholder row
+  // #557: the member field is the shared #416 SEARCH picker (typing filters, candidates show names) —
+  // the every-member dropdown this row used to carry is gone.
+  await page.getByTestId("tenant-assign-member").fill("dev");
+  await page.getByTestId("tenant-assign-candidate").first().click();
   await page.getByTestId("tenant-assign-add").click();
   await expect(page.getByTestId("tenant-assignment-list")).toContainText(name, { timeout: 8000 });
 
