@@ -524,7 +524,8 @@
     "commentSummaryMembers": "all viewing members",
     "commentSummaryGuests": "view-link guests",
     "managedBadge": "mapping",
-    "managedByMapping": "Conferred by a group mapping - remove it in Group mappings below."
+    "managedByMapping": "Conferred by a group mapping - remove it in Group mappings below.",
+    "replaceConfirm": "Replace {{who}}'s current role ({{current}}) with {{next}}? One principal holds one role."
   },
   "auth": {
     "signInTitle": "Sign in to wikistead",
@@ -1233,14 +1234,16 @@
     "mappingDeleteConfirm": "Remove the mapping from group \"{{group}}\" to \"{{role}}\"? The role is revoked from that group. This cannot be undone.",
     "defaultRoleTitle": "Default role",
     "defaultRoleBody": "A tenant role given to any member no group mapping matches. It is applied at their next sign-in and removed once a mapping starts matching; a hand-placed assignment of the same role always wins.",
-    "defaultRoleNone": "None (plain member)",
+    "defaultRoleNone": "member (built-in default)",
     "defaultRoleNeedsTenant": "Create a tenant-scope custom role above to use it as the default.",
     "tenantAssignTitle": "Tenant role assignments",
     "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
     "memberLabel": "Member",
     "memberPlaceholder": "Select member",
     "mappingTenantBody": "Confer a TENANT role (like creating spaces) on everyone in an IdP group. Membership resolves live from your identity provider — nobody is added or billed. A mapping onto a space's role is made in that space's Members tab.",
-    "mixedScopeHint": "A role is either a space/page role or a tenant role - uncheck one side to save."
+    "mixedScopeHint": "A role is either a space/page role or a tenant role - uncheck one side to save.",
+    "sectionTenant": "Tenant",
+    "sectionResource": "Space / Page"
   },
   "detailsEdit": {
     "title": "Edit collapsible",

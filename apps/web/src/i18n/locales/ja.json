@@ -524,7 +524,8 @@
     "commentSummaryMembers": "閲覧できる全メンバー",
     "commentSummaryGuests": "閲覧リンクのゲスト",
     "managedBadge": "マッピング",
-    "managedByMapping": "グループマッピング由来の付与です。下の「グループマッピング」から削除してください。"
+    "managedByMapping": "グループマッピング由来の付与です。下の「グループマッピング」から削除してください。",
+    "replaceConfirm": "「{{who}}」の現在のロール（{{current}}）を {{next}} に置き換えます。よろしいですか？（1 人につき 1 ロール）"
   },
   "auth": {
     "signInTitle": "wikistead にサインイン",
@@ -1232,14 +1233,16 @@
     "mappingDeleteConfirm": "グループ「{{group}}」→「{{role}}」のマッピングを削除しますか？そのグループからロールが取り消されます。元に戻せません。",
     "defaultRoleTitle": "デフォルトロール",
     "defaultRoleBody": "どのグループマッピングにも該当しないメンバーに付与するテナントロール。次回サインイン時に適用され、マッピングが該当し始めると外れます。同じロールを手動で割り当てている場合は手動が優先されます。",
-    "defaultRoleNone": "なし（通常メンバー）",
+    "defaultRoleNone": "member（組み込みの基本）",
     "defaultRoleNeedsTenant": "デフォルトにするテナントスコープのカスタムロールを上で作成してください。",
     "tenantAssignTitle": "テナントロールの割り当て",
     "tenantAssignBody": "テナントロール（スペースの作成など）はメンバーの属性なので、ここで付与します。スペースのロールは各スペースの「メンバー」タブで付与します。",
     "memberLabel": "メンバー",
     "memberPlaceholder": "メンバーを選択",
     "mappingTenantBody": "IdP グループのメンバー全員に**テナントロール**（スペース作成など）を付与します。メンバーシップは ID プロバイダから随時解決されます（メンバー追加や課金は発生しません）。スペースのロールへのマッピングは、各スペースの「メンバー」タブで設定します。",
-    "mixedScopeHint": "ロールはスペース/ページ用かテナント用のどちらかです。片方のチェックを外すと保存できます。"
+    "mixedScopeHint": "ロールはスペース/ページ用かテナント用のどちらかです。片方のチェックを外すと保存できます。",
+    "sectionTenant": "テナント",
+    "sectionResource": "スペース / ページ"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",

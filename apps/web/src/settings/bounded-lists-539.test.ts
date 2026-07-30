@@ -17,8 +17,8 @@ import { resolve } from "node:path";
 const BOUNDED_LISTS: { file: string; testid: string; ticket: string }[] = [
   { file: "AdminAuditTab.tsx", testid: "audit-scrollbox", ticket: "#503 audit ledger" },
   { file: "SpaceModerationTab.tsx", testid: "moderation-list", ticket: "#521 patrol queue" },
-  { file: "SpaceMembersTab.tsx", testid: "space-grant-list", ticket: "#539 space members" },
-  { file: "SpaceMembersTab.tsx", testid: "space-role-assign-list", ticket: "#539 role assignments" },
+  // #536 ①: the grant list and the assignment list merged into ONE member list — one bounded box.
+  { file: "SpaceMembersTab.tsx", testid: "space-member-list", ticket: "#539/#536 space members" },
   // (review reject): the FOURTH instance was missed in the very fix that promised "add a row
   // here" — the mapping list sat unbounded right below the two lists that were fixed.
   { file: "SpaceGroupMappings.tsx", testid: "space-mapping-list", ticket: "#539 group mappings" },

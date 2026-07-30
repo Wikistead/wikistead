@@ -60,9 +60,14 @@ describe("#529/#552: the effective comment-audience summary", () => {
     expect(src.indexOf('data-testid="comment-baseline"'), "baseline sits above the toggle map").toBeLessThan(src.indexOf("comment-open-guests"));
   });
 
-  it("#552: `comment` left the picker but NOT the ordering (API-made rows must not float to the top)", () => {
+  it("#552: `comment` left the picker but NOT the display (API-made rows must still render + sort)", () => {
+    // #536 ①: the capability-power CAP_ORDER sort went with the split lists — the merged list sorts
+    // by principal LABEL (capability-independent, so an API-made comment row cannot float to a bogus
+    // indexOf(-1) position by construction). What must survive: the row still DISPLAYS as its noun
+    // (CAP_NOUN keeps `comment`), and the picker still does not offer it (#552).
     const src = readFileSync(resolve(import.meta.dirname, "./SpaceMembersTab.tsx"), "utf8");
-    expect(src).toMatch(/CAP_ORDER: PageRelation\[\] = \["view", "comment", "edit", "moderate", "manage"\]/);
+    expect(src).toMatch(/comment: "commenter"/); // CAP_NOUN still names an API-made comment row
     expect(src).toMatch(/GRANTABLE: PageRelation\[\] = \["view", "edit", "moderate", "manage"\]/);
+    expect(src).toMatch(/\.sort\(\(x, y\) => x\.label\.localeCompare\(y\.label\)/); // label sort, not indexOf
   });
 });

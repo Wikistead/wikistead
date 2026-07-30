@@ -490,6 +490,110 @@ export async function backfillSpaceViewerMembers(fga: OpenFgaClient, spaceIds: s
   return written
 }
 
+// ── #536 item 2: ONE principal = ONE role on a space ──────────────────
+//
+// Policy (reported on the ticket): a manual add REPLACES the principal's other manual roles instead of
+// stacking — the alternative (reject) turns the common "change someone's role" edit into revoke-then-add,
+// and the Members picker offers no way to see why the add was refused. Two layers: the UI confirms the
+// replacement; the server converges regardless of who calls (a direct API double-grant cannot stack).
+//
+// Boundaries
+// - SPACE scope only — the ruling is about the space Members surface; page/tenant assignment semantics
+// are unchanged.
+// - A MACHINE-owned row (origin mapping/default) is never replaced by a manual add — ADR-183 §1: the
+// mapping owns its assignment. The add is refused up front (409) so the machine state stays intact.
+// - Legacy ROWLESS grants (pre-086 FGA tuples with no role_assignments row) are swept in the same pass,
+// so the principal converges to exactly the new role. This IS the recorded migration policy for
+// pre-existing duplicate data: it is cleaned up on the next add for that principal (no bulk backfill
+// untouched principals keep their historical rows/tuples until someone edits them).
+
+// The up-front refusal: adding a role to a principal whose CURRENT role is machine-managed would replace
+// machine state. Runs BEFORE any write so a 409 leaves everything untouched.
+export async function assertNoMachineSpaceRole(
+  db: TenantDb,
+  args: { spaceId: string; principal: string; keep: { builtinCapability?: string; roleId?: string } },
+): Promise<void> {
+  const rows = await db.sql<{ origin: string; role_id: string | null; builtin_capability: string | null }[]>`
+    SELECT origin, role_id, builtin_capability FROM role_assignments
+    WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.principal}`
+  const isKeep = (r: { role_id: string | null; builtin_capability: string | null }) =>
+    (args.keep.builtinCapability !== undefined && r.builtin_capability === args.keep.builtinCapability) ||
+    (args.keep.roleId !== undefined && r.role_id === args.keep.roleId)
+  if (rows.some((r) => !isKeep(r) && r.origin !== 'manual')) {
+    throw Object.assign(new Error('the principal already holds a machine-managed role — edit the mapping instead'), { statusCode: 409 })
+  }
+}
+
+// The convergence sweep: runs AFTER the new row landed (so the principal never has an access gap), and
+// removes (a) every OTHER manual row via the refcount-aware unassign core, then (b) any legacy rowless
+// FGA capability the surviving rows don't cover. One reindex at the end when anything changed.
+export async function sweepOtherSpaceRoles(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: {
+    spaceId: string; tenantId: string; userId: string; principal: string;
+    keep: { builtinCapability?: string; roleId?: string }; keepCaps: string[]; plan?: string;
+  },
+): Promise<void> {
+  const rows = await db.sql<{ id: string; origin: string; role_id: string | null; builtin_capability: string | null }[]>`
+    SELECT id, origin, role_id, builtin_capability FROM role_assignments
+    WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.principal}`
+  const isKeep = (r: { role_id: string | null; builtin_capability: string | null }) =>
+    (args.keep.builtinCapability !== undefined && r.builtin_capability === args.keep.builtinCapability) ||
+    (args.keep.roleId !== undefined && r.role_id === args.keep.roleId)
+  // `manage` is EXEMPT from auto-replacement (row-tracked here, rowless below): silently demoting a
+  // manager on an unrelated add is the owner-lockout footgun — a manager is demoted only by an explicit
+  // revoke. Everything below manage converges to one role.
+  const others = rows.filter((r) => !isKeep(r) && r.origin === 'manual' && r.builtin_capability !== 'manage')
+  const { unassignRoleInTx } = await import('./roles.js')
+  let changed = false
+  for (const r of others) {
+    await unassignRoleInTx(db, fga, driver, {
+      tenant: { id: args.tenantId, plan: args.plan ?? '' },
+      assignmentId: r.id,
+      actorSub: args.userId,
+      // keep each mechanism's own audit vocabulary (the #536 rule: the mechanism changed, the event didn't)
+      ...(r.builtin_capability !== null ? { auditAction: 'space.access_revoked' } : {}),
+      skipAudit: args.plan === undefined,
+    })
+  }
+  // Legacy rowless tuples: whatever FGA still grants this principal beyond the kept role's bundle goes,
+  // unless a surviving row covers it (same covering rule as the rowless revoke path).
+  // (unassignRoleInTx reindexed per removed row already — only the rowless tuple sweep below still needs one)
+  changed = false
+  const { tuples } = await fga.read({ user: args.principal, object: `space:${args.spaceId}` })
+  // Group the tuples that ACTUALLY exist by capability — deletion must target exactly these keys (a
+  // legacy/seeded grant can hold only half of an expansion pair, and deleting a non-existent tuple is
+  // an FGA error that would fail the whole add after the new row already landed).
+  const heldByCap = new Map<string, { user: string; relation: string; object: string }[]>()
+  for (const t of tuples ?? []) {
+    const rel = t.key?.relation ?? ''
+    const cap = RELATION_TO_CAP[rel]
+    if (!cap) continue
+    const list = heldByCap.get(cap) ?? []
+    list.push({ user: args.principal, relation: rel, object: `space:${args.spaceId}` })
+    heldByCap.set(cap, list)
+  }
+  for (const [cap, held] of heldByCap) {
+    if (args.keepCaps.includes(cap)) continue
+    // A ROWLESS `manage` is indistinguishable from the structural owner leaf createSpace writes for the
+    // creator — sweeping it would let "assign any role to the owner" silently destroy their manage and
+    // lock them out of their own space. Rowless manage is therefore never swept (an EXPLICIT, row-tracked
+    // manager grant still replaces normally above — that swap is visible and confirmed in the UI).
+    if (cap === 'manage') continue
+    const covering = await db.sql`
+      SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+      WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId} AND a.principal = ${args.principal}
+        AND ${cap} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
+    if (covering.length === 0) {
+      await deleteTuples(fga, held)
+      changed = true
+    }
+  }
+  if (changed) await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+}
+
 export async function grantSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -516,6 +620,9 @@ export async function grantSpaceAccess(
   if (held?.origin === 'mapping') {
     throw Object.assign(new Error('managed by a group mapping — edit the mapping instead'), { statusCode: 409 })
   }
+  // #536 item 2: 1 principal = 1 role — a machine-owned row refuses the add up front; after the
+  // new row lands, the principal's other manual roles (rows + legacy rowless tuples) are swept.
+  await assertNoMachineSpaceRole(db, { spaceId: args.spaceId, principal: args.grantee, keep: { builtinCapability: args.capability } })
   await assignRoleInTx(db, fga, driver, {
     tenant: { id: args.tenantId, plan: args.plan ?? '' },
     roleId: null,
@@ -530,6 +637,10 @@ export async function grantSpaceAccess(
     onDuplicate: 'ignore',
     auditAction: 'space.access_granted',
     skipAudit: args.plan === undefined,
+  })
+  await sweepOtherSpaceRoles(db, fga, driver, {
+    spaceId: args.spaceId, tenantId: args.tenantId, userId: args.userId, principal: args.grantee,
+    keep: { builtinCapability: args.capability }, keepCaps: [args.capability], plan: args.plan,
   })
   emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
 }

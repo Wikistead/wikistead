@@ -37,14 +37,20 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   await page.goto("/spaces/demo_space/settings/members");
   // #536 §6: assignment goes through the MERGED picker (one control for built-ins and custom roles);
   // the old space-role-select/-member-input/-add form is gone.
-  await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
   await page.getByTestId("space-grant-input").fill("dev");
   await page.getByTestId("space-grant-candidate").first().click();
   await page.getByTestId("space-grant-capability").click();
   await page.getByRole("option", { name }).click();
   await expect(page.getByRole("option")).toHaveCount(0); // the listbox is fully closed (radix restores pointer-events)
   await page.getByTestId("space-grant-add").click();
-  await expect(page.getByTestId("space-role-assign-list")).toContainText(name, { timeout: 8000 });
+  // #536 ②: adding over an existing different role opens the replace confirm (1 principal = 1
+  // role). Residue rows on the shared demo space make this conditional.
+  {
+    const replaceConfirm = page.getByTestId("space-role-replace-confirm");
+    if (await replaceConfirm.isVisible({ timeout: 1500 }).catch(() => false)) await replaceConfirm.click();
+  }
+  await expect(page.getByTestId("space-member-list")).toContainText(name, { timeout: 8000 });
 
   // Deleting a role with live assignments is refused (the 409 guard) — the toast explains.
   await page.goto("/admin/roles");
@@ -55,8 +61,8 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
 
   // Unassign (again where the grant lives) → then delete succeeds.
   await page.goto("/spaces/demo_space/settings/members");
-  await page.getByTestId("space-role-assign-item").filter({ hasText: name }).getByTestId("space-role-assign-revoke").click();
-  await expect(page.getByTestId("space-role-assign-list")).not.toContainText(name, { timeout: 8000 });
+  await page.getByTestId("space-member-item").filter({ hasText: name }).getByTestId("space-role-assign-revoke").click();
+  await expect(page.getByTestId("space-member-list")).not.toContainText(name, { timeout: 8000 });
   await page.goto("/admin/roles");
   const row3 = page.getByTestId("custom-role-row").filter({ hasText: name });
   await row3.getByTestId("role-delete").click();
@@ -181,7 +187,7 @@ test("#420 built-ins render as read-only capability checkboxes, and members are 
   // which screen shows it. #514 slice 4 moved assignment to where each grant lives, so the property is
   // pinned there: the space Members tab still picks a person by name and resolves the principal itself.
   await page.goto("/spaces/demo_space/settings/members");
-  await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
   await page.getByTestId("space-grant-input").fill("e");
   const item = page.getByTestId("space-grant-candidate").first();
   await expect(item, "a tenant member matched the search").toBeVisible({ timeout: 8000 });

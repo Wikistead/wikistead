@@ -41,19 +41,22 @@ describe("#536: space access is granted from one control", () => {
     expect(src).not.toMatch(/`group:\$\{/);
   });
 
-  it("still LISTS role assignments, which the grant list cannot show", () => {
-    // Removing the form must not remove the section: an assignment is a role, and the grant list above
-    // only knows capabilities. Losing this list would hide who holds what.
-    expect(src).toContain('data-testid="space-role-assign-list"');
+  it("still LISTS role assignments — now inside the ONE merged member list (#536 ①)", () => {
+    // The merge must not lose the assignments: an assignment is a role the grant machinery cannot show,
+    // and its revoke must still reach the assignment mechanism. The old split list testids are GONE —
+    // the red-check: they must not coexist with the merged list.
+    expect(src).toContain('data-testid="space-member-list"');
     expect(src).toContain('data-testid="space-role-assign-revoke"');
+    expect(src).not.toContain('data-testid="space-role-assign-list"');
+    expect(src).not.toContain('data-testid="space-grant-list"');
   });
 
-  it("shows that list even when no custom roles remain to assign", () => {
+  it("renders assignments unconditionally — never gated on the assignable-roles list", () => {
     // An entitlement lapse empties the assignable-roles list while the assignments themselves live on as
-    // FGA tuples. Gating the section on the former alone made existing assignments invisible — and an
-    // assignment you cannot see is one you cannot revoke.
-    const at = src.indexOf('data-testid="space-role-assign"');
-    const guard = src.slice(src.lastIndexOf("{", src.lastIndexOf("(", at)), at);
-    expect(guard, "the section survives an empty role list").toMatch(/roleAssignments\.data\?\.length/);
+    // FGA tuples. The merged list renders mergedRows (grants + assignments) with no customRoles guard,
+    // so an assignment you hold is always one you can see and revoke.
+    const at = src.indexOf('data-testid="space-member-list"');
+    const before = src.slice(Math.max(0, at - 400), at);
+    expect(before, "no customRoles-length gate wraps the merged list").not.toMatch(/customRoles\.length/);
   });
 });

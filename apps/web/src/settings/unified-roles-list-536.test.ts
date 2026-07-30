@@ -33,6 +33,33 @@ describe("#536 one roles list, one creation flow", () => {
     expect(src).toContain('data-testid="role-builtin-badge"');
   });
 
+  // #536 ④: the ONE set is presented in TWO scope sections — tenant above, space/page below,
+  // each built-in → custom (the re-ruling keeps "one set", changes the dividing axis to SCOPE).
+  it(" ④: scope sections — tenant precedes space/page; each orders built-in → custom (DOM-pinned)", () => {
+    const tenantHdr = src.indexOf('data-testid="roles-section-tenant"');
+    const resourceHdr = src.indexOf('data-testid="roles-section-resource"');
+    expect(tenantHdr, "tenant section exists").toBeGreaterThan(-1);
+    expect(resourceHdr, "resource section exists").toBeGreaterThan(-1);
+    expect(tenantHdr, "tenant section comes first").toBeLessThan(resourceHdr);
+    // tenant section: built-ins (member/admin) precede its custom rows
+    const tenantSeg = src.slice(tenantHdr, resourceHdr);
+    expect(tenantSeg.indexOf('data-testid="builtin-role-member"')).toBeGreaterThan(-1);
+    expect(tenantSeg.indexOf('data-testid="builtin-role-member"')).toBeLessThan(tenantSeg.indexOf('scope === "tenant"'));
+    // resource section: built-in resource roles precede its custom rows
+    const resourceSeg = src.slice(resourceHdr);
+    expect(resourceSeg.indexOf("roles.data?.builtIn")).toBeGreaterThan(-1);
+    expect(resourceSeg.indexOf("roles.data?.builtIn")).toBeLessThan(resourceSeg.indexOf('scope !== "tenant"'));
+  });
+
+  // #536 ③: the default-role "no selection" label says the TRUTH (everyone falls back to the
+  // built-in member role) — not "None", which read as "no role at all".
+  it(" ③: the default-role empty option names the member fallback (en/ja)", () => {
+    for (const loc of ["en", "ja"]) {
+      const j = JSON.parse(readFileSync(resolve(import.meta.dirname, `../i18n/locales/${loc}.json`), "utf8"));
+      expect(j.adminRoles.defaultRoleNone, `${loc} names member`).toMatch(/member/);
+    }
+  });
+
   it("built-ins stay read-only in the same control custom roles edit with", () => {
     // the four resource built-ins and admin render CapabilityPicker with `disabled`
     expect(src).toMatch(/idPrefix=\{`builtin-\$\{r\.name\}`\} list=\{CAPABILITIES\} disabled/);

@@ -70,7 +70,7 @@ test("#497 §3: the default-role setting persists across a reload", async ({ pag
 
   // Back to None, then delete the role (no live assignment yet).
   await page.getByTestId("default-role").click();
-  await page.getByRole("option", { name: "None (plain member)" }).click();
+  await page.getByRole("option", { name: "member (built-in default)" }).click();
   await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click();
   await expect(page.getByTestId("roles-list")).not.toContainText(role, { timeout: 8000 });

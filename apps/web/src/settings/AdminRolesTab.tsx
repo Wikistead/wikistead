@@ -157,109 +157,121 @@ export function AdminRolesTab() {
     notify.error(status === 403 ? t("adminRoles.notEntitled") : status === 409 ? t("adminRoles.conflict") : t("toast.actionFailed"));
   };
 
+  // #536 ④: one renderer for a custom-role row, used by BOTH scope sections (the row itself is
+  // scope-agnostic; only which section it sits in changed).
+  const renderCustomRole = (r: { id: string; name: string; capabilities: string[]; scope: string }) => {
+    const commitRename = () => {
+      if (renamingId !== r.id) return; // Enter already committed; the trailing blur is a no-op
+      const v = renameValue.trim();
+      setRenamingId(null);
+      if (!v || v === r.name) return;
+      updateRole.mutate({ id: r.id, name: v, capabilities: r.capabilities }, {
+        onSuccess: () => notify.success(t("toast.saved")),
+        onError,
+      });
+    };
+    return (
+      <div key={r.id} className="flex flex-col gap-1" data-testid="custom-role-row">
+        <div className="flex items-center gap-2 text-sm">
+          {renamingId === r.id ? (
+            <Input inputSize="sm" className="max-w-xs" value={renameValue} autoFocus
+              aria-label={t("adminRoles.nameLabel")} data-testid="role-rename-input"
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                else if (e.key === "Escape") setRenamingId(null);
+              }} />
+          ) : (
+            <>
+              <span className="font-medium">{r.name}</span>
+              <RoleBadges scope={r.scope === "tenant" ? "tenant" : "resource"} />
+              <IconButton aria-label={t("adminRoles.rename")} data-tip={t("adminRoles.rename")} data-testid="role-rename"
+                onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}><Pencil size={14} /></IconButton>
+            </>
+          )}
+          <span className="flex-1" />
+          {/* #504: red at rest + confirm-before-delete (irreversible — assignments die with it) */}
+          <IconButton aria-label={t("adminRoles.delete")} data-testid="role-delete" variant="danger"
+            onClick={() => setDeletingRole({ id: r.id, name: r.name })}><X size={14} /></IconButton>
+        </div>
+        <CapabilityPicker
+          value={r.capabilities}
+          idPrefix="custom"
+          list={r.scope === "tenant" ? TENANT_CAPABILITIES : CAPABILITIES}
+          disabled={updateRole.isPending}
+          lockLast
+          onChange={(caps) => {
+            if (caps.length === 0) return; // belt + braces under lockLast — never PUT an empty bundle
+            updateRole.mutate({ id: r.id, name: r.name, capabilities: caps }, {
+              onSuccess: () => notify.success(t("toast.saved")),
+              onError,
+            });
+          }}
+        />
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-[860px] p-6" data-testid="admin-roles">
       <h2 className="mt-0">{t("adminRoles.title")}</h2>
 
-      {/* #536 (user re-ruling): ONE roles list. Built-in and custom, tenant- and resource-scope,
-          side by side in a single list — scope is a ROW ATTRIBUTE (badge), not a section split, so a
-          tenant role is made and found in the same place as every other role. What each row keeps:
+      {/* #536 (user re-ruling) + ④: ONE set of roles, presented in TWO scope sections —
+          "Tenant" above, "Space / Page" below (the ruling: tenant roles and resource roles mixed in one
+          flat list read as a jumble; the dividing axis is SCOPE, not built-in/custom). Within each
+          section the order is built-in → custom (DOM-pinned). What each row keeps:
           - #445 / #469: every role reads the SAME way — bold name + a CapabilityPicker; built-ins
             are the read-only version of the very control custom roles edit with.
           - `member` is the one editable built-in cell: its boxes ARE the tenant defaults
             (tenant#space_creator wildcard / api_key_issue, #496) through the unchanged endpoint, and
             stay disabled until the defaults have ARRIVED (an authz control must not guess its state).
           - Custom rows: live per-op capability toggles (#445), pencil rename, #504 red delete. */}
-      <div className="mb-2 flex flex-col gap-2" data-testid="roles-list">
-        <div className="flex flex-col gap-1" data-testid="builtin-role-member">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">member</span>
-            <RoleBadges scope="tenant" builtIn />
-          </div>
-          <CapabilityPicker
-            value={[
-              ...((defaults.data?.member.createSpaces ?? true) ? ["createSpaces"] : []),
-              // #496: default OFF — provisioning seeds no member tuple, so issuance starts admin-only.
-              ...((defaults.data?.member.issueApiKeys ?? false) ? ["issueApiKeys"] : []),
-            ]}
-            idPrefix="builtin-member"
-            list={TENANT_CAPABILITIES}
-            disabled={!defaults.data || setDefaults.isPending}
-            onChange={(caps) => setDefaults.mutate({ memberCreateSpaces: caps.includes("createSpaces"), memberIssueApiKeys: caps.includes("issueApiKeys") }, {
-              onSuccess: () => notify.success(t("toast.saved")),
-              onError,
-            })}
-          />
-        </div>
-        <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">admin</span>
-            <RoleBadges scope="tenant" builtIn />
-          </div>
-          <CapabilityPicker value={["createSpaces", "issueApiKeys"]} idPrefix="builtin-admin" list={TENANT_CAPABILITIES} disabled />
-        </div>
-        {(roles.data?.builtIn ?? []).map((r) => (
-          <div key={r.name} className="flex flex-col gap-1">
+      <div className="mb-2 flex flex-col gap-3" data-testid="roles-list">
+        <h3 className="m-0 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-tenant">{t("adminRoles.sectionTenant")}</h3>
+        <div className="flex flex-col gap-2" data-testid="roles-list-tenant">
+          <div className="flex flex-col gap-1" data-testid="builtin-role-member">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">{r.name}</span>
-              <RoleBadges scope="resource" builtIn />
+              <span className="text-sm font-medium">member</span>
+              <RoleBadges scope="tenant" builtIn />
             </div>
-            <CapabilityPicker value={r.capabilities} idPrefix={`builtin-${r.name}`} list={CAPABILITIES} disabled />
+            <CapabilityPicker
+              value={[
+                ...((defaults.data?.member.createSpaces ?? true) ? ["createSpaces"] : []),
+                // #496: default OFF — provisioning seeds no member tuple, so issuance starts admin-only.
+                ...((defaults.data?.member.issueApiKeys ?? false) ? ["issueApiKeys"] : []),
+              ]}
+              idPrefix="builtin-member"
+              list={TENANT_CAPABILITIES}
+              disabled={!defaults.data || setDefaults.isPending}
+              onChange={(caps) => setDefaults.mutate({ memberCreateSpaces: caps.includes("createSpaces"), memberIssueApiKeys: caps.includes("issueApiKeys") }, {
+                onSuccess: () => notify.success(t("toast.saved")),
+                onError,
+              })}
+            />
           </div>
-        ))}
-        {(roles.data?.custom ?? []).map((r) => {
-          const commitRename = () => {
-            if (renamingId !== r.id) return; // Enter already committed; the trailing blur is a no-op
-            const v = renameValue.trim();
-            setRenamingId(null);
-            if (!v || v === r.name) return;
-            updateRole.mutate({ id: r.id, name: v, capabilities: r.capabilities }, {
-              onSuccess: () => notify.success(t("toast.saved")),
-              onError,
-            });
-          };
-          return (
-            <div key={r.id} className="flex flex-col gap-1" data-testid="custom-role-row">
-              <div className="flex items-center gap-2 text-sm">
-                {renamingId === r.id ? (
-                  <Input inputSize="sm" className="max-w-xs" value={renameValue} autoFocus
-                    aria-label={t("adminRoles.nameLabel")} data-testid="role-rename-input"
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onBlur={commitRename}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") commitRename();
-                      else if (e.key === "Escape") setRenamingId(null);
-                    }} />
-                ) : (
-                  <>
-                    <span className="font-medium">{r.name}</span>
-                    <RoleBadges scope={r.scope === "tenant" ? "tenant" : "resource"} />
-                    <IconButton aria-label={t("adminRoles.rename")} data-tip={t("adminRoles.rename")} data-testid="role-rename"
-                      onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}><Pencil size={14} /></IconButton>
-                  </>
-                )}
-                <span className="flex-1" />
-                {/* #504: red at rest + confirm-before-delete (irreversible — assignments die with it) */}
-                <IconButton aria-label={t("adminRoles.delete")} data-testid="role-delete" variant="danger"
-                  onClick={() => setDeletingRole({ id: r.id, name: r.name })}><X size={14} /></IconButton>
-              </div>
-              <CapabilityPicker
-                value={r.capabilities}
-                idPrefix="custom"
-                list={r.scope === "tenant" ? TENANT_CAPABILITIES : CAPABILITIES}
-                disabled={updateRole.isPending}
-                lockLast
-                onChange={(caps) => {
-                  if (caps.length === 0) return; // belt + braces under lockLast — never PUT an empty bundle
-                  updateRole.mutate({ id: r.id, name: r.name, capabilities: caps }, {
-                    onSuccess: () => notify.success(t("toast.saved")),
-                    onError,
-                  });
-                }}
-              />
+          <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">admin</span>
+              <RoleBadges scope="tenant" builtIn />
             </div>
-          );
-        })}
+            <CapabilityPicker value={["createSpaces", "issueApiKeys"]} idPrefix="builtin-admin" list={TENANT_CAPABILITIES} disabled />
+          </div>
+          {(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map(renderCustomRole)}
+        </div>
+        <h3 className="m-0 mt-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-resource">{t("adminRoles.sectionResource")}</h3>
+        <div className="flex flex-col gap-2" data-testid="roles-list-resource">
+          {(roles.data?.builtIn ?? []).map((r) => (
+            <div key={r.name} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">{r.name}</span>
+                <RoleBadges scope="resource" builtIn />
+              </div>
+              <CapabilityPicker value={r.capabilities} idPrefix={`builtin-${r.name}`} list={CAPABILITIES} disabled />
+            </div>
+          ))}
+          {(roles.data?.custom ?? []).filter((r) => r.scope !== "tenant").map(renderCustomRole)}
+        </div>
         {(roles.data?.custom.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.customEmpty")}</p>}
       </div>
       {creating ? (

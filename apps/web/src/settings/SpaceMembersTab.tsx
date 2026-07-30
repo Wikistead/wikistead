@@ -15,6 +15,7 @@ import { Select } from "../ui/Select";
 import { resolveGrantDispatch } from "./grant-dispatch";
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
+import { ConfirmDialog } from "../ui/dialogs";
 import { SpaceGroupMappings } from "./SpaceGroupMappings";
 
 interface SpaceCtx { spaceId: string; name: string }
@@ -23,14 +24,10 @@ interface SpaceCtx { spaceId: string; name: string }
 // that, and conflating them is what the review rejected — "why is a role that isn't in the roles
 // list showing up here?".
 //
-// ORDER covers every capability a grant row can HOLD, because rows sort by indexOf and anything missing
-// lands at -1 and floats above the rest. A comment grant made through the API (or before this change) has
-// to display correctly.
-const CAP_ORDER: PageRelation[] = ["view", "comment", "edit", "moderate", "manage"];
-// #552 (user ruling): `comment` leaves the picker with the built-in commenter role — a comment-only
-// grant is composed via a CUSTOM role now. CAP_ORDER above deliberately KEEPS "comment": rows created
-// through the API or before this change must still sort into place instead of floating to the top at
-// index -1 (the "the ordering set ⊇ the offering set" rule).
+// #536 ①: rows sort by principal NAME (one rule for the merged list) — the old capability-power
+// CAP_ORDER sort went with the split lists. #552 (user ruling): `comment` leaves the picker with the
+// built-in commenter role — a comment-only grant is composed via a CUSTOM role now; a comment row made
+// through the API (or before that change) still DISPLAYS correctly (CAP_NOUN keeps its noun).
 const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
 // #445 the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
@@ -79,6 +76,9 @@ export function SpaceMembersTab() {
   // #536: ONE selection for the merged list. The prefix says which mechanism the choice belongs to, so the
   // add handler dispatches on data rather than inferring it from the shape of an id.
   const [pick, setPick] = useState<string>("builtin:view");
+  // #536 ②: 1 principal = 1 role — adding over an existing (different) role REPLACES it. The
+  // server converges regardless (the fortress); this confirm is the "no accidental double-grant" UI layer.
+  const [pendingAdd, setPendingAdd] = useState<{ run: () => void; who: string; current: string; next: string } | null>(null);
   const candidates = useMemberCandidates(spaceId, picked ? "" : query);
   const groups = useTenantGroups(spaceId, mode === "group");
 
@@ -112,6 +112,29 @@ export function SpaceMembersTab() {
   const addUnified = () => {
     const action = resolveGrantDispatch({ pick, mode, picked, groupName });
     if (action.path === "none") return;
+    // #536 ②: if this principal already holds a DIFFERENT role, the add is a REPLACEMENT — say so
+    // before dispatching (the server replaces regardless; this stops the unnoticed double-grant).
+    const nextBadge = action.path === "assign"
+      ? (customRoles.find((r) => r.id === action.roleId)?.name ?? "")
+      : capNoun(action.capability);
+    const who = mode === "group" ? groupName : (picked?.label ?? "");
+    const existing = mergedRows.find((r) => {
+      // `manage` rows never auto-replace (server-side exemption — owner-lockout prevention; a manager is
+      // demoted only by an explicit revoke), so they don't trigger the replace confirm either.
+      if (r.kind === "grant" && r.capability === "manage") return false;
+      if (mode === "group") return r.label === `${groupName} (${t("spaceMembers.group")})`;
+      if (!picked) return false;
+      return r.kind === "grant" ? r.grantee === picked.grantee : r.principal === picked.grantee;
+    });
+    if (existing && existing.badge !== nextBadge && !existing.managed) {
+      setPendingAdd({ run: () => dispatchAdd(action), who, current: existing.badge, next: nextBadge });
+      return;
+    }
+    dispatchAdd(action);
+  };
+
+  const dispatchAdd = (action: ReturnType<typeof resolveGrantDispatch>) => {
+    if (action.path === "none") return;
     if (action.path === "assign") {
       const target = action.target.kind === "group" ? { groupName: action.target.groupName } : { principal: action.target.principal };
       assignRole.mutate({ roleId: action.roleId, resourceType: "space", resourceId: spaceId, ...target }, {
@@ -143,7 +166,7 @@ export function SpaceMembersTab() {
     setQuery("");
   };
 
-  const grants = (access.data ?? []).slice().sort((a, b) => CAP_ORDER.indexOf(b.capability) - CAP_ORDER.indexOf(a.capability));
+  const grants = access.data ?? [];
   // #523 / ADR-190 slice D: the server now resolves each user grantee's full name (override ?? OIDC
   // display_name) on the manage-gated grant list (slice A), so an un-customized member reads as their
   // name, not a sub — the #513 root fix. A departed / cross-tenant sub comes back null and falls back to
@@ -154,6 +177,24 @@ export function SpaceMembersTab() {
     const sub = g.grantee.replace(/^user:/, "");
     return g.displayName || sub;
   };
+
+  // #536 ①: ONE list. A built-in grant row and a custom-role assignment row are the same thing to
+  // the person reading this screen — a principal wearing a role — so they render as one sorted set. The
+  // two mechanisms stay underneath (each row's revoke goes to its own machinery); that is an
+  // implementation fact, not a reason to split the screen. One sort rule: principal name, then badge.
+  type MergedRow =
+    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; grantee: string; capability: PageRelation; principal?: undefined }
+    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: undefined; assignmentId: string; principal: string; grantee?: undefined };
+  const mergedRows: MergedRow[] = [
+    ...grants.map((g) => ({
+      kind: "grant" as const, key: `g:${g.grantee}:${g.capability}`, badge: capNoun(g.capability), custom: false as const,
+      label: label(g), managed: g.managed, grantee: g.grantee, capability: g.capability,
+    })),
+    ...(roleAssignments.data ?? []).map((a) => ({
+      kind: "assignment" as const, key: `a:${a.id}`, badge: a.roleName, custom: true as const,
+      label: rolePrincipalLabel(a.principal), assignmentId: a.id, principal: a.principal,
+    })),
+  ].sort((x, y) => x.label.localeCompare(y.label) || x.badge.localeCompare(y.badge));
 
   return (
     <div className="max-w-[640px] p-6" data-testid="space-members">
@@ -213,25 +254,39 @@ export function SpaceMembersTab() {
         <Button variant="primary" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending || assignRole.isPending} onClick={addUnified} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
       </FormRow>
 
-      {/* #539: the grant list scrolls INSIDE a bounded box — the third instance of the same failure
+      {/* #539: the list scrolls INSIDE a bounded box — the third instance of the same failure
           (#503 audit ledger, #521 patrol queue), so it takes the same 26rem box rather than a third
-          bespoke treatment. A space with many members used to push everything below it — the custom-role
-          assignments and the group mappings — past the fold, which is the whole reason those sections
-          were hard to reach. The page keeps its own scroll; only this list scrolls. */}
-      <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-grant-list">
-        {grants.map((g) => (
-          <div key={`${g.grantee}:${g.capability}`} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-grant-item">
-            <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={g.capability}>{capNoun(g.capability)}</span>
-            <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{label(g)}</span>
+          bespoke treatment. The page keeps its own scroll; only this list scrolls.
+          #536 ①: built-in grant rows and custom-role assignment rows are ONE list (the old
+          space-grant-list / space-role-assign-list pair is gone). Row badges: a built-in wears the
+          capability noun, a custom role its name (accent); each row's revoke reaches its own mechanism. */}
+      <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-member-list">
+        {mergedRows.map((r) => (
+          <div key={r.key} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-member-item" data-kind={r.kind}>
+            {r.custom ? (
+              <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-[var(--accent)]">{r.badge}</span>
+            ) : (
+              <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability}>{r.badge}</span>
+            )}
+            <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{r.label}</span>
             {/* #497 (088): a mapping-conferred row is machine-managed (ADR-183 §1) — no revoke affordance
                 here (the server 409s it anyway; this is the read-only-with-a-pointer rendering). It is
                 removed by deleting the MAPPING in the group-mappings section below. */}
-            {g.managed ? (
+            {r.kind === "grant" && r.managed ? (
               <span className="flex-none rounded bg-bg-subtle px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="space-grant-managed" data-tip={t("spaceMembers.managedByMapping")}>{t("spaceMembers.managedBadge")}</span>
-            ) : (
+            ) : r.kind === "grant" ? (
               /* #504: red at rest; no confirm — a grant is re-grantable in one step (exception candidate) */
               <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" variant="danger"
-                onClick={() => revoke.mutate({ grantee: g.grantee, capability: g.capability }, {
+                onClick={() => revoke.mutate({ grantee: r.grantee, capability: r.capability }, {
+                  onSuccess: () => notify.success(t("toast.accessRevoked")),
+                  onError: () => notify.error(t("toast.actionFailed")),
+                })}>
+                <X size={14} />
+              </IconButton>
+            ) : (
+              /* #504: red at rest; no confirm — an unassignment is re-assignable in one step */
+              <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-role-assign-revoke" variant="danger"
+                onClick={() => unassignRole.mutate(r.assignmentId, {
                   onSuccess: () => notify.success(t("toast.accessRevoked")),
                   onError: () => notify.error(t("toast.actionFailed")),
                 })}>
@@ -240,42 +295,17 @@ export function SpaceMembersTab() {
             )}
           </div>
         ))}
-        {grants.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
+        {mergedRows.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
       </div>
 
-      {/* #485 / #514: custom-role assignments for THIS space (roles are DEFINED in the tenant Roles tab and
-          only ASSIGNED here). Each assignment expands to the role's capability bundle server-side,
-          manage-gated.
-          #536 / ADR-188 §6: this section no longer carries its own add form. Adding is ONE control — the
-          merged picker above, where a custom role sits in the same list as a built-in capability. The
-          second form was strictly weaker (users only, never groups) and it built its principal string
-          itself, which is exactly where the group bug came from: two places constructing a principal
-          means one of them can be wrong while the other is right. What remains here is the LIST, which the
-          grant list above cannot show — an assignment is a role, not a capability. */}
-      {(customRoles.length > 0 || (roleAssignments.data?.length ?? 0) > 0) && (
-        <div className="mt-8 border-t border-border pt-4" data-testid="space-role-assign">
-          <h3 className="mt-0 text-sm font-medium">{t("spaceMembers.customRolesTitle")}</h3>
-          <p className="mt-0 mb-3 text-sm text-fg-dim">{t("spaceMembers.customRolesBody")}</p>
-          {/* #539: same bound for the assignment list — it grows with the same membership. */}
-          <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-role-assign-list">
-            {(roleAssignments.data ?? []).map((a) => (
-              <div key={a.id} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-role-assign-item">
-                <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-[var(--accent)]">{a.roleName}</span>
-                <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{rolePrincipalLabel(a.principal)}</span>
-                {/* #504: red at rest; no confirm — an unassignment is re-assignable in one step */}
-                <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-role-assign-revoke" variant="danger"
-                  onClick={() => unassignRole.mutate(a.id, {
-                    onSuccess: () => notify.success(t("toast.accessRevoked")),
-                    onError: () => notify.error(t("toast.actionFailed")),
-                  })}>
-                  <X size={14} />
-                </IconButton>
-              </div>
-            ))}
-            {(roleAssignments.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.customRolesEmpty")}</p>}
-          </div>
-        </div>
-      )}
+      {/* #536 ②: the replacement confirm — adding over a different existing role swaps it. */}
+      <ConfirmDialog
+        open={pendingAdd !== null}
+        message={pendingAdd ? t("spaceMembers.replaceConfirm", { who: pendingAdd.who, current: pendingAdd.current, next: pendingAdd.next }) : ""}
+        confirmTestId="space-role-replace-confirm"
+        onClose={() => setPendingAdd(null)}
+        onConfirm={() => { pendingAdd?.run(); setPendingAdd(null); }}
+      />
 
       {/* #514 / ADR-188 §8: a mapping onto a SPACE role is this space's configuration, so it lives here
           rather than on the tenant Roles tab (which kept a space picker only tenant admins could reach).
