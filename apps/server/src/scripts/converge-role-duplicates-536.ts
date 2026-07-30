@@ -31,6 +31,7 @@
 import postgres from 'postgres'
 import { pathToFileURL } from 'node:url'
 import type { FastifyInstance } from 'fastify'
+import type { OpenFgaClient } from '@openfga/sdk'
 import { buildApp } from '../app.js'
 import { acquireTenantDb } from '../db/index.js'
 import { RELATION_TO_CAP, reindexPublishedPages } from '../routes/spaces.js'
@@ -48,10 +49,12 @@ export const CONVERGE_ACTOR = 'operator:converge-536'
 // and the group still converges among its ordered rows. Ranking the unknown as 0 would have deleted a
 // publish-only role in favour of a bare `view` — a silent capability loss nobody ruled on.
 const RANK: Record<string, number> = { view: 1, comment: 2, edit: 3, moderate: 4 }
+// Object.hasOwn, not `in`/bare lookup — the space-grant-expansion.ts rule: this is an authz decision
+// table, and a bare lookup answers truthy for inherited keys like 'constructor'.
 export const isRankedRow = (r: Pick<DupRow, 'builtin_capability' | 'capabilities'>): boolean =>
   r.builtin_capability != null
-    ? r.builtin_capability in RANK
-    : (r.capabilities ?? []).length > 0 && (r.capabilities ?? []).every((c) => c in RANK)
+    ? Object.hasOwn(RANK, r.builtin_capability)
+    : (r.capabilities ?? []).length > 0 && (r.capabilities ?? []).every((c) => Object.hasOwn(RANK, c))
 
 export interface DupRow {
   id: string
@@ -66,8 +69,8 @@ export interface DupRow {
 
 export const rankOf = (r: Pick<DupRow, 'builtin_capability' | 'capabilities'>): number =>
   r.builtin_capability != null
-    ? RANK[r.builtin_capability] ?? 0
-    : Math.max(0, ...(r.capabilities ?? []).map((c) => RANK[c] ?? 0))
+    ? (Object.hasOwn(RANK, r.builtin_capability) ? RANK[r.builtin_capability]! : 0)
+    : Math.max(0, ...(r.capabilities ?? []).map((c) => (Object.hasOwn(RANK, c) ? RANK[c]! : 0)))
 
 // keeper: rank desc → custom over built-in → newest
 export const pickKeeper = (rows: DupRow[]): DupRow =>
@@ -85,6 +88,10 @@ export interface ConvergencePlanItem {
   remove: string[]
   keepRow: DupRow
   removeRows: { id: string; label: string }[]
+  // ranked, non-manage capabilities held as ROWLESS tuples that no row covers (legacy pre-086 residue,
+  // #536measured: a commenter tuple beside an aaa-role row). Swept by the leftover pass; listed
+  // here so the DRY-RUN shows them before anything runs.
+  rowlessResidue?: string[]
 }
 
 // Enumerate the duplicate groups (>1 manual, non-manage, RANKED rows for one tenant+space+principal)
@@ -94,9 +101,15 @@ export interface ConvergencePlanItem {
 // physically promoted tenant those are DIFFERENT tables (public keeps the frozen pre-promotion copy for
 // rollback), so a plan made here would be a stale snapshot that can neither converge nor go idempotent.
 // Those tenants are reported and skipped; run tenant-scoped tooling for them if it ever matters.
+// `fga` is optional: when provided, the plan ALSO covers principals whose duplicate is ROWLESS —
+// legacy tuples no row covers, sitting beside at least one manual row (the rows are the post-086
+// ledger of intent; uncovered residue converges away, exactly what the runtime add would do). A
+// principal with NO rows at all is never planned — their tuples may be their only access, and the
+// recorded converge-on-next-add policy stays in force for them.
 export async function planConvergence(
   admin: postgres.Sql,
   log: (line: string) => void = console.log,
+  fga?: OpenFgaClient,
 ): Promise<ConvergencePlanItem[]> {
   const skipped = await admin<{ id: string }[]>`
     SELECT DISTINCT t.id FROM role_assignments a JOIN tenants t ON t.id = a.tenant_id
@@ -119,10 +132,12 @@ export async function planConvergence(
   const plan: ConvergencePlanItem[] = []
   for (const g of groups.values()) {
     const ranked = g.filter(isRankedRow)
+    if (ranked.length < 2) continue // nothing to converge in this group (an exempt-only stack stays whole)
+    // report the exempt keeps ONLY for groups that actually converge — logging every unranked role in
+    // the tenant would bury the plan this dry-run exists to show (#499's discipline)
     for (const ex of g.filter((r) => !isRankedRow(r))) {
       log(`keep (unranked capabilities, exempt like manage): ${ex.principal} on space:${ex.resource_id} — ${ex.builtin_capability ?? `role:${ex.role_id}`}`)
     }
-    if (ranked.length < 2) continue // nothing left to converge in this group
     const keep = pickKeeper(ranked)
     const removals = ranked.filter((r) => r.id !== keep.id)
     plan.push({
@@ -134,6 +149,56 @@ export async function planConvergence(
       keepRow: keep,
       removeRows: removals.map((r) => ({ id: r.id, label: r.builtin_capability ?? `role:${r.role_id}` })),
     })
+  }
+  if (fga) {
+    // ROWLESS residue: a principal holding at least one MANUAL row whose FGA tuples grant a ranked,
+    // non-manage capability NO row covers (the engine's COALESCE(capabilities, [builtin]) rule, over
+    // rows of EVERY origin — a mapping-covered capability is not residue). Measured on the motivating
+    // data: a legacy commenter tuple sitting beside an aaa-role row. `manage` never counts (the owner
+    // leaf is rowless by design). Principals already planned above get their residue swept by execute
+    // anyway; principals with NO manual row are never planned (their tuples may be their only access —
+    // the converge-on-next-add policy stays in force for them).
+    const anchored = await admin<{ tenant_id: string; resource_id: string; principal: string; caps: string[] | null; id: string; role_id: string | null; builtin_capability: string | null; capabilities: string[] | null; origin: string; created_at: Date }[]>`
+      SELECT a.tenant_id, a.resource_id, a.principal, COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS caps,
+             a.id, a.role_id, a.builtin_capability, r.capabilities, a.origin, a.created_at
+      FROM role_assignments a
+      LEFT JOIN roles r ON r.id = a.role_id
+      JOIN tenants t ON t.id = a.tenant_id AND t.isolation = 'logical'
+      WHERE a.resource_type = 'space'
+      ORDER BY a.tenant_id, a.resource_id, a.principal, a.created_at`
+    const byPrincipal = new Map<string, (typeof anchored)[number][]>()
+    for (const r of anchored) {
+      const k = `${r.tenant_id} ${r.resource_id} ${r.principal}`
+      byPrincipal.set(k, [...(byPrincipal.get(k) ?? []), r])
+    }
+    for (const [k, rows] of byPrincipal) {
+      if (plan.some((p) => `${p.tenantId} ${p.spaceId} ${p.principal}` === k)) continue // residue rides the row plan
+      const manualRows = rows.filter((r) => r.origin === 'manual')
+      if (manualRows.length === 0) continue // machine-only principals are the mapping's business, not this sweep's
+      const covered = new Set<string>(rows.flatMap((r) => r.caps ?? []))
+      const [tenantId, spaceId, principal] = [rows[0]!.tenant_id, rows[0]!.resource_id, rows[0]!.principal]
+      const { tuples } = await fga.read({ user: principal, object: `space:${spaceId}` })
+      const held = new Set<string>()
+      for (const t of tuples ?? []) {
+        const rel = t.key?.relation ?? ''
+        const cap = RELATION_TO_CAP[rel]
+        if (cap && cap !== 'manage') held.add(cap)
+      }
+      const residue = [...held].filter((c) => Object.hasOwn(RANK, c) && !covered.has(c)).sort()
+      if (residue.length === 0) continue
+      // the anchor for the execute-time existence check (C): the newest MANUAL row — no row is removed
+      // for a residue-only item, but a vanished anchor still means "this principal changed since the
+      // plan; skip".
+      const keepRow = [...manualRows].sort((a, b) => b.created_at.getTime() - a.created_at.getTime())[0]!
+      plan.push({
+        tenantId, spaceId, principal,
+        keep: keepRow.builtin_capability ?? `role:${keepRow.role_id}`,
+        remove: [],
+        keepRow: keepRow as DupRow,
+        removeRows: [],
+        rowlessResidue: residue,
+      })
+    }
   }
   return plan
 }
@@ -245,9 +310,16 @@ if (isMain) {
     const adminUrl = process.env.DATABASE_ADMIN_URL
     if (!adminUrl) { console.error('DATABASE_ADMIN_URL required'); process.exit(1) }
     const admin = postgres(adminUrl, { max: 1, onnotice: () => {} })
-    const plan = await planConvergence(admin)
-    console.log(`${APPLY ? 'APPLY' : 'DRY-RUN'}: ${plan.length} principal(s) with duplicate manual space roles`)
-    for (const p of plan) console.log(JSON.stringify({ tenantId: p.tenantId, spaceId: p.spaceId, principal: p.principal, keep: p.keep, remove: p.remove }))
+    // a bare FGA client for the plan's rowless-residue reads (read-only; same envs the server uses)
+    const { OpenFgaClient } = await import('@openfga/sdk')
+    const fga = new OpenFgaClient({
+      apiUrl: process.env.OPENFGA_API_URL ?? 'http://localhost:8080',
+      storeId: process.env.OPENFGA_STORE_ID!,
+      ...(process.env.OPENFGA_MODEL_ID ? { authorizationModelId: process.env.OPENFGA_MODEL_ID } : {}),
+    })
+    const plan = await planConvergence(admin, console.log, fga)
+    console.log(`${APPLY ? 'APPLY' : 'DRY-RUN'}: ${plan.length} principal(s) with duplicate/residual manual space roles`)
+    for (const p of plan) console.log(JSON.stringify({ tenantId: p.tenantId, spaceId: p.spaceId, principal: p.principal, keep: p.keep, remove: p.remove, ...(p.rowlessResidue ? { rowlessResidue: p.rowlessResidue } : {}) }))
     if (!APPLY || plan.length === 0) { await admin.end(); process.exit(0) }
     const app = await buildApp()
     await app.ready()

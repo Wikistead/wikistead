@@ -716,6 +716,21 @@ export async function listSpaceAccess(
     SELECT builtin_capability, principal FROM role_assignments
     WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND origin = 'mapping' AND builtin_capability IS NOT NULL`)
     .map((r) => `${r.principal} ${r.builtin_capability}`))
+  // #536(5), measured on the motivating data: a CUSTOM-role assignment expands into per-capability
+  // tuples, and this list rendered those expansion tuples as INDEPENDENT built-in grant rows — one aaa
+  // (view/edit/publish/delete) assignment showed as AAA + VIEWER + EDITOR rows for the same principal.
+  // A capability owned by a custom-role row is that row's expansion, not a separate grant, so it is
+  // filtered here — UNLESS the same (principal, capability) also exists as a BUILT-IN row (then the
+  // tuple is the built-in grant's own face and must stay, or its revoke becomes unreachable). `manage`
+  // is never filtered: the manager tuple can be the structural owner leaf, which no row represents.
+  const customOwned = new Set<string>()
+  const builtinOwned = new Set<string>()
+  for (const r of await db.sql<{ principal: string; caps: string[] | null; builtin_capability: string | null }[]>`
+    SELECT a.principal, COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS caps, a.builtin_capability
+    FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+    WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId}`) {
+    for (const c of r.caps ?? []) (r.builtin_capability != null ? builtinOwned : customOwned).add(`${r.principal} ${c}`)
+  }
   const out: { grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null; managed?: boolean }[] = []
   for (const { key } of tuples ?? []) {
     if (!key || !(key.relation in RELATION_TO_CAP)) continue
@@ -724,6 +739,7 @@ export async function listSpaceAccess(
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
     const groupName = resolveGroupName(key.user, byId)
     const cap = RELATION_TO_CAP[key.relation]!
+    if (cap !== 'manage' && customOwned.has(`${key.user} ${cap}`) && !builtinOwned.has(`${key.user} ${cap}`)) continue
     out.push({ grantee: key.user, capability: cap, ...(groupName ? { groupName } : {}), ...(managed.has(`${key.user} ${cap}`) ? { managed: true } : {}) })
   }
   // #523 / ADR-190: FULL name resolution (override ?? OIDC display_name) for the USER grantees. This is a

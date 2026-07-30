@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, writeTuples, deleteTuples } from '@wikistead/authz'
-import { createSpace, deleteSpace } from '../routes/spaces.js'
+import { createSpace, deleteSpace, listSpaceAccess } from '../routes/spaces.js'
 import { buildApp } from '../app.js'
 import { planConvergence, executeConvergence, pickKeeper, isRankedRow, type DupRow } from '../scripts/converge-role-duplicates-536.js'
 import type { Tenant } from '@wikistead/types'
@@ -25,11 +25,14 @@ let db: TenantDb
 let spaceId = ''
 let roleId = ''
 let pubRoleId = ''
+let covRoleId = ''
 const P_DUP = `user:cvg-dup-${STAMP}`
 const P_MGR = `user:cvg-mgr-${STAMP}`
 const P_MAP = `user:cvg-map-${STAMP}`
 const P_PUB = `user:cvg-pub-${STAMP}`  // carries an UNRANKED (publish) role next to a ranked pair
 const P_MIX = `user:cvg-mix-${STAMP}`  // one manual row next to mapping rows — not a duplicate group
+const P_RES = `user:cvg-res-${STAMP}`  // ONE custom-role row + a legacy ROWLESS commenter tuple (the dev shape)
+const P_COV = `user:cvg-cov-${STAMP}`  // an EXEMPT role sharing a ranked cap with a removed builtin row
 
 const insertRow = (principal: string, opts: { builtin?: string; roleId?: string; origin?: string; caps: string[]; at?: string }) =>
   adminPool`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin, created_at)
@@ -77,12 +80,29 @@ beforeAll(async () => {
   await insertRow(P_MIX, { builtin: 'view', origin: 'mapping', caps: ['view'] })
   await insertRow(P_MIX, { builtin: 'edit', caps: ['edit'] })
   await writeTuples(fgaClient, tuplesFor(P_MIX, ['viewer', 'viewer_member', 'editor_member']))
+
+  // the MOTIVATING dev shape: one custom-role row (its expansion tuples) + a legacy ROWLESS commenter
+  // tuple no row covers — no row duplicate, but a rowless residue the fga-aware plan must catch
+  await insertRow(P_RES, { roleId, caps: ['view', 'edit'], at: '2026-01-01T00:00:00Z' })
+  await writeTuples(fgaClient, tuplesFor(P_RES, ['viewer', 'viewer_member', 'editor_member', 'commenter']))
+
+  // covering across the exemption boundary: an EXEMPT role that also owns `view` sits beside a builtin
+  // view/edit duplicate pair. The view row is removed (edit wins) — but the viewer tuple must SURVIVE,
+  // because the exempt row still owns view (refcount + covering, the reviewer's unpinned case).
+  covRoleId = `cvg-cov-role-${STAMP}`
+  await adminPool`INSERT INTO roles (id, tenant_id, name, capabilities, scope) VALUES (${covRoleId}, ${TENANT}, ${`cvg-cov-${STAMP}`}, ARRAY['view','publish']::text[], 'resource')`
+  await insertRow(P_COV, { roleId: covRoleId, caps: ['view', 'publish'], at: '2026-01-01T00:00:00Z' })
+  await insertRow(P_COV, { builtin: 'view', caps: ['view'], at: '2026-01-02T00:00:00Z' })
+  await insertRow(P_COV, { builtin: 'edit', caps: ['edit'], at: '2026-01-03T00:00:00Z' })
+  await writeTuples(fgaClient, tuplesFor(P_COV, ['viewer', 'viewer_member', 'publisher', 'editor_member']))
 }, 120_000)
 
 afterAll(async () => {
   await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId}`.catch(() => {})
   await adminPool`DELETE FROM roles WHERE id = ${roleId}`.catch(() => {})
   await adminPool`DELETE FROM roles WHERE id = ${pubRoleId}`.catch(() => {})
+  await adminPool`DELETE FROM roles WHERE id = ${covRoleId}`.catch(() => {})
+  await deleteTuples(fgaClient, tuplesFor(P_COV, ['viewer', 'viewer_member', 'publisher'])).catch(() => {})
   await adminPool`DELETE FROM tenant_transparency_log WHERE tenant_id = ${TENANT} AND action = 'roles.duplicates_converged'`.catch(() => {})
   await deleteTuples(fgaClient, tuplesFor(P_MIX, ['viewer', 'viewer_member', 'editor_member'])).catch(() => {})
   await deleteTuples(fgaClient, tuplesFor(P_PUB, ['publisher'])).catch(() => {})
@@ -139,6 +159,10 @@ describe('#536(5): one-shot duplicate convergence', () => {
     expect(pub, 'the ranked pair beside an unranked role still converges').toBeTruthy()
     expect(pub!.keep).toBe('comment')
     expect(pub!.remove, 'the publish role is exempt — only the ranked loser goes').toEqual(['view'])
+    const cov = plan.find((p) => p.principal === P_COV)
+    expect(cov, 'the exempt-covering pair is planned').toBeTruthy()
+    expect(cov!.keep).toBe('edit')
+    expect(cov!.remove).toEqual(['view'])
     for (const p of plan) expect(p.remove, 'no removal list ever names manage or an unranked role').not.toContain(`role:${pubRoleId}`)
     // dry-run wrote nothing
     expect((await rowsOf(P_DUP)).length).toBe(3)
@@ -172,10 +196,21 @@ describe('#536(5): one-shot duplicate convergence', () => {
     expect(pubRels, 'the uncovered legacy moderator tuple is swept').not.toContain('moderator')
     expect(pubRels).not.toContain('viewer')
 
-    // per-removal audit went through the normal in-tx path
-    const audits = await adminPool<{ action: string }[]>`
-      SELECT action FROM audit_log WHERE tenant_id = ${TENANT} AND actor = ${'user:' + 'operator:converge-536'} AND action = 'space.access_revoked'`
-    expect(audits.length, 'built-in removals audit as space.access_revoked').toBeGreaterThan(0)
+    // covering across the exemption boundary (design-review (1) pin): the builtin view row went (edit
+    // won), but the exempt role still owns view — the viewer tuple SURVIVES, publish untouched
+    const covRows = await rowsOf(P_COV)
+    expect(covRows.map((r) => r.role_id ?? r.builtin_capability).sort()).toEqual(['edit', covRoleId].sort())
+    const covRels = await relationsOf(P_COV)
+    expect(covRels, 'the exempt row keeps covering view — the tuple stays').toContain('viewer')
+    expect(covRels).toContain('publisher')
+
+    // per-removal audit went through the normal in-tx path. Scoped to THIS space's target and counted
+    // across audit_log + audit_outbox (buildApp runs no drain worker, so this run's entries sit in the
+    // outbox; an unscoped actor query would ride residue from earlier runs — reviewer-measured vacuity)
+    const audited = await adminPool<{ n: string }[]>`
+      SELECT (SELECT count(*) FROM audit_log    WHERE tenant_id = ${TENANT} AND action = 'space.access_revoked' AND target = ${`space:${spaceId}`} AND actor = ${'user:operator:converge-536'})
+           + (SELECT count(*) FROM audit_outbox WHERE tenant_id = ${TENANT} AND action = 'space.access_revoked' AND target = ${`space:${spaceId}`} AND actor = ${'user:operator:converge-536'}) AS n`
+    expect(Number(audited[0]!.n), 'THIS run audited its built-in removals as space.access_revoked').toBeGreaterThan(0)
 
     // operator ledger has the summary entry for the tenant
     const ledger = await adminPool<{ action: string; target: string }[]>`
@@ -185,6 +220,30 @@ describe('#536(5): one-shot duplicate convergence', () => {
     // idempotent: a re-plan finds nothing left
     const replan = await planConvergence(adminPool, () => {})
     expect(replan.find((p) => p.spaceId === spaceId)).toBeUndefined()
+  }, 120_000)
+
+  it('the dev shape: one role row + a rowless commenter — display collapses, the residue converges', async () => {
+    // display (listSpaceAccess): the custom role's EXPANSION tuples are not independent grant rows;
+    // the uncovered legacy commenter still shows (it IS an independent legacy grant)
+    const access = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: TENANT, userId: OWNER })
+    const resRows = access.filter((g) => g.grantee === P_RES)
+    expect(resRows.map((g) => g.capability).sort(), 'expansion caps filtered; the legacy comment shows').toEqual(['comment'])
+
+    // the fga-aware plan catches the residue (no row is removed)
+    const plan = await planConvergence(adminPool, () => {}, fgaClient)
+    const item = plan.find((p) => p.principal === P_RES)
+    expect(item, 'the rowless residue is planned').toBeTruthy()
+    expect(item!.removeRows, 'no row removal for a residue-only item').toEqual([])
+    expect(item!.rowlessResidue).toEqual(['comment'])
+
+    await executeConvergence(adminPool, app, [item!], () => {})
+    expect((await rowsOf(P_RES)), 'the role row is untouched').toEqual([{ role_id: roleId, builtin_capability: null, origin: 'manual' }])
+    const rels = await relationsOf(P_RES)
+    expect(rels, 'the residue tuple is gone').not.toContain('commenter')
+    expect(rels, 'the covered expansion tuples stay').toContain('editor_member')
+    // and the fga-aware re-plan is clean for this principal too
+    const replan = await planConvergence(adminPool, () => {}, fgaClient)
+    expect(replan.find((p) => p.principal === P_RES)).toBeUndefined()
   }, 120_000)
 
   it('a keeper revoked between plan and apply skips the group (design-review C) — never delete-all', async () => {
