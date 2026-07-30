@@ -98,9 +98,11 @@ export function SpaceMembersTab() {
       .filter((a) => a.principal.startsWith("user:"))
       .map((a) => [a.principal.replace(/^user:/, ""), a.displayName ?? null] as const),
   );
-  const rolePrincipalLabel = (principal: string): string => {
-    if (principal.startsWith("group:")) return `${principal.replace(/^group:/, "").replace(/#member$/, "")} (${t("spaceMembers.group")})`;
-    const sub = principal.replace(/^user:/, "");
+  // #536⑥: a group principal is a HASH — the server resolves the name (group-sync.ts is the id
+  // authority); an orphan (group gone at the IdP) gets the explicit label and STAYS revocable.
+  const rolePrincipalLabel = (a: { principal: string; groupName?: string }): string => {
+    if (a.principal.startsWith("group:")) return `${a.groupName ?? t("spaceMembers.unknownGroup")} (${t("spaceMembers.group")})`;
+    const sub = a.principal.replace(/^user:/, "");
     return roleNameBySub.get(sub) || sub; // server-resolved name; raw sub only for a departed/cross-tenant one
   };
 
@@ -173,7 +175,9 @@ export function SpaceMembersTab() {
   // the sub, unchanged. (This supersedes the customized-only /members/identities lookup here.)
   const label = (g: { grantee: string; groupName?: string; displayName?: string | null }) => {
     if (g.groupName) return `${g.groupName} (${t("spaceMembers.group")})`;
-    if (g.grantee.startsWith("group:")) return `${g.grantee.replace(/^group:/, "").replace(/#member$/, "")} (${t("spaceMembers.group")})`;
+    // #536⑥: an unresolvable group id is an ORPHAN (group gone at the IdP) — say so instead of
+    // printing the hash; the row keeps its revoke (unreadable must not mean unremovable).
+    if (g.grantee.startsWith("group:")) return `${t("spaceMembers.unknownGroup")} (${t("spaceMembers.group")})`;
     const sub = g.grantee.replace(/^user:/, "");
     return g.displayName || sub;
   };
@@ -192,7 +196,7 @@ export function SpaceMembersTab() {
     })),
     ...(roleAssignments.data ?? []).map((a) => ({
       kind: "assignment" as const, key: `a:${a.id}`, badge: a.roleName, custom: true as const,
-      label: rolePrincipalLabel(a.principal), assignmentId: a.id, principal: a.principal,
+      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal,
     })),
   ].sort((x, y) => x.label.localeCompare(y.label) || x.badge.localeCompare(y.badge));
 

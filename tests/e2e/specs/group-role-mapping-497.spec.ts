@@ -71,6 +71,9 @@ test("#497 §3: the default-role setting persists across a reload", async ({ pag
   // Back to None, then delete the role (no live assignment yet).
   await page.getByTestId("default-role").click();
   await page.getByRole("option", { name: "member (built-in default)" }).click();
+  // #536③: the CLOSED trigger says the truth too — Radix rendered nothing for the empty-valued
+  // option, so "no selection" looked broken exactly where the label matters most.
+  await expect(page.getByTestId("default-role"), "the closed select names the member fallback").toContainText("member", { timeout: 8000 });
   await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click();
   await expect(page.getByTestId("roles-list")).not.toContainText(role, { timeout: 8000 });

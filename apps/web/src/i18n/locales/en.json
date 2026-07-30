@@ -504,6 +504,7 @@
     "revoke": "Revoke",
     "empty": "No direct grants yet.",
     "group": "group",
+    "unknownGroup": "unknown group",
     "granteeType": "Grantee",
     "typeUser": "Member",
     "typeGroup": "Group",

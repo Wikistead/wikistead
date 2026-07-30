@@ -1613,8 +1613,10 @@ export function useDeleteRole() {
 }
 // #523 / ADR-190 (slice E): `displayName` is the server-resolved name of a USER principal (override ?? OIDC
 // name), present only for user principals and null when the sub is cross-tenant/departed — the client falls
-// back to the raw sub. Group principals carry their own name in the principal string.
-export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string; displayName?: string | null }
+// back to the raw sub. A group principal is a HASH (groupFgaId is one-way) — the server resolves it
+// back to the human name (`groupName`, #536); absent means the group no longer exists at the IdP
+// (the UI shows its explicit orphan label, never the hash).
+export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string; displayName?: string | null; groupName?: string }
 export function useRoleAssignments(resourceType: string, resourceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
