@@ -98,7 +98,11 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
 /* An unreferenced definition carries no number (no fn-<n> id / marker) so the `<ol>` count stays aligned with
    the referenced items' explicit `value`; it is still shown, de-emphasised (content is never dropped). */
 .cm-lp-footnote-unref{opacity:0.65;list-style:none}
-.cm-lp-footnote-back{margin-left:0.4em;text-decoration:none;color:var(--link,#4ea1ff);cursor:pointer}
+/* inline-flex, measured (#544): the back link is the one icon site that is a BARE inline <a>
+   Tailwind preflight's `svg{display:block}` splits an inline formatting context at a block child, so the
+   anchor grew to the full line (671px) and the arrow wrapped below the definition text. A flex container
+   neutralises the preflight the same way every button icon site already does. */
+.cm-lp-footnote-back{display:inline-flex;align-items:center;vertical-align:middle;margin-left:0.4em;text-decoration:none;color:var(--link,#4ea1ff);cursor:pointer}
 .cm-lp-footnote-back:hover{text-decoration:underline}
 .cm-lp-todo-icon{position:absolute;left:0.65em;top:0.35em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat;pointer-events:none}
 /* #290 (4): round the todo BOX like the callout panel (callout-icons.css .cm-lp-callout-panel — keep
