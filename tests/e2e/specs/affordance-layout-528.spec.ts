@@ -276,37 +276,42 @@ test("#528 only the FOCUSED block offers an affordance (asserted by ownership, n
 // same glyph, so a user could not tell which was which. They do different things — one enters the rich
 // editor from the source, the other edits the rendered block — so each carries its own tooltip and its own
 // mark. This pins that they are distinguishable, not that they look any particular way.
+// #556/#528 re-aim: the fixture used to click the nested note's body and expect BOTH affordances
+// in that one state — a shape that predates the current entry contracts (since #556 the click lands the
+// island caret in the note, which reveals it raw: the RAW pill shows and the rendered pencil is gone; on
+// the pre-#556 master the same click revealed neither). The pin's intent ("the two entry affordances are
+// told apart") stands; each is now read off the state it actually lives in — the rendered block's ✎
+// BEFORE entry, the raw pill AFTER — and the two must still differ in words and glyph.
 test("#528 the two entry affordances are told apart", async ({ page }) => {
   await openScratch(page, `aff528d-${Date.now().toString(36)}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText(NESTED);
-  await sleep(600);
+  await sleep(800);
+
+  // 1. the rendered block's own ✎, where it lives: the RENDERED nested note (hover-gated — existence
+  // and wording are the contract here; visibility gating has its own pins above)
+  const rows = await page.evaluate(() => {
+    const list = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-edit, .cm-lp-callout-panel-edit")]
+      .filter((e) => !e.classList.contains("cm-lp-macro-richui-raw"));
+    return list.map((r) => ({ tip: r.dataset.tip ?? "", svg: r.querySelector("svg")?.innerHTML ?? "" }));
+  });
+  expect(rows.length, "the rendered block offers its own control").toBeGreaterThan(0);
+  expect(rows.every((r) => r.tip.length > 0), "each control names what it does").toBe(true);
+
+  // 2. the RAW pill, where it lives: enter the note (the click reveals its source, #556 top-level parity)
   await page.getByText("inner body text", { exact: false }).first().click();
   await sleep(600);
-
-  const rep = await page.evaluate(() => {
-    const visible = (e: HTMLElement) => {
-      const c = getComputedStyle(e);
-      return c.display !== "none" && c.visibility !== "hidden" && parseFloat(c.opacity || "1") > 0.01;
-    };
-    const pill = document.querySelector<HTMLElement>(".cm-lp-macro-richui-raw");
-    const rows = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-edit")]
-      .filter((e) => !e.classList.contains("cm-lp-macro-richui-raw"));
-    return {
-      pillTip: pill?.dataset.tip ?? null,
-      pillSvg: pill?.querySelector("svg")?.innerHTML ?? null,
-      rowTips: rows.map((r) => r.dataset.tip ?? ""),
-      rowSvgs: rows.map((r) => r.querySelector("svg")?.innerHTML ?? ""),
-      anyVisible: [pill, ...rows].filter((e): e is HTMLElement => !!e).some(visible),
-    };
+  const pill = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".cm-lp-macro-richui-raw");
+    return el ? { tip: el.dataset.tip ?? "", svg: el.querySelector("svg")?.innerHTML ?? "" } : null;
   });
+  expect(pill, "the revealed source offers the raw pill").not.toBeNull();
+  expect(pill!.tip, "the pill names what it does").toBeTruthy();
 
-  expect(rep.pillTip, "the pill names what it does").toBeTruthy();
-  expect(rep.rowTips.every((t) => t.length > 0), "so does each block's own control").toBe(true);
-  expect(rep.rowTips, "…and it is not the same words as the pill's").not.toContain(rep.pillTip);
-  if (rep.pillSvg && rep.rowSvgs.some((g) => g.length > 0)) {
-    expect(rep.rowSvgs.filter((g) => g.length > 0), "nor the same glyph").not.toContain(rep.pillSvg);
+  expect(rows.map((r) => r.tip), "the pencil's words are not the pill's").not.toContain(pill!.tip);
+  if (pill!.svg && rows.some((r) => r.svg.length > 0)) {
+    expect(rows.filter((r) => r.svg.length > 0).map((r) => r.svg), "nor the same glyph").not.toContain(pill!.svg);
   }
 });
 
