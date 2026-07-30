@@ -388,40 +388,111 @@ export const atomSelectionTint: Extension = ViewPlugin.define((view) => {
 // the block's first SOURCE line ("```mermaid" / ":::note[Hello]"), so a WYSIWYG click-the-atom → Ctrl+C
 // → paste produced a broken fragment. Reveal is not involved (no atomicRanges churn — the #359 warp fix
 // stands); a NON-empty selection keeps CM's default doc slice, which already carries full raw source.
-export const atomClipboard: Extension = EditorView.domEventHandlers({
-  copy: (e, view) => atomClipboardHandler(e, view, false),
-  cut: (e, view) => atomClipboardHandler(e, view, true),
-});
-function atomClipboardHandler(e: ClipboardEvent, view: EditorView, isCut: boolean): boolean {
-  const sel = view.state.selection.main;
-  if (!sel.empty) return false; // a real selection: CM's default (the doc slice = raw source) is correct
-  // #549: a NESTED selection (the ring on a macro inside a container) copies/cuts THAT block, not the
-  // container the caret technically rests on — the same innermost-wins rule as edit/delete (#215).
-  const nestedSel = view.state.field(nestedSelectionField, false);
+//
+// #549 review: this CANNOT live in EditorView.domEventHandlers. CM filters events through
+// eventBelongsToEditor, which walks up from the event TARGET and drops any event originating inside a
+// widget whose ignoreEvent is true — and the copy event's DOM target after a widget click is routinely
+// inside that widget's DOM (measured: excalidraw parked-atom Ctrl+C reached a document capture listener
+// but NO CM handler, and no clipboard write happened at all). So the whole handler is a CAPTURE listener
+// on view.dom instead: it sees every copy/cut in this editor regardless of widget target, and nested
+// editors (slot islands share this factory) each handle their own — the closest(".cm-editor") guard
+// gives innermost-wins for free, the same #549 rule the context menu uses.
+//
+// Resolution order for an EMPTY selection (a non-empty one keeps CM's default doc slice)
+// (a) the nested-selection ring (the innermost-wins rule shared with edit/delete, #215);
+// (b) a collapsed block atom under the caret (the original #359 case);
+// (c) the caret on a block's OPEN/CLOSE MARKER line (fence/:::) — in Live mode a widget click
+// REVEALS the block and lands the caret on its first source line, where the pre-#549 handler
+// fell through to CM's line copy and reproduced the exact "```mermaid" fragment #359 fixed.
+// A marker line alone is never a useful copy; the block is. Content lines inside revealed
+// source keep the line-copy default (normal editing);
+// (d) the LAST-CLICKED widget: some widgets never park the caret on their block (the :::details
+// bar pushes it past the block; container chrome swallows the click), so a mousedown on
+// non-editable widget DOM records the innermost macro at the click — context-menu-style
+// resolution — and Ctrl+C/Ctrl+X copies/cuts THAT. The record dies on the next keydown that
+// is not a copy/cut chord, on any doc change, and on the next click elsewhere: it exists
+// exactly from "I clicked this block" until the user does anything else.
+function atomCopyBlockFor(state: EditorState): { from: number; to: number } | null {
+  const sel = state.selection.main;
+  if (!sel.empty) return null;
+  const nestedSel = state.field(nestedSelectionField, false);
   if (nestedSel) {
-    const m = innermostMacroAt(view.state, nestedSel.anchor);
-    if (m) {
-      const doc = view.state.doc;
-      e.clipboardData?.setData("text/plain", view.state.sliceDoc(doc.lineAt(m.from).from, doc.lineAt(Math.min(m.to, doc.length)).to));
-      e.preventDefault();
-      if (isCut && !view.state.readOnly) {
-        const ch = nestedDeleteChange(view.state, nestedSel.anchor); // the same range Backspace/dd take
-        if (ch) view.dispatch({ changes: ch, userEvent: "delete.cut" });
-      }
-      return true;
-    }
+    const m = innermostMacroAt(state, nestedSel.anchor);
+    if (m) return m;
   }
-  const blocks = view.state.field(livePreview, false)?.blocks ?? [];
+  const blocks = state.field(livePreview, false)?.blocks ?? [];
   const b = blocks.find((bl) => sel.head >= bl.from && sel.head <= bl.to);
-  if (!b) return false; // not on an atom: keep CM's copy-the-line default
-  e.clipboardData?.setData("text/plain", view.state.sliceDoc(b.from, b.to));
-  e.preventDefault();
-  if (isCut && !view.state.readOnly) {
-    // remove the whole block including its trailing newline (the same range vim dd takes on an atom)
-    view.dispatch({ changes: { from: b.from, to: Math.min(b.to + 1, view.state.doc.length) }, userEvent: "delete.cut" });
+  if (b) return b;
+  const m = innermostMacroAt(state, sel.head);
+  if (m) {
+    const line = state.doc.lineAt(sel.head);
+    const openLine = state.doc.lineAt(m.from);
+    const closeLine = state.doc.lineAt(Math.min(m.to, state.doc.length));
+    if (line.from === openLine.from || line.from === closeLine.from) return m;
   }
-  return true;
+  return null;
 }
+export const atomClipboard: Extension = ViewPlugin.define((view) => {
+  let clickedAnchor: number | null = null; // rule (d): re-resolved at copy time (drift-tolerant, #215)
+  const isCopyChord = (e: KeyboardEvent) =>
+    (e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C" || e.key === "x" || e.key === "X" || e.key === "Insert");
+  const onMousedown = (e: MouseEvent) => {
+    const t = e.target as HTMLElement | null;
+    if (t?.closest?.(".cm-editor") !== view.dom) return; // a nested editor's event: its own instance records
+    if (e.button !== 0) return; // right-click belongs to the context menu (which must not clear it either)
+    let anchor = resolveNestedAnchor(t);
+    if (anchor == null && t?.closest?.('[contenteditable="false"]')) {
+      // widget DOM without a data-mac-pos tag (details bar, container chrome, a rendered fence's
+      // preview): posAtDOM of any node inside a block widget is the widget's own from.
+      try { anchor = view.posAtDOM(t); } catch { anchor = null; }
+    }
+    clickedAnchor = anchor != null && innermostMacroAt(view.state, anchor) ? anchor : null;
+  };
+  const onKeydown = (e: KeyboardEvent) => {
+    // a bare modifier press is part of the chord being formed, not "doing something else"
+    if (e.key === "Control" || e.key === "Meta" || e.key === "Shift" || e.key === "Alt") return;
+    if (!isCopyChord(e)) clickedAnchor = null;
+  };
+  const onCopyCut = (e: ClipboardEvent) => {
+    const isCut = e.type === "cut";
+    const t = e.target as HTMLElement | null;
+    const ed = t?.closest?.(".cm-editor") ?? null;
+    // Ownership: a copy targeting a node inside SOME editor belongs to exactly that editor; a copy
+    // whose target sits outside every editor (measured: a caret parked on an atom inside a slot
+    // island dispatches the copy on document.body) belongs to the FOCUSED editor. Every other
+    // instance returns, so outer/island never double-handle.
+    if (ed ? ed !== view.dom : !view.hasFocus) return;
+    let b = atomCopyBlockFor(view.state);
+    if (!b && clickedAnchor != null && view.state.selection.main.empty) b = innermostMacroAt(view.state, Math.min(clickedAnchor, view.state.doc.length));
+    if (!b || !e.clipboardData) return; // no block resolves: CM's defaults stand
+    const doc = view.state.doc;
+    const fromLine = doc.lineAt(b.from);
+    const toLine = doc.lineAt(Math.min(b.to, doc.length));
+    e.clipboardData.setData("text/plain", view.state.sliceDoc(fromLine.from, toLine.to));
+    e.preventDefault(); // also makes CM's own handlers skip the event (eventBelongsToEditor)
+    if (isCut && !view.state.readOnly) {
+      // whole lines + the trailing separator — the same range Backspace/dd/nested delete take (#215)
+      view.dispatch({ changes: { from: fromLine.from, to: Math.min(toLine.to + 1, doc.length) }, userEvent: "delete.cut" });
+    }
+  };
+  view.dom.addEventListener("mousedown", onMousedown, true);
+  view.dom.addEventListener("keydown", onKeydown, true);
+  // copy/cut listen on DOCUMENT: the event target can land outside view.dom entirely (body — see the
+  // ownership note in onCopyCut), where a view.dom listener never hears it.
+  document.addEventListener("copy", onCopyCut, true);
+  document.addEventListener("cut", onCopyCut, true);
+  return {
+    update(u: ViewUpdate) {
+      if (u.docChanged) clickedAnchor = null;
+    },
+    destroy() {
+      view.dom.removeEventListener("mousedown", onMousedown, true);
+      view.dom.removeEventListener("keydown", onKeydown, true);
+      document.removeEventListener("copy", onCopyCut, true);
+      document.removeEventListener("cut", onCopyCut, true);
+    },
+  };
+});
 
 // #202: nested bullet lists get a hierarchy glyph per level (Notion/editors convention) so nesting
 // reads at a glance: level 0 = •, 1 = ◦, 2 = ▪, then cycle. Level = indentation / 2 (the markdown
