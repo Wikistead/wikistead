@@ -15,10 +15,12 @@ test("#469: the roles tab lists built-ins by scope; the space-creation preset is
   await expect(page.getByTestId("tenant-defaults")).toHaveCount(0);
   await expect(page.getByTestId("default-admin-create-spaces")).toHaveCount(0);
 
-  // 2. built-ins are grouped by scope; admin is a uniform read-only picker with createSpaces checked+disabled
-  const tenantList = page.getByTestId("builtin-tenant-roles");
+  // 2. #536 ONE roles list — scope is a row badge, not a section split. admin stays a uniform
+  // read-only picker with createSpaces checked+disabled.
+  const tenantList = page.getByTestId("roles-list");
   await expect(tenantList).toBeVisible();
-  await expect(page.getByTestId("builtin-roles")).toBeVisible(); // resource-scope list
+  await expect(page.getByTestId("builtin-tenant-roles")).toHaveCount(0); // the section split stays gone
+  await expect(page.getByTestId("builtin-roles")).toHaveCount(0);
   const adminCap = page.getByTestId("builtin-admin-cap-createSpaces");
   await expect(adminCap).toBeVisible();
   await expect(adminCap).toBeChecked();

@@ -27,6 +27,20 @@ const CAPABILITIES = ["view", "comment", "edit", "publish", "delete", "share", "
 // screen configures issuance". The old /admin/api two-choice policy selector is gone with the enum.
 const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys"] as const;
 
+// #536 every row in the single roles list says what it is inline — its scope and whether it is
+// built-in — because the section headers that used to say it are gone.
+function RoleBadges({ scope, builtIn = false }: { scope: "resource" | "tenant"; builtIn?: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim" data-testid="role-scope-badge">
+        {t(scope === "tenant" ? "adminRoles.scopeTenant" : "adminRoles.scopeResource")}
+      </span>
+      {builtIn && <span className="rounded border border-border px-1 text-[10px] uppercase tracking-wide text-fg-dim" data-testid="role-builtin-badge">{t("adminRoles.builtIn")}</span>}
+    </>
+  );
+}
+
 // #420 `disabled` renders the SAME control read-only, so a built-in role is shown as the very
 // checkbox grid you would use to build a custom one — the vocabulary and layout match instead of the
 // old "cap · cap · cap" text, and what a role can do reads the same way everywhere.
@@ -59,35 +73,30 @@ function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false, l
   );
 }
 
-function RoleEditor({ initial, onSave, onCancel, pending, scopeSelectable = false }: {
-  initial: { name: string; capabilities: string[]; scope: "resource" | "tenant" };
+// #536 (user re-ruling): creation is ONE flow — name + one combined capability check group. The
+// two vocabularies are disjoint, so the scope (#445's resource/tenant exclusivity) is DERIVED from what
+// is checked instead of being asked up front; a mix disables save with a hint, and the server still
+// validates. Nobody needs to know "switch scope to tenant first" to make a tenant role.
+function RoleEditor({ onSave, onCancel, pending }: {
   onSave: (v: { name: string; capabilities: string[]; scope: "resource" | "tenant" }) => void;
   onCancel?: () => void;
   pending: boolean;
-  scopeSelectable?: boolean; // scope is fixed after creation (#445)
 }) {
   const { t } = useTranslation();
-  const [name, setName] = useState(initial.name);
-  const [caps, setCaps] = useState<string[]>(initial.capabilities);
-  const [scope, setScope] = useState<"resource" | "tenant">(initial.scope);
+  const [name, setName] = useState("");
+  const [caps, setCaps] = useState<string[]>([]);
+  const hasResource = caps.some((c) => (CAPABILITIES as readonly string[]).includes(c));
+  const hasTenant = caps.some((c) => (TENANT_CAPABILITIES as readonly string[]).includes(c));
+  const mixed = hasResource && hasTenant;
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border p-3">
-      <div className="flex items-center gap-2">
-        <Input inputSize="sm" className="max-w-xs" value={name} placeholder={t("adminRoles.namePlaceholder")}
-          aria-label={t("adminRoles.nameLabel")} data-testid="role-name-input" onChange={(e) => setName(e.target.value)} />
-        {scopeSelectable && (
-          <Select size="sm" value={scope} ariaLabel={t("adminRoles.scopeLabel")} testId="role-scope"
-            options={[
-              { value: "resource", label: t("adminRoles.scopeResource") },
-              { value: "tenant", label: t("adminRoles.scopeTenant") },
-            ]}
-            onChange={(v) => { setScope(v as "resource" | "tenant"); setCaps([]); }} />
-        )}
-      </div>
-      <CapabilityPicker value={caps} onChange={setCaps} idPrefix="role" list={scope === "tenant" ? TENANT_CAPABILITIES : CAPABILITIES} />
+      <Input inputSize="sm" className="max-w-xs" value={name} placeholder={t("adminRoles.namePlaceholder")}
+        aria-label={t("adminRoles.nameLabel")} data-testid="role-name-input" onChange={(e) => setName(e.target.value)} />
+      <CapabilityPicker value={caps} onChange={setCaps} idPrefix="role" list={[...CAPABILITIES, ...TENANT_CAPABILITIES]} />
+      {mixed && <p className="m-0 text-xs text-[var(--callout-warning)]" data-testid="role-mixed-hint">{t("adminRoles.mixedScopeHint")}</p>}
       <div className="flex gap-2">
-        <Button variant="primary" size="sm" data-testid="role-save" disabled={pending || !name.trim() || caps.length === 0}
-          onClick={() => onSave({ name: name.trim(), capabilities: caps, scope })}>{t("common.save")}</Button>
+        <Button variant="primary" size="sm" data-testid="role-save" disabled={pending || !name.trim() || caps.length === 0 || mixed}
+          onClick={() => onSave({ name: name.trim(), capabilities: caps, scope: hasTenant ? "tenant" : "resource" })}>{t("common.save")}</Button>
         {onCancel && <Button variant="default" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>}
       </div>
     </div>
@@ -152,18 +161,21 @@ export function AdminRolesTab() {
     <div className="max-w-[860px] p-6" data-testid="admin-roles">
       <h2 className="mt-0">{t("adminRoles.title")}</h2>
 
-      {/* #445 / #469: ONE place answers "what can this role do", and every built-in role reads the
-          SAME way — a bold name + a CapabilityPicker — whether it is tenant- or resource-scoped. The
-          tenant-level `createSpaces` capability lives IN that list. member's picker is the only editable
-          cell: its createSpaces box IS the tenant#space_creator wildcard (drives setDefaults). admin's is a
-          read-only picker with createSpaces checked (the model's `or admin`). This OVERTURNS the ADR-171
-          addendum note that admin had to be plain text to avoid a lone disabled checkbox reading "broken":
-          now that EVERY built-in is a uniform read-only picker, a disabled admin cell reads as consistent,
-          not broken. UI only — the member toggle drives the very same wildcard through the unchanged endpoint. */}
-      <h3 className="text-sm font-medium">{t("adminRoles.builtInTenantTitle")}</h3>
-      <div className="mb-4 flex flex-col gap-2" data-testid="builtin-tenant-roles">
+      {/* #536 (user re-ruling): ONE roles list. Built-in and custom, tenant- and resource-scope,
+          side by side in a single list — scope is a ROW ATTRIBUTE (badge), not a section split, so a
+          tenant role is made and found in the same place as every other role. What each row keeps:
+          - #445 / #469: every role reads the SAME way — bold name + a CapabilityPicker; built-ins
+            are the read-only version of the very control custom roles edit with.
+          - `member` is the one editable built-in cell: its boxes ARE the tenant defaults
+            (tenant#space_creator wildcard / api_key_issue, #496) through the unchanged endpoint, and
+            stay disabled until the defaults have ARRIVED (an authz control must not guess its state).
+          - Custom rows: live per-op capability toggles (#445), pencil rename, #504 red delete. */}
+      <div className="mb-2 flex flex-col gap-2" data-testid="roles-list">
         <div className="flex flex-col gap-1" data-testid="builtin-role-member">
-          <span className="text-sm font-medium">member</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">member</span>
+            <RoleBadges scope="tenant" builtIn />
+          </div>
           <CapabilityPicker
             value={[
               ...((defaults.data?.member.createSpaces ?? true) ? ["createSpaces"] : []),
@@ -172,9 +184,6 @@ export function AdminRolesTab() {
             ]}
             idPrefix="builtin-member"
             list={TENANT_CAPABILITIES}
-            // #496 review: also disabled until the defaults have actually ARRIVED. On a failed query
-            // `data` is undefined with isLoading false, and the `?? true` fallbacks below would let one
-            // click write a capability the tenant never had. An authz control must not guess its state.
             disabled={!defaults.data || setDefaults.isPending}
             onChange={(caps) => setDefaults.mutate({ memberCreateSpaces: caps.includes("createSpaces"), memberIssueApiKeys: caps.includes("issueApiKeys") }, {
               onSuccess: () => notify.success(t("toast.saved")),
@@ -183,30 +192,21 @@ export function AdminRolesTab() {
           />
         </div>
         <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
-          <span className="text-sm font-medium">admin</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">admin</span>
+            <RoleBadges scope="tenant" builtIn />
+          </div>
           <CapabilityPicker value={["createSpaces", "issueApiKeys"]} idPrefix="builtin-admin" list={TENANT_CAPABILITIES} disabled />
         </div>
-      </div>
-
-      {/* Built-in RESOURCE roles: virtual, read-only — shown so the picker vocabulary is uniform. */}
-      <h3 className="text-sm font-medium">{t("adminRoles.builtInResourceTitle")}</h3>
-      <div className="mb-4 flex flex-col gap-2" data-testid="builtin-roles">
         {(roles.data?.builtIn ?? []).map((r) => (
           <div key={r.name} className="flex flex-col gap-1">
-            <span className="text-sm font-medium">{r.name}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">{r.name}</span>
+              <RoleBadges scope="resource" builtIn />
+            </div>
             <CapabilityPicker value={r.capabilities} idPrefix={`builtin-${r.name}`} list={CAPABILITIES} disabled />
           </div>
         ))}
-      </div>
-
-      {/* Custom roles (EE): create / inline-edit / delete. #445 a custom role reads and EDITS in
-          the very layout the built-ins read in — bold name + a CapabilityPicker — except its picker is
-          live: each checkbox toggle commits ONE updateRole (per-op, the member-createSpaces operation
-          model), so there is no separate form to open. The server stays the fortress: a non-entitled
-          plan gets the 403 upsell toast on the first toggle; a stale row gets the 409 conflict toast.
-          Only the NAME keeps a small affordance (pencil → inline input); scope is fixed at creation. */}
-      <h3 className="text-sm font-medium">{t("adminRoles.customTitle")}</h3>
-      <div className="mb-2 flex flex-col gap-2" data-testid="custom-roles">
         {(roles.data?.custom ?? []).map((r) => {
           const commitRename = () => {
             if (renamingId !== r.id) return; // Enter already committed; the trailing blur is a no-op
@@ -233,7 +233,7 @@ export function AdminRolesTab() {
                 ) : (
                   <>
                     <span className="font-medium">{r.name}</span>
-                    {r.scope === "tenant" && <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim">{t("adminRoles.scopeTenant")}</span>}
+                    <RoleBadges scope={r.scope === "tenant" ? "tenant" : "resource"} />
                     <IconButton aria-label={t("adminRoles.rename")} data-tip={t("adminRoles.rename")} data-testid="role-rename"
                       onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}><Pencil size={14} /></IconButton>
                   </>
@@ -263,7 +263,7 @@ export function AdminRolesTab() {
         {(roles.data?.custom.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.customEmpty")}</p>}
       </div>
       {creating ? (
-        <RoleEditor initial={{ name: "", capabilities: [], scope: "resource" }} scopeSelectable pending={createRole.isPending}
+        <RoleEditor pending={createRole.isPending}
           onCancel={() => setCreating(false)}
           onSave={(v) => createRole.mutate(v, {
             onSuccess: () => { notify.success(t("toast.saved")); setCreating(false); },

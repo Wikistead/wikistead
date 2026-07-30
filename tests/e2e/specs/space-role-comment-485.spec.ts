@@ -16,17 +16,18 @@ test("#485: a role carrying `comment` assigns at space scope (the bounce is gone
   await page.getByTestId("role-cap-view").check();
   await page.getByTestId("role-cap-comment").check(); // the capability that used to make the assign 400
   await page.getByTestId("role-save").click();
-  await expect(page.getByTestId("custom-roles")).toContainText(name, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).toContainText(name, { timeout: 8000 });
 
   // assign it where a space role now lives (#514 slice 4)
   await page.goto("/spaces/demo_space/settings/members");
   await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId("space-role-select").click();
+  // #536 §6: the merged picker (one control for built-ins and custom roles)
+  await page.getByTestId("space-grant-input").fill("dev");
+  await page.getByTestId("space-grant-candidate").first().click();
+  await page.getByTestId("space-grant-capability").click();
   await page.getByRole("option", { name }).click();
   await expect(page.getByRole("option")).toHaveCount(0);
-  await page.getByTestId("space-role-member-input").fill("dev");
-  await page.getByTestId("space-role-member-candidate").first().click();
-  await page.getByTestId("space-role-assign-add").click();
+  await page.getByTestId("space-grant-add").click();
 
   // it landed — no 400, no generic failure toast
   await expect(page.getByTestId("space-role-assign-list"), "the comment-bearing role assigned").toContainText(name, { timeout: 8000 });
@@ -37,5 +38,5 @@ test("#485: a role carrying `comment` assigns at space scope (the bounce is gone
   await page.goto("/admin/roles");
   await page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click();
-  await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).not.toContainText(name, { timeout: 8000 });
 });

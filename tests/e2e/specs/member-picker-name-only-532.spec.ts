@@ -10,8 +10,8 @@ test("#532: the member picker lists names, not subs — and still resolves the p
   await page.goto("/spaces/demo_space/settings/members");
   await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
 
-  await page.getByTestId("space-role-member-input").fill("e");
-  const row = page.getByTestId("space-role-member-candidate").first();
+  await page.getByTestId("space-grant-input").fill("e");
+  const row = page.getByTestId("space-grant-candidate").first();
   await expect(row, "a tenant member matched").toBeVisible({ timeout: 8000 });
 
   // one line, and it is not an opaque id: the picker no longer prints the sub beside the name
@@ -21,5 +21,5 @@ test("#532: the member picker lists names, not subs — and still resolves the p
   // …and picking still yields the person, with the principal resolved behind the scenes
   const name = lines[0]!;
   await row.click();
-  await expect(page.getByTestId("space-role-member-input")).toHaveValue(name);
+  await expect(page.getByTestId("space-grant-input")).toHaveValue(name);
 });
