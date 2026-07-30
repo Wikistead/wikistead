@@ -77,7 +77,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
       const available = await resolveLogin(req.db, req.tenant)
       if (!available.methods.has('tenant-oidc') && !available.methods.has('saml')) {
         throw Object.assign(
-          new Error('enable and verify your own identity provider (OIDC or SAML) before turning platform login off — otherwise nobody could sign in.'),
+          new Error('enable and verify OIDC or SAML before turning platform login off — otherwise nobody could sign in.'),
           { statusCode: 409, code: 'own_idp_required' },
         )
       }
