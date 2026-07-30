@@ -274,7 +274,9 @@ test("#174 nested mermaid + pipe table lay out at full size when a hidden tab ac
 
   const active = tabs.locator(".cm-lp-tabpanel-active");
   // 1: the mermaid SVG lays out at a real width (a hidden-render sliver was ~87px).
-  const svgW = await active.locator("[data-testid=macro-mermaid] svg").evaluate((el) => el.getBoundingClientRect().width);
+  // #528 d12fba40 mounts the nested-edit affordance (an SVG icon) INSIDE the macro element, so a bare
+  // `svg` matches two elements (strict-mode violation). The DIAGRAM svg is the one mermaid ids itself.
+  const svgW = await active.locator("[data-testid=macro-mermaid] svg[id^=wks-mermaid], [data-testid=macro-mermaid] svg[aria-roledescription]").first().evaluate((el) => el.getBoundingClientRect().width);
   expect(svgW).toBeGreaterThan(200);
   // 2: the nested pipe table is a real bordered table (width + cell padding), not a padless skeleton.
   const table = active.locator("table.cm-lp-md-table");
