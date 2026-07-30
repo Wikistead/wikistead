@@ -13,7 +13,9 @@ import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, deletePage, publishPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
+import IORedis from 'ioredis'
 import { clearTitleDictCache } from '../title-dict-cache.js'
+import { DICT_CHANNEL_PREFIX } from '../search/outbox.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -52,13 +54,38 @@ const get = (id: string) => app.inject({ method: 'GET', url: `/pages/${id}/title
 describe('#534 the cached dictionary route', () => {
   beforeEach(() => clearTitleDictCache())
 
-  it('answers, and answers again from the cache with the same content', async () => {
+  it('a MISS answers degraded-empty at once; the background fill lands and later calls serve the real dictionary', async () => {
     const first = await get(pageId)
     expect(first.statusCode).toBe(200)
-    const second = await get(pageId)
-    expect(second.statusCode).toBe(200)
-    expect(second.json().entries.length, 'the warm answer is the same dictionary').toBe(first.json().entries.length)
-    expect(first.json().entries.some((e: { title: string }) => e.title.includes(tag))).toBe(true)
+    // The user-ruled pivot: the cold path never again holds the page-open hostage to the confirm.
+    // In-request computation would return the full dictionary here — this asserts it did NOT.
+    expect(first.json().degraded, 'a miss does not compute in-request').toBe(true)
+    expect(first.json().entries).toEqual([])
+    let warm: { entries: { title: string }[]; degraded?: boolean } | null = null
+    for (let i = 0; i < 150; i++) {
+      const res = await get(pageId)
+      const body = res.json()
+      if (!body.degraded && body.entries.length > 0) { warm = body; break }
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    expect(warm, 'the background fill eventually serves the dictionary').not.toBeNull()
+    expect(warm!.entries.some((e) => e.title.includes(tag)), 'and it is the real, viewer-scoped content').toBe(true)
+  }, 120_000)
+
+  it('the fill completion pings the tenant dict channel so connected clients refetch', async () => {
+    const sub = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
+    let pinged = false
+    // the outbox reindex path pings this same channel — only the fill's marker counts
+    sub.on('message', (_ch, msg) => { try { if ((JSON.parse(msg) as { filled?: boolean }).filled) pinged = true } catch { /* not ours */ } })
+    await sub.subscribe(`${DICT_CHANNEL_PREFIX}${tenant.id}`)
+    try {
+      const res = await get(pageId) // cold → kicks the fill
+      expect(res.json().degraded).toBe(true)
+      for (let i = 0; i < 300 && !pinged; i++) await new Promise((r) => setTimeout(r, 200))
+      expect(pinged, 'without the ping, autolink candidates only appear after a reload / 30s staleTime').toBe(true)
+    } finally {
+      await sub.quit()
+    }
   }, 120_000)
 
   it('a WARM cache does not let an unviewable anchor through — the gate runs first', async () => {

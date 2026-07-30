@@ -4,11 +4,12 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readUserTuplesByType, requireTenantAdmin } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
-import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration } from '../title-dict-cache.js' // #534
+import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration, beginTitleDictFill, endTitleDictFill } from '../title-dict-cache.js' // #534
 import { getTreeConfirm, setTreeConfirm, getCachedBadge, setCachedBadge, invalidatePageBadge } from '../tree-confirm-cache.js' // #541
 import { docName } from '@wikistead/types'
 import { resolveDirectiveRanges } from '@wikistead/macro-render' // #353: scan `:::query` blocks for the anon snapshot
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
+import { DICT_CHANNEL_PREFIX } from '../search/outbox.js' // #534the background fill pings clients on the same channel
 import type { SearchDriver } from '../search/index.js'
 import { resolveAuthorIdentities, authorFields } from '../author-identity.js' // #486 / ADR-150 Addendum 2
 import { collectPageView, analyticsDayUTC } from '../analytics/collect.js' // #464 / ADR-175
@@ -3976,29 +3977,46 @@ export async function pagesPlugin(app: FastifyInstance) {
       // existed. A miss computes; nothing is ever served stale in place of a fresh answer.
       const cached = getCachedTitleDict(req.tenant.id, subject)
       if (cached) return cached
-      // Read the generation BEFORE computing. A revoke landing during the ~1.3s this takes clears the
-      // cache and bumps the generation, so the result — computed against the tuples as they were — is
-      // returned to this request but refused as a cache entry. Without that, the stale answer would be
-      // written after the invalidation and republished for another TTL (design review, #534).
-      const gen = titleDictGeneration(req.tenant.id)
-      // #541wire the CONNECTION's lifetime into the fan-out. When the requester navigates away
-      // (or a probe context closes) the socket closes, and the remaining confirm waves stop instead of
-      // flooding the checker for seconds and starving the next page-open's interactive checks. The
-      // catch below turns the abort into the same degraded-empty 200 (written to a dead socket).
-      const abort = new AbortController()
-      // The SOCKET, not the message: an IncomingMessage 'close' also fires on normal completion of the
-      // (bodyless) request, which would abort every computation instantly. A socket closing while the
-      // response has not been written is the requester genuinely gone. Listener removed after the
-      // compute so keep-alive sockets do not accumulate one per request.
-      const onGone = () => abort.abort()
-      req.raw.socket?.once('close', onGone)
-      try {
-        const fresh = await getTitleDictionary(req.db, app.fga, { subject, signal: abort.signal })
-        setCachedTitleDict(req.tenant.id, subject, fresh, Date.now(), gen)
-        return fresh
-      } finally {
-        req.raw.socket?.removeListener('close', onGone)
+      // #534(user ruling): a MISS answers EMPTY IMMEDIATELY (degraded — links render as plain
+      // text and fill in moments later) instead of holding this request, and with it the whole
+      // page-open, hostage to a multi-second confirm. Measured: the in-request compute was what made
+      // a fresh page's own GETs take ~1s in the browser while the server answered curl in 11ms — the
+      // cold dictionary a NEIGHBOURING surface kicked off was starving them. Under-disclosure only
+      // an empty dictionary never shows a title the viewer must not see, and navigation re-checks
+      // view server-side, so nothing here is an authz gate.
+      //
+      // The fill runs detached, once per (tenant, subject) — single-flight — on its OWN TenantDb
+      // (req.db dies with this request). It keeps the whole generation discipline: gen is read
+      // before computing, and a revoke landing mid-fill makes setCachedTitleDict refuse the store
+      // (fail toward slow, never toward a stale answer). On success it publishes the SAME stateless
+      // dict ping the reindex path uses (client: refetch, throttled) — but through a client-only
+      // publish that does NOT bump the generation, or the fill would invalidate its own work.
+      // The requester-lifetime abort (#541) is deliberately NOT wired here: the fill serves
+      // the next request too, so the requester navigating away must not kill it — the #541 time
+      // budget inside getTitleDictionary is what bounds it now.
+      if (beginTitleDictFill(req.tenant.id, subject)) {
+        const tenant = req.tenant
+        const log = req.log
+        void (async () => {
+          const bg = await acquireTenantDb(tenant)
+          try {
+            const gen = titleDictGeneration(tenant.id)
+            const fresh = await getTitleDictionary(bg, app.fga, { subject })
+            setCachedTitleDict(tenant.id, subject, fresh, Date.now(), gen)
+            // liveness only — the client's 30s staleTime refetch is the backstop
+            // The payload is ignored by the collab fan-out (it broadcasts a stateless
+            // "dict-invalidate" with no page id — existence-hiding on the wire); the marker only
+            // lets tests tell a fill ping from a reindex ping.
+            void app.valkey.publish(`${DICT_CHANNEL_PREFIX}${tenant.id}`, JSON.stringify({ filled: true })).catch(() => {})
+          } catch (e) {
+            log.warn({ err: e }, 'title-dictionary background fill failed; next miss retries')
+          } finally {
+            endTitleDictFill(tenant.id, subject)
+            await bg.release()
+          }
+        })()
       }
+      return { entries: [], capped: false, degraded: true }
     } catch (e) {
       req.log.warn({ err: e, pageId: req.params.pageId }, 'title-dictionary degraded: authz backend unavailable')
       return { entries: [], capped: false, degraded: true }

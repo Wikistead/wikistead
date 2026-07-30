@@ -101,11 +101,19 @@ describe('title-dictionary anchor gate (#489 fix 2)', () => {
   })
 
   it('a real, viewable page still gets the dictionary (the gate does not break the happy path)', async () => {
-    const res = await app.inject({ method: 'GET', url: `/pages/${pageId}/title-dictionary`, headers: H })
-    expect(res.statusCode).toBe(200)
-    const body = res.json() as { entries: { id: string; title: string }[] }
-    expect(Array.isArray(body.entries)).toBe(true)
-    expect(body.entries.some((e) => e.id === pageId)).toBe(true) // the caller's own page is in their view set
+    // #534a cold call answers degraded-empty and kicks the background fill — the dictionary
+    // arrives on a later call, so the happy path is pinned as "the fill lands", not "the first answer".
+    type Dict = { entries: { id: string; title: string }[]; degraded?: boolean }
+    let body: Dict | null = null
+    for (let i = 0; i < 150; i++) {
+      const res = await app.inject({ method: 'GET', url: `/pages/${pageId}/title-dictionary`, headers: H })
+      expect(res.statusCode).toBe(200)
+      const j = res.json() as Dict
+      if (!j.degraded) { body = j; break }
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    expect(body, 'the fill landed').not.toBeNull()
+    expect(body!.entries.some((e) => e.id === pageId)).toBe(true) // the caller's own page is in their view set
   })
 })
 
@@ -127,10 +135,15 @@ describe('title-dictionary DEGRADES under an ERRORING FGA (#489remedy 1)', () =>
     // healthy again: a clean non-viewable/nonexistent anchor still 404s (the gate is untouched)…
     const dead = await app.inject({ method: 'GET', url: `/pages/no-such-degrade-${tag}/title-dictionary`, headers: H })
     expect(dead.statusCode).toBe(404)
-    // …and a real page gets a real (non-degraded) dictionary
-    const ok = await app.inject({ method: 'GET', url: `/pages/${pageId}/title-dictionary`, headers: H })
-    expect(ok.statusCode).toBe(200)
-    expect((ok.json() as { degraded?: boolean }).degraded).toBeUndefined()
+    // …and a real page gets a real (non-degraded) dictionary once the background fill lands (#534)
+    let healthy = false
+    for (let i = 0; i < 150 && !healthy; i++) {
+      const ok = await app.inject({ method: 'GET', url: `/pages/${pageId}/title-dictionary`, headers: H })
+      expect(ok.statusCode).toBe(200)
+      if ((ok.json() as { degraded?: boolean }).degraded === undefined) healthy = true
+      else await new Promise((r) => setTimeout(r, 200))
+    }
+    expect(healthy, 'FGA recovered and the fill served a real dictionary again').toBe(true)
   })
 })
 
