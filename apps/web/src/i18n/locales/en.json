@@ -1185,7 +1185,6 @@
     "lastCap": "A role keeps at least one capability.",
     "builtInTitle": "Built-in roles",
     "builtIn": "built-in",
-    "customTitle": "Custom roles",
     "customEmpty": "No custom roles yet.",
     "create": "New role",
     "delete": "Delete role",
@@ -1216,12 +1215,9 @@
       "createSpaces": "create spaces",
       "issueApiKeys": "issue API keys"
     },
-    "scopeLabel": "Role scope",
     "scopeResource": "Space / page",
     "scopeTenant": "Tenant",
     "assignTenantScope": "applies tenant-wide",
-    "builtInTenantTitle": "Built-in tenant roles",
-    "builtInResourceTitle": "Built-in space & page roles",
     "deleteConfirm": "Delete the role \"{{name}}\"? Its assignments are removed with it. This cannot be undone.",
     "mappingTitle": "Group mappings",
     "mappingBody": "Confer a custom role on everyone in an IdP group. Membership resolves live from your identity provider — no one is added or billed, and the role appears the moment a member is synced into the group.",
@@ -1241,7 +1237,8 @@
     "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
     "memberLabel": "Member",
     "memberPlaceholder": "Select member",
-    "mappingTenantBody": "Confer a TENANT role (like creating spaces) on everyone in an IdP group. Membership resolves live from your identity provider — nobody is added or billed. A mapping onto a space's role is made in that space's Members tab."
+    "mappingTenantBody": "Confer a TENANT role (like creating spaces) on everyone in an IdP group. Membership resolves live from your identity provider — nobody is added or billed. A mapping onto a space's role is made in that space's Members tab.",
+    "mixedScopeHint": "A role is either a space/page role or a tenant role - uncheck one side to save."
   },
   "detailsEdit": {
     "title": "Edit collapsible",

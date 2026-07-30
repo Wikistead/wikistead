@@ -15,36 +15,36 @@ test("#497: group→role mapping — create a custom role, map a group, list, de
   await page.getByTestId("role-name-input").fill(role);
   await page.getByTestId("role-cap-view").check();
   await page.getByTestId("role-save").click();
-  await expect(page.getByTestId("custom-roles")).toContainText(role, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).toContainText(role, { timeout: 8000 });
 
-  // Map an IdP group to the role on the first space.
-  await page.getByTestId("mapping-group").fill(group);
-  await page.getByTestId("mapping-role").click();
+  // Map an IdP group to the role ON THE SPACE. #514 / ADR-188 §8 moved space-scope mappings off the
+  // tenant Roles tab (whose form is tenant-scope only now) and into the space's own Members tab — the
+  // space is the page's context, so the row needs no space column (the c50eedbdb naming property now
+  // only applies to the tenant tab's own rows, which all say "· Tenant").
+  await page.goto("/spaces/demo_space/settings/members");
+  await expect(page.getByTestId("space-group-mappings")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("space-mapping-group").fill(group);
+  await page.getByTestId("space-mapping-role").click();
   await page.getByRole("option", { name: role }).click();
   await expect(page.getByRole("option")).toHaveCount(0); // the role listbox closed (radix pointer-events restored)
-  await page.getByTestId("mapping-space").click();
-  await page.getByRole("option").first().click();
-  const spaceName = ((await page.getByTestId("mapping-space").innerText()) || "").trim();
-  await page.getByTestId("mapping-add").click();
+  await page.getByTestId("space-mapping-add").click();
 
-  // The mapping lists: group name → role name → WHICH SPACE. The last part was missing: a space-scope
-  // row named only the role, so the same role mapped to two spaces produced two identical-looking rows
-  // and the list could not tell you what it did.
-  const row = page.getByTestId("mapping-row").filter({ hasText: group });
+  const row = page.getByTestId("space-mapping-row").filter({ hasText: group });
   await expect(row).toContainText(group, { timeout: 8000 });
   await expect(row).toContainText(role);
-  expect(spaceName.length, "the picker names the space it chose").toBeGreaterThan(0);
-  await expect(row, "the row names the space the mapping targets").toContainText(spaceName);
 
   // Delete confirms first (#504 danger), then the row is gone.
-  await row.getByTestId("mapping-remove").click();
-  await page.getByTestId("mapping-delete-confirm").click();
-  await expect(page.getByTestId("mapping-list")).not.toContainText(group, { timeout: 8000 });
+  await row.getByTestId("space-mapping-remove").click();
+  await page.getByTestId("space-mapping-delete-confirm").click();
+  await expect(page.getByTestId("space-mapping-list")).not.toContainText(group, { timeout: 8000 });
+
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
 
   // Cleanup: the role now has no live assignment, so delete succeeds.
   await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click();
-  await expect(page.getByTestId("custom-roles")).not.toContainText(role, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).not.toContainText(role, { timeout: 8000 });
 });
 
 // #497 / ADR-183 §3: the tenant default role setting persists (a tenant-scope custom role becomes the
@@ -57,11 +57,9 @@ test("#497 §3: the default-role setting persists across a reload", async ({ pag
 
   await page.getByTestId("role-create").click();
   await page.getByTestId("role-name-input").fill(role);
-  await page.getByTestId("role-scope").click();
-  await page.getByRole("option", { name: "Tenant" }).click();
-  await page.getByTestId("role-cap-createSpaces").check();
+  await page.getByTestId("role-cap-createSpaces").check(); // tenant scope derives from the checked capability (#536)
   await page.getByTestId("role-save").click();
-  await expect(page.getByTestId("custom-roles")).toContainText(role, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).toContainText(role, { timeout: 8000 });
 
   // Pick it as the default → reload → still selected (the PUT persisted).
   await page.getByTestId("default-role").click();
@@ -75,7 +73,7 @@ test("#497 §3: the default-role setting persists across a reload", async ({ pag
   await page.getByRole("option", { name: "None (plain member)" }).click();
   await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click();
-  await expect(page.getByTestId("custom-roles")).not.toContainText(role, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).not.toContainText(role, { timeout: 8000 });
 });
 
 // A tenant-scope mapping needs no space picker — the target is the tenant itself (the tenant-wide note
@@ -88,11 +86,9 @@ test("#497: a tenant-scope role maps tenant-wide (no space picker)", async ({ pa
 
   await page.getByTestId("role-create").click();
   await page.getByTestId("role-name-input").fill(role);
-  await page.getByTestId("role-scope").click();
-  await page.getByRole("option", { name: "Tenant" }).click();
-  await page.getByTestId("role-cap-createSpaces").check();
+  await page.getByTestId("role-cap-createSpaces").check(); // tenant scope derives from the checked capability (#536)
   await page.getByTestId("role-save").click();
-  await expect(page.getByTestId("custom-roles")).toContainText(role, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).toContainText(role, { timeout: 8000 });
 
   await page.getByTestId("mapping-group").fill(group);
   await page.getByTestId("mapping-role").click();
@@ -109,5 +105,5 @@ test("#497: a tenant-scope role maps tenant-wide (no space picker)", async ({ pa
   await expect(page.getByTestId("mapping-list")).not.toContainText(group, { timeout: 8000 });
   await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click();
-  await expect(page.getByTestId("custom-roles")).not.toContainText(role, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).not.toContainText(role, { timeout: 8000 });
 });

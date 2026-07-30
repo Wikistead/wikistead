@@ -9,7 +9,7 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   const name = `e2e-role-${Date.now()}`;
   await page.goto("/admin/roles");
   await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId("builtin-roles")).toContainText("manager"); // built-ins on every plan
+  await expect(page.getByTestId("roles-list")).toContainText("manager"); // built-ins on every plan
 
   // Create: name + delete/view capabilities.
   await page.getByTestId("role-create").click();
@@ -17,7 +17,7 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   await page.getByTestId("role-cap-delete").check();
   await page.getByTestId("role-cap-view").check();
   await page.getByTestId("role-save").click();
-  await expect(page.getByTestId("custom-roles")).toContainText(name, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).toContainText(name, { timeout: 8000 });
 
   // Edit: add publish via the INLINE picker (#445— a checkbox toggle IS the commit, no
   // form/save). The check must survive a full reload = the PUT really landed, not local state.
@@ -35,13 +35,15 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   // DEFINES roles) and into the space's own Members tab, so the role's lifecycle is exercised where the
   // grant actually lives now.
   await page.goto("/spaces/demo_space/settings/members");
+  // #536 §6: assignment goes through the MERGED picker (one control for built-ins and custom roles);
+  // the old space-role-select/-member-input/-add form is gone.
   await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId("space-role-select").click();
+  await page.getByTestId("space-grant-input").fill("dev");
+  await page.getByTestId("space-grant-candidate").first().click();
+  await page.getByTestId("space-grant-capability").click();
   await page.getByRole("option", { name }).click();
   await expect(page.getByRole("option")).toHaveCount(0); // the listbox is fully closed (radix restores pointer-events)
-  await page.getByTestId("space-role-member-input").fill("dev");
-  await page.getByTestId("space-role-member-candidate").first().click();
-  await page.getByTestId("space-role-assign-add").click();
+  await page.getByTestId("space-grant-add").click();
   await expect(page.getByTestId("space-role-assign-list")).toContainText(name, { timeout: 8000 });
 
   // Deleting a role with live assignments is refused (the 409 guard) — the toast explains.
@@ -49,7 +51,7 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   const row2 = page.getByTestId("custom-role-row").filter({ hasText: name });
   await row2.getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
-  await expect(page.getByTestId("custom-roles")).toContainText(name); // still there (409)
+  await expect(page.getByTestId("roles-list")).toContainText(name); // still there (409)
 
   // Unassign (again where the grant lives) → then delete succeeds.
   await page.goto("/spaces/demo_space/settings/members");
@@ -59,7 +61,7 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   const row3 = page.getByTestId("custom-role-row").filter({ hasText: name });
   await row3.getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
-  await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).not.toContainText(name, { timeout: 8000 });
 });
 
 // #445the inline picker's guard rails — a role can never lose its LAST capability (the sole
@@ -104,7 +106,7 @@ test("#445last capability is locked; rename works via the inline affordance", as
   // Cleanup.
   await renamedRow.getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
-  await expect(page.getByTestId("custom-roles")).not.toContainText(renamed, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).not.toContainText(renamed, { timeout: 8000 });
 });
 
 // #445 / ADR-171: tenant-scope roles + the default presets. The member default toggle IS the
@@ -119,7 +121,7 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   // #469 / #445the preset lives inside the TENANT role list as a CapabilityPicker cell; the old
   // standalone admin control is gone (admin is now a uniform read-only picker, asserted in roles-ia-469).
   await expect(page.getByTestId("default-admin-create-spaces")).toHaveCount(0);
-  const member = page.getByTestId("builtin-tenant-roles").getByTestId("builtin-member-cap-createSpaces");
+  const member = page.getByTestId("builtin-role-member").getByTestId("builtin-member-cap-createSpaces");
   await expect(member).toBeEnabled({ timeout: 8000 });
   const initial = await member.isChecked();
   await member.click();
@@ -127,14 +129,13 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await member.click(); // restore the seeded default
   await expect(member).toBeChecked({ checked: initial, timeout: 8000 });
 
-  // A TENANT-scope custom role: the scope select narrows the capability vocabulary.
+  // A TENANT-scope custom role: no scope selector — checking a tenant capability IS the scope
+  // (#536the vocabularies are disjoint, so scope derives from what is checked).
   await page.getByTestId("role-create").click();
   await page.getByTestId("role-name-input").fill(name);
-  await page.getByTestId("role-scope").click();
-  await page.getByRole("option", { name: "Tenant" }).click();
   await page.getByTestId("role-cap-createSpaces").check();
   await page.getByTestId("role-save").click();
-  await expect(page.getByTestId("custom-roles")).toContainText(name, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).toContainText(name, { timeout: 8000 });
 
   // #514 / ADR-188 slice 4: a TENANT role is an attribute of a member, so it is granted on the Members
   // page — no space picker anywhere, because the scope is the tenant itself.
@@ -154,7 +155,7 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.goto("/admin/roles");
   await page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first
-  await expect(page.getByTestId("custom-roles")).not.toContainText(name, { timeout: 8000 });
+  await expect(page.getByTestId("roles-list")).not.toContainText(name, { timeout: 8000 });
 });
 
 // #420the console's vocabulary. A built-in role is shown as the SAME capability grid used to
@@ -174,20 +175,20 @@ test("#420built-ins render as read-only capability checkboxes, and members are p
   const viewerDelete = page.getByTestId("builtin-viewer-cap-delete");
   await expect(viewerDelete).toBeVisible();
   await expect(viewerDelete).not.toBeChecked();
-  await expect(page.getByTestId("builtin-roles"), "the cap · cap · cap text is gone").not.toContainText(" · ");
+  await expect(page.getByTestId("roles-list"), "the cap · cap · cap text is gone").not.toContainText(" · ");
 
   // Theruling was about VOCABULARY — "never ask for an internal sub, search by name" — not about
   // which screen shows it. #514 slice 4 moved assignment to where each grant lives, so the property is
   // pinned there: the space Members tab still picks a person by name and resolves the principal itself.
   await page.goto("/spaces/demo_space/settings/members");
   await expect(page.getByTestId("space-role-assign")).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId("space-role-member-input").fill("e");
-  const item = page.getByTestId("space-role-member-candidate").first();
+  await page.getByTestId("space-grant-input").fill("e");
+  const item = page.getByTestId("space-grant-candidate").first();
   await expect(item, "a tenant member matched the search").toBeVisible({ timeout: 8000 });
   const picked = (await item.innerText()).split("\n")[0]!.trim();
   await item.click();
-  await expect(page.getByTestId("space-role-member-input"), "the field now holds the person's NAME, not a sub").toHaveValue(picked);
-  await expect(page.getByTestId("space-role-member-candidates"), "the list closes once a member is chosen").toHaveCount(0);
+  await expect(page.getByTestId("space-grant-input"), "the field now holds the person's NAME, not a sub").toHaveValue(picked);
+  await expect(page.getByTestId("space-grant-candidates"), "the list closes once a member is chosen").toHaveCount(0);
 
   // …and the Roles tab no longer offers any assignment control at all (it DEFINES roles now).
   await page.goto("/admin/roles");
