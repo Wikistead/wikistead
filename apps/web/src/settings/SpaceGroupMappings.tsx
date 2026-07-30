@@ -6,6 +6,7 @@ import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { useAssignableRoles, useResourceRoleMappings, useCreateRoleMapping, useDeleteRoleMapping } from "../data/queries";
+import { resolveMappingDispatch } from "./grant-dispatch";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
 
 // #514 / ADR-188 §8: a group→role MAPPING is configured with the same scope symmetry as an assignment —
@@ -63,15 +64,19 @@ export function SpaceGroupMappings({ spaceId }: { spaceId: string }) {
         </label>
         <Button variant="primary" size="sm" data-testid="space-mapping-add"
           disabled={!group.trim() || !roleId || createMapping.isPending}
-          onClick={() => createMapping.mutate(
-            {
-              groupName: group.trim(),
-              // the prefix names the mechanism (the grant-dispatch-536 rule: dispatch on data, never guess)
-              ...(roleId.startsWith("builtin:") ? { builtinCapability: roleId.slice("builtin:".length) } : { roleId: roleId.slice("role:".length) }),
-              resourceType: "space", resourceId: spaceId,
-            },
-            { onSuccess: () => { notify.success(t("toast.saved")); setGroup(""); }, onError },
-          )}>{t("adminRoles.mappingAdd")}</Button>
+          onClick={() => {
+            // the grant-dispatch-536 rule: the decision is a value, the handler only executes it
+            const action = resolveMappingDispatch(roleId);
+            if (action.kind === "none") return;
+            createMapping.mutate(
+              {
+                groupName: group.trim(),
+                ...(action.kind === "builtin" ? { builtinCapability: action.builtinCapability } : { roleId: action.roleId }),
+                resourceType: "space", resourceId: spaceId,
+              },
+              { onSuccess: () => { notify.success(t("toast.saved")); setGroup(""); }, onError },
+            );
+          }}>{t("adminRoles.mappingAdd")}</Button>
       </div>
 
       <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-mapping-list">

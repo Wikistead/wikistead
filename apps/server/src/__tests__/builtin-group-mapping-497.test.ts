@@ -12,9 +12,12 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
+import IORedis from 'ioredis'
 import { fgaClient, writeTuples, check } from '@wikistead/authz'
-import { createSpace, deleteSpace } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listSpaceAccess } from '../routes/spaces.js'
 import { groupGrantee } from '../auth/group-sync.js'
+import { ensureMembers } from './helpers/membership.js'
+import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -28,6 +31,13 @@ let app: FastifyInstance
 let tenant: Tenant
 let db: TenantDb
 let spaceId: string
+const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
+const MGR = `g497-mgr-${tag}`
+const PLAIN = `g497-plain-${tag}`
+let mgrSid = ''
+let plainSid = ''
+const HMGR = () => ({ host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${mgrSid}`, 'content-type': 'application/json' })
+const HPLAIN = () => ({ host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${plainSid}`, 'content-type': 'application/json' })
 
 beforeAll(async () => {
   tenant = (await new TenantRegistry(pool).findBySlug('dev'))! as Tenant
@@ -37,12 +47,18 @@ beforeAll(async () => {
   spaceId = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: `gm497-${tag}` })).id
   // the #111 sync would write this on login; the test writes the SAME tuple the sync writes
   await writeTuples(fgaClient, [{ user: MEMBER, relation: 'member', object: groupGrantee(tenant.id, GROUP).replace('#member', '') }])
+  // a SPACE MANAGER and a plain member with real sessions — the per-scope authority pins (review D3)
+  await ensureMembers(tenant.id, [MGR, PLAIN])
+  await writeTuples(fgaClient, [{ user: `user:${MGR}`, relation: 'manager', object: `space:${spaceId}` }])
+  mgrSid = await createSession(valkey, { tenantId: tenant.id, sub: MGR, role: 'member' })
+  plainSid = await createSession(valkey, { tenantId: tenant.id, sub: PLAIN, role: 'member' })
 }, 120_000)
 
 afterAll(async () => {
   await deleteSpace(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId, userId: 'dev-user' }).catch(() => {})
   await app?.close()
   await db.release()
+  await valkey.quit()
   await pool.end()
 }, 120_000)
 
@@ -97,5 +113,54 @@ describe('#497: built-in group mappings', () => {
   it('a cross-tenant space id is a uniform 404 (existence-hiding holds on the new branch)', async () => {
     const res = await post({ groupName: GROUP, builtinCapability: 'edit', resourceType: 'space', resourceId: '00000000-0000-4000-8000-00000000497b' })
     expect(res.statusCode).toBe(404)
+  }, 120_000)
+})
+
+describe('#497 review D1/D3: ownership at the Members surface, and per-scope authority', () => {
+  it('a mapping-owned builtin grant cannot be revoked or re-granted from the Members surface (409); deleting the mapping still revokes', async () => {
+    const created = await post({ groupName: GROUP, builtinCapability: 'edit', resourceType: 'space', resourceId: spaceId })
+    expect(created.statusCode, created.body).toBe(201)
+    const mappingId = (created.json() as { id: string }).id
+    const grantee = groupGrantee(tenant.id, GROUP)
+
+    // Members revoke must refuse — silently unassigning strands the mapping as a lying console row
+    await expect(revokeSpaceAccess(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: tenant.id, userId: 'dev-user', grantee, capability: 'edit', plan: tenant.plan,
+    })).rejects.toMatchObject({ statusCode: 409 })
+    expect(await check(fgaClient, MEMBER, 'edit', { type: 'space', id: spaceId }), 'access survives the refused revoke').toBe(true)
+
+    // Members grant must refuse too — the idempotent dup path would silently ADOPT the mapping's row
+    await expect(grantSpaceAccess(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: tenant.id, userId: 'dev-user', grantee, capability: 'edit', plan: tenant.plan,
+    })).rejects.toMatchObject({ statusCode: 409 })
+
+    // the list names the machine-managed row
+    const listed = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: tenant.id, userId: 'dev-user' })
+    const row = listed.find((g) => g.grantee === grantee && g.capability === 'edit')
+    expect(row?.managed, 'the console says who manages it').toBe(true)
+
+    // the OWNER still removes it — mapping delete revokes for real
+    const del = await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${mappingId}`, headers: HG })
+    expect(del.statusCode).toBe(204)
+    expect(await check(fgaClient, MEMBER, 'edit', { type: 'space', id: spaceId }), 'the mapping delete is the real revoke').toBe(false)
+  }, 120_000)
+
+  it('a direct (manual) grant is NOT marked managed and stays revocable', async () => {
+    const grantee = groupGrantee(tenant.id, `Direct-${tag}`)
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: tenant.id, userId: 'dev-user', grantee, capability: 'view', plan: tenant.plan })
+    const listed = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: tenant.id, userId: 'dev-user' })
+    const row = listed.find((g) => g.grantee === grantee && g.capability === 'view')
+    expect(row, 'the direct grant lists').toBeTruthy()
+    expect(row?.managed).toBeUndefined()
+    await revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: tenant.id, userId: 'dev-user', grantee, capability: 'view', plan: tenant.plan })
+  }, 120_000)
+
+  it('a space manager creates a builtin mapping in their own space (201); a plain member is refused (403)', async () => {
+    const mgrRes = await app.inject({ method: 'POST', url: '/admin/roles/mappings', headers: HMGR(), payload: { groupName: `MgrB-${tag}`, builtinCapability: 'view', resourceType: 'space', resourceId: spaceId } })
+    expect(mgrRes.statusCode, mgrRes.body).toBe(201)
+    const plainRes = await app.inject({ method: 'POST', url: '/admin/roles/mappings', headers: HPLAIN(), payload: { groupName: `PlainB-${tag}`, builtinCapability: 'view', resourceType: 'space', resourceId: spaceId } })
+    expect(plainRes.statusCode, 'no space manage, no mapping').toBe(403)
+    const del = await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${(mgrRes.json() as { id: string }).id}`, headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${mgrSid}` } })
+    expect(del.statusCode).toBe(204)
   }, 120_000)
 })

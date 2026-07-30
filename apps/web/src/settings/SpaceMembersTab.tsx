@@ -223,14 +223,21 @@ export function SpaceMembersTab() {
           <div key={`${g.grantee}:${g.capability}`} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-grant-item">
             <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={g.capability}>{capNoun(g.capability)}</span>
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{label(g)}</span>
-            {/* #504: red at rest; no confirm — a grant is re-grantable in one step (exception candidate) */}
-            <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" variant="danger"
-              onClick={() => revoke.mutate({ grantee: g.grantee, capability: g.capability }, {
-                onSuccess: () => notify.success(t("toast.accessRevoked")),
-                onError: () => notify.error(t("toast.actionFailed")),
-              })}>
-              <X size={14} />
-            </IconButton>
+            {/* #497 (088): a mapping-conferred row is machine-managed (ADR-183 §1) — no revoke affordance
+                here (the server 409s it anyway; this is the read-only-with-a-pointer rendering). It is
+                removed by deleting the MAPPING in the group-mappings section below. */}
+            {g.managed ? (
+              <span className="flex-none rounded bg-bg-subtle px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="space-grant-managed" data-tip={t("spaceMembers.managedByMapping")}>{t("spaceMembers.managedBadge")}</span>
+            ) : (
+              /* #504: red at rest; no confirm — a grant is re-grantable in one step (exception candidate) */
+              <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" variant="danger"
+                onClick={() => revoke.mutate({ grantee: g.grantee, capability: g.capability }, {
+                  onSuccess: () => notify.success(t("toast.accessRevoked")),
+                  onError: () => notify.error(t("toast.actionFailed")),
+                })}>
+                <X size={14} />
+              </IconButton>
+            )}
           </div>
         ))}
         {grants.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}

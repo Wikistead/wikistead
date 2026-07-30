@@ -49,3 +49,18 @@ describe("#536: the merged picker dispatch, four ways", () => {
     expect(a).toMatchObject({ target: { principal: "user:weird sub with spaces" } });
   });
 });
+
+// #497 (088): the mapping picker's decision, same discipline.
+import { resolveMappingDispatch } from "./grant-dispatch";
+
+describe("#497: resolveMappingDispatch", () => {
+  it("dispatches builtin and role picks by prefix", () => {
+    expect(resolveMappingDispatch("builtin:edit")).toEqual({ kind: "builtin", builtinCapability: "edit" });
+    expect(resolveMappingDispatch("role:abc-123")).toEqual({ kind: "role", roleId: "abc-123" });
+  });
+  it("maps nothing for empty, prefix-only, or unrecognised values (never a broken wire field)", () => {
+    for (const v of ["", "builtin:", "role:", "someid", "BUILTIN:edit"]) {
+      expect(resolveMappingDispatch(v), v).toEqual({ kind: "none" });
+    }
+  });
+});
