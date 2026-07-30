@@ -13,7 +13,11 @@
   margin: 14mm;
 }
 
-/* Off-print, the print portal is inert and invisible (it still renders in the DOM so print has it ready). */
+/* Off-print, the print portal is inert and invisible (it still renders in the DOM so print has it ready).
+   `data-print-root` is the PORTAL's attribute and this rule is its screen-side contract — which is why the
+   exported document must never wear it (#85the app CSS travels inside the exported file, and a root
+   carrying the attribute opened to a blank page). The export root is `.wks-export-doc` instead, and the
+   print rules below name that class beside the attribute so the saved file still prints. */
 [data-print-root] {
   display: none;
 }
@@ -21,11 +25,16 @@
 @media print {
   /* Hide the entire live app (chrome, the virtualised CM reading surface, floating controls, toasts —
      everything), show ONLY the static print portal. display:none removes them from layout entirely, so
-     the portal flows from the top of the sheet and paginates naturally. */
-  body > *:not([data-print-root]) {
+     the portal flows from the top of the sheet and paginates naturally.
+     `.wks-export-doc` is exempt too: inside the exported FILE (which carries this stylesheet) the
+     document's own root is a body child, and without the exemption printing the saved file blanked it
+     (#505→ #85, the marker round-trip). In the live app nothing at body level wears that
+     class, so this changes nothing on screen. */
+  body > *:not([data-print-root]):not(.wks-export-doc) {
     display: none !important;
   }
-  [data-print-root] {
+  [data-print-root],
+  .wks-export-doc {
     display: block !important;
     position: static;
     max-width: 100%;
@@ -38,7 +47,8 @@
   }
   /* A table taller than a sheet must paginate too — the #518 box-scroll (max-height) would clip it to
      one screenful in print, so let printed tables take their natural height and flow across pages. */
-  [data-print-root] .cm-lp-table-scroll {
+  [data-print-root] .cm-lp-table-scroll,
+  .wks-export-doc .cm-lp-table-scroll {
     max-height: none;
     overflow: visible;
   }
@@ -80,7 +90,8 @@
     --callout-danger: #cf222e;
     color-scheme: light; /* native controls / caret follow the sheet, not the app theme */
   }
-  [data-print-root] {
+  [data-print-root],
+  .wks-export-doc {
     background: #ffffff;
     color: var(--fg);
     -webkit-print-color-adjust: exact;

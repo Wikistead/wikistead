@@ -177,9 +177,11 @@ test("#85: the exported document and the app render the same document", async ({
   expect(html, "the plantuml figure is baked in as bytes that outlive this session").toContain("data:image/png");
   expect(html, "no image points at a blob: handle that dies with this page").not.toContain('src="blob:');
 
-  // #505 review rejection: the file must survive being PRINTED. The app's stylesheet travels with it, and its
-  // print rule hides everything that is not the print root — which was this document itself.
-  expect(html, "the document names itself the print root").toMatch(/<main[^>]*data-print-root/);
+  // #85(supersedes the #505 pin that stood here): naming itself the print root is what blanked the
+  // OPENED file — `data-print-root` carries the app's hidden-on-screen contract. The root is identified by
+  // its own class; both media on the saved file are pinned in export-user-path-85.spec.ts.
+  expect(html, "the document does not borrow the print portal's marker").not.toMatch(/<main[^>]*data-print-root/);
+  expect(html, "…its own class is the root's identity").toContain('<main class="wks-export-doc wks-prose"');
 
   // Read the same properties from the app…
   const appProbes = (await page.evaluate(

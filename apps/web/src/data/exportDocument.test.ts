@@ -147,12 +147,17 @@ describe("#85: the browser-built export document", () => {
     expect(out).toContain("hidden body");
   });
 
-  // #505 review rejection: the app's stylesheet travels with the file, and its print rule hides everything
-  // that is not the print root — which, inside the exported document, was the document itself. Printing
-  // the file produced a blank sheet. The root wears the marker so that rule points at it.
-  it("marks its root as the print root, so the app's print rule does not hide it", () => {
-    const out = buildExportDocument({ title: "t", body: surface("<p>content</p>"), css: "@media print{body > :not([data-print-root]){display:none !important}}" });
-    expect(out).toMatch(/<main[^>]*data-print-root/);
+  // #85(supersedes the #505 pin that stood here): `data-print-root` is the app PRINT PORTAL's
+  // attribute, and the app stylesheet — which travels with the file — hides it ON SCREEN. Wearing it made
+  // the saved file print correctly and OPEN to a blank page (measured: root 0×0, display none). The root
+  // is identified by its own `.wks-export-doc` marker instead; print.css names that class beside the
+  // portal attribute in its print rules, so print survives without borrowing the portal's semantics. The
+  // "opened file is visible in both media" behaviour is pinned where it can be seen — the file:// e2e
+  // (export-user-path-85.spec.ts); this guards the marker choice lexically.
+  it("does not wear the print portal's marker — its own class identifies the root", () => {
+    const out = buildExportDocument({ title: "t", body: surface("<p>content</p>"), css: "[data-print-root]{display:none}" });
+    expect(out, "the portal attribute would hide the opened file").not.toMatch(/<main[^>]*data-print-root/);
+    expect(out, "the export marker is the root's identity").toMatch(/<main class="wks-export-doc wks-prose"/);
     expect(out).toContain("content");
   });
 
