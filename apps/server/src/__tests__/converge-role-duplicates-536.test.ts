@@ -11,7 +11,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, writeTuples, deleteTuples } from '@wikistead/authz'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { buildApp } from '../app.js'
-import { planConvergence, executeConvergence, pickKeeper, type DupRow } from '../scripts/converge-role-duplicates-536.js'
+import { planConvergence, executeConvergence, pickKeeper, isRankedRow, type DupRow } from '../scripts/converge-role-duplicates-536.js'
 import type { Tenant } from '@wikistead/types'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -24,9 +24,12 @@ let app: FastifyInstance
 let db: TenantDb
 let spaceId = ''
 let roleId = ''
+let pubRoleId = ''
 const P_DUP = `user:cvg-dup-${STAMP}`
 const P_MGR = `user:cvg-mgr-${STAMP}`
 const P_MAP = `user:cvg-map-${STAMP}`
+const P_PUB = `user:cvg-pub-${STAMP}`  // carries an UNRANKED (publish) role next to a ranked pair
+const P_MIX = `user:cvg-mix-${STAMP}`  // one manual row next to mapping rows — not a duplicate group
 
 const insertRow = (principal: string, opts: { builtin?: string; roleId?: string; origin?: string; caps: string[]; at?: string }) =>
   adminPool`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin, created_at)
@@ -59,11 +62,30 @@ beforeAll(async () => {
   await insertRow(P_MAP, { builtin: 'view', origin: 'mapping', caps: ['view'] })
   await insertRow(P_MAP, { builtin: 'comment', origin: 'mapping', caps: ['comment'] })
   await writeTuples(fgaClient, tuplesFor(P_MAP, ['viewer', 'viewer_member', 'commenter']))
+
+  // an UNRANKED custom role (publish) next to a ranked view/comment pair: the publish role is exempt
+  // (kept), the ranked pair still converges. Plus a stray legacy ROWLESS moderator tuple that no row
+  // covers — the leftover pass must take it (manage-shaped tuples would not be).
+  pubRoleId = `cvg-pub-role-${STAMP}`
+  await adminPool`INSERT INTO roles (id, tenant_id, name, capabilities, scope) VALUES (${pubRoleId}, ${TENANT}, ${`cvg-pub-${STAMP}`}, ARRAY['publish']::text[], 'resource')`
+  await insertRow(P_PUB, { roleId: pubRoleId, caps: ['publish'], at: '2026-01-01T00:00:00Z' })
+  await insertRow(P_PUB, { builtin: 'view', caps: ['view'], at: '2026-01-02T00:00:00Z' })
+  await insertRow(P_PUB, { builtin: 'comment', caps: ['comment'], at: '2026-01-03T00:00:00Z' })
+  await writeTuples(fgaClient, tuplesFor(P_PUB, ['publisher', 'viewer', 'viewer_member', 'commenter', 'moderator']))
+
+  // ONE manual row next to mapping rows is not a duplicate group — nothing to converge
+  await insertRow(P_MIX, { builtin: 'view', origin: 'mapping', caps: ['view'] })
+  await insertRow(P_MIX, { builtin: 'edit', caps: ['edit'] })
+  await writeTuples(fgaClient, tuplesFor(P_MIX, ['viewer', 'viewer_member', 'editor_member']))
 }, 120_000)
 
 afterAll(async () => {
   await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId}`.catch(() => {})
   await adminPool`DELETE FROM roles WHERE id = ${roleId}`.catch(() => {})
+  await adminPool`DELETE FROM roles WHERE id = ${pubRoleId}`.catch(() => {})
+  await adminPool`DELETE FROM tenant_transparency_log WHERE tenant_id = ${TENANT} AND action = 'roles.duplicates_converged'`.catch(() => {})
+  await deleteTuples(fgaClient, tuplesFor(P_MIX, ['viewer', 'viewer_member', 'editor_member'])).catch(() => {})
+  await deleteTuples(fgaClient, tuplesFor(P_PUB, ['publisher'])).catch(() => {})
   await adminPool`DELETE FROM operator_audit_log WHERE actor = 'operator:converge-536'`.catch(() => {})
   await deleteTuples(fgaClient, tuplesFor(P_MAP, ['viewer', 'viewer_member', 'commenter'])).catch(() => {})
   await deleteSpace(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: OWNER }).catch(() => {})
@@ -93,16 +115,31 @@ describe('#536(5): one-shot duplicate convergence', () => {
     ]).builtin_capability).toBe('comment')
   })
 
-  it('dry-run plans without writing; apply converges rows AND tuples; manage/mapping survive; ledger written', async () => {
-    const plan = await planConvergence(adminPool)
+  it('unranked capabilities are exempt from the rank order (design-review A)', () => {
+    expect(isRankedRow({ builtin_capability: 'view', capabilities: null })).toBe(true)
+    expect(isRankedRow({ builtin_capability: null, capabilities: ['view', 'edit'] })).toBe(true)
+    expect(isRankedRow({ builtin_capability: null, capabilities: ['publish'] })).toBe(false)
+    expect(isRankedRow({ builtin_capability: null, capabilities: ['edit', 'share'] })).toBe(false)
+    expect(isRankedRow({ builtin_capability: null, capabilities: [] })).toBe(false)
+  })
+
+  it('dry-run plans without writing; apply converges rows AND tuples; manage/mapping/unranked survive; ledger written', async () => {
+    const plan = await planConvergence(adminPool, () => {})
     const dup = plan.find((p) => p.principal === P_DUP)
     const mgr = plan.find((p) => p.principal === P_MGR)
+    const pub = plan.find((p) => p.principal === P_PUB)
     expect(dup, 'the stacked principal is planned').toBeTruthy()
     expect(dup!.keep, 'the custom role (view+edit) is the strongest keeper').toBe(`role:${roleId}`)
     expect(dup!.remove.sort()).toEqual(['comment', 'view'])
     expect(mgr, 'the manager duplicate pair is planned (manage itself excluded)').toBeTruthy()
     expect(mgr!.keep).toBe('comment')
+    expect(mgr!.remove, 'manage is NEVER in a removal list').toEqual(['view'])
     expect(plan.find((p) => p.principal === P_MAP), 'mapping-owned rows are never planned').toBeUndefined()
+    expect(plan.find((p) => p.principal === P_MIX), 'a single manual row next to mapping rows is no duplicate').toBeUndefined()
+    expect(pub, 'the ranked pair beside an unranked role still converges').toBeTruthy()
+    expect(pub!.keep).toBe('comment')
+    expect(pub!.remove, 'the publish role is exempt — only the ranked loser goes').toEqual(['view'])
+    for (const p of plan) expect(p.remove, 'no removal list ever names manage or an unranked role').not.toContain(`role:${pubRoleId}`)
     // dry-run wrote nothing
     expect((await rowsOf(P_DUP)).length).toBe(3)
 
@@ -126,13 +163,43 @@ describe('#536(5): one-shot duplicate convergence', () => {
     expect((await rowsOf(P_MAP)).map((r) => r.origin)).toEqual(['mapping', 'mapping'])
     expect(await relationsOf(P_MAP)).toContain('commenter')
 
+    // the unranked publish role SURVIVES next to the converged keeper; the stray rowless moderator
+    // tuple (no covering row) was swept by the leftover pass
+    const pubRows = await rowsOf(P_PUB)
+    expect(pubRows.map((r) => r.role_id ?? r.builtin_capability).sort()).toEqual(['comment', pubRoleId].sort())
+    const pubRels = await relationsOf(P_PUB)
+    expect(pubRels, 'the exempt role keeps its tuple').toContain('publisher')
+    expect(pubRels, 'the uncovered legacy moderator tuple is swept').not.toContain('moderator')
+    expect(pubRels).not.toContain('viewer')
+
+    // per-removal audit went through the normal in-tx path
+    const audits = await adminPool<{ action: string }[]>`
+      SELECT action FROM audit_log WHERE tenant_id = ${TENANT} AND actor = ${'user:' + 'operator:converge-536'} AND action = 'space.access_revoked'`
+    expect(audits.length, 'built-in removals audit as space.access_revoked').toBeGreaterThan(0)
+
     // operator ledger has the summary entry for the tenant
     const ledger = await adminPool<{ action: string; target: string }[]>`
       SELECT action, target FROM operator_audit_log WHERE actor = 'operator:converge-536' ORDER BY seq DESC LIMIT 5`
     expect(ledger.some((l) => l.action === 'roles.duplicates_converged' && l.target === `tenant:${TENANT}`)).toBe(true)
 
     // idempotent: a re-plan finds nothing left
-    const replan = await planConvergence(adminPool)
+    const replan = await planConvergence(adminPool, () => {})
     expect(replan.find((p) => p.spaceId === spaceId)).toBeUndefined()
+  }, 120_000)
+
+  it('a keeper revoked between plan and apply skips the group (design-review C) — never delete-all', async () => {
+    const pa = `user:cvg-race-${STAMP}`
+    await insertRow(pa, { builtin: 'view', caps: ['view'], at: '2026-01-01T00:00:00Z' })
+    await insertRow(pa, { builtin: 'edit', caps: ['edit'], at: '2026-01-02T00:00:00Z' })
+    await writeTuples(fgaClient, tuplesFor(pa, ['viewer', 'viewer_member', 'editor_member']))
+    const plan = await planConvergence(adminPool, () => {})
+    const item = plan.find((p) => p.principal === pa)!
+    expect(item.keep).toBe('edit')
+    // the race: the keeper row is revoked after the plan was made
+    await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId} AND principal = ${pa} AND builtin_capability = 'edit'`
+    await executeConvergence(adminPool, app, [item], () => {})
+    const rows = await rowsOf(pa)
+    expect(rows, 'the view row was NOT deleted into a ghost keeper').toEqual([{ role_id: null, builtin_capability: 'view', origin: 'manual' }])
+    await deleteTuples(fgaClient, tuplesFor(pa, ['viewer', 'viewer_member', 'editor_member'])).catch(() => {})
   }, 120_000)
 })
