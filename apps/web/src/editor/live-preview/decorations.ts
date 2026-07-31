@@ -3982,11 +3982,15 @@ const RENDERERS: BlockRenderer[] = [
           // ones — the copy button and the lang tab are universal (a plain ```c must have a copy button too,
           // and the tab must look identical whether it's "lang only" or "filename + lang"). Reveal-on-cursor
           // via hideMarker (caret on the line / Source → raw info). NON-atomic so the line stays LANDABLE.
-          if (n === first && info && info.lang) {
-            const fence = line.text.match(/^(\s*)([`~]+)/);
-            const infoStart = line.from + (fence ? fence[0].length : 0);
+          // #565: the header band replaces ANY non-empty info string, not only a language-led one — a
+          // language-less `title="…"` / `showLineNumbers` / `{1,3}` fence (which the settings panel
+          // itself writes for a bare fence) must render its chrome, and its raw attributes must never
+          // stay visible as text on the opening line.
+          const fence = n === first ? line.text.match(/^(\s*)([`~]+)/) : null;
+          const infoStart = fence ? line.from + fence[0].length : line.to;
+          if (n === first && info && infoStart < line.to) {
             // #198 (comment 724): tab (title + lang) + a copy button shown only in a VIEW mode (!srcMode).
-            if (infoStart < line.to) ctx.hideMarker(infoStart, line.to, Decoration.replace({ widget: new FenceHeaderWidget(info.lang, info.title, codeBody, !srcMode) }), false);
+            ctx.hideMarker(infoStart, line.to, Decoration.replace({ widget: new FenceHeaderWidget(info.lang, info.title, codeBody, !srcMode) }), false);
           } else if (n === first && !srcMode && !lineRevealed(ctx.state, line.from)) {
             // #174 comment 911: a fence with NO language (a plain ```) still needs a COPY button — the
             // opening line has no info string to replace (the CodeMark renderer already hides the ``` ),

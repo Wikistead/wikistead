@@ -37,7 +37,24 @@ function settingsTooltip(pos: number): Tooltip {
       // Keep clicks inside the panel from reaching the editor: a mousedown on the surface would move
       // the selection and close the panel out from under the control being used.
       dom.addEventListener("mousedown", (e) => e.stopPropagation());
-      const dismiss = () => { view.dispatch({ effects: closeFenceSettings.of(null) }); view.focus(); };
+      // #565: text controls commit on the native `change` event (blur / Enter — one edit per commit,
+      // macro-settings-controls). A dismissal driven by the capture-phase document mousedown OUTRUNS
+      // blur, tearing the input out of the DOM before `change` can ever fire — whoever closed with
+      // the mouse lost what they typed. So a closing gesture that means "done" (outside click, ✕)
+      // first flushes the focused pending text input by dispatching its commit event; the no-op
+      // guard below keeps an unchanged value from producing a document edit. Escape stays a CANCEL
+      // (the one deliberate way to back out of a half-typed value).
+      const flushPendingText = () => {
+        const active = document.activeElement;
+        if (active instanceof HTMLInputElement && active.type === "text" && dom.contains(active)) {
+          active.dispatchEvent(new Event("change"));
+        }
+      };
+      const dismiss = (flush: boolean) => {
+        if (flush) flushPendingText();
+        view.dispatch({ effects: closeFenceSettings.of(null) });
+        view.focus();
+      };
       // #456 (user, 2026-07-27): dismiss on an outside click, like every other popover — pressing ✕ or
       // Escape should not be the only way out. The panel lives in CM's tooltip layer, so "outside" is
       // decided by containment, not by the editor's own handlers. Attached on a later task so the very
@@ -47,14 +64,14 @@ function settingsTooltip(pos: number): Tooltip {
       const onDocMouseDown = (e: MouseEvent) => {
         const t = e.target as Node | null;
         if (t && dom.contains(t)) return; // inside the panel (its own controls included) — not a dismissal
-        dismiss();
+        dismiss(true);
       };
       const attach = setTimeout(() => document.addEventListener("mousedown", onDocMouseDown, true), 0);
       // #456item 3: an explicit way OUT. The panel deliberately does not close itself when you use
       // a control (its writes ARE document changes), so it needs a close affordance the user drives — a ✕
       // in the header, and Escape while focus is inside the panel. Escape bubbles here from any control.
       dom.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); dismiss(); }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); dismiss(false); }
       });
 
       const header = document.createElement("div");
@@ -68,7 +85,7 @@ function settingsTooltip(pos: number): Tooltip {
       closeBtn.setAttribute("data-testid", "fence-settings-close");
       closeBtn.setAttribute("aria-label", i18n.t("common.close"));
       closeBtn.innerHTML = ICON_CLOSE; // #544: trusted constant SVG (glyph rendering is font-dependent); no user input
-      closeBtn.addEventListener("click", (e) => { e.preventDefault(); dismiss(); });
+      closeBtn.addEventListener("click", (e) => { e.preventDefault(); dismiss(true); });
       header.append(title, closeBtn);
       dom.append(header);
 

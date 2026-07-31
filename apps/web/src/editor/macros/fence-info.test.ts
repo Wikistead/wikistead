@@ -67,3 +67,46 @@ describe("parseFenceInfo (#198)", () => {
     expect(serializeFenceInfo(f!)).toBe('mermaid title="Flow" align=right');
   });
 });
+
+// #565 bug 2: a language-less fence's first token was consumed as the LANGUAGE, swallowing the
+// attribute before interpretation started — and serializeFenceInfo emits exactly that shape for
+// lang="", so the settings panel's own writes were unreadable (round-trip false for lang="").
+describe("#565: language-less fences with a leading attribute", () => {
+  it('```title="AA" — the attribute is a title, not a language', () => {
+    const f = parseFenceInfo(`title="AA"`);
+    expect(f.lang).toBe("");
+    expect(f.title).toBe("AA");
+  });
+  it("```showLineNumbers — recognised, no language", () => {
+    const f = parseFenceInfo("showLineNumbers");
+    expect(f.lang).toBe("");
+    expect(f.showLineNumbers).toBe(true);
+  });
+  it("```{1,3} — highlight ranges, no language", () => {
+    const f = parseFenceInfo("{1,3}");
+    expect(f.lang).toBe("");
+    expect(f.highlight).toEqual([[1, 1], [3, 3]]);
+  });
+  it("```align=left — alignment, no language", () => {
+    const f = parseFenceInfo("align=left");
+    expect(f.lang).toBe("");
+    expect(f.align).toBe("left");
+  });
+  it("round-trips with lang='' for every attribute combination", () => {
+    for (const src of [`title="AA"`, "showLineNumbers", "{1,3}", "align=left", `title="AA" showLineNumbers {1,3-5}`]) {
+      const parsed = parseFenceInfo(src);
+      expect(parsed.lang, src).toBe("");
+      const once = serializeFenceInfo(parsed);
+      expect(serializeFenceInfo(parseFenceInfo(once)), src).toBe(once);
+      const twice = parseFenceInfo(once);
+      expect(twice.title, src).toBe(parsed.title);
+      expect(twice.showLineNumbers, src).toBe(parsed.showLineNumbers);
+      expect(twice.highlight, src).toEqual(parsed.highlight);
+    }
+  });
+  it("a real language still wins the first slot (non-regression)", () => {
+    expect(parseFenceInfo(`ts title="x.ts"`).lang).toBe("ts");
+    expect(parseFenceInfo("mermaid").lang).toBe("mermaid");
+    expect(parseFenceInfo(`py wrap copyable="yes"`).lang).toBe("py");
+  });
+});

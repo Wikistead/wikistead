@@ -42,3 +42,24 @@ describe("#85: the read surface keeps a fence's chrome", () => {
     expect(host.querySelector("pre code")?.textContent).toContain("const x = 1;");
   });
 });
+
+// #565 bug 2, read-surface parity (the two-renderer rule): a language-less fence whose first token
+// is an attribute must render the attribute's chrome — not a garbage language badge — on the same
+// path the published page and exports use.
+describe("#565: language-less fences keep their chrome on the read surface", () => {
+  it('```title="AA" renders the filename tab and no language badge text', () => {
+    const host = render('```title="AA"\nconst x = 1;\n```');
+    expect(host.querySelector(".cm-lp-code-title")?.textContent).toBe("AA");
+    expect(host.textContent).not.toContain('title="AA"');
+  });
+  it("```showLineNumbers numbers the lines", () => {
+    const host = render("```showLineNumbers\nconst x = 1;\nconst y = 2;\n```");
+    expect(host.querySelectorAll(".cm-lp-code-numbered").length).toBe(2);
+  });
+  it("```{1} bands the first line", () => {
+    const host = render("```{1}\nconst x = 1;\nconst y = 2;\n```");
+    const banded = Array.from(host.querySelectorAll(".cm-lp-code-hl"));
+    expect(banded.length).toBe(1);
+    expect(banded[0]!.textContent).toContain("const x = 1;");
+  });
+});
