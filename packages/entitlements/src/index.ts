@@ -132,6 +132,12 @@ export interface Entitlements {
   // tuples and survive a downgrade (issuance-gate semantics, the apiAccess/webhooks precedent).
   // Built-in roles are free on every plan. Self-host UNLIMITED on; Cloud = top tier (EE).
   customRoles: boolean
+  // #547 / ADR-196 §7: may this tenant's email ride the MANAGED sender (the EE/Cloud provider-API
+  // driver with the shared domain's SPF/DKIM)? The FEATURE (immediate + digest over the deployment's
+  // own SMTP) is CE and never gated — this only picks the TRANSPORT: unentitled tenants resolve to
+  // the CE default driver (SMTP/no-op), never an error. Self-host UNLIMITED on (a self-hosted EE
+  // that registers a resolver may use it); Cloud = paid tiers (business placeholder).
+  managedEmail: boolean
 }
 
 // Self-host / Community edition: never plan-limited.
@@ -158,6 +164,7 @@ export const UNLIMITED: Entitlements = {
   mcpWrite: true,
   spaceEditLink: true,
   customRoles: true,
+  managedEmail: true,
 }
 
 // NOTE (ADR-069 / #132): the Cloud plan table (`CLOUD_PLANS`) and its resolver
