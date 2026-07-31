@@ -15,6 +15,11 @@ export interface OidcLoginState {
   // Which config authenticated: the tenant's own IdP (eligible for CE first-admin
   // bootstrap) vs the platform IdP (Cloud — never bootstraps; admin comes from signup).
   viaTenantOidc: boolean
+  // #554 S2 / ADR-197 §2 (the B3 generalization): the CONNECTION this state was minted under.
+  // The callback re-resolves and completes ONLY against this exact connection — a state minted
+  // for connection A never completes against connection B, and disabling a connection closes its
+  // 300s window. Absent on legacy (connection-less) starts, which keep the kind-level check.
+  connectionId?: string
   // Present when the login was started from an invite link. Carried through the
   // OIDC round-trip so /auth/callback can accept the invite (the new membership
   // grant) once identity is proven. The invite row is itself consume-once, and so
