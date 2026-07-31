@@ -177,6 +177,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Transactional email (P1.3). EE/Cloud may registerEmailDriver; CE uses SMTP
   // when configured, else a no-op (announced once — see email/index.ts).
   app.decorate('email', getEmailDriver(resolveEmailDriver((m) => app.log.info(m))))
+  // #547 S2: delivery-class builders register at app build so the drain (and drain-driving tests)
+  // can resolve them; registration is idempotent (a Map set).
+  await import('./email/mention-builder.js')
 
   const verifyMember = makeMemberVerifier({
     issuer: process.env.OIDC_ISSUER!,

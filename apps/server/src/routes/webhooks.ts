@@ -9,6 +9,7 @@ import type { TenantDb } from '../db/index.js'
 import { withTenantTx } from '../db/index.js' // #382
 import { encryptSecret, decryptSecret } from '../auth/secret-crypto.js'
 import { guardedFetch } from '../safe-fetch.js'
+import { pageEventDisposition } from '../page-disposition.js'
 
 // #228 / ADR-108: outbound webhooks. A subscription is admin-managed (RLS) and gated by the `webhooks`
 // entitlement at CREATION. Events are enqueued IN the operation's tx (enqueueWebhookOutbox — like the audit
@@ -75,33 +76,8 @@ export async function enqueueWebhookOutbox(sql: Sql, args: { tenantId: string; e
 
 // ── delivery worker ─────────────────────────────────────────────────────────
 
-// #228 comment 1000: an event about a PRIVATE or UNPUBLISHED-DRAFT page must NOT be delivered (its pageId/
-// actor would leak the existence the 404-uniform surface hides). Disposition is TRI-state so the drain can
-// tell a hard-suppress (private → drop now, security) apart from a transient not-yet-linked page (retry)
-// 'suppress' — a `private` marker is present: drop immediately, never deliver (existence-hiding).
-// 'deliver' — has a `page#space` tuple (published / space-linked) and no private marker.
-// 'not-ready' — neither: a `page.published` whose page#space FGA write hasn't landed yet (it is written
-// AFTER the publish tx commits, so the outbox row can briefly out-race it — #228 review
-// 2), OR a genuine draft event. Retry with backoff; drop after MAX_ATTEMPTS. Never
-// delivers while unlinked, so a real draft's existence stays hidden either way.
-// Non-page events are always 'deliver'. Fails CLOSED to 'suppress' on any FGA error.
-type EventDisposition = 'suppress' | 'deliver' | 'not-ready'
-async function pageEventDisposition(fga: OpenFgaClient, payload: Record<string, unknown>): Promise<EventDisposition> {
-  const pageId = typeof payload.pageId === 'string' ? payload.pageId : (payload.resource as { type?: string; id?: string } | undefined)?.id
-  if (!pageId) return 'deliver' // not a page event → no instance-level exclusion
-  try {
-    const { tuples } = await fga.read({ object: `page:${pageId}` })
-    const rel = (tuples ?? []).map((t) => t.key)
-    const linked = rel.some((k) => k?.relation === 'space') // page#space → published/space-linked (not a draft)
-    // #228 review 3: suppress on ANY `private` marker, not just `private@user:*`. The model writes private
-    // as the pair [user:*, share_link:*] (model.fga), so this is equivalent in the happy path — but if a
-    // write-path bug ever left a lone `share_link:*` private tuple, keying on user:* alone would leak the
-    // existence this hides. Relation-only is strictly more defensive (fail toward suppression).
-    const priv = rel.some((k) => k?.relation === 'private')
-    if (priv) return 'suppress'
-    return linked ? 'deliver' : 'not-ready'
-  } catch { return 'suppress' } // fail closed
-}
+// #228 comment 1000: the tri-state page disposition moved to ../page-disposition.ts (#547 shares it
+// with the email drain — ONE definition of what may leave the fortress). Semantics unchanged.
 
 const signBody = (secret: string, ts: string, body: string) => `sha256=${createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex')}`
 

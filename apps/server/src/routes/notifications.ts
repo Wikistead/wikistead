@@ -158,13 +158,29 @@ export async function fanOutMention(
     INSERT INTO feed_events (tenant_id, event_type, page_id, space_id, actor)
     VALUES (${args.tenantId}, 'mention', ${args.pageId}, ${args.spaceId}, ${args.actor})
     RETURNING id`
+  // #547 / ADR-196 §1 §5: the email ride-along, in the SAME tx (commit-then-crash still delivers —
+  // the webhook outbox pattern). Emission rules are INHERITED: only the notification rows that just
+  // passed the #362 kill switch / default mask produce outbox rows, further narrowed by the member's
+  // email_immediate pref. The row is thin (ids only); the short hold on next_attempt_at is the §6 fold
+  // window — K mentions inside it become one message at the drain.
+  const holdS = Number(process.env.EMAIL_FOLD_WINDOW_S ?? 30)
   await tx`
-    INSERT INTO notifications (tenant_id, member_sub, event_id)
-    SELECT DISTINCT ${args.tenantId}, m.sub, ${ev!.id}
-    FROM members m
-    WHERE m.tenant_id = ${args.tenantId} AND m.sub = ANY(${recipients})
-      AND COALESCE(m.notifications_enabled, true)
-      AND (cardinality(m.default_event_mask) = 0 OR 'mention' = ANY(m.default_event_mask))`
+    WITH ins AS (
+      INSERT INTO notifications (tenant_id, member_sub, event_id)
+      SELECT DISTINCT ${args.tenantId}, m.sub, ${ev!.id}
+      FROM members m
+      WHERE m.tenant_id = ${args.tenantId} AND m.sub = ANY(${recipients})
+        AND COALESCE(m.notifications_enabled, true)
+        AND (cardinality(m.default_event_mask) = 0 OR 'mention' = ANY(m.default_event_mask))
+      RETURNING id, member_sub
+    )
+    INSERT INTO email_outbox (tenant_id, member_sub, class, notification_id, fold_key, next_attempt_at)
+    SELECT ${args.tenantId}, ins.member_sub, 'mention', ins.id,
+           ${args.tenantId} || ':' || ins.member_sub || ':page:' || ${args.pageId} || ':mention',
+           now() + (${holdS} || ' seconds')::interval
+    FROM ins
+    JOIN members m ON m.tenant_id = ${args.tenantId} AND m.sub = ins.member_sub
+    WHERE COALESCE(m.email_immediate, true)`
   return ev!.id
 }
 
@@ -186,7 +202,7 @@ export interface FeedItem {
   patrolled?: boolean // #326: set on the feed (patrol view) — whether a moderator has marked this event reviewed
 }
 
-interface RawRow {
+export interface RawRow {
   id: string; event_type: string; page_id: string | null; space_id: string | null
   actor: string; created_at: Date; notification_id?: string; read_at?: Date | null; patrolled_at?: Date | null
 }
@@ -196,7 +212,7 @@ interface RawRow {
 // MOST-SPECIFIC resource — page_id when non-NULL (NEVER space#viewer for a page event: that would leak a
 // private page's activity to space viewers, correction 1), else space_id. Events failing either gate are
 // silently dropped. Pages batch through filterAuthorized; spaces use a per-id check.
-async function gateEvents(db: TenantDb, fga: OpenFgaClient, subject: string, rows: RawRow[]): Promise<FeedItem[]> {
+export async function gateEvents(db: TenantDb, fga: OpenFgaClient, subject: string, rows: RawRow[]): Promise<FeedItem[]> {
   const pageIds = [...new Set(rows.filter((r) => r.page_id).map((r) => r.page_id!))]
   const spaceIds = [...new Set(rows.filter((r) => !r.page_id && r.space_id).map((r) => r.space_id!))]
 
