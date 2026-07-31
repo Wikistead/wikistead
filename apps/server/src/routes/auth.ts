@@ -5,25 +5,39 @@ import type { TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { mintMemberCollabToken } from '@wikistead/auth'
 import { SESSION_COOKIE, destroySession, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
-import { buildLogin, exchangeCode, loadSocialLogin, type TenantOidcConfig } from '../auth/oidc.js'
+import { buildLogin, exchangeCode, loadSocialLogin, loadPlatformOidc, type TenantOidcConfig } from '../auth/oidc.js'
 import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
 import { bootstrapFirstAdmin } from '../auth/provisioning.js'
 import { acceptInvite } from '../auth/invites.js'
-import { resolveAvailableLogin, socialProvidersFor } from '../auth/login-methods.js'
+import { resolveAvailableLogin, resolveLoginConnections, socialProvidersFor } from '../auth/login-methods.js'
 
 async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   const { slug, domain } = resolveTenantFromHost(host ?? '')
   return loadTenant(slug, domain)
 }
 
-// The tenant's own IdP (RLS-scoped, one row per tenant); secret decrypted here.
+// The tenant's own IdP (RLS-scoped; the tenant's FIRST connection); secret decrypted here.
 async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   const [row] = await db.sql<
     { issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null }[]
   >`SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc ORDER BY sort, id LIMIT 1`
   if (!row || !row.enabled) return null
+  return toOidcCfg(row)
+}
+
+// #554 S2: ONE connection by its minted id (RLS-scoped, enabled only). The resolver's list is the
+// existence/effectiveness authority; this loads the secret-bearing config for the chosen row.
+async function loadTenantOidcById(db: TenantDb, id: string): Promise<TenantOidcConfig | null> {
+  const [row] = await db.sql<
+    { issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null }[]
+  >`SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc WHERE id = ${id}`
+  if (!row || !row.enabled) return null
+  return toOidcCfg(row)
+}
+
+function toOidcCfg(row: { issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; groups_claim: string | null }): TenantOidcConfig {
   return {
     issuer: row.issuer,
     clientId: row.client_id,
@@ -47,15 +61,31 @@ export async function resolveLogin(db: TenantDb, tenant: Tenant) {
 // existing session and run through the normal hook.
 export async function authPlugin(app: FastifyInstance) {
   // Start the OIDC flow: redirect to the tenant's IdP with state/nonce/PKCE.
-  app.get<{ Querystring: { returnTo?: string; invite?: string; provider?: string } }>('/auth/login', async (req, reply) => {
+  app.get<{ Querystring: { returnTo?: string; invite?: string; provider?: string; connection?: string } }>('/auth/login', async (req, reply) => {
     const tenant = await resolveTenant(req.headers.host)
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     const db = await acquireTenantDb(tenant)
     try {
       // #537 §7: the unified body — a method outside the effective set and a tenant that does not
       // exist answer identically ('not found'; the old 'login not configured' was a distinguisher).
-      const available = await resolveLogin(db, tenant)
-      const resolved = available.oidc
+      //
+      // #554 S2 / ADR-197 §2: ?connection=<id> starts ONE named connection. Absent / disabled /
+      // ceiling-excluded / unentitled / non-OIDC-family ids all answer the SAME unified 404 —
+      // connection ids stay unguessable uuids until S3 publishes the list. Without the param the
+      // legacy pick (tenant IdP over platform, ADR-016) is byte-identical to before.
+      let resolved: { cfg: TenantOidcConfig; viaTenantOidc: boolean } | null = null
+      let connectionId: string | undefined
+      if (req.query?.connection) {
+        const conn = (await resolveLoginConnections(db, tenant)).find((c) => c.id === req.query!.connection)
+        if (!conn || conn.kind === 'saml') return reply.code(404).send({ error: 'not found' })
+        const cfg = conn.kind === 'platform' ? loadPlatformOidc() : await loadTenantOidcById(db, conn.id)
+        if (!cfg) return reply.code(404).send({ error: 'not found' })
+        resolved = { cfg, viaTenantOidc: conn.kind === 'oidc' }
+        connectionId = conn.id
+      } else {
+        const available = await resolveLogin(db, tenant)
+        resolved = available.oidc
+      }
       if (!resolved) return reply.code(404).send({ error: 'not found' })
       const redirectUri = `${req.protocol}://${req.headers.host}/auth/callback`
       // #281 / ADR-121 §2: a social button passes ?provider=<slug>. Only ALLOWLISTED slugs
@@ -69,7 +99,7 @@ export async function authPlugin(app: FastifyInstance) {
       // An invite link starts login with ?invite=<token>; carry it (opaque) through
       // the round-trip so the callback can accept the invite after identity is proven.
       const inviteToken = req.query?.invite || undefined
-      await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo, viaTenantOidc: resolved.viaTenantOidc, inviteToken })
+      await saveState(app.valkey, state, { nonce, codeVerifier, tenantId: tenant.id, returnTo, viaTenantOidc: resolved.viaTenantOidc, inviteToken, ...(connectionId ? { connectionId } : {}) })
       return reply.redirect(url)
     } catch (e) {
       // #346: buildLogin does OIDC discovery against the issuer; if the IdP is unreachable /
@@ -128,8 +158,22 @@ export async function authPlugin(app: FastifyInstance) {
       // disabled mid-flight the old resolver FELL BACK to the platform config — exchanging the code
       // against a different IdP than the one that issued it. The flow completes only if the method the
       // state was minted under is STILL the effective one; otherwise the same unified 404.
-      const available = await resolveLogin(db, tenant)
-      const resolved = available.oidc
+      //
+      // #554 S2 (the B3 generalization, per-connection): a state minted under a NAMED connection
+      // completes only against that exact connection — still effective, same kind, its own config.
+      // Disabling the connection (or the ceiling/entitlement dropping it) closes the 300s window.
+      // The bootstrap gate below stays keyed on viaTenantOidc — wiring it to bootstrap_eligible
+      // awaits the #572ruling (grandfathered legacy surface vs explicit flip).
+      let resolved: { cfg: TenantOidcConfig; viaTenantOidc: boolean } | null = null
+      if (st.connectionId) {
+        const conn = (await resolveLoginConnections(db, tenant)).find((c) => c.id === st.connectionId && c.kind !== 'saml')
+        const cfg = conn ? (conn.kind === 'platform' ? loadPlatformOidc() : await loadTenantOidcById(db, conn.id)) : null
+        if (!conn || !cfg) return reply.code(404).send({ error: 'not found' })
+        resolved = { cfg, viaTenantOidc: conn.kind === 'oidc' }
+      } else {
+        const available = await resolveLogin(db, tenant)
+        resolved = available.oidc
+      }
       if (!resolved || resolved.viaTenantOidc !== st.viaTenantOidc) return reply.code(404).send({ error: 'not found' })
 
       const currentUrl = `${req.protocol}://${req.headers.host}${req.url}`
