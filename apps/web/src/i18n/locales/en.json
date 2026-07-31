@@ -1286,7 +1286,8 @@
     "groupAssignBody": "Give a tenant role to an IdP group. Everyone in the group gets it — and loses it when they leave the group.",
     "groupAssignEmpty": "No group holds a tenant role.",
     "groupLabel": "Group",
-    "groupPlaceholder": "Select a group…"
+    "groupPlaceholder": "Select a group…",
+    "scopeQuestion": "Which kind of role is this?"
   },
   "detailsEdit": {
     "title": "Edit collapsible",

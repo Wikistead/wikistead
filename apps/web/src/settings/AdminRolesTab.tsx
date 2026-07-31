@@ -73,10 +73,17 @@ function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false, l
   );
 }
 
-// #536(user re-ruling): creation is ONE flow — name + one combined capability check group. The
-// two vocabularies are disjoint, so the scope (#445's resource/tenant exclusivity) is DERIVED from what
-// is checked instead of being asked up front; a mix disables save with a hint, and the server still
-// validates. Nobody needs to know "switch scope to tenant first" to make a tenant role.
+// #580: the scope is CHOSEN, and it is the first thing on the form.
+//
+// #536removed a scope <Select> nobody could find and derived the scope from the boxes instead —
+// which fixed the hidden control and created a new problem the user then hit: you cannot tell which
+// kind of role you are making until you have already ticked something, and both vocabularies sit in
+// one undifferentiated grid until then. The answer is not to bring back the hidden Select: the choice
+// is made visible, as two segments, with a default, so the form always says what it is building.
+//
+// The capability list then follows the segment, which is what makes a mixed role UNBUILDABLE rather
+// than merely refused at save — the mixed-state hint has nothing left to warn about. The server's
+// exclusivity check stays exactly where it was (two layers; the UI is convenience, ADR-171 §445).
 function RoleEditor({ onSave, onCancel, pending }: {
   onSave: (v: { name: string; capabilities: string[]; scope: "resource" | "tenant" }) => void;
   onCancel?: () => void;
@@ -84,19 +91,40 @@ function RoleEditor({ onSave, onCancel, pending }: {
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<"resource" | "tenant">("resource");
   const [caps, setCaps] = useState<string[]>([]);
-  const hasResource = caps.some((c) => (CAPABILITIES as readonly string[]).includes(c));
-  const hasTenant = caps.some((c) => (TENANT_CAPABILITIES as readonly string[]).includes(c));
-  const mixed = hasResource && hasTenant;
+  const list = scope === "tenant" ? TENANT_CAPABILITIES : CAPABILITIES;
+  // switching scope drops what was ticked: keeping it would rebuild the mixed role this removes, and
+  // a capability from the other vocabulary is not "the same choice" in the new scope.
+  const pickScope = (next: "resource" | "tenant") => { setScope(next); setCaps([]); };
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border p-3">
       <Input inputSize="sm" className="max-w-xs" value={name} placeholder={t("adminRoles.namePlaceholder")}
         aria-label={t("adminRoles.nameLabel")} data-testid="role-name-input" onChange={(e) => setName(e.target.value)} />
-      <CapabilityPicker value={caps} onChange={setCaps} idPrefix="role" list={[...CAPABILITIES, ...TENANT_CAPABILITIES]} />
-      {mixed && <p className="m-0 text-xs text-[var(--callout-warning)]" data-testid="role-mixed-hint">{t("adminRoles.mixedScopeHint")}</p>}
+      <div className="flex flex-col gap-1">
+        <span className="text-xs text-fg-dim">{t("adminRoles.scopeQuestion")}</span>
+        {/* segments, not a Select: the choice is the frame for everything below it, so it is visible
+            without opening anything (the #536 complaint was a control nobody found) */}
+        <div className="inline-flex w-fit rounded-md border border-border p-0.5" role="radiogroup" aria-label={t("adminRoles.scopeQuestion")} data-testid="role-scope-segments">
+          {(["resource", "tenant"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="radio"
+              aria-checked={scope === s}
+              data-testid={`role-scope-${s}`}
+              onClick={() => pickScope(s)}
+              className={`rounded px-3 py-1 text-sm ${scope === s ? "bg-bg-subtle font-medium text-fg" : "text-fg-dim"}`}
+            >
+              {t(s === "tenant" ? "adminRoles.scopeTenant" : "adminRoles.scopeResource")}
+            </button>
+          ))}
+        </div>
+      </div>
+      <CapabilityPicker value={caps} onChange={setCaps} idPrefix="role" list={list} />
       <div className="flex gap-2">
-        <Button variant="primary" size="sm" data-testid="role-save" disabled={pending || !name.trim() || caps.length === 0 || mixed}
-          onClick={() => onSave({ name: name.trim(), capabilities: caps, scope: hasTenant ? "tenant" : "resource" })}>{t("common.save")}</Button>
+        <Button variant="primary" size="sm" data-testid="role-save" disabled={pending || !name.trim() || caps.length === 0}
+          onClick={() => onSave({ name: name.trim(), capabilities: caps, scope })}>{t("common.save")}</Button>
         {onCancel && <Button variant="default" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>}
       </div>
     </div>
