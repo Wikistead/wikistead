@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, writeTuples, deleteTuples } from '@wikistead/authz'
-import { createSpace, deleteSpace, grantSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess } from '../routes/spaces.js'
 import { createPage, deletePage, publishPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
@@ -164,6 +164,39 @@ describe('#536a manager is demoted only by someone who said so', () => {
     expect(await rowsOf(p), 'one principal, one row').toEqual([{ role_id: null, builtin_capability: 'view', origin: 'manual' }])
     expect(await holdsManager(p), 'the demotion reached FGA, not just the table').toBe(false)
     expect(await canView(p), 'and the role they were given actually works').toBe(true)
+  }, 120_000)
+
+  // #536 re-review 2, measured by the reviewer: the confirmed demotion of a ROWLESS manager — the
+  // space's own creator, the ruling's production case — wrote nothing to the audit stream, while the
+  // same demotion through a row audited normally. An authz change nobody can find in the log is one
+  // nobody can review.
+  it('a confirmed rowless demotion is AUDITED, like every demotion that goes through a row', async () => {
+    const p = sub('mgr-audit')
+    await writeTuples(fgaClient, [{ user: p, relation: 'manager', object: `space:${spaceId}` }])
+    const revoked = async () => Number((await adminPool<{ n: string }[]>`
+      SELECT (SELECT count(*) FROM audit_log    WHERE tenant_id = ${TENANT} AND action = 'space.access_revoked' AND target = ${`space:${spaceId}`})
+           + (SELECT count(*) FROM audit_outbox WHERE tenant_id = ${TENANT} AND action = 'space.access_revoked' AND target = ${`space:${spaceId}`}) AS n`)[0]!.n)
+    const before = await revoked()
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business', replace: true,
+    })
+    expect(await revoked() - before, 'the strongest change this path makes must leave a trace').toBeGreaterThan(0)
+  }, 120_000)
+
+  // and the sweep must delete the WHOLE grant, not the part that happens to be in the display table
+  it('a swept rowless view takes viewer_member with it (or they can still see the space)', async () => {
+    const p = sub('mgr-viewmember')
+    // the legacy shape: both leaves of a view grant, no row
+    await writeTuples(fgaClient, [
+      { user: p, relation: 'viewer', object: `space:${spaceId}` },
+      { user: p, relation: 'viewer_member', object: `space:${spaceId}` },
+    ])
+    await grant(p, 'edit') // the sweep converges them to edit
+    await revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
+    const { tuples } = await fgaClient.read({ user: p, object: `space:${spaceId}` })
+    const rels = (tuples ?? []).map((t) => t.key?.relation)
+    expect(rels, 'the member leaf is part of the same grant').not.toContain('viewer_member')
+    expect(await check(fgaClient, p, 'view', { type: 'space', id: spaceId }), 'nothing left means nothing left').toBe(false)
   }, 120_000)
 
   it('CONFIRMED reaches the rowless creator leaf as well (the production case)', async () => {
