@@ -17,8 +17,17 @@ export type GrantTarget =
 
 export type GrantAction =
   | { path: "grant"; capability: string; target: GrantTarget }
+  // #553 / ADR-199 §2: the editor NOUN is a composite — N single-capability built-in grants in one
+  // server transaction (the wire's `relations` array). Only where the noun is offered; every other
+  // built-in stays the single-capability grant it always was.
+  | { path: "grant-composite"; capabilities: string[]; target: GrantTarget }
   | { path: "assign"; roleId: string; target: GrantTarget }
   | { path: "none" };
+
+// The noun → bundle table. editor is the one built-in whose display bundle exceeds what its single
+// capability delivers post-ADR-199 (comment is the severed implication; view/publish still flow from
+// the edit chain in the model).
+export const COMPOSITE_BUILTINS: Record<string, string[]> = { edit: ["edit", "comment"] };
 
 export function resolveGrantDispatch(args: {
   pick: string; // "builtin:<capability>" | "role:<roleId>" — the merged picker's value
@@ -38,7 +47,10 @@ export function resolveGrantDispatch(args: {
   }
   if (args.pick.startsWith("builtin:")) {
     const capability = args.pick.slice("builtin:".length);
-    return capability ? { path: "grant", capability, target } : { path: "none" };
+    if (!capability) return { path: "none" };
+    const bundle = Object.hasOwn(COMPOSITE_BUILTINS, capability) ? COMPOSITE_BUILTINS[capability] : undefined;
+    if (bundle) return { path: "grant-composite", capabilities: bundle, target };
+    return { path: "grant", capability, target };
   }
   // an unrecognised value grants nothing rather than guessing a mechanism
   return { path: "none" };

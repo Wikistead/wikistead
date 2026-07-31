@@ -118,7 +118,7 @@ export function SpaceMembersTab() {
     // before dispatching (the server replaces regardless; this stops the unnoticed double-grant).
     const nextBadge = action.path === "assign"
       ? (customRoles.find((r) => r.id === action.roleId)?.name ?? "")
-      : capNoun(action.capability);
+      : capNoun(action.path === "grant-composite" ? action.capabilities[0]! : action.capability);
     const who = mode === "group" ? groupName : (picked?.label ?? "");
     const existing = mergedRows.find((r) => {
       // `manage` rows never auto-replace (server-side exemption — owner-lockout prevention; a manager is
@@ -140,6 +140,15 @@ export function SpaceMembersTab() {
     if (action.path === "assign") {
       const target = action.target.kind === "group" ? { groupName: action.target.groupName } : { principal: action.target.principal };
       assignRole.mutate({ roleId: action.roleId, resourceType: "space", resourceId: spaceId, ...target }, {
+        onSuccess: () => { notify.success(t("toast.accessGranted")); setPicked(null); setQuery(""); setGroupName(""); },
+        onError: () => notify.error(t("toast.actionFailed")),
+      });
+      return;
+    }
+    if (action.path === "grant-composite") {
+      // #553 / ADR-199 §2: the editor noun — one control, N single-capability grants in one server tx
+      const target = action.target.kind === "group" ? { groupName: action.target.groupName } : { grantee: action.target.principal };
+      grant.mutate({ ...target, capabilities: action.capabilities }, {
         onSuccess: () => { notify.success(t("toast.accessGranted")); setPicked(null); setQuery(""); setGroupName(""); },
         onError: () => notify.error(t("toast.actionFailed")),
       });
@@ -187,12 +196,20 @@ export function SpaceMembersTab() {
   // two mechanisms stay underneath (each row's revoke goes to its own machinery); that is an
   // implementation fact, not a reason to split the screen. One sort rule: principal name, then badge.
   type MergedRow =
-    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; grantee: string; capability: PageRelation; principal?: undefined }
+    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; grantee: string; capability: PageRelation; foldedCaps?: PageRelation[]; principal?: undefined }
     | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: undefined; assignmentId: string; principal: string; grantee?: undefined };
+  // #553 / ADR-199 §2 (rev5 ruling): a principal holding BOTH the edit and comment built-in grants is
+  // ONE editor — the pair folds into a single "editor" row whose revoke removes both arms. The word
+  // "commenter" appears in no UI; a lone comment grant (an unfolded arm) wears the capability noun.
+  const capsByGrantee = new Map<string, Set<string>>();
+  for (const g of grants) capsByGrantee.set(g.grantee, new Set([...(capsByGrantee.get(g.grantee) ?? []), g.capability]));
+  const foldedGrantees = new Set([...capsByGrantee.entries()].filter(([, caps]) => caps.has("edit") && caps.has("comment")).map(([k]) => k));
+  const visibleGrants = grants.filter((g) => !(foldedGrantees.has(g.grantee) && g.capability === "comment"));
   const mergedRows: MergedRow[] = [
-    ...grants.map((g) => ({
+    ...visibleGrants.map((g) => ({
       kind: "grant" as const, key: `g:${g.grantee}:${g.capability}`, badge: capNoun(g.capability), custom: false as const,
       label: label(g), managed: g.managed, grantee: g.grantee, capability: g.capability,
+      ...(foldedGrantees.has(g.grantee) && g.capability === "edit" ? { foldedCaps: ["edit", "comment"] as PageRelation[] } : {}),
     })),
     ...(roleAssignments.data ?? []).map((a) => ({
       kind: "assignment" as const, key: `a:${a.id}`, badge: a.roleName, custom: true as const,
@@ -281,10 +298,16 @@ export function SpaceMembersTab() {
             ) : r.kind === "grant" ? (
               /* #504: red at rest; no confirm — a grant is re-grantable in one step (exception candidate) */
               <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" variant="danger"
-                onClick={() => revoke.mutate({ grantee: r.grantee, capability: r.capability }, {
-                  onSuccess: () => notify.success(t("toast.accessRevoked")),
-                  onError: () => notify.error(t("toast.actionFailed")),
-                })}>
+                onClick={() => {
+                  // #553: a folded editor row revokes BOTH its arms — the noun revokes what the noun granted
+                  const caps = r.foldedCaps ?? [r.capability];
+                  for (const capability of caps) {
+                    revoke.mutate({ grantee: r.grantee, capability }, {
+                      onSuccess: () => notify.success(t("toast.accessRevoked")),
+                      onError: () => notify.error(t("toast.actionFailed")),
+                    });
+                  }
+                }}>
                 <X size={14} />
               </IconButton>
             ) : (

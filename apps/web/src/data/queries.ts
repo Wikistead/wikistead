@@ -1278,9 +1278,17 @@ export function useGrantSpaceAccess(spaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     // The API body keys the capability as `relation` (shared page/space vocabulary). grantee OR
-    // groupName (#163: server resolves the group name → group:<id>#member).
-    mutationFn: (args: { grantee?: string; groupName?: string; capability: PageRelation }) =>
-      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, { method: "POST", body: JSON.stringify({ grantee: args.grantee, groupName: args.groupName, relation: args.capability }) }),
+    // groupName (#163: server resolves the group name → group:<id>#member). #553: `capabilities`
+    // (plural) is the composite form — the editor noun grants its bundle atomically via `relations`.
+    mutationFn: (args: { grantee?: string; groupName?: string; capability?: PageRelation; capabilities?: string[] }) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, {
+        method: "POST",
+        body: JSON.stringify(
+          args.capabilities
+            ? { grantee: args.grantee, groupName: args.groupName, relations: args.capabilities }
+            : { grantee: args.grantee, groupName: args.groupName, relation: args.capability },
+        ),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
   });
 }

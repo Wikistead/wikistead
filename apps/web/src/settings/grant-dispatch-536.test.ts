@@ -8,9 +8,17 @@ import { resolveGrantDispatch } from "./grant-dispatch";
 const MEMBER = { grantee: "user:alice" };
 
 describe("#536: the merged picker dispatch, four ways", () => {
-  it("user × built-in → the grant path with the capability", () => {
+  // #553 / ADR-199 §2: this pin FLIPPED deliberately — the editor NOUN is now a composite (edit +
+  // comment as N single-capability grants; the subsumption the model loses is delivered by the bundle,
+  // exactly where the noun is offered). Every non-composite built-in keeps the single-grant shape.
+  it("user × built-in editor NOUN → the composite grant path with the bundle (#553 flip)", () => {
     expect(resolveGrantDispatch({ pick: "builtin:edit", mode: "user", picked: MEMBER, groupName: "" }))
-      .toEqual({ path: "grant", capability: "edit", target: { kind: "user", principal: "user:alice" } });
+      .toEqual({ path: "grant-composite", capabilities: ["edit", "comment"], target: { kind: "user", principal: "user:alice" } });
+  });
+
+  it("user × non-composite built-in → the single grant path, unchanged", () => {
+    expect(resolveGrantDispatch({ pick: "builtin:view", mode: "user", picked: MEMBER, groupName: "" }))
+      .toEqual({ path: "grant", capability: "view", target: { kind: "user", principal: "user:alice" } });
   });
 
   it("user × custom role → the assignment path with the role id", () => {

@@ -211,39 +211,98 @@ export async function assignRoleInTx(
     owned.length = 0
     owned.push(...caps)
   }
-  const id = randomUUID()
-  const builtin = args.builtinCapability ?? null
-  let existingId: string | null = null
-  const oid = await db.tx(async (tx) => {
-    const dup = builtin
-      ? await tx<{ id: string }[]>`
-          SELECT id FROM role_assignments WHERE builtin_capability = ${builtin} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
-      : await tx<{ id: string }[]>`
-          SELECT id FROM role_assignments WHERE role_id = ${roleId} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
-    if (dup.length) {
-      if (args.onDuplicate !== 'ignore') throw Object.assign(new Error('already assigned'), { statusCode: 409 })
-      // Idempotent: the row is already there and already owns whatever it owns. Writing the tuples again
-      // would be harmless but recomputing `owned` from a stale read would not — leave the row alone.
-      // The AUDIT still happens (#536 review 2): before 086 a duplicate grant audited like any other
-      // successful write, and the caller's webhook still fires — an audit stream that goes quiet for a
-      // subset of the events the webhook stream reports is one nobody can reconcile. The reindex is the
-      // one thing legitimately skipped: nothing changed to index.
-      if (!args.skipAudit) await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: args.auditAction ?? 'role.assigned', target: `${resourceType}:${resourceId}` })
-      existingId = dup[0].id
-      return null
-    }
-    await tx`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin)
-             VALUES (${id}, ${tenant.id}, ${roleId}, ${builtin}, ${resourceType}, ${resourceId}, ${principal}, ${owned as string[]}, ${origin})`
-    if (args.afterAssign) await args.afterAssign(tx, id)
-    if (!args.skipAudit) await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: args.auditAction ?? 'role.assigned', target: `${resourceType}:${resourceId}` })
-    const o = resourceType === 'page' ? await enqueueOutbox(tx, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' }) : null
-    if (toWrite.length) await writeTuples(fga, toWrite)
+  const outcome = await db.tx(async (tx) => {
+    const o = await assignRoleTxCore(tx, args, { owned, toWrite })
+    // FGA LAST, inside the tx, exactly as before the #553 core extraction — the composite caller
+    // batches multiple arms' tuples into one write instead.
+    if (o.toWrite.length) await writeTuples(fga, o.toWrite)
     return o
   })
-  if (oid) processOutboxAsync(searchDriver, oid, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' })
-  if (existingId) return existingId
+  if (outcome.outboxId) processOutboxAsync(searchDriver, outcome.outboxId, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' })
+  if (outcome.existingId) return outcome.existingId
   if (resourceType === 'space') await reindexPublishedPages(db, searchDriver, tenant.id, resourceId)
-  return id
+  return outcome.id!
+}
+
+// #553 / ADR-199 §2: the ONE-transaction assign body, extracted so the editor-noun composite can run
+// N single-capability arms inside a single db.tx (row atomicity; the FGA tuples are collected and
+// written ONCE by the caller — FGA does not roll back with the tx, so batching narrows the window
+// exactly as the single-arm path always has). Byte-for-byte the former assignRoleInTx tx body, minus
+// the write.
+interface AssignTxOutcome { id: string | null; existingId: string | null; outboxId: string | null; toWrite: { user: string; relation: string; object: string }[] }
+async function assignRoleTxCore(
+  tx: Sql,
+  args: {
+    tenant: { id: string; plan: string }; roleId: string | null;
+    resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
+    actorSub: string; origin?: 'manual' | 'mapping' | 'default';
+    builtinCapability?: string; onDuplicate?: 'conflict' | 'ignore'; auditAction?: string; skipAudit?: boolean;
+    afterAssign?: (tx: Sql, assignmentId: string) => Promise<void>;
+  },
+  pre: { owned: AnyRoleCapability[]; toWrite: { user: string; relation: string; object: string }[] },
+): Promise<AssignTxOutcome> {
+  const { tenant, roleId, resourceType, resourceId, principal, actorSub } = args
+  const origin = args.origin ?? 'manual'
+  const id = randomUUID()
+  const builtin = args.builtinCapability ?? null
+  const dup = builtin
+    ? await tx<{ id: string }[]>`
+        SELECT id FROM role_assignments WHERE builtin_capability = ${builtin} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
+    : await tx<{ id: string }[]>`
+        SELECT id FROM role_assignments WHERE role_id = ${roleId} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
+  if (dup.length) {
+    if (args.onDuplicate !== 'ignore') throw Object.assign(new Error('already assigned'), { statusCode: 409 })
+    // Idempotent: the row is already there and already owns whatever it owns. Writing the tuples again
+    // would be harmless but recomputing `owned` from a stale read would not — leave the row alone.
+    // The AUDIT still happens (#536 review 2): before 086 a duplicate grant audited like any other
+    // successful write, and the caller's webhook still fires — an audit stream that goes quiet for a
+    // subset of the events the webhook stream reports is one nobody can reconcile. The reindex is the
+    // one thing legitimately skipped: nothing changed to index.
+    if (!args.skipAudit) await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: args.auditAction ?? 'role.assigned', target: `${resourceType}:${resourceId}` })
+    return { id: null, existingId: dup[0].id, outboxId: null, toWrite: [] }
+  }
+  await tx`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin)
+           VALUES (${id}, ${tenant.id}, ${roleId}, ${builtin}, ${resourceType}, ${resourceId}, ${principal}, ${pre.owned as string[]}, ${origin})`
+  if (args.afterAssign) await args.afterAssign(tx, id)
+  if (!args.skipAudit) await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: args.auditAction ?? 'role.assigned', target: `${resourceType}:${resourceId}` })
+  const o = resourceType === 'page' ? await enqueueOutbox(tx, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' }) : null
+  return { id, existingId: null, outboxId: o, toWrite: pre.toWrite }
+}
+
+// #553 / ADR-199 §2: the editor-noun composite — N single-capability BUILT-IN grants in ONE db.tx.
+// N capabilities = N rows (the rev2 lesson: a built-in row never carries more than its single
+// builtin_capability); each arm keeps the unconditional built-in ownership, its own audit event
+// and its own dup-idempotence (a principal already holding one arm still lands the other). Space
+// scope only — the page dialog offers bare capabilities, no role noun (ADR §2).
+export async function assignBuiltinCompositeInTx(
+  db: TenantDb, fga: OpenFgaClient, searchDriver: SearchDriver,
+  args: {
+    tenant: { id: string; plan: string }; spaceId: string; principal: string; actorSub: string;
+    capabilities: string[]; auditAction?: string; skipAudit?: boolean;
+  },
+): Promise<void> {
+  const { tenant, spaceId, principal, actorSub } = args
+  const { tuples: existingTuples } = await fga.read({ user: principal, object: `space:${spaceId}` })
+  const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
+  const arms = args.capabilities.map((cap) => ({
+    cap,
+    toWrite: expansionTuples('space', spaceId, principal, cap as AnyRoleCapability, true).filter((t) => !existing.has(`${t.relation}|${t.user}`)),
+  }))
+  await db.tx(async (tx) => {
+    const all: { user: string; relation: string; object: string }[] = []
+    for (const arm of arms) {
+      const o = await assignRoleTxCore(tx, {
+        tenant, roleId: null, builtinCapability: arm.cap,
+        resourceType: 'space', resourceId: spaceId, principal, actorSub,
+        onDuplicate: 'ignore', auditAction: args.auditAction, skipAudit: args.skipAudit,
+      }, { owned: [arm.cap as AnyRoleCapability], toWrite: arm.toWrite })
+      all.push(...o.toWrite)
+    }
+    const seen = new Set<string>()
+    const deduped = all.filter((t) => { const k = `${t.relation}|${t.user}|${t.object}`; if (seen.has(k)) return false; seen.add(k); return true })
+    if (deduped.length) await writeTuples(fga, deduped)
+  })
+  await reindexPublishedPages(db, searchDriver, tenant.id, spaceId)
 }
 
 // #497 / ADR-183: the UNASSIGN CORE by assignment id, extracted for the mapping DELETE path. The
