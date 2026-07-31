@@ -16,6 +16,8 @@
     "moveUp": "Move up",
     "moveDown": "Move down",
     "preset": "Provider",
+    "trustGroups": "Trust this connection’s group claims (group sync, role mappings)",
+    "bootstrapEligible": "May bootstrap the first admin of an empty tenant",
     "presetNone": "Custom (any OIDC provider)",
     "issuerPlaceholder": "Issuer URL (https://idp.example.com)",
     "labelPlaceholder": "Button label (optional, shown on the login screen)",

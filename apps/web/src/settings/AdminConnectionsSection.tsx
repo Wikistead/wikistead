@@ -30,12 +30,13 @@ export function AdminConnectionsSection() {
   const [adding, setAdding] = useState(false);
   const [preset, setPreset] = useState("");
   const [form, setForm] = useState({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "" });
+  const [flags, setFlags] = useState({ bootstrapEligible: false, trustGroups: false });
   const [deleting, setDeleting] = useState<AdminConnectionDTO | null>(null);
 
   const rows = connections.data ?? [];
   const onError = (e: unknown) => {
-    const msg = (e as { message?: string })?.message ?? "";
-    notify.error(msg.includes("lockout") || msg.includes("sign in") ? t("adminConnections.lockoutRefused") : t("toast.actionFailed"));
+    // the server names the refusal (code login_lockout) — never sniff English message text
+    notify.error((e as { code?: string })?.code === "login_lockout" ? t("adminConnections.lockoutRefused") : t("toast.actionFailed"));
   };
   const move = (idx: number, dir: -1 | 1) => {
     const ids = rows.map((r) => r.id);
@@ -45,17 +46,25 @@ export function AdminConnectionsSection() {
     reorder.mutate(ids, { onError });
   };
   const submit = () => {
-    const body =
+    const base =
       preset === "google" ? { preset, clientId: form.clientId, clientSecret: form.clientSecret || undefined, redirectUri: form.redirectUri }
       : preset === "microsoft" ? { preset, clientId: form.clientId, clientSecret: form.clientSecret || undefined, redirectUri: form.redirectUri, entraTenantId: form.entraTenantId }
       : { issuer: form.issuer, clientId: form.clientId, clientSecret: form.clientSecret || undefined, redirectUri: form.redirectUri, label: form.label || undefined };
+    // ADR-197 §2 rev2 / §6: the two TRUST flags are set where connections are created — explicit,
+    // default off (S4 review F8: without this, UI-created connections could never carry them)
+    const body = { ...base, bootstrapEligible: flags.bootstrapEligible, trustGroups: flags.trustGroups };
     create.mutate(body, {
       onSuccess: () => { setAdding(false); setForm({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "" }); notify.success(t("adminConnections.created")); },
       onError,
     });
   };
-  const name = (c: AdminConnectionDTO) =>
-    c.preset === "google" ? "Google" : c.preset === "microsoft" ? "Microsoft" : c.label || new URL(c.issuer).host;
+  const name = (c: AdminConnectionDTO) => {
+    if (c.preset === "google") return "Google";
+    if (c.preset === "microsoft") return "Microsoft";
+    // defensive: the server refuses non-URL issuers at write now (S4 review F1), but a render
+    // helper must never be able to white-screen the settings page over one bad row
+    try { return c.label || new URL(c.issuer).host; } catch { return c.label || c.issuer; }
+  };
 
   return (
     <div className="mt-8 border-t border-border pt-4" data-testid="admin-connections">
@@ -117,6 +126,16 @@ export function AdminConnectionsSection() {
             onChange={(e) => setForm({ ...form, clientSecret: e.target.value })} />
           <Input inputSize="sm" placeholder={t("adminConnections.redirectPlaceholder")} value={form.redirectUri} aria-label="redirect uri"
             onChange={(e) => setForm({ ...form, redirectUri: e.target.value })} data-testid="admin-connection-redirect" />
+          <label className="flex items-center gap-2 text-xs text-fg-dim">
+            <Switch checked={flags.trustGroups} ariaLabel={t("adminConnections.trustGroups")} testId="admin-connection-trust-groups"
+              onChange={(on: boolean) => setFlags({ ...flags, trustGroups: on })} />
+            {t("adminConnections.trustGroups")}
+          </label>
+          <label className="flex items-center gap-2 text-xs text-fg-dim">
+            <Switch checked={flags.bootstrapEligible} ariaLabel={t("adminConnections.bootstrapEligible")} testId="admin-connection-bootstrap"
+              onChange={(on: boolean) => setFlags({ ...flags, bootstrapEligible: on })} />
+            {t("adminConnections.bootstrapEligible")}
+          </label>
           <div className="flex gap-2">
             <Button variant="primary" size="sm" data-testid="admin-connection-save" disabled={create.isPending} onClick={submit}>
               {t("common.save")}

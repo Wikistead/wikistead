@@ -181,3 +181,71 @@ describe('#554 S4b: subject namespacing (§5) — the internal-mint face', () =>
     }
   }, 60_000)
 })
+
+// #554 S4 re-review F6 (the ADR §5 rev3 anti-test mandate, spoof face THROUGH the minting path)
+// + F7 (authority and cross-tenant pins for the admin surface) + F1 (issuer shape at write).
+describe('#554 S4 re-review pins', () => {
+  it('F6: a reserved RAW subject through a MINTING connection is refused pre-mint — even as a member both ways', async () => {
+    const minting = randomUUID()
+    const prefix = subjectPrefixFor(minting)
+    const RESERVED_RAW = `wcdeadbeef_spoof-${STAMP}`
+    await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, scopes, redirect_uri, enabled, sort, subject_prefix)
+      VALUES (${minting}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 8, ${prefix})`
+    const tuples = [
+      { user: `user:${RESERVED_RAW}`, relation: 'member', object: `tenant:${tenantId}` },
+      { user: `user:${prefix}${RESERVED_RAW}`, relation: 'member', object: `tenant:${tenantId}` },
+    ]
+    await writeTuples(fgaClient, tuples)
+    issuer.setSubject(RESERVED_RAW, { email: 'spoof@s4.test' })
+    try {
+      const res = await app.inject({ method: 'GET', url: `/auth/login?connection=${minting}`, headers: { host: HOST } })
+      expect(res.statusCode).toBe(302)
+      const authRes = await fetch(res.headers.location as string, { redirect: 'manual' })
+      const u = new URL(authRes.headers.get('location')!)
+      const cb = await app.inject({ method: 'GET', url: u.pathname + u.search, headers: { host: HOST } })
+      expect(cb.statusCode).toBe(302)
+      expect(String(cb.headers.location), 'refused BEFORE the mint, vague').toContain('/login?error=access')
+      expect(String(cb.headers['set-cookie'] ?? '')).not.toContain(`${SESSION_COOKIE}=`)
+      expect((await admin<{ sub: string }[]>`SELECT sub FROM members WHERE tenant_id = ${tenantId} AND sub LIKE ${'%' + RESERVED_RAW}`).length,
+        'no row under either identity').toBe(0)
+    } finally {
+      await deleteTuples(fgaClient, tuples).catch(() => {})
+      await admin`DELETE FROM tenant_oidc WHERE id = ${minting}`
+    }
+  }, 60_000)
+
+  it('F7: every route is tenant-admin gated (plain member → 403) and RLS-scoped (foreign id → 404/no-op)', async () => {
+    const PLAIN = `s4-plain-${STAMP}`
+    await writeTuples(fgaClient, [{ user: `user:${PLAIN}`, relation: 'member', object: `tenant:${tenantId}` }])
+    const plainSid = await createSession(valkey, { tenantId, sub: PLAIN, role: 'member' })
+    const HP = { host: HOST, cookie: `${SESSION_COOKIE}=${plainSid}`, 'content-type': 'application/json' }
+    try {
+      expect((await app.inject({ method: 'GET', url: '/admin/connections', headers: HP })).statusCode).toBe(403)
+      expect((await app.inject({ method: 'POST', url: '/admin/connections', headers: HP, payload: { issuer: 'https://x', clientId: 'c', redirectUri: 'https://x/cb' } })).statusCode).toBe(403)
+      expect((await app.inject({ method: 'POST', url: '/admin/connections/reorder', headers: HP, payload: { ids: ['x'] } })).statusCode).toBe(403)
+
+      // a foreign tenant's connection id: invisible through RLS
+      const foreign = randomUUID()
+      await admin`INSERT INTO tenants (id, slug, plan, isolation) VALUES (${foreign}, ${`s4f-${STAMP}`}, 'business', 'logical')`
+      const foreignConn = randomUUID()
+      await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, scopes, redirect_uri, enabled, sort, subject_prefix)
+        VALUES (${foreignConn}, ${foreign}, 'https://idp.example', 'c', 'openid', 'https://x/cb', true, 0, ${subjectPrefixFor(foreignConn)})`
+      try {
+        expect((await app.inject({ method: 'PATCH', url: `/admin/connections/${foreignConn}`, headers: H(), payload: { enabled: false } })).statusCode).toBe(404)
+        expect((await app.inject({ method: 'DELETE', url: `/admin/connections/${foreignConn}`, headers: HG() })).statusCode).toBe(404)
+        const [still] = await admin<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc WHERE id = ${foreignConn}`
+        expect(still!.enabled, 'untouched across the tenant boundary').toBe(true)
+      } finally {
+        await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${foreign}`
+        await admin`DELETE FROM tenants WHERE id = ${foreign}`
+      }
+    } finally {
+      await deleteTuples(fgaClient, [{ user: `user:${PLAIN}`, relation: 'member', object: `tenant:${tenantId}` }]).catch(() => {})
+    }
+  }, 60_000)
+
+  it('F1: a non-URL issuer refuses at WRITE time, enabled or not', async () => {
+    expect((await post({ issuer: 'not a url', clientId: 'c', redirectUri: 'https://x/cb' })).statusCode).toBe(400)
+    expect((await post({ issuer: 'idp.example.com', clientId: 'c', redirectUri: 'https://x/cb' })).statusCode, 'scheme-less refuses too').toBe(400)
+  }, 60_000)
+})
