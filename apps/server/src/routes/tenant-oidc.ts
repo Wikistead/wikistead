@@ -145,9 +145,13 @@ export async function updateTenantOidc(
         WHERE id = ${row.id}
       `
     } else {
+      // #554 S6 review N1: the legacy surface's connection is TRUSTED for groups too (the same
+      // grandfathering as bootstrap_eligible — this row IS "the tenant's IdP", and a silent
+      // default-false here killed group sync / default roles / admin mappings for every tenant
+      // configuring OIDC after migration 093, with no UI to fix it until S4).
       await tx`
-        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible)
-        VALUES (${randomUUID()}, ${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim}, true)
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible, trust_groups)
+        VALUES (${randomUUID()}, ${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim}, true, true)
       `
     }
   })
