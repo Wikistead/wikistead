@@ -39,9 +39,31 @@ describe("#536one roles list, one creation flow", () => {
     expect(src).not.toMatch(/\|\| mixed\}/);
   });
 
-  it("every row carries its scope as an attribute (badge), built-ins additionally say so", () => {
-    expect(src).toContain('data-testid="role-scope-badge"');
+  // #581 SUPERSEDES the scope badge on THIS list.put it on every row because the sections it
+  // sat in did not read as sections; #581 fixed the sections, and repeating what position already says
+  // is the redundancy the user asked us to drop. The component keeps the ability (a list that MIXES
+  // scopes still needs it) — this pins that the list stops using it, and that BUILT-IN stays, because
+  // no position implies that one.
+  it("rows say BUILT-IN but not their scope — the section they sit in says that", () => {
     expect(src).toContain('data-testid="role-builtin-badge"');
+    expect(src).toContain('<RoleBadges builtIn />');
+    expect(src, "no call in this file passes a scope any more").not.toMatch(/<RoleBadges[^>]*scope=/);
+    // the capability itself survives for surfaces that mix scopes
+    expect(src).toMatch(/scope\?: "resource" \| "tenant"/);
+  });
+
+  // #581: the sections are surfaces with a boundary, and each is bounded in height like every other
+  // growing list in settings (#503 / #521 / #539 — this is the fourth).
+  it("each scope section is a card with its own bounded, scrollable list", () => {
+    for (const id of ["roles-list-tenant", "roles-list-resource"]) {
+      const at = src.indexOf(`data-testid="${id}"`);
+      expect(at, `${id} exists`).toBeGreaterThan(-1);
+      const opening = src.lastIndexOf("<div", at);
+      const box = src.slice(opening, at);
+      expect(box, `${id} is the 26rem box`).toContain("max-h-[26rem]");
+      expect(box).toContain("overflow-y-auto");
+    }
+    expect(src.match(/<section className="rounded-md border border-border bg-panel">/g) ?? []).toHaveLength(2);
   });
 
   // #536④: the ONE set is presented in TWO scope sections — tenant above, space/page below,
