@@ -26,6 +26,10 @@ export async function authenticateMcpRequest(req: FastifyRequest, hostTenantId: 
   // instead, so the tenant binding has to be repeated here — including membership, resolved per
   // request. Without it a removed member's token kept working until it expired, which for an MCP
   // access token is long after the tenant believes the account is gone.
+  // #554 / ADR-197 §5 (S0): same rule as the bearer path — a reserved-prefix / over-long asserted
+  // sub never becomes the MCP principal (the seam's own uniform failure below).
+  const { externalSubViolation } = await import('./reserved-subs.js')
+  if (externalSubViolation(claims.sub)) throw Object.assign(new Error('invalid or expired token'), { statusCode: 401 })
   if (!(await isTenantMember(fgaClient, claims.sub, hostTenantId))) {
     throw Object.assign(new Error('invalid or expired token'), { statusCode: 401 })
   }

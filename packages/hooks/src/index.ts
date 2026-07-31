@@ -10,3 +10,4 @@ export { registerAIProvider, getAIProvider, resetAIProvider } from './ai-provide
 export type { AIProvider } from './ai-provider.js'
 export { registerEeFeatures, getEeFeatures, resetEeFeatures } from './ee-features.js'
 export type { EeMount } from './ee-features.js'
+export { RESERVED_SUB_RE, MAX_EXTERNAL_SUB_LENGTH, externalSubViolation, assertExternalSub } from './reserved-subs.js'

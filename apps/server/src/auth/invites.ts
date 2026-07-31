@@ -126,6 +126,11 @@ export async function acceptInvite(
   token: string,
   claims: { sub: string; email?: string | null; name?: string | null },
 ): Promise<boolean> {
+  // #554 / ADR-197 §5 (S0): a claims.sub wearing a reserved connection/local prefix (or FGA-unsafe
+  // length) never becomes a member through an invite — refused as this seam's own failure shape
+  // (indistinguishable from an unknown/expired invite).
+  const { externalSubViolation } = await import('./reserved-subs.js')
+  if (externalSubViolation(claims.sub)) return false
   return deps.db.tx(async (tx) => {
     // Serialize seat decisions for this tenant for the rest of the tx (atomic cap check).
     await lockSeats(tx, tenant.id)

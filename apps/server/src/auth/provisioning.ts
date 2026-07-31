@@ -47,6 +47,10 @@ export async function provisionTenant(
   args: { slug: string; plan?: string; admin: { sub: string; email?: string | null; name?: string | null } },
 ): Promise<{ tenantId: string }> {
   if (!isValidSlug(args.slug)) throw Object.assign(new Error('invalid slug'), { statusCode: 400 })
+  // #554 / ADR-197 §5 (S0): a signup whose asserted sub wears a reserved prefix (or FGA-unsafe
+  // length) never seats an admin — the seam's own 400, indistinguishable from other bad input.
+  const { assertExternalSub } = await import('./reserved-subs.js')
+  assertExternalSub(args.admin.sub, () => Object.assign(new Error('invalid signup'), { statusCode: 400 }))
 
   const tenantId = await pool.begin(async (tx) => {
     // tenants is the global registry (no RLS). UNIQUE(slug) rejects a taken slug
@@ -78,6 +82,11 @@ export async function bootstrapFirstAdmin(
   tenant: { id: string },
   claims: { sub: string; email?: string | null; name?: string | null; picture?: string | null },
 ): Promise<boolean> {
+  // #554 / ADR-197 §5 (S0): a reserved-prefix (or over-long) sub never bootstraps the first admin —
+  // this seam writes the member row and the admin tuple BEFORE any session gate runs, so the check
+  // must live here, not downstream. Refusal = false, the same answer a non-empty tenant gives.
+  const { externalSubViolation } = await import('./reserved-subs.js')
+  if (externalSubViolation(claims.sub)) return false
   return deps.db.tx(async (tx) => {
     // Serialize concurrent first-logins for this tenant so EXACTLY ONE wins.
     await tx`SELECT pg_advisory_xact_lock(hashtext(${'bootstrap:' + tenant.id})::bigint)`

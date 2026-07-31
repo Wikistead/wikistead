@@ -1,0 +1,113 @@
+// #554 / ADR-197 §5 (S0): the reserved internal sub space, enforced at every seam where an
+// externally-asserted subject becomes a principal. Each seam refuses with ITS OWN failure shape
+// (never a distinguishable oracle); internal read-backs are untouched. The SCIM seam (the most
+// direct vector — the client chooses the sub) is pinned on the EE side (managed there); the OIDC
+// bearer seam cannot be driven end-to-end without a live IdP, so it carries a lexical pin here plus
+// the shared validator's unit pins — stated honestly, not padded.
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import type { FastifyInstance } from 'fastify'
+import postgres from 'postgres'
+import { readFileSync } from 'node:fs'
+import { pool } from '../db/pool.js'
+import { acquireTenantDb, type TenantDb } from '../db/index.js'
+import { fgaClient } from '@wikistead/authz'
+import { externalSubViolation, mintMcpAccessToken } from './helpers/reserved-subs-helper.js'
+import { establishMemberSession } from '../auth/session.js'
+import { acceptInvite, createInvite } from '../auth/invites.js'
+import { provisionTenant, bootstrapFirstAdmin } from '../auth/provisioning.js'
+import { buildApp } from '../app.js'
+import IORedis from 'ioredis'
+import type { Tenant } from '@wikistead/types'
+
+const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
+const TENANT = 'tenant_dev'
+const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
+const STAMP = Date.now().toString(36)
+
+const RESERVED = [`wc00000000_intruder-${STAMP}`, `wlocal_${STAMP}`]
+const TOO_LONG = 'x'.repeat(502)
+
+let app: FastifyInstance
+let db: TenantDb
+let valkey: IORedis
+
+beforeAll(async () => {
+  app = await buildApp()
+  await app.ready()
+  db = await acquireTenantDb(asTenant(TENANT))
+  valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
+}, 60_000)
+
+afterAll(async () => {
+  await adminPool`DELETE FROM invites WHERE tenant_id = ${TENANT} AND email LIKE ${'rs554%'}`.catch(() => {})
+  await db.release(); await valkey.quit(); await app.close(); await adminPool.end(); await pool.end()
+}, 60_000)
+
+describe('#554 S0: the reserved sub space', () => {
+  it('validator: reserved prefixes and the FGA length cap; ordinary subs pass', () => {
+    for (const s of [...RESERVED, 'wlocal_']) expect(externalSubViolation(s), s).toBe('reserved')
+    expect(externalSubViolation(TOO_LONG)).toBe('too-long')
+    expect(externalSubViolation('x'.repeat(501)), 'exactly 501 fits under the prefix budget').toBeNull()
+    for (const ok of ['alice', 'wc123_x' /* 3 hex, not 8 */, 'WC00000000_x' /* mint grammar is lowercase */, 'oauth2|google-oauth2|1234']) {
+      expect(externalSubViolation(ok), ok).toBeNull()
+    }
+  })
+
+  it('seam 1 — login upsert: a reserved sub is a 403 shaped exactly like a non-member', async () => {
+    for (const sub of [...RESERVED, TOO_LONG]) {
+      await expect(establishMemberSession({ db, fga: fgaClient, valkey }, { id: TENANT, plan: 'business' }, { sub }))
+        .rejects.toMatchObject({ statusCode: 403, message: 'not a member of this tenant' })
+    }
+  }, 60_000)
+
+  it('seam 2 — invite acceptance: a reserved sub answers false (an unknown-invite shape), the invite stays pending', async () => {
+    const { token } = await createInvite(db, { tenantId: TENANT, plan: 'business', invitedBy: 'dev-user', email: `rs554-${STAMP}@t.test`, role: 'member' })
+    expect(await acceptInvite({ db, fga: fgaClient }, { id: TENANT, plan: 'business' }, token, { sub: RESERVED[0]! })).toBe(false)
+    const [inv] = await adminPool<{ status: string }[]>`SELECT status FROM invites WHERE tenant_id = ${TENANT} AND email = ${`rs554-${STAMP}@t.test`}`
+    expect(inv!.status, 'not consumed').toBe('pending')
+  }, 60_000)
+
+  it('seam 3 — Cloud provisioning: a reserved admin sub is a 400 like any bad signup input', async () => {
+    await expect(provisionTenant(fgaClient, { slug: `rs554-${STAMP}`, admin: { sub: RESERVED[1]! } }))
+      .rejects.toMatchObject({ statusCode: 400 })
+    expect((await adminPool<{ id: string }[]>`SELECT id FROM tenants WHERE slug = ${`rs554-${STAMP}`}`).length, 'no tenant seated').toBe(0)
+  }, 60_000)
+
+  it('seam 4 — CE first-admin bootstrap: a reserved sub never becomes the first admin (false, no row)', async () => {
+    // bootstrap only fires on a member-less tenant; on tenant_dev (members exist) it answers false
+    // for everyone — so drive the guard's ORDER: it must refuse BEFORE the member-count decision.
+    // A fresh tenant proves it: reserved → false AND the tenant stays member-less.
+    const slug = `rs554b-${STAMP}`
+    const { tenantId } = await provisionTenant(fgaClient, { slug, admin: { sub: `rs554-real-admin-${STAMP}` } })
+    // simulate member-less (the bootstrap precondition) by removing the seeded admin row + tuples
+    await adminPool`DELETE FROM members WHERE tenant_id = ${tenantId}`
+    const tdb = await acquireTenantDb(asTenant(tenantId))
+    try {
+      expect(await bootstrapFirstAdmin({ db: tdb, fga: fgaClient }, { id: tenantId }, { sub: RESERVED[0]! })).toBe(false)
+      expect((await adminPool<{ sub: string }[]>`SELECT sub FROM members WHERE tenant_id = ${tenantId}`).length, 'no admin row written').toBe(0)
+    } finally {
+      await tdb.release()
+      await adminPool`DELETE FROM tenants WHERE id = ${tenantId}`.catch(() => {})
+    }
+  }, 60_000)
+
+  it('seam 7 — MCP broker: a minted token bearing a reserved sub is the seam\'s own 401', async () => {
+    const token = await mintMcpAccessToken(
+      { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 },
+      { tenantId: TENANT, sub: RESERVED[0]!, scopes: ['read'], groups: [] },
+    )
+    const res = await app.inject({
+      method: 'POST', url: '/mcp',
+      headers: { host: 'dev.localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    })
+    expect(res.statusCode).toBe(401)
+  }, 60_000)
+
+  it('seam 6 — OIDC bearer (lexical: no live IdP to drive it end-to-end): the violation check guards req.user', () => {
+    const src = readFileSync(new URL('../app.ts', import.meta.url), 'utf8')
+    const bearer = src.slice(src.indexOf('OIDC bearer path'), src.indexOf('claimedTenant = m.tenantId'))
+    expect(bearer, 'the check sits between verifyMember and the principal assignment').toContain('externalSubViolation')
+    expect(bearer.indexOf('externalSubViolation'), 'before req.user').toBeLessThan(bearer.indexOf('req.user = { sub: m.sub'))
+  })
+})
