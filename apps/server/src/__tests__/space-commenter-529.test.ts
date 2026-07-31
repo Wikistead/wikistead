@@ -85,7 +85,7 @@ describe('#529 space#commenter — the per-principal comment grant pages inherit
     expect(await canComment(CASCADE, draft), 'an unpublished draft does NOT — the Phase-4 gate').toBe(false)
   })
 
-  it('the three paths are a real OR, and with none of them it is fail-closed', async () => {
+  it('the grant paths are a real OR (direct, audience — edit is no longer one, #553), fail-closed with none', async () => {
     const page = await mkPage('three-paths')
     await publish(page)
     // 1. nobody: closed
@@ -99,9 +99,11 @@ describe('#529 space#commenter — the per-principal comment grant pages inherit
     await deleteTuples(fgaClient, [{ user: 'user:*', relation: 'comment_open', object: `space:${spaceId}` }])
     expect(await canComment(STRANGER, page), 'and closing it closes them again').toBe(false)
     await deleteTuples(fgaClient, [{ user: `user:${STRANGER}`, relation: 'view_direct', object: `page:${page}` }])
-    // 3. edit subsumes comment (this is what makes "turn members off" not silence editors)
+    // 3. #553 / ADR-199 FLIP: edit no longer subsumes comment — the third path this OR used to have
+    // is the thing #553 removed (its name changed with it). A bare edit grant is edit and only edit;
+    // the editor NOUN delivers comment as its own explicit grant (composite-grant-553 pins that side).
     await writeTuples(fgaClient, [{ user: `user:${STRANGER}`, relation: 'edit_direct', object: `page:${page}` }])
-    expect(await canComment(STRANGER, page), 'an editor always comments').toBe(true)
+    expect(await canComment(STRANGER, page), 'bare edit does NOT comment (#553)').toBe(false)
     await deleteTuples(fgaClient, [{ user: `user:${STRANGER}`, relation: 'edit_direct', object: `page:${page}` }])
     expect(await canComment(STRANGER, page), 'fail-closed once every path is gone').toBe(false)
   })
@@ -157,11 +159,11 @@ describe('#529 space#commenter — the per-principal comment grant pages inherit
     ])
   })
 
-  it('restricted: the MODEL still says comment — the route\'s view floor is what refuses (deliberate)', async () => {
-    // ADR-193 states this split explicitly: `restricted` is subtracted from view_live but NOT from
-    // comment, so a restricted page can resolve comment=true while view=false. Nothing is exploitable
-    // because every comment route checks view first (comments.ts), but spraying `commenter` across a
-    // space widens the population that relies on that floor — so the property is pinned, not assumed.
+  it('restricted: the MODEL now denies comment too (#553 flip — deny-wins at the model, not just the route floor)', async () => {
+    // ADR-193 deliberately left `restricted` out of comment (the route's view floor refused). #553 /
+    // ADR-199 reverses that with the swap: `restricted` subtracts from every comment arm BELOW the
+    // manage/moderate bypass, so the model and the route agree — deny-wins, no population relying on
+    // a floor. (comment-independence-553 pins the bypass survivors and the audience-arm reversal.)
     const page = await mkPage('restricted-path')
     await publish(page)
     expect(await canComment(REVIEWER, page)).toBe(true)
@@ -169,7 +171,7 @@ describe('#529 space#commenter — the per-principal comment grant pages inherit
       { user: `user:${REVIEWER}`, relation: 'restricted', object: `page:${page}` },
     ])
     expect(await check(fgaClient, `user:${REVIEWER}`, 'view', { type: 'page', id: page }), 'restricted denies VIEW').toBe(false)
-    expect(await canComment(REVIEWER, page), 'the model still resolves comment — the route floor is the gate').toBe(true)
+    expect(await canComment(REVIEWER, page), 'the model itself denies comment now (#553)').toBe(false)
     await deleteTuples(fgaClient, [{ user: `user:${REVIEWER}`, relation: 'restricted', object: `page:${page}` }])
   })
 

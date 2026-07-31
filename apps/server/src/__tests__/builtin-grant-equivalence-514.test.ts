@@ -146,19 +146,31 @@ describe('#536 §6 — what every other built-in grant confers today', () => {
     expect(await check(fgaClient, sub, 'edit', { type: 'page', id: pageId }), 'but NOT edit').toBe(false)
   }, 120_000)
 
-  it('editor: edits, and gets comment WITHOUT the table ever writing a comment leaf', async () => {
+  // #553 / ADR-199: this pin SPLIT deliberately. The old single test asserted `edit subsumes comment`
+  // (the model implication #553 removed); the intent survives as a pair — the editor NOUN (the
+  // composite) still delivers comment, while the bare `edit` capability grants exactly what it says.
+  it('editor NOUN (the composite): edits AND comments — the bundle delivers what the noun promises', async () => {
     const sub = `user:${BY_CAP.edit}`
-    await grant('edit')
     const { spaceGrantTuplesFor } = await import('../space-grant-expansion.js')
-    expect(spaceGrantTuplesFor(sub, 'edit', spaceId).map((t) => t.relation), 'one leaf goes in').toEqual(['editor_member'])
+    expect(spaceGrantTuplesFor(sub, 'edit', spaceId).map((t) => t.relation), 'the edit table is untouched').toEqual(['editor_member'])
+    const { grantSpaceAccessComposite } = await import('../routes/spaces.js')
+    await grantSpaceAccessComposite(db, fgaClient, driver, {
+      spaceId, tenantId: tenant.id, userId: OWNER, grantee: sub, capabilities: ['edit', 'comment'], plan: tenant.plan,
+    })
     expect(await check(fgaClient, sub, 'edit', { type: 'page', id: pageId })).toBe(true)
-    // …yet comment resolves, because the MODEL subsumes it (edit ⊃ comment). An expansion that "helpfully"
-    // wrote the comment leaf too would be adding a grant nobody asked for; one that dropped this check
-    // would let the unification silently narrow what an editor can do.
-    expect(await check(fgaClient, sub, 'comment', { type: 'page', id: pageId }), 'edit subsumes comment').toBe(true)
+    expect(await check(fgaClient, sub, 'comment', { type: 'page', id: pageId }), 'the composite delivers comment explicitly').toBe(true)
     expect(await check(fgaClient, sub, 'view', { type: 'page', id: pageId })).toBe(true)
     expect(await check(fgaClient, sub, 'manage', { type: 'page', id: pageId }), 'an editor is not a manager').toBe(false)
     expect(await check(fgaClient, sub, 'moderate', { type: 'space', id: spaceId }), 'nor a moderator').toBe(false)
+  }, 120_000)
+
+  it('bare edit capability: edits, does NOT comment (#553 — the severed subsumption)', async () => {
+    const sub = `user:bare-edit-514-${Date.now().toString(36)}`
+    await grantSpaceAccess(db, fgaClient, driver, {
+      spaceId, tenantId: tenant.id, userId: OWNER, grantee: sub, capability: 'edit', plan: tenant.plan,
+    })
+    expect(await check(fgaClient, sub, 'edit', { type: 'page', id: pageId })).toBe(true)
+    expect(await check(fgaClient, sub, 'comment', { type: 'page', id: pageId }), 'bare edit grants exactly edit').toBe(false)
   }, 120_000)
 
   it('moderator: moderates and gains the comment the model gives it, but not edit-by-right', async () => {
