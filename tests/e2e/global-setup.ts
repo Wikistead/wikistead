@@ -64,8 +64,8 @@ export default async function globalSetup() {
         WHERE id = ${oidcRow.id}`;
     } else {
       await sql`
-        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible)
-        VALUES (${randomUUID()}, ${E2E.tenant}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${REDIRECT}, true)`;
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible, trust_groups)
+        VALUES (${randomUUID()}, ${E2E.tenant}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${REDIRECT}, true, true)`;
     }
   } finally {
     await sql.end();

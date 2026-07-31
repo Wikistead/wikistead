@@ -26,11 +26,11 @@ async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   return row ? toOidcCfg(row) : null
 }
 
-type TenantOidcRow = { id: string; issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null; bootstrap_eligible: boolean }
+type TenantOidcRow = { id: string; issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null; bootstrap_eligible: boolean; trust_groups: boolean }
 
 async function firstEnabledTenantOidc(db: TenantDb): Promise<TenantOidcRow | null> {
   const [row] = await db.sql<TenantOidcRow[]>`
-    SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible
+    SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible, trust_groups
     FROM tenant_oidc WHERE enabled ORDER BY sort, id LIMIT 1`
   return row ?? null
 }
@@ -214,6 +214,10 @@ export async function authPlugin(app: FastifyInstance) {
       // the state is bound to — the ADR-197 §2 rev2 pinned rule (a default-flag connection never
       // bootstraps) wired at last. The platform pseudo-connection and SAML are structurally false.
       let bootstrapEligible = false
+      // #554 S6 / ADR-197 §6: whether the state's connection trusts the asserted groups claim —
+      // read alongside eligibility, from the same connection the state is bound to. The platform
+      // connection is trusted (the operator's own IdP, today's behavior).
+      let trustGroups = true
       try {
         if (st.connectionId) {
           const conn = (await resolveLoginConnections(db, tenant)).find((c) => c.id === st.connectionId && c.kind !== 'saml')
@@ -221,12 +225,15 @@ export async function authPlugin(app: FastifyInstance) {
           if (!conn || !cfg) return reply.code(404).send({ error: 'not found' })
           resolved = { cfg, viaTenantOidc: conn.kind === 'oidc' }
           bootstrapEligible = conn.bootstrapEligible
+          trustGroups = conn.trustGroups
         } else {
           // legacy states minted before connection binding shipped (a ≤300s window at deploy)
           const available = await resolveLogin(db, tenant)
           resolved = available.oidc
           if (resolved?.viaTenantOidc) {
-            bootstrapEligible = (await firstEnabledTenantOidc(db))?.bootstrap_eligible ?? false
+            const first = await firstEnabledTenantOidc(db)
+            bootstrapEligible = first?.bootstrap_eligible ?? false
+            trustGroups = first?.trust_groups ?? false
           }
         }
       } catch (e) {
@@ -248,6 +255,16 @@ export async function authPlugin(app: FastifyInstance) {
         // secret, IdP outage). Log it (the redirect + vagueness to the user are unchanged — no enumeration).
         req.log.error({ err: e, tenantId: tenant.id }, 'auth/callback: OIDC code exchange failed')
         return reply.redirect('/login?error=auth')
+      }
+
+      // #554 S6 / ADR-197 §6: an untrusted connection asserts NOTHING about groups — the claim is
+      // DROPPED before anything persists (the member upsert, the #111 FGA sync, default-role and
+      // admin-mapping evaluation, and the drift sweep all read what the upsert wrote, so cutting
+      // it HERE covers every sink). Dropping = the same semantics as an IdP that sent no groups
+      // claim. Logged once per login, no claim content in the log.
+      if (!trustGroups && claims.groups !== undefined) {
+        req.log.info({ tenantId: tenant.id }, 'auth/callback: groups claim dropped — the connection does not trust groups (ADR-197 §6)')
+        claims = { ...claims, groups: [] }
       }
 
       const deps = { db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver }

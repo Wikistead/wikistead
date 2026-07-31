@@ -48,8 +48,8 @@ beforeAll(async () => {
   // #554 S1: no tenant uniqueness on tenant_oidc — reset the tenant's rows and seed one
   await db.sql`DELETE FROM tenant_oidc`
   await db.sql`
-    INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible)
-    VALUES (${crypto.randomUUID()}, ${tenant.id}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${REDIRECT}, true)`
+    INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible, trust_groups)
+    VALUES (${crypto.randomUUID()}, ${tenant.id}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${REDIRECT}, true, true)`
   // MEMBER is provisioned (FGA tenant#member); STRANGER is not.
   await writeTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }])
 })
@@ -173,8 +173,8 @@ describe('CE first-admin bootstrap via callback', () => {
     const [t] = await admin<{ id: string }[]>`INSERT INTO tenants (slug, plan) VALUES (${slug}, 'free') RETURNING id`
     tenantId = t.id
     await admin`
-      INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible)
-      VALUES (${crypto.randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${`http://${host}/auth/callback`}, true)`
+      INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible, trust_groups)
+      VALUES (${crypto.randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${`http://${host}/auth/callback`}, true, true)`
   })
   afterAll(async () => {
     await deleteTuples(fgaClient, [

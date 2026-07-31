@@ -143,6 +143,10 @@ export interface LoginConnection {
   label: string | null
   brand: string | null
   bootstrapEligible: boolean
+  // #554 S6 / ADR-197 §6: whether this connection's asserted groups claim is persisted. SERVER-
+  // INTERNAL — login-options projects {id, kind, label, brand} explicitly, so this never publishes.
+  // The platform connection is trusted (the deployment operator's own IdP — today's behavior).
+  trustGroups: boolean
 }
 
 export async function resolveLoginConnections(
@@ -153,22 +157,22 @@ export async function resolveLoginConnections(
   const ceiling = loginMethodCeiling(env)
   const out: LoginConnection[] = []
   if (ceiling.has('tenant-oidc')) {
-    const rows = await db.sql<{ id: string; bootstrap_eligible: boolean }[]>`
-      SELECT id, bootstrap_eligible FROM tenant_oidc WHERE enabled ORDER BY sort, id`
-    for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: null, brand: null, bootstrapEligible: r.bootstrap_eligible })
+    const rows = await db.sql<{ id: string; bootstrap_eligible: boolean; trust_groups: boolean }[]>`
+      SELECT id, bootstrap_eligible, trust_groups FROM tenant_oidc WHERE enabled ORDER BY sort, id`
+    for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: null, brand: null, bootstrapEligible: r.bootstrap_eligible, trustGroups: r.trust_groups })
   }
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso) {
     // one per tenant in v1 (ADR-197 §1 B5); SAML never bootstraps (§2 rev2: oidc-only in v1)
-    const [row] = await db.sql<{ id: string }[]>`SELECT id FROM tenant_saml WHERE enabled LIMIT 1`.catch((err: unknown) => {
-      if ((err as { code?: string }).code === '42P01') return [] as { id: string }[]
+    const [row] = await db.sql<{ id: string; trust_groups: boolean }[]>`SELECT id, trust_groups FROM tenant_saml WHERE enabled LIMIT 1`.catch((err: unknown) => {
+      if ((err as { code?: string }).code === '42P01') return [] as { id: string; trust_groups: boolean }[]
       throw err
     })
-    if (row) out.push({ id: row.id, kind: 'saml', label: null, brand: null, bootstrapEligible: false })
+    if (row) out.push({ id: row.id, kind: 'saml', label: null, brand: null, bootstrapEligible: false, trustGroups: row.trust_groups })
   }
   const ownIdpEffective = out.length > 0
   let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
   if (platform && ownIdpEffective && (await platformLoginDisabled(db))) platform = null
-  if (platform) out.push({ id: 'platform', kind: 'platform', label: null, brand: null, bootstrapEligible: false })
+  if (platform) out.push({ id: 'platform', kind: 'platform', label: null, brand: null, bootstrapEligible: false, trustGroups: true })
   return out
 }
 
