@@ -2,6 +2,7 @@
 // FGA tuples are handled separately by infra/openfga/seed.ts.
 // Run with: pnpm --filter @wikistead/server db:seed
 import postgres from 'postgres'
+import { randomUUID } from 'node:crypto'
 import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
 
 ;(async () => {
@@ -50,14 +51,22 @@ import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
     // Dev OIDC config (placeholder issuer; real IdP is configured per deployment).
     // client_secret is stored ENCRYPTED via the same helper the app uses.
     const clientSecret = process.env.OIDC_CLIENT_SECRET
-    await tx`
-      INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, redirect_uri)
-      VALUES ('tenant_dev', ${process.env.OIDC_ISSUER!}, ${process.env.OIDC_CLIENT_ID!},
-              ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!})
-      ON CONFLICT (tenant_id) DO UPDATE SET
-        issuer = EXCLUDED.issuer, client_id = EXCLUDED.client_id,
-        client_secret_enc = EXCLUDED.client_secret_enc, redirect_uri = EXCLUDED.redirect_uri, updated_at = now()
-    `
+    // #554 S1: tenant_oidc is N-capable (uuid PK, no tenant uniqueness) — seed idempotence goes
+    // through the FIRST connection (sort, id), the same row every legacy read path picks.
+    const [existingOidc] = await tx<{ id: string }[]>`
+      SELECT id FROM tenant_oidc WHERE tenant_id = 'tenant_dev' ORDER BY sort, id LIMIT 1`
+    if (existingOidc) {
+      await tx`
+        UPDATE tenant_oidc SET issuer = ${process.env.OIDC_ISSUER!}, client_id = ${process.env.OIDC_CLIENT_ID!},
+          client_secret_enc = ${clientSecret ? encryptSecret(clientSecret) : null},
+          redirect_uri = ${process.env.OIDC_REDIRECT_URI!}, updated_at = now()
+        WHERE id = ${existingOidc.id}`
+    } else {
+      await tx`
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, redirect_uri, bootstrap_eligible)
+        VALUES (${randomUUID()}, 'tenant_dev', ${process.env.OIDC_ISSUER!}, ${process.env.OIDC_CLIENT_ID!},
+                ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!}, true)`
+    }
     console.log('seeded: tenant_dev / tenant_oidc')
 
     // #390: env-linked, RESET-RESISTANT dev config — like tenant_oidc above, these survive a

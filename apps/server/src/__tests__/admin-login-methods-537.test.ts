@@ -57,10 +57,13 @@ const setPlatformEnv = () => {
   process.env.PLATFORM_OIDC_CLIENT_ID = 'pc'
   process.env.PLATFORM_OIDC_REDIRECT_URI = `http://${HOST}/auth/callback`
 }
-const enableTenantOidc = () =>
-  admin`INSERT INTO tenant_oidc (tenant_id, issuer, client_id, redirect_uri, enabled)
-    VALUES (${tenant.id}, 'https://idp.example', 'c', ${'http://' + HOST + '/auth/callback'}, true)
-    ON CONFLICT (tenant_id) DO UPDATE SET enabled = true`
+const enableTenantOidc = async () => {
+  // #554 S1: no tenant uniqueness on tenant_oidc — idempotence by hand
+  const [row] = await admin<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${tenant.id} ORDER BY sort, id LIMIT 1`
+  if (row) await admin`UPDATE tenant_oidc SET enabled = true WHERE id = ${row.id}`
+  else await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, redirect_uri, enabled, bootstrap_eligible)
+    VALUES (${crypto.randomUUID()}, ${tenant.id}, 'https://idp.example', 'c', ${'http://' + HOST + '/auth/callback'}, true, true)`
+}
 const get = (h: Record<string, string> = ADMIN_H) => app.inject({ method: 'GET', url: '/admin/login-methods', headers: h })
 const patch = (enabled: boolean, h: Record<string, string> = ADMIN_H) =>
   app.inject({ method: 'PATCH', url: '/admin/login-methods', headers: h, payload: { platformLoginEnabled: enabled } })
@@ -94,8 +97,8 @@ describe('#537 /admin/login-methods', () => {
     setPlatformEnv()
     // SAML as the own IdP so the OIDC surface shows the bite directly (with tenant-oidc as the own
     // IdP, /auth/login would simply serve the tenant IdP — indistinguishable from the outside).
-    await admin`INSERT INTO tenant_saml (tenant_id, idp_entity_id, sso_url, idp_cert_enc, sp_entity_id, acs_url, enabled)
-      VALUES (${tenant.id}, 'https://idp.example/meta', 'https://idp.example/sso', 'enc', 'https://wks/sp', 'https://wks/acs', true)`
+    await admin`INSERT INTO tenant_saml (id, tenant_id, idp_entity_id, sso_url, idp_cert_enc, sp_entity_id, acs_url, enabled)
+      VALUES (${crypto.randomUUID()}, ${tenant.id}, 'https://idp.example/meta', 'https://idp.example/sso', 'enc', 'https://wks/sp', 'https://wks/acs', true)`
     try {
       await enableTenantOidc()
       expect((await patch(false)).statusCode).toBe(204)

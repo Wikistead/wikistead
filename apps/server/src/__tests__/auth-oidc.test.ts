@@ -45,12 +45,11 @@ beforeAll(async () => {
   tenant = (await new TenantRegistry(pool).findBySlug('dev'))!
   db = await acquireTenantDb(tenant)
   // Point tenant_dev's OIDC config at the test issuer (secret encrypted at rest).
+  // #554 S1: no tenant uniqueness on tenant_oidc — reset the tenant's rows and seed one
+  await db.sql`DELETE FROM tenant_oidc`
   await db.sql`
-    INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri)
-    VALUES (${tenant.id}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${REDIRECT})
-    ON CONFLICT (tenant_id) DO UPDATE SET
-      issuer = EXCLUDED.issuer, client_id = EXCLUDED.client_id, client_secret_enc = EXCLUDED.client_secret_enc,
-      scopes = EXCLUDED.scopes, redirect_uri = EXCLUDED.redirect_uri, enabled = true, updated_at = now()`
+    INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible)
+    VALUES (${crypto.randomUUID()}, ${tenant.id}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${REDIRECT}, true)`
   // MEMBER is provisioned (FGA tenant#member); STRANGER is not.
   await writeTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }])
 })
@@ -174,8 +173,8 @@ describe('CE first-admin bootstrap via callback', () => {
     const [t] = await admin<{ id: string }[]>`INSERT INTO tenants (slug, plan) VALUES (${slug}, 'free') RETURNING id`
     tenantId = t.id
     await admin`
-      INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri)
-      VALUES (${tenantId}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${`http://${host}/auth/callback`})`
+      INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible)
+      VALUES (${crypto.randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${`http://${host}/auth/callback`}, true)`
   })
   afterAll(async () => {
     await deleteTuples(fgaClient, [

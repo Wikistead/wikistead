@@ -22,8 +22,8 @@ async function freshTenant(slug: string): Promise<string> {
   return t.id
 }
 const seedOidc = (tenantId: string, enabled: boolean) =>
-  admin`INSERT INTO tenant_oidc (tenant_id, issuer, client_id, redirect_uri, enabled)
-    VALUES (${tenantId}, 'https://idp.test/', 'c', 'https://app.test/cb', ${enabled})`
+  admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, redirect_uri, enabled, bootstrap_eligible)
+    VALUES (${crypto.randomUUID()}, ${tenantId}, 'https://idp.test/', 'c', 'https://app.test/cb', ${enabled}, true)`
 const ledgerCount = async (tenantId: string) =>
   Number((await admin<{ n: string }[]>`SELECT count(*) AS n FROM operator_audit_log WHERE target = ${'tenant:' + tenantId}`)[0]!.n)
 
