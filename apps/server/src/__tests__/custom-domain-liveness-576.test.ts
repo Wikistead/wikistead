@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
-import { recheckCustomDomains, verifyCustomDomain, DEMOTE_AFTER, GRACE_MS } from '../routes/custom-domains.js'
+import { recheckCustomDomains, removeCustomDomain, verifyCustomDomain, DEMOTE_AFTER, GRACE_MS } from '../routes/custom-domains.js'
 import { tenantBaseUrl } from '../email/base-url.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient } from '@wikistead/authz'
@@ -203,6 +203,41 @@ describe('#576: a custom domain that stopped being ours stops deciding link host
         delete process.env.WKS_PUBLIC_BASE_URL
       }
     }, 120_000)
+
+    it('REMOVING the mapped domain hands the mapping to the survivor too (the delete path)', async () => {
+      // #576 re-review 2, reproduced by the reviewer: removeCustomDomain was the one status-changing
+      // path still clearing the mapping by hand, so deleting the mapped domain left the OTHER verified
+      // row winning tenantBaseUrl with nothing resolving it — dead links until the next sweep.
+      process.env.WKS_PUBLIC_BASE_URL = 'https://wikistead.example.com'
+      // arrange EXPLICITLY rather than leaning on hook order: the mapping must point at the domain
+      // being removed, or the assertion below passes without the fix ever running
+      await admin`UPDATE tenants SET custom_domain = ${SECOND} WHERE id = ${tenantId}`
+      expect(await mapped()).toBe(SECOND)
+      try {
+        await removeCustomDomain(db, { tenantId, domain: SECOND })
+        expect(await mapped(), 'the mapping follows to the surviving verified domain').toBe(DOMAIN)
+        expect(await tenantBaseUrl(admin, { id: tenantId, slug: SLUG })).toBe(`https://${DOMAIN}`)
+      } finally {
+        delete process.env.WKS_PUBLIC_BASE_URL
+        await admin`INSERT INTO custom_domains (tenant_id, domain, verification_token, status, verified_at, last_ok_at)
+          VALUES (${tenantId}, ${SECOND}, ${secondToken}, 'verified', now() + interval '1 minute', now())
+          ON CONFLICT (tenant_id, domain) DO NOTHING`
+      }
+    }, 60_000)
+
+    it('removing the LAST verified domain clears the mapping (no stale host left behind)', async () => {
+      await admin`UPDATE custom_domains SET status = 'pending' WHERE domain = ${DOMAIN}`
+      await admin`UPDATE tenants SET custom_domain = ${SECOND} WHERE id = ${tenantId}`
+      try {
+        await removeCustomDomain(db, { tenantId, domain: SECOND })
+        expect(await mapped(), 'nothing verified is left, so nothing may resolve').toBeNull()
+      } finally {
+        await admin`UPDATE custom_domains SET status = 'verified' WHERE domain = ${DOMAIN}`
+        await admin`INSERT INTO custom_domains (tenant_id, domain, verification_token, status, verified_at, last_ok_at)
+          VALUES (${tenantId}, ${SECOND}, ${secondToken}, 'verified', now() + interval '1 minute', now())
+          ON CONFLICT (tenant_id, domain) DO NOTHING`
+      }
+    }, 60_000)
 
     it('a mapping that drifted to NULL is repaired by a successful check', async () => {
       await admin`UPDATE tenants SET custom_domain = NULL WHERE id = ${tenantId}`

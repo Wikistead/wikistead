@@ -93,14 +93,18 @@ export async function verifyCustomDomain(
 
   // last_ok_at is the liveness sweep's grace anchor (#576): a manual verification IS a success, and
   // leaving it behind would hand the next sweep a stale anchor from the previous ownership period.
-  await db.sql`UPDATE custom_domains SET status = 'verified', verified_at = now(), last_ok_at = now(),
-                      check_failures = 0, auto_demoted_at = NULL
-               WHERE tenant_id = ${args.tenantId} AND domain = ${domain}`
-  // Activate host→tenant resolution (ADR-016). tenants is the global registry (no tenant RLS);
-  // billing updates it via the raw pool too. UNIQUE(custom_domain) guards cross-tenant collision.
+  // ONE transaction (db.tx, not the session handle — #576 re-review 2: the claim was "same tx" and the
+  // session handle is not one): the row's status and the registry mapping are a single fact, and a
+  // crash between them leaves a live host pointing at a domain the product calls unverified.
+  // Activate host→tenant resolution (ADR-016). tenants is the global registry (no tenant RLS).
   // The just-verified row is the newest, so syncDomainMapping names it — going through the one
   // expression keeps this path from being the odd one out when a tenant holds several domains.
-  await syncDomainMapping(db.sql, args.tenantId)
+  await db.tx(async (tx) => {
+    await tx`UPDATE custom_domains SET status = 'verified', verified_at = now(), last_ok_at = now(),
+                    check_failures = 0, auto_demoted_at = NULL
+             WHERE tenant_id = ${args.tenantId} AND domain = ${domain}`
+    await syncDomainMapping(tx, args.tenantId)
+  })
   emit({ type: 'tenant.custom_domain_verified', tenantId: args.tenantId, domain })
   return { verified: true }
 }
@@ -163,8 +167,12 @@ type DomainRow = {
 // none. Every path that changes a row's status calls it inside the same transaction, which also
 // repairs a mapping that drifted for any other reason.
 async function syncDomainMapping(tx: Sql, tenantId: string): Promise<void> {
+  // `AND tenant_id` as well as RLS: this ticket has now twice been bitten by a handle that was not
+  // tenant-scoped, and a mapping derived from another tenant's row would be the worst possible way to
+  // find out a third time.
   const [live] = await tx<{ domain: string }[]>`
-    SELECT domain FROM custom_domains WHERE status = 'verified' ORDER BY verified_at DESC LIMIT 1`
+    SELECT domain FROM custom_domains WHERE tenant_id = ${tenantId} AND status = 'verified'
+    ORDER BY verified_at DESC LIMIT 1`
   await tx`UPDATE tenants SET custom_domain = ${live?.domain ?? null} WHERE id = ${tenantId}`
 }
 
@@ -192,7 +200,8 @@ export async function recheckCustomDomains(
       const rows = await withTenantTx(tenant.id, async (tx) => tx<DomainRow[]>`
         SELECT domain, verification_token, check_failures, verified_at, last_ok_at, status, auto_demoted_at
         FROM custom_domains
-        WHERE status = 'verified' OR (status = 'pending' AND auto_demoted_at IS NOT NULL)`)
+        WHERE status = 'verified' OR (status = 'pending' AND auto_demoted_at IS NOT NULL)
+        ORDER BY domain`)
       for (const row of rows) {
         checked++
         let present: boolean
@@ -274,6 +283,11 @@ export async function recheckCustomDomains(
 // and NOT re-entrant — a sweep slower than the interval, e.g. a resolver timing out per domain,
 // would otherwise stack ticks and have two passes counting the same failure).
 export function startCustomDomainRecheckWorker(intervalMs = 6 * 60 * 60 * 1000): () => void {
+  // A non-positive interval switches the sweep OFF. That exists for one honest reason: the dev seed
+  // shortcuts the DNS-TXT challenge to make host routing work locally (infra/db/seed.ts), so the
+  // seeded domain cannot prove ownership and the sweep would correctly demote it a day later and take
+  // local host routing with it. A dev pointing a real tunnel at a real TXT record needs no such switch.
+  if (intervalMs <= 0) return () => {}
   let running = false
   const t = setInterval(async () => {
     if (running) return
@@ -295,9 +309,15 @@ export function startCustomDomainRecheckWorker(intervalMs = 6 * 60 * 60 * 1000):
 // deleted out of band. Used on explicit release AND on entitlement loss (ADR-064 downgrade).
 export async function removeCustomDomain(db: TenantDb, args: { tenantId: string; domain: string }): Promise<void> {
   const domain = normalizeDomain(args.domain)
-  await db.sql`DELETE FROM custom_domains WHERE tenant_id = ${args.tenantId} AND domain = ${domain}`
-  // Clear the resolution mapping only if it points at THIS domain (don't clobber another).
-  await pool`UPDATE tenants SET custom_domain = NULL WHERE id = ${args.tenantId} AND custom_domain = ${domain}`
+  // #576 re-review 2: this was the ONE status-changing path still clearing the mapping by hand, and it
+  // reproduced the exact split it was supposed to be fixed by — deleting the mapped domain of a tenant
+  // that holds two verified ones cleared tenants.custom_domain while the OTHER row went on winning
+  // tenantBaseUrl, so links pointed at a host nothing resolved until the next sweep repaired it
+  // (measured by the reviewer, up to a 6h window of dead links). Same derivation as everywhere else.
+  await db.tx(async (tx) => {
+    await tx`DELETE FROM custom_domains WHERE tenant_id = ${args.tenantId} AND domain = ${domain}`
+    await syncDomainMapping(tx, args.tenantId)
+  })
   emit({ type: 'tenant.custom_domain_removed', tenantId: args.tenantId, domain })
 }
 
