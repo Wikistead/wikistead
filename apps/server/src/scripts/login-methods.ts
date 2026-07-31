@@ -48,7 +48,9 @@ export async function inspectLoginMethods(sql: postgres.Sql, args: { slug: strin
   const [tenant] = await sql<{ id: string; plan: string }[]>`SELECT id, plan FROM tenants WHERE slug = ${args.slug}`
   if (!tenant) throw Object.assign(new Error(`no tenant with slug "${args.slug}"`), { code: 'tenant_not_found' })
   const ceiling = loginMethodCeiling()
-  const [oidc] = await sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc WHERE tenant_id = ${tenant.id}`
+  // #554 S1: deterministic first connection (the row every legacy read path picks); the kind-level
+  // writes below flip ALL of the tenant's oidc connections — TODO(#554 S4): per-connection --connection.
+  const [oidc] = await sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc WHERE tenant_id = ${tenant.id} ORDER BY sort, id LIMIT 1`
   const [saml] = await sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml WHERE tenant_id = ${tenant.id}`.catch(() => [] as { enabled: boolean }[])
   const [pref] = await sql<{ platform_login_disabled: boolean }[]>`SELECT platform_login_disabled FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`
   const platformCfg = !!loadPlatformOidc()

@@ -128,6 +128,12 @@ export async function resolveAvailableLogin(
 // row), listed under the fixed id 'platform' — it can never collide with a minted uuid, and S3
 // owns whatever surfaces it publicly. The platform-lapse rule (ADR-195 ruling 4) carries over:
 // the tenant's platform-off pref bites only while an own-IdP connection is effective.
+//
+// KNOWN drift vs resolveAvailableLogin, to reconcile when S2/S3 make this the consumed truth
+// (S1 review, finding 3): (a) tenantOidcEnabled looks at the FIRST row's enabled while this lists
+// every enabled row — divergent ownIdpEffective once N≥2; (b) resolveAvailableLogin drops a
+// connection whose secret fails to DECRYPT (loadTenantOidcCfg throws/null) while this lists it —
+// S3 must not render a button the start route cannot honor.
 export interface LoginConnection {
   id: string
   kind: 'oidc' | 'saml' | 'platform'

@@ -126,20 +126,31 @@ export async function updateTenantOidc(
   // A fresh row minted here is the legacy tenant-IdP connection, so it keeps today's bootstrap
   // behavior: bootstrap_eligible = true (ADR-197 §2 rev2 — the flag is set only where connections
   // are created, and THIS is that surface for the tenant IdP).
-  if (existing) {
-    await db.sql`
-      UPDATE tenant_oidc SET
-        issuer = ${issuer}, client_id = ${clientId}, client_secret_enc = ${secretEnc},
-        scopes = ${scopes}, redirect_uri = ${redirectUri}, enabled = ${args.enabled},
-        groups_claim = ${groupsClaim}, updated_at = now()
-      WHERE id = ${existing.id}
-    `
-  } else {
-    await db.sql`
-      INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible)
-      VALUES (${randomUUID()}, ${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim}, true)
-    `
-  }
+  //
+  // S1 review A: the old ON CONFLICT carried a DB-level single-row guarantee this read-then-write
+  // lost — two concurrent first saves would mint two connections (one an orphan the legacy read
+  // paths never show, but enabled and bootstrap-eligible). One transaction + an advisory lock on
+  // the tenant (the bootstrapFirstAdmin discipline) restores it; the row is RE-read under the lock
+  // so the loser of the race lands on the winner's row.
+  await db.tx(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${'tenant-oidc-save:' + args.tenantId})::bigint)`
+    const [row] = await tx<{ id: string }[]>`
+      SELECT id FROM tenant_oidc WHERE tenant_id = ${args.tenantId} ORDER BY sort, id LIMIT 1`
+    if (row) {
+      await tx`
+        UPDATE tenant_oidc SET
+          issuer = ${issuer}, client_id = ${clientId}, client_secret_enc = ${secretEnc},
+          scopes = ${scopes}, redirect_uri = ${redirectUri}, enabled = ${args.enabled},
+          groups_claim = ${groupsClaim}, updated_at = now()
+        WHERE id = ${row.id}
+      `
+    } else {
+      await tx`
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible)
+        VALUES (${randomUUID()}, ${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim}, true)
+      `
+    }
+  })
   emit({ type: 'tenant.oidc_updated', tenantId: args.tenantId, actorId: args.userId, enabled: args.enabled })
 }
 
