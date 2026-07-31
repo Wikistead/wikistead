@@ -79,10 +79,17 @@ import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
       // verification-registry row is what the domains UI shows. Real deployments only reach 'verified' via the
       // DNS-TXT challenge (#123 / ADR-065); the dev seed shortcuts it for local host-routing.
       await tx`UPDATE tenants SET custom_domain = ${customDomain} WHERE id = 'tenant_dev'`
+      // #576: this row cannot pass the liveness sweep — its token is a placeholder, so no TXT record
+      // will ever match it and the sweep would demote it (correctly) once the grace window elapsed,
+      // taking local host routing with it. Re-seeding therefore RE-ARMS the guard (counter zeroed,
+      // anchor moved to now), which buys another grace window, and a dev who keeps the stack up longer
+      // than that sets CUSTOM_DOMAIN_RECHECK_MS=0 to switch the sweep off. Both are dev-only crutches
+      // for a dev-only shortcut: nothing here changes what a real deployment must prove.
       await tx`
-        INSERT INTO custom_domains (tenant_id, domain, verification_token, status, verified_at)
-        VALUES ('tenant_dev', ${customDomain}, 'dev-seed-token', 'verified', now())
-        ON CONFLICT (tenant_id, domain) DO UPDATE SET status = 'verified', verified_at = now()
+        INSERT INTO custom_domains (tenant_id, domain, verification_token, status, verified_at, last_ok_at)
+        VALUES ('tenant_dev', ${customDomain}, 'dev-seed-token', 'verified', now(), now())
+        ON CONFLICT (tenant_id, domain) DO UPDATE SET status = 'verified', verified_at = now(),
+          last_ok_at = now(), check_failures = 0, auto_demoted_at = NULL
       `
       console.log(`seeded: tenant_dev / custom_domain = ${customDomain} (verified)`)
     }
