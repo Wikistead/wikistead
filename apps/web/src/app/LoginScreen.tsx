@@ -65,9 +65,13 @@ export function connectionStartUrl(conn: LoginConnection, returnTo: string): str
 // connection fixed first-party branding of its own (it is not admin data, so it never waited for
 // S4's label column); SAML keeps its fixed wording; an oidc connection wears its admin label once
 // S4 ships the column, generic SSO wording until then. Pure for tests.
-export function connectionButtonText(conn: LoginConnection, t: (k: string) => string): string {
+export function connectionButtonText(conn: LoginConnection, t: (k: string, o?: Record<string, string>) => string): string {
   if (conn.kind === "saml") return t("auth.signInSaml");
   if (conn.kind === "platform") return t("auth.signInPlatform");
+  // #554 S4: a PRESET connection wears its fixed first-party brand ("Continue with Google") —
+  // rev3: the label field never carries through a branded connection (the server enforces it;
+  // this is display truth, not a gate).
+  if (conn.brand && conn.brand in SOCIAL_LABELS) return t("auth.continueWith", { provider: SOCIAL_LABELS[conn.brand]! });
   return conn.label ?? t("auth.signIn");
 }
 

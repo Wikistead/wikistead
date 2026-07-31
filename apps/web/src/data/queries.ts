@@ -2093,3 +2093,57 @@ export function useSearch(q: string, tokenOverride?: string) {
     placeholderData: keepPreviousData,
   });
 }
+
+// #554 S4 / ADR-197 §1-3: the admin connection-management surface (N oidc connections). Secrets are
+// write-only (hasSecret). subjectPrefix is display-only (immutable — set at creation, §5).
+export interface AdminConnectionDTO {
+  id: string; kind: "oidc"; issuer: string; clientId: string; hasSecret: boolean; scopes: string
+  redirectUri: string; enabled: boolean; sort: number; label: string | null; preset: string | null
+  bootstrapEligible: boolean; trustGroups: boolean; subjectPrefix: string | null; groupsClaim: string | null
+}
+export interface AdminConnectionInput {
+  preset?: string; issuer?: string; clientId?: string; clientSecret?: string | null; redirectUri?: string
+  scopes?: string; label?: string; entraTenantId?: string; enabled?: boolean
+  bootstrapEligible?: boolean; trustGroups?: boolean; groupsClaim?: string | null
+}
+export function useAdminConnections() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["admin-connections"],
+    queryFn: () => apiFetch<AdminConnectionDTO[]>("/admin/connections", token).then((r) => r ?? []),
+    staleTime: 30_000,
+  });
+}
+export function useCreateConnection() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AdminConnectionInput) => apiFetch<{ id: string }>("/admin/connections", token, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-connections"] }),
+  });
+}
+export function useUpdateConnection() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: AdminConnectionInput & { id: string }) =>
+      apiFetch<null>(`/admin/connections/${encodeURIComponent(id)}`, token, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-connections"] }),
+  });
+}
+export function useDeleteConnection() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<null>(`/admin/connections/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-connections"] }),
+  });
+}
+export function useReorderConnections() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => apiFetch<null>("/admin/connections/reorder", token, { method: "POST", body: JSON.stringify({ ids }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-connections"] }),
+  });
+}

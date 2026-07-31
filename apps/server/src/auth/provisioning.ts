@@ -81,12 +81,17 @@ export async function bootstrapFirstAdmin(
   deps: { db: TenantDb; fga: OpenFgaClient },
   tenant: { id: string },
   claims: { sub: string; email?: string | null; name?: string | null; picture?: string | null },
+  // #554 S4 / §5 rev3 gate flip: set only by a caller that validated the RAW sub and minted the
+  // namespaced form itself. Never set from request data.
+  opts?: { subMintedInternally?: boolean },
 ): Promise<boolean> {
   // #554 / ADR-197 §5 (S0): a reserved-prefix (or over-long) sub never bootstraps the first admin —
   // this seam writes the member row and the admin tuple BEFORE any session gate runs, so the check
   // must live here, not downstream. Refusal = false, the same answer a non-empty tenant gives.
-  const { externalSubViolation } = await import('./reserved-subs.js')
-  if (externalSubViolation(claims.sub)) return false
+  if (!opts?.subMintedInternally) {
+    const { externalSubViolation } = await import('./reserved-subs.js')
+    if (externalSubViolation(claims.sub)) return false
+  }
   return deps.db.tx(async (tx) => {
     // Serialize concurrent first-logins for this tenant so EXACTLY ONE wins.
     await tx`SELECT pg_advisory_xact_lock(hashtext(${'bootstrap:' + tenant.id})::bigint)`

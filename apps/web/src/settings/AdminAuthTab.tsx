@@ -9,6 +9,7 @@ import { cn } from "../lib/utils";
 import { AdminEnrollmentSection } from "./AdminEnrollmentSection";
 import { AdminSamlSection } from "./AdminSamlSection";
 import { AdminLoginMethodsSection } from "./AdminLoginMethodsSection";
+import { AdminConnectionsSection } from "./AdminConnectionsSection";
 
 const label = "mb-1 mt-3.5 block text-sm text-fg-dim";
 
@@ -60,6 +61,8 @@ export function AdminAuthTab() {
       <p className="mt-0 text-sm text-fg-dim">{t("adminAuth.body")}</p>
       {/* #537 Slice 3: which ways in exist — per-method state + the platform-login toggle. */}
       <AdminLoginMethodsSection />
+      {/* #554 S4: N login connections (add/reorder/enable/delete) */}
+      <AdminConnectionsSection />
 
       <div className="mb-5 rounded-lg border border-l-[3px] border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] border-l-[var(--danger)] px-3 py-2.5 text-xs text-fg-dim" data-testid="oidc-warning">{t("adminAuth.warning")}</div>
 

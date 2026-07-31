@@ -54,4 +54,8 @@ describe("#554 S3 connectionButtonText (ADR-197 §3 rev3 fixed branding)", () =>
     expect(connectionButtonText(conn("oidc", "x", "Corp SSO"), t)).toBe("Corp SSO");
     expect(connectionButtonText(conn("oidc", "x"), t)).toBe("auth.signIn");
   });
+  it("#554 S4: a PRESET connection wears its fixed brand, and a label never rides through it", () => {
+    expect(connectionButtonText({ id: "x", kind: "oidc", label: null, brand: "google" }, t)).toBe("auth.continueWith");
+    expect(connectionButtonText({ id: "x", kind: "oidc", label: "Evil", brand: "microsoft" }, t)).toBe("auth.continueWith");
+  });
 });
