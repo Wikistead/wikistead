@@ -542,7 +542,7 @@
     "selectGroup": "Select a group",
     "noGroups": "No groups (imported from your IdP)",
     "commentAudienceTitle": "Commenting",
-    "commentAudienceBody": "These toggles open commenting to a whole AUDIENCE — every member who can view, or guests holding a link (view or edit). To let specific people comment instead, grant comment in the access list above (space-wide), or on a single page from that page's permissions. The two are independent: turning these toggles off does not take commenting away from an explicit comment grant.",
+    "commentAudienceBody": "These toggles open commenting to a whole AUDIENCE — every member who can view, or guests holding a link (view or edit). To let specific people comment instead, assign a custom role that includes comment (space-wide — the picker above grants built-in roles only, and there is no comment among them), or grant comment on a single page from that page's permissions. The two are independent: turning these toggles off does not take commenting away from an explicit comment grant.",
     "commentGuests": "Link guests (view or edit) may comment",
     "commentMembers": "Anyone who can view (public) may comment",
     "mappingBody": "Confer a role on everyone in an IdP group, for THIS space. Membership resolves live from your identity provider — nobody is added or billed.",

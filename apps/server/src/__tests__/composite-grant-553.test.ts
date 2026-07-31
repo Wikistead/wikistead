@@ -7,7 +7,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check } from '@wikistead/authz'
-import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, grantSpaceAccessComposite } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, grantSpaceAccessComposite, revokeSpaceAccessComposite } from '../routes/spaces.js'
 import { createPage, deletePage, publishPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
@@ -134,5 +134,111 @@ describe('#553 review D: composite allowlist', () => {
     })
     expect(res.statusCode).toBe(204)
     expect((await rowsOf(p)).map((r) => r.builtin_capability)).toEqual(['comment', 'edit'])
+  }, 120_000)
+})
+
+// #553 (a) / the composite REVOKE. The reviewer reproduced the state this closes — the
+// folded editor row's × fired two DELETEs, and stopping after the first left the principal "revoked"
+// with commenting intact. The ruling: one request, one transaction, all arms or none.
+describe('#553 revoking a folded noun takes every arm, in one transaction', () => {
+  const canComment = (p: string) => check(fgaClient, p, 'comment', { type: 'page', id: pageId })
+  const canEdit = (p: string) => check(fgaClient, p, 'edit', { type: 'page', id: pageId })
+
+  it('one DELETE with relations[] removes both rows and both leaves', async () => {
+    const p = sub('rev-both')
+    await composite(p, ['edit', 'comment'])
+    expect(await canEdit(p)).toBe(true)
+    expect(await canComment(p)).toBe(true)
+
+    const res = await app.inject({
+      method: 'DELETE', url: `/spaces/${spaceId}/access`, headers: dev,
+      payload: { grantee: p, relations: ['edit', 'comment'] },
+    })
+    expect(res.statusCode).toBe(204)
+    expect((await rowsOf(p)).length, 'no arm left behind').toBe(0)
+    expect(await canEdit(p)).toBe(false)
+    expect(await canComment(p), 'the leftover this exists to prevent').toBe(false)
+  }, 120_000)
+
+  it('the whole fold is ONE write, so there is no moment where half of it has landed', async () => {
+    // The discriminating pin. "Both arms end up gone" is true of a loop as well, so it proves nothing
+    // about atomicity: what distinguishes the fix is that the arms are deleted TOGETHER — one
+    // transaction, one FGA write. Revoking arm by arm (the client's old behaviour, or a server-side
+    // loop) issues one write per arm and passes through the half state in between.
+    const p = sub('rev-onewrite')
+    await composite(p, ['edit', 'comment'])
+    let writes = 0
+    const counting = new Proxy(fgaClient, {
+      get: (t, prop, recv) => prop === 'write'
+        ? async (...a: unknown[]) => { writes++; return (Reflect.get(t, prop, recv) as (...x: unknown[]) => Promise<unknown>).apply(t, a) }
+        : Reflect.get(t, prop, recv),
+    })
+    await revokeSpaceAccessComposite(db, counting, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capabilities: ['edit', 'comment'], plan: 'business',
+    })
+    expect(writes, 'one write for the whole noun — not one per arm').toBe(1)
+    expect((await rowsOf(p)).length).toBe(0)
+    expect(await canComment(p)).toBe(false)
+  }, 120_000)
+
+  it('a FAILURE mid-revoke leaves the principal exactly as they were (all or nothing)', async () => {
+    // the acceptance condition from the ruling: not just "the client sends one request", but "a failure
+    // cannot produce the half state either". The failure is injected where it can actually happen —
+    // the FGA delete, which runs last inside the transaction.
+    const p = sub('rev-rollback')
+    await composite(p, ['edit', 'comment'])
+    const spy = { calls: 0 }
+    // a PROXY, not a spread: the client's methods live on its prototype, and a spread copy would fail
+    // for the wrong reason (before any row was touched), which would pin nothing.
+    const broken = new Proxy(fgaClient, {
+      get: (t, prop, recv) => prop === 'write'
+        ? async () => { spy.calls++; throw new Error('FGA down') }
+        : Reflect.get(t, prop, recv),
+    })
+    await expect(revokeSpaceAccessComposite(db, broken, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capabilities: ['edit', 'comment'], plan: 'business',
+    })).rejects.toThrow()
+    expect(spy.calls, 'the failure was reached (otherwise this pin proves nothing)').toBeGreaterThan(0)
+    expect((await rowsOf(p)).map((r) => r.builtin_capability), 'both rows rolled back').toEqual(['comment', 'edit'])
+    expect(await canEdit(p), 'and access is untouched').toBe(true)
+    expect(await canComment(p)).toBe(true)
+
+    // and the real one still works afterwards
+    await revokeSpaceAccessComposite(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capabilities: ['edit', 'comment'], plan: 'business',
+    })
+    expect((await rowsOf(p)).length).toBe(0)
+  }, 120_000)
+
+  it('a ROWLESS arm goes too (a legacy comment leaf must not survive the fold\'s revoke)', async () => {
+    const p = sub('rev-rowless')
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
+    // the pre-composite shape: a comment leaf with no row of its own
+    const { writeTuples } = await import('@wikistead/authz')
+    await writeTuples(fgaClient, [{ user: p, relation: 'commenter', object: `space:${spaceId}` }])
+    expect(await canComment(p)).toBe(true)
+    await revokeSpaceAccessComposite(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capabilities: ['edit', 'comment'], plan: 'business',
+    })
+    expect(await canComment(p), 'the untracked arm is not a way to keep commenting').toBe(false)
+    expect(await canEdit(p)).toBe(false)
+  }, 120_000)
+
+  it('the same allowlist as the grant: a free-form relations[] is 400 and removes nothing', async () => {
+    const p = sub('rev-freeform')
+    await composite(p, ['edit', 'comment'])
+    for (const relations of [['edit'], ['edit', 'manage'], ['view', 'comment']]) {
+      const res = await app.inject({ method: 'DELETE', url: `/spaces/${spaceId}/access`, headers: dev, payload: { grantee: p, relations } })
+      expect(res.statusCode, relations.join('+')).toBe(400)
+    }
+    expect((await rowsOf(p)).length, 'nothing removed by a refused shape').toBe(2)
+  }, 120_000)
+
+  it('the singular form still means exactly one capability (independence, non-regression)', async () => {
+    const p = sub('rev-single')
+    await composite(p, ['edit', 'comment'])
+    await revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
+    expect(await canEdit(p)).toBe(false)
+    expect(await canComment(p), 'comment is independent — taking edit does not take it').toBe(true)
   }, 120_000)
 })

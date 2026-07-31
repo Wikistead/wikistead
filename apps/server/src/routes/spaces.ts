@@ -752,6 +752,69 @@ export async function grantSpaceAccessComposite(
   }
 }
 
+// #553 (a) / ADR-199 §2: the composite REVOKE — the mirror of grantSpaceAccessComposite, and
+// the reason it exists is a state the reviewer reproduced: the Members list folds an edit+comment pair
+// into one "editor" row, its × fired two DELETEs from the browser, and stopping after the first left
+// the principal revoked in the UI and still able to comment. A permission leftover nobody can see is
+// not something to detect with a second toast — one request, one transaction, all arms or none.
+export async function revokeSpaceAccessComposite(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string },
+): Promise<void> {
+  for (const cap of args.capabilities) validateSpaceGrant(args.grantee, cap)
+  // The SAME allowlist the composite grant uses: only a ruled noun bundle may travel as a set, so this
+  // cannot become a free-form multi-revoke that takes capabilities the caller never named.
+  const { builtinBundle, unassignRoleTxCore } = await import('./roles.js')
+  const allowed = [...new Set(Object.values(RELATION_TO_CAP))].map((c) => builtinBundle(c)).filter((b) => b.length > 1)
+  if (!allowed.some((b) => sameCapSet(b, args.capabilities))) {
+    throw Object.assign(new Error('unknown composite revoke'), { statusCode: 400 })
+  }
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  const rows = await db.sql<{ id: string; origin: string; builtin_capability: string }[]>`
+    SELECT id, origin, builtin_capability FROM role_assignments
+    WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.grantee}
+      AND builtin_capability = ANY(${args.capabilities})`
+  // Machine-owned rows are removed where the machine is (ADR-183 §1) — the same refusal the single-arm
+  // revoke gives, checked across ALL arms before anything is deleted.
+  if (rows.some((r) => r.origin === 'mapping')) {
+    throw Object.assign(new Error('managed by a group mapping — delete the mapping instead'), { statusCode: 409 })
+  }
+  const missing = args.capabilities.filter((c) => !rows.some((r) => r.builtin_capability === c))
+  await db.tx(async (tx) => {
+    const toDelete: { user: string; relation: string; object: string }[] = []
+    for (const row of rows) {
+      const r = await unassignRoleTxCore(tx, {
+        tenant: { id: args.tenantId, plan: args.plan ?? '' }, assignmentId: row.id, actorSub: args.userId,
+        auditAction: 'space.access_revoked', skipAudit: args.plan === undefined,
+      })
+      if (r) toDelete.push(...r.toDelete)
+    }
+    // A ROWLESS arm (a pre-086 grant, or one arm written before the composite existed) still has to go,
+    // or the fold would revoke "editor" and leave the legacy comment leaf standing — the same leftover
+    // by another route. Covering is checked against what SURVIVES this transaction.
+    for (const cap of missing) {
+      const covering = await tx`
+        SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+        WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId} AND a.principal = ${args.grantee}
+          AND ${cap} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
+      if (covering.length === 0) toDelete.push(...spaceGrantTuples(args.grantee, cap, args.spaceId))
+    }
+    if (missing.length > 0 && args.plan !== undefined) {
+      await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
+    }
+    // ONE delete for every arm, last inside the tx: a failure rolls every row deletion back, so the
+    // half-revoked state cannot be reached by a failure either — not just by a client that gave up.
+    if (toDelete.length) await deleteTuples(fga, toDelete)
+  })
+  void sweepUnviewableWatches(db, fga, [args.spaceId]).catch(() => {})
+  await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+  for (const cap of args.capabilities) {
+    emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: cap, actorId: args.userId })
+  }
+}
+
 export async function revokeSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -1258,8 +1321,17 @@ export async function spacesPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  app.delete<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation: string } }>('/spaces/:spaceId/access', async (req, reply) => {
+  app.delete<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation?: string; relations?: string[] } }>('/spaces/:spaceId/access', async (req, reply) => {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
+    // #553 (a): the plural form revokes a folded noun in ONE transaction. The singular keeps
+    // meaning exactly one capability, as it always has.
+    if (Array.isArray(req.body?.relations) && req.body.relations.length > 0) {
+      await revokeSpaceAccessComposite(req.db, app.fga, app.searchDriver, {
+        spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+        grantee, capabilities: req.body.relations, plan: req.tenant.plan,
+      })
+      return reply.code(204).send()
+    }
     await revokeSpaceAccess(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
       grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan,
