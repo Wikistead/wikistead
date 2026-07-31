@@ -24,6 +24,7 @@
     "fga:seed": "tsx --env-file=../../.env ../../infra/openfga/seed.ts",
     "fga:resync": "tsx --env-file=../../.env ../../infra/openfga/resync.ts",
     "roles:converge": "tsx --env-file=../../.env src/scripts/converge-role-duplicates-536.ts",
+    "authz:migrate-comment-553": "tsx --env-file=../../.env src/scripts/migrate-comment-independence-553.ts",
     "fga:migrate-comment-direct": "tsx --env-file=../../.env ../../infra/openfga/migrate-comment-direct.ts",
     "db:seed": "tsx --env-file=../../.env ../../infra/db/seed.ts",
     "storage:gc": "tsx --env-file=../../.env src/storage/gc.ts",
