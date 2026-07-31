@@ -72,3 +72,26 @@ describe("#497: resolveMappingDispatch", () => {
     }
   });
 });
+
+// #553 review F: the display fold and its revoke set, pinned as values (the component only executes).
+import { foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
+
+describe("#553: foldedEditorGrantees / revokeCapsForRow", () => {
+  const g = (grantee: string, capability: string) => ({ grantee, capability });
+  it("folds only the full edit+comment pair; lone arms stay unfolded", () => {
+    const folded = foldedEditorGrantees([
+      g("user:pair", "edit"), g("user:pair", "comment"),
+      g("user:edit-only", "edit"),
+      g("user:comment-only", "comment"),
+      g("user:viewer", "view"),
+    ]);
+    expect(folded).toEqual(new Set(["user:pair"]));
+  });
+  it("is origin-blind: the pair folds regardless of which grant came first or what else is held", () => {
+    expect(foldedEditorGrantees([g("g:1#member", "comment"), g("g:1#member", "view"), g("g:1#member", "edit")])).toEqual(new Set(["g:1#member"]));
+  });
+  it("a folded editor row revokes BOTH arms; an ordinary row revokes exactly itself", () => {
+    expect(revokeCapsForRow({ capability: "edit", foldedCaps: ["edit", "comment"] })).toEqual(["edit", "comment"]);
+    expect(revokeCapsForRow({ capability: "comment" })).toEqual(["comment"]);
+  });
+});

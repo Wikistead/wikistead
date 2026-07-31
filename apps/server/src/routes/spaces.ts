@@ -651,6 +651,12 @@ export async function grantSpaceAccess(
 // it issues N single-capability grants (today: editor = edit + comment) in one transaction, then ONE
 // sweep keeping both arms. The bare-capability form stays exactly what it says (an API that quietly
 // granted more than asked would be the same lie #553 removes); the bundle lives only where the noun is.
+// The server-side mirror of the web's COMPOSITE_BUILTINS table (grant-dispatch.ts) — the UI offers
+// the noun, the server decides what a noun may bundle.
+const ALLOWED_COMPOSITES: ReadonlySet<readonly string[]> = new Set([['edit', 'comment']])
+const sameCapSet = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',')
+
 export async function grantSpaceAccessComposite(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -658,6 +664,12 @@ export async function grantSpaceAccessComposite(
   args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string },
 ): Promise<void> {
   for (const cap of args.capabilities) validateSpaceGrant(args.grantee, cap)
+  // #553 review D: the plural wire form is NOT a free-form multi-grant — only the ruled noun
+  // bundles pass (today: editor = edit+comment). An arbitrary capability list would slip N roles
+  // past the one-principal-one-role convergence (#536) through the sweep's keep-set.
+  if (![...ALLOWED_COMPOSITES].some((b) => sameCapSet(b, args.capabilities))) {
+    throw Object.assign(new Error('unknown composite grant'), { statusCode: 400 })
+  }
   await requireSpaceManage(fga, args.userId, args.spaceId)
   // machine-row refusal across BOTH arms (the same 409 the single grant gives)
   const held = await db.sql<{ origin: string; builtin_capability: string | null }[]>`

@@ -218,7 +218,7 @@ type page
     # subtraction is its own helper (OpenFGA forbids mixing `or`/`but not` at one level). NOTE the
     # deliberate breadth (ADR-139): an EDIT-ONLY-link guest holds no view_base, so a full freeze removes
     # their view/comment/collab-join too (anti-vandalism denial); members degrade to read-only; a
-    # view+comment-link guest keeps view+comment (`view_base and comment_open` is edit-independent).
+    # view+comment-link guest keeps view+comment (the comment_audience view_base arm is edit-independent).
     define frozen: [user:*, share_link:*]
     define frozen_guests: [share_link:*]
     define edit_no_guests: edit_permitted but not frozen_guests

@@ -608,8 +608,8 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   // #330 / ADR-141: canModerate gates the moderation affordances (freeze control, patrol, revert) for a
   // moderator who is NOT a manager. Convenience only — every moderation route re-checks FGA (requireModerate).
   const canModerate = canManage || (await check(fga, `user:${args.userId}`, 'moderate', { type: 'page', id: args.pageId }))
-  // canComment gates the comment COMPOSER (#100): true for edit, an explicit comment grant, OR a
-  // viewer when the space's comment_open is on (view_base and comment_open). view/edit is capability;
+  // canComment gates the comment COMPOSER (#100, re-ruled by #553/ADR-199): true for an explicit
+  // comment grant, manage/moderate, or the comment_open audience — edit alone no longer implies it.
   // comment is a distinct capability the UI needs to show the composer to comment-capable viewers.
   // Convenience only — the comment routes re-check FGA (the fortress), so a forged composer can't post.
   const canComment = await check(fga, `user:${args.userId}`, 'comment', { type: 'page', id: args.pageId })

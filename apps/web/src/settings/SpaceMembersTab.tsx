@@ -12,7 +12,7 @@ import {
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { Select } from "../ui/Select";
-import { resolveGrantDispatch } from "./grant-dispatch";
+import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -201,9 +201,7 @@ export function SpaceMembersTab() {
   // #553 / ADR-199 §2 (rev5 ruling): a principal holding BOTH the edit and comment built-in grants is
   // ONE editor — the pair folds into a single "editor" row whose revoke removes both arms. The word
   // "commenter" appears in no UI; a lone comment grant (an unfolded arm) wears the capability noun.
-  const capsByGrantee = new Map<string, Set<string>>();
-  for (const g of grants) capsByGrantee.set(g.grantee, new Set([...(capsByGrantee.get(g.grantee) ?? []), g.capability]));
-  const foldedGrantees = new Set([...capsByGrantee.entries()].filter(([, caps]) => caps.has("edit") && caps.has("comment")).map(([k]) => k));
+  const foldedGrantees = foldedEditorGrantees(grants);
   const visibleGrants = grants.filter((g) => !(foldedGrantees.has(g.grantee) && g.capability === "comment"));
   const mergedRows: MergedRow[] = [
     ...visibleGrants.map((g) => ({
@@ -300,7 +298,7 @@ export function SpaceMembersTab() {
               <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" variant="danger"
                 onClick={() => {
                   // #553: a folded editor row revokes BOTH its arms — the noun revokes what the noun granted
-                  const caps = r.foldedCaps ?? [r.capability];
+                  const caps = revokeCapsForRow(r) as PageRelation[];
                   for (const capability of caps) {
                     revoke.mutate({ grantee: r.grantee, capability }, {
                       onSuccess: () => notify.success(t("toast.accessRevoked")),
