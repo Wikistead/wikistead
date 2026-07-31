@@ -70,7 +70,10 @@ describe('#554 S1: connection identities and the list resolver', () => {
 
   it('resolveLoginConnections: ordered list, enabled-only, ceiling-respecting; a second row defaults bootstrap_eligible=false', async () => {
     // a second connection, inserted where connections are created (no legacy surface for it yet — S4)
-    const secondId = randomUUID()
+    // S3 review N5: force the second row's id LEXICOGRAPHICALLY SMALLER than the first's, so the
+    // sort-order pin cannot pass by id-order coincidence (dropping `sort` must go RED).
+    const [firstRow] = await admin<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${tenantId} ORDER BY sort, id LIMIT 1`
+    const secondId = firstRow!.id > '0' ? '0' + randomUUID().slice(1) : randomUUID()
     await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, redirect_uri, enabled, sort)
       VALUES (${secondId}, ${tenantId}, 'https://idp2.example', 'c2', 'https://app.example/auth/callback', true, 1)`
     try {

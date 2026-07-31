@@ -554,6 +554,7 @@
     "acceptInvite": "Accept invite",
     "errorIdpUnavailable": "Sign-in is temporarily unavailable. Please try again in a moment.",
     "signInSaml": "Sign in with SSO (SAML)",
+    "signInPlatform": "Sign in with your platform account",
     "moreWays": "Sign in another way",
     "noMethods": "Sign-in is not available right now. Contact your administrator."
   },

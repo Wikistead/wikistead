@@ -61,6 +61,26 @@ export function connectionStartUrl(conn: LoginConnection, returnTo: string): str
   return conn.id ? `/auth/login?connection=${encodeURIComponent(conn.id)}&${rt}` : `/auth/login?${rt}`;
 }
 
+// #554 S3 review (finding 4): the button wording per kind — ADR-197 §3 rev3 gives the PLATFORM
+// connection fixed first-party branding of its own (it is not admin data, so it never waited for
+// S4's label column); SAML keeps its fixed wording; an oidc connection wears its admin label once
+// S4 ships the column, generic SSO wording until then. Pure for tests.
+export function connectionButtonText(conn: LoginConnection, t: (k: string) => string): string {
+  if (conn.kind === "saml") return t("auth.signInSaml");
+  if (conn.kind === "platform") return t("auth.signInPlatform");
+  return conn.label ?? t("auth.signIn");
+}
+
+// #554 S3 review N4: the social start URL, pure and pinned. It must NAME the platform connection —
+// the bare URL starts the legacy pick, which is the tenant IdP once one exists, and the provider
+// hint is then silently dropped (the worst failure shape: "Continue with Google" launching the
+// corporate IdP). Empty platformId = pre-S3 server, where social only rendered when platform WAS
+// the pick, so the bare URL stays correct there.
+export function socialStartUrl(platformId: string, slug: string, returnTo: string): string {
+  const conn = platformId ? `connection=${encodeURIComponent(platformId)}&` : "";
+  return `/auth/login?${conn}provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 function useAuthError(): string | null {
   const { t } = useTranslation();
   const kind = new URLSearchParams(window.location.search).get("error");
@@ -128,7 +148,7 @@ export function LoginScreen() {
               onClick={() => go("signin", connectionStartUrl(primary, returnTo))}
             >
               {navigating === "signin" && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
-              {primary.kind === "saml" ? t("auth.signInSaml") : primary.label ?? t("auth.signIn")}
+              {connectionButtonText(primary, t)}
             </Button>
           )}
           {primary === null && (
@@ -147,12 +167,12 @@ export function LoginScreen() {
                     key={c.id || `${c.kind}-${i}`}
                     variant="default"
                     className="w-full"
-                    data-testid={c.kind === "saml" ? "login-saml" : `login-conn-${i}`}
+                    data-testid={c.kind === "saml" ? "login-saml" : `login-conn-${c.id || i}`}
                     disabled={navigating !== null}
                     onClick={() => go(c.id || c.kind, connectionStartUrl(c, returnTo))}
                   >
                     {navigating === (c.id || c.kind) && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
-                    {c.kind === "saml" ? t("auth.signInSaml") : c.label ?? t("auth.signIn")}
+                    {connectionButtonText(c, t)}
                   </Button>
                 ))}
               </div>
@@ -169,12 +189,7 @@ export function LoginScreen() {
                     className="w-full"
                     data-testid={`login-social-${slug}`}
                     disabled={navigating !== null}
-                    onClick={() =>
-                      // #554 S3: social rides the PLATFORM connection — name it explicitly, or the
-                      // legacy start would pick the tenant IdP once one exists (pre-S3, social only
-                      // rendered when platform WAS the pick, so the bare URL was safe).
-                      go(slug, `/auth/login?${platformId ? `connection=${encodeURIComponent(platformId)}&` : ""}provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`)
-                    }
+                    onClick={() => go(slug, socialStartUrl(platformId, slug, returnTo))}
                   >
                     <span className="inline-flex items-center gap-2">
                       {navigating === slug ? <Loader2 size={16} className="animate-spin" data-testid="login-spinner" /> : <SocialIcon slug={slug} />}
