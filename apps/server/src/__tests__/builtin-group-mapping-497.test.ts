@@ -8,6 +8,7 @@
 //   - the list names the mapping with the built-in NOUN, and delete → 204 → access gone.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
+import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
@@ -21,6 +22,7 @@ import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
+const adminSql = postgres(process.env.DATABASE_ADMIN_URL!) // #497 re-review: origin/ownership inspection
 const H = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
 const HG = { host: 'dev.localhost', authorization: 'Bearer dev-token' } // bodyless verbs: no content-type (Fastify 400s an empty JSON body)
 const tag = Date.now().toString(36)
@@ -55,6 +57,7 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
+  await adminSql.end().catch(() => {})
   await deleteSpace(db, fgaClient, app.searchDriver, { tenantId: tenant.id, spaceId, userId: 'dev-user' }).catch(() => {})
   await app?.close()
   await db.release()
@@ -192,6 +195,70 @@ describe('#497 re-review N2: mapping-owned CUSTOM assignments are not the assign
       expect(await check(fgaClient, MEMBER, 'edit', { type: 'space', id: spaceId }), 'the mapping is the one real revocation').toBe(false)
     } finally {
       await app.inject({ method: 'DELETE', url: `/admin/roles/${roleId}`, headers: HG }).catch(() => {})
+    }
+  }, 120_000)
+})
+
+// #497 re-review N1/N3 (ADR-199 §2 rev5 enforcement): the mapping surface offers the same NOUNS the
+// Members picker does, so `editor` has to mean the same thing on both — edit AND comment. Before
+// this, "Engineering → editor" produced editors who could not comment ('s own acceptance case),
+// and the #553 backfill's manual comment sibling survived the mapping's deletion.
+describe('#497 re-review N1: a builtin editor mapping confers the whole noun', () => {
+  it('creates both arms mapping-owned, the group member can comment, and deleting the mapping takes both away', async () => {
+    const created = await post({ resourceType: 'space', resourceId: spaceId, groupName: GROUP, builtinCapability: 'edit' })
+    expect(created.statusCode).toBe(201)
+    const mappingId = (created.json() as { id: string }).id
+    try {
+      const rows = await adminSql<{ builtin_capability: string; origin: string }[]>`
+        SELECT builtin_capability, origin FROM role_assignments
+        WHERE resource_type = 'space' AND resource_id = ${spaceId} AND principal = ${groupGrantee(tenant.id, GROUP)}
+        ORDER BY builtin_capability`
+      expect(rows.map((r) => r.builtin_capability), 'the noun is a bundle').toEqual(['comment', 'edit'])
+      expect(rows.every((r) => r.origin === 'mapping'), 'BOTH arms are machine-managed').toBe(true)
+      expect(await check(fgaClient, MEMBER, 'edit', { type: 'space', id: spaceId })).toBe(true)
+      expect(await check(fgaClient, MEMBER, 'comment', { type: 'space', id: spaceId }), 'an editor can comment (ADR-199 §2)').toBe(true)
+
+      const del = await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${mappingId}`, headers: HG })
+      expect(del.statusCode).toBe(204)
+      expect(await check(fgaClient, MEMBER, 'edit', { type: 'space', id: spaceId })).toBe(false)
+      expect(await check(fgaClient, MEMBER, 'comment', { type: 'space', id: spaceId }), 'the comment arm dies with its mapping').toBe(false)
+      expect((await adminSql<{ id: string }[]>`
+        SELECT id FROM role_assignments WHERE resource_type = 'space' AND resource_id = ${spaceId} AND principal = ${groupGrantee(tenant.id, GROUP)}`).length,
+        'no residue row').toBe(0)
+    } finally {
+      await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${mappingId}`, headers: HG }).catch(() => {})
+    }
+  }, 120_000)
+})
+
+// #497 re-review N3: the pre-existing rows the #553 backfill left MANUAL beside a mapping-owned edit.
+describe('#497 re-review N3: the converge script pulls stray siblings into mapping ownership', () => {
+  it('flips only the mapping-adjacent manual sibling, and the mapping delete then takes it too', async () => {
+    const { planMappingComposite, executeMappingComposite } = await import('../scripts/converge-mapping-composite-497.js')
+    const created = await post({ resourceType: 'space', resourceId: spaceId, groupName: GROUP, builtinCapability: 'edit' })
+    expect(created.statusCode).toBe(201)
+    const mappingId = (created.json() as { id: string }).id
+    const principal = groupGrantee(tenant.id, GROUP)
+    try {
+      // simulate the backfill's residue: the comment arm exists but as a MANUAL row
+      await adminSql`UPDATE role_assignments SET origin = 'manual'
+        WHERE resource_type = 'space' AND resource_id = ${spaceId} AND principal = ${principal} AND builtin_capability = 'comment'`
+      const plan = await planMappingComposite(adminSql, () => {})
+      const mine = plan.rows.filter((r) => r.principal === principal && r.resourceId === spaceId)
+      expect(mine.map((r) => r.capability), 'exactly the stray comment arm is planned').toEqual(['comment'])
+
+      await executeMappingComposite(adminSql, { rows: mine }, () => {})
+      const [after] = await adminSql<{ origin: string }[]>`
+        SELECT origin FROM role_assignments WHERE resource_type = 'space' AND resource_id = ${spaceId} AND principal = ${principal} AND builtin_capability = 'comment'`
+      expect(after!.origin, 'converged').toBe('mapping')
+      expect((await planMappingComposite(adminSql, () => {})).rows.filter((r) => r.principal === principal).length, 'idempotent').toBe(0)
+
+      const del = await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${mappingId}`, headers: HG })
+      expect(del.statusCode).toBe(204)
+      expect(await check(fgaClient, MEMBER, 'comment', { type: 'space', id: spaceId }), 'the converged arm dies with the mapping').toBe(false)
+    } finally {
+      await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${mappingId}`, headers: HG }).catch(() => {})
+      await adminSql`DELETE FROM role_assignments WHERE resource_id = ${spaceId} AND principal = ${principal}`.catch(() => {})
     }
   }, 120_000)
 })
