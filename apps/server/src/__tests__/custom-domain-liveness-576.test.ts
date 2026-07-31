@@ -163,6 +163,106 @@ describe('#576: a custom domain that stopped being ours stops deciding link host
     }
   }, 120_000)
 
+  // #576 re-review 2. The reviewer found the fix manufacturing the ticket's own symptom: with TWO
+  // verified domains, demoting the mapped one cleared tenants.custom_domain while the other row
+  // still won tenantBaseUrl — links built on a host that resolved to nothing, and no fallback to
+  // the platform URL either. The two readers must agree by construction.
+  describe('a tenant with two domains: the URL builder and host→tenant resolution never disagree', () => {
+    const SECOND = `alt-${STAMP}.example.test`
+    const secondToken = `tok2${STAMP}`
+    // resolveTxt is per-domain here: the OLD domain stays live, the mapped one disappears
+    const onlySecondGone = (): ((d: string) => Promise<string[][]>) => async (d: string) => {
+      if (d.includes(SECOND)) throw new Error('ENOTFOUND')
+      return [[token]]
+    }
+    beforeAll(async () => {
+      // DOMAIN verified first (older), SECOND verified after it — so SECOND is what both readers pick
+      await admin`INSERT INTO custom_domains (tenant_id, domain, verification_token, status, verified_at, last_ok_at)
+        VALUES (${tenantId}, ${SECOND}, ${secondToken}, 'verified', now() + interval '1 minute', now())`
+      await admin`UPDATE tenants SET custom_domain = ${SECOND} WHERE id = ${tenantId}`
+    })
+    afterAll(async () => { await admin`DELETE FROM custom_domains WHERE domain = ${SECOND}`.catch(() => {}) })
+    afterEach(async () => {
+      await admin`UPDATE custom_domains SET status = 'verified', check_failures = 0, auto_demoted_at = NULL, last_ok_at = now() WHERE domain = ${SECOND}`
+      await admin`UPDATE tenants SET custom_domain = ${SECOND} WHERE id = ${tenantId}`
+    })
+
+    it('demoting the mapped domain hands the mapping to the OTHER verified one, not to NULL', async () => {
+      process.env.WKS_PUBLIC_BASE_URL = 'https://wikistead.example.com'
+      try {
+        const t0 = Date.now()
+        let hit: string[] = []
+        for (let i = 1; i <= 8 && !hit.includes(SECOND); i++) {
+          hit = (await recheckCustomDomains({ resolveTxt: onlySecondGone(), now: new Date(t0 + i * INTERVAL_MS) })).demoted
+        }
+        expect(hit, 'the dead one is demoted').toContain(SECOND)
+        expect(await mapped(), 'the mapping follows to the surviving verified domain').toBe(DOMAIN)
+        expect(await tenantBaseUrl(admin, { id: tenantId, slug: SLUG }), 'and it is the SAME domain the URL builder picks')
+          .toBe(`https://${DOMAIN}`)
+      } finally {
+        delete process.env.WKS_PUBLIC_BASE_URL
+      }
+    }, 120_000)
+
+    it('a mapping that drifted to NULL is repaired by a successful check', async () => {
+      await admin`UPDATE tenants SET custom_domain = NULL WHERE id = ${tenantId}`
+      await recheckCustomDomains({ resolveTxt: present() })
+      expect(await mapped(), 'the sweep does not leave a verified row unresolvable').toBe(SECOND)
+    }, 60_000)
+  })
+
+  describe('the sweep can undo its OWN demotion, and nobody else\'s pending row', () => {
+    it('a domain that comes back is restored without an admin touching anything', async () => {
+      const t0 = Date.now()
+      const { demotedAtTick } = await runTicks(3, gone(), t0)
+      expect(demotedAtTick).not.toBeNull()
+      expect((await admin<{ auto_demoted_at: Date | null }[]>`SELECT auto_demoted_at FROM custom_domains WHERE domain = ${DOMAIN}`)[0]!.auto_demoted_at,
+        'the sweep marks what IT demoted').not.toBeNull()
+
+      const r = await recheckCustomDomains({ resolveTxt: present(), now: new Date(t0 + 10 * INTERVAL_MS) })
+      expect(r.restored, 'our own resolver outage is not a one-way door').toContain(DOMAIN)
+      const back = (await row())!
+      expect(back.status).toBe('verified')
+      expect(back.check_failures).toBe(0)
+      expect(await mapped()).toBe(DOMAIN)
+    }, 120_000)
+
+    it('a pending row a HUMAN added is never auto-verified, even when its DNS matches', async () => {
+      // the enrolment path must stay a person's decision: auto-verifying would issue a certificate
+      // nobody asked for at a moment nobody chose
+      const typed = `typed-${STAMP}.example.test`
+      const typedToken = `tok3${STAMP}`
+      await admin`INSERT INTO custom_domains (tenant_id, domain, verification_token, status) VALUES (${tenantId}, ${typed}, ${typedToken}, 'pending')`
+      try {
+        const r = await recheckCustomDomains({ resolveTxt: async () => [[typedToken]] })
+        expect(r.restored).not.toContain(typed)
+        expect((await admin<{ status: string }[]>`SELECT status FROM custom_domains WHERE domain = ${typed}`)[0]!.status).toBe('pending')
+      } finally {
+        await admin`DELETE FROM custom_domains WHERE domain = ${typed}`.catch(() => {})
+      }
+    }, 60_000)
+  })
+
+  it('an admin who fixes DNS and presses Verify is not demoted by a sweep that read them earlier', async () => {
+    // the TOCTOU the reviewer found: the write was conditional on status alone, and a successful
+    // Verify leaves the status exactly as the stale sweep expects. The counter is the CAS value —
+    // Verify resets it to 0, so the stale write finds nothing to update.
+    await admin`UPDATE custom_domains SET check_failures = ${DEMOTE_AFTER - 1}, last_ok_at = now() - interval '30 days' WHERE domain = ${DOMAIN}`
+    // hold the sweep INSIDE its DNS probe — read done, decision made, write not yet issued
+    let releaseProbe = (): void => {}
+    const probed = new Promise<void>((r) => { releaseProbe = r })
+    const held = new Promise<void>((r) => { void probed.then(r) })
+    const stale = recheckCustomDomains({
+      resolveTxt: async () => { releaseProbe(); await held; await new Promise((r) => setTimeout(r, 50)); throw new Error('ENOTFOUND') },
+    })
+    await probed
+    await verifyCustomDomain(db, { tenantId, domain: DOMAIN }, { resolveTxt: present() })
+    const r = await stale
+    expect(r.demoted, 'the admin just proved ownership — the older decision must not land').not.toContain(DOMAIN)
+    expect((await row())!.status).toBe('verified')
+    expect(await mapped()).toBe(DOMAIN)
+  }, 60_000)
+
   it('a demoted domain is not demoted a SECOND time (two workers, or a replica, cannot double-fire)', async () => {
     const t0 = Date.now()
     const first = await runTicks(3, gone(), t0)
