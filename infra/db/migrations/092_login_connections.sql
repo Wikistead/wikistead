@@ -5,6 +5,10 @@
 -- keeps ONE-per-tenant (ADR-197 §1 B5: multi-SAML is deferred until per-connection ACS binding —
 -- the uuid PK lands now so ids exist, the tenant uniqueness stays as a constraint).
 --
+-- DEPLOY ORDER: the server reads sort/bootstrap_eligible with NO undefined-column tolerance —
+-- a server running ahead of this migration fails LOUD on the login path (deliberate: silently
+-- serving the old single-row auth shape would mask a half-deployed rollout).
+--
 -- bootstrap_eligible (ADR-197 §2 rev2): an EXPLICIT trust attribute — the migration sets it TRUE
 -- only on the legacy tenant-OIDC connection, which is today's exact bootstrap behavior. New
 -- connections default false; only connection-creation surfaces may set it.

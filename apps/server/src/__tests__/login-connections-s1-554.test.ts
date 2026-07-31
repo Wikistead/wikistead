@@ -140,3 +140,26 @@ describe('#554 S1: connection identities and the list resolver', () => {
     }
   }, 60_000)
 })
+
+// #554 S1 review A: the old ON CONFLICT (tenant_id) carried a DB-level single-row guarantee; the
+// N-capable table must restore it in code — two CONCURRENT first saves race the read-then-insert
+// and would mint two connections (one an enabled, bootstrap-eligible orphan no legacy read shows).
+describe('#554 S1 review A: concurrent first saves mint exactly one connection', () => {
+  it('two parallel saves on a fresh tenant land on one row', async () => {
+    const sub2 = `lc554b-admin-${STAMP}`
+    const t2 = await provisionTenant(fgaClient, { slug: `lc554b-${STAMP}`, admin: { sub: sub2 } })
+    const db2 = await acquireTenantDb(asTenant(t2.tenantId))
+    try {
+      const one = () => updateTenantOidc(db2, fgaClient, {
+        tenantId: t2.tenantId, userId: sub2, issuer: 'https://idp.example', clientId: 'c1',
+        redirectUri: 'https://app.example/auth/callback', enabled: true, plan: 'business',
+      }, fakeDiscovery)
+      await Promise.all([one(), one()])
+      const rows = await admin<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${t2.tenantId}`
+      expect(rows.length, 'the advisory lock serializes the race — one connection, not an orphan pair').toBe(1)
+    } finally {
+      await db2.release()
+      await admin`DELETE FROM tenants WHERE id = ${t2.tenantId}`.catch(() => {})
+    }
+  }, 60_000)
+})

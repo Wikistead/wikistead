@@ -38,8 +38,10 @@ export async function disableTenantOidc(
   if (!tenant) {
     throw Object.assign(new Error(`no tenant with slug "${args.slug}"`), { code: 'tenant_not_found' })
   }
+  // #554 S1: deterministic first connection; the break-glass disable below deliberately flips ALL
+  // of the tenant's oidc connections (recovery wants the whole kind off) — TODO(#554 S4): --connection.
   const [oidc] = await sql<{ enabled: boolean }[]>`
-    SELECT enabled FROM tenant_oidc WHERE tenant_id = ${tenant.id}
+    SELECT enabled FROM tenant_oidc WHERE tenant_id = ${tenant.id} ORDER BY sort, id LIMIT 1
   `
   const hadConfig = oidc != null
   if (!oidc || oidc.enabled === false) {

@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { randomUUID } from "node:crypto";
 import { seedFixtures, seedFgaFixtures, E2E } from "./fixtures";
 import { startE2eIssuer } from "./oidc-issuer";
 // @ts-expect-error — repo-root JS helper, no types
@@ -52,12 +53,20 @@ export default async function globalSetup() {
                          onboarding_completed_at = COALESCE(onboarding_completed_at, now())
       WHERE tenant_id = ${E2E.tenant} AND sub = 'dev-user'`;
     await sql`DELETE FROM members WHERE tenant_id = ${E2E.tenant} AND sub LIKE 'gate-%'`;
-    await sql`
-      INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri)
-      VALUES (${E2E.tenant}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${REDIRECT})
-      ON CONFLICT (tenant_id) DO UPDATE SET
-        issuer = EXCLUDED.issuer, client_id = EXCLUDED.client_id, client_secret_enc = NULL,
-        scopes = EXCLUDED.scopes, redirect_uri = EXCLUDED.redirect_uri, enabled = true, updated_at = now()`;
+    // #554 S1: tenant_oidc is N-capable (uuid PK, no tenant uniqueness) — idempotence goes through
+    // the FIRST connection (ORDER BY sort, id), the same row every legacy read path picks.
+    const [oidcRow] = await sql<{ id: string }[]>`
+      SELECT id FROM tenant_oidc WHERE tenant_id = ${E2E.tenant} ORDER BY sort, id LIMIT 1`;
+    if (oidcRow) {
+      await sql`
+        UPDATE tenant_oidc SET issuer = ${issuer.url}, client_id = ${CLIENT_ID}, client_secret_enc = NULL,
+          scopes = 'openid email profile', redirect_uri = ${REDIRECT}, enabled = true, updated_at = now()
+        WHERE id = ${oidcRow.id}`;
+    } else {
+      await sql`
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible)
+        VALUES (${randomUUID()}, ${E2E.tenant}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${REDIRECT}, true)`;
+    }
   } finally {
     await sql.end();
   }
