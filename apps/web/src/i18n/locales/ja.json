@@ -1285,7 +1285,8 @@
     "groupAssignBody": "IdP のグループにテナントロールを付与します。グループのメンバー全員に効き、グループを抜けると外れます。",
     "groupAssignEmpty": "テナントロールを持つグループはありません。",
     "groupLabel": "グループ",
-    "groupPlaceholder": "グループを選択…"
+    "groupPlaceholder": "グループを選択…",
+    "scopeQuestion": "どちらのロールを作りますか？"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",

@@ -57,7 +57,8 @@ test("#497 §3: the default-role setting persists across a reload", async ({ pag
 
   await page.getByTestId("role-create").click();
   await page.getByTestId("role-name-input").fill(role);
-  await page.getByTestId("role-cap-createSpaces").check(); // tenant scope derives from the checked capability (#536)
+  await page.getByTestId("role-scope-tenant").click(); // #580: the scope is chosen first, then its capabilities show
+  await page.getByTestId("role-cap-createSpaces").check();
   await page.getByTestId("role-save").click();
   await expect(page.getByTestId("roles-list")).toContainText(role, { timeout: 8000 });
 
@@ -89,7 +90,8 @@ test("#497: a tenant-scope role maps tenant-wide (no space picker)", async ({ pa
 
   await page.getByTestId("role-create").click();
   await page.getByTestId("role-name-input").fill(role);
-  await page.getByTestId("role-cap-createSpaces").check(); // tenant scope derives from the checked capability (#536)
+  await page.getByTestId("role-scope-tenant").click(); // #580: the scope is chosen first, then its capabilities show
+  await page.getByTestId("role-cap-createSpaces").check();
   await page.getByTestId("role-save").click();
   await expect(page.getByTestId("roles-list")).toContainText(role, { timeout: 8000 });
 

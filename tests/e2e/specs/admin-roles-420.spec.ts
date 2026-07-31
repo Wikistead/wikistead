@@ -135,31 +135,33 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await member.click(); // restore the seeded default
   await expect(member).toBeChecked({ checked: initial, timeout: 8000 });
 
-  // A TENANT-scope custom role: no scope selector — checking a tenant capability IS the scope
-  // (#536 the vocabularies are disjoint, so scope derives from what is checked).
+  // A TENANT-scope custom role. #580: the scope is CHOSEN first (segments) and the capability list
+  // follows it — before that, checking a tenant capability WAS the scope (#536 the derivation),
+  // which left you unable to tell what you were building until you had ticked something.
   await page.getByTestId("role-create").click();
   await page.getByTestId("role-name-input").fill(name);
+  await page.getByTestId("role-scope-tenant").click();
   await page.getByTestId("role-cap-createSpaces").check();
   await page.getByTestId("role-save").click();
   await expect(page.getByTestId("roles-list")).toContainText(name, { timeout: 8000 });
 
   // #514 / ADR-188 slice 4: a TENANT role is an attribute of a member, so it is granted on the Members
   // page — no space picker anywhere, because the scope is the tenant itself.
+  // #579: and it is granted ON THE MEMBER'S ROW. The separate assign form (its own role picker, its own
+  // member search) is gone; finding the person is a filter over the table.
   await page.goto("/admin/members");
-  await expect(page.getByTestId("tenant-role-assignments")).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId("tenant-assign-role").click();
+  await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("members-filter").fill("dev");
+  const roleCell = page.getByTestId("member-roles").first();
+  await expect(roleCell).toBeVisible({ timeout: 8000 });
+  await roleCell.getByTestId("member-role-add").click();
+  await roleCell.getByTestId("member-role-add-select").click();
   await page.getByRole("option", { name }).click();
-  await expect(page.getByRole("option")).toHaveCount(0);
-  // #557: the member field is the shared #416 SEARCH picker (typing filters, candidates show names) —
-  // the every-member dropdown this row used to carry is gone.
-  await page.getByTestId("tenant-assign-member").fill("dev");
-  await page.getByTestId("tenant-assign-candidate").first().click();
-  await page.getByTestId("tenant-assign-add").click();
-  await expect(page.getByTestId("tenant-assignment-list")).toContainText(name, { timeout: 8000 });
+  await expect(roleCell.getByTestId("member-role-chip").filter({ hasText: name })).toBeVisible({ timeout: 8000 });
 
   // Unassign + delete (leave the board clean).
-  await page.getByTestId("tenant-assignment-row").filter({ hasText: name }).getByTestId("tenant-assignment-remove").click();
-  await expect(page.getByTestId("tenant-assignment-list")).not.toContainText(name, { timeout: 8000 });
+  await roleCell.getByTestId("member-role-chip").filter({ hasText: name }).getByTestId("member-role-remove").click();
+  await expect(roleCell.getByTestId("member-role-chip").filter({ hasText: name })).toHaveCount(0, { timeout: 8000 });
   await page.goto("/admin/roles");
   await page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first

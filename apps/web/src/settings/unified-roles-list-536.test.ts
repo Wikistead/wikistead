@@ -19,13 +19,24 @@ describe("#536 one roles list, one creation flow", () => {
     }
   });
 
-  it("creation asks no scope up front — the scope selector is gone and derivation exists", () => {
-    expect(src).not.toContain('testId="role-scope"');
-    // the derivation seam: save sends a scope computed from the checked capabilities
-    expect(src).toMatch(/scope:\s*hasTenant\s*\?\s*"tenant"\s*:\s*"resource"/);
-    // a mixed selection cannot save (the #445 exclusivity, surfaced at compose time)
-    expect(src).toContain('data-testid="role-mixed-hint"');
-    expect(src).toMatch(/disabled=\{pending \|\| !name\.trim\(\) \|\| caps\.length === 0 \|\| mixed\}/);
+  // #580 SUPERSEDES the derivation this used to pin. Deriving the scope from the boxes did remove the
+  // hidden <Select> — and left the user unable to tell which kind of role they were making until they
+  // had ticked something. The rule that survives is the one that mattered: NO hidden scope control.
+  // The choice is visible segments now, and a mixed role is unbuildable rather than refused at save,
+  // so the mixed hint has nothing left to warn about.
+  it("creation asks for the scope in the open — segments, never a hidden Select", () => {
+    expect(src).not.toContain('testId="role-scope"'); // the Select stays gone
+    expect(src).toContain('data-testid="role-scope-segments"');
+    // the two segments are rendered from the pair, so the ids are a template — the e2e spec drives
+    // the real `role-scope-tenant` / `role-scope-resource` ids
+    expect(src).toMatch(/\(\["resource", "tenant"\] as const\)\.map/);
+    expect(src).toMatch(/data-testid=\{`role-scope-\$\{s\}`\}/);
+    // the capability list follows the segment — that is what makes a mix impossible to compose
+    expect(src).toMatch(/const list = scope === "tenant" \? TENANT_CAPABILITIES : CAPABILITIES/);
+    expect(src).toContain('list={list}');
+    // …so the mixed-state machinery is gone with it
+    expect(src, "nothing left to warn about").not.toContain('data-testid="role-mixed-hint"');
+    expect(src).not.toMatch(/\|\| mixed\}/);
   });
 
   it("every row carries its scope as an attribute (badge), built-ins additionally say so", () => {
