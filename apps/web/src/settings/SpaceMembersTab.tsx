@@ -197,7 +197,7 @@ export function SpaceMembersTab() {
   // implementation fact, not a reason to split the screen. One sort rule: principal name, then badge.
   type MergedRow =
     | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; grantee: string; capability: PageRelation; foldedCaps?: PageRelation[]; principal?: undefined }
-    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: undefined; assignmentId: string; principal: string; grantee?: undefined };
+    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; assignmentId: string; principal: string; grantee?: undefined };
   // #553 / ADR-199 §2 (rev5 ruling): a principal holding BOTH the edit and comment built-in grants is
   // ONE editor — the pair folds into a single "editor" row whose revoke removes both arms. The word
   // "commenter" appears on no GRANT surface (#552 — the picker); a lone comment grant (an unfolded
@@ -212,7 +212,9 @@ export function SpaceMembersTab() {
     })),
     ...(roleAssignments.data ?? []).map((a) => ({
       kind: "assignment" as const, key: `a:${a.id}`, badge: a.roleName, custom: true as const,
-      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal,
+      // #497 re-review N2: a mapping-owned assignment is read-only here too (ADR-183 §1) — the
+      // badge below replaces its revoke exactly as it does for the builtin grant rows.
+      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal, managed: a.managed,
     })),
   ].sort((x, y) => x.label.localeCompare(y.label) || x.badge.localeCompare(y.badge));
 
@@ -292,7 +294,7 @@ export function SpaceMembersTab() {
             {/* #497 (088): a mapping-conferred row is machine-managed (ADR-183 §1) — no revoke affordance
                 here (the server 409s it anyway; this is the read-only-with-a-pointer rendering). It is
                 removed by deleting the MAPPING in the group-mappings section below. */}
-            {r.kind === "grant" && r.managed ? (
+            {r.managed ? (
               <span className="flex-none rounded bg-bg-subtle px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="space-grant-managed" data-tip={t("spaceMembers.managedByMapping")}>{t("spaceMembers.managedBadge")}</span>
             ) : r.kind === "grant" ? (
               /* #504: red at rest; no confirm — a grant is re-grantable in one step (exception candidate) */
@@ -337,7 +339,9 @@ export function SpaceMembersTab() {
           rather than on the tenant Roles tab (which kept a space picker only tenant admins could reach).
           The server already gated it per resource — creating needs `manage` on this space, and the
           filtered list answers to the same authority. */}
-      {customRoles.length > 0 && <SpaceGroupMappings spaceId={spaceId} />}
+      {/* #497 re-review N4: builtin mappings need NO custom role — gating the section on
+          customRoles.length made it unreachable for exactly the tenants #497 opened it to. */}
+      <SpaceGroupMappings spaceId={spaceId} />
 
       {/* #100 / ADR-029: comment AUDIENCE toggles — who may comment on this space's pages. A resource
           setting (space#comment_open), separate from the per-member grants above. Default OFF.
