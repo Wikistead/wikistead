@@ -27,15 +27,20 @@ const CAPABILITIES = ["view", "comment", "edit", "publish", "delete", "share", "
 // screen configures issuance". The old /admin/api two-choice policy selector is gone with the enum.
 const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys"] as const;
 
-// #536 every row in the single roles list says what it is inline — its scope and whether it is
-// built-in — because the section headers that used to say it are gone.
-function RoleBadges({ scope, builtIn = false }: { scope: "resource" | "tenant"; builtIn?: boolean }) {
+// #536 gave every row a scope badge because the sections it sat in were not readable as sections.
+// #581 fixes the sections instead and drops the badge here: where POSITION carries the information,
+// repeating it on every row is noise the user asked us to remove. The badge is still available —
+// `scope` is optional now — for a surface that mixes scopes in one list (a search result, a member
+// row's chips), where position says nothing. "BUILT-IN" always stays: no position implies it.
+function RoleBadges({ scope, builtIn = false }: { scope?: "resource" | "tenant"; builtIn?: boolean }) {
   const { t } = useTranslation();
   return (
     <>
-      <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim" data-testid="role-scope-badge">
-        {t(scope === "tenant" ? "adminRoles.scopeTenant" : "adminRoles.scopeResource")}
-      </span>
+      {scope && (
+        <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim" data-testid="role-scope-badge">
+          {t(scope === "tenant" ? "adminRoles.scopeTenant" : "adminRoles.scopeResource")}
+        </span>
+      )}
       {builtIn && <span className="rounded border border-border px-1 text-[10px] uppercase tracking-wide text-fg-dim" data-testid="role-builtin-badge">{t("adminRoles.builtIn")}</span>}
     </>
   );
@@ -213,7 +218,7 @@ export function AdminRolesTab() {
           ) : (
             <>
               <span className="font-medium">{r.name}</span>
-              <RoleBadges scope={r.scope === "tenant" ? "tenant" : "resource"} />
+              <RoleBadges />
               <IconButton aria-label={t("adminRoles.rename")} data-tip={t("adminRoles.rename")} data-testid="role-rename"
                 onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}><Pencil size={14} /></IconButton>
             </>
@@ -255,13 +260,19 @@ export function AdminRolesTab() {
             (tenant#space_creator wildcard / api_key_issue, #496) through the unchanged endpoint, and
             stay disabled until the defaults have ARRIVED (an authz control must not guess its state).
           - Custom rows: live per-op capability toggles (#445), pencil rename, #504 red delete. */}
-      <div className="mb-2 flex flex-col gap-3" data-testid="roles-list">
-        <h3 className="m-0 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-tenant">{t("adminRoles.sectionTenant")}</h3>
-        <div className="flex flex-col gap-2" data-testid="roles-list-tenant">
+      <div className="mb-2 flex flex-col gap-4" data-testid="roles-list">
+        {/* #581: the two groups are SURFACES, not a pair of small grey labels above a continuous run of
+            rows. A card each — border, panel background, its own heading bar — so the boundary is
+            visible before you read anything, which is what lets the per-row scope badge go away. */}
+        <section className="rounded-md border border-border bg-panel">
+          <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-tenant">{t("adminRoles.sectionTenant")}</h3>
+          {/* #539 / #521 / #503: the same 26rem box + inner scroll, because this list grows with the
+              tenant's roles and this is the fourth list to hit that. The page keeps its own scroll. */}
+          <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-tenant">
           <div className="flex flex-col gap-1" data-testid="builtin-role-member">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">member</span>
-              <RoleBadges scope="tenant" builtIn />
+              <RoleBadges builtIn />
             </div>
             <CapabilityPicker
               value={[
@@ -281,25 +292,28 @@ export function AdminRolesTab() {
           <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">admin</span>
-              <RoleBadges scope="tenant" builtIn />
+              <RoleBadges builtIn />
             </div>
             <CapabilityPicker value={["createSpaces", "issueApiKeys"]} idPrefix="builtin-admin" list={TENANT_CAPABILITIES} disabled />
           </div>
           {(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map(renderCustomRole)}
-        </div>
-        <h3 className="m-0 mt-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-resource">{t("adminRoles.sectionResource")}</h3>
-        <div className="flex flex-col gap-2" data-testid="roles-list-resource">
+          </div>
+        </section>
+        <section className="rounded-md border border-border bg-panel">
+          <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-resource">{t("adminRoles.sectionResource")}</h3>
+          <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-resource">
           {(roles.data?.builtIn ?? []).map((r) => (
             <div key={r.name} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{r.name}</span>
-                <RoleBadges scope="resource" builtIn />
+                <RoleBadges builtIn />
               </div>
               <CapabilityPicker value={r.capabilities} idPrefix={`builtin-${r.name}`} list={CAPABILITIES} disabled />
             </div>
           ))}
           {(roles.data?.custom ?? []).filter((r) => r.scope !== "tenant").map(renderCustomRole)}
-        </div>
+          </div>
+        </section>
         {(roles.data?.custom.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.customEmpty")}</p>}
       </div>
       {creating ? (
