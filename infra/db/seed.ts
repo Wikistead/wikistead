@@ -63,9 +63,9 @@ import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
         WHERE id = ${existingOidc.id}`
     } else {
       await tx`
-        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, redirect_uri, bootstrap_eligible)
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, redirect_uri, bootstrap_eligible, trust_groups)
         VALUES (${randomUUID()}, 'tenant_dev', ${process.env.OIDC_ISSUER!}, ${process.env.OIDC_CLIENT_ID!},
-                ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!}, true)`
+                ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!}, true, true)`
     }
     console.log('seeded: tenant_dev / tenant_oidc')
 
