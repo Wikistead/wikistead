@@ -557,7 +557,8 @@
     "commentSummaryGuests": "リンクのゲスト",
     "managedBadge": "マッピング",
     "managedByMapping": "グループマッピング由来の付与です。下の「グループマッピング」から削除してください。",
-    "replaceConfirm": "「{{who}}」の現在のロール（{{current}}）を {{next}} に置き換えます。よろしいですか？（1 人につき 1 ロール）"
+    "replaceConfirm": "「{{who}}」の現在のロール（{{current}}）を {{next}} に置き換えます。よろしいですか？（1 人につき 1 ロール）",
+    "managerReplaceConfirm": "「{{who}}」はこのスペースの マネージャ です。マネージャ権限を {{next}} に置き換えますか？このスペースの管理権限をすべて失います（テナント管理者が付け直せます）。"
   },
   "auth": {
     "signInTitle": "wikistead にサインイン",

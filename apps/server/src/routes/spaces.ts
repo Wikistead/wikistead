@@ -9,7 +9,7 @@ import { emit } from '@wikistead/events'
 import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
-import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
+import { groupGrantee, groupNameByFgaId, knownGroupNames, resolveGroupName } from '../auth/group-sync.js'
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: full name on the manage-gated grant list
 import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
 import { auditIfEntitled } from '../audit/outbox.js'
@@ -526,6 +526,48 @@ export async function assertNoMachineSpaceRole(
   }
 }
 
+// #536, the user's ruling on the one case the convergence sweep could not decide by itself.
+// A manager holding a weaker role too is the last "1 principal = 2 rows" state left, and neither
+// automatic answer is acceptable
+// - sweeping their manage silently is the owner-lockout footgun the exemption exists to prevent;
+// - dropping the new weaker role silently (keep manage, discard the add) is a success toast that
+// changed nothing — the same "granted, but not really" lie #536 has been removing all along.
+// So the decision belongs to a person, and the server is where it is enforced: adding a weaker role
+// to a manager is REFUSED (409, with a code the UI turns into "replace their manager role?") unless
+// the caller says replace. The UI dialog is convenience; this is the wall.
+//
+// Direct holdings only — a tenant admin is a manager through `admin from tenant` (model.fga:61) and
+// must not be asked to confirm a replacement of a role they do not hold here. That computed path is
+// also the recovery route the ruling was accepted on: a space can lose every manager and a tenant
+// admin can still walk back in.
+export const MANAGER_REPLACEMENT_CODE = 'manager_replacement_requires_confirmation'
+
+export async function holdsDirectSpaceManage(
+  db: TenantDb, fga: OpenFgaClient, args: { spaceId: string; principal: string },
+): Promise<boolean> {
+  const rows = await db.sql`
+    SELECT 1 FROM role_assignments WHERE resource_type = 'space' AND resource_id = ${args.spaceId}
+      AND principal = ${args.principal} AND builtin_capability = 'manage' LIMIT 1`
+  if (rows.length) return true
+  // The ROWLESS case is the production one (the ruling's item 3): createSpace writes the creator's
+  // `manager` leaf with no row at all, so a check that only read rows would miss every space owner.
+  // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so this is bounded by the type's relation count, never by tenant size.
+  const { tuples } = await fga.read({ user: args.principal, object: `space:${args.spaceId}` })
+  return (tuples ?? []).some((t) => t.key?.relation === 'manager')
+}
+
+export async function assertManagerReplacementConfirmed(
+  db: TenantDb, fga: OpenFgaClient,
+  args: { spaceId: string; principal: string; keepCaps: readonly string[]; replace?: boolean },
+): Promise<void> {
+  if (args.replace) return
+  if (args.keepCaps.includes('manage')) return // assigning manager itself is not a demotion
+  if (!(await holdsDirectSpaceManage(db, fga, args))) return
+  throw Object.assign(new Error('the principal is a manager of this space — confirm the replacement to demote them'), {
+    statusCode: 409, code: MANAGER_REPLACEMENT_CODE,
+  })
+}
+
 // The convergence sweep: runs AFTER the new row landed (so the principal never has an access gap), and
 // removes (a) every OTHER manual row via the refcount-aware unassign core, then (b) any legacy rowless
 // FGA capability the surviving rows don't cover. One reindex at the end when anything changed.
@@ -536,6 +578,9 @@ export async function sweepOtherSpaceRoles(
   args: {
     spaceId: string; tenantId: string; userId: string; principal: string;
     keep: { builtinCapability?: string; builtinCapabilities?: string[]; roleId?: string }; keepCaps: string[]; plan?: string;
+    // #536 set ONLY by a caller that passed assertManagerReplacementConfirmed — i.e. a person
+    // answered "yes, demote them". Without it `manage` stays exempt exactly as before.
+    replaceManage?: boolean;
   },
 ): Promise<void> {
   const rows = await db.sql<{ id: string; origin: string; role_id: string | null; builtin_capability: string | null }[]>`
@@ -548,7 +593,7 @@ export async function sweepOtherSpaceRoles(
   // `manage` is EXEMPT from auto-replacement (row-tracked here, rowless below): silently demoting a
   // manager on an unrelated add is the owner-lockout footgun — a manager is demoted only by an explicit
   // revoke. Everything below manage converges to one role.
-  const others = rows.filter((r) => !isKeep(r) && r.origin === 'manual' && r.builtin_capability !== 'manage')
+  const others = rows.filter((r) => !isKeep(r) && r.origin === 'manual' && (args.replaceManage || r.builtin_capability !== 'manage'))
   const { unassignRoleInTx } = await import('./roles.js')
   let changed = false
   for (const r of others) {
@@ -583,9 +628,11 @@ export async function sweepOtherSpaceRoles(
     if (args.keepCaps.includes(cap)) continue
     // A ROWLESS `manage` is indistinguishable from the structural owner leaf createSpace writes for the
     // creator — sweeping it would let "assign any role to the owner" silently destroy their manage and
-    // lock them out of their own space. Rowless manage is therefore never swept (an EXPLICIT, row-tracked
-    // manager grant still replaces normally above — that swap is visible and confirmed in the UI).
-    if (cap === 'manage') continue
+    // lock them out of their own space. Rowless manage is therefore never swept SILENTLY. It is swept
+    // when a person confirmed the demotion (replaceManage), which is the production case: the space
+    // creator holds exactly this leaf and nothing else, so without this the confirmed replacement would
+    // report success and leave them a manager (#536 item 3).
+    if (cap === 'manage' && !args.replaceManage) continue
     const covering = await db.sql`
       SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
       WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId} AND a.principal = ${args.principal}
@@ -602,7 +649,7 @@ export async function grantSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string },
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean },
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
@@ -627,6 +674,7 @@ export async function grantSpaceAccess(
   // #536 item 2: 1 principal = 1 role — a machine-owned row refuses the add up front; after the
   // new row lands, the principal's other manual roles (rows + legacy rowless tuples) are swept.
   await assertNoMachineSpaceRole(db, { spaceId: args.spaceId, principal: args.grantee, keep: { builtinCapability: args.capability } })
+  await assertManagerReplacementConfirmed(db, fga, { spaceId: args.spaceId, principal: args.grantee, keepCaps: [args.capability], replace: args.replace })
   await assignRoleInTx(db, fga, driver, {
     tenant: { id: args.tenantId, plan: args.plan ?? '' },
     roleId: null,
@@ -644,7 +692,7 @@ export async function grantSpaceAccess(
   })
   await sweepOtherSpaceRoles(db, fga, driver, {
     spaceId: args.spaceId, tenantId: args.tenantId, userId: args.userId, principal: args.grantee,
-    keep: { builtinCapability: args.capability }, keepCaps: [args.capability], plan: args.plan,
+    keep: { builtinCapability: args.capability }, keepCaps: [args.capability], plan: args.plan, replaceManage: args.replace,
   })
   emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
 }
@@ -664,7 +712,7 @@ export async function grantSpaceAccessComposite(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string },
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string; replace?: boolean },
 ): Promise<void> {
   for (const cap of args.capabilities) validateSpaceGrant(args.grantee, cap)
   // #553 review D: the plural wire form is NOT a free-form multi-grant — only the ruled noun
@@ -685,6 +733,7 @@ export async function grantSpaceAccessComposite(
     throw Object.assign(new Error('managed by a group mapping — edit the mapping instead'), { statusCode: 409 })
   }
   await assertNoMachineSpaceRole(db, { spaceId: args.spaceId, principal: args.grantee, keep: { builtinCapabilities: args.capabilities } })
+  await assertManagerReplacementConfirmed(db, fga, { spaceId: args.spaceId, principal: args.grantee, keepCaps: args.capabilities, replace: args.replace })
   const { assignBuiltinCompositeInTx } = await import('./roles.js')
   await assignBuiltinCompositeInTx(db, fga, driver, {
     tenant: { id: args.tenantId, plan: args.plan ?? '' },
@@ -695,7 +744,7 @@ export async function grantSpaceAccessComposite(
   })
   await sweepOtherSpaceRoles(db, fga, driver, {
     spaceId: args.spaceId, tenantId: args.tenantId, userId: args.userId, principal: args.grantee,
-    keep: { builtinCapabilities: args.capabilities }, keepCaps: args.capabilities, plan: args.plan,
+    keep: { builtinCapabilities: args.capabilities }, keepCaps: args.capabilities, plan: args.plan, replaceManage: args.replace,
   })
   // one event per arm — the mechanism changed, what happened did not (#536 rule); two precise events
   for (const cap of args.capabilities) {
@@ -707,7 +756,7 @@ export async function revokeSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string },
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean },
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
@@ -768,8 +817,7 @@ export async function listSpaceAccess(
   // it would draw an unfolded editor row whose revoke strips edit but leaves comment behind.
   const tuples = await readObjectTuples(fga, `space:${args.spaceId}`)
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
-  const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
-  const byId = groupNameByFgaId(args.tenantId, names)
+  const byId = groupNameByFgaId(args.tenantId, await knownGroupNames(db))
   // #497 (088): a row conferred BY A MAPPING is machine-managed (ADR-183 §1) — the list says so, and
   // the UI drops the revoke affordance for it (the server refuses anyway; two layers, UI convenience).
   const managed = new Set((await db.sql<{ builtin_capability: string; principal: string }[]>`
@@ -1191,7 +1239,7 @@ export async function spacesPlugin(app: FastifyInstance) {
 
   // grantee = user:<sub> | group:<id>#member (raw), OR groupName (#163: server resolves it to
   // group:<id>#member via groupGrantee → groupFgaId, so the id always matches #111's sync).
-  app.post<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation?: string; relations?: string[] } }>('/spaces/:spaceId/access', async (req, reply) => {
+  app.post<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation?: string; relations?: string[]; replace?: boolean } }>('/spaces/:spaceId/access', async (req, reply) => {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
     // #553 / ADR-199 §2: `relations` (plural) is the composite form — the editor NOUN grants edit +
     // comment as N single-capability rows in one tx. The singular `relation` keeps meaning exactly
@@ -1199,13 +1247,13 @@ export async function spacesPlugin(app: FastifyInstance) {
     if (Array.isArray(req.body?.relations) && req.body.relations.length > 0) {
       await grantSpaceAccessComposite(req.db, app.fga, app.searchDriver, {
         spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
-        grantee, capabilities: req.body.relations, plan: req.tenant.plan,
+        grantee, capabilities: req.body.relations, plan: req.tenant.plan, replace: req.body?.replace === true,
       })
       return reply.code(204).send()
     }
     await grantSpaceAccess(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan,
+      grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan, replace: req.body?.replace === true,
     })
     return reply.code(204).send()
   })

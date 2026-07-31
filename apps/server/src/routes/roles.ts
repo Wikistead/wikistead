@@ -20,7 +20,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { reindexPublishedPages } from './spaces.js'
 import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
-import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js' // #497: mappings assign the group principal; #536 names for display
+import { groupGrantee, groupNameByFgaId, knownGroupNames, resolveGroupName } from '../auth/group-sync.js' // #497: mappings assign the group principal; #536 names for display
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: name user principals on the gated list
 import type { TenantDb } from '../db/index.js'
 import type { Sql } from 'postgres'
@@ -669,10 +669,7 @@ export async function rolesPlugin(app: FastifyInstance) {
     // (renamed / emptied at the IdP) gets no groupName — the client shows its explicit orphan label and
     // the row stays revocable.
     const hasGroups = rows.some((r) => r.principal.startsWith('group:'))
-    const groupNames = hasGroups
-      ? (await req.db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
-      : []
-    const byId = groupNameByFgaId(req.tenant.id, groupNames)
+    const byId = groupNameByFgaId(req.tenant.id, hasGroups ? await knownGroupNames(req.db) : [])
     return rows.map((r) => {
       const groupName = resolveGroupName(r.principal, byId)
       return {
@@ -702,7 +699,7 @@ export async function rolesPlugin(app: FastifyInstance) {
     }
   })
 
-  app.post<{ Params: { roleId: string }; Body: { resourceType?: string; resourceId?: string; principal?: string; groupName?: string } }>(
+  app.post<{ Params: { roleId: string }; Body: { resourceType?: string; resourceId?: string; principal?: string; groupName?: string; replace?: boolean } }>(
     '/admin/roles/:roleId/assignments', async (req, reply) => {
       const { resourceType, resourceId, groupName } = req.body ?? {}
       // #536 a GROUP is named, never addressed. Its FGA id is a tenant-salted hash the server owns
@@ -750,8 +747,13 @@ export async function rolesPlugin(app: FastifyInstance) {
       // lands, the principal's OTHER manual roles (grant rows, other assignments, legacy rowless tuples)
       // are swept so a direct API double-assign converges to one role. Page/tenant scope unchanged.
       if (resourceType === 'space') {
-        const { assertNoMachineSpaceRole } = await import('./spaces.js')
+        const { assertNoMachineSpaceRole, assertManagerReplacementConfirmed } = await import('./spaces.js')
         await assertNoMachineSpaceRole(req.db, { spaceId: resourceId, principal, keep: { roleId: role.id } })
+        // #536 same wall on the custom-role door. A custom role can never bundle `manage`, so
+        // assigning one to a manager is always the weaker-role case the ruling is about.
+        await assertManagerReplacementConfirmed(req.db, app.fga, {
+          spaceId: resourceId, principal, keepCaps: caps as string[], replace: req.body?.replace === true,
+        })
       }
       // #497: the assign core is now a shared helper (the HTTP route + the mapping create path).
       const id = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
@@ -762,7 +764,7 @@ export async function rolesPlugin(app: FastifyInstance) {
         const { sweepOtherSpaceRoles } = await import('./spaces.js')
         await sweepOtherSpaceRoles(req.db, app.fga, app.searchDriver, {
           spaceId: resourceId, tenantId: req.tenant.id, userId: req.user.sub, principal,
-          keep: { roleId: role.id }, keepCaps: caps as string[], plan: req.tenant.plan,
+          keep: { roleId: role.id }, keepCaps: caps as string[], plan: req.tenant.plan, replaceManage: req.body?.replace === true,
         })
       }
       // Re-read the row's owned_capabilities for the response (the helper computed them internally).

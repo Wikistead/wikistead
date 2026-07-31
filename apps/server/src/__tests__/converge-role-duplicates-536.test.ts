@@ -151,9 +151,15 @@ describe('#536 (5): one-shot duplicate convergence', () => {
     expect(dup, 'the stacked principal is planned').toBeTruthy()
     expect(dup!.keep, 'the custom role (view+edit) is the strongest keeper').toBe(`role:${roleId}`)
     expect(dup!.remove.sort()).toEqual(['comment', 'view'])
-    expect(mgr, 'the manager duplicate pair is planned (manage itself excluded)').toBeTruthy()
-    expect(mgr!.keep).toBe('comment')
-    expect(mgr!.remove, 'manage is NEVER in a removal list').toEqual(['view'])
+    // #536 SUPERSEDES the old expectation here (keep the strongest weak role, leave the manager
+    // beside it). A manager wearing weaker rows is the last stack the user still sees, and the ruling
+    // is: the MANAGER is the keeper and every weaker row goes. Their manage is never touched — that is
+    // what "not a silent demotion" means — but nothing weaker survives next to it.
+    expect(mgr, 'the manager stack is planned').toBeTruthy()
+    expect(mgr!.keep).toBe('manage')
+    expect(mgr!.managerKeeper).toBe(true)
+    expect(mgr!.keepRow, 'the keeper is a standing, not a row (the rowless creator shape)').toBeNull()
+    expect(mgr!.remove.sort(), 'both weaker rows go').toEqual(['comment', 'view'])
     expect(plan.find((p) => p.principal === P_MAP), 'mapping-owned rows are never planned').toBeUndefined()
     expect(plan.find((p) => p.principal === P_MIX), 'a single manual row next to mapping rows is no duplicate').toBeUndefined()
     expect(pub, 'the ranked pair beside an unranked role still converges').toBeTruthy()
@@ -175,13 +181,13 @@ describe('#536 (5): one-shot duplicate convergence', () => {
     expect(dupRels).not.toContain('commenter')
     expect(await check(fgaClient, P_DUP, 'edit', { type: 'space', id: spaceId }), 'kept role still in force').toBe(true)
 
-    // manager: manage row + tuple survive; view/comment converge to comment
-    const mgrRows = await rowsOf(P_MGR)
-    expect(mgrRows).toEqual([
-      { role_id: null, builtin_capability: 'comment', origin: 'manual' },
-      { role_id: null, builtin_capability: 'manage', origin: 'manual' },
-    ])
-    expect(await relationsOf(P_MGR), 'the manager leaf is untouched').toContain('manager')
+    // manager: exactly ONE row left — theirs — and the manage leaf untouched. The weaker tuples go with
+    // their rows, which is the difference between "converged" and "the table looks tidy" (#536).
+    expect(await rowsOf(P_MGR)).toEqual([{ role_id: null, builtin_capability: 'manage', origin: 'manual' }])
+    const mgrRels = await relationsOf(P_MGR)
+    expect(mgrRels, 'the manager leaf is untouched').toContain('manager')
+    expect(mgrRels, 'the weaker grant did not survive its row').not.toContain('commenter')
+    expect(await check(fgaClient, P_MGR, 'manage', { type: 'space', id: spaceId }), 'they still manage the space').toBe(true)
 
     // mapping-owned principal untouched, rows and tuples
     expect((await rowsOf(P_MAP)).map((r) => r.origin)).toEqual(['mapping', 'mapping'])
@@ -244,6 +250,34 @@ describe('#536 (5): one-shot duplicate convergence', () => {
     // and the fga-aware re-plan is clean for this principal too
     const replan = await planConvergence(adminPool, () => {}, fgaClient)
     expect(replan.find((p) => p.principal === P_RES)).toBeUndefined()
+  }, 120_000)
+
+  // #536 item 3: the production shape. A space CREATOR holds `manager` as a bare FGA leaf with no
+  // row at all, so a later "give them viewer too" leaves them a manager wearing a viewer row — and a
+  // planner that only reads rows sees one row, calls it no duplicate, and leaves the stack forever.
+  it('a ROWLESS manager with a weaker row converges to the manager alone (fga-aware plan)', async () => {
+    const pc = `user:cvg-rowless-mgr-${STAMP}`
+    await writeTuples(fgaClient, tuplesFor(pc, ['manager', 'viewer', 'viewer_member']))
+    await insertRow(pc, { builtin: 'view', caps: ['view'], at: '2026-01-02T00:00:00Z' })
+    try {
+      expect((await planConvergence(adminPool, () => {})).find((p) => p.principal === pc),
+        'without FGA the planner cannot see a rowless manager — it must not guess').toBeUndefined()
+      const plan = await planConvergence(adminPool, () => {}, fgaClient)
+      const item = plan.find((p) => p.principal === pc)
+      expect(item, 'with FGA the standing is visible and the stack is planned').toBeTruthy()
+      expect(item!.keep).toBe('manage')
+      expect(item!.remove).toEqual(['view'])
+
+      await executeConvergence(adminPool, app, [item!], () => {})
+      expect(await rowsOf(pc), 'the weaker row is gone').toEqual([])
+      const rels = await relationsOf(pc)
+      expect(rels, 'their manage — which no row ever recorded — is untouched').toContain('manager')
+      expect(rels, 'the weaker grant went with its row').not.toContain('viewer')
+      expect(await check(fgaClient, pc, 'manage', { type: 'space', id: spaceId })).toBe(true)
+    } finally {
+      await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId} AND principal = ${pc}`.catch(() => {})
+      await deleteTuples(fgaClient, tuplesFor(pc, ['manager'])).catch(() => {})
+    }
   }, 120_000)
 
   it('a keeper revoked between plan and apply skips the group (design-review C) — never delete-all', async () => {

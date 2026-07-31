@@ -10,9 +10,9 @@ import postgres from 'postgres'
 import { randomUUID } from 'node:crypto'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient } from '@wikistead/authz'
+import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { groupFgaId } from '../auth/group-sync.js'
-import { createSpace, deleteSpace } from '../routes/spaces.js'
+import { createSpace, deleteSpace, listSpaceAccess } from '../routes/spaces.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -84,5 +84,56 @@ describe('#536 (6): group assignments carry the human name, never the hash', () 
     const row = rows.find((r) => r.principal === ghost)
     expect(row, 'the orphan row still lists (revocable)').toBeTruthy()
     expect(row!.groupName, 'no fabricated name — the client shows its explicit orphan label').toBeUndefined()
+  }, 120_000)
+
+  // #536 "we cannot resolve this id" and "nobody is in this group right now" are DIFFERENT
+  // facts, and the list was reporting the second as the first. A mapping OWNS its assignment and
+  // stores the name it was created with, so a mapping-derived row can be named even when the group has
+  // been emptied at the IdP — measured on the motivating data, where /admin/roles/mappings answered
+  // groupName "Engineering" for the very assignment the list drew as "unknown group".
+  it('a MAPPING-derived row is named even when no member carries the group any more', async () => {
+    const orphanGroup = `gna-mapped-orphan-${STAMP}`
+    const principal = `group:${groupFgaId(TENANT, orphanGroup)}#member`
+    const assignmentId = randomUUID()
+    await adminPool`INSERT INTO role_assignments (id, tenant_id, role_id, resource_type, resource_id, principal, owned_capabilities, origin)
+      VALUES (${assignmentId}, ${TENANT}, ${roleId}, 'space', ${spaceId}, ${principal}, ARRAY['view']::text[], 'mapping')`
+    await adminPool`INSERT INTO group_role_mappings (id, tenant_id, group_name, role_id, resource_type, resource_id, assignment_id, created_by)
+      VALUES (${randomUUID()}, ${TENANT}, ${orphanGroup}, ${roleId}, 'space', ${spaceId}, ${assignmentId}, ${OWNER})`
+    try {
+      const list = await app.inject({ method: 'GET', url: `/admin/roles/assignments?resourceType=space&resourceId=${spaceId}`, headers: dev })
+      const row = (list.json() as { principal: string; groupName?: string; managed?: boolean }[]).find((r) => r.principal === principal)
+      expect(row!.groupName, 'the product knows this name — it must not say "unknown"').toBe(orphanGroup)
+      expect(row!.managed, 'and it is still drawn as machine-owned').toBe(true)
+    } finally {
+      await adminPool`DELETE FROM group_role_mappings WHERE assignment_id = ${assignmentId}`.catch(() => {})
+      await adminPool`DELETE FROM role_assignments WHERE id = ${assignmentId}`.catch(() => {})
+    }
+  }, 120_000)
+
+  // the same fact on the OTHER surface: the space Members list resolves through the same helper
+  it('the space member list names a mapping-owned group grant the same way', async () => {
+    const orphanGroup = `gna-mapped-orphan2-${STAMP}`
+    const principal = `group:${groupFgaId(TENANT, orphanGroup)}#member`
+    const assignmentId = randomUUID()
+    await adminPool`INSERT INTO role_assignments (id, tenant_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin)
+      VALUES (${assignmentId}, ${TENANT}, 'view', 'space', ${spaceId}, ${principal}, ARRAY['view']::text[], 'mapping')`
+    await adminPool`INSERT INTO group_role_mappings (id, tenant_id, group_name, builtin_capability, resource_type, resource_id, assignment_id, created_by)
+      VALUES (${randomUUID()}, ${TENANT}, ${orphanGroup}, 'view', 'space', ${spaceId}, ${assignmentId}, ${OWNER})`
+    await writeTuples(fgaClient, [
+      { user: principal, relation: 'viewer', object: `space:${spaceId}` },
+      { user: principal, relation: 'viewer_member', object: `space:${spaceId}` },
+    ])
+    try {
+      const rows = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: TENANT, userId: OWNER })
+      const row = rows.find((r) => r.grantee === principal)
+      expect(row!.groupName, 'both surfaces resolve through knownGroupNames').toBe(orphanGroup)
+    } finally {
+      await deleteTuples(fgaClient, [
+        { user: principal, relation: 'viewer', object: `space:${spaceId}` },
+        { user: principal, relation: 'viewer_member', object: `space:${spaceId}` },
+      ]).catch(() => {})
+      await adminPool`DELETE FROM group_role_mappings WHERE assignment_id = ${assignmentId}`.catch(() => {})
+      await adminPool`DELETE FROM role_assignments WHERE id = ${assignmentId}`.catch(() => {})
+    }
   }, 120_000)
 })
