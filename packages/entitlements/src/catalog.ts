@@ -133,6 +133,13 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     enforcedAt: 'tenant SAML config + /auth/saml',
     downgrade: 'gated; EE-only (the SP loads only under this entitlement)',
   },
+  managedEmail: {
+    title: 'Managed email sender',
+    summary: 'Notification email rides the managed provider driver instead of self-hosted SMTP (#547 / ADR-196 §7).',
+    unit: 'boolean',
+    enforcedAt: 'email driver resolution (request path + outbox drain)',
+    downgrade: 'transport falls back to the CE default (SMTP/no-op); the feature itself is CE and never gated',
+  },
   auditLog: {
     title: 'Compliance audit log',
     summary: 'Durable, hash-chained audit ledger of authz/compliance operations (#134 #177 / ADR-070, EE).',
