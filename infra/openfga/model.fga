@@ -263,12 +263,19 @@ type page
     define view_base: [user:*] or view_direct or view_base_from_space or view_base_inherited
     # comment audience gate, space-inherited (the write/delete switch lives on space#comment_open).
     define comment_open: [user:*, share_link:*] or comment_open from space
-    # explicit per-principal comment grant (member/group granularity)  ∪  edit  ∪  the audience gate.
+    # explicit per-principal comment grant (member/group granularity)  ∪  the audience gate.
     # A specific member may be granted comment even when the audience toggle is off.
     # #411 / ADR-153: `comment` was the DIRECT WRITE TARGET (fgaRelationForCap) — turning it computed
     # requires the leaf split (the #100 write-ripple lesson). Existing `comment@user/group` tuples are
-    # migrated to comment_direct (infra/openfga/migrate-comment-direct.ts). comment_live uses edit_live
-    # (pre-subtraction) so the trash subtraction happens exactly once, at `comment`.
+    # migrated to comment_direct (infra/openfga/migrate-comment-direct.ts).
+    # #553 / ADR-199 (the ruling): edit ⇒ comment is SEVERED — the edit_live arm is gone. The editor
+    # NOUN delivers comment as an explicit second grant (the composite); pre-swap holders were
+    # backfilled (migrate-comment-independence-553). What remains of the edit chain here is the
+    # AUDIENCE arm only (§5(i)): the comment-open toggle reaches everyone who can SEE the page —
+    # view_base holders AND edit-capable principals (edit-link guests included) — via edit_unfrozen,
+    # which keeps the freeze/frozen_guests subtractions, so a frozen page still silences them.
+    # `restricted` now subtracts from every comment arm (deny-wins) BELOW the manage/moderate bypass:
+    # a restricted moderator still comments (the moderation bypass), a restricted commenter does not.
     define comment_direct: [user, group#member]
     # #529 / ADR-193: the two inheritance arms comment was missing while every other verb had them.
     # `comment_from_space` carries the new space-scoped grant down, private-guarded exactly like
@@ -278,7 +285,11 @@ type page
     define comment_from_space: commenter from space but not private
     define comment_from_parent: comment_direct from parent or comment_from_parent from parent
     define comment_inherited: comment_from_parent and published
-    define comment_live: comment_direct or comment_from_space or comment_inherited or edit_live or (view_base and comment_open)
+    define comment_audience_base: view_base or edit_unfrozen
+    define comment_audience: comment_audience_base and comment_open
+    define comment_base: comment_direct or comment_from_space or comment_inherited or comment_audience
+    define comment_permitted: comment_base but not restricted
+    define comment_live: manage or moderate or comment_permitted
     define comment: comment_live but not trashed
     # #109 / ADR-072 · #218 / ADR-103 (A5-1): per-page MONOTONIC DENY. `restricted` gains share_link
     # (UNCONDITIONAL — a `with non_expired` deny would be non-monotonic) so a folder-share-link guest can be
