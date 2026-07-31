@@ -11,6 +11,7 @@
 // mention stays in-app deterministically, never a timing-dependent send).
 // Non-page events are always 'deliver'. Fails CLOSED to 'suppress' on any FGA error.
 import type { OpenFgaClient } from '@openfga/sdk'
+import { readObjectTuples } from '@wikistead/authz'
 
 export type EventDisposition = 'suppress' | 'deliver' | 'not-ready'
 
@@ -18,13 +19,16 @@ export async function pageEventDisposition(fga: OpenFgaClient, payload: Record<s
   const pageId = typeof payload.pageId === 'string' ? payload.pageId : (payload.resource as { type?: string; id?: string } | undefined)?.id
   if (!pageId) return 'deliver' // not a page event → no instance-level exclusion
   try {
-    const { tuples } = await fga.read({ object: `page:${pageId}` })
-    const rel = (tuples ?? []).map((t) => t.key)
-    const linked = rel.some((k) => k?.relation === 'space') // page#space → published/space-linked (not a draft)
+    // #553 re-review: paginated. A bare read answers ONE page (50) and truncates silently — on a page
+    // with many grants the `private` marker could fall off it, and this function would answer
+    // 'deliver' for a PRIVATE page. Every other branch here fails toward suppression; the read itself
+    // must not be the one place that fails open.
+    const rel = await readObjectTuples(fga, `page:${pageId}`)
+    const linked = rel.some((k) => k.relation === 'space') // page#space → published/space-linked (not a draft)
     // #228 review 3: suppress on ANY `private` marker, not just `private@user:*`. The model writes
     // private as the pair [user:*, share_link:*] (model.fga) — relation-only is strictly more defensive
     // (fail toward suppression).
-    const priv = rel.some((k) => k?.relation === 'private')
+    const priv = rel.some((k) => k.relation === 'private')
     if (priv) return 'suppress'
     return linked ? 'deliver' : 'not-ready'
   } catch { return 'suppress' } // fail closed

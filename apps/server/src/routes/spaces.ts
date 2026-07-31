@@ -426,10 +426,11 @@ export async function listAdminSpaces(
   `
   const out: { id: string; name: string; pageCount: number; grantCount: number }[] = []
   for (const r of rows) {
-    const { tuples } = await fga.read({ object: `space:${r.id}` })
+    // #553 re-review: paginated — a truncated read UNDER-counts grantees, and this number is what
+    // the admin screen reports as "who can reach this space".
     const grantees = new Set<string>()
-    for (const { key } of tuples ?? []) {
-      if (!key || !(key.relation in RELATION_TO_CAP)) continue
+    for (const key of await readObjectTuples(fga, `space:${r.id}`)) {
+      if (!(key.relation in RELATION_TO_CAP)) continue
       if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
       grantees.add(key.user)
     }
@@ -953,8 +954,10 @@ export async function unsetSpacePublic(
 // Manage-gated read of the space's public state for the toggle UI's authoritative read.
 export async function isSpacePublic(fga: OpenFgaClient, args: { spaceId: string; userId: string }): Promise<boolean> {
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  const { tuples } = await fga.read({ object: `space:${args.spaceId}`, relation: 'viewer' })
-  return (tuples ?? []).some(({ key }) => key?.relation === 'viewer' && key.user === 'user:*')
+  // #553 re-review: paginated — a space with >50 viewer tuples could hide `viewer@user:*` past the
+  // first page and report a PUBLIC space as private (the toggle would then read as off).
+  const tuples = await readObjectTuples(fga, `space:${args.spaceId}`)
+  return tuples.some((k) => k.relation === 'viewer' && k.user === 'user:*')
 }
 
 // The tenant parent switch (#253 / ADR-113 guardrail 1), read fresh. Kept as a LOCAL read
