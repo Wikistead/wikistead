@@ -258,7 +258,11 @@ async function assignRoleTxCore(
     : await tx<{ id: string }[]>`
         SELECT id FROM role_assignments WHERE role_id = ${roleId} AND resource_type = ${resourceType} AND resource_id = ${resourceId} AND principal = ${principal}`
   if (dup.length) {
-    if (args.onDuplicate !== 'ignore') throw Object.assign(new Error('already assigned'), { statusCode: 409 })
+    // #497 re-review nit: name the capability. On a composite (the editor noun) the collision can be
+    // on the arm the admin never picked — "already assigned" alone sends them looking at the wrong row.
+    if (args.onDuplicate !== 'ignore') {
+      throw Object.assign(new Error(builtin ? `already assigned: ${builtin}` : 'already assigned'), { statusCode: 409 })
+    }
     // Idempotent: the row is already there and already owns whatever it owns. Writing the tuples again
     // would be harmless but recomputing `owned` from a stale read would not — leave the row alone.
     // The AUDIT still happens (#536 review 2): before 086 a duplicate grant audited like any other

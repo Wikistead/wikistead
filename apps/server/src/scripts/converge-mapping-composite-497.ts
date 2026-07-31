@@ -38,8 +38,8 @@ export async function planMappingComposite(admin: postgres.Sql, log: (l: string)
     if (!siblings.length) continue
     const strays = await admin<{ id: string; builtin_capability: string }[]>`
       SELECT id, builtin_capability FROM role_assignments
-      WHERE resource_type = ${o.resource_type} AND resource_id = ${o.resource_id} AND principal = ${o.principal}
-        AND origin <> 'mapping' AND builtin_capability = ANY(${siblings})`
+      WHERE tenant_id = ${o.tenant_id} AND resource_type = ${o.resource_type} AND resource_id = ${o.resource_id}
+        AND principal = ${o.principal} AND origin <> 'mapping' AND builtin_capability = ANY(${siblings})`
     for (const s of strays) {
       rows.push({
         tenantId: o.tenant_id, assignmentId: s.id, principal: o.principal,
@@ -51,25 +51,46 @@ export async function planMappingComposite(admin: postgres.Sql, log: (l: string)
 }
 
 export async function executeMappingComposite(admin: postgres.Sql, plan: MappingCompositePlan, log: (l: string) => void = console.log): Promise<void> {
+  // Nothing to do = nothing to record. A ledger entry for a no-op pass is noise in an append-only
+  // chain (the converge-536 discipline).
+  if (!plan.rows.length) { log('nothing to converge'); return }
+  const touched = new Set<string>()
   for (const r of plan.rows) {
     // per-item, so one surprising row cannot abandon the rest mid-pass
     try {
-      await admin`UPDATE role_assignments SET origin = 'mapping' WHERE id = ${r.assignmentId} AND origin <> 'mapping'`
+      // Re-verify UNDER the write that the primary is STILL mapping-owned: between plan and apply the
+      // mapping can be deleted, and flipping an orphan to origin='mapping' would strand a row the
+      // Members surface refuses to revoke (machine-managed) with no machine left to remove it.
+      const [done] = await admin<{ id: string }[]>`
+        UPDATE role_assignments a SET origin = 'mapping'
+        WHERE a.id = ${r.assignmentId} AND a.origin <> 'mapping' AND a.tenant_id = ${r.tenantId}
+          AND EXISTS (
+            SELECT 1 FROM role_assignments p
+            WHERE p.tenant_id = a.tenant_id AND p.resource_type = a.resource_type AND p.resource_id = a.resource_id
+              AND p.principal = a.principal AND p.origin = 'mapping' AND p.builtin_capability = ${r.primary})
+        RETURNING a.id`
+      if (!done) { log(`skipped ${r.assignmentId}: its mapping-owned ${r.primary} is gone`); continue }
+      touched.add(r.tenantId)
       log(`converged ${r.capability} for ${r.principal} on ${r.resourceId} (beside the mapping-owned ${r.primary})`)
     } catch (e) {
       log(`FAILED ${r.assignmentId}: ${(e as Error).message}`)
     }
   }
-  await admin.begin(async (tx) => {
-    await appendOperatorEntry(tx, {
-      actor: MIGRATE_ACTOR,
-      action: 'authz.mapping_composite_converged',
-      target: '',
-      at: new Date().toISOString(),
-      reason: 'maintenance',
+  // One entry PER TOUCHED TENANT, targeted — an empty target resolves to no tenant, so the
+  // Access Transparency projection and the vendor.access notification never fire (ADR-169). An
+  // operator pass over a tenant's authz rows has to be visible to that tenant.
+  for (const tenantId of touched) {
+    await admin.begin(async (tx) => {
+      await appendOperatorEntry(tx, {
+        actor: MIGRATE_ACTOR,
+        action: 'authz.mapping_composite_converged',
+        target: `tenant:${tenantId}`,
+        at: new Date().toISOString(),
+        reason: 'maintenance',
+      })
     })
-  })
-  log(`ledger: ${plan.rows.length} sibling row(s) converged to mapping ownership`)
+  }
+  log(`ledger: ${plan.rows.length} sibling row(s) planned across ${touched.size} tenant(s)`)
 }
 
 const isMain = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false
