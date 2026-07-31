@@ -73,19 +73,28 @@ export function AdminConnectionsSection() {
 
       <div className="flex flex-col gap-1.5" data-testid="admin-connections-list">
         {rows.map((c, i) => (
-          <div key={c.id} className="flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-2 text-sm" data-testid={`admin-connection-${c.id}`}>
-            <div className="min-w-0 flex-1">
-              <span className="font-medium">{name(c)}</span>
-              <span className="ml-2 text-xs text-fg-dim">{c.preset ? t("adminConnections.presetBadge", { preset: c.preset }) : c.issuer}</span>
-              {c.subjectPrefix === null && <span className="ml-2 rounded bg-bg-subtle px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim">{t("adminConnections.legacyBadge")}</span>}
+          <div key={c.id} className="flex flex-col gap-1.5 rounded-md border border-border bg-panel px-3 py-2 text-sm" data-testid={`admin-connection-${c.id}`}>
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <span className="font-medium">{name(c)}</span>
+                <span className="ml-2 text-xs text-fg-dim">{c.preset ? t("adminConnections.presetBadge", { preset: c.preset }) : c.issuer}</span>
+                {c.subjectPrefix === null && <span className="ml-2 rounded bg-bg-subtle px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim">{t("adminConnections.legacyBadge")}</span>}
+              </div>
+              <IconButton aria-label={t("adminConnections.moveUp")} disabled={i === 0} onClick={() => move(i, -1)}><ArrowUp size={14} /></IconButton>
+              <IconButton aria-label={t("adminConnections.moveDown")} disabled={i === rows.length - 1} onClick={() => move(i, 1)}><ArrowDown size={14} /></IconButton>
+              {/* #504: red at rest + confirm — a deleted connection's minted identities never reconnect */}
+              <IconButton aria-label={t("adminConnections.delete")} variant="danger" data-testid={`admin-connection-delete-${c.id}`}
+                onClick={() => setDeleting(c)}><X size={14} /></IconButton>
             </div>
-            <IconButton aria-label={t("adminConnections.moveUp")} disabled={i === 0} onClick={() => move(i, -1)}><ArrowUp size={14} /></IconButton>
-            <IconButton aria-label={t("adminConnections.moveDown")} disabled={i === rows.length - 1} onClick={() => move(i, 1)}><ArrowDown size={14} /></IconButton>
-            <Switch checked={c.enabled} ariaLabel={t("adminConnections.enabled")} testId={`admin-connection-enabled-${c.id}`}
-              onChange={(on: boolean) => update.mutate({ id: c.id, enabled: on }, { onError })} />
-            {/* #504: red at rest + confirm — a deleted connection's minted identities never reconnect */}
-            <IconButton aria-label={t("adminConnections.delete")} variant="danger" data-testid={`admin-connection-delete-${c.id}`}
-              onClick={() => setDeleting(c)}><X size={14} /></IconButton>
+            {/* #535 (caught by its own discovery pin): a 20px switch wedged between 32px icon buttons is
+                the ragged row that rule forbids, and it was also an UNLABELLED toggle in an action
+                cluster — you had to know what it did. It gets its own line with a word next to it, which
+                is where every other switch in the console already lives. */}
+            <label className="flex w-fit items-center gap-2 text-xs text-fg-dim">
+              <Switch checked={c.enabled} ariaLabel={t("adminConnections.enabled")} testId={`admin-connection-enabled-${c.id}`}
+                onChange={(on: boolean) => update.mutate({ id: c.id, enabled: on }, { onError })} />
+              {t("adminConnections.enabled")}
+            </label>
           </div>
         ))}
         {rows.length === 0 && !connections.isLoading && <p className="text-sm text-fg-dim">{t("adminConnections.empty")}</p>}
