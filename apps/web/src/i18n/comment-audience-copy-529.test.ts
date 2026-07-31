@@ -35,30 +35,40 @@ describe("#529: the comment-audience copy describes both paths", () => {
   }
 });
 
-// #553 / — the THIRD time this paragraph went stale after a model change, so this pin
-// stops describing wording and starts describing the product: the copy tells the reader how to give
-// one person comment, and the route it names has to be one they can actually walk. The space picker
-// offers built-in nouns only (GRANTABLE: view / edit / moderate / manage — comment left with #552), so
-// "grant comment in the access list above" was an instruction that cannot be followed. The page
-// permissions dialog DOES offer comment, and a custom role including comment is the space-wide route.
+// #553 / — the paragraph has gone stale after a model change three times, and the fix for
+// the third staleness was itself wrong ("the picker above grants built-in roles only" — it offers
+// custom roles too, which is exactly the route the text recommends). So the pin stops paraphrasing the
+// UI and READS it: the real GRANTABLE list, imported, decides whether a sentence about granting
+// comment from that picker can be true.
+import { GRANTABLE } from "../settings/SpaceMembersTab";
+
 describe("#553: the per-person route the copy names actually exists", () => {
-  // mirrored from SpaceMembersTab (GRANTABLE) — if someone puts comment back in the picker, this
-  // constant moves with it and the pin below relaxes on purpose.
-  const SPACE_PICKER_CAPS = ["view", "edit", "moderate", "manage"];
+  const grantable = GRANTABLE as readonly string[];
+
+  it("comment is not a built-in the picker can grant — the premise of the advice", () => {
+    expect(grantable).not.toContain("comment");
+  });
 
   for (const [loc, body] of Object.entries(bodies)) {
-    it(`${loc}: does not send the reader to a space picker that has no comment in it`, () => {
-      if (SPACE_PICKER_CAPS.includes("comment")) return // the instruction became true again
-      const claimsPicker = loc === "en"
-        ? /grant comment in the access list above|comment in the (access )?list above/i.test(body)
+    it(`${loc}: does not claim comment can be granted from the picker directly`, () => {
+      if (grantable.includes("comment")) return // the instruction became true again
+      const claimsDirect = loc === "en"
+        ? /grant comment in the access list above|grant comment from the (access )?list/i.test(body)
         : /上のアクセス一覧で\s*comment\s*を付与/.test(body)
-      expect(claimsPicker, `the picker offers ${SPACE_PICKER_CAPS.join("/")} — this sentence cannot be followed: ${body}`).toBe(false)
+      expect(claimsDirect, `the picker offers ${grantable.join("/")} — this sentence cannot be followed: ${body}`).toBe(false)
     });
 
     it(`${loc}: names the routes that DO exist (a custom role including comment, or the page dialog)`, () => {
       const namesRole = loc === "en" ? /custom role/i.test(body) : /カスタムロール/.test(body)
-      const namesPage = loc === "en" ? /page's permissions|single page/i.test(body) : /ページの権限|そのページ/.test(body)
+      const namesPage = loc === "en" ? /page's permissions|single page|one page/i.test(body) : /ページの権限|ページ単位/.test(body)
       expect(namesRole && namesPage, `both real routes must be findable from this text: ${body}`).toBe(true)
+    });
+
+    it(`${loc}: if it lists the picker's built-ins, the list matches the code`, () => {
+      // the other way this paragraph rots: naming the nouns and then someone changes GRANTABLE
+      const mentioned = grantable.filter((c) => new RegExp(c === "view" ? "viewer" : c === "edit" ? "editor" : c === "moderate" ? "moderator" : "manager", "i").test(body))
+      if (mentioned.length === 0) return // it does not enumerate them — nothing to keep in sync
+      expect(mentioned.length, `the text enumerates only part of ${grantable.join("/")}: ${body}`).toBe(grantable.length)
     });
   }
 });

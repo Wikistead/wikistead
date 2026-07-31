@@ -798,27 +798,45 @@ export async function revokeSpaceAccessComposite(
   if (rows.some((r) => r.origin === 'mapping')) {
     throw Object.assign(new Error('managed by a group mapping — delete the mapping instead'), { statusCode: 409 })
   }
-  const missing = args.capabilities.filter((c) => !rows.some((r) => r.builtin_capability === c))
+  // What FGA actually holds for this principal, read BEFORE the transaction: the delete set is decided
+  // from the live tuples, never from what the tables imply. Two ways that mattered, both found in
+  // review: (a) migration 1a inserts a comment row with `owned_capabilities = []` when the leaf already
+  // existed, so removing that row deletes nothing and — because the row EXISTS — the rowless arm below
+  // never looked either; the fold reported success and the principal kept commenting. (b) an arm whose
+  // leaf is absent made the old code ask FGA to delete a tuple that is not there, which is an error
+  // that rolled the whole transaction back: a revoke that removed nothing at all.
+  // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so this is bounded by the type's relation count, never by tenant size.
+  const { tuples: heldTuples } = await fga.read({ user: args.grantee, object: `space:${args.spaceId}` })
+  const heldRelations = new Set((heldTuples ?? []).map((t) => t.key?.relation ?? ''))
   await db.tx(async (tx) => {
-    const toDelete: { user: string; relation: string; object: string }[] = []
     for (const row of rows) {
-      const r = await unassignRoleTxCore(tx, {
+      // the core's own toDelete is deliberately ignored: it can only speak for the leaves that row
+      // OWNS, and the whole point here is the arms it does not own. The delete set is recomputed
+      // below from live tuples against the rows that SURVIVE.
+      await unassignRoleTxCore(tx, {
         tenant: { id: args.tenantId, plan: args.plan ?? '' }, assignmentId: row.id, actorSub: args.userId,
         auditAction: 'space.access_revoked', skipAudit: args.plan === undefined,
       })
-      if (r) toDelete.push(...r.toDelete)
     }
-    // A ROWLESS arm (a pre-086 grant, or one arm written before the composite existed) still has to go,
-    // or the fold would revoke "editor" and leave the legacy comment leaf standing — the same leftover
-    // by another route. Covering is checked against what SURVIVES this transaction.
-    for (const cap of missing) {
+    const toDelete: { user: string; relation: string; object: string }[] = []
+    // EVERY requested arm, not just the ones without a row: what decides is (1) does a surviving row
+    // still confer this capability — a live custom role bundling `comment` keeps its leaf, the
+    // rule — and (2) does the tuple actually exist. Nothing else. That covers the owned arm, the
+    // unowned migration row, the rowless legacy leaf and the already-missing arm with one rule.
+    let sweptRowless = false
+    for (const cap of args.capabilities) {
       const covering = await tx`
         SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
         WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId} AND a.principal = ${args.grantee}
           AND ${cap} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
-      if (covering.length === 0) toDelete.push(...spaceGrantTuples(args.grantee, cap, args.spaceId))
+      if (covering.length > 0) continue
+      const present = spaceGrantTuples(args.grantee, cap as SpaceCapability, args.spaceId).filter((t) => heldRelations.has(t.relation))
+      if (present.length === 0) continue
+      if (!rows.some((r) => r.builtin_capability === cap)) sweptRowless = true
+      toDelete.push(...present)
     }
-    if (missing.length > 0 && args.plan !== undefined) {
+    if (sweptRowless && args.plan !== undefined) {
+      // a rowless arm has no row whose removal was audited — say it happened
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
     }
     // ONE delete for every arm, last inside the tx: a failure rolls every row deletion back, so the

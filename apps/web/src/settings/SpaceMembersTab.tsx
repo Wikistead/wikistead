@@ -31,7 +31,9 @@ interface SpaceCtx { spaceId: string; name: string }
 // CAP_ORDER sort went with the split lists. #552 (user ruling): `comment` leaves the picker with the
 // built-in commenter role — a comment-only grant is composed via a CUSTOM role now; a comment row made
 // through the API (or before that change) still DISPLAYS correctly (CAP_NOUN keeps its noun).
-const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
+// exported for the copy pin (#553): a paragraph that tells the reader how to grant something must
+// be checked against the list this picker actually offers, not against a second copy of it.
+export const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
 // #445 the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.

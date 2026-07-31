@@ -224,6 +224,68 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
     expect(await canEdit(p)).toBe(false)
   }, 120_000)
 
+  // #553 re-review: BOTH of these were reproduced by the reviewer against the first version.
+  it('a comment row that owns nothing (the migration shape) still loses its leaf', async () => {
+    // migrate-comment-independence-553 pass 1a inserts a comment row with owned_capabilities = [] when
+    // the leaf already existed. Removing that row deletes nothing by ownership, and because a row
+    // EXISTS the rowless arm was skipped too — so the fold reported success and the principal kept
+    // commenting. dev happens to have zero such rows, so no review could ever have caught it.
+    const p = sub('rev-unowned')
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
+    const { writeTuples } = await import('@wikistead/authz')
+    await writeTuples(fgaClient, [{ user: p, relation: 'commenter', object: `space:${spaceId}` }])
+    await adminPool`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin)
+      VALUES (gen_random_uuid()::text, ${TENANT}, NULL, 'comment', 'space', ${spaceId}, ${p}, ${[]}, 'manual')`
+    expect(await canComment(p)).toBe(true)
+
+    await revokeSpaceAccessComposite(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capabilities: ['edit', 'comment'], plan: 'business',
+    })
+    expect((await rowsOf(p)).length).toBe(0)
+    expect(await canComment(p), 'a row that owns nothing is not a licence to keep the leaf').toBe(false)
+  }, 120_000)
+
+  it('an arm whose leaf is already gone does not abort the whole revoke', async () => {
+    // deleting a tuple that is not there is an FGA error, and it rolled the transaction back: the
+    // fold threw and removed NOTHING — a revoke you can press with no effect.
+    const p = sub('rev-halfgrant')
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
+    expect(await canEdit(p)).toBe(true)
+    expect(await canComment(p), 'no comment arm at all — the state this used to choke on').toBe(false)
+
+    await revokeSpaceAccessComposite(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capabilities: ['edit', 'comment'], plan: 'business',
+    })
+    expect((await rowsOf(p)).length, 'the arm that WAS there is gone').toBe(0)
+    expect(await canEdit(p)).toBe(false)
+  }, 120_000)
+
+  it('a live CUSTOM ROLE covering comment keeps its leaf when the editor noun is revoked', async () => {
+    // the rule the recomputed delete set must not break: another row still confers comment, so
+    // comment stays — taking the editor noun away is not taking the role away.
+    const p = sub('rev-covered')
+    const roleId = `cg-role-${STAMP}`
+    await adminPool`INSERT INTO roles (id, tenant_id, name, capabilities, scope) VALUES (${roleId}, ${TENANT}, ${`cg-cov-${STAMP}`}, ARRAY['comment']::text[], 'resource')
+      ON CONFLICT (id) DO NOTHING`
+    try {
+      // Built directly, because the runtime cannot produce it any more: #536's convergence sweeps a
+      // principal's other manual rows on every add, so a custom role and a built-in noun cannot be
+      // added side by side today. The state still EXISTS in data that predates that rule, and the
+      // covering rule is what protects it — that is what this pins.
+      await composite(p, ['edit', 'comment'])
+      await adminPool`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin)
+        VALUES (gen_random_uuid()::text, ${TENANT}, ${roleId}, NULL, 'space', ${spaceId}, ${p}, ${[]}, 'manual')`
+      await revokeSpaceAccessComposite(db, fgaClient, app.searchDriver, {
+        spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capabilities: ['edit', 'comment'], plan: 'business',
+      })
+      expect(await canEdit(p), 'the noun is gone').toBe(false)
+      expect(await canComment(p), 'the ROLE still confers comment — its leaf is not collateral').toBe(true)
+    } finally {
+      await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId} AND principal = ${p}`.catch(() => {})
+      await adminPool`DELETE FROM roles WHERE id = ${roleId}`.catch(() => {})
+    }
+  }, 120_000)
+
   it('the same allowlist as the grant: a free-form relations[] is 400 and removes nothing', async () => {
     const p = sub('rev-freeform')
     await composite(p, ['edit', 'comment'])
