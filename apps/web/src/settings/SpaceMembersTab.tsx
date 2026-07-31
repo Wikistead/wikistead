@@ -200,7 +200,8 @@ export function SpaceMembersTab() {
     | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: undefined; assignmentId: string; principal: string; grantee?: undefined };
   // #553 / ADR-199 §2 (rev5 ruling): a principal holding BOTH the edit and comment built-in grants is
   // ONE editor — the pair folds into a single "editor" row whose revoke removes both arms. The word
-  // "commenter" appears in no UI; a lone comment grant (an unfolded arm) wears the capability noun.
+  // "commenter" appears on no GRANT surface (#552 — the picker); a lone comment grant (an unfolded
+  // arm) still wears the capability noun "commenter" as its ROW BADGE (the #529 pin keeps it).
   const foldedGrantees = foldedEditorGrantees(grants);
   const visibleGrants = grants.filter((g) => !(foldedGrantees.has(g.grantee) && g.capability === "comment"));
   const mergedRows: MergedRow[] = [

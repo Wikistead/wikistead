@@ -13,7 +13,8 @@ const bodies = { en: en.spaceMembers.commentAudienceBody, ja: ja.spaceMembers.co
 describe("#529: the comment-audience copy describes both paths", () => {
   for (const [loc, body] of Object.entries(bodies)) {
     // #553 / ADR-199 §2 rev5 re-aim: the built-in commenter ROLE is gone (#552) and the word
-    // "commenter" appears in no UI — the per-person path is now an explicit comment GRANT, and the
+    // "commenter" appears on no GRANT surface (a lone comment row still wears it as a badge) — the
+    // per-person path is now an explicit comment GRANT, and the
     // copy must name that path without resurrecting the dead role name.
     it(`${loc}: names the explicit comment grant as the per-person path (not the dead commenter role)`, () => {
       expect(body.toLowerCase()).toContain("comment");

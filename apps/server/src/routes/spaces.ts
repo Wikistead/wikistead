@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
+import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -759,7 +759,9 @@ export async function listSpaceAccess(
   args: { spaceId: string; tenantId: string; userId: string },
 ): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null; managed?: boolean }[]> {
   await requireSpaceManage(fga, args.userId, args.spaceId)
-  const { tuples } = await fga.read({ object: `space:${args.spaceId}` })
+  // #553 re-review N1: paginated — a bare read answers ONE page (50) and the comment arm falling off
+  // it would draw an unfolded editor row whose revoke strips edit but leaves comment behind.
+  const tuples = await readObjectTuples(fga, `space:${args.spaceId}`)
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
   const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
   const byId = groupNameByFgaId(args.tenantId, names)
@@ -785,8 +787,8 @@ export async function listSpaceAccess(
     for (const c of r.caps ?? []) (r.builtin_capability != null ? builtinOwned : customOwned).add(`${r.principal} ${c}`)
   }
   const out: { grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null; managed?: boolean }[] = []
-  for (const { key } of tuples ?? []) {
-    if (!key || !(key.relation in RELATION_TO_CAP)) continue
+  for (const key of tuples) {
+    if (!(key.relation in RELATION_TO_CAP)) continue
     // Direct member/group grants only — never expose share_link, user:* (public)
     // or the structural tenant link.
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
@@ -818,10 +820,12 @@ export async function listSpaceAccess(
 // inherit `comment_open from space` (space is the only inheritance level). No reindex needed: the VIEW
 // audience is unchanged (viewers already view via view_base; comment_open only opens commenting).
 async function readCommentOpen(fga: OpenFgaClient, spaceId: string): Promise<{ guests: boolean; members: boolean }> {
-  const { tuples } = await fga.read({ object: `space:${spaceId}` })
+  // #553 re-review N2: paginated — the comment_open wildcards are written LAST on a busy space, so a
+  // one-page read would show the toggle OFF while the audience is actually open.
+  const tuples = await readObjectTuples(fga, `space:${spaceId}`)
   let guests = false, members = false
-  for (const { key } of tuples ?? []) {
-    if (key?.relation !== 'comment_open') continue
+  for (const key of tuples) {
+    if (key.relation !== 'comment_open') continue
     if (key.user === 'share_link:*') guests = true
     else if (key.user === 'user:*') members = true
   }
