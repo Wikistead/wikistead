@@ -249,3 +249,29 @@ describe('#497 §2b — admin materialisation is per user, and the model stays s
     }
   })
 })
+
+// #573 re-review NEW-1: the sweep carried a FOURTH hand-written copy of the last-admin predicate —
+// seventy lines below the real one and the only one missing the deactivated exclusion. A
+// SCIM-suspended admin therefore counted as "someone else is admin", and the sweep demoted the last
+// LIVE one: the tenant loses its own administration through a background worker, which is the exact
+// lockout #573 closed at the SCIM door.
+describe('#573 NEW-1: a suspended admin is not a way back in, so the sweep must not demote the last live one', () => {
+  it('leaves the drifted admin in place when the only other admin is deactivated', async () => {
+    const SUSPENDED = 'am-suspended-573'
+    subs.push(SUSPENDED)
+    await addMapping()
+    // the only other admin is SCIM-suspended: role='admin' in the row, but cannot log in
+    await seedMember(SUSPENDED, { role: 'admin' })
+    await db.sql`UPDATE members SET deactivated_at = now(), deactivation_reason = 'scim' WHERE tenant_id = ${TENANT} AND sub = ${SUSPENDED}`
+    await adminPool`UPDATE members SET role = 'member' WHERE tenant_id = ${TENANT} AND sub = ${ANCHOR}`
+
+    // a genuinely drifted mapping admin — the sweep's normal target
+    await seedMember(VIA_GROUP, { role: 'member', groups: [GROUP] })
+    await evaluateAdminMapping(db, fgaClient, tenant, VIA_GROUP, [GROUP])
+    await db.sql`UPDATE members SET groups = ${db.sql.array([])} WHERE sub = ${VIA_GROUP}`
+
+    await reconcileMaterialisedAdmins(fgaClient)
+    expect(await memberRow(VIA_GROUP), 'the last LIVE admin survives the sweep').toMatchObject({ role: 'admin' })
+    expect(await isTenantAdmin(fgaClient, VIA_GROUP, TENANT), 'and keeps administering').toBe(true)
+  })
+})

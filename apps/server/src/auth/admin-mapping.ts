@@ -89,6 +89,12 @@ async function demote(
 // NOTE the sub-exclusion: "would REMOVING this member's admin leave none?" — a deactivated admin
 // still carries role='admin', so counting rows without excluding them would answer 'no' forever.
 export async function isLastAdmin(sql: Sql, sub: string): Promise<boolean> {
+  // #573 re-review NEW-3: the handle must be TENANT-SCOPED. Counting on an unscoped pool would see
+  // other tenants' admins and answer "not the last one" — fail-OPEN, the exact direction this guard
+  // exists to prevent. RLS does the scoping; this asserts the caller actually set it, because the
+  // signature (a bare Sql) cannot.
+  const [scope] = await sql<{ t: string | null }[]>`SELECT current_setting('app.tenant_id', TRUE) AS t`
+  if (!scope?.t) throw new Error('isLastAdmin: the handle is not tenant-scoped (app.tenant_id unset)')
   const [row] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM members WHERE role = 'admin' AND sub <> ${sub} AND deactivated_at IS NULL`
   return (row?.n ?? 0) === 0
@@ -156,10 +162,11 @@ export async function reconcileMaterialisedAdmins(fga: OpenFgaClient): Promise<n
         // turned the whole sweep into a no-op, leaving real drifted admins in place indefinitely.
         try {
           // Re-check the last-admin guard inside the loop: demoting several in one sweep must not walk
-          // the tenant down to zero admins.
-          const others = await withTenantTx(tenant.id, async (tx) => tx<{ n: number }[]>`
-            SELECT count(*)::int AS n FROM members WHERE role = 'admin' AND sub <> ${row.sub}`)
-          if ((others[0]?.n ?? 0) === 0) continue
+          // the tenant down to zero admins. #573 re-review NEW-1: this was a FOURTH hand-written copy
+          // of the predicate — seventy lines below the real one and the only one missing the
+          // deactivated exclusion, so a SCIM-suspended admin counted as a way back in and the sweep
+          // demoted the last LIVE one. One function, actually every caller.
+          if (await withTenantTx(tenant.id, (tx) => isLastAdmin(tx, row.sub))) continue
           await withTenantTx(tenant.id, (tx) => demoteInTx(tx, fga, tenant, row.sub))
           emit({ type: 'member.role_changed', tenantId: tenant.id, actorId: row.sub, targetSub: row.sub, role: 'member' })
           demoted++
