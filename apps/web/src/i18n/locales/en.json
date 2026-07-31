@@ -950,7 +950,10 @@
     "revoke": "Revoke",
     "eraseAnalyticsConfirm": "Erase the reading history of {{name}}? This cannot be undone.",
     "removeConfirm": "Remove {{name}} from this workspace? Their access, API keys and sessions end immediately.",
-    "revokeConfirm": "Revoke the invite for {{email}}? The sent link stops working."
+    "revokeConfirm": "Revoke the invite for {{email}}? The sent link stops working.",
+    "filterPlaceholder": "Filter members…",
+    "filterLabel": "Filter members",
+    "addRole": "+ Role"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
@@ -1278,7 +1281,12 @@
     "mappingTenantBody": "Confer a TENANT role (like creating spaces) on everyone in an IdP group. Membership resolves live from your identity provider — nobody is added or billed. A mapping onto a space's role is made in that space's Members tab.",
     "mixedScopeHint": "A role is either a space/page role or a tenant role - uncheck one side to save.",
     "sectionTenant": "Tenant",
-    "sectionResource": "Space / Page"
+    "sectionResource": "Space / Page",
+    "groupAssignTitle": "Group roles",
+    "groupAssignBody": "Give a tenant role to an IdP group. Everyone in the group gets it — and loses it when they leave the group.",
+    "groupAssignEmpty": "No group holds a tenant role.",
+    "groupLabel": "Group",
+    "groupPlaceholder": "Select a group…"
   },
   "detailsEdit": {
     "title": "Edit collapsible",
