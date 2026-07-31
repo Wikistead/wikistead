@@ -262,3 +262,39 @@ describe('#497 re-review N3: the converge script pulls stray siblings into mappi
     }
   }, 120_000)
 })
+
+// #497 re-review round 2: the arms the FIRST round left unpinned.
+describe('#497 re-review round 2: both arms are protected, and the converge is not greedy', () => {
+  it('the COMMENT arm carries the same machine-managed protection as the edit arm', async () => {
+    const created = await post({ resourceType: 'space', resourceId: spaceId, groupName: GROUP, builtinCapability: 'edit' })
+    expect(created.statusCode).toBe(201)
+    const mappingId = (created.json() as { id: string }).id
+    const principal = groupGrantee(tenant.id, GROUP)
+    try {
+      const listed = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: tenant.id, userId: 'dev-user' })
+      const mine = listed.filter((g) => g.grantee === principal)
+      expect(mine.map((g) => g.capability).sort(), 'both arms listed').toEqual(['comment', 'edit'])
+      expect(mine.every((g) => g.managed === true), 'BOTH arms say machine-managed').toBe(true)
+
+      await expect(revokeSpaceAccess(db, fgaClient, app.searchDriver,
+        { spaceId, tenantId: tenant.id, userId: 'dev-user', grantee: principal, capability: 'comment', plan: 'business' }),
+        'the comment arm refuses a manual revoke too').rejects.toMatchObject({ statusCode: 409 })
+      expect(await check(fgaClient, MEMBER, 'comment', { type: 'space', id: spaceId }), 'access intact').toBe(true)
+    } finally {
+      await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${mappingId}`, headers: HG }).catch(() => {})
+    }
+  }, 120_000)
+
+  it('the converge plan ignores a purely MANUAL pair (no mapping-owned primary beside it)', async () => {
+    const { planMappingComposite } = await import('../scripts/converge-mapping-composite-497.js')
+    const solo = `user:gm497-solo-${tag}`
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: tenant.id, userId: 'dev-user', grantee: solo, capability: 'edit', plan: 'business' })
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: tenant.id, userId: 'dev-user', grantee: solo, capability: 'comment', plan: 'business' })
+    try {
+      const plan = await planMappingComposite(adminSql, () => {})
+      expect(plan.rows.some((r) => r.principal === solo), 'a human-made pair is not the mapping\'s to claim (therule)').toBe(false)
+    } finally {
+      await adminSql`DELETE FROM role_assignments WHERE resource_id = ${spaceId} AND principal = ${solo}`.catch(() => {})
+    }
+  }, 120_000)
+})

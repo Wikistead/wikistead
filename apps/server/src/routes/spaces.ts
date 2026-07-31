@@ -652,9 +652,10 @@ export async function grantSpaceAccess(
 // it issues N single-capability grants (today: editor = edit + comment) in one transaction, then ONE
 // sweep keeping both arms. The bare-capability form stays exactly what it says (an API that quietly
 // granted more than asked would be the same lie #553 removes); the bundle lives only where the noun is.
-// The server-side mirror of the web's COMPOSITE_BUILTINS table (grant-dispatch.ts) — the UI offers
-// the noun, the server decides what a noun may bundle.
-const ALLOWED_COMPOSITES: ReadonlySet<readonly string[]> = new Set([['edit', 'comment']])
+// The server's ONE bundle table lives in roles.ts (builtinBundle); this surface derives from it
+// rather than restating it (#497 re-review: three copies of the same table — web, roles, spaces
+// with nothing pinning them equal, and a drift meant "the mapping creates arms the Members
+// composite then refuses with 400").
 const sameCapSet = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',')
 
@@ -668,7 +669,9 @@ export async function grantSpaceAccessComposite(
   // #553 review D: the plural wire form is NOT a free-form multi-grant — only the ruled noun
   // bundles pass (today: editor = edit+comment). An arbitrary capability list would slip N roles
   // past the one-principal-one-role convergence (#536) through the sweep's keep-set.
-  if (![...ALLOWED_COMPOSITES].some((b) => sameCapSet(b, args.capabilities))) {
+  const { builtinBundle } = await import('./roles.js')
+  const allowed = [...new Set(Object.values(RELATION_TO_CAP))].map((c) => builtinBundle(c)).filter((b) => b.length > 1)
+  if (!allowed.some((b) => sameCapSet(b, args.capabilities))) {
     throw Object.assign(new Error('unknown composite grant'), { statusCode: 400 })
   }
   await requireSpaceManage(fga, args.userId, args.spaceId)
