@@ -50,6 +50,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `tenant.custom_domain_added` | A custom domain was added (pending verification). |
 | `tenant.custom_domain_verified` | A custom domain was verified and activated. |
 | `tenant.custom_domain_removed` | A custom domain was removed (three-point revocation). |
+| `tenant.custom_domain_unverified` | A verified custom domain stopped proving ownership and was demoted to pending (#576); links fall back to the platform URL until it is verified again. |
 | `tenant.saml_updated` | The tenant SAML SSO configuration was changed (EE). |
 | `tenant.plan_changed` | The tenant plan changed (billing). |
 | `tenant.ai_toggled` | A tenant admin enabled/disabled AI for the tenant (ADR-077 consent). |
