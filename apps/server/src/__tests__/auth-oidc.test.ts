@@ -250,19 +250,31 @@ describe('#537 login-method ceiling on the routes', () => {
     })
   })
 
-  it('B3 cross-IdP (platform→tenant): a platform-minted state cannot complete once the tenant IdP is the pick', async () => {
+  it('B3 cross-IdP (platform→tenant): a platform-minted state cannot complete once SSO enforcement drops platform', async () => {
+    // #554 S2 re-aim: states are CONNECTION-bound now, so a platform state completes against the
+    // still-effective platform connection even after the tenant IdP returns as the default pick —
+    // correct under ADR-197 §2 (the exchange runs against the IdP that issued the code; ADR-195
+    // ruling 4 already listed platform as effective without the pref). The security property this
+    // pin holds is the ENFORCED case: platform_login_disabled + an effective own IdP drop the
+    // platform connection from the list, which closes the in-flight window with the unified 404.
     await withPlatform(async () => {
       await db.sql`UPDATE tenant_oidc SET enabled = false WHERE tenant_id = ${tenant.id}`
       let path: string
       try {
-        path = await startLogin() // platform pick → state.viaTenantOidc = false
+        path = await startLogin() // platform pick → state bound to the platform connection
       } finally {
         await db.sql`UPDATE tenant_oidc SET enabled = true WHERE tenant_id = ${tenant.id}`
       }
-      const res = await cb(path) // tenant IdP is back as the pick → mode mismatch → 404
-      expect(res.statusCode).toBe(404)
-      expect(res.json()).toEqual({ error: 'not found' })
-      expect(res.headers['set-cookie']).toBeUndefined()
+      await db.sql`INSERT INTO tenant_login_prefs (tenant_id, platform_login_disabled) VALUES (${tenant.id}, true)
+        ON CONFLICT (tenant_id) DO UPDATE SET platform_login_disabled = true`
+      try {
+        const res = await cb(path) // own IdP effective + pref → platform lapsed → window closed
+        expect(res.statusCode).toBe(404)
+        expect(res.json()).toEqual({ error: 'not found' })
+        expect(res.headers['set-cookie']).toBeUndefined()
+      } finally {
+        await db.sql`DELETE FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`
+      }
     })
   })
 

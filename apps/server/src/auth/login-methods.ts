@@ -38,9 +38,12 @@ export function assertLoginCeilingValid(env: string | undefined = process.env.LO
   }
 }
 
-// The tenant's own IdP row (RLS-scoped; the caller owns decryption via oidc.ts loaders where needed).
+// The tenant's own IdP rows (RLS-scoped; the caller owns decryption via oidc.ts loaders where
+// needed). S2 review N6: ANY enabled connection counts — first-row-only diverged from the
+// connection list once N≥2, and on the platform-lapse side that divergence failed OPEN (a
+// first-row-disabled tenant with a live second connection had its SSO enforcement lapse).
 async function tenantOidcEnabled(db: TenantDb): Promise<boolean> {
-  const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc ORDER BY sort, id LIMIT 1`
+  const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc WHERE enabled LIMIT 1`
   return !!row?.enabled
 }
 
@@ -129,11 +132,11 @@ export async function resolveAvailableLogin(
 // owns whatever surfaces it publicly. The platform-lapse rule (ADR-195 ruling 4) carries over:
 // the tenant's platform-off pref bites only while an own-IdP connection is effective.
 //
-// KNOWN drift vs resolveAvailableLogin, to reconcile when S2/S3 make this the consumed truth
-// (S1 review, finding 3): (a) tenantOidcEnabled looks at the FIRST row's enabled while this lists
-// every enabled row — divergent ownIdpEffective once N≥2; (b) resolveAvailableLogin drops a
-// connection whose secret fails to DECRYPT (loadTenantOidcCfg throws/null) while this lists it —
-// S3 must not render a button the start route cannot honor.
+// KNOWN drift vs resolveAvailableLogin, to reconcile when S3 makes this the consumed truth
+// (S1 review finding 3; (a) first-row-vs-any-enabled was RESOLVED in the S2 review — both sides
+// now count any enabled row, and the legacy pick is the first ENABLED row): (b) remains —
+// resolveAvailableLogin drops a connection whose secret fails to DECRYPT (loadTenantOidcCfg
+// throws/null) while this lists it — S3 must not render a button the start route cannot honor.
 export interface LoginConnection {
   id: string
   kind: 'oidc' | 'saml' | 'platform'
