@@ -193,6 +193,10 @@
       "desc": "Control what lands in your in-app inbox. These only reduce what you receive — access to content is always enforced separately.",
       "enabled": "Enable notifications",
       "enabledHint": "Turn off to stop all in-app notifications (your watches are kept).",
+      "emailImmediate": "Mention email",
+      "emailImmediateHint": "Email me when someone mentions me (title and link only).",
+      "emailDigest": "Daily digest email",
+      "emailDigestHint": "One daily rollup of activity on pages and spaces I watch.",
       "defaultMask": "Default event types",
       "defaultMaskHint": "Applied to watches without their own type filter. All types are on by default."
     },

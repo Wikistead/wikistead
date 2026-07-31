@@ -166,6 +166,21 @@ describe('account settings (ADR-020)', () => {
     expect((await getAccountSettings(db, { subject: SUB_B })).hasAvatar).toBe(false)
   })
 
+  // #547 / ADR-196 §3 (S6): the email prefs round-trip on the same self-scope surface, with the ADR
+  // defaults (immediate ON — the narrowing default — digest OFF) and boolean validation.
+  it('email prefs: ADR defaults, round-trip, and type validation', async () => {
+    const before = await getAccountSettings(db, { subject: SUB_B })
+    expect(before.emailImmediate, 'immediate defaults ON').toBe(true)
+    expect(before.emailDigest, 'digest defaults OFF (opt-in)').toBe(false)
+    await updateAccountSettings(db, { subject: SUB_B, emailImmediate: false, emailDigest: true })
+    const after = await getAccountSettings(db, { subject: SUB_B })
+    expect(after.emailImmediate).toBe(false)
+    expect(after.emailDigest).toBe(true)
+    await expect(updateAccountSettings(db, { subject: SUB_B, emailImmediate: 'yes' as unknown as boolean }))
+      .rejects.toMatchObject({ statusCode: 400 })
+    await updateAccountSettings(db, { subject: SUB_B, emailImmediate: true, emailDigest: false }) // restore
+  })
+
   it('an unauthenticated request to /me/settings is rejected (401)', async () => {
     const res = await app.inject({ method: 'GET', url: '/me/settings', headers: { host: 'dev.localhost' } })
     expect(res.statusCode).toBe(401)
