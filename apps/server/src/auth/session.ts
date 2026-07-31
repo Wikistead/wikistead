@@ -161,6 +161,11 @@ export async function establishMemberSession(
   tenant: { id: string; plan: string },
   claims: { sub: string; email?: string | null; emailVerified?: boolean | null; name?: string | null; picture?: string | null; groups?: string[] },
 ): Promise<string> {
+  // #554 / ADR-197 §5 (S0): the reserved internal sub space — an externally-asserted subject that
+  // wears a future connection's prefix (or exceeds the FGA-safe length) is refused with this seam's
+  // own failure (a non-member 403), never a distinguishable oracle.
+  const { assertExternalSub } = await import('./reserved-subs.js')
+  assertExternalSub(claims.sub, () => Object.assign(new Error('not a member of this tenant'), { statusCode: 403 }))
   // tenant#member is the authority (raw relation on a tenant object — not a page/
   // space Capability — so call FGA directly). Membership = the right to enter.
   const { allowed } = await deps.fga.check({ user: `user:${claims.sub}`, relation: 'member', object: `tenant:${tenant.id}` })

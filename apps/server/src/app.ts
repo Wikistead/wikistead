@@ -389,6 +389,11 @@ export async function buildApp(): Promise<FastifyInstance> {
       // OIDC bearer path (programmatic/legacy). Failure → 401, no API key fallback.
       try {
         const m = await verifyMember(token)
+        // #554 / ADR-197 §5 (S0): the bearer path creates no row — the asserted sub simply BECOMES
+        // the principal, so the reserved-space refusal must live here too (a reserved-prefix or
+        // over-long sub answers the seam's own 401, indistinguishable from a bad token).
+        const { externalSubViolation } = await import('./auth/reserved-subs.js')
+        if (externalSubViolation(m.sub)) throw new Error('reserved subject')
         req.user = { sub: m.sub, groups: m.groups }
         // #471 / ADR-176: the token's own idea of its tenant, kept for the cross-check below. The
         // Host stays the authority (it already picks the RLS context and the FGA object ids); this
