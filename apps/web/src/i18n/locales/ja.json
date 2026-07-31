@@ -522,10 +522,10 @@
     "commentBaselineEditors": "編集権を持つ人（editor / moderator / manager）は常にコメントできます — このトグルで消えることはありません。",
     "commentMembersOn": "ON：閲覧のみのメンバーもコメント可（編集者・個別付与に加えて）。",
     "commentMembersOff": "OFF：閲覧のみのメンバーはコメント不可（編集者・個別付与は引き続き可）。",
-    "commentGuestsOn": "ON：閲覧リンクを持つゲスト全員がコメント可。",
-    "commentGuestsOff": "OFF：閲覧リンクのゲストはコメント不可（編集リンクのゲストは編集権として可）。",
+    "commentGuestsOn": "ON：ページを閲覧できるゲスト全員がコメント可（閲覧・編集リンクとも）。",
+    "commentGuestsOff": "OFF：ゲストはコメント不可（閲覧・編集リンクとも）。",
     "commentSummaryLead": "現在コメント可：",
-    "commentSummaryEditors": "編集権を持つ人",
+    "commentSummaryEditors": "管理者・モデレーター・コメント権を持つ人",
     "commentSummaryMembers": "閲覧できる全メンバー",
     "commentSummaryGuests": "閲覧リンクのゲスト",
     "managedBadge": "マッピング",
@@ -924,6 +924,7 @@
     "revokeConfirm": "{{email}} への招待を取り消しますか？送信済みのリンクは使えなくなります。"
   },
   "commentsPanel": {
+    "readOnlyReason": "このページではコメントできません。",
     "submit": "コメント",
     "delete": "削除",
     "reply": "返信…",

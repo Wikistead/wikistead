@@ -200,6 +200,14 @@ export function CommentsPanel({ pageId, canComment, anchorGetterRef, onClose, to
           })}
         </div>
 
+        {!canComment && (
+          // #553 / ADR-199 §4: "can view (or even edit) but cannot comment" is a REACHABLE state now —
+          // a hidden composer read as a bug, so the slot says why in one line. The server stays the
+          // fortress (view floor + comment check); this is display only.
+          <div className="flex-none -mx-3 -mb-3 border-t border-border bg-panel px-3 pb-3 pt-2 text-[0.8em] text-fg-dim" data-testid="comment-composer-readonly">
+            {tr("commentsPanel.readOnlyReason")}
+          </div>
+        )}
         {canComment && (
           // Composer pinned flush to the panel bottom: the negative margins cancel the RightPanel p-3 so the
           // opaque bar reaches the panel's true bottom edge (no gap / see-through — comment 738 part 4).

@@ -839,7 +839,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
             />
           </div>
         </div>
-        {pageId && commentsOpen && <Suspense fallback={null}><CommentsPanel pageId={pageId} canComment={page?.canComment ?? capability === "edit"} anchorGetterRef={anchorGetterRef} onClose={closeComments} /></Suspense>}
+        {pageId && commentsOpen && <Suspense fallback={null}><CommentsPanel pageId={pageId} canComment={page?.canComment ?? false} anchorGetterRef={anchorGetterRef} onClose={closeComments} /></Suspense>}
         {pageId && historyOpen && <Suspense fallback={null}><HistoryPanel pageId={pageId} canRestore={capability === "edit"} canModerate={page?.canModerate ?? false} onCompare={openDiff} onClose={closeHistory} /></Suspense>}
         {pageId && attachmentsOpen && <Suspense fallback={null}><AttachmentsPanel pageId={pageId} readOnly={capability !== "edit"} onClose={closeAttachments} /></Suspense>}
         {pageId && analyticsOpen && <Suspense fallback={null}><AnalyticsRightPanel pageId={pageId} onClose={closeAnalytics} /></Suspense>}
