@@ -40,7 +40,7 @@ export function assertLoginCeilingValid(env: string | undefined = process.env.LO
 
 // The tenant's own IdP row (RLS-scoped; the caller owns decryption via oidc.ts loaders where needed).
 async function tenantOidcEnabled(db: TenantDb): Promise<boolean> {
-  const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc LIMIT 1`
+  const [row] = await db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc ORDER BY sort, id LIMIT 1`
   return !!row?.enabled
 }
 
@@ -118,6 +118,49 @@ export async function resolveAvailableLogin(
       ? { cfg: platform, viaTenantOidc: false }
       : null
   return { methods, oidc }
+}
+
+// #554 S1 / ADR-197 §2: the ordered effective CONNECTION list — ceiling ∩ enabled ∩ entitlement,
+// computed at read time like everything else in this module. S1 ships the resolver; the login
+// screen and start/callback keep consuming resolveAvailableLogin until S2/S3 wire them here, so
+// N=1 behavior stays byte-identical while the vessel widens. `label`/`brand` stay null until S3
+// (rev3 narrowed labels) and S4 (presets) fill them. The platform connection is env-injected (no
+// row), listed under the fixed id 'platform' — it can never collide with a minted uuid, and S3
+// owns whatever surfaces it publicly. The platform-lapse rule (ADR-195 ruling 4) carries over:
+// the tenant's platform-off pref bites only while an own-IdP connection is effective.
+export interface LoginConnection {
+  id: string
+  kind: 'oidc' | 'saml' | 'platform'
+  label: string | null
+  brand: string | null
+  bootstrapEligible: boolean
+}
+
+export async function resolveLoginConnections(
+  db: TenantDb,
+  tenant: { plan: string },
+  env?: string | undefined,
+): Promise<LoginConnection[]> {
+  const ceiling = loginMethodCeiling(env)
+  const out: LoginConnection[] = []
+  if (ceiling.has('tenant-oidc')) {
+    const rows = await db.sql<{ id: string; bootstrap_eligible: boolean }[]>`
+      SELECT id, bootstrap_eligible FROM tenant_oidc WHERE enabled ORDER BY sort, id`
+    for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: null, brand: null, bootstrapEligible: r.bootstrap_eligible })
+  }
+  if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso) {
+    // one per tenant in v1 (ADR-197 §1 B5); SAML never bootstraps (§2 rev2: oidc-only in v1)
+    const [row] = await db.sql<{ id: string }[]>`SELECT id FROM tenant_saml WHERE enabled LIMIT 1`.catch((err: unknown) => {
+      if ((err as { code?: string }).code === '42P01') return [] as { id: string }[]
+      throw err
+    })
+    if (row) out.push({ id: row.id, kind: 'saml', label: null, brand: null, bootstrapEligible: false })
+  }
+  const ownIdpEffective = out.length > 0
+  let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
+  if (platform && ownIdpEffective && (await platformLoginDisabled(db))) platform = null
+  if (platform) out.push({ id: 'platform', kind: 'platform', label: null, brand: null, bootstrapEligible: false })
+  return out
 }
 
 // #537 lockout guard: "would anything OTHER than `except` still let someone in?" — asked before a

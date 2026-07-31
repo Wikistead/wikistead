@@ -37,7 +37,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     const ceiling = loginMethodCeiling()
     const available = await resolveLogin(req.db, req.tenant)
-    const [oidcRow] = await req.db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc LIMIT 1`
+    const [oidcRow] = await req.db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc ORDER BY sort, id LIMIT 1`
     const [samlRow] = await req.db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml LIMIT 1`.catch(() => [] as { enabled: boolean }[])
     const [pref] = await req.db.sql<{ platform_login_disabled: boolean }[]>`SELECT platform_login_disabled FROM tenant_login_prefs LIMIT 1`
     return {

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { randomUUID } from 'node:crypto'
 import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
@@ -61,7 +62,7 @@ export async function validateIssuer(issuer: string, fetchJson: DiscoveryFetch =
 
 export async function getTenantOidc(db: TenantDb): Promise<TenantOidcView | null> {
   const [row] = await db.sql<{ issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null }[]>`
-    SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc LIMIT 1
+    SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc ORDER BY sort, id LIMIT 1
   `
   if (!row) return null
   return {
@@ -98,8 +99,10 @@ export async function updateTenantOidc(
   }
   // Secret is write-only: a non-empty value sets it, explicit null clears it
   // (public client), undefined/'' keeps the existing one.
-  const [existing] = await db.sql<{ client_secret_enc: string | null; enabled: boolean }[]>`
-    SELECT client_secret_enc, enabled FROM tenant_oidc WHERE tenant_id = ${args.tenantId}
+  // #554 S1: rows carry minted uuid ids now; this legacy admin surface manages the tenant's FIRST
+  // connection (ORDER BY sort, id — the same row every read path picks).
+  const [existing] = await db.sql<{ id: string; client_secret_enc: string | null; enabled: boolean }[]>`
+    SELECT id, client_secret_enc, enabled FROM tenant_oidc WHERE tenant_id = ${args.tenantId} ORDER BY sort, id LIMIT 1
   `
   // #537 lockout guard: disabling the tenant IdP while NOTHING else is effective (ceiling excludes
   // platform, or no platform IdP configured; SAML unentitled/disabled) would 404 every future login —
@@ -118,14 +121,25 @@ export async function updateTenantOidc(
   else if (args.clientSecret) secretEnc = encryptSecret(args.clientSecret)
   else secretEnc = existing?.client_secret_enc ?? null
 
-  await db.sql`
-    INSERT INTO tenant_oidc (tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim)
-    VALUES (${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim})
-    ON CONFLICT (tenant_id) DO UPDATE SET
-      issuer = ${issuer}, client_id = ${clientId}, client_secret_enc = ${secretEnc},
-      scopes = ${scopes}, redirect_uri = ${redirectUri}, enabled = ${args.enabled},
-      groups_claim = ${groupsClaim}, updated_at = now()
-  `
+  // #554 S1 / ADR-197 §1: tenant_oidc is N-capable (PK = minted uuid), so the old
+  // ON CONFLICT (tenant_id) upsert is gone — this surface updates ITS row by id, or mints one.
+  // A fresh row minted here is the legacy tenant-IdP connection, so it keeps today's bootstrap
+  // behavior: bootstrap_eligible = true (ADR-197 §2 rev2 — the flag is set only where connections
+  // are created, and THIS is that surface for the tenant IdP).
+  if (existing) {
+    await db.sql`
+      UPDATE tenant_oidc SET
+        issuer = ${issuer}, client_id = ${clientId}, client_secret_enc = ${secretEnc},
+        scopes = ${scopes}, redirect_uri = ${redirectUri}, enabled = ${args.enabled},
+        groups_claim = ${groupsClaim}, updated_at = now()
+      WHERE id = ${existing.id}
+    `
+  } else {
+    await db.sql`
+      INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible)
+      VALUES (${randomUUID()}, ${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim}, true)
+    `
+  }
   emit({ type: 'tenant.oidc_updated', tenantId: args.tenantId, actorId: args.userId, enabled: args.enabled })
 }
 

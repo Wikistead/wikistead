@@ -22,7 +22,7 @@ async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
 async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   const [row] = await db.sql<
     { issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null }[]
-  >`SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc LIMIT 1`
+  >`SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc ORDER BY sort, id LIMIT 1`
   if (!row || !row.enabled) return null
   return {
     issuer: row.issuer,
