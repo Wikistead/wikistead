@@ -5479,7 +5479,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // permanently (only its ✎ faded), so an unrelated block still presented a full-size affordance rectangle
   // which is what the rejection measured, and which also made the layout owner reserve a slot for chrome
   // nobody could see. `cm-aff-shown` comes from the same measure pass that positions it.
-  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none", opacity: "0", transition: "opacity 120ms", transform: "translateY(var(--aff-dy-row, 0px))" },
+  ".cm-lp-macro-btnrow": { position: "absolute", top: "-1.5em", left: "0", display: "inline-flex", alignItems: "center", gap: "4px", zIndex: "3", pointerEvents: "none", opacity: "0", transition: "opacity 120ms", transform: "translate(var(--aff-dx-row, 0px), var(--aff-dy-row, 0px))" },
   // Revealed by the owner, or by the keyboard/atom-selection and table-hover paths that predate it (those
   // reveal their buttons through the rules further down, and a row at opacity 0 would swallow them).
   ".cm-lp-macro-btnrow.cm-aff-shown, .cm-lp-macro-wrap.cm-lp-atom-sel > .cm-lp-macro-btnrow, .cm-lp-table-wrap:hover > .cm-lp-macro-btnrow, .cm-lp-table-edit:hover > .cm-lp-macro-btnrow, .cm-lp-table-wrap.cm-aff-focus > .cm-lp-macro-btnrow, .cm-lp-table-edit.cm-aff-focus > .cm-lp-macro-btnrow": { opacity: "1" },
@@ -5534,7 +5534,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // loses the placement for however many frames it takes to measure again — visible as the flicker in the
   // report. The variable lives on a node the rebuild does not touch, so a fresh element is born already
   // placed. The owner sets `--aff-dy`; everything else here is unchanged.
-  ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0", pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px", transition: "opacity 120ms", transform: "translateY(var(--aff-dy-pill, 0px))" },
+  ".cm-lp-macro-richui-raw": { top: "-1.5em", left: "0", zIndex: "4", opacity: "0", pointerEvents: "none", display: "inline-flex", alignItems: "center", gap: "3px", padding: "1px 5px", transition: "opacity 120ms", transform: "translate(var(--aff-dx-pill, 0px), var(--aff-dy-pill, 0px))" },
   ".cm-lp-macro-richui-key": { fontSize: "0.72em", fontWeight: "600", letterSpacing: "0.02em" },
   //①: the zone `:has` walks DIRECT-child lines only (`>`), so hovering raw lines inside a slot
   // island can never light pills of the OUTER document (or vice versa) — .cm-content elements nest.
@@ -5632,7 +5632,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // accent ring already marks the focused macro, so tinting the pencil too was redundant.
   // #424: nested macros use the SAME top-left offset as every other edit affordance (the old
   // -0.9em/-0.4em special case made the button wander between nesting levels).
-  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-1.5em", left: "0", opacity: "1", zIndex: "5", transform: "translateY(var(--aff-dy-nested, 0px))" },
+  ".cm-lp-nested-macro-edit": { position: "absolute", top: "-1.5em", left: "0", opacity: "1", zIndex: "5", transform: "translate(var(--aff-dx-nested, 0px), var(--aff-dy-nested, 0px))" },
   // #278point 5: INSIDE a layout cell / tab panel the floated corner controls (-0.9em / -1.55em
   // above their slot) stick out past the container's top edge and get cut (the clipped mermaid toolbar
   // in a tab). Nested contexts pin them INSIDE the slot's top-left corner instead — the container never

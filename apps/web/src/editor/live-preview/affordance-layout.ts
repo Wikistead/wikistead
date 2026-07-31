@@ -61,8 +61,13 @@ function varFor(el: HTMLElement): string | null {
   if (el.matches(".cm-lp-nested-macro-edit")) return "--aff-dy-nested";
   return null;
 }
+// #577: the same variable, one axis over. A NESTED block has no room above (its container's chrome row
+// owns that space), so the downward flip was the only slot left — and downward means ON TOP OF THE
+// BLOCK'S OWN DRAWING. Sideways is the room a nested block actually has, so the search gained an
+// inline axis, and that needs a second variable per kind.
+const dxVarFor = (el: HTMLElement): string | null => varFor(el)?.replace("--aff-dy-", "--aff-dx-") ?? null;
 
-interface Placed { readonly el: HTMLElement; top: number; bottom: number; left: number; right: number; dy: number }
+interface Placed { readonly el: HTMLElement; top: number; bottom: number; left: number; right: number; dy: number; dx: number }
 
 const overlaps = (a: Placed, b: Placed): boolean =>
   a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
@@ -169,12 +174,18 @@ export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | n
     if (!name) return 0;
     return parseFloat(view.dom.style.getPropertyValue(name) || "0") || 0;
   };
+  const appliedX = (el: HTMLElement): number => {
+    const name = dxVarFor(el);
+    if (!name) return 0;
+    return parseFloat(view.dom.style.getPropertyValue(name) || "0") || 0;
+  };
   const candidates = els
     .filter(willShow)
     .map((el) => {
       const b = el.getBoundingClientRect();
       const dy = applied(el);
-      return { el, r: { top: b.top - dy, bottom: b.bottom - dy, left: b.left, right: b.right, width: b.width, height: b.height } };
+      const dx = appliedX(el);
+      return { el, r: { top: b.top - dy, bottom: b.bottom - dy, left: b.left - dx, right: b.right - dx, width: b.width, height: b.height } };
     })
     .filter((c) => c.r.width > 0 && c.r.height > 0)
     .sort((a, b) => rank(a.el) - rank(b.el) || a.r.top - b.r.top);
@@ -182,20 +193,30 @@ export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | n
   const bounds = view.scrollDOM.getBoundingClientRect();
   const placed: Placed[] = [];
   for (const { el, r } of candidates) {
-    const cur: Placed = { el, top: r.top, bottom: r.bottom, left: r.left, right: r.right, dy: 0 };
+    const cur: Placed = { el, top: r.top, bottom: r.bottom, left: r.left, right: r.right, dy: 0, dx: 0 };
     if (el.matches(PINNED)) { placed.push(cur); continue; } // #453: presence is authoritative, never moved
 
     const step = r.height + GAP;
-    // Try the reserved rows ABOVE first (that is where this chrome lives), then flip BELOW. The flip is the
-    // slot policy for "every row above is taken": docking downward keeps the affordance beside its own block
-    // and on screen, whereas stacking further up eventually leaves the scroller — i.e. it would be invisible,
-    // which the approval conditions forbid outright.
-    const offsets: number[] = [];
-    for (let i = 1; i <= 4; i++) offsets.push(-i * step);
-    for (let i = 1; i <= 4; i++) offsets.push(i * step);
-    for (const dy of [0, ...offsets]) {
-      const cand: Placed = { ...cur, top: r.top + dy, bottom: r.bottom + dy, dy };
+    // Try the reserved rows ABOVE first (that is where this chrome lives), then SIDEWAYS on the original
+    // row, and only then flip BELOW. #577: the flip alone satisfied "nothing overlaps" and "nothing is
+    // hidden" while breaking a rule nobody had written down — inside a container the rows above belong to
+    // the container's own chrome, so the flip was always taken, and downward lands ON the block's drawing
+    // (measured: the pill sat 20px inside an excalidraw canvas). A nested block has no room above but it
+    // does have room beside, so the inline candidates come first and the flip stays as the last resort for
+    // a column too narrow to hold both.
+    const host = el.closest<HTMLElement>(FOCUS_HOSTS);
+    const content = host ? host.getBoundingClientRect() : null;
+    const inlineRoom = content ? content.right - r.left - r.width : 0;
+    const cands: { dy: number; dx: number }[] = [{ dy: 0, dx: 0 }];
+    for (let i = 1; i <= 4; i++) cands.push({ dy: -i * step, dx: 0 });
+    // sideways: flush right inside the host, then the mirror to the left, both on the ORIGINAL row
+    if (inlineRoom > 0) cands.push({ dy: 0, dx: Math.round(inlineRoom) });
+    if (content && r.left - content.left > 0) cands.push({ dy: 0, dx: -Math.round(r.left - content.left) });
+    for (let i = 1; i <= 4; i++) cands.push({ dy: i * step, dx: 0 });
+    for (const { dy, dx } of cands) {
+      const cand: Placed = { ...cur, top: r.top + dy, bottom: r.bottom + dy, left: r.left + dx, right: r.right + dx, dy, dx };
       if (cand.top < bounds.top || cand.bottom > bounds.bottom) continue; // would leave the visible surface
+      if (cand.left < bounds.left || cand.right > bounds.right) continue; // …in either axis
       if (placed.some((p) => overlaps(cand, p))) continue;
       placed.push(cand);
       break;
@@ -262,6 +283,11 @@ export const affordanceLayout = ViewPlugin.fromClass(
             if (!name) continue; // presence: pinned, never displaced, has no variable
             const v = `${Math.round(p.dy)}px`;
             if (root.style.getPropertyValue(name) !== v) root.style.setProperty(name, v);
+            const nameX = dxVarFor(p.el);
+            if (nameX) {
+              const vx = `${Math.round(p.dx)}px`;
+              if (root.style.getPropertyValue(nameX) !== vx) root.style.setProperty(nameX, vx);
+            }
           }
         },
       });
