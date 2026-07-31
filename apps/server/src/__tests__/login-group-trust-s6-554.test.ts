@@ -90,3 +90,22 @@ describe('#554 S6: per-connection group trust', () => {
     expect(await fgaGroupMember(), 'the diff removes the previous groups').toBe(false)
   }, 60_000)
 })
+
+// #554 S6 review N3: the byte-compat claims themselves — a connection inserted WITHOUT the flag
+// defaults untrusted (deleting migration 093's DEFAULT/backfill must go RED, not stay green
+// because every fixture spells the flag out).
+describe('#554 S6 review N3: the default is untrusted', () => {
+  it('a connection that never mentions trust_groups drops the claim', async () => {
+    const defaulted = randomUUID()
+    await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort)
+      VALUES (${defaulted}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 9)`
+    try {
+      issuer.setSubject(MEMBER, { email: 'm@s6.test', groups: ['Engineering'] })
+      await login(defaulted)
+      expect(await memberGroups(), 'DEFAULT false — no flag, no trust').toEqual([])
+      expect(await fgaGroupMember()).toBe(false)
+    } finally {
+      await admin`DELETE FROM tenant_oidc WHERE id = ${defaulted}`
+    }
+  }, 60_000)
+})
