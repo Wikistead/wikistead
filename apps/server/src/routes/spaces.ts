@@ -511,13 +511,14 @@ export async function backfillSpaceViewerMembers(fga: OpenFgaClient, spaceIds: s
 // machine state. Runs BEFORE any write so a 409 leaves everything untouched.
 export async function assertNoMachineSpaceRole(
   db: TenantDb,
-  args: { spaceId: string; principal: string; keep: { builtinCapability?: string; roleId?: string } },
+  args: { spaceId: string; principal: string; keep: { builtinCapability?: string; builtinCapabilities?: string[]; roleId?: string } },
 ): Promise<void> {
   const rows = await db.sql<{ origin: string; role_id: string | null; builtin_capability: string | null }[]>`
     SELECT origin, role_id, builtin_capability FROM role_assignments
     WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.principal}`
   const isKeep = (r: { role_id: string | null; builtin_capability: string | null }) =>
     (args.keep.builtinCapability !== undefined && r.builtin_capability === args.keep.builtinCapability) ||
+    (args.keep.builtinCapabilities !== undefined && r.builtin_capability !== null && args.keep.builtinCapabilities.includes(r.builtin_capability)) ||
     (args.keep.roleId !== undefined && r.role_id === args.keep.roleId)
   if (rows.some((r) => !isKeep(r) && r.origin !== 'manual')) {
     throw Object.assign(new Error('the principal already holds a machine-managed role — edit the mapping instead'), { statusCode: 409 })
@@ -533,7 +534,7 @@ export async function sweepOtherSpaceRoles(
   driver: SearchDriver,
   args: {
     spaceId: string; tenantId: string; userId: string; principal: string;
-    keep: { builtinCapability?: string; roleId?: string }; keepCaps: string[]; plan?: string;
+    keep: { builtinCapability?: string; builtinCapabilities?: string[]; roleId?: string }; keepCaps: string[]; plan?: string;
   },
 ): Promise<void> {
   const rows = await db.sql<{ id: string; origin: string; role_id: string | null; builtin_capability: string | null }[]>`
@@ -541,6 +542,7 @@ export async function sweepOtherSpaceRoles(
     WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.principal}`
   const isKeep = (r: { role_id: string | null; builtin_capability: string | null }) =>
     (args.keep.builtinCapability !== undefined && r.builtin_capability === args.keep.builtinCapability) ||
+    (args.keep.builtinCapabilities !== undefined && r.builtin_capability !== null && args.keep.builtinCapabilities.includes(r.builtin_capability)) ||
     (args.keep.roleId !== undefined && r.role_id === args.keep.roleId)
   // `manage` is EXEMPT from auto-replacement (row-tracked here, rowless below): silently demoting a
   // manager on an unrelated add is the owner-lockout footgun — a manager is demoted only by an explicit
@@ -643,6 +645,45 @@ export async function grantSpaceAccess(
     keep: { builtinCapability: args.capability }, keepCaps: [args.capability], plan: args.plan,
   })
   emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
+}
+
+// #553 / ADR-199 §2: the editor-noun COMPOSITE grant — where a built-in role NOUN is offered, choosing
+// it issues N single-capability grants (today: editor = edit + comment) in one transaction, then ONE
+// sweep keeping both arms. The bare-capability form stays exactly what it says (an API that quietly
+// granted more than asked would be the same lie #553 removes); the bundle lives only where the noun is.
+export async function grantSpaceAccessComposite(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  driver: SearchDriver,
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string },
+): Promise<void> {
+  for (const cap of args.capabilities) validateSpaceGrant(args.grantee, cap)
+  await requireSpaceManage(fga, args.userId, args.spaceId)
+  // machine-row refusal across BOTH arms (the same 409 the single grant gives)
+  const held = await db.sql<{ origin: string; builtin_capability: string | null }[]>`
+    SELECT origin, builtin_capability FROM role_assignments
+    WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.grantee}
+      AND builtin_capability = ANY(${args.capabilities})`
+  if (held.some((h) => h.origin === 'mapping')) {
+    throw Object.assign(new Error('managed by a group mapping — edit the mapping instead'), { statusCode: 409 })
+  }
+  await assertNoMachineSpaceRole(db, { spaceId: args.spaceId, principal: args.grantee, keep: { builtinCapabilities: args.capabilities } })
+  const { assignBuiltinCompositeInTx } = await import('./roles.js')
+  await assignBuiltinCompositeInTx(db, fga, driver, {
+    tenant: { id: args.tenantId, plan: args.plan ?? '' },
+    spaceId: args.spaceId, principal: args.grantee, actorSub: args.userId,
+    capabilities: args.capabilities,
+    auditAction: 'space.access_granted',
+    skipAudit: args.plan === undefined,
+  })
+  await sweepOtherSpaceRoles(db, fga, driver, {
+    spaceId: args.spaceId, tenantId: args.tenantId, userId: args.userId, principal: args.grantee,
+    keep: { builtinCapabilities: args.capabilities }, keepCaps: args.capabilities, plan: args.plan,
+  })
+  // one event per arm — the mechanism changed, what happened did not (#536 rule); two precise events
+  for (const cap of args.capabilities) {
+    emit({ type: 'space.access_granted', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: cap, actorId: args.userId })
+  }
 }
 
 export async function revokeSpaceAccess(
@@ -1127,8 +1168,18 @@ export async function spacesPlugin(app: FastifyInstance) {
 
   // grantee = user:<sub> | group:<id>#member (raw), OR groupName (#163: server resolves it to
   // group:<id>#member via groupGrantee → groupFgaId, so the id always matches #111's sync).
-  app.post<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation: string } }>('/spaces/:spaceId/access', async (req, reply) => {
+  app.post<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation?: string; relations?: string[] } }>('/spaces/:spaceId/access', async (req, reply) => {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
+    // #553 / ADR-199 §2: `relations` (plural) is the composite form — the editor NOUN grants edit +
+    // comment as N single-capability rows in one tx. The singular `relation` keeps meaning exactly
+    // what it says.
+    if (Array.isArray(req.body?.relations) && req.body.relations.length > 0) {
+      await grantSpaceAccessComposite(req.db, app.fga, app.searchDriver, {
+        spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+        grantee, capabilities: req.body.relations, plan: req.tenant.plan,
+      })
+      return reply.code(204).send()
+    }
     await grantSpaceAccess(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
       grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan,
