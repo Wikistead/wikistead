@@ -35,6 +35,8 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { buildApp } from '../app.js'
 import { acquireTenantDb } from '../db/index.js'
 import { RELATION_TO_CAP, reindexPublishedPages } from '../routes/spaces.js'
+import { spaceGrantTuplesFor } from '../space-grant-expansion.js'
+import { auditIfEntitled } from '../audit/outbox.js'
 import { unassignRoleInTx } from '../routes/roles.js'
 import { deleteTuples } from '@wikistead/authz'
 import { appendOperatorEntry } from '../audit/operator-ledger.js'
@@ -302,14 +304,16 @@ export async function executeConvergence(
         // never swept — the creator leaf is indistinguishable from a legacy manager tuple)
         // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
         const { tuples } = await app.fga.read({ user: p.principal, object: `space:${p.spaceId}` })
+        // #536 re-review 2: group through the EXPANSION, like the runtime sweep. RELATION_TO_CAP is a
+        // display table and leaves `viewer_member` out on purpose, so grouping by it swept `viewer`
+        // and left the member leaf — and `viewer: … or viewer_member` means the principal still saw
+        // the space this script reported as cleaned.
+        const heldRelations = new Set((tuples ?? []).map((tu) => tu.key?.relation ?? ''))
         const heldByCap = new Map<string, { user: string; relation: string; object: string }[]>()
-        for (const tu of tuples ?? []) {
-          const rel = tu.key?.relation ?? ''
+        for (const rel of heldRelations) {
           const cap = RELATION_TO_CAP[rel]
           if (!cap) continue
-          const list = heldByCap.get(cap) ?? []
-          list.push({ user: p.principal, relation: rel, object: `space:${p.spaceId}` })
-          heldByCap.set(cap, list)
+          heldByCap.set(cap, spaceGrantTuplesFor(p.principal, cap, p.spaceId).filter((x: { relation: string }) => heldRelations.has(x.relation)))
         }
         let sweptRowless = false
         for (const [cap, held] of heldByCap) {
@@ -319,7 +323,15 @@ export async function executeConvergence(
             WHERE a.resource_type = 'space' AND a.resource_id = ${p.spaceId} AND a.principal = ${p.principal}
               AND ${cap} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
           if (covering.length === 0) {
-            await deleteTuples(app.fga, held)
+            // audited like every other removal this script makes (condition): the runtime path
+            // had the same gap and it is closed in the same commit — a rowless sweep is still an authz
+            // change, and the strongest one it makes is demoting a space's creator.
+            await db.tx(async (tx) => {
+              await auditIfEntitled(tx, { id: p.tenantId, plan: t.plan }, {
+                actor: CONVERGE_ACTOR, action: 'space.access_revoked', target: `space:${p.spaceId}`,
+              })
+              await deleteTuples(app.fga, held)
+            })
             sweptRowless = true
             removed += 1
             log(`swept rowless ${cap} tuple(s) for ${p.principal} on space:${p.spaceId}`)

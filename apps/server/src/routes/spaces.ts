@@ -615,16 +615,22 @@ export async function sweepOtherSpaceRoles(
   // Group the tuples that ACTUALLY exist by capability — deletion must target exactly these keys (a
   // legacy/seeded grant can hold only half of an expansion pair, and deleting a non-existent tuple is
   // an FGA error that would fail the whole add after the new row already landed).
+  // #536 re-review 2: group by capability through the EXPANSION, not through RELATION_TO_CAP alone.
+  // That table maps a relation to the capability it displays as, and `viewer_member` is deliberately
+  // absent from it (a view grant writes viewer + viewer_member, and listing both would draw one grant
+  // as two rows). Using it to decide what to DELETE meant a swept `view` left viewer_member behind
+  // and model.fga:108 defines `viewer: … or viewer_member`, so the principal kept viewing after
+  // everything they held was "removed" (measured by the reviewer). Sweeping deletes the whole grant.
+  const held = new Set((tuples ?? []).map((t) => t.key?.relation ?? ''))
   const heldByCap = new Map<string, { user: string; relation: string; object: string }[]>()
-  for (const t of tuples ?? []) {
-    const rel = t.key?.relation ?? ''
+  for (const rel of held) {
     const cap = RELATION_TO_CAP[rel]
     if (!cap) continue
-    const list = heldByCap.get(cap) ?? []
-    list.push({ user: args.principal, relation: rel, object: `space:${args.spaceId}` })
-    heldByCap.set(cap, list)
+    // every tuple THIS capability writes, restricted to the ones that actually exist (deleting a
+    // tuple that is not there is an FGA error that would fail the whole add after the row landed)
+    heldByCap.set(cap, spaceGrantTuples(args.principal, cap as SpaceCapability, args.spaceId).filter((t) => held.has(t.relation)))
   }
-  for (const [cap, held] of heldByCap) {
+  for (const [cap, heldTuples] of heldByCap) {
     if (args.keepCaps.includes(cap)) continue
     // A ROWLESS `manage` is indistinguishable from the structural owner leaf createSpace writes for the
     // creator — sweeping it would let "assign any role to the owner" silently destroy their manage and
@@ -638,7 +644,18 @@ export async function sweepOtherSpaceRoles(
       WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId} AND a.principal = ${args.principal}
         AND ${cap} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
     if (covering.length === 0) {
-      await deleteTuples(fga, held)
+      // #536 re-review 2: the strongest privilege change this sweep makes — demoting a rowless manager,
+      // i.e. the space's own creator, which is the ruling's production case — was leaving NO trace,
+      // while the same removal through a row audited normally. An authz change nobody can find in the
+      // log is one nobody can review. Same vocabulary the rowless revoke path already uses.
+      await db.tx(async (tx) => {
+        if (args.plan !== undefined) {
+          await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, {
+            actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}`,
+          })
+        }
+        await deleteTuples(fga, heldTuples)
+      })
       changed = true
     }
   }
