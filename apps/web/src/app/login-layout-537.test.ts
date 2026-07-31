@@ -31,3 +31,27 @@ describe("#554 S3 connectionStartUrl", () => {
     expect(connectionStartUrl(conn("saml", "some-uuid"), "/x")).toBe("/auth/saml/login?returnTo=%2Fx");
   });
 });
+
+// #554 S3 review N4: the social start URL was the one fixed-in-S3 behavior with no pin — a bare
+// URL regression would launch the CORPORATE IdP from a "Continue with Google" button (the provider
+// hint is dropped on the tenant-IdP path) — plus the per-kind fixed wording (finding 4).
+import { socialStartUrl, connectionButtonText } from "./LoginScreen";
+
+describe("#554 S3 socialStartUrl", () => {
+  it("names the platform connection so the hint survives beside a tenant IdP", () => {
+    expect(socialStartUrl("platform", "google", "/")).toBe("/auth/login?connection=platform&provider=google&returnTo=%2F");
+  });
+  it("pre-S3 server (no platform id) keeps the bare legacy URL", () => {
+    expect(socialStartUrl("", "github", "/x")).toBe("/auth/login?provider=github&returnTo=%2Fx");
+  });
+});
+
+describe("#554 S3 connectionButtonText (ADR-197 §3 rev3 fixed branding)", () => {
+  const t = (k: string) => k;
+  it("platform and SAML wear FIXED first-party wording; oidc wears its label or the generic fallback", () => {
+    expect(connectionButtonText(conn("platform", "platform"), t)).toBe("auth.signInPlatform");
+    expect(connectionButtonText(conn("saml"), t)).toBe("auth.signInSaml");
+    expect(connectionButtonText(conn("oidc", "x", "Corp SSO"), t)).toBe("Corp SSO");
+    expect(connectionButtonText(conn("oidc", "x"), t)).toBe("auth.signIn");
+  });
+});

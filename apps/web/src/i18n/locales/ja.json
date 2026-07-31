@@ -554,6 +554,7 @@
     "acceptInvite": "招待を承認",
     "errorIdpUnavailable": "サインインが一時的に利用できません。しばらくしてからもう一度お試しください。",
     "signInSaml": "SSO (SAML) でサインイン",
+    "signInPlatform": "プラットフォームアカウントでサインイン",
     "moreWays": "別の方法でサインイン",
     "noMethods": "現在サインインできません。管理者に連絡してください。"
   },

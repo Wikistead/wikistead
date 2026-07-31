@@ -24,8 +24,11 @@ const HOST = `${SLUG}.localhost`
 
 let app: FastifyInstance
 let tenantId = ''
-const connA = randomUUID()
-const connB = randomUUID()
+// S3 review N5: the order pin must not coin-flip — sort 0 deliberately gets the lexicographically
+// LARGER id, so dropping `sort` from the ORDER BY is guaranteed RED, not 50/50.
+const [idSmall, idLarge] = [randomUUID(), randomUUID()].sort() as [string, string]
+const connA = idLarge  // sort 0
+const connB = idSmall  // sort 1
 const connBroken = randomUUID()
 
 const insert = async (id: string, sort: number, secretEnc: string | null) => {
