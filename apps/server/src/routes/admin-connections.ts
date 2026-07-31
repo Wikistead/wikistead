@@ -5,8 +5,7 @@ import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
 import { validateIssuer, type DiscoveryFetch } from './tenant-oidc.js'
-import { resolveLoginConnections } from '../auth/login-methods.js'
-import type { TenantDb } from '../db/index.js'
+import { assertNotLastWayIn } from '../auth/login-methods.js'
 
 // #554 S4 / ADR-197 §1-3: the admin management surface for OIDC login connections. tenant#admin
 // gated, RLS-scoped. Scope note: SAML keeps its own surface (/admin/saml — one per tenant, EE) and
@@ -42,15 +41,27 @@ const ENTRA_TENANT_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-
 // The label hygiene rule, exported for pins: the string renders on the UNAUTHENTICATED login
 // screen, so it is bounded and stripped of the characters that lie (bidi overrides) or break
 // layout (control/newline). Empty after trimming = no label.
+// #554 S4 review F1: the issuer must be a parseable http(s) URL at WRITE time, enabled or not —
+// a stored garbage issuer used to 201 while disabled and then blow up every consumer that parses
+// it (the admin list screen crashed whole-page on new URL()).
+export function validIssuerShape(issuer: string): boolean {
+  try {
+    const u = new URL(issuer)
+    return u.protocol === 'https:' || u.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
 export function sanitizeConnectionLabel(raw: unknown): { ok: true; label: string | null } | { ok: false } {
   if (raw == null || raw === '') return { ok: true, label: null }
   if (typeof raw !== 'string') return { ok: false }
   const label = raw.trim()
   if (label === '') return { ok: true, label: null }
   if (label.length > 64) return { ok: false }
-  // control chars, DEL, and the bidi-override family (LRM/RLM, LRE..PDF, LRI..PDI)
+  // control chars, DEL, line/para separators, zero-width family, BOM, and the bidi-override family
   // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001F\u007F\u200E\u200F\u202A-\u202E\u2066-\u2069]/.test(label)) return { ok: false }
+  if (/[\u0000-\u001F\u007F\u200B-\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/.test(label)) return { ok: false }
   return { ok: true, label }
 }
 
@@ -68,19 +79,6 @@ const toView = (r: ConnRow) => ({
   preset: r.preset, bootstrapEligible: r.bootstrap_eligible, trustGroups: r.trust_groups,
   subjectPrefix: r.subject_prefix, groupsClaim: r.groups_claim,
 })
-
-// The per-connection lockout guard: would the effective list still be non-empty without `exceptId`?
-// Uses the SAME resolver every login entry point consults; a not-currently-effective connection
-// never triggers it (disabling it changes nothing).
-async function guardNotLastWayIn(db: TenantDb, tenant: { id: string; plan: string }, exceptId: string): Promise<void> {
-  const effective = await resolveLoginConnections(db, tenant)
-  if (!effective.some((c) => c.id === exceptId)) return
-  if (effective.filter((c) => c.id !== exceptId).length > 0) return
-  throw Object.assign(
-    new Error('this is the last effective way to sign in. Enable another connection first, or have an operator run `pnpm tenant:login-methods`.'),
-    { statusCode: 409, code: 'login_lockout' },
-  )
-}
 
 export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { discoveryFetch?: DiscoveryFetch }) {
   const fetchJson = opts?.discoveryFetch ?? safeFetchJson
@@ -123,12 +121,22 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     if (!issuer || !clientId || !redirectUri) {
       throw Object.assign(new Error('issuer, client id and redirect URI are required'), { statusCode: 400 })
     }
+    if (!validIssuerShape(issuer)) {
+      throw Object.assign(new Error('issuer must be an http(s) URL'), { statusCode: 400 })
+    }
     const enabled = b.enabled === true
     if (enabled) {
       const err = await validateIssuer(issuer, fetchJson)
       if (err) throw Object.assign(new Error(err), { statusCode: 400, code: 'oidc_unreachable' })
     }
-    const id = randomUUID()
+    // #554 S4 review F5: wc<conn8>_ derives from the uuid's first 8 hex — re-mint on the
+    // (astronomically rare, but silently identity-merging) per-tenant prefix collision.
+    let id = randomUUID()
+    for (let tries = 0; tries < 5; tries++) {
+      const [dup] = await req.db.sql<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE subject_prefix = ${subjectPrefixFor(id)} LIMIT 1`
+      if (!dup) break
+      id = randomUUID()
+    }
     const [{ next }] = await req.db.sql<[{ next: number }]>`
       SELECT COALESCE(MAX(sort) + 1, 0)::int AS next FROM tenant_oidc`
     await req.db.sql`
@@ -160,12 +168,15 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     const labelRes = b.label !== undefined ? sanitizeConnectionLabel(b.label) : { ok: true as const, label: row.label }
     if (!labelRes.ok) throw Object.assign(new Error('invalid label'), { statusCode: 400 })
     const issuer = (b.issuer ?? row.issuer).trim()
+    if (b.issuer !== undefined && !validIssuerShape(issuer)) {
+      throw Object.assign(new Error('issuer must be an http(s) URL'), { statusCode: 400 })
+    }
     const enabled = b.enabled ?? row.enabled
     if (enabled && (b.enabled === true || b.issuer !== undefined)) {
       const err = await validateIssuer(issuer, fetchJson)
       if (err) throw Object.assign(new Error(err), { statusCode: 400, code: 'oidc_unreachable' })
     }
-    if (b.enabled === false && row.enabled) await guardNotLastWayIn(req.db, req.tenant, row.id)
+    if (b.enabled === false && row.enabled) await assertNotLastWayIn(req.db, req.tenant, row.id)
     let secretEnc = row.client_secret_enc
     if (b.clientSecret === null) secretEnc = null
     else if (b.clientSecret) secretEnc = encryptSecret(b.clientSecret)
@@ -185,7 +196,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     const [row] = await req.db.sql<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE id = ${req.params.id}`
     if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
-    await guardNotLastWayIn(req.db, req.tenant, row.id)
+    await assertNotLastWayIn(req.db, req.tenant, row.id)
     // Members the connection minted keep their rows and grants (FGA is untouched); only this way
     // IN dies. Recovery for an accidental delete is re-creating the connection — but the minted
     // subject_prefix derives from the NEW id, so their sign-in identities do NOT reconnect: stated,

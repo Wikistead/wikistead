@@ -5,7 +5,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
-import { otherLoginMethodsEffective, loginMethodCeiling } from '../auth/login-methods.js' // #537 lockout guard
+import { loginMethodCeiling, assertNotLastWayIn } from '../auth/login-methods.js' // #537 lockout ceiling; #554 S4 shared per-connection guard
 import type { TenantDb } from '../db/index.js'
 
 // Tenant OIDC (members' SSO) settings (Phase 5e). tenant#admin gated. Available on
@@ -101,20 +101,29 @@ export async function updateTenantOidc(
   // (public client), undefined/'' keeps the existing one.
   // #554 S1: rows carry minted uuid ids now; this legacy admin surface manages the tenant's FIRST
   // connection (ORDER BY sort, id — the same row every read path picks).
-  const [existing] = await db.sql<{ id: string; client_secret_enc: string | null; enabled: boolean }[]>`
-    SELECT id, client_secret_enc, enabled FROM tenant_oidc WHERE tenant_id = ${args.tenantId} ORDER BY sort, id LIMIT 1
+  const [existing] = await db.sql<{ id: string; client_secret_enc: string | null; enabled: boolean; preset: string | null }[]>`
+    SELECT id, client_secret_enc, enabled, preset FROM tenant_oidc WHERE tenant_id = ${args.tenantId} ORDER BY sort, id LIMIT 1
   `
+  // #554 S4 review F4: this legacy card only understands the legacy shape — editing a PRESET
+  // connection here would rewrite its issuer while the login screen keeps the preset's fixed
+  // first-party branding ("Continue with Google" pointing anywhere). The connections surface owns
+  // preset rows.
+  if (existing?.preset != null) {
+    throw Object.assign(new Error('this connection is managed on the Login connections surface'), { statusCode: 409, code: 'managed_connection' })
+  }
   // #537 lockout guard: disabling the tenant IdP while NOTHING else is effective (ceiling excludes
   // platform, or no platform IdP configured; SAML unentitled/disabled) would 404 every future login —
   // and unlike a broken issuer, this state looks intentional, so no discovery check catches it.
   // Refuse the TRANSITION to an empty effective set; an already-disabled row may still be edited.
   // When the ceiling itself excludes tenant-oidc the row is already outside the effective set, so
   // disabling it changes nothing — the guard steps aside (review finding C).
-  if (!args.enabled && existing?.enabled && loginMethodCeiling().has('tenant-oidc') && !(await otherLoginMethodsEffective(db, { plan: args.plan }, 'tenant-oidc'))) {
-    throw Object.assign(
-      new Error('disabling the tenant IdP would leave this tenant with no way to sign in. Enable another login method first, or have an operator run `pnpm tenant:login-methods`.'),
-      { statusCode: 409, code: 'login_lockout' },
-    )
+  // #554 S4 review F3: the guard is the SHARED per-connection one — with N≥2 a live sibling
+  // connection keeps this disable legal (the old kind-level check answered 409 against siblings
+  // it could not see), and the ruling-4 platform lapse is honored by the same code path the
+  // connections surface uses. The kind-level otherLoginMethodsEffective stays for the OTHER
+  // surfaces (SAML/platform toggles).
+  if (!args.enabled && existing?.enabled && loginMethodCeiling().has('tenant-oidc')) {
+    await assertNotLastWayIn(db, { id: args.tenantId, plan: args.plan }, existing.id)
   }
   let secretEnc: string | null
   if (args.clientSecret === null) secretEnc = null

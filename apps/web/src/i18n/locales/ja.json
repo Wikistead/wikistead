@@ -16,6 +16,8 @@
     "moveUp": "上へ",
     "moveDown": "下へ",
     "preset": "プロバイダ",
+    "trustGroups": "この接続の groups claim を信頼する（グループ同期・ロールマッピング）",
+    "bootstrapEligible": "空テナントの first admin をこの接続から bootstrap 可能にする",
     "presetNone": "カスタム（任意の OIDC プロバイダ）",
     "issuerPlaceholder": "Issuer URL（https://idp.example.com）",
     "labelPlaceholder": "ボタンラベル（任意・ログイン画面に表示）",

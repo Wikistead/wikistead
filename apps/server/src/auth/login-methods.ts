@@ -181,6 +181,29 @@ export async function resolveLoginConnections(
   return out
 }
 
+// #554 S4 review F2/F3: the per-connection lockout guard, SHARED by the connections surface and
+// the legacy /admin/oidc card so the same operation cannot get opposite answers. It honors the
+// ADR-195 ruling-4 platform LAPSE: when the write would remove the last own-IdP connection, a
+// configured, in-ceiling platform IdP is still a way back in — the pref lapses open the moment no
+// own IdP is effective, so the write is allowed. Honest limit (F11, the #537 guard's own caveat):
+// read-then-write without a lock — two concurrent disables of different connections can still
+// empty the set; break-glass is the recovery.
+export async function assertNotLastWayIn(
+  db: TenantDb,
+  tenant: { id: string; plan: string },
+  exceptId: string,
+  env?: string | undefined,
+): Promise<void> {
+  const effective = await resolveLoginConnections(db, tenant, env)
+  if (!effective.some((c) => c.id === exceptId)) return // not effective now — the guard steps aside
+  if (effective.filter((c) => c.id !== exceptId).length > 0) return
+  if (loginMethodCeiling(env).has('platform-oidc') && loadPlatformOidc()) return // the lapse (ruling 4)
+  throw Object.assign(
+    new Error('this is the last effective way to sign in. Enable another connection first, or have an operator run `pnpm tenant:login-methods`.'),
+    { statusCode: 409, code: 'login_lockout' },
+  )
+}
+
 // #537 lockout guard: "would anything OTHER than `except` still let someone in?" — asked before a
 // write that disables one method. Refusing the transition to an empty effective set is the guard; an
 // ALREADY-empty set is not made worse by a write, so only the transition is refused (the admin's
