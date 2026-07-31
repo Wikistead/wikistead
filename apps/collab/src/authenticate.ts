@@ -10,6 +10,7 @@ import {
   makeMemberVerifier,
 } from "@wikistead/auth";
 import { fgaClient, check, checkMemberAccess, isTenantMember } from "@wikistead/authz";
+import { externalSubViolation } from "@wikistead/hooks";
 import { pool } from "./db.js";
 
 const guestCfg = {
@@ -135,6 +136,13 @@ export async function authenticate(args: { token: string; documentName: string }
   // would mean the same token authenticates over HTTP and then cannot open the document it just
   // fetched.
   const m = await verifyMember(token);
+  // #554 / ADR-197 §5 (S0, seam 8): the collab WS twin of the HTTP bearer seam — an externally-
+  // asserted sub wearing a reserved internal prefix (or outside the FGA-safe grammar) never becomes
+  // a room principal (it would join presence AS the spoofed member). Refused with this branch's own
+  // membership failure, never a distinguishable oracle. The other branches stay ungated on purpose:
+  // dev-token is internal, guests are `share_link:` subjects, the member collab token is minted by
+  // our server from an already-admitted session sub.
+  assert(!externalSubViolation(m.sub), "not a member of this tenant");
   assert(!m.tenantId || m.tenantId === tenantId || m.tenantId === (await tenantSlug(tenantId)), "tenant mismatch");
   const access = await checkMemberAccess(fgaClient, m.sub, { type: "page", id: pageId });
   assert(access !== null, "member has no access to this page");
