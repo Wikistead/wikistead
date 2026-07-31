@@ -67,11 +67,19 @@ function parseRanges(tok: string): ReadonlyArray<readonly [number, number]> | un
 // The fence markers + the info string: ```ts title="app.ts" → info "ts title=…". null = not a fence.
 const FENCE_RE = /^\s*(?:`{3,}|~{3,})\s*(.*)$/;
 
+// #565: a token is a LANGUAGE only when it is attribute-shaped in no way — a language-less fence's
+// first token can be `title="x"`, `showLineNumbers`, `{1,3}` or `align=left`, and consuming it as
+// the language swallows the attribute before interpretation starts. serializeFenceInfo emits exactly
+// that first-token-is-an-attribute shape when lang is "", so without this the panel's own writes
+// were unreadable (the round-trip promise below was false for lang="").
+const attrShaped = (t: string) => t.startsWith("{") || t.includes("=") || t === "showLineNumbers";
+
 // Parse the info string AFTER the fence markers (e.g. `ts title="app.ts" showLineNumbers {1,3-5}`).
 export function parseFenceInfo(info: string): FenceInfo {
   const toks = tokenize(info.trim());
-  const out: FenceInfo = { lang: toks[0] ?? "", extra: [] };
-  for (let k = 1; k < toks.length; k++) {
+  const hasLang = toks.length > 0 && !attrShaped(toks[0]!);
+  const out: FenceInfo = { lang: hasLang ? toks[0]! : "", extra: [] };
+  for (let k = hasLang ? 1 : 0; k < toks.length; k++) {
     const t = toks[k]!;
     if (t.startsWith("{")) {
       const r = parseRanges(t);
@@ -104,7 +112,8 @@ export function parseFenceLine(firstLine: string): FenceInfo | null {
 const serializeRanges = (r: ReadonlyArray<readonly [number, number]>) =>
   "{" + r.map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(",") + "}";
 
-// Rebuild the info string from a descriptor. parse∘serialize is stable (round-trip safe), and unknown
+// Rebuild the info string from a descriptor. parse∘serialize is stable (round-trip safe — including
+// lang="", where the first emitted token is an attribute; #565), and unknown
 // attributes on `extra` are re-emitted so nothing is lost.
 export function serializeFenceInfo(info: FenceInfo): string {
   const parts = [info.lang];
