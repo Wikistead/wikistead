@@ -18,7 +18,10 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
-import { recheckCustomDomains, removeCustomDomain, verifyCustomDomain, DEMOTE_AFTER, GRACE_MS } from '../routes/custom-domains.js'
+import {
+  recheckCustomDomains, removeCustomDomain, verifyCustomDomain, recheckIntervalFromEnv,
+  startCustomDomainRecheckWorker, DEMOTE_AFTER, GRACE_MS, DEFAULT_RECHECK_MS,
+} from '../routes/custom-domains.js'
 import { tenantBaseUrl } from '../email/base-url.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient } from '@wikistead/authz'
@@ -168,7 +171,11 @@ describe('#576: a custom domain that stopped being ours stops deciding link host
   // still won tenantBaseUrl — links built on a host that resolved to nothing, and no fallback to
   // the platform URL either. The two readers must agree by construction.
   describe('a tenant with two domains: the URL builder and host→tenant resolution never disagree', () => {
-    const SECOND = `alt-${STAMP}.example.test`
+    // NAME MATTERS (#576 re-review 3): the sweep reads ORDER BY domain, so `zz-` puts the DEAD domain
+    // LAST — after the live one has already run its success path. If the dead row went first, the live
+    // row's own syncDomainMapping would repair the mapping later in the same tick and the pin would
+    // pass with the fix removed. Measured: with `alt-` this test was vacuous.
+    const SECOND = `zz-alt-${STAMP}.example.test`
     const secondToken = `tok2${STAMP}`
     // resolveTxt is per-domain here: the OLD domain stays live, the mapped one disappears
     const onlySecondGone = (): ((d: string) => Promise<string[][]>) => async (d: string) => {
@@ -308,4 +315,32 @@ describe('#576: a custom domain that stopped being ours stops deciding link host
     expect(again.demoted, 'the second pass has nothing to demote').not.toContain(DOMAIN)
     expect((await row())!.check_failures, 'and it does not keep counting against a pending row').toBe(settled)
   }, 120_000)
+})
+
+// #576 re-review 3: the sweep's own on/off switch. `Number(env ?? default)` let an EMPTY env line read
+// as 0 and disable the sweep silently — the exact failure class this ticket exists to remove — and a
+// unit-less value like "6h" reached setInterval(NaN). Pure function, so this is a unit pin.
+describe('#576: the re-check interval is parsed, not coerced', () => {
+  it('an empty or missing value keeps the default; only a real number overrides', () => {
+    expect(recheckIntervalFromEnv(undefined)).toBe(DEFAULT_RECHECK_MS)
+    expect(recheckIntervalFromEnv(''), 'CUSTOM_DOMAIN_RECHECK_MS= must NOT mean "off"').toBe(DEFAULT_RECHECK_MS)
+    expect(recheckIntervalFromEnv('   ')).toBe(DEFAULT_RECHECK_MS)
+    expect(recheckIntervalFromEnv('6h'), 'a unit-less value is a typo, not an interval').toBe(DEFAULT_RECHECK_MS)
+    expect(recheckIntervalFromEnv('900000')).toBe(900_000)
+    expect(recheckIntervalFromEnv('0'), 'switching it off stays possible — explicitly').toBe(0)
+  })
+
+  it('a disabled worker says so and schedules nothing', () => {
+    const warn = console.warn
+    const said: unknown[] = []
+    console.warn = (...a: unknown[]) => { said.push(a[0]) }
+    try {
+      const stop = startCustomDomainRecheckWorker(0)
+      stop()
+      expect(said.some((l) => typeof l === 'string' && l.includes('DISABLED')), 'never quietly').toBe(true)
+      startCustomDomainRecheckWorker(Number.NaN)() // NaN would have been setInterval(NaN) — a hot loop
+    } finally {
+      console.warn = warn
+    }
+  })
 })
