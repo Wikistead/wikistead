@@ -557,7 +557,8 @@
     "commentSummaryGuests": "link guests",
     "managedBadge": "mapping",
     "managedByMapping": "Conferred by a group mapping - remove it in Group mappings below.",
-    "replaceConfirm": "Replace {{who}}'s current role ({{current}}) with {{next}}? One principal holds one role."
+    "replaceConfirm": "Replace {{who}}'s current role ({{current}}) with {{next}}? One principal holds one role.",
+    "managerReplaceConfirm": "{{who}} is a MANAGER of this space. Replace their manager role with {{next}}? They lose every management capability here — a tenant admin can restore it."
   },
   "auth": {
     "signInTitle": "Sign in to wikistead",

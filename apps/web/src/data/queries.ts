@@ -1280,13 +1280,15 @@ export function useGrantSpaceAccess(spaceId: string) {
     // The API body keys the capability as `relation` (shared page/space vocabulary). grantee OR
     // groupName (#163: server resolves the group name → group:<id>#member). #553: `capabilities`
     // (plural) is the composite form — the editor noun grants its bundle atomically via `relations`.
-    mutationFn: (args: { grantee?: string; groupName?: string; capability?: PageRelation; capabilities?: string[] }) =>
+    // #536`replace` is the caller saying a PERSON confirmed demoting a manager. Without it the
+    // server refuses (409 manager_replacement_requires_confirmation) rather than silently demoting.
+    mutationFn: (args: { grantee?: string; groupName?: string; capability?: PageRelation; capabilities?: string[]; replace?: boolean }) =>
       apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, {
         method: "POST",
         body: JSON.stringify(
           args.capabilities
-            ? { grantee: args.grantee, groupName: args.groupName, relations: args.capabilities }
-            : { grantee: args.grantee, groupName: args.groupName, relation: args.capability },
+            ? { grantee: args.grantee, groupName: args.groupName, relations: args.capabilities, replace: args.replace }
+            : { grantee: args.grantee, groupName: args.groupName, relation: args.capability, replace: args.replace },
         ),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
@@ -1641,7 +1643,7 @@ export function useAssignRole() {
   return useMutation({
     // #536`groupName` is the group form — the server derives its tenant-salted FGA id. A client
     // that sends a hand-built `group:<name>#member` principal writes a tuple nobody holds.
-    mutationFn: ({ roleId, ...body }: { roleId: string; resourceType: string; resourceId: string; principal?: string; groupName?: string }) =>
+    mutationFn: ({ roleId, ...body }: { roleId: string; resourceType: string; resourceId: string; principal?: string; groupName?: string; replace?: boolean }) =>
       apiFetch<RoleAssignment>(`/admin/roles/${encodeURIComponent(roleId)}/assignments`, token, { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
   });

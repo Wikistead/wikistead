@@ -122,30 +122,84 @@ describe('#536one principal, one space role (replace semantics)', () => {
   }, 120_000)
 })
 
-describe('#536the structural owner grant is never swept', () => {
-  it('a ROWLESS manage (the createSpace creator leaf) survives an add for that principal', async () => {
-    const p = sub('owner-ish')
-    // the creator-shaped state: a manager leaf with no role_assignments row
-    await writeTuples(fgaClient, [{ user: p, relation: 'manager', object: `space:${spaceId}` }])
-    await grant(p, 'view')
-    const rows = await rowsOf(p)
-    expect(rows).toEqual([{ role_id: null, builtin_capability: 'view', origin: 'manual' }])
+// #536SUPERSEDES the two pins that used to live here ("manage is exempt, so the manager and the
+// weaker role coexist" / "a rowless manage survives an add"). Coexistence was the last stack a user
+// could still see, and the ruling replaced silence with a question: adding a weaker role to a manager
+// is REFUSED unless a person confirmed the demotion, and once confirmed it converges like any other
+// replacement. Both of the old assertions are now WRONG answers — a silent no-op grant (a success that
+// changed nothing) and a two-row principal — so they are rewritten rather than kept beside their
+// contradiction. What must never happen is unchanged and pinned below: manage never disappears on its
+// own.
+describe('#536a manager is demoted only by someone who said so', () => {
+  const holdsManager = async (p: string) => {
     const { tuples } = await fgaClient.read({ user: p, object: `space:${spaceId}` })
-    const relations = (tuples ?? []).map((t) => t.key?.relation)
-    expect(relations, 'the structural manage leaf is untouched').toContain('manager')
+    return (tuples ?? []).some((t) => t.key?.relation === 'manager')
+  }
+
+  it('a weaker grant onto a ROW-TRACKED manager is refused (409) and changes NOTHING', async () => {
+    const p = sub('mgr-row')
+    await grant(p, 'manage')
+    await expect(grant(p, 'view')).rejects.toMatchObject({ statusCode: 409, code: 'manager_replacement_requires_confirmation' })
+    expect(await rowsOf(p), 'no demotion, and no half-applied new role').toEqual([{ role_id: null, builtin_capability: 'manage', origin: 'manual' }])
+    expect(await holdsManager(p)).toBe(true)
+  }, 120_000)
+
+  it('a weaker grant onto a ROWLESS manager (the createSpace creator leaf) is refused too', async () => {
+    // the production shape: the space creator holds a manager leaf and no row at all. A guard that only
+    // read rows would wave this through and silently demote the owner of the space.
+    const p = sub('mgr-rowless')
+    await writeTuples(fgaClient, [{ user: p, relation: 'manager', object: `space:${spaceId}` }])
+    await expect(grant(p, 'view')).rejects.toMatchObject({ statusCode: 409, code: 'manager_replacement_requires_confirmation' })
+    expect(await rowsOf(p)).toEqual([])
+    expect(await holdsManager(p), 'the creator still manages their own space').toBe(true)
     await deleteTuples(fgaClient, [{ user: p, relation: 'manager', object: `space:${spaceId}` }]).catch(() => {})
   }, 120_000)
-})
 
-describe('#536manage is exempt from auto-replacement (lockout prevention)', () => {
-  it('a row-tracked manage grant survives a later add; the two coexist', async () => {
-    const p = sub('mgr-keep')
+  it('CONFIRMED, it converges: one row, the manager leaf gone, the new role in force', async () => {
+    const p = sub('mgr-replace')
     await grant(p, 'manage')
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business', replace: true,
+    })
+    expect(await rowsOf(p), 'one principal, one row').toEqual([{ role_id: null, builtin_capability: 'view', origin: 'manual' }])
+    expect(await holdsManager(p), 'the demotion reached FGA, not just the table').toBe(false)
+    expect(await canView(p), 'and the role they were given actually works').toBe(true)
+  }, 120_000)
+
+  it('CONFIRMED reaches the rowless creator leaf as well (the production case)', async () => {
+    const p = sub('mgr-rowless-replace')
+    await writeTuples(fgaClient, [{ user: p, relation: 'manager', object: `space:${spaceId}` }])
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, {
+      spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business', replace: true,
+    })
+    expect(await rowsOf(p)).toEqual([{ role_id: null, builtin_capability: 'view', origin: 'manual' }])
+    expect(await holdsManager(p), 'a confirmed demotion that left the leaf behind would be a lie').toBe(false)
+  }, 120_000)
+
+  it('granting `manage` ITSELF is not a demotion and needs no confirmation', async () => {
+    const p = sub('mgr-promote')
     await grant(p, 'view')
-    const rows = await rowsOf(p)
-    expect(rows).toEqual([
-      { role_id: null, builtin_capability: 'manage', origin: 'manual' },
-      { role_id: null, builtin_capability: 'view', origin: 'manual' },
-    ])
+    await grant(p, 'manage') // no replace flag, no refusal
+    expect(await holdsManager(p)).toBe(true)
+  }, 120_000)
+
+  it('the custom-role door asks the same question (HTTP 409, then converges when confirmed)', async () => {
+    const p = sub('mgr-http')
+    await grant(p, 'manage')
+    const refused = await app.inject({
+      method: 'POST', url: `/admin/roles/${roleId}/assignments`, headers: dev,
+      payload: { resourceType: 'space', resourceId: spaceId, principal: p },
+    })
+    expect(refused.statusCode).toBe(409)
+    expect(refused.json()).toMatchObject({ code: 'manager_replacement_requires_confirmation' })
+    expect(await rowsOf(p)).toEqual([{ role_id: null, builtin_capability: 'manage', origin: 'manual' }])
+
+    const confirmed = await app.inject({
+      method: 'POST', url: `/admin/roles/${roleId}/assignments`, headers: dev,
+      payload: { resourceType: 'space', resourceId: spaceId, principal: p, replace: true },
+    })
+    expect(confirmed.statusCode).toBe(201)
+    expect(await rowsOf(p)).toEqual([{ role_id: roleId, builtin_capability: null, origin: 'manual' }])
+    expect(await holdsManager(p)).toBe(false)
   }, 120_000)
 })

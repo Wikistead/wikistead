@@ -86,12 +86,18 @@ export interface ConvergencePlanItem {
   principal: string
   keep: string
   remove: string[]
-  keepRow: DupRow
+  // #536null when the keeper is the principal's MANAGER standing rather than a row. That is the
+  // production shape — createSpace writes the creator's `manager` leaf with no row at all — so a plan
+  // that could only name rows could not express "keep their manager, drop the weaker ones", which is
+  // exactly the stack the user still sees. Execute re-checks the manager tuple instead of a row id.
+  keepRow: DupRow | null
   removeRows: { id: string; label: string }[]
   // ranked, non-manage capabilities held as ROWLESS tuples that no row covers (legacy pre-086 residue,
   // #536measured: a commenter tuple beside an aaa-role row). Swept by the leftover pass; listed
   // here so the DRY-RUN shows them before anything runs.
   rowlessResidue?: string[]
+  // set when the keeper is a manager (row-tracked or rowless) — execute verifies it still stands
+  managerKeeper?: boolean
 }
 
 // Enumerate the duplicate groups (>1 manual, non-manage, RANKED rows for one tenant+space+principal)
@@ -129,9 +135,46 @@ export async function planConvergence(
     const k = `${r.tenant_id} ${r.resource_id} ${r.principal}`
     groups.set(k, [...(groups.get(k) ?? []), r])
   }
+  // #536who still holds `manage` on this space. A manager wearing a weaker role too is the last
+  // "one principal, two rows" stack the user sees, and the ruling settled it: keep the manager, drop the
+  // weaker rows. That is not the silent demotion the manage exemption protects against — the manager
+  // survives; only the redundant row goes. Row-tracked AND rowless, because the rowless one (the space
+  // creator's leaf) is the production case.
+  const managerRows = await admin<{ tenant_id: string; resource_id: string; principal: string }[]>`
+    SELECT a.tenant_id, a.resource_id, a.principal FROM role_assignments a
+    JOIN tenants t ON t.id = a.tenant_id AND t.isolation = 'logical'
+    WHERE a.resource_type = 'space' AND a.builtin_capability = 'manage'`
+  const managers = new Set(managerRows.map((r) => `${r.tenant_id} ${r.resource_id} ${r.principal}`))
+  const holdsManage = async (key: string, spaceId: string, principal: string): Promise<boolean> => {
+    if (managers.has(key)) return true
+    if (!fga) return false
+    // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so this is bounded by the type's relation count, never by tenant size.
+    const { tuples } = await fga.read({ user: principal, object: `space:${spaceId}` })
+    return (tuples ?? []).some((t) => t.key?.relation === 'manager')
+  }
+
   const plan: ConvergencePlanItem[] = []
-  for (const g of groups.values()) {
+  for (const [key, g] of groups) {
     const ranked = g.filter(isRankedRow)
+    const manager = ranked.length > 0 && await holdsManage(key, g[0]!.resource_id, g[0]!.principal)
+    if (manager) {
+      // the manager IS the keeper; every ranked row here is weaker by construction (manage rows are not
+      // in this query at all), so they all go. Unranked rows stay exempt exactly as they do below.
+      for (const ex of g.filter((r) => !isRankedRow(r))) {
+        log(`keep (unranked capabilities, exempt like manage): ${ex.principal} on space:${ex.resource_id} — ${ex.builtin_capability ?? `role:${ex.role_id}`}`)
+      }
+      plan.push({
+        tenantId: g[0]!.tenant_id,
+        spaceId: g[0]!.resource_id,
+        principal: g[0]!.principal,
+        keep: 'manage',
+        remove: ranked.map((r) => r.builtin_capability ?? `role:${r.role_id}`),
+        keepRow: null,
+        removeRows: ranked.map((r) => ({ id: r.id, label: r.builtin_capability ?? `role:${r.role_id}` })),
+        managerKeeper: true,
+      })
+      continue
+    }
     if (ranked.length < 2) continue // nothing to converge in this group (an exempt-only stack stays whole)
     // report the exempt keeps ONLY for groups that actually converge — logging every unranked role in
     // the tenant would bury the plan this dry-run exists to show (#499's discipline)
@@ -229,9 +272,20 @@ export async function executeConvergence(
       const db = await acquireTenantDb({ id: t.id, slug: t.slug, plan: t.plan, isolation: t.isolation } as Tenant)
       try {
         // the keeper must still exist NOW, on the tenant's own handle — otherwise this group would
-        // converge to nothing (delete-all), which is not what anyone planned
-        const keeper = await db.sql`SELECT 1 FROM role_assignments WHERE id = ${p.keepRow.id}`
-        if (keeper.length === 0) { log(`skip ${p.principal} on space:${p.spaceId}: keeper row gone since plan`); continue }
+        // converge to nothing (delete-all), which is not what anyone planned. For a MANAGER keeper the
+        // standing is the tuple, not a row (#536): if their manage was revoked between plan and
+        // apply, dropping the weaker rows would leave them with nothing at all.
+        if (p.keepRow === null) {
+          // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so this is bounded by the type's relation count, never by tenant size.
+          const { tuples: keeperTuples } = await app.fga.read({ user: p.principal, object: `space:${p.spaceId}` })
+          const stillManages = (keeperTuples ?? []).some((t) => t.key?.relation === 'manager')
+            || (await db.sql`SELECT 1 FROM role_assignments WHERE resource_type = 'space' AND resource_id = ${p.spaceId}
+                             AND principal = ${p.principal} AND builtin_capability = 'manage'`).length > 0
+          if (!stillManages) { log(`skip ${p.principal} on space:${p.spaceId}: manager standing gone since plan`); continue }
+        } else {
+          const keeper = await db.sql`SELECT 1 FROM role_assignments WHERE id = ${p.keepRow.id}`
+          if (keeper.length === 0) { log(`skip ${p.principal} on space:${p.spaceId}: keeper row gone since plan`); continue }
+        }
         let removed = 0
         for (const r of p.removeRows) {
           const exists = await db.sql`SELECT 1 FROM role_assignments WHERE id = ${r.id}`
@@ -275,7 +329,9 @@ export async function executeConvergence(
         // drift visibility (informational, fail-closed): a keeper whose expansion tuples are missing
         // is legacy row/tuple skew — writing tuples is an authz change this script must NOT make, so
         // it is reported for a human to look at instead.
-        const keepCaps = p.keepRow.builtin_capability != null ? [p.keepRow.builtin_capability] : (p.keepRow.capabilities ?? [])
+        const keepCaps = p.keepRow === null
+          ? ['manage'] // the manager keeper: its leaf is the one that must still be there
+          : p.keepRow.builtin_capability != null ? [p.keepRow.builtin_capability] : (p.keepRow.capabilities ?? [])
         for (const cap of keepCaps) {
           if (!heldByCap.has(cap)) log(`WARNING: keeper of ${p.principal} on space:${p.spaceId} holds no '${cap}' tuple (legacy row/tuple drift — not repaired here)`)
         }

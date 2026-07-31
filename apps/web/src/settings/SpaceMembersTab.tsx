@@ -16,6 +16,9 @@ import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
 import { ConfirmDialog } from "../ui/dialogs";
+import { ApiError } from "../data/apiClient";
+// #536the server's refusal code — the client mirrors the constant instead of a string literal.
+export const MANAGER_REPLACEMENT_CODE = "manager_replacement_requires_confirmation";
 import { SpaceGroupMappings } from "./SpaceGroupMappings";
 
 interface SpaceCtx { spaceId: string; name: string }
@@ -78,7 +81,7 @@ export function SpaceMembersTab() {
   const [pick, setPick] = useState<string>("builtin:view");
   // #536②: 1 principal = 1 role — adding over an existing (different) role REPLACES it. The
   // server converges regardless (the fortress); this confirm is the "no accidental double-grant" UI layer.
-  const [pendingAdd, setPendingAdd] = useState<{ run: () => void; who: string; current: string; next: string } | null>(null);
+  const [pendingAdd, setPendingAdd] = useState<{ run: () => void; who: string; current: string; next: string; manager?: boolean } | null>(null);
   const candidates = useMemberCandidates(spaceId, picked ? "" : query);
   const groups = useTenantGroups(spaceId, mode === "group");
 
@@ -121,13 +124,20 @@ export function SpaceMembersTab() {
       : capNoun(action.path === "grant-composite" ? action.capabilities[0]! : action.capability);
     const who = mode === "group" ? groupName : (picked?.label ?? "");
     const existing = mergedRows.find((r) => {
-      // `manage` rows never auto-replace (server-side exemption — owner-lockout prevention; a manager is
-      // demoted only by an explicit revoke), so they don't trigger the replace confirm either.
-      if (r.kind === "grant" && r.capability === "manage") return false;
       if (mode === "group") return r.label === `${groupName} (${t("spaceMembers.group")})`;
       if (!picked) return false;
       return r.kind === "grant" ? r.grantee === picked.grantee : r.principal === picked.grantee;
     });
+    // #536a MANAGER getting a weaker role is its own question, with its own words — this is a
+    // demotion, not a swap, and the server refuses it outright without the confirmed `replace` flag. The
+    // manager row can also be ROWLESS (the space creator), which is why it shows up here as a grant row
+    // at all. Assigning `manage` itself is not a demotion and keeps the ordinary swap wording.
+    const demotesManager = existing?.kind === "grant" && existing.capability === "manage"
+      && !(action.path === "grant" && action.capability === "manage");
+    if (existing && demotesManager && !existing.managed) {
+      setPendingAdd({ run: () => dispatchAdd(action, true), who, current: existing.badge, next: nextBadge, manager: true });
+      return;
+    }
     if (existing && existing.badge !== nextBadge && !existing.managed) {
       setPendingAdd({ run: () => dispatchAdd(action), who, current: existing.badge, next: nextBadge });
       return;
@@ -135,43 +145,59 @@ export function SpaceMembersTab() {
     dispatchAdd(action);
   };
 
-  const dispatchAdd = (action: ReturnType<typeof resolveGrantDispatch>) => {
+  // The server is the wall: when it answers 409 manager_replacement_requires_confirmation (a manager the
+  // list could not show us — e.g. a group principal), open the SAME dialog and retry with the flag rather
+  // than showing a dead "action failed" toast.
+  const onAddError = (err: unknown, retry: () => void, who: string, next: string) => {
+    if (err instanceof ApiError && err.code === MANAGER_REPLACEMENT_CODE) {
+      setPendingAdd({ run: retry, who, current: capNoun("manage"), next, manager: true });
+      return;
+    }
+    notify.error(t("toast.actionFailed"));
+  };
+
+  const dispatchAdd = (action: ReturnType<typeof resolveGrantDispatch>, replace = false) => {
     if (action.path === "none") return;
     if (action.path === "assign") {
       const target = action.target.kind === "group" ? { groupName: action.target.groupName } : { principal: action.target.principal };
-      assignRole.mutate({ roleId: action.roleId, resourceType: "space", resourceId: spaceId, ...target }, {
+      const who = action.target.kind === "group" ? action.target.groupName : (picked?.label ?? "");
+      const next = customRoles.find((r) => r.id === action.roleId)?.name ?? "";
+      assignRole.mutate({ roleId: action.roleId, resourceType: "space", resourceId: spaceId, ...target, replace }, {
         onSuccess: () => { notify.success(t("toast.accessGranted")); setPicked(null); setQuery(""); setGroupName(""); },
-        onError: () => notify.error(t("toast.actionFailed")),
+        onError: (e) => onAddError(e, () => dispatchAdd(action, true), who, next),
       });
       return;
     }
     if (action.path === "grant-composite") {
       // #553 / ADR-199 §2: the editor noun — one control, N single-capability grants in one server tx
       const target = action.target.kind === "group" ? { groupName: action.target.groupName } : { grantee: action.target.principal };
-      grant.mutate({ ...target, capabilities: action.capabilities }, {
+      const who = action.target.kind === "group" ? action.target.groupName : (picked?.label ?? "");
+      grant.mutate({ ...target, capabilities: action.capabilities, replace }, {
         onSuccess: () => { notify.success(t("toast.accessGranted")); setPicked(null); setQuery(""); setGroupName(""); },
-        onError: () => notify.error(t("toast.actionFailed")),
+        onError: (e) => onAddError(e, () => dispatchAdd(action, true), who, capNoun(action.capabilities[0]!)),
       });
       return;
     }
     setCapability(action.capability as PageRelation);
-    addBuiltIn(action.capability as PageRelation);
+    addBuiltIn(action.capability as PageRelation, replace, () => dispatchAdd(action, true));
   };
 
-  const addBuiltIn = (capability: PageRelation) => {
+  const addBuiltIn = (capability: PageRelation, replace = false, retry?: () => void) => {
+    const again = retry ?? (() => addBuiltIn(capability, true));
     if (mode === "group") {
       if (!groupName) return;
-      grant.mutate({ groupName, capability }, {
+      grant.mutate({ groupName, capability, replace }, {
         onSuccess: () => notify.success(t("toast.accessGranted")),
-        onError: () => notify.error(t("toast.actionFailed")),
+        onError: (e) => onAddError(e, again, groupName, capNoun(capability)),
       });
       setGroupName("");
       return;
     }
     if (!picked) return;
-    grant.mutate({ grantee: picked.grantee, capability }, {
+    const who = picked.label;
+    grant.mutate({ grantee: picked.grantee, capability, replace }, {
       onSuccess: () => notify.success(t("toast.accessGranted")),
-      onError: () => notify.error(t("toast.actionFailed")),
+      onError: (e) => onAddError(e, again, who, capNoun(capability)),
     });
     setPicked(null);
     setQuery("");
@@ -329,7 +355,10 @@ export function SpaceMembersTab() {
       {/* #536②: the replacement confirm — adding over a different existing role swaps it. */}
       <ConfirmDialog
         open={pendingAdd !== null}
-        message={pendingAdd ? t("spaceMembers.replaceConfirm", { who: pendingAdd.who, current: pendingAdd.current, next: pendingAdd.next }) : ""}
+        message={pendingAdd
+          ? t(pendingAdd.manager ? "spaceMembers.managerReplaceConfirm" : "spaceMembers.replaceConfirm",
+              { who: pendingAdd.who, current: pendingAdd.current, next: pendingAdd.next })
+          : ""}
         confirmTestId="space-role-replace-confirm"
         onClose={() => setPendingAdd(null)}
         onConfirm={() => { pendingAdd?.run(); setPendingAdd(null); }}
