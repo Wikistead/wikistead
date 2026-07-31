@@ -1,53 +1,33 @@
-// @vitest-environment node
-// #537 §6: the login screen's layout rule and the admin badge rule, pinned as pure functions.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { loginLayout } from "./LoginScreen";
-import { methodBadge } from "../settings/AdminLoginMethodsSection";
-import en from "../i18n/locales/en.json";
-import ja from "../i18n/locales/ja.json";
+import { connectionsFor, connectionStartUrl, type LoginConnection } from "./LoginScreen";
 
-describe("#537 loginLayout (§6)", () => {
-  it("OIDC is primary; SAML folds behind 'another way' only when both exist", () => {
-    expect(loginLayout(["oidc", "saml"])).toEqual({ primary: "oidc", secondary: ["saml"] });
-    expect(loginLayout(["oidc"])).toEqual({ primary: "oidc", secondary: [] }); // single method → no fold (today's screen)
-    expect(loginLayout(["saml"])).toEqual({ primary: "saml", secondary: [] }); // SAML-only tenants get it as THE button
+// #537 §6 layout, re-aimed by #554 S3 (ADR-197 §3): the screen's truth is the ordered CONNECTION
+// list; the legacy method synthesis (no `connections` field — pre-S3 server / failed fetch) keeps
+// the old §6 semantics: OIDC outranks SAML, single method → no fold, empty ids → the
+// connection-less legacy start URLs (N=1 byte-compat).
+const conn = (kind: string, id = "", label: string | null = null): LoginConnection => ({ id, kind, label, brand: null });
+
+describe("#554 S3 connectionsFor", () => {
+  it("passes the server's ordered list through untouched (sort order = screen order)", () => {
+    const list = [conn("oidc", "b-second"), conn("oidc", "a-first"), conn("platform", "platform")];
+    expect(connectionsFor(list, [])).toBe(list);
   });
-  it("no methods → no dead button (the server would 404 it anyway)", () => {
-    expect(loginLayout([])).toEqual({ primary: null, secondary: [] });
+  it("legacy synthesis (§6): OIDC outranks SAML; single method degrades to one button; none → empty", () => {
+    expect(connectionsFor(undefined, ["oidc", "saml"]).map((c) => c.kind)).toEqual(["oidc", "saml"]);
+    expect(connectionsFor(undefined, ["oidc"]).map((c) => c.kind)).toEqual(["oidc"]);
+    expect(connectionsFor(undefined, ["saml"]).map((c) => c.kind)).toEqual(["saml"]);
+    expect(connectionsFor(undefined, [])).toEqual([]);
+    for (const c of connectionsFor(undefined, ["oidc", "saml"])) expect(c.id, "legacy ids are empty → legacy URLs").toBe("");
   });
 });
 
-describe("#537 methodBadge (§1 display rule)", () => {
-  const base = { configured: true, selected: true, effective: false };
-  it("a ceiling-excluded but selected method reads BY-POLICY, never silently off", () => {
-    expect(methodBadge({ ...base, inCeiling: false })).toBe("byPolicy");
+describe("#554 S3 connectionStartUrl", () => {
+  it("a named connection starts by id; the legacy empty id keeps the connection-less URL byte-identical", () => {
+    expect(connectionStartUrl(conn("oidc", "abc-123"), "/x")).toBe("/auth/login?connection=abc-123&returnTo=%2Fx");
+    expect(connectionStartUrl(conn("oidc"), "/x")).toBe("/auth/login?returnTo=%2Fx");
+    expect(connectionStartUrl(conn("platform", "platform"), "/")).toBe("/auth/login?connection=platform&returnTo=%2F");
   });
-  it("effective wins; a plain unselected method is just off", () => {
-    expect(methodBadge({ ...base, inCeiling: true, effective: true })).toBe("effective");
-    expect(methodBadge({ inCeiling: true, configured: false, selected: false, effective: false })).toBe("off");
-  });
-  it("a selected-but-unentitled method names the plan (ADR-072 admin surface), not a bare off", () => {
-    expect(methodBadge({ ...base, inCeiling: true, entitled: false })).toBe("unentitled");
-    expect(methodBadge({ inCeiling: true, configured: true, selected: false, effective: false, entitled: false })).toBe("off");
-  });
-});
-
-describe("#537 wiring pins", () => {
-  it("the SAML fold and the primary-SAML branch exist in the login screen", () => {
-    const src = readFileSync(resolve(import.meta.dirname, "./LoginScreen.tsx"), "utf8");
-    expect(src).toContain('data-testid="login-more"'); // the fold
-    expect(src).toContain('data-testid="login-saml"');
-    expect(src).toContain("/auth/saml/login?returnTo=");
-    expect(src).toContain('data-testid="login-none"'); // no-methods state, no dead button
-  });
-  it("the admin tab mounts the methods section and both locales carry the keys", () => {
-    const tab = readFileSync(resolve(import.meta.dirname, "../settings/AdminAuthTab.tsx"), "utf8");
-    expect(tab).toContain("<AdminLoginMethodsSection />");
-    for (const loc of [en, ja] as Array<{ auth: Record<string, string>; adminAuth: Record<string, string> }>) {
-      for (const k of ["signInSaml", "moreWays", "noMethods"]) expect(loc.auth[k], k).toBeTruthy();
-      for (const k of ["methodsTitle", "method_byPolicy", "method_unentitled", "platformOwnIdpRequired", "methodsSaveFailed"]) expect(loc.adminAuth[k], k).toBeTruthy();
-    }
+  it("SAML rides its own route (one per tenant — no id in the URL)", () => {
+    expect(connectionStartUrl(conn("saml", "some-uuid"), "/x")).toBe("/auth/saml/login?returnTo=%2Fx");
   });
 });

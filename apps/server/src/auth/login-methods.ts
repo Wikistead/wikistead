@@ -1,6 +1,6 @@
 import { resolveEntitlements } from '@wikistead/entitlements'
 import type { TenantDb } from '../db/index.js'
-import { loadPlatformOidc, loadSocialLogin, type TenantOidcConfig } from './oidc.js'
+import { loadPlatformOidc, type TenantOidcConfig } from './oidc.js'
 
 // #537 / ADR-195: the ONE place that answers "which login methods does this tenant offer right now?".
 // Two layers: the deployment env is a CEILING (`LOGIN_METHODS`), the tenant's own configuration selects
@@ -201,13 +201,9 @@ export async function otherLoginMethodsEffective(
   return false
 }
 
-// Social slugs for the login screen: only on the platform issuer path (ADR-121), and only when
-// platform-oidc is effective — a ceiling that drops platform-oidc drops the buttons with it.
-export function socialProvidersFor(available: AvailableLogin): string[] {
-  return available.methods.has('platform-oidc') && (!available.oidc || !available.oidc.viaTenantOidc)
-    ? loadSocialLogin().providers
-    : []
-}
+// #554 S3 / ADR-197 §3: socialProvidersFor is RETIRED (named in the ADR so the seam does not
+// linger half-alive). Social slugs now ride the platform CONNECTION's presence in the
+// login-options list — the "tenant OIDC wins → hide social" rule died with the N-up screen.
 
 // The admin toggle's write path (upsert). Ruling 4's guard lives in the route (it needs the whole
 // availability picture); this is just the persistence.
