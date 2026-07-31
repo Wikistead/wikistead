@@ -72,3 +72,27 @@ describe("#553: the per-person route the copy names actually exists", () => {
     });
   }
 });
+
+// #553 re-review: the ja text said the built-in roles "cannot grant comment" while a sentence four
+// lines below it — in the same panel, always on screen together — said the editor granted here DOES
+// carry comment. The en had "on its own", which makes both true; the ja had dropped it. Copy in two
+// languages drifts when only one is edited, so this checks the pair against each other rather than
+// against a remembered wording.
+describe("#553: the panel does not contradict itself about editor", () => {
+  const bodyOf = (loc: "en" | "ja") => (loc === "en" ? en : ja).spaceMembers;
+
+  for (const loc of ["en", "ja"] as const) {
+    it(`${loc}: if the text says the built-ins cannot grant comment, it says "on its own"`, () => {
+      const s = bodyOf(loc);
+      const blanket = loc === "en"
+        ? /cannot grant comment(?!\s+on its own)/i.test(s.commentAudienceBody)
+        : /comment\s*を付与できません/.test(s.commentAudienceBody);
+      // the sentence right below it, which the reader sees at the same time
+      const editorCarriesComment = loc === "en"
+        ? /Editors granted here carry an explicit comment grant/i.test(s.commentBaselineEditors)
+        : /editor には comment も明示的に付与されます/.test(s.commentBaselineEditors);
+      expect(blanket && editorCarriesComment,
+        `these two are on screen together and disagree:\n  ${s.commentAudienceBody}\n  ${s.commentBaselineEditors}`).toBe(false);
+    });
+  }
+});
