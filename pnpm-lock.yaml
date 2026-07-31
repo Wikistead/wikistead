@@ -35,6 +35,9 @@ importers:
       '@wikistead/authz':
         specifier: workspace:*
         version: link:../../packages/authz
+      '@wikistead/hooks':
+        specifier: workspace:*
+        version: link:../../packages/hooks
       '@wikistead/types':
         specifier: workspace:*
         version: link:../../packages/types

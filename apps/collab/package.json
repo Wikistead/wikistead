@@ -19,7 +19,8 @@
     "yjs": "^13.6.0",
     "@wikistead/types": "workspace:*",
     "@wikistead/auth": "workspace:*",
-    "@wikistead/authz": "workspace:*"
+    "@wikistead/authz": "workspace:*",
+    "@wikistead/hooks": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

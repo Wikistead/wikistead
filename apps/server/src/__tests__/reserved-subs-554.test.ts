@@ -44,19 +44,35 @@ afterAll(async () => {
 }, 60_000)
 
 describe('#554 S0: the reserved sub space', () => {
-  it('validator: reserved prefixes and the FGA length cap; ordinary subs pass', () => {
+  it('validator: reserved prefixes, the FGA length cap and the rest of the grammar; ordinary subs pass', () => {
     for (const s of [...RESERVED, 'wlocal_']) expect(externalSubViolation(s), s).toBe('reserved')
     expect(externalSubViolation(TOO_LONG)).toBe('too-long')
     expect(externalSubViolation('x'.repeat(501)), 'exactly 501 fits under the prefix budget').toBeNull()
+    // S0 review concern 4: the grammar's other conditions fail at the seam, not deep inside FGA
+    for (const bad of ['a', '', 'has space', 'tab\tsub', 'nl\nsub']) {
+      expect(externalSubViolation(bad), JSON.stringify(bad)).toBe('malformed')
+    }
     for (const ok of ['alice', 'wc123_x' /* 3 hex, not 8 */, 'WC00000000_x' /* mint grammar is lowercase */, 'oauth2|google-oauth2|1234']) {
       expect(externalSubViolation(ok), ok).toBeNull()
     }
   })
 
-  it('seam 1 — login upsert: a reserved sub is a 403 shaped exactly like a non-member', async () => {
-    for (const sub of [...RESERVED, TOO_LONG]) {
-      await expect(establishMemberSession({ db, fga: fgaClient, valkey }, { id: TENANT, plan: 'business' }, { sub }))
-        .rejects.toMatchObject({ statusCode: 403, message: 'not a member of this tenant' })
+  // Non-vacuous by construction (S0 review 2): the reserved sub IS made a tenant member
+  // first, so with the gate deleted the login SUCCEEDS (upserts a row, opens a session) — the
+  // membership refusal can no longer masquerade as the gate.
+  it('seam 1 — login upsert: a reserved sub is a 403 shaped exactly like a non-member, even AS a member', async () => {
+    const member = [...RESERVED, TOO_LONG].map((sub) => ({ user: `user:${sub}`, relation: 'member', object: `tenant:${TENANT}` }))
+    const { writeTuples, deleteTuples } = await import('@wikistead/authz')
+    await writeTuples(fgaClient, member)
+    try {
+      for (const sub of [...RESERVED, TOO_LONG]) {
+        await expect(establishMemberSession({ db, fga: fgaClient, valkey }, { id: TENANT, plan: 'business' }, { sub }))
+          .rejects.toMatchObject({ statusCode: 403, message: 'not a member of this tenant' })
+        expect((await adminPool<{ sub: string }[]>`SELECT sub FROM members WHERE tenant_id = ${TENANT} AND sub = ${sub}`).length,
+          'refused BEFORE the row upsert').toBe(0)
+      }
+    } finally {
+      await deleteTuples(fgaClient, member).catch(() => {})
     }
   }, 60_000)
 
@@ -91,17 +107,44 @@ describe('#554 S0: the reserved sub space', () => {
     }
   }, 60_000)
 
-  it('seam 7 — MCP broker: a minted token bearing a reserved sub is the seam\'s own 401', async () => {
-    const token = await mintMcpAccessToken(
-      { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 },
-      { tenantId: TENANT, sub: RESERVED[0]!, scopes: ['read'], groups: [] },
-    )
-    const res = await app.inject({
-      method: 'POST', url: '/mcp',
-      headers: { host: 'dev.localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
-    })
-    expect(res.statusCode).toBe(401)
+  // Non-vacuous the same way: the reserved sub holds membership, so the gate — not the membership
+  // check three lines below it — is what answers 401.
+  it('seam 7 — MCP broker: a minted token bearing a reserved sub is the seam\'s own 401, even AS a member', async () => {
+    const { writeTuples, deleteTuples } = await import('@wikistead/authz')
+    const tuple = [{ user: `user:${RESERVED[0]!}`, relation: 'member', object: `tenant:${TENANT}` }]
+    await writeTuples(fgaClient, tuple)
+    try {
+      const token = await mintMcpAccessToken(
+        { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 },
+        { tenantId: TENANT, sub: RESERVED[0]!, scopes: ['read'], groups: [] },
+      )
+      const res = await app.inject({
+        method: 'POST', url: '/mcp',
+        headers: { host: 'dev.localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+      })
+      expect(res.statusCode).toBe(401)
+    } finally {
+      await deleteTuples(fgaClient, tuple).catch(() => {})
+    }
+  }, 60_000)
+
+  it('seam 5b — the EE auth-provider extension point: one gate covers every provider (S0 review 懸念 3)', async () => {
+    const { registerAuthProvider, resetAuthProviders } = await import('@wikistead/hooks')
+    const { writeTuples, deleteTuples } = await import('@wikistead/authz')
+    const tuple = [{ user: `user:${RESERVED[0]!}`, relation: 'member', object: `tenant:${TENANT}` }]
+    await writeTuples(fgaClient, tuple)
+    registerAuthProvider({ name: 'rs554-dummy', verify: async (token) => (token === 'rs554-vouched' ? { sub: RESERVED[0]!, groups: [] } : null) })
+    try {
+      const res = await app.inject({
+        method: 'GET', url: '/me/capabilities',
+        headers: { host: 'dev.localhost', authorization: 'Bearer rs554-vouched' },
+      })
+      expect(res.statusCode, 'a provider cannot vouch a reserved sub in, membership or not').toBe(401)
+    } finally {
+      resetAuthProviders()
+      await deleteTuples(fgaClient, tuple).catch(() => {})
+    }
   }, 60_000)
 
   it('seam 6 — OIDC bearer (lexical: no live IdP to drive it end-to-end): the violation check guards req.user', () => {

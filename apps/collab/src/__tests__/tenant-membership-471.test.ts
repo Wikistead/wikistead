@@ -98,3 +98,19 @@ describe("#471 / ADR-176: collab room membership", () => {
     await expect(authenticate({ token, documentName: DOC }), "checked per join, not at token expiry").rejects.toThrow(/not a member/);
   });
 });
+
+// #554 / ADR-197 §5 (S0, seam 8): the WS twin of the HTTP bearer seam. Non-vacuous by construction:
+// the reserved sub IS a tenant member and the page is public, so with the gate deleted this join
+// SUCCEEDS — the refusal below is the gate and nothing else.
+describe("#554 S0 seam 8: the reserved sub space at the collab bearer branch", () => {
+  const RESERVED = "wc00000000_collab-intruder-554";
+  it("refuses a reserved-prefix bearer sub even when it holds membership (the spoof scenario)", async () => {
+    await writeTuples(fgaClient, [{ user: `user:${RESERVED}`, relation: "member", object: "tenant:tenant_dev" }]);
+    try {
+      await expect(authenticate({ token: await jwks.mint(RESERVED), documentName: DOC }))
+        .rejects.toThrow(/not a member/);
+    } finally {
+      await deleteTuples(fgaClient, [{ user: `user:${RESERVED}`, relation: "member", object: "tenant:tenant_dev" }]).catch(() => {});
+    }
+  });
+});

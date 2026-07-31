@@ -321,6 +321,15 @@ export async function buildApp(): Promise<FastifyInstance> {
       for (const provider of getAuthProviders()) {
         const result = await provider.verify(token, req.tenant.id)
         if (result) {
+          // #554 / ADR-197 §5 (S0): every provider on this extension point asserts an EXTERNAL
+          // subject — one gate here covers all present and future providers (the same 401 as any
+          // bad token, never an oracle).
+          const { externalSubViolation } = await import('./auth/reserved-subs.js')
+          if (externalSubViolation(result.sub)) {
+            emit({ type: 'auth.failed', tenantId: req.tenant.id, method: provider.name, reason: 'invalid token' })
+            await reply.code(401).send({ error: 'unauthorized' })
+            return
+          }
           req.user = result
           emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: result.sub, method: provider.name })
           return
