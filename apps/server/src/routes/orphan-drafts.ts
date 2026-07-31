@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
-import { writeTuples, deleteTuples, requireTenantAdminOr404 } from '@wikistead/authz'
+import { writeTuples, deleteTuples, readObjectTuples, requireTenantAdminOr404 } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 
@@ -43,9 +43,11 @@ async function liveMemberSubs(db: TenantDb): Promise<Set<string>> {
 // (a deleted creator) does NOT. Errs toward "reachable" (a group counts) so a shared page is
 // never falsely orphaned. This is the single source of the orphan reachability rule.
 async function pageHasLiveAccess(fga: OpenFgaClient, pageId: string, liveSubs: Set<string>): Promise<boolean> {
-  const { tuples } = await fga.read({ object: `page:${pageId}` })
-  return (tuples ?? []).some((t) => {
-    const u = t.key?.user ?? ''
+  // #553 re-review: paginated — a truncated read can miss the ONE grant that makes a page reachable
+  // and mark a live page an orphan (this list drives an admin recovery flow).
+  const tuples = await readObjectTuples(fga, `page:${pageId}`)
+  return tuples.some((t) => {
+    const u = t.user ?? ''
     if (u.startsWith('space:')) return true        // inherits from a space (published/shared)
     if (u === 'user:*') return true                // public
     if (u.includes('#')) return true               // group#member — treat as potentially live
