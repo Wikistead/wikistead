@@ -177,6 +177,21 @@ describe('#553 T2 review fixes: pagination and the dead-leaf covering row', () =
       expect(plan.siblingRows.some((r) => r.principal === p), 'row pair complete — 1a correctly skips').toBe(false)
       expect(plan.rowlessPairs.some((r) => r.resourceId === spaceId && r.principal === p),
         'the dead leaf converges back to its row instead of silently losing comment at the swap').toBe(true)
+
+      // #553 re-review G2: after APPLY, the visible comment row must OWN the leaf the migration wrote
+      // — an owned={} row revokes nothing (deletes are built from owned_capabilities only), which
+      // would be exactly the unrevocable tuples-only residue this script's own 1b rule forbids.
+      await executeCommentIndependence(adminPool, app, {
+        siblingRows: [], roleDefs: [], roleAssignments: [],
+        rowlessPairs: plan.rowlessPairs.filter((r) => r.principal === p),
+      }, () => {})
+      expect(await relationsOf(p, `space:${spaceId}`)).toContain('commenter')
+      const [row] = await adminPool<{ owned_capabilities: string[] }[]>`
+        SELECT owned_capabilities FROM role_assignments
+        WHERE resource_type = 'space' AND resource_id = ${spaceId} AND principal = ${p} AND builtin_capability = 'comment'`
+      expect(row!.owned_capabilities, 'the row claims the migration-written leaf').toEqual(['comment'])
+      await revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'comment', plan: 'business' })
+      expect(await relationsOf(p, `space:${spaceId}`), 'revoking the row kills the leaf — no residue').not.toContain('commenter')
     } finally {
       await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId} AND principal = ${p}`
       await deleteTuples(fgaClient, [{ user: p, relation: 'editor', object: `space:${spaceId}` }]).catch(() => {})

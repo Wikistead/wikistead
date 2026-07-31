@@ -181,6 +181,17 @@ export async function executeCommentIndependence(
   for (let i = 0; i < toWrite.length; i += FGA_WRITE_CHUNK) {
     await writeTuples(app.fga, toWrite.slice(i, i + FGA_WRITE_CHUNK))
   }
+  // #553 re-review G2: when the pair has a visible comment ROW whose leaf died (the dead-leaf
+  // convergence case), the row must OWN the leaf this pass just wrote — a row with empty
+  // owned_capabilities revokes nothing (roles.ts builds deletes from owned only), which would be
+  // exactly the unrevocable tuples-only residue pass 1b's discipline forbids.
+  for (const r of plan.rowlessPairs) {
+    await withTenantTx(tenantOf(r.tenantId), async (tx) => {
+      await tx`UPDATE role_assignments SET owned_capabilities = array_append(owned_capabilities, 'comment')
+        WHERE resource_type = ${r.resourceType} AND resource_id = ${r.resourceId} AND principal = ${r.principal}
+          AND builtin_capability = 'comment' AND NOT ('comment' = ANY(owned_capabilities))`
+    })
+  }
   for (const w of toWrite) log(`2: rowless comment leaf for ${w.user} on ${w.object}`)
 
   // one ledger entry for the whole pass — a migration is not user activity (no webhooks, no per-row audit)
