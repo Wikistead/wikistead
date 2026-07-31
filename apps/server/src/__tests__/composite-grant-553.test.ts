@@ -110,3 +110,29 @@ describe('#553 T1: the editor-noun composite grant', () => {
     expect((await count()) - before, 'two audit events for one noun add').toBe(2)
   }, 120_000)
 })
+
+// #553 review D: the plural wire form is a closed set of ruled bundles, not a free multi-grant —
+// an arbitrary capability list must not slip N roles past the #536 one-role convergence.
+describe('#553 review D: composite allowlist', () => {
+  it('rejects a non-bundle relations[] with 400 and writes nothing', async () => {
+    const p = sub('freeform')
+    for (const relations of [['view', 'comment', 'edit', 'moderate', 'manage'], ['view'], ['edit', 'manage'], ['comment']]) {
+      const res = await app.inject({
+        method: 'POST', url: `/spaces/${spaceId}/access`, headers: dev,
+        payload: { grantee: p, relations },
+      })
+      expect(res.statusCode, relations.join('+')).toBe(400)
+    }
+    expect((await rowsOf(p)).length, 'nothing written').toBe(0)
+  }, 120_000)
+
+  it('accepts the ruled editor bundle in either order', async () => {
+    const p = sub('order')
+    const res = await app.inject({
+      method: 'POST', url: `/spaces/${spaceId}/access`, headers: dev,
+      payload: { grantee: p, relations: ['comment', 'edit'] },
+    })
+    expect(res.statusCode).toBe(204)
+    expect((await rowsOf(p)).map((r) => r.builtin_capability)).toEqual(['comment', 'edit'])
+  }, 120_000)
+})

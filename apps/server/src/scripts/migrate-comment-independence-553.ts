@@ -29,7 +29,7 @@ import { pathToFileURL } from 'node:url'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
-import { writeTuples } from '@wikistead/authz'
+import { writeTuples, readObjectTuples, FGA_WRITE_CHUNK } from '@wikistead/authz'
 import { buildApp } from '../app.js'
 import { acquireTenantDb, withTenantTx } from '../db/index.js'
 import { appendOperatorEntry } from '../audit/operator-ledger.js'
@@ -93,21 +93,25 @@ export async function planCommentIndependence(
       SELECT p.tenant_id, p.id FROM pages p JOIN tenants t ON t.id = p.tenant_id AND t.isolation = 'logical'`) {
     resources.push({ tenantId: p.tenant_id, resourceType: 'page', resourceId: p.id })
   }
+  // a pair is excluded only when PASS 1 ITSELF will write its leaf — not when a covering row merely
+  // exists (#553 review G: a row whose leaf died through another revoke satisfies "row exists" while
+  // pass 1a's NOT EXISTS skips it, and the pair would silently lose comment at the swap; converging
+  // the leaf to the row it matches is the fail-closed direction)
+  const pass1Covered = new Set<string>([
+    ...siblingRows.map((r) => `${r.resourceType}:${r.resourceId}|${r.principal}`),
+    ...roleAssignments.map((r) => `${r.resourceType}:${r.resourceId}|${r.principal}`),
+  ])
   for (const res of resources) {
-    const { tuples } = await fga.read({ object: `${res.resourceType}:${res.resourceId}` })
-    const rel = (tuples ?? []).map((t) => t.key).filter((k): k is NonNullable<typeof k> => !!k)
+    // paginated to completion — a bare fga.read answers ONE page (50) and silently truncates, which
+    // on a real-sized space (~17 members) drops edit holders from the plan (#553 review A)
+    const rel = await readObjectTuples(fga, `${res.resourceType}:${res.resourceId}`)
     const commentHolders = new Set(rel.filter((k) => k.relation === COMMENT_LEAF[res.resourceType]).map((k) => k.user))
     const editHolders = [...new Set(rel.filter((k) => EDIT_LEAVES[res.resourceType].includes(k.relation)).map((k) => k.user))]
     for (const user of editHolders) {
       if (user.startsWith('share_link:')) continue // §5: comment leaves do not admit share_link — ruled, excluded
       if (!/^user:[^*\s]+$/.test(user) && !/^group:[^\s]+#member$/.test(user)) continue
       if (commentHolders.has(user)) continue
-      // a covering ROW (any origin) means pass 1 already owns this pairing
-      const covered = await admin<{ id: string }[]>`
-        SELECT a.id FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
-        WHERE a.resource_type = ${res.resourceType} AND a.resource_id = ${res.resourceId} AND a.principal = ${user}
-          AND 'edit' = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
-      if (covered.length > 0) continue
+      if (pass1Covered.has(`${res.resourceType}:${res.resourceId}|${user}`)) continue
       rowlessPairs.push({ tenantId: res.tenantId, resourceType: res.resourceType, resourceId: res.resourceId, principal: user })
     }
   }
@@ -172,10 +176,12 @@ export async function executeCommentIndependence(
 
   // pass 2: rowless pairs (share_link already excluded by the plan)
   const toWrite = plan.rowlessPairs.map((r) => ({ user: r.principal, relation: COMMENT_LEAF[r.resourceType], object: `${r.resourceType}:${r.resourceId}` }))
-  if (toWrite.length) {
-    await writeTuples(app.fga, toWrite)
-    for (const w of toWrite) log(`2: rowless comment leaf for ${w.user} on ${w.object}`)
+  // chunked: one fga.write refuses batches above max_tuples_per_write (default 100) and a real
+  // tenant clears that easily (#553 review B)
+  for (let i = 0; i < toWrite.length; i += FGA_WRITE_CHUNK) {
+    await writeTuples(app.fga, toWrite.slice(i, i + FGA_WRITE_CHUNK))
   }
+  for (const w of toWrite) log(`2: rowless comment leaf for ${w.user} on ${w.object}`)
 
   // one ledger entry for the whole pass — a migration is not user activity (no webhooks, no per-row audit)
   await admin.begin(async (tx) => {

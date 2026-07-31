@@ -29,6 +29,21 @@ export type GrantAction =
 // the edit chain in the model).
 export const COMPOSITE_BUILTINS: Record<string, string[]> = { edit: ["edit", "comment"] };
 
+// #553 / ADR-199 §2 display bundling, as a value (review F): a principal holding BOTH built-in
+// arms is ONE editor — the comment arm hides behind the edit row, and that row's revoke must
+// remove BOTH arms. Origin-blind on purpose: however the pair arrived, the display rule is the
+// same. A lone arm (edit-only or comment-only) stays its own capability row.
+export function foldedEditorGrantees(grants: { grantee: string; capability: string }[]): Set<string> {
+  const caps = new Map<string, Set<string>>();
+  for (const g of grants) caps.set(g.grantee, new Set([...(caps.get(g.grantee) ?? []), g.capability]));
+  return new Set([...caps.entries()].filter(([, c]) => c.has("edit") && c.has("comment")).map(([k]) => k));
+}
+
+// The revoke set for a rendered grant row: a folded editor row revokes what the noun granted.
+export function revokeCapsForRow(row: { capability: string; foldedCaps?: string[] }): string[] {
+  return row.foldedCaps ?? [row.capability];
+}
+
 export function resolveGrantDispatch(args: {
   pick: string; // "builtin:<capability>" | "role:<roleId>" — the merged picker's value
   mode: "user" | "group";

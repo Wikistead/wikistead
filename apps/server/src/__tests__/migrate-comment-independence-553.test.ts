@@ -145,3 +145,41 @@ describe('#553 T2: comment-independence migration, passes 1–2', () => {
     expect(ledger.length).toBe(1)
   }, 240_000)
 })
+
+// #553 review A/G: the plan must see past OpenFGA Read's silent one-page (50) truncation, and a
+// pair whose covering row exists but whose leaf died must still be planned (converge to the row).
+describe('#553 T2 review fixes: pagination and the dead-leaf covering row', () => {
+  it('plans EVERY edit holder on a resource with more tuples than one Read page — and never writes', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ user: `user:mc-pg${i}-${STAMP}`, relation: 'edit_direct', object: `page:${pageId}` }))
+    await writeTuples(fgaClient, many)
+    try {
+      // the plan is the dry run: any FGA write during planning is a bug (ADR-199 §3 anti-test)
+      const readOnly = new Proxy(fgaClient, {
+        get: (t, p) => (p === 'write' ? () => { throw new Error('plan must not write') } : (t as never as Record<PropertyKey, unknown>)[p]),
+      })
+      const plan = await planCommentIndependence(adminPool, readOnly as typeof fgaClient, () => {})
+      const planned = new Set(plan.rowlessPairs.filter((r) => r.resourceId === pageId).map((r) => r.principal))
+      for (const m of many) expect(planned.has(m.user), `${m.user} survives pagination`).toBe(true)
+    } finally {
+      await deleteTuples(fgaClient, many).catch(() => {})
+    }
+  }, 240_000)
+
+  it('a covering edit row whose comment leaf died elsewhere is re-planned, not skipped (review G)', async () => {
+    const p = `user:mc-dead-${STAMP}`
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
+    // simulate the G state: a sibling comment ROW exists (so pass 1a's NOT EXISTS skips the pair)
+    // while its leaf is gone (revoked through another path)
+    await adminPool`INSERT INTO role_assignments (id, tenant_id, resource_type, resource_id, principal, builtin_capability, owned_capabilities, origin)
+      VALUES (${randomUUID()}, ${TENANT}, 'space', ${spaceId}, ${p}, 'comment', ARRAY[]::text[], 'manual')`
+    try {
+      const plan = await planCommentIndependence(adminPool, fgaClient, () => {})
+      expect(plan.siblingRows.some((r) => r.principal === p), 'row pair complete — 1a correctly skips').toBe(false)
+      expect(plan.rowlessPairs.some((r) => r.resourceId === spaceId && r.principal === p),
+        'the dead leaf converges back to its row instead of silently losing comment at the swap').toBe(true)
+    } finally {
+      await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId} AND principal = ${p}`
+      await deleteTuples(fgaClient, [{ user: p, relation: 'editor', object: `space:${spaceId}` }]).catch(() => {})
+    }
+  }, 240_000)
+})
