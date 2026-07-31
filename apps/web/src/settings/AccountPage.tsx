@@ -440,6 +440,33 @@ function NotificationsTab() {
         </label>
         <p className="mb-0 mt-1 text-[length:var(--text-xs)] text-fg-dim">{t("account.notifications.enabledHint")}</p>
       </SettingsCard>
+      {/* #547 / ADR-196 §3: email delivery — both under the kill switch above (fan-out enforces). */}
+      <SettingsCard testid="email-prefs-card">
+        <label className="flex cursor-pointer items-center justify-between gap-3">
+          <span className="text-[length:var(--text-ui)] text-foreground">{t("account.notifications.emailImmediate")}</span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={settings.data?.emailImmediate ?? true}
+            disabled={update.isPending || settings.isLoading || !enabled}
+            onChange={(e) => update.mutate({ emailImmediate: e.target.checked })}
+            data-testid="email-immediate"
+          />
+        </label>
+        <p className="mb-2 mt-1 text-[length:var(--text-xs)] text-fg-dim">{t("account.notifications.emailImmediateHint")}</p>
+        <label className="flex cursor-pointer items-center justify-between gap-3">
+          <span className="text-[length:var(--text-ui)] text-foreground">{t("account.notifications.emailDigest")}</span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={settings.data?.emailDigest ?? false}
+            disabled={update.isPending || settings.isLoading || !enabled}
+            onChange={(e) => update.mutate({ emailDigest: e.target.checked })}
+            data-testid="email-digest"
+          />
+        </label>
+        <p className="mb-0 mt-1 text-[length:var(--text-xs)] text-fg-dim">{t("account.notifications.emailDigestHint")}</p>
+      </SettingsCard>
       <SettingsCard testid="notifications-mask-card">
         <div className="mb-2 text-[length:var(--text-ui)] text-foreground">{t("account.notifications.defaultMask")}</div>
         <p className="mb-3 text-[length:var(--text-xs)] text-fg-dim">{t("account.notifications.defaultMaskHint")}</p>

@@ -674,6 +674,8 @@ export interface AccountSettings {
   onboardingCompletedAt: string | null; // #289: null → the first-run two-question flow fires once
   notificationsEnabled: boolean; // #362: global notification kill switch (emission-narrowing only)
   defaultEventMask: string[]; // #362: default event mask for mask-less watches ([] = all types)
+  emailImmediate: boolean; // #547: mention email (default ON; under the kill switch)
+  emailDigest: boolean; // #547: daily watch digest email (default OFF; under the kill switch)
 }
 // #379 / ADR-150: resolve author subs to display identity (customized members only — the server omits
 // non-members / cross-tenant / un-customized identically, no membership oracle). Cached PER SUB (the
@@ -756,7 +758,7 @@ export function useUpdateAccountSettings() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[] }) =>
+    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean }) =>
       apiFetch<AccountSettings>("/me/settings", token, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
   });

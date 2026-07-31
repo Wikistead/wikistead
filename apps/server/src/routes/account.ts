@@ -62,11 +62,15 @@ export interface AccountSettings {
   // defaultEventMask applies to watches whose own mask is empty ([] = all types).
   notificationsEnabled: boolean
   defaultEventMask: string[]
+  // #547 / ADR-196 §3: email delivery prefs (both UNDER the kill switch above — enforced at fan-out).
+  // immediate defaults ON (mention mail; a narrowing of the pre-196 behavior), digest OFF (opt-in).
+  emailImmediate: boolean
+  emailDigest: boolean
 }
 
 export async function getAccountSettings(db: TenantDb, args: { subject: string }): Promise<AccountSettings> {
-  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null; notifications_enabled: boolean | null; default_event_mask: string[] | null; identity_source: string }?]>`
-    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings, editor_chrome, onboarding_completed_at, notifications_enabled, default_event_mask, identity_source
+  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null; notifications_enabled: boolean | null; default_event_mask: string[] | null; email_immediate: boolean | null; email_digest: boolean | null; identity_source: string }?]>`
+    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings, editor_chrome, onboarding_completed_at, notifications_enabled, default_event_mask, email_immediate, email_digest, identity_source
     FROM members WHERE sub = ${args.subject} LIMIT 1`
   if (!m) throw Object.assign(new Error('no member row'), { statusCode: 404 })
   // JSONB comes back as a raw JSON string from this pg driver — parse it (null → {}).
@@ -85,6 +89,8 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
     onboardingCompletedAt: m.onboarding_completed_at == null ? null : new Date(m.onboarding_completed_at).toISOString(),
     notificationsEnabled: m.notifications_enabled ?? true,
     defaultEventMask: m.default_event_mask ?? [],
+    emailImmediate: m.email_immediate ?? true,
+    emailDigest: m.email_digest ?? false,
   }
 }
 
@@ -137,7 +143,7 @@ export async function getMyActivity(db: TenantDb, args: { subject: string; tz?: 
 // only display_name, so the override set here survives re-login (ADR-020 D2).
 export async function updateAccountSettings(
   db: TenantDb,
-  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[] },
+  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean },
 ): Promise<AccountSettings> {
   if (args.editorKeymap !== undefined && !(KEYMAP_MODES as string[]).includes(args.editorKeymap)) {
     throw Object.assign(new Error('invalid keymap'), { statusCode: 400 })
@@ -182,6 +188,16 @@ export async function updateAccountSettings(
     await db.sql`UPDATE members SET onboarding_completed_at = COALESCE(onboarding_completed_at, now()), updated_at = now() WHERE sub = ${args.subject}`
   }
   // #362: notification defaults (self-scope like everything here; emission-narrowing only).
+  // #547 S6: the email prefs — same self-scope discipline (the subject is the session sub, never a
+  // parameter), boolean-validated, RLS handle.
+  if (args.emailImmediate !== undefined) {
+    if (typeof args.emailImmediate !== 'boolean') throw Object.assign(new Error('invalid emailImmediate'), { statusCode: 400 })
+    await db.sql`UPDATE members SET email_immediate = ${args.emailImmediate}, updated_at = now() WHERE sub = ${args.subject}`
+  }
+  if (args.emailDigest !== undefined) {
+    if (typeof args.emailDigest !== 'boolean') throw Object.assign(new Error('invalid emailDigest'), { statusCode: 400 })
+    await db.sql`UPDATE members SET email_digest = ${args.emailDigest}, updated_at = now() WHERE sub = ${args.subject}`
+  }
   if (args.notificationsEnabled !== undefined) {
     if (typeof args.notificationsEnabled !== 'boolean') throw Object.assign(new Error('invalid notificationsEnabled'), { statusCode: 400 })
     await db.sql`UPDATE members SET notifications_enabled = ${args.notificationsEnabled}, updated_at = now() WHERE sub = ${args.subject}`
@@ -246,7 +262,7 @@ export async function accountPlugin(app: FastifyInstance) {
   // boundary. An empty history returns an empty `days` array (not an error).
   app.get<{ Querystring: { tz?: string } }>('/me/activity', async (req) => getMyActivity(req.db, { subject: req.user.sub, tz: req.query?.tz }))
 
-  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[] } }>('/me/settings', async (req) =>
+  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean } }>('/me/settings', async (req) =>
     updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted, notificationsEnabled: req.body?.notificationsEnabled, defaultEventMask: req.body?.defaultEventMask }),
   )
 
