@@ -565,6 +565,7 @@ export async function sweepOtherSpaceRoles(
   // unless a surviving row covers it (same covering rule as the rowless revoke path).
   // (unassignRoleInTx reindexed per removed row already — only the rowless tuple sweep below still needs one)
   changed = false
+  // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
   const { tuples } = await fga.read({ user: args.principal, object: `space:${args.spaceId}` })
   // Group the tuples that ACTUALLY exist by capability — deletion must target exactly these keys (a
   // legacy/seeded grant can hold only half of an expansion pair, and deleting a non-existent tuple is

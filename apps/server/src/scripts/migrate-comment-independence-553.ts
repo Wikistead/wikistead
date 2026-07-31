@@ -135,6 +135,7 @@ export async function executeCommentIndependence(
   for (const r of plan.siblingRows) {
     const leaf = COMMENT_LEAF[r.resourceType]
     const object = `${r.resourceType}:${r.resourceId}`
+    // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
     const { tuples } = await app.fga.read({ user: r.principal, object })
     const present = (tuples ?? []).some((t) => t.key?.relation === leaf)
     const db = await acquireTenantDb(tenantOf(r.tenantId))
@@ -163,6 +164,7 @@ export async function executeCommentIndependence(
   for (const a of plan.roleAssignments) {
     const leaf = COMMENT_LEAF[a.resourceType]
     const object = `${a.resourceType}:${a.resourceId}`
+    // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
     const { tuples } = await app.fga.read({ user: a.principal, object })
     const present = (tuples ?? []).some((t) => t.key?.relation === leaf)
     await withTenantTx(tenantOf(a.tenantId), async (tx) => {
