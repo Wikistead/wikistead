@@ -39,6 +39,14 @@
   --wks-code-radius: 6px;
   --wks-table-th-bg: var(--panel-2, #f0f1f3);
   --wks-table-cell-padding: 3px 8px;
+  /* #85 (re-measure): the VERTICAL RHYTHM. In the editor two blocks are separated by a blank line —
+     a real CM line, one BODY line box tall — while the raw-tag render has no separator at all
+     (Tailwind preflight strips the UA margins), so the read surface, the print portal and the
+     exported file stacked paragraphs flush: measured 415.6px of editor height arriving as 271.6px.
+     Deliberately NOT `--lp-block-gap` (`1lh`): that resolves against the USING element, so the gap
+     before an h2 would be the h2's own taller line box, while the editor's blank line is always the
+     BODY's. One body line box, computed once, matches the editor by construction. */
+  --wks-prose-block-gap: calc(var(--text-body, 16px) * var(--lh-normal, 1.5));
 }
 
 /* #85 / ADR-194: the prose sheet declares the prose FACE, not just its headings. On screen the body text
@@ -48,6 +56,15 @@
    here means every container that receives renderMarkdownToDom output gets the same face by construction,
    which is exactly what ADR-163 says this sheet is for. */
 .wks-prose { font-family: var(--font-body); }
+
+/* #85: block separation on the two surfaces whose contract IS "looks like the editor" — the export
+   root and the print portal. `> * + *` (not per-tag margins) is the same shape the nested containers
+   already use (callout-icons.css) and it adds nothing before the FIRST block, so a container's own
+   padding stays the only top spacing. Deliberately NOT every `.wks-prose`: hover cards, the search
+   preview and the transclude excerpt are COMPACT surfaces by design (their own clamp/compaction
+   rules live with them, ADR-163), and nested macro bodies already carry `--lp-block-gap`. */
+.wks-export-doc > * + *,
+[data-print-root] > * + * { margin-top: var(--wks-prose-block-gap); }
 
 /* ── block prose (formerly the callout-icons :is(container-list) block, #185) ──
  * Tailwind's preflight strips h1-h6 / blockquote / hr / list defaults, so without these a nested

@@ -284,6 +284,27 @@ test("#85the downloaded file, opened with the app closed, IS the document", asyn
     expect(fileProbes[probe.name], `${probe.name}: the opened file does not match the screen`).toEqual(appProbes[probe.name]);
   }
 
+  // 2b. #85 re-measure FAIL-2: VERTICAL RHYTHM. The parity probes above compare per-element
+  // properties, which a document with every block flush against the next passes untouched — the
+  // re-measure read 415.6px of editor height arriving as 271.6px. Pin the gap itself: consecutive
+  // top-level blocks in the opened file are separated, and separated by the SAME body line box the
+  // editor's blank line occupies (a blank line is one line box — no magic number here).
+  const rhythm = await opened.evaluate(() => {
+    const root = document.querySelector("main.wks-export-doc")!
+    const kids = [...root.children].filter((el) => (el as HTMLElement).offsetParent !== null)
+    const gaps: number[] = []
+    for (let i = 1; i < kids.length; i++) {
+      const prev = kids[i - 1]!.getBoundingClientRect()
+      const cur = kids[i]!.getBoundingClientRect()
+      gaps.push(Math.round(cur.top - prev.bottom))
+    }
+    const p = root.querySelector("p")!
+    return { gaps, bodyLineBox: Math.round(parseFloat(getComputedStyle(p).lineHeight)) }
+  })
+  expect(rhythm.gaps.length, "the fixture has consecutive blocks to measure").toBeGreaterThan(2)
+  expect(Math.min(...rhythm.gaps), "no two blocks are flush (the -35% cramping)").toBeGreaterThan(0)
+  expect(rhythm.gaps.some((g) => g === rhythm.bodyLineBox), "the block gap IS the editor's blank line").toBe(true)
+
   // 4. the SAME opened file under print media: fixing "blank on screen" must not bring back "blank in
   // print" (the marker round-tripcalled out). Root visible in BOTH media, pinned side by side.
   await opened.emulateMedia({ media: "print" });
