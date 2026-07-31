@@ -12,6 +12,9 @@ export interface EmailMessage {
   subject: string
   html: string
   text: string
+  // #547 S3: optional transport headers (List-Unsubscribe / List-Unsubscribe-Post, RFC 8058). A driver
+  // that cannot set headers may ignore them — they are a deliverability courtesy, never authorization.
+  headers?: Record<string, string>
 }
 
 export interface EmailDriver {

@@ -102,6 +102,9 @@ describe('#547 S2: mention email through the outbox', () => {
     for (const field of [sent[0]!.subject, sent[0]!.text, sent[0]!.html]) {
       expect(field, 'the comment body never reaches a mailbox').not.toContain('secret comment body')
     }
+    // #547 S3: the RFC 8058 one-click headers ride every mention mail
+    expect(sent[0]!.headers?.['List-Unsubscribe'], 'the unsubscribe link header').toContain('/api/email/unsubscribe?token=')
+    expect(sent[0]!.headers?.['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click')
     expect((await outboxOf(R1)).length).toBe(0)
   }, 120_000)
 

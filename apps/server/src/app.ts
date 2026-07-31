@@ -437,6 +437,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(signupPlugin)
   await app.register(membersPlugin)
   await app.register(commentsPlugin)
+  await app.register((await import('./routes/email-unsubscribe.js')).emailUnsubscribePlugin) // #547 S3
   await app.register(exportPlugin)
   await app.register(brandingPlugin)
   await app.register(abuseConfigPlugin) // #491: tenant-admin abuse-filter config

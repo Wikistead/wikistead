@@ -11,6 +11,7 @@
 // outside the fortress). No base URL configured → skip with a logged reason (an honest drop beats an
 // improvised link).
 import { fgaClient } from '@wikistead/authz'
+import { mintUnsubToken } from '@wikistead/auth'
 import { acquireTenantDb, registry } from '../db/index.js'
 import { pageEventDisposition } from '../page-disposition.js'
 import { registerEmailBuilder, type EmailBuildResult, type EmailOutboxRow } from './outbox.js'
@@ -49,13 +50,24 @@ export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId:
     const title = gated[0]!.title ?? 'a page'
     const link = `${ctx.baseUrl}/p/${pageId}`
     const more = gated.length > 1 ? ` (and ${gated.length - 1} more)` : ''
+    // #547 S3: the RFC 8058 unsubscribe — a tenant-bound unsub+jwt in the link; GET confirms, the
+    // one-click POST (List-Unsubscribe-Post) flips exactly this member's email_immediate pref.
+    const unsubToken = await mintUnsubToken(
+      { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: Number(process.env.UNSUB_TOKEN_TTL_S ?? 30 * 86400) },
+      { tenantId: ctx.tenantId, sub: rows[0]!.member_sub, action: 'immediate' },
+    )
+    const unsubUrl = `${ctx.baseUrl}/api/email/unsubscribe?token=${encodeURIComponent(unsubToken)}`
     // TITLE + LINK ONLY — never the comment body, never an excerpt (the Review ruling)
     return {
       kind: 'send',
       message: {
         subject: `You were mentioned in "${title}"${more}`,
-        text: `You were mentioned in "${title}"${more}.\n\nOpen the page:\n${link}\n`,
-        html: `<p>You were mentioned in <strong>${esc(title)}</strong>${esc(more)}.</p><p><a href="${esc(link)}">Open the page</a></p>`,
+        text: `You were mentioned in "${title}"${more}.\n\nOpen the page:\n${link}\n\nStop these emails: ${unsubUrl}\n`,
+        html: `<p>You were mentioned in <strong>${esc(title)}</strong>${esc(more)}.</p><p><a href="${esc(link)}">Open the page</a></p><p style="font-size:12px;color:#666"><a href="${esc(unsubUrl)}">Stop these emails</a></p>`,
+        headers: {
+          'List-Unsubscribe': `<${unsubUrl}>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        },
       },
     }
   } finally {

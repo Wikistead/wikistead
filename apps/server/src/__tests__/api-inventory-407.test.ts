@@ -35,6 +35,7 @@ const EXCLUDED_PATHS = new Set([
   '/pages/:pageId/plantuml/render', // editor diagram proxy
   '/templates/:id/plantuml/render', // editor diagram proxy (template preview)
   '/pages/:pageId/private', '/pages/:pageId/public', '/pages/:pageId/restrict', '/pages/:pageId/freeze', // permission dialog plumbing (grants API covers integration)
+  '/email/unsubscribe', // #547 S3: token-addressed one-click endpoint (unsub+jwt in the mail; not a client API)
   '/spaces/:spaceId/access', '/spaces/:spaceId/public-access', '/spaces/:spaceId/comment-open', // space settings plumbing
   '/spaces/:spaceId/groups', '/spaces/:spaceId/member-candidates', '/spaces/:spaceId/pages-overview', // space settings plumbing
   '/spaces/:spaceId/page-creation-policy', // page-creation-policy knob (#399; space settings plumbing)
