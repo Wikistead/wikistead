@@ -34,3 +34,31 @@ describe("#529: the comment-audience copy describes both paths", () => {
     });
   }
 });
+
+// #553/— the THIRD time this paragraph went stale after a model change, so this pin
+// stops describing wording and starts describing the product: the copy tells the reader how to give
+// one person comment, and the route it names has to be one they can actually walk. The space picker
+// offers built-in nouns only (GRANTABLE: view / edit / moderate / manage — comment left with #552), so
+// "grant comment in the access list above" was an instruction that cannot be followed. The page
+// permissions dialog DOES offer comment, and a custom role including comment is the space-wide route.
+describe("#553: the per-person route the copy names actually exists", () => {
+  // mirrored from SpaceMembersTab (GRANTABLE) — if someone puts comment back in the picker, this
+  // constant moves with it and the pin below relaxes on purpose.
+  const SPACE_PICKER_CAPS = ["view", "edit", "moderate", "manage"];
+
+  for (const [loc, body] of Object.entries(bodies)) {
+    it(`${loc}: does not send the reader to a space picker that has no comment in it`, () => {
+      if (SPACE_PICKER_CAPS.includes("comment")) return // the instruction became true again
+      const claimsPicker = loc === "en"
+        ? /grant comment in the access list above|comment in the (access )?list above/i.test(body)
+        : /上のアクセス一覧で\s*comment\s*を付与/.test(body)
+      expect(claimsPicker, `the picker offers ${SPACE_PICKER_CAPS.join("/")} — this sentence cannot be followed: ${body}`).toBe(false)
+    });
+
+    it(`${loc}: names the routes that DO exist (a custom role including comment, or the page dialog)`, () => {
+      const namesRole = loc === "en" ? /custom role/i.test(body) : /カスタムロール/.test(body)
+      const namesPage = loc === "en" ? /page's permissions|single page/i.test(body) : /ページの権限|そのページ/.test(body)
+      expect(namesRole && namesPage, `both real routes must be findable from this text: ${body}`).toBe(true)
+    });
+  }
+});

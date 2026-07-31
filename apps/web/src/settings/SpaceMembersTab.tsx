@@ -327,13 +327,14 @@ export function SpaceMembersTab() {
               <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" variant="danger"
                 onClick={() => {
                   // #553: a folded editor row revokes BOTH its arms — the noun revokes what the noun granted
+                  // #553(a): ONE request for a folded row. Two calls could stop halfway and leave
+                  // the comment arm standing — "revoked, but they can still comment" is a leftover
+                  // nobody goes looking for, so the server takes the whole set in one transaction.
                   const caps = revokeCapsForRow(r) as PageRelation[];
-                  for (const capability of caps) {
-                    revoke.mutate({ grantee: r.grantee, capability }, {
-                      onSuccess: () => notify.success(t("toast.accessRevoked")),
-                      onError: () => notify.error(t("toast.actionFailed")),
-                    });
-                  }
+                  revoke.mutate(caps.length > 1 ? { grantee: r.grantee, capabilities: caps } : { grantee: r.grantee, capability: caps[0]! }, {
+                    onSuccess: () => notify.success(t("toast.accessRevoked")),
+                    onError: () => notify.error(t("toast.actionFailed")),
+                  });
                 }}>
                 <X size={14} />
               </IconButton>

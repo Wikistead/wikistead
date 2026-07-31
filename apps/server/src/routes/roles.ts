@@ -342,11 +342,42 @@ export async function unassignRoleInTx(
     auditAction?: string; skipAudit?: boolean;
   },
 ): Promise<boolean> {
-  interface AsgRow { id: string; role_id: string; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; principal: string; owned_capabilities: string[]; capabilities: string[] }
   let deleted = false
   let resourceType = 'page' as 'page' | 'space' | 'tenant'
   let resourceId = ''
   const oid = await db.tx(async (tx) => {
+    const r = await unassignRoleTxCore(tx, args)
+    if (!r) return null
+    deleted = true
+    resourceType = r.resourceType
+    resourceId = r.resourceId
+    // FGA LAST, inside the tx — a failure here rolls the row deletions back, and the composite caller
+    // batches every arm's tuples into ONE delete instead of a call per arm.
+    if (r.toDelete.length) await deleteTuples(fga, r.toDelete)
+    return r.outboxId
+  })
+  if (oid) processOutboxAsync(searchDriver, oid, { tenantId: args.tenant.id, pageId: resourceId, operation: 'upsert' })
+  if (deleted && resourceType === 'space') await reindexPublishedPages(db, searchDriver, args.tenant.id, resourceId)
+  return deleted
+}
+
+// #553(a): the ONE-transaction unassign body, extracted for the same reason its assign twin was
+// — the folded `editor` row is two rows underneath, and revoking it as two requests could leave the
+// comment arm standing after the edit arm went. "Deleted, but they can still comment" is a leftover
+// nobody goes looking for, so it must not be reachable by a client that stops halfway, loses its
+// connection, or is closed between the two calls. Rows go in one tx; the tuples are collected and
+// deleted ONCE by the caller (FGA does not roll back with the tx, so batching narrows the window to
+// exactly what the single-arm path has always had).
+interface UnassignTxOutcome {
+  resourceType: 'page' | 'space' | 'tenant'; resourceId: string; outboxId: string | null
+  toDelete: { user: string; relation: string; object: string }[]
+}
+export async function unassignRoleTxCore(
+  tx: Sql,
+  args: { tenant: { id: string; plan: string }; assignmentId: string; actorSub: string; auditAction?: string; skipAudit?: boolean },
+): Promise<UnassignTxOutcome | null> {
+  interface AsgRow { id: string; role_id: string; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; principal: string; owned_capabilities: string[]; capabilities: string[] }
+  {
     // #536 / ADR-188 §6 item 1: LEFT join. A built-in grant is a row with no roles entry (built-ins are
     // virtual), and an inner join would make unassign silently find nothing for it — a revoke that
     // answers success and deletes neither the row nor the tuples.
@@ -355,9 +386,6 @@ export async function unassignRoleInTx(
              COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS capabilities
       FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id WHERE a.id = ${args.assignmentId} FOR UPDATE OF a`
     if (!asg) return null
-    deleted = true
-    resourceType = asg.resource_type
-    resourceId = asg.resource_id
     // Same LEFT join for the refcount: the capabilities a principal still holds through OTHER assignments
     // now include built-in grants. With the inner join, revoking a custom role that overlapped a built-in
     // grant deleted the shared leaves outright -- the grant was still there, and the access was not.
@@ -376,12 +404,8 @@ export async function unassignRoleInTx(
     await tx`DELETE FROM role_assignments WHERE id = ${asg.id}`
     if (!args.skipAudit) await auditIfEntitled(tx, args.tenant, { actor: `user:${args.actorSub}`, action: args.auditAction ?? 'role.unassigned', target: `${asg.resource_type}:${asg.resource_id}` })
     const o = asg.resource_type === 'page' ? await enqueueOutbox(tx, { tenantId: args.tenant.id, pageId: asg.resource_id, operation: 'upsert' }) : null
-    if (toDelete.length) await deleteTuples(fga, toDelete)
-    return o
-  })
-  if (oid) processOutboxAsync(searchDriver, oid, { tenantId: args.tenant.id, pageId: resourceId, operation: 'upsert' })
-  if (deleted && resourceType === 'space') await reindexPublishedPages(db, searchDriver, args.tenant.id, resourceId)
-  return deleted
+    return { resourceType: asg.resource_type, resourceId: asg.resource_id, outboxId: o, toDelete }
+  }
 }
 
 // #497 / ADR-183 §3: the tenant DEFAULT role evaluator. A member whom NO mapping matches gets the

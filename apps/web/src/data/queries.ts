@@ -1298,8 +1298,17 @@ export function useRevokeSpaceAccess(spaceId: string) {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { grantee?: string; groupName?: string; capability: PageRelation }) =>
-      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, { method: "DELETE", body: JSON.stringify({ grantee: args.grantee, groupName: args.groupName, relation: args.capability }) }),
+    // #553(a): `capabilities` is the folded-noun form — one request, one server transaction, so a
+    // half-revoked principal is not reachable by a client that stops between two calls.
+    mutationFn: (args: { grantee?: string; groupName?: string; capability?: PageRelation; capabilities?: string[] }) =>
+      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, {
+        method: "DELETE",
+        body: JSON.stringify(
+          args.capabilities
+            ? { grantee: args.grantee, groupName: args.groupName, relations: args.capabilities }
+            : { grantee: args.grantee, groupName: args.groupName, relation: args.capability },
+        ),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
   });
 }
