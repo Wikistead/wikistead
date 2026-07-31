@@ -1,0 +1,12 @@
+-- #576 re-review 2: the sweep demotes verified→pending, and NOTHING re-checked a pending row. So a
+-- demotion caused by OUR side (a resolver outage longer than the grace window) was a one-way door:
+-- the domain came back, the sweep never looked at it again, and the only way back was an admin
+-- calling the verify endpoint — which has no UI. This column marks the rows the SWEEP demoted, so it
+-- can restore exactly those and nothing else.
+--
+-- Why not simply re-check every pending row: a pending row that was never verified is a domain
+-- someone TYPED. Auto-verifying it would turn "add a domain" into "activate whenever DNS happens to
+-- match", quietly issuing a certificate the admin never asked for. Ownership would still be proved
+-- (the token is per-row and random), but the moment of activation would no longer be a human's.
+-- The sweep may undo its own demotions; it may not complete somebody's enrolment.
+ALTER TABLE custom_domains ADD COLUMN auto_demoted_at TIMESTAMPTZ;

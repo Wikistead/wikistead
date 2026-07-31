@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import type { Sql } from 'postgres'
 import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
 import { resolveEntitlements } from '@wikistead/entitlements'
@@ -92,11 +93,14 @@ export async function verifyCustomDomain(
 
   // last_ok_at is the liveness sweep's grace anchor (#576): a manual verification IS a success, and
   // leaving it behind would hand the next sweep a stale anchor from the previous ownership period.
-  await db.sql`UPDATE custom_domains SET status = 'verified', verified_at = now(), last_ok_at = now(), check_failures = 0
+  await db.sql`UPDATE custom_domains SET status = 'verified', verified_at = now(), last_ok_at = now(),
+                      check_failures = 0, auto_demoted_at = NULL
                WHERE tenant_id = ${args.tenantId} AND domain = ${domain}`
   // Activate host→tenant resolution (ADR-016). tenants is the global registry (no tenant RLS);
   // billing updates it via the raw pool too. UNIQUE(custom_domain) guards cross-tenant collision.
-  await pool`UPDATE tenants SET custom_domain = ${domain} WHERE id = ${args.tenantId}`
+  // The just-verified row is the newest, so syncDomainMapping names it — going through the one
+  // expression keeps this path from being the odd one out when a tenant holds several domains.
+  await syncDomainMapping(db.sql, args.tenantId)
   emit({ type: 'tenant.custom_domain_verified', tenantId: args.tenantId, domain })
   return { verified: true }
 }
@@ -127,6 +131,11 @@ export async function verifyCustomDomain(
 //     So the handle is no longer an argument: the sweep enumerates `tenants` (no RLS, the drift
 //     worker's precedent) and reads each tenant's rows inside its own withTenantTx. There is no
 //     signature left for a test to pass an admin connection through.
+//     CAVEAT, not fixed here: a namespace schema is a LIKE copy taken at promotion, and later
+//     migrations only touch public — so a tenant promoted before 095/096/097 has no such columns and
+//     its SELECT raises 42703. That is a repo-wide gap in how namespace tenants are migrated, not
+//     something this sweep can close; here it surfaces as a logged per-tenant error rather than a
+//     silent "nothing to check".
 //  2. The grace anchor advanced on every tick, so "24h since the last success" was re-zeroed by the
 //     check that saw the failure and never elapsed. Migration 096 splits the two meanings:
 //     last_checked_at = when we last looked, last_ok_at = when it was last proved ours.
@@ -137,11 +146,31 @@ export async function verifyCustomDomain(
 export const DEMOTE_AFTER = 3
 export const GRACE_MS = 24 * 60 * 60 * 1000
 
-type DomainRow = { domain: string; verification_token: string; check_failures: number; verified_at: Date | null; last_ok_at: Date | null }
+type DomainRow = {
+  domain: string; verification_token: string; check_failures: number
+  verified_at: Date | null; last_ok_at: Date | null; status: string; auto_demoted_at: Date | null
+}
+
+// #576 re-review 2: two readers disagreed about which domain is live. `tenantBaseUrl` picks the
+// newest VERIFIED custom_domains row (email/base-url.ts); host→tenant resolution reads
+// `tenants.custom_domain` (db/registry.ts). One tenant with two verified domains was enough to
+// split them: demoting the mapped one cleared the mapping, the OTHER row then won tenantBaseUrl,
+// and nothing resolved that host — the sweep manufacturing the exact symptom (#576) it exists to
+// prevent, and worse than the bug, because the fallback to the platform URL never happened.
+//
+// So the mapping is no longer patched by hand at each site. This states, in the one place, the same
+// expression tenantBaseUrl uses: the mapping IS the newest verified row, or NULL when there is
+// none. Every path that changes a row's status calls it inside the same transaction, which also
+// repairs a mapping that drifted for any other reason.
+async function syncDomainMapping(tx: Sql, tenantId: string): Promise<void> {
+  const [live] = await tx<{ domain: string }[]>`
+    SELECT domain FROM custom_domains WHERE status = 'verified' ORDER BY verified_at DESC LIMIT 1`
+  await tx`UPDATE tenants SET custom_domain = ${live?.domain ?? null} WHERE id = ${tenantId}`
+}
 
 export async function recheckCustomDomains(
   opts: { resolveTxt?: ResolveTxt; now?: Date; demoteAfter?: number; graceMs?: number } = {},
-): Promise<{ checked: number; demoted: string[] }> {
+): Promise<{ checked: number; demoted: string[]; restored: string[] }> {
   const now = opts.now ?? new Date()
   const demoteAfter = opts.demoteAfter ?? DEMOTE_AFTER
   const graceMs = opts.graceMs ?? GRACE_MS
@@ -150,14 +179,20 @@ export async function recheckCustomDomains(
   // the state that must still be re-checked. custom_domains is RLS'd, so this cannot be one join.
   const tenants = await pool<{ id: string }[]>`SELECT id FROM tenants`
   const demoted: string[] = []
+  const restored: string[] = []
   let checked = 0
   for (const tenant of tenants) {
     // Per tenant, like the drift sweep: one tenant whose rows are unreadable (DB hiccup, tenant
     // vanished between the registry read and now) must not cost every other tenant its check.
     try {
+      // Verified rows, plus the pending ones THIS sweep demoted. The second half is the way back:
+      // a demotion caused by our own resolver being down for a day would otherwise be permanent,
+      // repairable only through an endpoint with no UI behind it (migration 097 says why it is
+      // limited to the sweep's own demotions and never completes a human's enrolment).
       const rows = await withTenantTx(tenant.id, async (tx) => tx<DomainRow[]>`
-        SELECT domain, verification_token, check_failures, verified_at, last_ok_at
-        FROM custom_domains WHERE status = 'verified'`)
+        SELECT domain, verification_token, check_failures, verified_at, last_ok_at, status, auto_demoted_at
+        FROM custom_domains
+        WHERE status = 'verified' OR (status = 'pending' AND auto_demoted_at IS NOT NULL)`)
       for (const row of rows) {
         checked++
         let present: boolean
@@ -166,10 +201,31 @@ export async function recheckCustomDomains(
         } catch {
           present = false // an unreachable resolver counts as one failure, never as proof of loss
         }
+
+        if (row.status !== 'verified') {
+          if (!present) continue // still gone: leave it pending, no counting against a pending row
+          const back = await withTenantTx(tenant.id, async (tx) => {
+            const res = await tx`
+              UPDATE custom_domains SET status = 'verified', verified_at = ${now}, last_ok_at = ${now},
+                     last_checked_at = ${now}, check_failures = 0, auto_demoted_at = NULL
+              WHERE domain = ${row.domain} AND status = 'pending' AND auto_demoted_at IS NOT NULL`
+            if (res.count > 0) await syncDomainMapping(tx, tenant.id)
+            return res.count
+          })
+          if (back > 0) {
+            console.warn('[custom-domains] restored pending→verified: the domain proved ours again', { tenantId: tenant.id, domain: row.domain })
+            emit({ type: 'tenant.custom_domain_verified', tenantId: tenant.id, domain: row.domain })
+            restored.push(row.domain)
+          }
+          continue
+        }
+
         if (present) {
-          await withTenantTx(tenant.id, (tx) => tx`
-            UPDATE custom_domains SET check_failures = 0, last_checked_at = ${now}, last_ok_at = ${now}
-            WHERE domain = ${row.domain} AND status = 'verified'`)
+          await withTenantTx(tenant.id, async (tx) => {
+            await tx`UPDATE custom_domains SET check_failures = 0, last_checked_at = ${now}, last_ok_at = ${now}
+                     WHERE domain = ${row.domain} AND status = 'verified'`
+            await syncDomainMapping(tx, tenant.id) // also repairs a mapping that drifted
+          })
           continue
         }
         // The anchor is the last time we KNOW it was ours; before any sweep has succeeded that is
@@ -178,17 +234,20 @@ export async function recheckCustomDomains(
         const pastGrace = now.getTime() - new Date(lastGood).getTime() >= graceMs
         const willDemote = row.check_failures + 1 >= demoteAfter && pastGrace
         const affected = await withTenantTx(tenant.id, async (tx) => {
+          // Compare-and-set on the counter, not just on the status: an admin who fixes their DNS and
+          // presses Verify lands on `status = 'verified', check_failures = 0` — status alone would
+          // let a sweep that read the row a probe earlier demote them a moment after they succeeded.
+          // The two events correlate (both happen when the outage ends), so this is not theoretical.
           const res = willDemote
-            ? await tx`UPDATE custom_domains SET status = 'pending', check_failures = check_failures + 1, last_checked_at = ${now}
-                       WHERE domain = ${row.domain} AND status = 'verified'`
+            ? await tx`UPDATE custom_domains SET status = 'pending', check_failures = check_failures + 1,
+                              last_checked_at = ${now}, auto_demoted_at = ${now}
+                       WHERE domain = ${row.domain} AND status = 'verified' AND check_failures = ${row.check_failures}`
             : await tx`UPDATE custom_domains SET check_failures = check_failures + 1, last_checked_at = ${now}
-                       WHERE domain = ${row.domain} AND status = 'verified'`
+                       WHERE domain = ${row.domain} AND status = 'verified' AND check_failures = ${row.check_failures}`
           // Same transaction as the demotion: the registry mapping and the row's status are one fact
           // (host→tenant resolution reads the mapping, tenantBaseUrl reads the row), and a crash
           // between them leaves a live host pointing at a domain the product calls unverified.
-          if (willDemote && res.count > 0) {
-            await tx`UPDATE tenants SET custom_domain = NULL WHERE id = ${tenant.id} AND custom_domain = ${row.domain}`
-          }
+          if (willDemote && res.count > 0) await syncDomainMapping(tx, tenant.id)
           return res.count
         })
         if (willDemote && affected > 0) {
@@ -202,10 +261,13 @@ export async function recheckCustomDomains(
         }
       }
     } catch (err) {
+      // Includes the case where this tenant's schema predates a custom_domains migration (a
+      // namespace-promoted tenant is a LIKE copy and later migrations only touch public) — it fails
+      // loudly here rather than being read as "nothing to check".
       console.error('[custom-domains] tenant skipped; next sweep retries', { tenantId: tenant.id, err })
     }
   }
-  return { checked, demoted }
+  return { checked, demoted, restored }
 }
 
 // The periodic driver (the startAdminDriftWorker precedent: interval, self-scheduling, cancellable,
