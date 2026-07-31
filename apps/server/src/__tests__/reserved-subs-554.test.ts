@@ -47,14 +47,25 @@ describe('#554 S0: the reserved sub space', () => {
   it('validator: reserved prefixes, the FGA length cap and the rest of the grammar; ordinary subs pass', () => {
     for (const s of [...RESERVED, 'wlocal_']) expect(externalSubViolation(s), s).toBe('reserved')
     expect(externalSubViolation(TOO_LONG)).toBe('too-long')
-    expect(externalSubViolation('x'.repeat(501)), 'exactly 501 fits under the prefix budget').toBeNull()
-    // S0 review concern 4: the grammar's other conditions fail at the seam, not deep inside FGA
-    for (const bad of ['a', '', 'has space', 'tab\tsub', 'nl\nsub']) {
+    // S0 re-verification: the FGA constraint is BYTES on the whole user string (id budget 507,
+    // minus the 11-byte prefix = 496) — and it is bytes, not UTF-16 code units, so a short-looking
+    // multi-byte sub must be refused too (this was measured fail-open before the byte fix).
+    expect(externalSubViolation('x'.repeat(496)), 'exactly 496 fits under the prefix budget').toBeNull()
+    expect(externalSubViolation('x'.repeat(497)), '497 ASCII bytes bursts it').toBe('too-long')
+    expect(externalSubViolation('あ'.repeat(200)), '200 chars / 600 UTF-8 bytes').toBe('too-long')
+    // S0 review concern 4: whitespace fails at the seam, not deep inside FGA; empty is our own
+    // non-empty restriction. A 1-character sub is measured-VALID at FGA and passes.
+    for (const bad of ['', 'has space', 'tab\tsub', 'nl\nsub']) {
       expect(externalSubViolation(bad), JSON.stringify(bad)).toBe('malformed')
     }
-    for (const ok of ['alice', 'wc123_x' /* 3 hex, not 8 */, 'WC00000000_x' /* mint grammar is lowercase */, 'oauth2|google-oauth2|1234']) {
+    for (const ok of ['a', 'alice', 'wc123_x' /* 3 hex, not 8 */, 'WC00000000_x' /* mint grammar is lowercase */, 'oauth2|google-oauth2|1234']) {
       expect(externalSubViolation(ok), ok).toBeNull()
     }
+  })
+
+  it('no reserved-prefix sub pre-exists in members (the internal read-back exemption cannot be a standing bypass)', async () => {
+    const rows = await adminPool<{ sub: string }[]>`SELECT sub FROM members WHERE sub ~ '^(wc[0-9a-f]{8}_|wlocal_)'`
+    expect(rows, 'ingress gates guard the door; this pins that nothing is already inside').toEqual([])
   })
 
   // Non-vacuous by construction (S0 review 2): the reserved sub IS made a tenant member
