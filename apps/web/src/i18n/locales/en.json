@@ -522,10 +522,10 @@
     "commentBaselineEditors": "People with edit rights (editors, moderators, managers) can ALWAYS comment — these toggles never take that away.",
     "commentMembersOn": "ON: view-only members can comment too (in addition to editors and individual grants).",
     "commentMembersOff": "OFF: view-only members cannot comment (editors and individual grants still can).",
-    "commentGuestsOn": "ON: every guest holding a view link can comment.",
-    "commentGuestsOff": "OFF: view-link guests cannot comment (a guest on an EDIT link comments through their edit right).",
+    "commentGuestsOn": "ON: every guest who can see the page can comment (view and edit links alike).",
+    "commentGuestsOff": "OFF: guests cannot comment (view and edit links alike).",
     "commentSummaryLead": "Who can comment right now: ",
-    "commentSummaryEditors": "people with edit rights",
+    "commentSummaryEditors": "managers, moderators and people granted comment",
     "commentSummaryMembers": "all viewing members",
     "commentSummaryGuests": "view-link guests",
     "managedBadge": "mapping",
@@ -924,6 +924,7 @@
     "revokeConfirm": "Revoke the invite for {{email}}? The sent link stops working."
   },
   "commentsPanel": {
+    "readOnlyReason": "Commenting is off for you on this page.",
     "submit": "Comment",
     "delete": "delete",
     "reply": "Reply…",

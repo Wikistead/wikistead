@@ -20,7 +20,10 @@ const tFor = (loc: Dict) => (k: string, o?: Record<string, unknown>) => {
 
 describe("#529/#552: the effective comment-audience summary", () => {
   for (const [name, loc] of [["en", en], ["ja", ja]] as const) {
-    it(`${name}: toggles move the summary; the editors baseline never leaves it`, () => {
+    // #553: the baseline VALUE changed — "people with edit rights" became "managers, moderators and
+    // people granted comment" (edit no longer implies comment). The structural pin (a baseline that
+    // never leaves the summary) is unchanged.
+    it(`${name}: toggles move the summary; the always-on baseline never leaves it`, () => {
       const t = tFor(loc);
       const base = commentAudienceSummary(t, { members: false, guests: false });
       const withMembers = commentAudienceSummary(t, { members: true, guests: false });
@@ -39,8 +42,11 @@ describe("#529/#552: the effective comment-audience summary", () => {
       }
       expect(d.commentMembersOn).not.toBe(d.commentMembersOff);
       expect(d.commentGuestsOn).not.toBe(d.commentGuestsOff);
-      // an edit-link guest can still comment with both toggles off — the OFF copy must carry it.
-      expect(d.commentGuestsOff.toLowerCase()).toMatch(/edit|編集/);
+      // #553 / ADR-199 §5(i) FLIP (was): edit-link guests now ride the AUDIENCE — with the
+      // toggle OFF no guest comments, so the OFF copy must NOT claim the edit-link exception any more.
+      expect(d.commentGuestsOff).not.toMatch(/edit right|編集権/);
+      // …and the ON copy covers every guest who can see the page (edit links included — the (i) ruling)
+      expect(d.commentGuestsOn.toLowerCase()).toMatch(/edit|編集/);
     });
 
     it(`${name}: #552 — the grants vocabulary is GONE (its return is drift)`, () => {
