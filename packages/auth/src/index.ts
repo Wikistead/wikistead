@@ -129,6 +129,36 @@ export async function verifyMcpAccessToken(cfg: GuestTokenConfig, token: string)
   return payload as unknown as McpAccessClaims;
 }
 
+// ── Email unsubscribe tokens (#547 / ADR-196 §3) ────────────────────────────
+// The emailed unsubscribe link carries this TENANT-BOUND token. Same discipline as the other typs:
+// it asserts intent for exactly one (tenant, member, pref); the route re-checks the Host-resolved
+// tenant against the claim (a token minted for tenant A is a uniform 404 at tenant B). A NEW typ —
+// not a new scheme — is the token-confusion guard: none of the other verifiers will accept it, and
+// this verifier accepts none of theirs. GET confirms, POST mutates (RFC 8058 one-click is a POST);
+// the token itself never grants anything but the single pref flip.
+export interface UnsubTokenClaims {
+  tenantId: string;
+  sub: string;
+  action: "immediate" | "digest";
+}
+
+export async function mintUnsubToken(
+  cfg: GuestTokenConfig,
+  args: { tenantId: string; sub: string; action: "immediate" | "digest" },
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({ tenantId: args.tenantId, sub: args.sub, action: args.action })
+    .setProtectedHeader({ alg: "HS256", typ: "unsub+jwt" })
+    .setIssuedAt(now)
+    .setExpirationTime(now + cfg.ttlSeconds)
+    .sign(enc.encode(cfg.secret));
+}
+
+export async function verifyUnsubToken(cfg: GuestTokenConfig, token: string): Promise<UnsubTokenClaims> {
+  const { payload } = await jwtVerify(token, enc.encode(cfg.secret), { typ: "unsub+jwt" });
+  return payload as unknown as UnsubTokenClaims;
+}
+
 export interface OidcConfig {
   issuer: string;
   jwksUri: string;

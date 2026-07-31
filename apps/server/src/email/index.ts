@@ -23,7 +23,7 @@ class SmtpEmailDriver implements EmailDriver {
     this.from = cfg.from
   }
   async send(msg: EmailMessage): Promise<void> {
-    await this.transporter.sendMail({ from: this.from, to: msg.to, subject: msg.subject, html: msg.html, text: msg.text })
+    await this.transporter.sendMail({ from: this.from, to: msg.to, subject: msg.subject, html: msg.html, text: msg.text, ...(msg.headers ? { headers: msg.headers } : {}) })
   }
 }
 
