@@ -18,13 +18,21 @@ async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   return loadTenant(slug, domain)
 }
 
-// The tenant's own IdP (RLS-scoped; the tenant's FIRST connection); secret decrypted here.
+// The tenant's own IdP (RLS-scoped; the tenant's first ENABLED connection — S2 review N6: picking
+// the first row regardless of enabled diverged from the connection list once N≥2, and the
+// divergence was fail-open on the SSO-enforcement side). Secret decrypted here.
 async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
-  const [row] = await db.sql<
-    { issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null }[]
-  >`SELECT issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim FROM tenant_oidc ORDER BY sort, id LIMIT 1`
-  if (!row || !row.enabled) return null
-  return toOidcCfg(row)
+  const row = await firstEnabledTenantOidc(db)
+  return row ? toOidcCfg(row) : null
+}
+
+type TenantOidcRow = { id: string; issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null; bootstrap_eligible: boolean }
+
+async function firstEnabledTenantOidc(db: TenantDb): Promise<TenantOidcRow | null> {
+  const [row] = await db.sql<TenantOidcRow[]>`
+    SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible
+    FROM tenant_oidc WHERE enabled ORDER BY sort, id LIMIT 1`
+  return row ?? null
 }
 
 // #554 S2: ONE connection by its minted id (RLS-scoped, enabled only). The resolver's list is the
@@ -75,7 +83,10 @@ export async function authPlugin(app: FastifyInstance) {
       // legacy pick (tenant IdP over platform, ADR-016) is byte-identical to before.
       let resolved: { cfg: TenantOidcConfig; viaTenantOidc: boolean } | null = null
       let connectionId: string | undefined
-      if (req.query?.connection) {
+      if (req.query?.connection !== undefined) {
+        // S2 review N7: an EXPLICIT but empty/unknown connection is a refusal, never a silent fall
+        // back to the default pick — once S3's buttons pass ids, "started the wrong connection
+        // quietly" would be the worst failure shape.
         const conn = (await resolveLoginConnections(db, tenant)).find((c) => c.id === req.query!.connection)
         if (!conn || conn.kind === 'saml') return reply.code(404).send({ error: 'not found' })
         const cfg = conn.kind === 'platform' ? loadPlatformOidc() : await loadTenantOidcById(db, conn.id)
@@ -85,6 +96,20 @@ export async function authPlugin(app: FastifyInstance) {
       } else {
         const available = await resolveLogin(db, tenant)
         resolved = available.oidc
+        // S2 review N2: the legacy pick BINDS too — every state carries the connection it was
+        // minted under, so the product paths (login screen, invite links, MCP OAuth — all
+        // connection-less today) get the same mid-flight guarantee as a named start. The id is
+        // the first ENABLED row (the exact row loadTenantOidc picked) or the platform pseudo-id.
+        if (resolved && resolved.viaTenantOidc) {
+          // ONE read is the authority for BOTH the config and the bound id (a row shifting between
+          // two separate reads would bind a state to a different config than its authorize URL).
+          const row = await firstEnabledTenantOidc(db)
+          if (!row) return reply.code(404).send({ error: 'not found' })
+          resolved = { cfg: toOidcCfg(row), viaTenantOidc: true }
+          connectionId = row.id
+        } else if (resolved) {
+          connectionId = 'platform'
+        }
       }
       if (!resolved) return reply.code(404).send({ error: 'not found' })
       const redirectUri = `${req.protocol}://${req.headers.host}/auth/callback`
@@ -165,14 +190,31 @@ export async function authPlugin(app: FastifyInstance) {
       // The bootstrap gate below stays keyed on viaTenantOidc — wiring it to bootstrap_eligible
       // awaits the #572 ruling (grandfathered legacy surface vs explicit flip).
       let resolved: { cfg: TenantOidcConfig; viaTenantOidc: boolean } | null = null
-      if (st.connectionId) {
-        const conn = (await resolveLoginConnections(db, tenant)).find((c) => c.id === st.connectionId && c.kind !== 'saml')
-        const cfg = conn ? (conn.kind === 'platform' ? loadPlatformOidc() : await loadTenantOidcById(db, conn.id)) : null
-        if (!conn || !cfg) return reply.code(404).send({ error: 'not found' })
-        resolved = { cfg, viaTenantOidc: conn.kind === 'oidc' }
-      } else {
-        const available = await resolveLogin(db, tenant)
-        resolved = available.oidc
+      // S2 review N1: bootstrap eligibility is read HERE, at completion time, from the connection
+      // the state is bound to — the ADR-197 §2 rev2 pinned rule (a default-flag connection never
+      // bootstraps) wired at last. The platform pseudo-connection and SAML are structurally false.
+      let bootstrapEligible = false
+      try {
+        if (st.connectionId) {
+          const conn = (await resolveLoginConnections(db, tenant)).find((c) => c.id === st.connectionId && c.kind !== 'saml')
+          const cfg = conn ? (conn.kind === 'platform' ? loadPlatformOidc() : await loadTenantOidcById(db, conn.id)) : null
+          if (!conn || !cfg) return reply.code(404).send({ error: 'not found' })
+          resolved = { cfg, viaTenantOidc: conn.kind === 'oidc' }
+          bootstrapEligible = conn.bootstrapEligible
+        } else {
+          // legacy states minted before connection binding shipped (a ≤300s window at deploy)
+          const available = await resolveLogin(db, tenant)
+          resolved = available.oidc
+          if (resolved?.viaTenantOidc) {
+            bootstrapEligible = (await firstEnabledTenantOidc(db))?.bootstrap_eligible ?? false
+          }
+        }
+      } catch (e) {
+        // S2 review N4: a listed-but-broken connection (undecryptable secret) used to escape as a
+        // raw 500 here while the START answered gracefully — match the #346 contract: vague
+        // user-facing error, detail server-side only (never the secret, issuer or id).
+        req.log.error({ err: e, tenantId: tenant.id }, 'auth/callback: connection config load failed')
+        return reply.redirect('/login?error=idp_unavailable')
       }
       if (!resolved || resolved.viaTenantOidc !== st.viaTenantOidc) return reply.code(404).send({ error: 'not found' })
 
@@ -224,7 +266,9 @@ export async function authPlugin(app: FastifyInstance) {
 
       // (2) CE first-admin bootstrap — the bounded exception (tenant's own IdP +
       // member-less tenant). A 2nd login or the platform IdP (Cloud) never does.
-      if (!sid && st.viaTenantOidc && (await bootstrapFirstAdmin({ db, fga: app.fga }, tenant, claims))) {
+      // #554 S2 review N1: AND the connection must be bootstrap_eligible (ADR-197 §2 rev2) — a
+      // named non-first connection is reachable now, and a default-flag one never bootstraps.
+      if (!sid && st.viaTenantOidc && bootstrapEligible && (await bootstrapFirstAdmin({ db, fga: app.fga }, tenant, claims))) {
         sid = await establishMemberSession(deps, tenant, claims)
       }
       if (!sid) {
