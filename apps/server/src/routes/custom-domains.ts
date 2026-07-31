@@ -282,12 +282,33 @@ export async function recheckCustomDomains(
 // The periodic driver (the startAdminDriftWorker precedent: interval, self-scheduling, cancellable,
 // and NOT re-entrant — a sweep slower than the interval, e.g. a resolver timing out per domain,
 // would otherwise stack ticks and have two passes counting the same failure).
-export function startCustomDomainRecheckWorker(intervalMs = 6 * 60 * 60 * 1000): () => void {
-  // A non-positive interval switches the sweep OFF. That exists for one honest reason: the dev seed
-  // shortcuts the DNS-TXT challenge to make host routing work locally (infra/db/seed.ts), so the
-  // seeded domain cannot prove ownership and the sweep would correctly demote it a day later and take
-  // local host routing with it. A dev pointing a real tunnel at a real TXT record needs no such switch.
-  if (intervalMs <= 0) return () => {}
+export const DEFAULT_RECHECK_MS = 6 * 60 * 60 * 1000
+
+// #576 re-review 3: `Number(process.env.X ?? default)` is not a parser. `??` only catches undefined, so
+// an env line left EMPTY (`CUSTOM_DOMAIN_RECHECK_MS=`) reads as 0 and switched the sweep off in silence
+// — this ticket exists because a worker was silently doing nothing in production, and that would have
+// been the same bug wearing a different hat. `6h` reads as NaN, which is not <= 0, so it reached
+// setInterval(NaN) — a hot loop. Only a finite number counts; anything else falls back and says so.
+export function recheckIntervalFromEnv(raw: string | undefined, fallback = DEFAULT_RECHECK_MS): number {
+  if (raw === undefined || raw.trim() === '') return fallback
+  const n = Number(raw)
+  if (!Number.isFinite(n)) {
+    console.warn('[custom-domains] CUSTOM_DOMAIN_RECHECK_MS is not a number; using the default', { raw, fallback })
+    return fallback
+  }
+  return n
+}
+
+export function startCustomDomainRecheckWorker(intervalMs = DEFAULT_RECHECK_MS): () => void {
+  // A non-positive interval switches the sweep OFF — deliberately, and never quietly. It exists for one
+  // honest reason: the dev seed shortcuts the DNS-TXT challenge to make host routing work locally
+  // (infra/db/seed.ts), so the seeded domain cannot prove ownership and the sweep would correctly demote
+  // it a day later and take local host routing with it. A dev pointing a real tunnel at a real TXT
+  // record needs no such switch, and a production operator who sees this line knows what it costs.
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    console.warn('[custom-domains] liveness re-verification DISABLED — a custom domain that stops being the tenant\'s will keep deciding link hosts', { intervalMs })
+    return () => {}
+  }
   let running = false
   const t = setInterval(async () => {
     if (running) return
