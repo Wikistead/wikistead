@@ -21,13 +21,14 @@ const SOCIAL_LABELS: Record<string, string> = { google: "Google", github: "GitHu
 // #537 §6: the screen shows what is OPEN — the method kinds are published facts (ADR-195 §7). On
 // fetch failure we fall back to the historical single-button screen (fail-open DISPLAY only; every
 // button is still a server-refused URL — the UI is convenience, the server is the fortress).
-interface LoginOptions { social: string[]; methods: string[] }
+export interface LoginConnection { id: string; kind: string; label: string | null; brand: string | null }
+interface LoginOptions { social: string[]; methods: string[]; connections?: LoginConnection[] }
 function useLoginOptions(): LoginOptions {
   const q = useQuery({
     queryKey: ["login-options"],
     queryFn: () =>
       fetch(assetUrl("/auth/login-options"))
-        .then((r) => (r.ok ? (r.json() as Promise<{ social?: string[]; methods?: string[] }>) : null))
+        .then((r) => (r.ok ? (r.json() as Promise<{ social?: string[]; methods?: string[]; connections?: LoginConnection[] }>) : null))
         .catch(() => null),
     staleTime: 60_000,
   });
@@ -36,16 +37,28 @@ function useLoginOptions(): LoginOptions {
   return {
     social: (q.data?.social ?? []).filter((s) => s in SOCIAL_LABELS),
     methods: q.data ? (q.data.methods ?? ["oidc"]) : ["oidc"],
+    connections: q.data?.connections,
   };
 }
 
-// §6 layout, pure for tests: the PRIMARY method gets the large button; everything else folds behind
-// "sign in another way". OIDC outranks SAML as primary (the common case); with a single method the
-// fold renders nothing (degrades to today's screen).
-export function loginLayout(methods: string[]): { primary: "oidc" | "saml" | null; secondary: "saml"[] } {
-  const primary = methods.includes("oidc") ? "oidc" : methods.includes("saml") ? "saml" : null;
-  const secondary = primary === "oidc" && methods.includes("saml") ? (["saml"] as "saml"[]) : [];
-  return { primary, secondary };
+// #554 S3 / ADR-197 §3: the screen's truth is the ordered CONNECTION list — the first entry is the
+// primary (large) button, the rest fold behind "sign in another way". A server without the list (or
+// a failed fetch) degrades to the legacy method synthesis, whose empty ids make every URL the
+// connection-less legacy start — N=1 renders byte-identically to the old screen. Pure for tests.
+export function connectionsFor(connections: LoginConnection[] | undefined, methods: string[]): LoginConnection[] {
+  if (connections) return connections;
+  const out: LoginConnection[] = [];
+  if (methods.includes("oidc")) out.push({ id: "", kind: "oidc", label: null, brand: null });
+  if (methods.includes("saml")) out.push({ id: "", kind: "saml", label: null, brand: null });
+  return out;
+}
+
+// The start URL for one connection. SAML has its own route (one per tenant — no id needed); an
+// empty id is the legacy connection-less start (byte-compat fallback).
+export function connectionStartUrl(conn: LoginConnection, returnTo: string): string {
+  const rt = `returnTo=${encodeURIComponent(returnTo)}`;
+  if (conn.kind === "saml") return `/auth/saml/login?${rt}`;
+  return conn.id ? `/auth/login?connection=${encodeURIComponent(conn.id)}&${rt}` : `/auth/login?${rt}`;
 }
 
 function useAuthError(): string | null {
@@ -65,8 +78,11 @@ export function LoginScreen() {
   const branding = useBranding();
   const returnTo = window.location.pathname === "/login" ? "/" : window.location.pathname + window.location.search;
   const error = useAuthError();
-  const { social, methods } = useLoginOptions();
-  const layout = loginLayout(methods);
+  const { social, methods, connections } = useLoginOptions();
+  const conns = connectionsFor(connections, methods);
+  const primary = conns[0] ?? null;
+  const secondary = conns.slice(1);
+  const platformId = conns.find((c) => c.kind === "platform")?.id ?? "";
   const logoUrl = branding.data?.logoUrl;
   const name = branding.data?.displayName;
   // #371: sign-in navigates top-level to /auth/login (then the IdP), which can take a beat. Show a spinner on the
@@ -103,45 +119,42 @@ export function LoginScreen() {
               {error}
             </div>
           )}
-          {layout.primary !== null && (
+          {primary !== null && (
             <Button
               variant="primary"
               className="w-full"
               data-testid="login-signin"
               disabled={navigating !== null}
-              onClick={() =>
-                go(
-                  "signin",
-                  layout.primary === "saml"
-                    ? `/auth/saml/login?returnTo=${encodeURIComponent(returnTo)}`
-                    : `/auth/login?returnTo=${encodeURIComponent(returnTo)}`,
-                )
-              }
+              onClick={() => go("signin", connectionStartUrl(primary, returnTo))}
             >
               {navigating === "signin" && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
-              {layout.primary === "saml" ? t("auth.signInSaml") : t("auth.signIn")}
+              {primary.kind === "saml" ? t("auth.signInSaml") : primary.label ?? t("auth.signIn")}
             </Button>
           )}
-          {layout.primary === null && (
+          {primary === null && (
             <p className="text-sm text-fg-dim" data-testid="login-none">{t("auth.noMethods")}</p>
           )}
-          {/* #281 / ADR-121: Cloud social sign-in — deep-links the platform flow with the provider
-              pre-selected (?provider=<slug>; the server allowlists it). Absent on CE / tenant OIDC. */}
-          {/* #537 §6: everything that is not the primary folds behind "sign in another way". */}
-          {layout.secondary.length > 0 && (
+          {/* #554 S3 / ADR-197 §3: every non-primary connection folds behind "sign in another way",
+              in the tenant's sort order. rev3 labels: a free label renders only when the server sent
+              one (preset-less custom OIDC — S4 fills the column); everything else wears fixed
+              first-party wording. */}
+          {secondary.length > 0 && (
             <details className="mt-4" data-testid="login-more">
               <summary className="cursor-pointer text-xs text-fg-dim">{t("auth.moreWays")}</summary>
               <div className="mt-2 flex flex-col gap-2">
-                <Button
-                  variant="default"
-                  className="w-full"
-                  data-testid="login-saml"
-                  disabled={navigating !== null}
-                  onClick={() => go("saml", `/auth/saml/login?returnTo=${encodeURIComponent(returnTo)}`)}
-                >
-                  {navigating === "saml" && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
-                  {t("auth.signInSaml")}
-                </Button>
+                {secondary.map((c, i) => (
+                  <Button
+                    key={c.id || `${c.kind}-${i}`}
+                    variant="default"
+                    className="w-full"
+                    data-testid={c.kind === "saml" ? "login-saml" : `login-conn-${i}`}
+                    disabled={navigating !== null}
+                    onClick={() => go(c.id || c.kind, connectionStartUrl(c, returnTo))}
+                  >
+                    {navigating === (c.id || c.kind) && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
+                    {c.kind === "saml" ? t("auth.signInSaml") : c.label ?? t("auth.signIn")}
+                  </Button>
+                ))}
               </div>
             </details>
           )}
@@ -156,7 +169,12 @@ export function LoginScreen() {
                     className="w-full"
                     data-testid={`login-social-${slug}`}
                     disabled={navigating !== null}
-                    onClick={() => go(slug, `/auth/login?provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`)}
+                    onClick={() =>
+                      // #554 S3: social rides the PLATFORM connection — name it explicitly, or the
+                      // legacy start would pick the tenant IdP once one exists (pre-S3, social only
+                      // rendered when platform WAS the pick, so the bare URL was safe).
+                      go(slug, `/auth/login?${platformId ? `connection=${encodeURIComponent(platformId)}&` : ""}provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`)
+                    }
                   >
                     <span className="inline-flex items-center gap-2">
                       {navigating === slug ? <Loader2 size={16} className="animate-spin" data-testid="login-spinner" /> : <SocialIcon slug={slug} />}

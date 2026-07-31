@@ -11,7 +11,7 @@ import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
 import { bootstrapFirstAdmin } from '../auth/provisioning.js'
 import { acceptInvite } from '../auth/invites.js'
-import { resolveAvailableLogin, resolveLoginConnections, socialProvidersFor } from '../auth/login-methods.js'
+import { resolveAvailableLogin, resolveLoginConnections } from '../auth/login-methods.js'
 
 async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   const { slug, domain } = resolveTenantFromHost(host ?? '')
@@ -148,16 +148,36 @@ export async function authPlugin(app: FastifyInstance) {
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     const db = await acquireTenantDb(tenant)
     try {
-      const available = await resolveLogin(db, tenant)
-      // #537 §6/§7: the login screen lists what is OPEN, so the method KINDS are published facts
-      // (approved secrecy line: what stays hidden is WHY something is absent — off, unconfigured
-      // and unentitled are indistinguishable). `oidc` does not name tenant-vs-platform, though a
-      // non-empty `social` implies the platform path (ADR-121's pre-existing disclosure) — the field
-      // avoids ADDING a distinguisher rather than hiding that one.
+      // #554 S3 / ADR-197 §3: the CONNECTION list is the screen's truth — ordered, minted opaque
+      // ids, {id, kind, label, brand}. Two rules bite here:
+      //   - S1 drift (b), resolved: an oidc connection whose config cannot LOAD (undecryptable
+      //     secret) is dropped from the list — the screen must never render a button the start
+      //     route cannot honor. The failure is logged server-side, never surfaced (no oracle).
+      //   - rev3 labels: no admin-authored string reaches this unauthenticated surface until the
+      //     preset-less custom-OIDC label ships (S4 owns the column); label stays null.
+      const connections: { id: string; kind: string; label: string | null; brand: string | null }[] = []
+      for (const c of await resolveLoginConnections(db, tenant)) {
+        if (c.kind === 'oidc') {
+          try {
+            if (!(await loadTenantOidcById(db, c.id))) continue
+          } catch (e) {
+            req.log.error({ err: e, tenantId: tenant.id }, 'login-options: connection config load failed — dropped from the list')
+            continue
+          }
+        }
+        connections.push({ id: c.id, kind: c.kind, label: c.label, brand: c.brand })
+      }
+      // #537 §6/§7 legacy fields (kept for byte-compat during the N-up transition): the method
+      // KINDS are published facts (approved secrecy line: what stays hidden is WHY something is
+      // absent). Derived from the same connection list now — `social` appears iff the platform
+      // connection is effective (ADR-197 §3 retires socialProvidersFor's "tenant OIDC wins →
+      // hide social" rule together with the N-up screen: the platform button and its social
+      // slugs render whenever platform is effective, not only when it is the default pick).
       const methods: string[] = []
-      if (available.oidc) methods.push('oidc')
-      if (available.methods.has('saml')) methods.push('saml')
-      return reply.send({ social: socialProvidersFor(available), methods })
+      if (connections.some((c) => c.kind === 'oidc' || c.kind === 'platform')) methods.push('oidc')
+      if (connections.some((c) => c.kind === 'saml')) methods.push('saml')
+      const social = connections.some((c) => c.kind === 'platform') ? loadSocialLogin().providers : []
+      return reply.send({ social, methods, connections })
     } finally {
       await db.release()
     }
