@@ -67,6 +67,10 @@ export async function startServer(): Promise<FastifyInstance> {
   // tests drive drainEmailOutbox directly, THIS is what delivers in production.
   startEmailDrainWorker({ fallback: app.email, log: (m) => app.log.info(m) }, Number(process.env.EMAIL_OUTBOX_POLL_MS ?? 5000))
 
+  // Digest producer (#547 S4): hourly tick, fires at EMAIL_DIGEST_HOUR (EMAIL_DIGEST_TZ, default UTC).
+  const { startDigestProducerWorker } = await import('./email/digest.js')
+  startDigestProducerWorker((m) => app.log.info(m))
+
   // Background trash retention purge (#411 / ADR-153): permanently deletes trash entries older than
   // TRASH_RETENTION_DAYS (30). Hourly is plenty for a 30-day horizon; started here (not buildApp) so
   // inject-driven tests don't spawn a timer.

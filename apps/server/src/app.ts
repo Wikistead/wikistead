@@ -180,6 +180,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // #547 S2: delivery-class builders register at app build so the drain (and drain-driving tests)
   // can resolve them; registration is idempotent (a Map set).
   await import('./email/mention-builder.js')
+  await import('./email/digest.js') // #547 S4: the digest builder
 
   const verifyMember = makeMemberVerifier({
     issuer: process.env.OIDC_ISSUER!,
