@@ -11,14 +11,19 @@ import {
   listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
-import { TenantRoleAssignments } from "./TenantRoleAssignments";
+import { TenantGroupRoles } from "./TenantGroupRoles";
+import { IconButton } from "../ui/Button";
+import { X } from "lucide-react"; // #544: icon component, not a text glyph
+import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
+import { notify } from "../ui/toast";
+import { buildTenantRoleRows, filterMembers } from "./tenant-role-rows";
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
 // (the server is the authority — this screen is just chrome).
 export function MembersPage() {
   const { t } = useTranslation();
-  const { token, sub: me } = useSession();
+  const { token, sub: me, tenantId } = useSession();
   const [members, setMembers] = useState<Member[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [forbidden, setForbidden] = useState(false);
@@ -30,6 +35,18 @@ export function MembersPage() {
   // sessions die), DSAR erasure (the reading history is gone for good), invite revoke (the sent link
   // stops working). The pending action carries its own message + handler.
   const [confirming, setConfirming] = useState<{ message: string; run: () => void } | null>(null);
+  // #579: roles are an attribute of the member row now — the separate assign form (its own role
+  // select, its own member search) is gone. Both mechanisms still exist underneath (built-in =
+  // members.role, custom = a role_assignment row FGA expands); the row dispatches to whichever the
+  // chosen thing belongs to, which is the same shape the space screen settled on in #536.
+  const roles = useRoles();
+  const assignments = useRoleAssignments("tenant", tenantId);
+  const assignRole = useAssignRole();
+  const unassignRole = useUnassignRole();
+  // the search #557 put inside the assign form belongs to the TABLE now — it filters the people, which
+  // is useful for every column, not just for finding someone to give a role to
+  const [filter, setFilter] = useState("");
+  const [addingFor, setAddingFor] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -63,6 +80,12 @@ export function MembersPage() {
     catch (e) { setError(e instanceof ApiError && e.status === 409 ? "Cannot change the last admin." : "Action failed"); }
   };
 
+  // pure, so the asymmetry and the "already held" exclusion are pinned without a DOM
+  const roleRows = new Map(
+    buildTenantRoleRows(members, assignments.data ?? [], roles.data?.custom ?? []).map((r) => [r.sub, r]),
+  );
+  const shownMembers = filterMembers(members, filter);
+
   if (forbidden) {
     return <div style={{ padding: 24, maxWidth: 560 }}><h2>{t("members.title")}</h2><p style={{ color: "var(--fg-dim)" }}>{t("members.adminOnly")}</p></div>;
   }
@@ -73,8 +96,12 @@ export function MembersPage() {
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
       {/* #514 / ADR-188 slice 4: a TENANT role is an attribute of a member, so it is granted here —
-          beside the people — while a SPACE role is granted in that space's Members tab. */}
-      <TenantRoleAssignments members={members} />
+          beside the people — while a SPACE role is granted in that space's Members tab.
+          #579: and it is granted ON THE PERSON'S ROW. There is no second place. */}
+      <FormRow>
+        <Input className="max-w-xs" value={filter} onChange={(e) => setFilter(e.target.value)}
+          placeholder={t("members.filterPlaceholder")} aria-label={t("members.filterLabel")} data-testid="members-filter" />
+      </FormRow>
 
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 32 }}>
         <thead>
@@ -83,7 +110,7 @@ export function MembersPage() {
           </tr>
         </thead>
         <tbody>
-          {members.map((m) => (
+          {shownMembers.map((m) => (
             <tr key={m.sub} style={{ borderBottom: "1px solid var(--border, #222)" }}>
               <td style={{ padding: "8px 4px" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -91,17 +118,60 @@ export function MembersPage() {
                   {m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}
                 </span>
               </td>
-              <td>
-                <Select
-                  value={m.role}
-                  onChange={(v) => void guarded(() => changeRole(token, m.sub, v as "admin" | "member"))()}
-                  ariaLabel={t("members.roleFor", { sub: m.sub })}
-                  size="sm"
-                  options={[
-                    { value: "member", label: t("members.roleMember") },
-                    { value: "admin", label: t("members.roleAdmin") },
-                  ]}
-                />
+              {/* The row tells the truth about an asymmetry: the built-in role is EXACTLY ONE (a
+                  column on the member — picking admin unpicks member), custom roles are a SET (each
+                  one an assignment row). A single control cannot say both, so the built-in keeps its
+                  Select and the custom ones are chips with their own ×, plus one add control. */}
+              <td data-testid="member-roles">
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <Select
+                    value={m.role}
+                    onChange={(v) => void guarded(() => changeRole(token, m.sub, v as "admin" | "member"))()}
+                    ariaLabel={t("members.roleFor", { sub: m.sub })}
+                    size="sm"
+                    options={[
+                      { value: "member", label: t("members.roleMember") },
+                      { value: "admin", label: t("members.roleAdmin") },
+                    ]}
+                  />
+                  {(roleRows.get(m.sub)?.custom ?? []).map((c) => (
+                    <span key={c.assignmentId} className="inline-flex items-center gap-1 rounded-full border border-[var(--accent)] px-2 py-px text-[11px] text-[var(--accent)]" data-testid="member-role-chip">
+                      {c.roleName}
+                      {/* removal is PER ASSIGNMENT: two roles can share a capability, and the server's
+                          reference count decides what actually goes. A chip that removed "the
+                          capability" would take the other role's grant with it. */}
+                      {!c.managed && (
+                        <IconButton aria-label={t("adminRoles.unassign")} data-testid="member-role-remove" variant="danger"
+                          onClick={() => unassignRole.mutate(c.assignmentId, {
+                            onSuccess: () => notify.success(t("toast.saved")),
+                            onError: () => notify.error(t("toast.actionFailed")),
+                          })}><X size={12} /></IconButton>
+                      )}
+                    </span>
+                  ))}
+                  {(roleRows.get(m.sub)?.addable.length ?? 0) > 0 && (
+                    addingFor === m.sub ? (
+                      <Select
+                        size="sm"
+                        value=""
+                        ariaLabel={t("adminRoles.roleLabel")}
+                        testId="member-role-add-select"
+                        options={[{ value: "", label: t("adminRoles.rolePlaceholder") },
+                          ...(roleRows.get(m.sub)?.addable ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+                        onChange={(roleId) => {
+                          if (!roleId) return;
+                          setAddingFor(null);
+                          assignRole.mutate({ roleId, resourceType: "tenant", resourceId: tenantId, principal: `user:${m.sub}` }, {
+                            onSuccess: () => notify.success(t("toast.saved")),
+                            onError: () => notify.error(t("toast.actionFailed")),
+                          });
+                        }}
+                      />
+                    ) : (
+                      <Button variant="ghost" size="sm" data-testid="member-role-add" onClick={() => setAddingFor(m.sub)}>{t("members.addRole")}</Button>
+                    )
+                  )}
+                </span>
               </td>
               <td style={{ textAlign: "right" }}>
                 {/* #464 / ADR-175 §6 (DSAR): erase this member's page-analytics reading history on request
@@ -116,6 +186,9 @@ export function MembersPage() {
           ))}
         </tbody>
       </table>
+
+      {/* groups are not people and have no row above — their tenant roles live in their own section */}
+      <TenantGroupRoles />
 
       <h3>{t("members.inviteTitle")}</h3>
       <FormRow>

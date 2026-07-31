@@ -99,6 +99,19 @@ export async function membersPlugin(app: FastifyInstance) {
     return { members: rows }
   })
 
+  // #579: the tenant-scope group name source. Assigning a tenant role to a GROUP needs the names the
+  // members carry, and the only existing list was space-scoped and gated on that space's `manage` —
+  // unusable from the admin console, where there is no space. Same projection, same sensitivity
+  // argument (group names are not shown to every member), gated on tenant admin instead. Names only:
+  // the id is derived server-side (group-sync.ts is the single id authority — a client that hashes
+  // writes a tuple nobody holds, the #536 bug).
+  app.get('/admin/groups', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    const rows = await req.db.sql<{ g: string }[]>`
+      SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL ORDER BY g`
+    return rows.map((r) => r.g).filter((g) => g != null && g !== '')
+  })
+
   // #379 / ADR-150: resolve a SPECIFIC set of author subs to display identity — any tenant MEMBER may
   // call (not admin-only; no `config.guest` → guests/anon are structurally 401, the public surface never
   // resolves). Returns ONLY the subs that are members of the CALLER'S tenant (RLS) AND have CUSTOMIZED

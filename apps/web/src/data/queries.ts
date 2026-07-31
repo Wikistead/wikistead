@@ -1240,6 +1240,16 @@ export function useUpdateSpaceAbuseFilterConfig(spaceId: string | undefined) {
 
 // The tenant's group-name source for the group-grant picker (#163). manage-gated server-side
 // (group names can be sensitive), so scope the query to a space the caller manages.
+// #579: the TENANT-scope group name source, for assigning a tenant role to a group from the admin
+// console. The space-scoped list above is gated on that space's `manage` and needs a space id, which
+// the console does not have; this one is tenant-admin gated. Names only — the id stays server-derived.
+export function useTenantGroupNames() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["tenant-group-names"],
+    queryFn: () => apiFetch<string[]>("/admin/groups", token).then((r) => r ?? []),
+  });
+}
 export function useTenantGroups(spaceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({

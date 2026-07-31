@@ -28,7 +28,10 @@ export const ALLOWLIST: Record<string, string> = {
   "AdminEnrollmentSection.tsx:removeDomain": "an enroll domain is re-addable in one step; outside the #504 audit scope (surfaced by #510)",
   // #504 review exception candidates — red at rest, no confirm (reversible in one step):
   // #514 slice 4 moved role assignment off the Roles tab: the tenant one now lives beside the members.
-  "TenantRoleAssignments.tsx:unassign": "un-assignment is re-assignable in one step (#504 exception)",
+  // #579 folded that form into the member table, so the same sanctioned exception now lives on the
+  // row (MembersPage) and in the group section — one surface became two, the reason is unchanged.
+  "MembersPage.tsx:unassignRole": "un-assignment is re-assignable in one step (#504 exception)",
+  "TenantGroupRoles.tsx:unassign": "un-assignment is re-assignable in one step (#504 exception)",
   "AccountPage.tsx:removeAvatar": "re-uploading restores the avatar (#504 exception)",
   "WatchListPage.tsx:unwatch": "re-watching is one click on the page (#504 exception)",
   "PermissionsDialog.tsx:revoke": "a page grant is re-grantable in one step (#504 exception)",

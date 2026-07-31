@@ -9,21 +9,24 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const src = readFileSync(resolve(import.meta.dirname, "./TenantRoleAssignments.tsx"), "utf8");
+// #579 removed the separate assign form: a tenant role is chosen on the member's own ROW, and the
+// "find the person" problem it solved is now a filter over the table itself. The subject of this pin
+// moves with it — what must never come back is a control that ENUMERATES members.
+const src = readFileSync(resolve(import.meta.dirname, "./MembersPage.tsx"), "utf8");
 
-describe("#557: tenant assignment picks members by search, not enumeration", () => {
-  it("uses the shared MemberSearchInput on the member field", () => {
-    expect(src).toContain('import { MemberSearchInput } from "../ui/MemberSearchInput"');
-    expect(src).toMatch(/inputTestId="tenant-assign-member"/);
+describe("#557: members are found by search, never enumerated into a control", () => {
+  it("the table has a filter, and it is the only 'find a member' affordance", () => {
+    expect(src).toMatch(/data-testid="members-filter"/);
+    expect(src).toContain("filterMembers(members, filter)");
   });
 
   it("the every-member dropdown stays gone", () => {
     // the old shape mapped the FULL member list into Select options
     expect(src).not.toMatch(/Select[^]*?members\.map/);
-    expect(src).not.toMatch(/testId="tenant-assign-member"/); // the Select prop spelling — the picker uses inputTestId
+    expect(src).not.toMatch(/testId="tenant-assign-member"/);
   });
 
-  it("what gets sent is unchanged: the pick resolves to a user:<sub> principal", () => {
-    expect(src).toMatch(/principal: `user:\$\{sub\}`/);
+  it("what gets sent is unchanged: the row assigns to a user:<sub> principal", () => {
+    expect(src).toMatch(/principal: `user:\$\{m\.sub\}`/);
   });
 });

@@ -950,7 +950,10 @@
     "revoke": "取り消し",
     "eraseAnalyticsConfirm": "{{name}} の閲覧履歴を消去しますか？元に戻せません。",
     "removeConfirm": "{{name}} をこのワークスペースから削除しますか？アクセス・API キー・セッションは即座に失効します。",
-    "revokeConfirm": "{{email}} への招待を取り消しますか？送信済みのリンクは使えなくなります。"
+    "revokeConfirm": "{{email}} への招待を取り消しますか？送信済みのリンクは使えなくなります。",
+    "filterPlaceholder": "メンバーを絞り込む…",
+    "filterLabel": "メンバーの絞り込み",
+    "addRole": "＋ ロール"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",
@@ -1277,7 +1280,12 @@
     "mappingTenantBody": "IdP グループのメンバー全員に**テナントロール**（スペース作成など）を付与します。メンバーシップは ID プロバイダから随時解決されます（メンバー追加や課金は発生しません）。スペースのロールへのマッピングは、各スペースの「メンバー」タブで設定します。",
     "mixedScopeHint": "ロールはスペース/ページ用かテナント用のどちらかです。片方のチェックを外すと保存できます。",
     "sectionTenant": "テナント",
-    "sectionResource": "スペース / ページ"
+    "sectionResource": "スペース / ページ",
+    "groupAssignTitle": "グループのロール",
+    "groupAssignBody": "IdP のグループにテナントロールを付与します。グループのメンバー全員に効き、グループを抜けると外れます。",
+    "groupAssignEmpty": "テナントロールを持つグループはありません。",
+    "groupLabel": "グループ",
+    "groupPlaceholder": "グループを選択…"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",
