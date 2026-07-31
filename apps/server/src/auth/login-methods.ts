@@ -147,6 +147,9 @@ export interface LoginConnection {
   // INTERNAL — login-options projects {id, kind, label, brand} explicitly, so this never publishes.
   // The platform connection is trusted (the deployment operator's own IdP — today's behavior).
   trustGroups: boolean
+  // #554 S4 / ADR-197 §5: non-null on connections that MINT namespaced member subs
+  // (wc<conn8>_<externalSub>). NULL on the legacy connection (raw subs), platform and SAML.
+  subjectPrefix: string | null
 }
 
 export async function resolveLoginConnections(
@@ -157,9 +160,11 @@ export async function resolveLoginConnections(
   const ceiling = loginMethodCeiling(env)
   const out: LoginConnection[] = []
   if (ceiling.has('tenant-oidc')) {
-    const rows = await db.sql<{ id: string; bootstrap_eligible: boolean; trust_groups: boolean }[]>`
-      SELECT id, bootstrap_eligible, trust_groups FROM tenant_oidc WHERE enabled ORDER BY sort, id`
-    for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: null, brand: null, bootstrapEligible: r.bootstrap_eligible, trustGroups: r.trust_groups })
+    const rows = await db.sql<{ id: string; bootstrap_eligible: boolean; trust_groups: boolean; subject_prefix: string | null; label: string | null; preset: string | null }[]>`
+      SELECT id, bootstrap_eligible, trust_groups, subject_prefix, label, preset FROM tenant_oidc WHERE enabled ORDER BY sort, id`
+    // rev3 labels: a tenant-authored label publishes ONLY preset-less (a preset connection wears
+    // its fixed brand; the API refuses labels on presets, this is the second seatbelt)
+    for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: r.preset ? null : r.label, brand: r.preset, bootstrapEligible: r.bootstrap_eligible, trustGroups: r.trust_groups, subjectPrefix: r.subject_prefix })
   }
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso) {
     // one per tenant in v1 (ADR-197 §1 B5); SAML never bootstraps (§2 rev2: oidc-only in v1)
@@ -167,12 +172,12 @@ export async function resolveLoginConnections(
       if ((err as { code?: string }).code === '42P01') return [] as { id: string; trust_groups: boolean }[]
       throw err
     })
-    if (row) out.push({ id: row.id, kind: 'saml', label: null, brand: null, bootstrapEligible: false, trustGroups: row.trust_groups })
+    if (row) out.push({ id: row.id, kind: 'saml', label: null, brand: null, bootstrapEligible: false, trustGroups: row.trust_groups, subjectPrefix: null })
   }
   const ownIdpEffective = out.length > 0
   let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
   if (platform && ownIdpEffective && (await platformLoginDisabled(db))) platform = null
-  if (platform) out.push({ id: 'platform', kind: 'platform', label: null, brand: null, bootstrapEligible: false, trustGroups: true })
+  if (platform) out.push({ id: 'platform', kind: 'platform', label: null, brand: null, bootstrapEligible: false, trustGroups: true, subjectPrefix: null })
   return out
 }
 

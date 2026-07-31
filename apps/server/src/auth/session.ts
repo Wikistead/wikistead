@@ -160,12 +160,18 @@ export async function establishMemberSession(
   deps: { db: TenantDb; fga: OpenFgaClient; valkey: IORedis; searchDriver?: SearchDriver },
   tenant: { id: string; plan: string },
   claims: { sub: string; email?: string | null; emailVerified?: boolean | null; name?: string | null; picture?: string | null; groups?: string[] },
+  // #554 S4 / ADR-197 §5 rev3 (the gate flip): true ONLY when the CALLER validated the raw
+  // external sub and minted the namespaced form (wc<conn8>_<raw>) itself — the gate below would
+  // otherwise refuse the very subs this seam exists to protect. Never set from request data.
+  opts?: { subMintedInternally?: boolean },
 ): Promise<string> {
   // #554 / ADR-197 §5 (S0): the reserved internal sub space — an externally-asserted subject that
   // wears a future connection's prefix (or exceeds the FGA-safe length) is refused with this seam's
   // own failure (a non-member 403), never a distinguishable oracle.
-  const { assertExternalSub } = await import('./reserved-subs.js')
-  assertExternalSub(claims.sub, () => Object.assign(new Error('not a member of this tenant'), { statusCode: 403 }))
+  if (!opts?.subMintedInternally) {
+    const { assertExternalSub } = await import('./reserved-subs.js')
+    assertExternalSub(claims.sub, () => Object.assign(new Error('not a member of this tenant'), { statusCode: 403 }))
+  }
   // tenant#member is the authority (raw relation on a tenant object — not a page/
   // space Capability — so call FGA directly). Membership = the right to enter.
   const { allowed } = await deps.fga.check({ user: `user:${claims.sub}`, relation: 'member', object: `tenant:${tenant.id}` })

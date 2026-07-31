@@ -26,11 +26,11 @@ async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   return row ? toOidcCfg(row) : null
 }
 
-type TenantOidcRow = { id: string; issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null; bootstrap_eligible: boolean; trust_groups: boolean }
+type TenantOidcRow = { id: string; issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null; bootstrap_eligible: boolean; trust_groups: boolean; subject_prefix: string | null }
 
 async function firstEnabledTenantOidc(db: TenantDb): Promise<TenantOidcRow | null> {
   const [row] = await db.sql<TenantOidcRow[]>`
-    SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible, trust_groups
+    SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible, trust_groups, subject_prefix
     FROM tenant_oidc WHERE enabled ORDER BY sort, id LIMIT 1`
   return row ?? null
 }
@@ -218,6 +218,9 @@ export async function authPlugin(app: FastifyInstance) {
       // read alongside eligibility, from the same connection the state is bound to. The platform
       // connection is trusted (the operator's own IdP, today's behavior).
       let trustGroups = true
+      // #554 S4 / ADR-197 §5: the connection's sub namespace — non-null means THIS login mints
+      // wc<conn8>_<externalSub> member identities (the legacy connection stays raw).
+      let subjectPrefix: string | null = null
       try {
         if (st.connectionId) {
           const conn = (await resolveLoginConnections(db, tenant)).find((c) => c.id === st.connectionId && c.kind !== 'saml')
@@ -226,6 +229,7 @@ export async function authPlugin(app: FastifyInstance) {
           resolved = { cfg, viaTenantOidc: conn.kind === 'oidc' }
           bootstrapEligible = conn.bootstrapEligible
           trustGroups = conn.trustGroups
+          subjectPrefix = conn.subjectPrefix
         } else {
           // legacy states minted before connection binding shipped (a ≤300s window at deploy)
           const available = await resolveLogin(db, tenant)
@@ -234,6 +238,7 @@ export async function authPlugin(app: FastifyInstance) {
             const first = await firstEnabledTenantOidc(db)
             bootstrapEligible = first?.bootstrap_eligible ?? false
             trustGroups = first?.trust_groups ?? false
+            subjectPrefix = first?.subject_prefix ?? null
           }
         }
       } catch (e) {
@@ -267,10 +272,25 @@ export async function authPlugin(app: FastifyInstance) {
         claims = { ...claims, groups: [] }
       }
 
+      // #554 S4 / ADR-197 §5 + rev3 gate flip: on a namespacing connection, the RAW external sub is
+      // validated FIRST (the same refusal shape as a non-member — no oracle), then the namespaced
+      // identity is minted and the downstream seams are told the mint is OURS. The S0 gates keep
+      // refusing every externally-asserted reserved prefix; only this validated mint passes.
+      let subMintedInternally = false
+      if (subjectPrefix) {
+        const { externalSubViolation } = await import('../auth/reserved-subs.js')
+        if (externalSubViolation(claims.sub)) {
+          req.log.info({ tenantId: tenant.id }, 'auth/callback: raw subject refused before namespacing (reserved/oversize)')
+          return reply.redirect('/login?error=access')
+        }
+        claims = { ...claims, sub: subjectPrefix + claims.sub }
+        subMintedInternally = true
+      }
+
       const deps = { db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver }
       let sid: string | null = null
       try {
-        sid = await establishMemberSession(deps, tenant, claims) // existing member → session
+        sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally }) // existing member → session
       } catch (e) {
         // Not a member yet. Identity is proven but membership is NOT — login alone
         // never grants it (the identity≠membership invariant). Membership appears
@@ -287,8 +307,8 @@ export async function authPlugin(app: FastifyInstance) {
       let seatFull = false
       if (!sid && st.inviteToken) {
         try {
-          if (await acceptInvite({ db, fga: app.fga }, tenant, st.inviteToken, claims)) {
-            sid = await establishMemberSession(deps, tenant, claims)
+          if (await acceptInvite({ db, fga: app.fga }, tenant, st.inviteToken, claims, { subMintedInternally })) {
+            sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally })
           }
         } catch (e) {
           // A seat-cap hit (402) is surfaced distinctly so the user learns the tenant is
@@ -305,8 +325,8 @@ export async function authPlugin(app: FastifyInstance) {
       // member-less tenant). A 2nd login or the platform IdP (Cloud) never does.
       // #554 S2 review N1: AND the connection must be bootstrap_eligible (ADR-197 §2 rev2) — a
       // named non-first connection is reachable now, and a default-flag one never bootstraps.
-      if (!sid && st.viaTenantOidc && bootstrapEligible && (await bootstrapFirstAdmin({ db, fga: app.fga }, tenant, claims))) {
-        sid = await establishMemberSession(deps, tenant, claims)
+      if (!sid && st.viaTenantOidc && bootstrapEligible && (await bootstrapFirstAdmin({ db, fga: app.fga }, tenant, claims, { subMintedInternally }))) {
+        sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally })
       }
       if (!sid) {
         // Seat-full is a billing state the user should see; everything else stays

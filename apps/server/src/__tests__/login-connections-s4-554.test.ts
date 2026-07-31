@@ -1,0 +1,183 @@
+// #554 S4 / ADR-197 §1-3 + §5: the admin connection-management surface, the per-connection lockout
+// guard, and the wc<conn8>_ subject namespacing with its gate flip. The pins that carry weight:
+//   - presets: google prefills its issuer; microsoft REQUIRES the Entra tenant GUID and templates
+//     the issuer; a preset connection refuses a label (rev3);
+//   - label hygiene: bidi-override / control chars / >64 refuse — the string renders on the
+//     UNAUTHENTICATED screen;
+//   - verify-before-enable per connection (the SSRF-guarded discovery check);
+//   - the lockout guard: disabling/deleting the LAST effective connection is 409; with a sibling
+//     enabled it passes;
+//   - §5 namespacing: a login through a minting connection creates a member whose sub is
+//     wc<conn8>_<externalSub>; the SAME external subject through the legacy connection is a
+//     SEPARATE raw-sub member (the collision §5 exists to prevent) — and the S0 gates still refuse
+//     an externally-asserted wc-prefixed sub (two-faced: reserved-subs-554 holds the refusal face,
+//     this file holds the internal-mint face);
+//   - break-glass --connection flips one row and ledgers it.
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import type { FastifyInstance } from 'fastify'
+import postgres from 'postgres'
+import { randomUUID } from 'node:crypto'
+import IORedis from 'ioredis'
+import { pool } from '../db/pool.js'
+import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+import { provisionTenant } from '../auth/provisioning.js'
+import { createSession, SESSION_COOKIE } from '../auth/session.js'
+import { subjectPrefixFor, sanitizeConnectionLabel } from '../routes/admin-connections.js'
+import { recoverLoginMethods } from '../scripts/login-methods.js'
+import { startTestIssuer, type TestIssuer } from './helpers/oidc-issuer.js'
+import { buildApp } from '../app.js'
+
+const admin = postgres(process.env.DATABASE_ADMIN_URL!)
+const STAMP = Date.now().toString(36)
+const SLUG = `s4ac-${STAMP}`
+const HOST = `${SLUG}.localhost`
+const ADMIN_SUB = `s4ac-admin-${STAMP}`
+const CLIENT_ID = 'wikistead-s4'
+const EXT = `s4-ext-${STAMP}` // the external subject both connections authenticate
+
+let app: FastifyInstance
+let issuer: TestIssuer
+let tenantId = ''
+let sid = ''
+let valkey: IORedis
+const H = () => ({ host: HOST, cookie: `${SESSION_COOKIE}=${sid}`, 'content-type': 'application/json' })
+const HG = () => ({ host: HOST, cookie: `${SESSION_COOKIE}=${sid}` })
+
+beforeAll(async () => {
+  issuer = await startTestIssuer({ clientId: CLIENT_ID })
+  const t = await provisionTenant(fgaClient, { slug: SLUG, admin: { sub: ADMIN_SUB } })
+  tenantId = t.tenantId
+  // the legacy (raw-sub) connection, enabled — the tenant's first way in
+  await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, trust_groups, bootstrap_eligible)
+    VALUES (${randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 0, true, true)`
+  app = await buildApp()
+  await app.ready()
+  valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
+  sid = await createSession(valkey, { tenantId, sub: ADMIN_SUB, role: 'admin' })
+  issuer.setSubject(EXT, { email: 'ext@s4.test' })
+}, 60_000)
+
+afterAll(async () => {
+  await valkey.quit()
+  await app.close()
+  await issuer.close()
+  await admin`DELETE FROM tenants WHERE id = ${tenantId}`.catch(() => {})
+  await admin.end()
+  await pool.end()
+}, 60_000)
+
+const post = (body: object) => app.inject({ method: 'POST', url: '/admin/connections', headers: H(), payload: body })
+
+describe('#554 S4a: connection management', () => {
+  it('presets prefill and brand; microsoft needs the Entra GUID; a preset refuses a label (rev3)', async () => {
+    const g = await post({ preset: 'google', clientId: 'g', redirectUri: `http://${HOST}/auth/callback` })
+    expect(g.statusCode).toBe(201)
+    const gid = (g.json() as { id: string }).id
+    const [grow] = await admin<{ issuer: string; preset: string; subject_prefix: string }[]>`
+      SELECT issuer, preset, subject_prefix FROM tenant_oidc WHERE id = ${gid}`
+    expect(grow).toMatchObject({ issuer: 'https://accounts.google.com', preset: 'google', subject_prefix: subjectPrefixFor(gid) })
+    expect(grow!.subject_prefix).toMatch(/^wc[0-9a-f]{8}_$/)
+
+    expect((await post({ preset: 'microsoft', clientId: 'm', redirectUri: 'https://x/cb' })).statusCode, 'GUID required').toBe(400)
+    const ms = await post({ preset: 'microsoft', clientId: 'm', redirectUri: 'https://x/cb', entraTenantId: '11111111-2222-3333-4444-555555555555' })
+    expect(ms.statusCode).toBe(201)
+    const [mrow] = await admin<{ issuer: string }[]>`SELECT issuer FROM tenant_oidc WHERE id = ${(ms.json() as { id: string }).id}`
+    expect(mrow!.issuer).toBe('https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0')
+
+    expect((await post({ preset: 'google', clientId: 'g', redirectUri: 'https://x/cb', label: 'Evil Corp' })).statusCode, 'preset wears its own branding').toBe(400)
+  }, 60_000)
+
+  it('label hygiene: bidi/control/oversize refuse; a clean label lands (preset-less only)', async () => {
+    expect(sanitizeConnectionLabel('ok label')).toEqual({ ok: true, label: 'ok label' })
+    expect(sanitizeConnectionLabel('x'.repeat(65))).toEqual({ ok: false })
+    expect(sanitizeConnectionLabel('a‮b')).toEqual({ ok: false })
+    expect(sanitizeConnectionLabel('a\nb')).toEqual({ ok: false })
+    const res = await post({ issuer: 'https://idp.example', clientId: 'c', redirectUri: 'https://x/cb', label: ' Corp SSO ' })
+    expect(res.statusCode).toBe(201)
+    const [row] = await admin<{ label: string }[]>`SELECT label FROM tenant_oidc WHERE id = ${(res.json() as { id: string }).id}`
+    expect(row!.label, 'trimmed').toBe('Corp SSO')
+    expect((await post({ issuer: 'https://idp.example', clientId: 'c', redirectUri: 'https://x/cb', label: 'bad‮label' })).statusCode).toBe(400)
+  }, 60_000)
+
+  it('verify-before-enable: enabling against an unreachable/refused issuer is 400', async () => {
+    const res = await post({ issuer: 'http://127.0.0.1:1/', clientId: 'c', redirectUri: 'https://x/cb', enabled: true })
+    expect(res.statusCode).toBe(400)
+  }, 60_000)
+
+  it('the lockout guard: the LAST effective connection refuses disable and delete; a sibling unlocks it', async () => {
+    const [first] = await admin<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${tenantId} AND enabled ORDER BY sort, id LIMIT 1`
+    const off = await app.inject({ method: 'PATCH', url: `/admin/connections/${first!.id}`, headers: H(), payload: { enabled: false } })
+    expect(off.statusCode, 'last way in — refused').toBe(409)
+    const del = await app.inject({ method: 'DELETE', url: `/admin/connections/${first!.id}`, headers: HG() })
+    expect(del.statusCode).toBe(409)
+
+    const sibling = randomUUID()
+    await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, scopes, redirect_uri, enabled, sort, subject_prefix)
+      VALUES (${sibling}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, 'openid', ${`http://${HOST}/auth/callback`}, true, 5, ${subjectPrefixFor(sibling)})`
+    try {
+      const offNow = await app.inject({ method: 'PATCH', url: `/admin/connections/${first!.id}`, headers: H(), payload: { enabled: false } })
+      expect(offNow.statusCode, 'a live sibling unlocks the guard').toBe(204)
+      // re-enable via SQL: the PATCH path would run discovery against the LOCAL test issuer, which
+      // the hardened fetch refuses by design (the verify gate is pinned separately above)
+      await admin`UPDATE tenant_oidc SET enabled = true WHERE id = ${first!.id}`
+    } finally {
+      await admin`DELETE FROM tenant_oidc WHERE id = ${sibling}`
+    }
+  }, 60_000)
+
+  it('break-glass --connection flips one row and ledgers the act', async () => {
+    const target = randomUUID()
+    await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, scopes, redirect_uri, enabled, sort, subject_prefix)
+      VALUES (${target}, ${tenantId}, 'https://idp.example', 'c', 'openid', 'https://x/cb', true, 6, ${subjectPrefixFor(target)})`
+    try {
+      const r = await recoverLoginMethods(admin, { slug: SLUG, operator: 's4-test', connection: { id: target, on: false } })
+      expect(r.changed).toBe(true)
+      const [row] = await admin<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc WHERE id = ${target}`
+      expect(row!.enabled).toBe(false)
+      const ledger = await admin<{ action: string }[]>`
+        SELECT action FROM operator_audit_log WHERE actor = 'operator:s4-test' AND target = ${`tenant:${tenantId}`}`
+      expect(ledger.some((l) => l.action === 'tenant.connection_disabled')).toBe(true)
+    } finally {
+      await admin`DELETE FROM tenant_oidc WHERE id = ${target}`
+    }
+  }, 60_000)
+})
+
+describe('#554 S4b: subject namespacing (§5) — the internal-mint face', () => {
+  it('a minting connection creates wc<conn8>_<ext>; the legacy connection keeps the raw sub — TWO members, no merge', async () => {
+    const minting = randomUUID()
+    const prefix = subjectPrefixFor(minting)
+    await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, scopes, redirect_uri, enabled, sort, subject_prefix)
+      VALUES (${minting}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 7, ${prefix})`
+    const tuples = [
+      { user: `user:${prefix}${EXT}`, relation: 'member', object: `tenant:${tenantId}` },
+      { user: `user:${EXT}`, relation: 'member', object: `tenant:${tenantId}` },
+    ]
+    await writeTuples(fgaClient, tuples)
+    try {
+      const login = async (connection: string) => {
+        const res = await app.inject({ method: 'GET', url: `/auth/login?connection=${connection}`, headers: { host: HOST } })
+        expect(res.statusCode).toBe(302)
+        const authRes = await fetch(res.headers.location as string, { redirect: 'manual' })
+        const u = new URL(authRes.headers.get('location')!)
+        const cb = await app.inject({ method: 'GET', url: u.pathname + u.search, headers: { host: HOST } })
+        expect(cb.statusCode).toBe(302)
+        expect(String(cb.headers['set-cookie'] ?? ''), 'session established').toContain(`${SESSION_COOKIE}=`)
+      }
+      await login(minting)
+      const [namespaced] = await admin<{ sub: string }[]>`
+        SELECT sub FROM members WHERE tenant_id = ${tenantId} AND sub = ${prefix + EXT}`
+      expect(namespaced, 'the namespaced identity exists — the gate flip admitted OUR mint').toBeDefined()
+
+      const [legacy] = await admin<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${tenantId} AND subject_prefix IS NULL ORDER BY sort, id LIMIT 1`
+      await login(legacy!.id)
+      const rows = await admin<{ sub: string }[]>`
+        SELECT sub FROM members WHERE tenant_id = ${tenantId} AND sub IN (${EXT}, ${prefix + EXT}) ORDER BY sub`
+      expect(rows.map((r) => r.sub).sort(), 'two members — the §5 collision never happens').toEqual([EXT, prefix + EXT].sort())
+    } finally {
+      await deleteTuples(fgaClient, tuples).catch(() => {})
+      await admin`DELETE FROM members WHERE tenant_id = ${tenantId} AND sub IN (${EXT}, ${prefix + EXT})`.catch(() => {})
+      await admin`DELETE FROM tenant_oidc WHERE id = ${minting}`
+    }
+  }, 60_000)
+})

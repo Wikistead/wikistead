@@ -107,6 +107,9 @@ export interface RecoverArgs {
   enable?: LoginMethod
   disable?: LoginMethod
   platformLogin?: 'on' | 'off'
+  // #554 S4 / ADR-197 §2: per-connection break-glass — flips ONE tenant_oidc row by its minted id
+  // instead of the whole kind. Composable with --enable/--disable being absent.
+  connection?: { id: string; on: boolean }
 }
 export interface RecoverResult {
   changed: boolean
@@ -126,6 +129,24 @@ export async function recoverLoginMethods(sql: postgres.Sql, args: RecoverArgs):
 
   let changed = false
   await sql.begin(async (tx) => {
+    if (args.connection) {
+      const [row] = await tx<{ id: string; enabled: boolean }[]>`
+        SELECT id, enabled FROM tenant_oidc WHERE id = ${args.connection.id} AND tenant_id = ${before.tenantId}`
+      if (!row) {
+        throw Object.assign(new Error(`no connection ${args.connection.id} on "${args.slug}" — break-glass flips flags, it never invents config.`), { code: 'no_config' })
+      }
+      if (row.enabled !== args.connection.on) {
+        await tx`UPDATE tenant_oidc SET enabled = ${args.connection.on}, updated_at = now() WHERE id = ${row.id}`
+        changed = true
+        await appendOperatorEntry(tx, {
+          actor: `operator:${args.operator}`,
+          action: args.connection.on ? 'tenant.connection_enabled' : 'tenant.connection_disabled',
+          target: `tenant:${before.tenantId}`,
+          at,
+          reason: 'recovery',
+        })
+      }
+    }
     for (const w of wants) {
       const cur = before.methods[w.method]
       if (w.method === 'platform-oidc') {
@@ -196,7 +217,7 @@ export function renderPicture(p: LoginMethodsPicture): string {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const slug = process.argv[2]
   if (!slug || slug.startsWith('--')) {
-    console.error('usage: pnpm tenant:login-methods <tenantSlug> [--enable=<m>] [--disable=<m>] [--platform-login=on|off] [--by=<operator>]')
+    console.error('usage: pnpm tenant:login-methods <tenantSlug> [--enable=<m>] [--disable=<m>] [--connection=<id>:on|off] [--platform-login=on|off] [--by=<operator>]')
     process.exit(2)
   }
   const opt = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -216,10 +237,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const enable = asMethod(opt('enable'))
     const disable = asMethod(opt('disable'))
-    if (!enable && !disable && !platformLogin) {
+    const connRaw = opt('connection')
+    let connection: { id: string; on: boolean } | undefined
+    if (connRaw !== undefined) {
+      const m = /^(.+):(on|off)$/.exec(connRaw)
+      if (!m) { console.error('--connection takes <id>:on|off'); process.exit(2) }
+      connection = { id: m[1]!, on: m[2] === 'on' }
+    }
+    if (!enable && !disable && !platformLogin && !connection) {
       console.log(renderPicture(await inspectLoginMethods(adminPool, { slug })))
     } else {
-      const r = await recoverLoginMethods(adminPool, { slug, operator, enable, disable, platformLogin: platformLogin as 'on' | 'off' | undefined })
+      const r = await recoverLoginMethods(adminPool, { slug, operator, enable, disable, platformLogin: platformLogin as 'on' | 'off' | undefined, connection })
       console.log(r.changed ? 'changed.' : 'no-op (already in the requested state).')
       console.log(renderPicture(r.picture))
     }
