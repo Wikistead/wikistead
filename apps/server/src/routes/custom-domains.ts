@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import type postgres from 'postgres'
 import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
 import { resolveEntitlements } from '@wikistead/entitlements'
@@ -96,6 +97,74 @@ export async function verifyCustomDomain(
   await pool`UPDATE tenants SET custom_domain = ${domain} WHERE id = ${args.tenantId}`
   emit({ type: 'tenant.custom_domain_verified', tenantId: args.tenantId, domain })
   return { verified: true }
+}
+
+// #576: the RE-verification sweep. A domain proved ours once; nothing asked again, so a domain that
+// stopped being ours (DNS moved, the dev tunnel died, the registration lapsed) kept winning
+// `tenantBaseUrl` and every notification mail carried a link to a dead host — silently, because the
+// only signal was a user clicking it.
+//
+// The shape (the ticket's option 1, with the abuse guard it asked for): re-run the SAME DNS-TXT
+// ownership primitive the manual verify uses — one primitive, no looser second path — and demote
+// only after DEMOTE_AFTER consecutive failures AND a grace window since the last success. A single
+// resolver hiccup, or an outage shorter than the window, must never unpick a customer's domain.
+// Demotion is verified→pending, the reversible direction: the row, its token and the admin's
+// configuration survive, `tenants.custom_domain` is cleared so host→tenant resolution and
+// tenantBaseUrl fall back to the platform URL, and pressing Verify again restores it.
+//
+// HONEST LIMIT: this proves OWNERSHIP, not reachability. A domain whose TXT record still stands but
+// whose server answers nothing keeps its verified status — catching that needs an HTTP probe, which
+// is a different (and SSRF-shaped) decision. Stated so nobody reads this as a health check.
+export const DEMOTE_AFTER = 3
+export const GRACE_MS = 24 * 60 * 60 * 1000
+
+export async function recheckCustomDomains(
+  sql: postgres.Sql,
+  opts: { resolveTxt?: ResolveTxt; now?: Date; demoteAfter?: number; graceMs?: number } = {},
+): Promise<{ checked: number; demoted: string[] }> {
+  const now = opts.now ?? new Date()
+  const demoteAfter = opts.demoteAfter ?? DEMOTE_AFTER
+  const graceMs = opts.graceMs ?? GRACE_MS
+  // the admin connection: this runs without a request, across tenants (the drift-worker precedent)
+  const rows = await sql<{ tenant_id: string; domain: string; verification_token: string; check_failures: number; verified_at: Date | null; last_checked_at: Date | null }[]>`
+    SELECT tenant_id, domain, verification_token, check_failures, verified_at, last_checked_at
+    FROM custom_domains WHERE status = 'verified'`
+  const demoted: string[] = []
+  for (const row of rows) {
+    let present: boolean
+    try {
+      present = await txtChallengePresent(row.domain, row.verification_token, opts.resolveTxt)
+    } catch {
+      present = false // an unreachable resolver counts as one failure, never as proof of loss
+    }
+    if (present) {
+      await sql`UPDATE custom_domains SET check_failures = 0, last_checked_at = ${now} WHERE tenant_id = ${row.tenant_id} AND domain = ${row.domain}`
+      continue
+    }
+    const failures = row.check_failures + 1
+    // the grace anchor is the last time we KNOW it was ours
+    const lastGood = row.last_checked_at ?? row.verified_at ?? now
+    const past = now.getTime() - new Date(lastGood).getTime() >= graceMs
+    if (failures >= demoteAfter && past) {
+      await sql`UPDATE custom_domains SET status = 'pending', check_failures = ${failures}, last_checked_at = ${now}
+                WHERE tenant_id = ${row.tenant_id} AND domain = ${row.domain}`
+      await sql`UPDATE tenants SET custom_domain = NULL WHERE id = ${row.tenant_id} AND custom_domain = ${row.domain}`
+      emit({ type: 'tenant.custom_domain_unverified', tenantId: row.tenant_id, domain: row.domain })
+      demoted.push(row.domain)
+    } else {
+      await sql`UPDATE custom_domains SET check_failures = ${failures}, last_checked_at = ${now} WHERE tenant_id = ${row.tenant_id} AND domain = ${row.domain}`
+    }
+  }
+  return { checked: rows.length, demoted }
+}
+
+// The periodic driver (the startAdminDriftWorker precedent: interval, self-scheduling, cancellable).
+export function startCustomDomainRecheckWorker(sql: postgres.Sql, intervalMs = 6 * 60 * 60 * 1000): () => void {
+  const t = setInterval(() => {
+    void recheckCustomDomains(sql).catch(() => { /* a sweep that fails retries next tick */ })
+  }, intervalMs)
+  t.unref?.()
+  return () => clearInterval(t)
 }
 
 // Remove a custom domain — three-point revocation (ADR-065): drop the registry row, clear the

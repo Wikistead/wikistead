@@ -74,6 +74,7 @@ export type DomainEvent =
   | { type: 'tenant.custom_domain_added'; tenantId: string; domain: string }
   | { type: 'tenant.custom_domain_verified'; tenantId: string; domain: string }
   | { type: 'tenant.custom_domain_removed'; tenantId: string; domain: string }
+  | { type: 'tenant.custom_domain_unverified'; tenantId: string; domain: string } // #576
   // SAML config change (#135 / ADR-067), EE. The production SP/ACS validation is a separate sub-task.
   | { type: 'tenant.saml_updated'; tenantId: string; actorId: string; enabled: boolean }
   // Tenant AI opt-in toggle (#130 / ADR-077): the tenant half of the two-stage egress consent.
