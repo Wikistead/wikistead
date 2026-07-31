@@ -9,6 +9,7 @@ import { pool } from '../db/pool.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { buildApp } from '../app.js'
+import { drainEmailOutbox } from '../email/outbox.js' // #547 S2: mention mail rides the outbox now
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -38,6 +39,9 @@ const fgaFixture = [
 ]
 
 beforeAll(async () => {
+  // #547: the outbox builder refuses to improvise a link — give it the canonical base (no dependence
+  // on custom-domain residue from other suites)
+  process.env.WKS_PUBLIC_BASE_URL ??= 'http://cmt547.test'
   app = await buildApp()
   await app.ready()
   // Own space + page (admin pool bypasses RLS for the fixture insert).
@@ -62,6 +66,7 @@ afterAll(async () => {
   await admin`DELETE FROM comments WHERE tenant_id = ${TENANT}`.catch(() => {})
   await admin`DELETE FROM comment_threads WHERE tenant_id = ${TENANT}`.catch(() => {})
   await admin`DELETE FROM members WHERE tenant_id = ${TENANT} AND sub LIKE 'cmt-%'`.catch(() => {})
+  await admin`DELETE FROM email_outbox WHERE member_sub LIKE 'cmt-%'`.catch(() => {})
   await admin`DELETE FROM pages WHERE id = ${PAGE}`.catch(() => {})
   await admin`DELETE FROM spaces WHERE id = ${SPACE}`.catch(() => {})
   await admin.end()
@@ -189,10 +194,17 @@ describe('@mention (directory scoped to page-viewers; notification best-effort)'
     expect((await get('viewer', `/pages/${PAGE}/mentionable`)).statusCode).toBe(403)
   })
 
-  it('notifies a mentioned page-viewer by email (best-effort, real SMTP via Mailpit)', async () => {
+  // #547 / ADR-196 §1 re-aim: the direct in-request send this test used to pin is the DEFECT the ADR
+  // removed — mention mail now rides the notification row through the email outbox (fold window, then
+  // the drain builds it behind the send-time gates). The pinned OUTCOME is the same (the viewer gets
+  // real SMTP mail via Mailpit); what changed is the road, so the test walks the road: enqueue → due →
+  // drain. mention-email-547.test.ts owns the new pipeline's own pins (kill switch, draft suppress …).
+  it('notifies a mentioned page-viewer by email (through the outbox, real SMTP via Mailpit)', async () => {
     await clearMail()
     const r = await post('author', `/pages/${PAGE}/comments`, { body: 'hey @viewer', mentions: ['cmt-viewer'] })
     expect(r.statusCode).toBe(201)
+    await admin`UPDATE email_outbox SET next_attempt_at = now() - interval '1 second' WHERE member_sub = 'cmt-viewer'`
+    await drainEmailOutbox({ fallback: app.email, batch: 50 })
     expect(await mailedTo('viewer@x.test')).toBe(true)
   })
 
@@ -200,6 +212,8 @@ describe('@mention (directory scoped to page-viewers; notification best-effort)'
     await clearMail()
     const r = await post('author', `/pages/${PAGE}/comments`, { body: 'hey @outsider', mentions: ['cmt-outsider'] })
     expect(r.statusCode).toBe(201) // the comment is still created
+    await admin`UPDATE email_outbox SET next_attempt_at = now() - interval '1 second' WHERE member_sub = 'cmt-outsider'`
+    await drainEmailOutbox({ fallback: app.email, batch: 50 })
     expect(await mailedTo('outsider@x.test')).toBe(false) // but no notification leaks the page
   })
 })
