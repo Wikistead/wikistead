@@ -70,6 +70,13 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
 // the commenter noun from every grant surface; comment-only stays a custom-role composition.
 const BUILTIN_MAPPABLE = new Set(['view', 'edit', 'moderate', 'manage'])
 const BUILTIN_NOUN: Record<string, string> = { view: 'viewer', edit: 'editor', moderate: 'moderator', manage: 'manager' }
+// #497 re-review N1 / ADR-199 §2 rev5: the NOUN is the unit a human picks, and `editor` means
+// edit + comment (severing edit ⇒ comment left the bare capability unable to comment). The Members
+// picker already grants the bundle; a GROUP MAPPING offering the same word has to mean the same
+// thing, or "Engineering → editor" produces editors who cannot comment. Mirrors the web's
+// COMPOSITE_BUILTINS — one table per side, same content, both pinned.
+const COMPOSITE_BUILTINS: Record<string, string[]> = { edit: ['edit', 'comment'] }
+export const builtinBundle = (cap: string): string[] => COMPOSITE_BUILTINS[cap] ?? [cap]
 const RESERVED_NAMES = new Set([...BUILT_IN_ROLES.map((r) => r.name), 'admin', 'owner'])
 
 interface RoleRow { id: string; name: string; capabilities: string[]; scope: RoleScope; created_at: Date; updated_at: Date }
@@ -279,8 +286,14 @@ export async function assignBuiltinCompositeInTx(
   args: {
     tenant: { id: string; plan: string }; spaceId: string; principal: string; actorSub: string;
     capabilities: string[]; auditAction?: string; skipAudit?: boolean;
+    // #497 re-review N1: a GROUP MAPPING's arms are machine-managed too — same composite, different
+    // origin, and the mapping row is written in the SAME tx (afterArms) so a mapping can never
+    // commit owning one arm and not the other.
+    origin?: 'manual' | 'mapping' | 'default';
+    onDuplicate?: 'conflict' | 'ignore';
+    afterArms?: (tx: Sql, ids: { cap: string; id: string }[]) => Promise<void>;
   },
-): Promise<void> {
+): Promise<{ cap: string; id: string }[]> {
   const { tenant, spaceId, principal, actorSub } = args
   const { tuples: existingTuples } = await fga.read({ user: principal, object: `space:${spaceId}` })
   const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
@@ -288,21 +301,27 @@ export async function assignBuiltinCompositeInTx(
     cap,
     toWrite: expansionTuples('space', spaceId, principal, cap as AnyRoleCapability, true).filter((t) => !existing.has(`${t.relation}|${t.user}`)),
   }))
-  await db.tx(async (tx) => {
+  const assigned = await db.tx(async (tx) => {
     const all: { user: string; relation: string; object: string }[] = []
+    const ids: { cap: string; id: string }[] = []
     for (const arm of arms) {
       const o = await assignRoleTxCore(tx, {
         tenant, roleId: null, builtinCapability: arm.cap,
         resourceType: 'space', resourceId: spaceId, principal, actorSub,
-        onDuplicate: 'ignore', auditAction: args.auditAction, skipAudit: args.skipAudit,
+        onDuplicate: args.onDuplicate ?? 'ignore', auditAction: args.auditAction, skipAudit: args.skipAudit,
+        origin: args.origin,
       }, { owned: [arm.cap as AnyRoleCapability], toWrite: arm.toWrite })
       all.push(...o.toWrite)
+      ids.push({ cap: arm.cap, id: (o.id ?? o.existingId)! })
     }
+    if (args.afterArms) await args.afterArms(tx, ids)
     const seen = new Set<string>()
     const deduped = all.filter((t) => { const k = `${t.relation}|${t.user}|${t.object}`; if (seen.has(k)) return false; seen.add(k); return true })
     if (deduped.length) await writeTuples(fga, deduped)
+    return ids
   })
   await reindexPublishedPages(db, searchDriver, tenant.id, spaceId)
+  return assigned
 }
 
 // #497 / ADR-183: the UNASSIGN CORE by assignment id, extracted for the mapping DELETE path. The
@@ -934,16 +953,33 @@ export async function rolesPlugin(app: FastifyInstance) {
       // For a built-in, a pre-existing assignment for the same (group, capability, space) — e.g. a
       // DIRECT group grant from the Members tab — 409s here, exactly as a duplicate custom assign
       // does: a mapping must OWN its assignment, and one it didn't create is not its to own.
-      const assignmentId = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
-        tenant: req.tenant, roleId: role ? role.id : null, builtinCapability: role ? undefined : builtinCapability,
-        capabilities: caps, resourceType, resourceId, principal,
-        actorSub: req.user.sub, origin: 'mapping',
-        afterAssign: async (tx, asgId) => {
-          await tx`INSERT INTO group_role_mappings (id, tenant_id, group_name, role_id, builtin_capability, resource_type, resource_id, assignment_id, created_by)
-                   VALUES (${id}, ${req.tenant.id}, ${groupName.trim()}, ${role ? role.id : null}, ${role ? null : builtinCapability!}, ${resourceType}, ${resourceId}, ${asgId}, ${req.user.sub})`
-          await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.mapping_created', target: role ? `role:${role.id}` : `role:builtin:${builtinCapability}` })
-        },
-      })
+      const writeMappingRow = async (tx: Sql, asgId: string) => {
+        await tx`INSERT INTO group_role_mappings (id, tenant_id, group_name, role_id, builtin_capability, resource_type, resource_id, assignment_id, created_by)
+                 VALUES (${id}, ${req.tenant.id}, ${groupName.trim()}, ${role ? role.id : null}, ${role ? null : builtinCapability!}, ${resourceType}, ${resourceId}, ${asgId}, ${req.user.sub})`
+        await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.mapping_created', target: role ? `role:${role.id}` : `role:builtin:${builtinCapability}` })
+      }
+      let assignmentId: string
+      if (!role && builtinBundle(builtinCapability!).length > 1) {
+        // #497 re-review N1 / ADR-199 §2 rev5: the NOUN is composite, so the mapping confers the whole
+        // bundle — N single-capability rows, all origin='mapping', in ONE tx with the mapping row. The
+        // mapping row points at the PRIMARY arm (the capability the admin picked); the siblings are
+        // found by bundle on delete, so no schema grows a second foreign key.
+        const ids = await assignBuiltinCompositeInTx(req.db, app.fga, app.searchDriver, {
+          tenant: req.tenant, spaceId: resourceId, principal, actorSub: req.user.sub,
+          capabilities: builtinBundle(builtinCapability!), origin: 'mapping', onDuplicate: 'conflict',
+          afterArms: async (tx, ids) => {
+            await writeMappingRow(tx, ids.find((i) => i.cap === builtinCapability)!.id)
+          },
+        })
+        assignmentId = ids.find((i) => i.cap === builtinCapability)!.id
+      } else {
+        assignmentId = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
+          tenant: req.tenant, roleId: role ? role.id : null, builtinCapability: role ? undefined : builtinCapability,
+          capabilities: caps, resourceType, resourceId, principal,
+          actorSub: req.user.sub, origin: 'mapping',
+          afterAssign: writeMappingRow,
+        })
+      }
       return reply.code(201).send({ id, groupName: groupName.trim(), roleId: role ? role.id : null, builtinCapability: role ? null : builtinCapability, roleName: role ? role.name : BUILTIN_NOUN[builtinCapability!] ?? builtinCapability, resourceType, resourceId, assignmentId })
     })
 
@@ -994,6 +1030,23 @@ export async function rolesPlugin(app: FastifyInstance) {
     // transient/orphaned mapping — just drops the row). Then delete the mapping row + audit.
     if (m.assignment_id) {
       await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: m.assignment_id, actorSub: req.user.sub })
+      // #497 re-review N1/N3: a composite mapping owns MORE than the row it points at. Its sibling
+      // arms are the bundle's other capabilities, mapping-owned, on the same principal + resource
+      // strip them with it, or "delete the mapping" leaves a comment grant nobody can reach (the
+      // Members surface refuses to revoke machine-managed rows, correctly).
+      const [mapRow] = await req.db.sql<{ builtin_capability: string | null; group_name: string }[]>`
+        SELECT builtin_capability, group_name FROM group_role_mappings WHERE id = ${m.id}`
+      const siblings = mapRow?.builtin_capability ? builtinBundle(mapRow.builtin_capability).filter((c) => c !== mapRow.builtin_capability) : []
+      if (siblings.length) {
+        const principal = groupGrantee(req.tenant.id, mapRow!.group_name)
+        const rows = await req.db.sql<{ id: string }[]>`
+          SELECT id FROM role_assignments
+          WHERE resource_type = ${m.resource_type} AND resource_id = ${m.resource_id} AND principal = ${principal}
+            AND origin = 'mapping' AND builtin_capability = ANY(${siblings})`
+        for (const r of rows) {
+          await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: r.id, actorSub: req.user.sub })
+        }
+      }
     }
     await req.db.tx(async (tx) => {
       await tx`DELETE FROM group_role_mappings WHERE id = ${req.params.mappingId}`
