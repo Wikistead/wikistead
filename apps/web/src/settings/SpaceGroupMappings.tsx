@@ -40,6 +40,12 @@ export function SpaceGroupMappings({ spaceId }: { spaceId: string }) {
   const roles = assignable.data?.custom ?? [];
   const onError = () => notify.error(t("toast.actionFailed"));
 
+  // #497 re-review N4: visibility is decided HERE, by whether the mappings surface answers — not by
+  // customRoles.length (builtin mappings need no custom role, so that gate hid the section from
+  // exactly the tenants #497 opened it to). An unentitled tenant's 402 (D6: the customRoles lever
+  // gates the whole surface) hides the section instead of rendering dead controls.
+  if (mappings.isError) return null;
+
   return (
     <div className="mt-8 border-t border-border pt-4" data-testid="space-group-mappings">
       <h3 className="mt-0 text-sm font-medium">{t("adminRoles.mappingTitle")}</h3>

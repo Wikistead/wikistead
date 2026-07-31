@@ -1626,7 +1626,7 @@ export function useDeleteRole() {
 // back to the raw sub. A group principal is a HASH (groupFgaId is one-way) — the server resolves it
 // back to the human name (`groupName`, #536); absent means the group no longer exists at the IdP
 // (the UI shows its explicit orphan label, never the hash).
-export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string; displayName?: string | null; groupName?: string }
+export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string; displayName?: string | null; groupName?: string; managed?: boolean }
 export function useRoleAssignments(resourceType: string, resourceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({

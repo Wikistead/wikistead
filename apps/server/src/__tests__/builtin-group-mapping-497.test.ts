@@ -164,3 +164,34 @@ describe('#497 review D1/D3: ownership at the Members surface, and per-scope aut
     expect(del.statusCode).toBe(204)
   }, 120_000)
 })
+
+// #497 re-review N2: the CUSTOM branch of the same surface had the same ownership hole D1 closed on
+// the builtin branch — DELETE /admin/roles/assignments/:id happily consumed a mapping-owned
+// assignment (204, access gone, mapping row left pointing at nothing, re-creation blocked by the
+// mapping's uniqueness). ADR-183 §1: only deleting the MAPPING revokes.
+describe('#497 re-review N2: mapping-owned CUSTOM assignments are not the assignment route\'s to delete', () => {
+  it('assignments list says managed; direct assignment delete is 409; mapping delete still revokes', async () => {
+    const roleRes = await app.inject({ method: 'POST', url: '/admin/roles', headers: H, payload: { name: `gm497-cust-${tag}`, capabilities: ['view', 'edit'] } })
+    expect(roleRes.statusCode).toBe(201)
+    const roleId = (roleRes.json() as { id: string }).id
+    try {
+      const created = await post({ resourceType: 'space', resourceId: spaceId, groupName: GROUP, roleId })
+      expect(created.statusCode).toBe(201)
+      const mappingId = (created.json() as { id: string }).id
+
+      const list = await app.inject({ method: 'GET', url: `/admin/roles/assignments?resourceType=space&resourceId=${spaceId}`, headers: HG })
+      const managedRow = (list.json() as { id: string; roleId: string; managed?: boolean }[]).find((a) => a.roleId === roleId)
+      expect(managedRow?.managed, 'the list SAYS the machine owns this row').toBe(true)
+
+      const del = await app.inject({ method: 'DELETE', url: `/admin/roles/assignments/${managedRow!.id}`, headers: HG })
+      expect(del.statusCode, 'the assignment route refuses a mapping-owned row').toBe(409)
+      expect(await check(fgaClient, MEMBER, 'edit', { type: 'space', id: spaceId }), 'access intact after the refusal').toBe(true)
+
+      const delMapping = await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${mappingId}`, headers: HG })
+      expect(delMapping.statusCode).toBe(204)
+      expect(await check(fgaClient, MEMBER, 'edit', { type: 'space', id: spaceId }), 'the mapping is the one real revocation').toBe(false)
+    } finally {
+      await app.inject({ method: 'DELETE', url: `/admin/roles/${roleId}`, headers: HG }).catch(() => {})
+    }
+  }, 120_000)
+})

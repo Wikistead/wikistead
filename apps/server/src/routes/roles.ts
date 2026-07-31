@@ -624,8 +624,10 @@ export async function rolesPlugin(app: FastifyInstance) {
     // #485: a space manager may list the assignments of a resource they manage (space/page); tenant
     // scope stays admin-only. No cross-space enumeration — the endpoint answers for one resourceId.
     await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId })
-    const rows = await req.db.sql<{ id: string; role_id: string; name: string; principal: string }[]>`
-      SELECT a.id, a.role_id, r.name, a.principal FROM role_assignments a JOIN roles r ON r.id = a.role_id
+    // #497 re-review N2: `managed` mirrors listSpaceAccess — a mapping-owned assignment is drawn
+    // read-only-with-a-link (ADR-183 §1), so the list must SAY which rows the machine owns.
+    const rows = await req.db.sql<{ id: string; role_id: string; name: string; principal: string; origin: string }[]>`
+      SELECT a.id, a.role_id, r.name, a.principal, a.origin FROM role_assignments a JOIN roles r ON r.id = a.role_id
       WHERE a.resource_type = ${resourceType} AND a.resource_id = ${resourceId} ORDER BY r.name, a.principal`
     // #523 / ADR-190 (slice E): name the USER principals. This list is already authorization-bounded and
     // server-set (requireListAuthority above, one resourceId, no cross-resource enumeration), so resolving
@@ -651,6 +653,7 @@ export async function rolesPlugin(app: FastifyInstance) {
         id: r.id, roleId: r.role_id, roleName: r.name, principal: r.principal,
         ...(r.principal.startsWith('user:') ? { displayName: names.get(r.principal.slice(5))?.displayName ?? null } : {}),
         ...(groupName ? { groupName } : {}),
+        ...(r.origin === 'mapping' ? { managed: true } : {}),
       }
     })
   })
@@ -748,9 +751,16 @@ export async function rolesPlugin(app: FastifyInstance) {
     // The mutating tx below re-reads FOR UPDATE for the ref-count discipline; the assignment's
     // resource/role are immutable, so gating on the pre-read is safe.
     requireEntitlement(req)
-    const [pre] = await req.db.sql<{ resource_type: 'page' | 'space' | 'tenant'; resource_id: string; capabilities: AnyRoleCapability[] }[]>`
-      SELECT a.resource_type, a.resource_id, r.capabilities FROM role_assignments a JOIN roles r ON r.id = a.role_id WHERE a.id = ${req.params.assignmentId}`
+    const [pre] = await req.db.sql<{ resource_type: 'page' | 'space' | 'tenant'; resource_id: string; capabilities: AnyRoleCapability[]; origin: string }[]>`
+      SELECT a.resource_type, a.resource_id, r.capabilities, a.origin FROM role_assignments a JOIN roles r ON r.id = a.role_id WHERE a.id = ${req.params.assignmentId}`
     if (!pre) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    // #497 re-review N2: the SAME §1 ownership the builtin branch enforces (D1) — a mapping-owned
+    // assignment dies with its MAPPING, never through this route (deleting it here left the mapping
+    // row pointing at nothing: access gone, console row still promising it, re-creation blocked by
+    // the mapping's uniqueness). Deleting the mapping is the one real revocation.
+    if (pre.origin === 'mapping') {
+      throw Object.assign(new Error('managed by a group mapping — delete the mapping instead'), { statusCode: 409 })
+    }
     await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: pre.resource_type, resourceId: pre.resource_id, capabilities: pre.capabilities as AnyRoleCapability[] })
     // #497: the unassign core is the shared helper (HTTP route + mapping delete).
     const gone = await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: req.params.assignmentId, actorSub: req.user.sub })
