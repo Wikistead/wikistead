@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readUserTuplesByType, requireTenantAdmin } from '@wikistead/authz'
+import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, requireTenantAdmin } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration, beginTitleDictFill, endTitleDictFill } from '../title-dict-cache.js' // #534
 import { getTreeConfirm, setTreeConfirm, getCachedBadge, setCachedBadge, invalidatePageBadge } from '../tree-confirm-cache.js' // #541
@@ -900,8 +900,8 @@ export async function toggleTask(
 // published a page stays published (no publish→draft reversion), so there is no deletion counterpart — a
 // cross-space move keeps both (marker is space-independent); deletePage sweeps all page tuples.
 async function ensurePageSpaceLink(fga: OpenFgaClient, pageId: string, spaceId: string): Promise<boolean> {
-  const { tuples } = await fga.read({ object: `page:${pageId}` })
-  const has = (relation: string, user: string) => (tuples ?? []).some((t) => t.key?.relation === relation && t.key?.user === user)
+  const tuples = await readObjectTuples(fga, `page:${pageId}`) // #574: paginated — a truncated read re-writes a tuple that already exists
+  const has = (relation: string, user: string) => tuples.some((t: { relation: string; user: string }) => t.relation === relation && t.user === user)
   const writes = [
     ...(has('space', `space:${spaceId}`) ? [] : [{ user: `space:${spaceId}`, relation: 'space', object: `page:${pageId}` }]),
     ...PUBLISHED_MARKERS(pageId).filter((m) => !has(m.relation, m.user)),
@@ -1037,10 +1037,10 @@ async function requireGrantAuthority(fga: OpenFgaClient, userId: string, pageId:
 // #399 / ADR-158 §1: read the page's OWN comment_open wildcard tuples (the override state; the
 // effective audience is this OR the space's — the model's monotonic union).
 async function readPageCommentAudience(fga: OpenFgaClient, pageId: string): Promise<{ guests: boolean; members: boolean }> {
-  const { tuples } = await fga.read({ object: `page:${pageId}` })
+  const tuples = await readObjectTuples(fga, `page:${pageId}`) // #574: paginated — the wildcards are written last and would fall off page one
   let guests = false, members = false
-  for (const { key } of tuples ?? []) {
-    if (key?.relation !== 'comment_open') continue
+  for (const key of tuples) {
+    if (key.relation !== 'comment_open') continue
     if (key.user === 'share_link:*') guests = true
     else if (key.user === 'user:*') members = true
   }
@@ -1223,10 +1223,11 @@ export async function listPageRestrictions(
 ): Promise<{ principal: string }[]> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'restricted' })
+  // #574: paginated — `restricted` is PER-PRINCIPAL, so this list silently stopped at fifty.
+  const tuples = await readObjectTuples(fga, `page:${args.pageId}`)
   const out: { principal: string }[] = []
-  for (const { key } of tuples ?? []) {
-    if (key?.relation === 'restricted' && key.user) out.push({ principal: key.user })
+  for (const key of tuples) {
+    if (key.relation === 'restricted' && key.user) out.push({ principal: key.user })
   }
   return out
 }
@@ -1262,6 +1263,7 @@ const PUBLISHED_MARKERS = (pageId: string) => [
 // allowlist when it is private, so exposing the flag to them leaks nothing (non-viewers 404).
 // isPagePrivate stays manage-gated for the permission UI's authoritative read.
 async function readPagePrivate(fga: OpenFgaClient, pageId: string): Promise<boolean> {
+  // fga-read-ok: a MARKER relation — the model's only writers are the wildcard pair (user:* / share_link:*), so at most two tuples exist.
   const { tuples } = await fga.read({ object: `page:${pageId}`, relation: 'private' })
   return (tuples ?? []).some(({ key }) => key?.relation === 'private' && key.user === 'user:*')
 }
@@ -1378,7 +1380,9 @@ const FROZEN_GUESTS_MARKERS = (pageId: string) => [
 // full-lock predicate (mirroring the private read).
 async function readPageFrozen(fga: OpenFgaClient, pageId: string): Promise<PageFreezeLevel | null> {
   const [full, guests] = await Promise.all([
+    // fga-read-ok: a MARKER relation — the model's only writers are the wildcard pair (user:* / share_link:*), so at most two tuples exist.
     fga.read({ object: `page:${pageId}`, relation: 'frozen' }),
+    // fga-read-ok: a MARKER relation — the model's only writers are the wildcard pair (user:* / share_link:*), so at most two tuples exist.
     fga.read({ object: `page:${pageId}`, relation: 'frozen_guests' }),
   ])
   if ((full.tuples ?? []).some(({ key }) => key?.relation === 'frozen' && key.user === 'user:*')) return 'full'
@@ -1528,8 +1532,10 @@ export async function setTenantPublicEnabled(db: TenantDb, tenantId: string, ena
 export async function isPagePublic(db: TenantDb, fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<boolean> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'view_base' })
-  return (tuples ?? []).some(({ key }) => key?.relation === 'view_base' && key.user === 'user:*')
+  // #574: paginated — `view_base` carries per-principal leaves, so `user:*` can sit past page one
+  // and a PUBLIC page would report as private (the same shape as isSpacePublic, #553).
+  const tuples = await readObjectTuples(fga, `page:${args.pageId}`)
+  return tuples.some((k) => k.relation === 'view_base' && k.user === 'user:*')
 }
 
 // Is the page private (allowlist mode)? Manage-gated read for the permissions UI.
@@ -1540,6 +1546,7 @@ export async function isPagePrivate(
 ): Promise<boolean> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
+  // fga-read-ok: a MARKER relation — the model's only writers are the wildcard pair (user:* / share_link:*), so at most two tuples exist.
   const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'private' })
   return (tuples ?? []).some(({ key }) => key?.relation === 'private' && key.user === 'user:*')
 }
@@ -1551,14 +1558,14 @@ export async function listPageAccess(
 ): Promise<{ grantee: string; relation: PageRelation; groupName?: string }[]> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  const { tuples } = await fga.read({ object: `page:${args.pageId}` })
+  const tuples = await readObjectTuples(fga, `page:${args.pageId}`) // #574: paginated — a truncated read under-lists who has access
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
   const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
   const byId = groupNameByFgaId(args.tenantId, names)
   const out: { grantee: string; relation: PageRelation; groupName?: string }[] = []
-  for (const { key } of tuples ?? []) {
-    const cap = key ? capForFgaRelation(key.relation) : null
-    if (!key || !cap) continue // maps view_base→view, comment/edit/manage; skips space/view/comment_open
+  for (const key of tuples) {
+    const cap = capForFgaRelation(key.relation)
+    if (!cap) continue // maps view_base→view, comment/edit/manage; skips space/view/comment_open
     // Direct member/group grants only — never expose share_link or the space link.
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
     const groupName = resolveGroupName(key.user, byId)
@@ -1594,9 +1601,9 @@ export async function listSpacePagesOverview(
   `
   const out: PageOverview[] = []
   for (const r of rows) {
-    const { tuples } = await fga.read({ object: `page:${r.id}` })
+    const tuples = await readObjectTuples(fga, `page:${r.id}`) // #574: paginated — this number is "who can reach this page"
     let grantCount = 0
-    for (const { key } of tuples ?? []) {
+    for (const key of tuples) {
       // #218 / ADR-103: direct member/group grants live on the *_direct leaves now (+ comment). capForFgaRelation
       // recognises exactly those grant relations (null for space/parent/private/restricted/view_base@user:*).
       if (!key || capForFgaRelation(key.relation) === null) continue
@@ -1713,8 +1720,9 @@ async function swapSpaceTuples(
   const deletes: { user: string; relation: string; object: string }[] = []
   const writes: { user: string; relation: string; object: string }[] = []
   for (const id of pageIds) {
-    const { tuples } = await fga.read({ object: `page:${id}` })
-    const keys = (tuples ?? []).map((t) => t.key).filter((k): k is NonNullable<typeof k> => !!k)
+    // #574: paginated — missing the old page#space tuple here silently LEAVES THE PAGE BEHIND on a
+    // space move (the write below only fires for pages seen to carry the old link).
+    const keys = await readObjectTuples(fga, `page:${id}`)
     const hadOld = keys.some((k) => k.relation === 'space' && k.user === `space:${oldSpace}`)
     // Only swap pages that were LINKED to the old space (published). A DRAFT has no
     // page#space (the visibility gate) — leave it unlinked so it stays gated; its

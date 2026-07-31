@@ -197,6 +197,7 @@ export async function assignRoleInTx(
   const origin = args.origin ?? 'manual'
   const allTuples = caps.map((c) => ({ cap: c, tuples: expansionTuples(resourceType, resourceId, principal, c, args.builtinCapability !== undefined) }))
   // Principal-scoped read (F4): only this principal's tuples, no paging (see the route comment).
+  // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
   const { tuples: existingTuples } = await fga.read({ user: principal, object: `${resourceType}:${resourceId}` })
   const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
   const owned: AnyRoleCapability[] = []
@@ -299,6 +300,7 @@ export async function assignBuiltinCompositeInTx(
   },
 ): Promise<{ cap: string; id: string }[]> {
   const { tenant, spaceId, principal, actorSub } = args
+  // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
   const { tuples: existingTuples } = await fga.read({ user: principal, object: `space:${spaceId}` })
   const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
   const arms = args.capabilities.map((cap) => ({
@@ -581,6 +583,7 @@ export async function rolesPlugin(app: FastifyInstance) {
             // ADD: principal-scoped pre-read decides ownership exactly like assign (a tuple that
             // already exists — direct grant or another role's expansion — is left and not owned).
             if (added.length) {
+              // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
               const { tuples: existingTuples } = await app.fga.read({ user: a.principal, object: `${a.resource_type}:${a.resource_id}` })
               const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
               const ownedAdd: AnyRoleCapability[] = []
@@ -825,6 +828,7 @@ export async function rolesPlugin(app: FastifyInstance) {
 
   app.get('/admin/roles/tenant-defaults', async (req) => {
     await adminGate(req)
+    // fga-read-ok: ONE specific subject (the tenant's member set) on ONE object — bounded by the tenant type's relation count, not by member count.
     const { tuples } = await app.fga.read({ user: `tenant:${req.tenant.id}#member`, object: `tenant:${req.tenant.id}` })
     const has = (relation: string) => (tuples ?? []).some((t: Tuple) => t.key?.relation === relation)
     return {
@@ -847,6 +851,7 @@ export async function rolesPlugin(app: FastifyInstance) {
     if (wantCreate === undefined && wantIssue === undefined) {
       return reply.code(400).send({ error: 'memberCreateSpaces or memberIssueApiKeys (boolean) required' })
     }
+    // fga-read-ok: ONE specific subject (the tenant's member set) on ONE object — bounded by the tenant type's relation count, not by member count.
     const { tuples } = await app.fga.read({ user: `tenant:${req.tenant.id}#member`, object: `tenant:${req.tenant.id}` })
     const has = (relation: string) => (tuples ?? []).some((t: Tuple) => t.key?.relation === relation)
     const hadCreate = has('space_creator')

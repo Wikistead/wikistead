@@ -177,6 +177,7 @@ export async function planConvergence(
       if (manualRows.length === 0) continue // machine-only principals are the mapping's business, not this sweep's
       const covered = new Set<string>(rows.flatMap((r) => r.caps ?? []))
       const [tenantId, spaceId, principal] = [rows[0]!.tenant_id, rows[0]!.resource_id, rows[0]!.principal]
+      // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
       const { tuples } = await fga.read({ user: principal, object: `space:${spaceId}` })
       const held = new Set<string>()
       for (const t of tuples ?? []) {
@@ -245,6 +246,7 @@ export async function executeConvergence(
         }
         // legacy ROWLESS leftovers: tuples no SURVIVING row covers (the engine's covering rule; manage
         // never swept — the creator leaf is indistinguishable from a legacy manager tuple)
+        // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (~15), never by tenant size.
         const { tuples } = await app.fga.read({ user: p.principal, object: `space:${p.spaceId}` })
         const heldByCap = new Map<string, { user: string; relation: string; object: string }[]>()
         for (const tu of tuples ?? []) {
