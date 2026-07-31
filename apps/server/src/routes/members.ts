@@ -11,6 +11,7 @@ import type { SearchDriver } from '../search/index.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/outbox.js'
 import { reindexPublishedPages } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
+import { isLastAdmin } from '../auth/admin-mapping.js' // #573: ONE last-admin predicate
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { auditIfEntitled } from '../audit/outbox.js'
@@ -28,11 +29,8 @@ async function requireTenantAdmin(req: FastifyRequest, reply: FastifyReply): Pro
   return false
 }
 
-async function adminCount(req: FastifyRequest): Promise<number> {
-  const [{ n }] = await req.db.sql<[{ n: number }]>`
-    SELECT count(*)::int AS n FROM members WHERE role = 'admin'`
-  return n
-}
+// #573: the last-admin question has ONE answer — see isLastAdmin (auth/admin-mapping.ts), which also
+// carries the rule's rationale. This surface asks it about the member it is DEMOTING or REMOVING.
 
 // #396 (#378 follow-up): sweep a removed member's DIRECT space/page grants. OpenFGA's Read supports a
 // user + object-type query (readUserTuplesByType), so the removed sub's grants are enumerated in two
@@ -139,7 +137,7 @@ export async function membersPlugin(app: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: 'member not found' })
     if (existing.role === role) return { ok: true } // no-op
 
-    if (existing.role === 'admin' && role === 'member' && (await adminCount(req)) <= 1) {
+    if (existing.role === 'admin' && role === 'member' && (await isLastAdmin(req.db.sql, req.params.sub))) {
       return reply.code(409).send({ error: 'cannot demote the last admin' })
     }
 
@@ -166,7 +164,7 @@ export async function membersPlugin(app: FastifyInstance) {
     const [existing] = await req.db.sql<[{ role: string; groups: string[] }?]>`
       SELECT role, groups FROM members WHERE sub = ${req.params.sub}`
     if (!existing) return reply.code(404).send({ error: 'member not found' })
-    if (existing.role === 'admin' && (await adminCount(req)) <= 1) {
+    if (existing.role === 'admin' && (await isLastAdmin(req.db.sql, req.params.sub))) {
       return reply.code(409).send({ error: 'cannot remove the last admin' })
     }
 

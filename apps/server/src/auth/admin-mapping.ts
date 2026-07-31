@@ -82,9 +82,15 @@ async function demote(
 // cannot be repaired from inside the product. A group edit in the IdP must not be able to do what the
 // admin console explicitly forbids. The stale admin is visible (admin_origin='mapping' with no matching
 // mapping) rather than silently retained.
-async function isLastAdmin(db: TenantDb, sub: string): Promise<boolean> {
-  const [row] = await db.sql<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM members WHERE role = 'admin' AND sub <> ${sub}`
+// #573: THE predicate. It had two hand-written twins (members.ts's adminCount, this file's own) and
+// the SCIM deactivation was about to be a third — where it was simply absent, so deprovisioning the
+// last admin at the IdP locked the tenant out of its own administration, the exact thing the comment
+// above forbids. One function, every caller (the #536 "two tables become one" discipline).
+// NOTE the sub-exclusion: "would REMOVING this member's admin leave none?" — a deactivated admin
+// still carries role='admin', so counting rows without excluding them would answer 'no' forever.
+export async function isLastAdmin(sql: Sql, sub: string): Promise<boolean> {
+  const [row] = await sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM members WHERE role = 'admin' AND sub <> ${sub} AND deactivated_at IS NULL`
   return (row?.n ?? 0) === 0
 }
 
@@ -120,7 +126,7 @@ export async function evaluateAdminMapping(
   // No mapping matches. ONLY a materialised admin is touched; a manual admin whose IdP group happens to
   // disappear keeps their appointment.
   if (member.role !== 'admin' || member.admin_origin !== 'mapping') return 'unchanged'
-  if (await isLastAdmin(db, sub)) return 'unchanged'
+  if (await isLastAdmin(db.sql, sub)) return 'unchanged'
   await demote(db, fga, tenant, sub)
   return 'demoted'
 }

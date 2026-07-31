@@ -19,7 +19,7 @@ export type { TenantDb } from './db/index.js'
 export { resolveTenantFromHost, loadTenant } from './tenant.js'
 export { provisionTenant } from './auth/provisioning.js' // #475: EE tests provision a second tenant to pin RLS scoping
 export { groupFgaId, syncMemberGroups } from './auth/group-sync.js'
-export { evaluateAdminMapping } from './auth/admin-mapping.js' // #497 §2b: SCIM group changes re-materialise admin through the same evaluator as login
+export { evaluateAdminMapping, isLastAdmin } from './auth/admin-mapping.js' // #573: SCIM deactivation asks the SAME last-admin question the console does // #497 §2b: SCIM group changes re-materialise admin through the same evaluator as login
 export { loginMethodCeiling, otherLoginMethodsEffective } from './auth/login-methods.js' // #537: SAML start/ACS honour the deployment ceiling; the SAML disable guard shares the lockout predicate
 export { billableMemberCount, lockSeats } from './auth/invites.js'
 export { auditIfEntitled, drainAuditOutbox, verifyTenantAuditChain } from './audit/outbox.js'
