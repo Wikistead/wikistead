@@ -45,9 +45,17 @@ describe("#537 SAML admin section wiring (source pins)", () => {
     expect(src).toContain("disclosureKindFromError(saml.error");
     expect(src).toContain('testId="saml-upgrade"');
   });
-  it("the section is mounted on the /admin/auth tab", () => {
+  // #589 re-aimed this pin rather than deleting it: SAML is still reachable from /admin/auth, but it
+  // is a ROW of the sign-in methods list now instead of a section of the tab. What it guards is
+  // unchanged — the section must stay mounted somewhere the admin can reach — so the assertion moved
+  // to the list, and the row's own presence rule (CE has no row at all) is pinned beside it.
+  it("the section is mounted inside the sign-in methods list, which /admin/auth renders", () => {
+    const list = readFileSync(resolve(import.meta.dirname, "./AdminSignInMethodsSection.tsx"), "utf8");
+    expect(list).toContain("<AdminSamlSection />");
+    // CE answers 404 for the SAML routes; a build that cannot offer the feature must not draw its row
+    expect(list).toContain('samlState.kind !== "hidden"');
     const tab = readFileSync(resolve(import.meta.dirname, "./AdminAuthTab.tsx"), "utf8");
-    expect(tab).toContain("<AdminSamlSection />");
+    expect(tab).toContain("<AdminSignInMethodsSection />");
   });
   it("both locales carry the SAML keys", () => {
     for (const loc of [en, ja] as Array<{ adminAuth: Record<string, string> }>) {

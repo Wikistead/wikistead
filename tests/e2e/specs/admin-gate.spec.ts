@@ -94,11 +94,19 @@ test("admin API tab: create a key shows the plaintext once, then revoke", async 
   await expect(page.locator("[data-testid=api-key-item]", { hasText: "e2e key" })).toHaveCount(0);
 });
 
-test("admin Auth tab renders OIDC settings and Test reports a bad issuer", async ({ page }) => {
+test("admin Auth tab edits a sign-in method in its row, and Test reports a bad issuer", async ({ page }) => {
+  // #589 re-aimed: the editor used to be a form of its own below the list, which always wrote the
+  // FIRST connection. It is the row's own editor now, so the walk is: open the row, edit there.
   await openDemo(page);
   await page.goto("/admin/auth");
   await expect(page.getByTestId("admin-auth")).toBeVisible();
   await expect(page.getByTestId("oidc-warning")).toBeVisible();
+  await expect(page.getByTestId("sign-in-methods-list")).toBeVisible();
+
+  const row = page.locator("[data-testid^=admin-connection-]").filter({ has: page.locator("[data-testid^=admin-connection-edit-]") }).first();
+  await expect(row, "the seeded tenant has a connection to edit").toBeVisible();
+  await row.locator("[data-testid^=admin-connection-edit-]").click();
+
   // Test connection against an unreachable issuer → a failure is reported (not enabled).
   await page.getByTestId("oidc-issuer").fill("http://127.0.0.1:1/");
   await page.getByTestId("oidc-test").click();
