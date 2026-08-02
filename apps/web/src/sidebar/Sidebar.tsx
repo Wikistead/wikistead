@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useProductName } from "../app/product-name";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NodeApi } from "react-arborist";
@@ -180,6 +181,7 @@ function SidebarImpl() {
   // (edit); the switcher item is manage-gated as a conservative UI proxy. On success the page tree is refetched
   // so the imported drafts appear, and the report drives a summary toast (413 = too large, 403 = not permitted).
   const qc = useQueryClient();
+  const productName = useProductName();
   const [importingSpace, setImportingSpace] = useState(false);
   const importSpace = useCallback((file: File) => {
     if (!current || importingSpace) return;
@@ -190,7 +192,7 @@ function SidebarImpl() {
         void qc.invalidateQueries({ queryKey: ["pages", current] });
         notify.success(t("import.done", { pages: report.pagesCreated, attachments: report.attachmentsImported }));
       } else {
-        notify.error(t(status === 413 ? "import.tooLarge" : status === 403 ? "import.forbidden" : status === 400 ? "import.invalid" : "toast.actionFailed"));
+        notify.error(t(status === 413 ? "import.tooLarge" : status === 403 ? "import.forbidden" : status === 400 ? "import.invalid" : "toast.actionFailed", { product: productName }));
       }
     });
   }, [current, importingSpace, token, qc, t]);

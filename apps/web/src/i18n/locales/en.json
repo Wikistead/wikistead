@@ -562,14 +562,14 @@
     "replaceAction": "Replace"
   },
   "auth": {
-    "signInTitle": "Sign in to wikistead",
+    "signInTitle": "Sign in to {{product}}",
     "signInBody": "Continue with your organization's identity provider.",
     "signIn": "Sign in",
     "socialHint": "Or continue with",
     "continueWith": "Continue with {{provider}}",
     "errorAccess": "Sign-in couldn't be completed. Please try again or contact your workspace administrator.",
     "errorSeatFull": "This workspace has reached its member limit. Ask an administrator to free a seat or upgrade.",
-    "joinTitle": "Create your wikistead workspace",
+    "joinTitle": "Create your {{product}} workspace",
     "joinBody": "Sign up with your identity provider to get started.",
     "signUp": "Sign up",
     "workspaceTitle": "Name your workspace",
@@ -785,7 +785,7 @@
     "title": "Branding",
     "body": "Set your workspace name and accent colour. These apply everywhere by default; a space can override the accent.",
     "displayName": "Workspace name",
-    "displayNamePlaceholder": "wikistead",
+    "displayNamePlaceholder": "{{product}}",
     "default": "Default",
     "logo": "Logo",
     "logoHint": "Shown next to the workspace name in the header. PNG, JPEG or WebP, up to 512 KB.",
@@ -1093,7 +1093,7 @@
     "done": "Imported {{pages}} pages ({{attachments}} attachments) as drafts",
     "tooLarge": "The archive exceeds the size limit.",
     "forbidden": "You don't have permission to import into this space.",
-    "invalid": "That file isn't a valid Wikistead export ZIP."
+    "invalid": "That file isn't a valid {{product}} export ZIP."
   },
   "notifications": {
     "title": "Notifications",
@@ -1297,7 +1297,7 @@
     "content": "Content"
   },
   "publicReader": {
-    "poweredBy": "Powered by Wikistead"
+    "poweredBy": "Powered by {{product}}"
   },
   "deleteMode": {
     "trash_only": "Trash only (restorable for 30 days)",
