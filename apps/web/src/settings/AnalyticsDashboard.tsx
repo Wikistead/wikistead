@@ -9,6 +9,18 @@ import { Switch } from "../ui/Switch";
 // the two cannot drift. Presentation only — it renders whatever the manage-gated endpoint returned. The
 // server builds every figure from the caller's §5 manage-filter-set, so a private page the caller does not
 // manage never reaches this component in either scope. `entitled:false` → the upgrade hint, never history.
+// #595: the totals row, as a value. In RAW mode every class is a sum of view counts. In UNIQUE mode the
+// member figure is a head-count, and head-counts do not add: the daily rows are per-day distincts, so
+// summing them counts a returning member once per visit. Only the server can answer the period-wide
+// question (it holds the roster), so the member total defers to `memberUnique` whenever it is there.
+// Guests and anon keep the sum either way — with no durable id there is nothing to de-duplicate them by,
+// which is what the caveat under the numbers says.
+export function analyticsTotals(data: Pick<SpaceAnalytics, "daily" | "memberUnique"> | null | undefined) {
+  const totals = { member: 0, guest: 0, anon: 0 };
+  for (const d of data?.daily ?? []) totals[d.viewerClass] += d.views;
+  return { ...totals, member: data?.memberUnique ?? totals.member };
+}
+
 export function AnalyticsDashboard({
   title, hint, data, isLoading, params, onParams, testId,
 }: {
@@ -21,8 +33,7 @@ export function AnalyticsDashboard({
   testId: string;
 }) {
   const { t } = useTranslation();
-  const totals = { member: 0, guest: 0, anon: 0 };
-  for (const d of data?.daily ?? []) totals[d.viewerClass] += d.views;
+  const totals = analyticsTotals(data);
 
   return (
     <div style={{ padding: 24, maxWidth: 640 }} data-testid={testId}>
