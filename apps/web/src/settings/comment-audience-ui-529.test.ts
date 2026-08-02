@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
+import { CAP_NOUN } from "./role-nouns";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { commentAudienceSummary } from "./SpaceMembersTab";
@@ -72,7 +73,9 @@ describe("#529/#552: the effective comment-audience summary", () => {
     // indexOf(-1) position by construction). What must survive: the row still DISPLAYS as its noun
     // (CAP_NOUN keeps `comment`), and the picker still does not offer it (#552).
     const src = readFileSync(resolve(import.meta.dirname, "./SpaceMembersTab.tsx"), "utf8");
-    expect(src).toMatch(/comment: "commenter"/); // CAP_NOUN still names an API-made comment row
+    // #582 bounce: the noun table moved to role-nouns.ts (both screens read it now). Same subject,
+    // read from the value instead of a literal in a file that no longer holds it.
+    expect(CAP_NOUN.comment, "an API-made comment row still has a name to render").toBe("commenter");
     expect(src).toMatch(/GRANTABLE: PageRelation\[\] = \["view", "edit", "moderate", "manage"\]/);
     expect(src).toMatch(/\.sort\(\(x, y\) => x\.label\.localeCompare\(y\.label\)/); // label sort, not indexOf
   });

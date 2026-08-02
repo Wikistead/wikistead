@@ -12,6 +12,7 @@ import {
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { GranteeRoleForm } from "./GranteeRoleForm";
+import { capNoun } from "./role-nouns";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
@@ -38,8 +39,8 @@ export const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
 // #445the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.
-const CAP_NOUN: Record<PageRelation, string> = { view: "viewer", comment: "commenter", edit: "editor", moderate: "moderator", manage: "manager" };
-const capNoun = (c: string): string => CAP_NOUN[c as PageRelation] ?? c;
+// #582 bounce: the noun table moved to role-nouns.ts so the page dialog reads the SAME one. Two copies
+// is how a vocabulary drifts into "manager" here and "manage" there.
 
 // #529the one-line effective comment audience — the three OR'd routes said as people. Pure so
 // the composition (what appears and disappears as the toggles move) is unit-testable; display-only,

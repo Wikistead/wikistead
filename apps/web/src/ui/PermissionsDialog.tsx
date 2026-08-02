@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, usePageCommentAudience, useSetPageCommentAudience, usePageAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole, type PageRelation } from "../data/queries";
 import { resolveGrantDispatch } from "../settings/grant-dispatch";
 import { MemberSearchInput } from "./MemberSearchInput";
+import { capNoun } from "../settings/role-nouns";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
 import { Select } from "./Select";
@@ -180,7 +181,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           560px on desktop, still clamped to 85vh on a short window) makes the flex-1 panel a stable box:
           short tabs leave breathing room at the bottom, the tall Access tab scrolls inside it, and the
           header / tab strip / footer never move between tabs. */}
-      {/* #460without this, Radix auto-focuses the first tabbable — the active TabsTrigger —
+      {/* #460without this, Radix auto-focuses the first tabbable — the active TabsTrigger
           and programmatic focus counts as :focus-visible, so a MOUSE open painted a focus ring on
           the Access tab. preventDefault alone strands focus outside the dialog (Radix then focuses
           NOTHING, measured: Tab goes dead), so focus the FocusScope container (e.target,
@@ -310,12 +311,13 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             ariaLabel={t("permissions.relation")}
             testId="grant-relation"
             size="sm"
+            // #582 bounce: every entry in this list is a ROLE NAME, so every entry reads like one. The
+            // built-ins wear the nouns the space screen has used since #445 (view→viewer, manage→manager)
+            // instead of translated verbs, which is what made sit beside "kakunin-582" as if they
+            // were different kinds of thing. Capability words still exist — on the surface that EDITS a
+            // role definition, where they describe what the role may do.
             options={[
-              { value: "builtin:view", label: t("permissions.view") },
-              { value: "builtin:comment", label: t("permissions.comment") }, // #100: per-member comment grant
-              { value: "builtin:edit", label: t("permissions.edit") },
-              { value: "builtin:moderate", label: t("permissions.moderate") }, // #330: per-page moderator (freeze/revert/patrol; not manage)
-              { value: "builtin:manage", label: t("permissions.manage") },
+              ...(["view", "comment", "edit", "moderate", "manage"] as const).map((c) => ({ value: `builtin:${c}`, label: capNoun(c) })),
               ...(assignable.data?.custom ?? []).map((r) => ({ value: `role:${r.id}`, label: r.name })),
             ]}
           />
@@ -326,7 +328,10 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           <div className="mt-3 flex flex-col gap-2" data-testid="grant-list">
           {(grants ?? []).map((g) => (
             <div key={`${g.grantee}:${g.relation}`} className="flex items-center gap-2" data-testid="grant-item">
-              <span className="whitespace-nowrap text-xs text-fg-dim">{g.relation}</span>
+              {/* #582 bounce: the same badge a role-conferred row wears, with the same noun the picker
+                  offered. It used to print the raw wire value as loose text beside a badge — one panel,
+                  two designs for one idea. */}
+              <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] tracking-wide text-fg-dim" data-testid="grant-role-badge">{capNoun(g.relation)}</span>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label(g)}</span>
               <IconButton aria-label={t("permissions.revoke")} data-testid="grant-revoke" variant="danger" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
                 onSuccess: () => notify.success(t("toast.accessRevoked")),
@@ -341,7 +346,9 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               and they still have access. A row that offers the button that lies is the defect. */}
           {(pageAssignments.data ?? []).map((a) => (
             <div key={a.id} className="flex items-center gap-2" data-testid="grant-role-item">
-              <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] uppercase tracking-wide text-fg-dim">{a.roleName}</span>
+              {/* no `uppercase`: shouting a tenant's role name back at them is changing it (kakunin-582
+                  rendered as KAKUNIN-582). A role name is a proper noun on every surface. */}
+              <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] tracking-wide text-fg-dim" data-testid="grant-role-badge">{a.roleName}</span>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{a.groupName ? `${a.groupName} (${t("spaceMembers.group")})` : (a.displayName ?? a.principal.replace(/^user:/, ""))}</span>
               <IconButton aria-label={t("permissions.revoke")} data-testid="grant-role-revoke" variant="danger" onClick={() => unassignRole.mutate(a.id, {
                 onSuccess: () => notify.success(t("toast.accessRevoked")),
