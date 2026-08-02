@@ -11,6 +11,7 @@ import {
 } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
+import { GroupPicker } from "./GroupPicker";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
@@ -263,37 +264,10 @@ export function SpaceMembersTab() {
           ]}
         />
         {mode === "group" ? (
-          // #578 / ADR-201 rev3 OQ4: ONE control for both halves. The picker can only offer group
-          // names somebody already carries, which is the one thing the mapping form could do that
-          // this could not — you could declare "Engineering" before anyone from Engineering had ever
-          // logged in. That capability moves here instead of keeping its own screen: pick a known
-          // group, or type a name, and a typed name says it is unconfirmed rather than looking the
-          // same as one the IdP has actually produced.
-          <span className="flex flex-col gap-1">
-            <Select
-              value={(groups.data ?? []).includes(groupName) ? groupName : ""}
-              onChange={(v) => setGroupName(v)}
-              ariaLabel={t("spaceMembers.typeGroup")}
-              testId="space-grant-group"
-              options={[
-                { value: "", label: t("spaceMembers.selectGroup") },
-                ...((groups.data ?? []).map((g) => ({ value: g, label: g }))),
-              ]}
-            />
-            <Input
-              inputSize="sm"
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
-              placeholder={t("spaceMembers.groupNamePlaceholder")}
-              aria-label={t("spaceMembers.groupNamePlaceholder")}
-              data-testid="space-grant-group-name"
-            />
-            {groupName && !(groups.data ?? []).includes(groupName) && (
-              <span className="text-[11px] text-fg-dim" data-testid="space-grant-group-unconfirmed">
-                {t("spaceMembers.groupUnconfirmed")}
-              </span>
-            )}
-          </span>
+          // #578 slice 6: the same control the tenant screen uses — one implementation, so "can I
+          // declare a group nobody carries yet?" cannot answer differently on two screens.
+          <GroupPicker value={groupName} onChange={setGroupName} known={groups.data ?? []}
+            testId="space-grant-group" ariaLabel={t("spaceMembers.typeGroup")} />
         ) : (
         <MemberSearchInput
           query={query}
