@@ -573,6 +573,9 @@
     "groupUnconfirmed": "このグループを持つメンバーはまだいません。誰かがサインインした時点で有効になります。"
   },
   "auth": {
+    "localIdentifier": "メールアドレス",
+    "localPassword": "パスワード",
+    "localFailed": "このメールアドレスとパスワードの組み合わせでは、サインインできません。",
     "signInTitle": "{{product}} にサインイン",
     "signInBody": "組織の ID プロバイダーで続行します。",
     "signIn": "サインイン",

@@ -295,10 +295,12 @@ export async function membersPlugin(app: FastifyInstance) {
   // Create an invite. Seat cap is enforced in createInvite (UNLIMITED self-host
   // skips it). Email is BEST-EFFORT (P1.3) — the invite link is authoritative, so
   // we always return it; `emailed` reports whether delivery was attempted+ok.
-  app.post<{ Body: { email?: string; role?: string; roleId?: string | null } }>('/members/invites', async (req, reply) => {
+  app.post<{ Body: { email?: string; role?: string; roleId?: string | null; kind?: string } }>('/members/invites', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     const role = (req.body?.role ?? 'member') as InviteRole
     if (!ROLES.includes(role)) return reply.code(400).send({ error: 'invalid role' })
+    // #568 / ADR-198 §2: which KIND of identity this invite creates. Default unchanged.
+    const kind = req.body?.kind === 'local' ? 'local' as const : 'oidc' as const
     const email = req.body?.email?.trim() || null
 
     // Issuing does NOT hard-block at the seat cap (ADR-034: accept is the fortress); it
@@ -306,8 +308,13 @@ export async function membersPlugin(app: FastifyInstance) {
     let token: string
     let seatWarning = false
     try {
-      ;({ token, seatWarning } = await createInvite(req.db, { tenantId: req.tenant.id, plan: req.tenant.plan, invitedBy: req.user.sub, email, role, roleId: req.body?.roleId ?? null }))
-    } catch {
+      ;({ token, seatWarning } = await createInvite(req.db, { tenantId: req.tenant.id, plan: req.tenant.plan, invitedBy: req.user.sub, email, role, roleId: req.body?.roleId ?? null, kind }))
+    } catch (e) {
+      // #568: a local invite that cannot work is refused with its REASON (no email, or the tenant
+      // does not offer password sign-in) — the admin is looking at the screen and can fix either.
+      // The blanket 500 below stays for everything else.
+      const err = e as { statusCode?: number; code?: string; message?: string }
+      if (err.statusCode === 400) return reply.code(400).send({ error: err.message ?? 'invalid invite', code: err.code })
       return reply.code(500).send({ error: 'could not create invite' })
     }
 
