@@ -3,6 +3,12 @@ import { describe, it, expect } from "vitest";
 import { renderMarkdownToDom } from "./md-render";
 import { renderMarkdownToHtml, builtinMacroRegistry } from "@wikistead/macro-render";
 
+// #85 (2026-08-02): the snapshots MOVED once, deliberately. A newline inside a paragraph or a quote now
+// renders as a line break instead of folding into a space — the editing surface always showed those lines
+// and the static surfaces did not, which reached a reader as "the line breaks in my quote disappeared".
+// The corpus is byte-pinned precisely so a change like this cannot happen quietly; it happened loudly,
+// with a ruling behind it, and the new bytes are the record of it.
+//
 // #384 / ADR-160 stage 1: the GOLDEN CORPUS byte-pin. One fixture document exercising every construct in
 // the walker inventory; the CURRENT DOM serialization and the CURRENT SafeHtml string are pinned as
 // snapshots BEFORE the visitor extraction and must stay byte-stable through every migration stage
