@@ -108,19 +108,15 @@ test("#579: a group gets a tenant role from its own section, by NAME", async ({ 
     const section = page.getByTestId("tenant-group-roles");
     await expect(section).toBeVisible({ timeout: 10_000 });
 
-    // the group list comes from the server (a hash is never built client-side — #536)
-    const groupSelect = section.getByTestId("tenant-group-assign-group");
-    await groupSelect.click();
-    const options = page.getByRole("option");
-    const n = await options.count();
-    if (n <= 1) {
-      // no IdP groups in this fixture: the section still renders and refuses to guess a name
-      await page.keyboard.press("Escape");
-      test.info().annotations.push({ type: "note", description: "no groups in the e2e fixture — assignment path not exercised" });
-      return;
-    }
-    const groupName = (await options.nth(1).innerText()).trim();
-    await options.nth(1).click();
+    // #578 bounce ②: ONE input with completion, not a Select stacked on an Input. The e2e tenant has no
+    // IdP groups, so this drives the half that used to be impossible here — a name nobody carries yet,
+    // which the screen must keep (bounce ①) and mark rather than turning into "unknown group".
+    const groupName = `e2e-579-group-${stamp}`;
+    await section.getByTestId("tenant-group-assign-group-name").fill(groupName);
+    await expect(
+      section.getByTestId("tenant-group-assign-group-unconfirmed"),
+      "a name the directory has not produced says so",
+    ).toBeVisible();
     await section.getByTestId("tenant-group-assign-role").click();
     await page.getByRole("option", { name: roleName }).click();
     await section.getByTestId("tenant-group-assign-add").click();
