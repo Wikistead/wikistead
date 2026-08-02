@@ -11,7 +11,6 @@
     "deleteTitle": "この接続を削除しますか？",
     "deleteConfirm": "「{{name}}」を削除しますか？この接続でサインインしたメンバーのコンテンツは残りますが、再作成してもサインイン識別子は再接続されません。",
     "lockoutRefused": "最後のサインイン手段を消すことになります。先に別の接続を有効化してください。",
-    "legacyBadge": "レガシー",
     "presetBadge": "プリセット: {{preset}}",
     "moveUp": "上へ",
     "moveDown": "下へ",

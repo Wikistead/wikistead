@@ -4,6 +4,10 @@
 import postgres from 'postgres'
 import { randomUUID } from 'node:crypto'
 import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
+// #590: the prefix derivation is the app's, imported rather than copied — a second copy of
+// `wc<conn8>_` would drift from the one that mints real connections, and the drift would only show
+// up as members appearing twice.
+import { subjectPrefixFor } from '../../apps/server/src/routes/admin-connections.js'
 
 ;(async () => {
   const sql = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -62,10 +66,21 @@ import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
           redirect_uri = ${process.env.OIDC_REDIRECT_URI!}, updated_at = now()
         WHERE id = ${existingOidc.id}`
     } else {
+      // #590: a FRESH dev connection gets a subject prefix, like every connection the admin screen
+      // creates (ADR-197 §5). Without it the seed kept minting NULL rows, so "this connection predates
+      // prefixes" was a permanent state of dev rather than a fact about old data.
+      //
+      // INSERT ONLY, deliberately. The UPDATE branch above must never learn to set it: the prefix is
+      // what member subs are DERIVED from, so filling it in on a live connection gives every existing
+      // member a different sub on their next sign-in — a second row for the same person, with their
+      // FGA tuples, notifications, audit entries, API keys and authored pages all pointing at the sub
+      // they no longer have.
+      const connId = randomUUID()
       await tx`
-        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, redirect_uri, bootstrap_eligible, trust_groups)
-        VALUES (${randomUUID()}, 'tenant_dev', ${process.env.OIDC_ISSUER!}, ${process.env.OIDC_CLIENT_ID!},
-                ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!}, true, true)`
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, redirect_uri, bootstrap_eligible, trust_groups, subject_prefix)
+        VALUES (${connId}, 'tenant_dev', ${process.env.OIDC_ISSUER!}, ${process.env.OIDC_CLIENT_ID!},
+                ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!}, true, true,
+                ${subjectPrefixFor(connId)})`
     }
     console.log('seeded: tenant_dev / tenant_oidc')
 
