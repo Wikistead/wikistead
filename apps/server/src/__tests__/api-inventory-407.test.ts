@@ -46,6 +46,7 @@ const EXCLUDED_PATHS = new Set([
   '/spaces/:spaceId/pages/bulk-move', // Pages-tab bulk move (#511 slice 5; both-sides manage inside)
   '/spaces/:spaceId/pages/bulk-export', // Pages-tab selection export (#511 slice 4; space settings plumbing, per-page view gate inside)
   '/spaces/:spaceId/assignable-roles', // manager-readable role list for the in-space assignment picker (#485/#514; space settings plumbing)
+  '/pages/:pageId/assignable-roles', // the same list for the PAGE dialog (#582 / ADR-202 §1) — a page-only manager cannot reach the space one
   '/admin/roles', '/admin/roles/:roleId', '/admin/roles/tenant-defaults', // custom-role definitions + default presets (#420/#445; admin console plumbing)
   '/admin/roles/assignments', '/admin/roles/:roleId/assignments', '/admin/roles/assignments/:assignmentId', // role assignments (#420 inc3)
   '/admin/roles/admin-mappings', '/admin/roles/admin-mappings/:mappingId', // IdP group -> tenant admin declarations (#497 §2b; admin console plumbing)

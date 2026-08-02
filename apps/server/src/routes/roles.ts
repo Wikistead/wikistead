@@ -684,6 +684,31 @@ export async function rolesPlugin(app: FastifyInstance) {
     }
   })
 
+  // #582 / ADR-202 §1: the PAGE equivalent of `/spaces/:spaceId/assignable-roles`. The page dialog
+  // offers custom roles beside the built-in capabilities, and a PAGE-only manager (someone holding
+  // `manage_direct` on the page, which that very dialog can grant) could not fetch the list: the space
+  // endpoint is gated on SPACE manage and `/admin/roles` on tenant admin. #485 added the space one for
+  // exactly this reason ("the tenant-admin-gated GET /admin/roles is unreachable for them").
+  //
+  // Gated on the page's `manage` — deliberately NARROWER than the `share` that suffices to assign
+  // (share unions manage in the model). At space scope list and assign are both `manage` so the
+  // question never arose; here it is a choice, and the narrower one is taken because a role's
+  // capability list is tenant-wide information and `share` is a wider audience.
+  //
+  // NO EXISTENCE ORACLE: a non-admin without `manage` is refused whether or not the page exists, and
+  // the body is tenant-wide role DEFINITIONS with nothing derived from the page — so the tenant-admin
+  // short-circuit inside requireListAuthority, which answers before reading the page at all,
+  // distinguishes nothing either.
+  app.get<{ Params: { pageId: string } }>('/pages/:pageId/assignable-roles', async (req) => {
+    await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: 'page', resourceId: req.params.pageId })
+    const rows = await req.db.sql<RoleRow[]>`
+      SELECT id, name, capabilities, scope FROM roles WHERE scope = 'resource' ORDER BY name`
+    return {
+      builtIn: BUILT_IN_ROLES,
+      custom: rows.map((r) => ({ id: r.id, name: r.name, capabilities: r.capabilities, scope: r.scope })),
+    }
+  })
+
   app.post<{ Params: { roleId: string }; Body: { resourceType?: string; resourceId?: string; principal?: string; groupName?: string; replace?: boolean } }>(
     '/admin/roles/:roleId/assignments', async (req, reply) => {
       const { resourceType, resourceId, groupName } = req.body ?? {}

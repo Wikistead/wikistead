@@ -1576,12 +1576,30 @@ export async function listPageAccess(
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
   const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
   const byId = groupNameByFgaId(args.tenantId, names)
+  // #582 / ADR-202 §1: a CUSTOM-role assignment expands into the same per-capability tuples a manual
+  // grant writes, so without this filter one role renders as several anonymous capability rows for the
+  // same principal — the defect #536 (5) was bounced for on the space screen, which fixed it
+  // server-side. The page list needs the same half, or the dialog shows a role as its parts.
+  //
+  // A capability owned by a custom-role row is that row's expansion, not a separate grant — UNLESS the
+  // same (principal, capability) also exists as a BUILT-IN row, in which case the tuple is the built-in
+  // grant's own face and must stay or its revoke becomes unreachable. `manage` is never filtered: the
+  // manager tuple can be the structural owner leaf, which no row represents.
+  const customOwned = new Set<string>()
+  const builtinOwned = new Set<string>()
+  for (const r of await db.sql<{ principal: string; caps: string[] | null; builtin_capability: string | null }[]>`
+    SELECT a.principal, COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS caps, a.builtin_capability
+    FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+    WHERE a.resource_type = 'page' AND a.resource_id = ${args.pageId}`) {
+    for (const c of r.caps ?? []) (r.builtin_capability != null ? builtinOwned : customOwned).add(`${r.principal} ${c}`)
+  }
   const out: { grantee: string; relation: PageRelation; groupName?: string }[] = []
   for (const key of tuples) {
     const cap = capForFgaRelation(key.relation)
     if (!cap) continue // maps view_base→view, comment/edit/manage; skips space/view/comment_open
     // Direct member/group grants only — never expose share_link or the space link.
     if (!/^user:[^*\s]+$/.test(key.user) && !/^group:[^\s]+#member$/.test(key.user)) continue
+    if (cap !== 'manage' && customOwned.has(`${key.user} ${cap}`) && !builtinOwned.has(`${key.user} ${cap}`)) continue
     const groupName = resolveGroupName(key.user, byId)
     out.push({ grantee: key.user, relation: cap, ...(groupName ? { groupName } : {}) })
   }
