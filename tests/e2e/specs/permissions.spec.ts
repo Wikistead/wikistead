@@ -27,7 +27,9 @@ test("manager grants and revokes page access via the Permissions dialog", async 
   // grant alice-perm view → appears in the list
   await page.fill("[data-testid=grant-sub]", "alice-perm");
   await page.getByTestId("grant-relation").click();
-  await page.getByTestId("grant-relation-view").click();
+  // #582: the picker's values carry their MECHANISM as a prefix (`builtin:` vs `role:`), so a custom
+  // role named `edit` can never be taken for the capability. The option id follows the value.
+  await page.getByTestId("grant-relation-builtin:view").click();
   await page.click("[data-testid=grant-add]");
   const row = page.locator("[data-testid=grant-item]", { hasText: "alice-perm" });
   await expect(row).toBeVisible();

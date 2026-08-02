@@ -1686,6 +1686,18 @@ export function useAssignableRoles(spaceId: string, enabled = true) {
   });
 }
 
+// #582 / ADR-202 §1: the same list for a PAGE. It is its own endpoint because a page-only manager
+// cannot read the space one (that is gated on SPACE manage), and its own query key because the two
+// answer for different resources.
+export function usePageAssignableRoles(pageId: string, enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["page-assignable-roles", pageId],
+    queryFn: () => apiFetch<{ builtIn: { name: string; capabilities: string[] }[]; custom: RoleDef[] }>(`/pages/${encodeURIComponent(pageId)}/assignable-roles`, token),
+    enabled: enabled && pageId.length > 0,
+  });
+}
+
 // #497 / ADR-183: declarative group → role MAPPINGS (EE — customRoles). A mapping owns a
 // group-principal role assignment created through the same gated assign path; the tenant-wide list is
 // admin-only. `orphaned` marks a mapping whose group no member currently carries (IdP rename/empty).
