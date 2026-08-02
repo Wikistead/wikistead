@@ -1700,52 +1700,10 @@ export function usePageAssignableRoles(pageId: string, enabled = true) {
   });
 }
 
-// #497 / ADR-183: declarative group → role MAPPINGS (EE — customRoles). A mapping owns a
-// group-principal role assignment created through the same gated assign path; the tenant-wide list is
-// admin-only. `orphaned` marks a mapping whose group no member currently carries (IdP rename/empty).
-export interface RoleMapping {
-  id: string; groupName: string; roleId: string | null; builtinCapability?: string | null; roleName: string;
-  resourceType: "space" | "tenant"; resourceId: string; assignmentId: string | null; orphaned: boolean;
-}
-export function useRoleMappings(enabled = true) {
-  const { token } = useSession();
-  return useQuery({
-    queryKey: ["role-mappings"],
-    queryFn: () => apiFetch<RoleMapping[]>("/admin/roles/mappings", token).then((r) => r ?? []),
-    enabled,
-  });
-}
-// #514 / ADR-188 §8: the mappings for ONE resource. The unfiltered list above is the tenant-wide config
-// view and is admin-only; filtered by a space it answers to that space's own manage authority
-// (roles.ts requireListAuthority), which is what lets a space manager configure their space's mappings
-// without seeing anyone else's.
-export function useResourceRoleMappings(resourceType: "space" | "tenant", resourceId: string, enabled = true) {
-  const { token } = useSession();
-  return useQuery({
-    queryKey: ["role-mappings", resourceType, resourceId],
-    queryFn: () => apiFetch<RoleMapping[]>(
-      `/admin/roles/mappings?resourceType=${encodeURIComponent(resourceType)}&resourceId=${encodeURIComponent(resourceId)}`, token,
-    ).then((r) => r ?? []),
-    enabled: enabled && resourceId.length > 0,
-  });
-}
-export function useCreateRoleMapping() {
-  const { token } = useSession();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { groupName: string; roleId?: string; builtinCapability?: string; resourceType: "space" | "tenant"; resourceId: string }) =>
-      apiFetch<RoleMapping>("/admin/roles/mappings", token, { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["role-mappings"] }),
-  });
-}
-export function useDeleteRoleMapping() {
-  const { token } = useSession();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/admin/roles/mappings/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["role-mappings"] }),
-  });
-}
+// #497 / ADR-183 → RETIRED by #578 / ADR-201 (slices 3 and 7): group mappings are gone, and with them
+// the four hooks that read, created and deleted them. A group takes a role the same way a person does
+// — the tenant assignment for a tenant role, the space grant for a space one — so there is one client
+// path to the same result instead of two. The server answers 410 on the old routes.
 
 // #497 / ADR-183 §3: the tenant DEFAULT role — a tenant-scope custom role conferred on any member no
 // #578 / ADR-201 slice 5: the tenant default role is retired (its meaning moved to the every-member

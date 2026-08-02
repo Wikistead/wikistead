@@ -4,7 +4,8 @@
 //
 // Lexical, deliberately (the one-add-control-536 precedent): what is pinned is that a SECOND section
 // or a scope pre-question does not come back. Behaviour (derivation, badges, the member toggle) is
-// covered by the e2e specs (admin-roles-420 / roles-ia-469 / group-role-mapping-497).
+// covered by the e2e specs (admin-roles-420 / roles-ia-469; the mapping spec went with the
+// mechanism in #578 slice 7).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

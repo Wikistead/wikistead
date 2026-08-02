@@ -349,8 +349,10 @@ export function SpaceMembersTab() {
             )}
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{r.label}</span>
             {/* #497 (088): a mapping-conferred row is machine-managed (ADR-183 §1) — no revoke affordance
-                here (the server 409s it anyway; this is the read-only-with-a-pointer rendering). It is
-                removed by deleting the MAPPING in the group-mappings section below. */}
+                here (the server 409s it anyway; this is the read-only rendering). #578 slice 7 retired
+                the mapping mechanism, so this can only be drawn on a database whose conversion (migration
+                098 / 103) has not run yet — the copy says that rather than pointing at a section that no
+                longer exists. It goes when the vestige sweep lands with the group_role_mappings DROP. */}
             {r.managed ? (
               <span className="flex-none rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="space-grant-managed" data-tip={t("spaceMembers.managedByMapping")}>{t("spaceMembers.managedBadge")}</span>
             ) : r.kind === "grant" ? (
