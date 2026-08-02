@@ -39,7 +39,17 @@ const search = async (q: string) => {
   const res = await app.inject({ method: 'GET', url: `/search?q=${encodeURIComponent(q)}`, headers: { host: 'dev.localhost', authorization: 'Bearer dev-token' } })
   return (res.json() as { id: string }[]).map((h) => h.id)
 }
-const drainAndSearch = async (q: string) => { await drainOutbox(app.searchDriver); return search(q) }
+// Drain until THIS page has nothing pending. One unscoped drain claims the 50 oldest rows in the whole
+// database, so in a full run this suite's row is often still queued when the search assertion runs
+// the batch-depth flake #482 diagnosed for the audit outbox, in the search one.
+const drainAndSearch = async (q: string) => {
+  for (let i = 0; i < 20; i++) {
+    const [{ n }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM search_outbox WHERE page_id = ${pageId}`
+    if (n === 0) break
+    await drainOutbox(app.searchDriver, { pageId })
+  }
+  return search(q)
+}
 
 beforeAll(async () => {
   app = await buildApp()

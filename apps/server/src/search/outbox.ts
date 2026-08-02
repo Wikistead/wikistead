@@ -64,12 +64,20 @@ function publishDictInvalidate(tenantId: string, pageId: string): void {
 // RELIABLE, not best-effort: success → delete the row; failure → leave it (its
 // claim ages out and it's retried). Idempotent with the inline path + itself
 // (Meili upsert/delete are idempotent), so double processing is harmless.
-export async function drainOutbox(driver: SearchDriver, opts: { batch?: number } = {}): Promise<number> {
+export async function drainOutbox(
+  driver: SearchDriver,
+  // `pageId` narrows the claim to one page. Production never passes it — the worker drains everything
+  // — but a TEST that asserts "not searchable until I drain" is really asserting something about the
+  // whole database unless it can say WHICH rows are its own. Two suites drove the same shared queue
+  // and took turns draining each other's rows, which is the #482 shape one table over.
+  opts: { batch?: number; pageId?: string } = {},
+): Promise<number> {
   // #432: the claim statement / stale window live in the shared lease primitive.
   const claimed = await claimOutboxBatch<ClaimedRow>({
     table: 'search_outbox',
     returning: ['id', 'tenant_id', 'page_id', 'operation'],
     batch: opts.batch ?? 50,
+    ...(opts.pageId ? { extraDue: pool`AND page_id = ${opts.pageId}` } : {}),
   })
   let processed = 0
   for (const row of claimed) {
