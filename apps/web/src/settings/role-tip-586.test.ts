@@ -77,3 +77,31 @@ describe("#586: role-derived and individually granted are told apart, without be
     expect(spaceTab, "and no second tooltip implementation grew beside it").not.toMatch(/title=\{t\(/);
   });
 });
+
+describe("#586: the capability grid shows subsumption instead of explaining it", () => {
+  const tab = readFileSync(resolve(import.meta.dirname, "./AdminRolesTab.tsx"), "utf8");
+
+  it("draws the carried capabilities as checked and not operable", () => {
+    expect(tab, "the implied set is computed").toMatch(/BUILTIN_EFFECTIVE_CAPS\[held as RoleNounKey\]/);
+    expect(tab, "and a carried box cannot be toggled").toMatch(/itemDisabled = disabled \|\| itemLocked \|\| impliedBy !== undefined/);
+    expect(tab, "it reads as checked").toMatch(/checked=\{value\.includes\(c\) \|\| impliedBy !== undefined\}/);
+  });
+
+  it("says WHICH capability carries it, rather than leaving a mystery tick", () => {
+    expect(tab).toMatch(/adminRoles\.impliedBy/);
+  });
+
+  it("does not write the implied capabilities into what gets saved", () => {
+    // The ruling's reason: an auto-written `comment` is indistinguishable from a deliberate one, and
+    // subsumption changes (#553 cut `edit ⇒ comment` this week). The saved set stays what was picked.
+    const onChange = /onChange=\{itemDisabled \? undefined : \(e\) => onChange\?\.\(e\.target\.checked \? \[\.\.\.value, c\] : value\.filter\(\(x\) => x !== c\)\)\}/;
+    expect(tab, "the only writer is the box the administrator actually clicked").toMatch(onChange);
+    expect(tab, "nothing expands the value on save").not.toMatch(/setCaps\(\[\.\.\.caps, \.\.\.BUILTIN_EFFECTIVE_CAPS/);
+  });
+
+  it("takes subsumption from the measured table, not a second hand-written one", () => {
+    // moderate carries comment; if this ever needs a literal here, the store test is the thing to read.
+    expect(BUILTIN_EFFECTIVE_CAPS.moderate).toContain("comment");
+    expect(tab.match(/moderate.*=>.*\["comment"/) ?? [], "no local subsumption table").toHaveLength(0);
+  });
+});
