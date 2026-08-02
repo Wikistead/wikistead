@@ -263,6 +263,9 @@ export function PageVim(p: PageControlsProps) {
             ariaLabel={t("page.displayMode")}
             testId="displaymode"
             className="gap-0.5 rounded-full border-0 bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] p-1 shadow-md backdrop-blur"
+            // #587 bounce ①: this pill keeps the round segments it always had. The DS supplies the
+            // behaviour (arrow keys, roving, aria-checked); the shape stays 28x28 circles.
+            optionClassName="size-7 justify-center rounded-full px-0 py-0"
             options={DISPLAY_MODES.filter(({ mode }) => !p.visibleModes || p.visibleModes.includes(mode)).map(({ mode, Icon, labelKey }) => ({
               value: mode,
               tip: t(labelKey),

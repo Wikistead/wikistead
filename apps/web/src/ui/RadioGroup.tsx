@@ -36,7 +36,7 @@ export interface RadioOption {
 // `${testId}-${value}` convention Select established, so tests keep clicking the same ids. The ROOT
 // deliberately carries no data-testid (several call sites already have a same-named container id).
 export function RadioGroup({
-  value, onChange, options, variant = "list", ariaLabel, testId, disabled, className,
+  value, onChange, options, variant = "list", ariaLabel, testId, disabled, className, optionClassName,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -46,8 +46,18 @@ export function RadioGroup({
   testId?: string;
   disabled?: boolean;
   className?: string;
+  /** #587 bounce: per-surface geometry for the SEGMENT itself. `className` only reached the container,
+   *  so adopting the DS silently replaced the display-mode pill's 28x28 circles with the DS rectangle.
+   *  A surface that already had a settled shape overrides it here and keeps the behaviour. */
+  optionClassName?: string;
 }) {
   const optId = (v: string) => (testId ? `${testId}-${v}` : undefined);
+  // #587 bounce ②: Radix leaves EVERY item at tabIndex -1 until something is focused (its
+  // RovingFocusGroup starts with no current tab stop and the group div carries the tab stop instead).
+  // For the floating pill that read as "cannot reach it with Tab at all". The checked item is the tab
+  // stop from the first paint, and Radix's roving still works because it spreads our props AFTER its
+  // own tabIndex, and the item it moves the stop to is the one it also checks.
+  const tabIndexOf = (v: string) => (v === value ? 0 : -1);
   // true while an arrow key is being handled — set in the capture phase, i.e. before Radix moves focus
   const arrowKey = useRef(false);
   const rootKeys = {
@@ -82,7 +92,11 @@ export function RadioGroup({
             data-testid={optId(o.value)}
             data-tip={o.tip}
             onFocus={selectOnArrowFocus(o)}
-            className="group inline-flex cursor-pointer items-center gap-1.5 rounded-[5px] px-3 py-1.5 text-sm text-fg-dim outline-none transition-colors duration-[120ms] hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:font-medium data-[state=checked]:text-primary-foreground"
+            tabIndex={tabIndexOf(o.value)}
+            className={cn(
+              "group inline-flex cursor-pointer items-center gap-1.5 rounded-[5px] px-3 py-1.5 text-sm text-fg-dim outline-none transition-colors duration-[120ms] hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:font-medium data-[state=checked]:text-primary-foreground",
+              optionClassName,
+            )}
           >
             {o.icon != null && <span aria-hidden className="flex-none [&_svg]:size-3.5">{o.icon}</span>}
             {o.label}
@@ -108,6 +122,7 @@ export function RadioGroup({
           disabled={o.disabled}
           data-testid={optId(o.value)}
           onFocus={selectOnArrowFocus(o)}
+          tabIndex={tabIndexOf(o.value)}
           className="group flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-2.5 text-left outline-none transition-colors duration-[120ms] hover:bg-panel focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary data-[state=checked]:bg-panel"
         >
           {/* #389the ring PAINTS its own dot (a radial-gradient background, faded in via the
