@@ -7,7 +7,7 @@ import { findMathSpans } from "./math.js"; // #505: one math-delimiter rule, bot
 import { HEADINGS, footnoteRefLabel } from "./md-nodes.js";
 
 // #384 / ADR-160: ONE markdown tree-walk, two sinks. This visitor owns every structural decision the
-// two hand-mirrored walkers (apps/web md-render.ts DOM walk; render.ts SafeHtml walk) used to duplicate:
+// two hand-mirrored walkers (apps/web md-render.ts DOM walk; render.ts SafeHtml walk) used to duplicate
 // the node switch, MARKS skipping, inline recursion + leading-space trim, table structure, footnote
 // collection/numbering/section, the resolver-corrected directive ranges, and the wks-attachment: / URL
 // scheme judgment for links. It can ONLY emit through the sink's open/close/text/leaf hooks — it never
@@ -22,7 +22,7 @@ import { HEADINGS, footnoteRefLabel } from "./md-nodes.js";
 export const mdParser = parser.configure([directiveExtension, Strikethrough, Table, TaskList, highlightExtension, footnoteExtension]);
 export type MdNode = ReturnType<typeof mdParser.parse>["topNode"];
 
-// Container roles emitted via open/close; leaf roles via leaf().
+// Container roles emitted via open/close; leaf roles via leaf.
 export type MdOpenRole =
   | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
   | "p" | "blockquote" | "ul" | "ol" | "li"
@@ -131,7 +131,7 @@ export function collectFootnotes(tree: MdNode, src: string): FootnoteData {
 
 // One walk = one WalkState; the footnote map is LOCAL to the walk (a nested body is a separate
 // walkMarkdown call with topLevel=false → map null → literal footnotes; ADR-130 §A). No module state.
-interface WalkState { src: string; sink: MdSink; fnNumbers: Map<string, number> | null }
+interface WalkState { src: string; sink: MdSink; fnNumbers: Map<string, number> | null; pendingBr?: boolean }
 
 // #505 / ADR-191: prose text is where `$…$` / `$$…$$` live, so the visitor splits them out HERE and hands
 // each one to the sink as a `math` leaf. Doing it in the visitor rather than in each sink is what ADR-160
@@ -140,24 +140,60 @@ interface WalkState { src: string; sink: MdSink; fnNumbers: Map<string, number> 
 // still chooses how to draw it. Text that contains no math takes exactly the path it always did.
 function emitProse(st: WalkState, s: string): void {
   const spans = findMathSpans(s);
-  if (spans.length === 0) { st.sink.text(s); return }
+  if (spans.length === 0) { emitTextLines(st, s); return }
   let at = 0;
   for (const m of spans) {
-    if (m.from > at) st.sink.text(s.slice(at, m.from));
+    if (m.from > at) emitTextLines(st, s.slice(at, m.from));
     st.sink.leaf("math", { tex: m.tex, display: m.display });
     at = m.to;
   }
-  if (at < s.length) st.sink.text(s.slice(at));
+  if (at < s.length) emitTextLines(st, s.slice(at));
+}
+
+// #85 (review rejection, measured): a line break inside a paragraph or a quote is a LINE BREAK.
+//
+// CommonMark folds a soft break into a space, and this walker passed the newline through as text, so a
+// two-line quote arrived as one run of prose — while the editing surface, which draws the source, shows
+// two lines. Same document, two answers, and the export is where a reader notices: "
+// ". The editor cannot be the one to change (it renders the text you typed), so the static surfaces
+// follow it, which is also the wiki-familiar GFM `breaks: true` behaviour.
+//
+// The leading whitespace of the continuation is dropped with the break: inside a quote the source is
+// `> line two`, and the `>` is its own node, so the text begins with the space that followed the mark.
+// Emitting it would indent every continued line by one space.
+function emitTextLines(st: WalkState, s: string): void {
+  const lines = s.split(/\r?\n/);
+  lines.forEach((line, i) => {
+    if (i > 0) { st.pendingBr = true; line = line.replace(/^[ \t]+/, ""); }
+    if (line) { flushBr(st); st.sink.text(line); }
+  });
+}
+
+// A break is emitted lazily, when something follows it. A trailing newline before the end of a block
+// which every block has — would otherwise hang an empty `<br>` inside every heading and paragraph.
+function flushBr(st: WalkState): void {
+  if (!st.pendingBr) return;
+  st.pendingBr = false;
+  st.sink.leaf("br");
 }
 
 function walkInlineChildren(st: WalkState, parent: MdNode): void {
+  st.pendingBr = false; // a break never crosses a block boundary
   let pos = parent.from;
   let first = true; // trim the leading syntax space after an opening mark (e.g. "# " / "- " / "> ")
   const pushText = (s: string) => {
     const v = first ? s.replace(/^[ \t]+/, "") : s;
-    if (v) { st.sink.text(v); first = false; }
+    // #85: a newline inside the run is a LINE BREAK, not a space — see emitTextLines. This is the path a
+    // plain paragraph and a quote continuation take (the math-aware emitProse is the other one).
+    if (!v) return;
+    emitTextLines(st, v);
+    // A run that ENDS at a newline hands the continuation to the next run — and in a quote that next run
+    // begins with the space after `>`, because the mark is its own node. Treating it as "first" again is
+    // what keeps a continued line from being indented by one space.
+    first = /\r?\n[ \t]*$/.test(s);
+    if (!first) first = false;
   };
-  // #505 / ADR-191: math spans are resolved over this node's WHOLE source, once, before the child walk —
+  // #505 / ADR-191: math spans are resolved over this node's WHOLE source, once, before the child walk
   // the same thing the editor does over the whole document. Scanning the per-child text runs instead was
   // measurably wrong: markdown emits an `Escape` node for every backslash, so `$$\int_0^1 x\,dx$$` reached
   // the sink as four fragments and never matched, and the formula printed as raw TeX. A span found here
@@ -190,6 +226,7 @@ function walkInlineChildren(st: WalkState, parent: MdNode): void {
 }
 
 function walkInlineNode(st: WalkState, node: MdNode): void {
+  flushBr(st); // the break belongs BEFORE whatever follows it, including a bold run or a link
   const wrap = INLINE_WRAP[node.name];
   if (wrap) { st.sink.open(wrap); walkInlineChildren(st, node); st.sink.close(wrap); return; }
   switch (node.name) {
@@ -203,7 +240,7 @@ function walkInlineNode(st: WalkState, node: MdNode): void {
       const urlNode = node.getChild("URL");
       const rawHref = urlNode ? txt(st.src, urlNode) : "";
       // #273 / ADR-120 → ADR-160 §2: `wks-attachment:` is OUR opaque scheme; it must NEVER be emitted as
-      // a raw anchor on a static surface. Under one visitor this is the SINGLE structural intercept —
+      // a raw anchor on a static surface. Under one visitor this is the SINGLE structural intercept
       // it fires before ANY anchor role can be emitted (supersedes the "two sites" wording; both sinks'
       // anti-tests remain as the per-surface pins).
       if (/^\s*wks-attachment:/i.test(rawHref)) {
