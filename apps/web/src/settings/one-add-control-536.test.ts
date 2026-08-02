@@ -16,16 +16,23 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const src = readFileSync(resolve(import.meta.dirname, "./SpaceMembersTab.tsx"), "utf8");
+// #578 bounce ③: the add-flow moved into a shared component, so the count that matters is now across
+// the pair — this screen must own NO add control of its own, and the shared form must own exactly one.
+// Re-aimed rather than deleted: the invariant ("a second path does not come back") is unchanged, only
+// the file that can violate it moved.
+const form = readFileSync(resolve(import.meta.dirname, "./GranteeRoleForm.tsx"), "utf8");
 
 describe("#536: space access is granted from one control", () => {
-  it("has exactly one add button", () => {
-    const adds = src.match(/data-testid="[a-z-]*add"/g) ?? [];
-    expect(adds, `one Add control, found ${JSON.stringify(adds)}`).toEqual(['data-testid="space-grant-add"']);
+  it("has exactly one add button, and it lives in the shared form", () => {
+    const own = src.match(/data-testid="[a-z-]*add"/g) ?? [];
+    expect(own, `the screen builds no Add of its own, found ${JSON.stringify(own)}`).toEqual([]);
+    expect(form.match(/data-testid=\{`\$\{p\.testId\}-add`\}/g) ?? [], "one Add in the shared form").toHaveLength(1);
   });
 
   it("has exactly one member search input", () => {
     // Two searches meant picking a person twice depending on what you were about to give them.
-    expect(src.match(/<MemberSearchInput/g) ?? []).toHaveLength(1);
+    expect(src.match(/<MemberSearchInput/g) ?? [], "none on the screen itself").toHaveLength(0);
+    expect(form.match(/<MemberSearchInput/g) ?? [], "one in the shared form").toHaveLength(1);
   });
 
   it("constructs a user principal in exactly one place", () => {

@@ -2,9 +2,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useSession } from "../session/SessionProvider";
-import { Button, IconButton } from "../ui/Button";
-import { GroupPicker } from "./GroupPicker";
-import { Select } from "../ui/Select";
+import { IconButton } from "../ui/Button";
+import { GranteeRoleForm } from "./GranteeRoleForm";
 import { notify } from "../ui/toast";
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole, useTenantGroupNames } from "../data/queries";
 import { buildGroupRoleRows } from "./tenant-role-rows";
@@ -49,19 +48,31 @@ export function TenantGroupRoles() {
           group, which is why the difference needs a sentence here rather than silence. */}
       <p className="mt-0 mb-2 text-xs text-fg-dim" data-testid="tenant-group-tiers-note">{t("adminRoles.groupTiersNote")}</p>
 
-      <div className="mb-3 flex flex-wrap items-end gap-3" data-testid="tenant-group-assign-form">
-        <Select size="sm" value={roleId} ariaLabel={t("adminRoles.roleLabel")} testId="tenant-group-assign-role"
-          options={[{ value: "", label: t("adminRoles.rolePlaceholder") }, ...tenantRoles.map((r) => ({ value: r.id, label: r.name }))]}
-          onChange={setRoleId} />
-        <GroupPicker value={groupName} onChange={setGroupName} known={groups.data ?? []}
-          testId="tenant-group-assign-group" ariaLabel={t("adminRoles.groupLabel")} />
-        <Button variant="primary" size="sm" data-testid="tenant-group-assign-add"
-          disabled={!roleId || !groupName || assign.isPending}
-          onClick={() => assign.mutate(
-            { roleId, resourceType: "tenant", resourceId: tenantId, groupName },
-            { onSuccess: () => { notify.success(t("toast.saved")); setGroupName(""); }, onError },
-          )}>{t("adminRoles.assign")}</Button>
-      </div>
+      {/* #578 bounce ③: the same add-flow component the space screen uses. Only two things differ, and
+          both are arguments: this surface confers TENANT-scope custom roles, and it offers groups only
+          — people get their tenant roles on their own row, which #579 ruled and pins. */}
+      <GranteeRoleForm
+        testId="tenant-group-assign"
+        types={["group"]}
+        type="group"
+        onTypeChange={() => {}}
+        query=""
+        onQueryChange={() => {}}
+        picked={null}
+        onPick={() => {}}
+        candidates={[]}
+        groupName={groupName}
+        onGroupNameChange={setGroupName}
+        knownGroups={groups.data ?? []}
+        roleOptions={[{ value: "", label: t("adminRoles.rolePlaceholder") }, ...tenantRoles.map((r) => ({ value: r.id, label: r.name }))]}
+        role={roleId}
+        onRoleChange={setRoleId}
+        pending={assign.isPending || !roleId}
+        onAdd={() => assign.mutate(
+          { roleId, resourceType: "tenant", resourceId: tenantId, groupName },
+          { onSuccess: () => { notify.success(t("toast.saved")); setGroupName(""); }, onError },
+        )}
+      />
 
       <div className="flex flex-col gap-1" data-testid="tenant-group-role-list">
         {rows.map((r) => (

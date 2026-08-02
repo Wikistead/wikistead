@@ -17,9 +17,14 @@ describe("#578: the group name control has one implementation", () => {
   const space = read("./SpaceMembersTab.tsx");
   const tenant = read("./TenantGroupRoles.tsx");
 
-  it("both screens render the shared component", () => {
-    expect(space, "space Members tab").toMatch(/<GroupPicker\b/);
-    expect(tenant, "tenant Roles tab").toMatch(/<GroupPicker\b/);
+  it("both screens reach the shared component", () => {
+    // bounce ③ moved the picker one level down: both screens now render the shared ADD FORM, and the
+    // form renders the one group control. The invariant is unchanged — there is a single
+    // implementation of "name a group" — so the pin follows it rather than pretending the old shape.
+    const form = read("./GranteeRoleForm.tsx");
+    expect(form, "the shared form owns the group control").toMatch(/<GroupPicker\b/);
+    expect(space, "space Members tab").toMatch(/<GranteeRoleForm\b/);
+    expect(tenant, "tenant Roles tab").toMatch(/<GranteeRoleForm\b/);
   });
 
   it("neither screen keeps a hand-rolled group Select beside it", () => {
@@ -51,5 +56,40 @@ describe("#578: the group name control has one implementation", () => {
     const rows = read("./tenant-role-rows.ts");
     expect(rows).toMatch(/BUILT_IN_TIERS/);
     expect(read("./MembersPage.tsx"), "the member row still has ONE picker offering tiers and custom roles").toMatch(/resolveRoleChoice/);
+  });
+});
+
+// UI ". The FLOW is now one component — grantee type, then who, then which
+// role — and each screen differs only in the arguments it passes.
+//
+// One difference is deliberate and is pinned as such: the tenant screen offers groups only, because
+// #579 ruled that a person's tenant role is given on their own row and nowhere else (its e2e asserts
+// there is no second assign form). Offering a person here would reverse that ruling, so it is raised
+// on the ticket rather than decided in a component.
+describe("#578 ③: both screens run the same add-flow", () => {
+  const form = read("./GranteeRoleForm.tsx");
+  const space = read("./SpaceMembersTab.tsx");
+  const tenant = read("./TenantGroupRoles.tsx");
+
+  it("each screen renders the shared form", () => {
+    expect(space).toMatch(/<GranteeRoleForm\b/);
+    expect(tenant).toMatch(/<GranteeRoleForm\b/);
+  });
+
+  it("neither screen keeps its own copy of the row", () => {
+    // the shape that was there before: a hand-built FormRow with the type Select, the picker and Add
+    expect(space, "space still builds the add row itself").not.toMatch(/testId="space-grant-type"/);
+    expect(tenant, "tenant still builds the add row itself").not.toMatch(/data-testid="tenant-group-assign-add"/);
+  });
+
+  it("the form takes the grantee kinds as an argument, and hides the control when there is one", () => {
+    expect(form).toMatch(/types\.length > 1/);
+    expect(space, "the space screen offers both").toMatch(/types=\{\["user", "group"\]\}/);
+    expect(tenant, "the tenant screen offers groups only (people use their row — #579)").toMatch(/types=\{\["group"\]\}/);
+  });
+
+  it("it owns no state and knows no endpoint — the caller decides what add means", () => {
+    expect(form, "no fetching in the shared form").not.toMatch(/useMutation|fetch\(|useQuery/);
+    expect(form).toMatch(/onAdd: \(\) => void/);
   });
 });

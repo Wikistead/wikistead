@@ -11,7 +11,7 @@ import {
 } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
-import { GroupPicker } from "./GroupPicker";
+import { GranteeRoleForm } from "./GranteeRoleForm";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
@@ -263,52 +263,31 @@ export function SpaceMembersTab() {
       <h2 className="mt-0">{t("spaceMembers.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("spaceMembers.body")}</p>
 
-      <FormRow className="mb-6">
-        <Select
-          value={mode}
-          onChange={(v) => setMode(v as "user" | "group")}
-          ariaLabel={t("spaceMembers.granteeType")}
-          testId="space-grant-type"
-          options={[
-            { value: "user", label: t("spaceMembers.typeUser") },
-            { value: "group", label: t("spaceMembers.typeGroup") },
-          ]}
-        />
-        {mode === "group" ? (
-          // #578 slice 6: the same control the tenant screen uses — one implementation, so "can I
-          // declare a group nobody carries yet?" cannot answer differently on two screens.
-          <GroupPicker value={groupName} onChange={setGroupName} known={groups.data ?? []}
-            testId="space-grant-group" ariaLabel={t("spaceMembers.typeGroup")} />
-        ) : (
-        <MemberSearchInput
-          query={query}
-          onQueryChange={setQuery}
-          picked={picked}
-          onPick={(c) => { setPicked(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null); if (c) setQuery(""); }}
-          candidates={candidates.data ?? []}
-          placeholder={t("spaceMembers.addPlaceholder")}
-          ariaLabel={t("spaceMembers.addPlaceholder")}
-          inputTestId="space-grant-input"
-          listTestId="space-grant-candidates"
-          itemTestId="space-grant-candidate"
-        />
-        )}
-        {/* #536 / ADR-188 §6: built-in roles and custom roles are ONE list. They remain two mechanisms
-            underneath (a built-in is a capability grant, a custom role expands its bundle), but that is an
-            implementation fact and was never a reason to make someone choose which of two controls to use.
-            The value carries the kind so the click below dispatches without guessing. */}
-        <Select
-          value={pick}
-          onChange={setPick}
-          ariaLabel={t("spaceMembers.capability")}
-          testId="space-grant-capability"
-          options={[
-            ...GRANTABLE.map((c) => ({ value: `builtin:${c}`, label: capNoun(c) })),
-            ...customRoles.map((r) => ({ value: `role:${r.id}`, label: r.name })),
-          ]}
-        />
-        <Button variant="primary" disabled={(mode === "group" ? !groupName : !picked) || grant.isPending || assignRole.isPending} onClick={addUnified} data-testid="space-grant-add">{t("spaceMembers.add")}</Button>
-      </FormRow>
+      {/* #578 bounce ③: the add-flow is one component now, shared with the tenant screen — grantee
+          type, then who, then which role. Only `types` and the role list differ per surface. */}
+      <GranteeRoleForm
+        testId="space-grant"
+        roleTestId="space-grant-capability"
+        types={["user", "group"]}
+        type={mode}
+        onTypeChange={(m) => setMode(m)}
+        query={query}
+        onQueryChange={setQuery}
+        picked={picked}
+        onPick={(c) => { setPicked(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null); if (c) setQuery(""); }}
+        candidates={candidates.data ?? []}
+        groupName={groupName}
+        onGroupNameChange={setGroupName}
+        knownGroups={groups.data ?? []}
+        roleOptions={[
+          ...GRANTABLE.map((c) => ({ value: `builtin:${c}`, label: capNoun(c) })),
+          ...customRoles.map((r) => ({ value: `role:${r.id}`, label: r.name })),
+        ]}
+        role={pick}
+        onRoleChange={setPick}
+        onAdd={addUnified}
+        pending={grant.isPending || assignRole.isPending}
+      />
 
       {/* #539: the list scrolls INSIDE a bounded box — the third instance of the same failure
           (#503 audit ledger, #521 patrol queue), so it takes the same 26rem box rather than a third
