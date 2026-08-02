@@ -10,6 +10,10 @@ import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { drainOutbox } from '../search/index.js'
+// Every drain below names THIS page. Unscoped, "the queue is empty" and "a fresh claim is left alone"
+// are claims about every pending row in the database, so any suite that publishes a page at the wrong
+// moment turns them red — and the other suite's own drain would meanwhile index this page's body
+// BEFORE the first case gets to assert that it is not indexed yet.
 import { buildApp } from '../app.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -63,7 +67,7 @@ describe('search outbox drain (collab body → full-text)', () => {
     // Before draining the collab-enqueued row, the body isn't in Meili.
     expect(await search(TOKEN)).not.toContain(PAGE)
 
-    const processed = await drainOutbox(app.searchDriver)
+    const processed = await drainOutbox(app.searchDriver, { pageId: PAGE })
     expect(processed).toBeGreaterThan(0)
 
     // After the drain, the body term finds the page via the real two-stage route.
@@ -74,7 +78,21 @@ describe('search outbox drain (collab body → full-text)', () => {
   })
 
   it('drainOutbox is idempotent on an empty queue (no rows → 0 processed)', async () => {
-    expect(await drainOutbox(app.searchDriver)).toBe(0)
+    expect(await drainOutbox(app.searchDriver, { pageId: PAGE })).toBe(0)
+  })
+
+  it('a page-scoped drain leaves another page\'s row alone (the narrowing is real)', async () => {
+    // Without this, the three assertions above could pass because the queue happened to be empty
+    // rather than because the drain is scoped — the vacuous-pin shape. A neighbour row proves it.
+    const other = `obx-other-${Date.now().toString(36)}`
+    await admin`INSERT INTO search_outbox (tenant_id, page_id, operation) VALUES (${TENANT}, ${other}, 'upsert')`
+    try {
+      expect(await drainOutbox(app.searchDriver, { pageId: PAGE }), 'not mine, not touched').toBe(0)
+      const [{ n }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM search_outbox WHERE page_id = ${other}`
+      expect(n, 'the neighbour row is still queued').toBe(1)
+    } finally {
+      await admin`DELETE FROM search_outbox WHERE page_id = ${other}`.catch(() => {})
+    }
   })
 
   // #432the stale window on the NO-extraDue claim path (search/audit). The only stale-window
@@ -88,7 +106,7 @@ describe('search outbox drain (collab body → full-text)', () => {
 
     // another worker holds a FRESH claim → this drain must not touch the row (disjoint batches)
     await admin`UPDATE search_outbox SET claimed_at = now() WHERE page_id = ${PAGE}`
-    expect(await drainOutbox(app.searchDriver), 'a freshly claimed row is left alone').toBe(0)
+    expect(await drainOutbox(app.searchDriver, { pageId: PAGE }), 'a freshly claimed row is left alone').toBe(0)
     const [{ n: still }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM search_outbox WHERE page_id = ${PAGE}`
     expect(still).toBe(1)
 
@@ -98,7 +116,7 @@ describe('search outbox drain (collab body → full-text)', () => {
     // pin exists to remove: widen the window past 3 minutes and this must go red. (Same shape as the
     // webhook-path pin, so both branches fail together when the constant stops reaching the SQL.)
     await admin`UPDATE search_outbox SET claimed_at = now() - interval '3 minutes' WHERE page_id = ${PAGE}`
-    expect(await drainOutbox(app.searchDriver), 'a stale claim is re-claimed').toBeGreaterThan(0)
+    expect(await drainOutbox(app.searchDriver, { pageId: PAGE }), 'a stale claim is re-claimed').toBeGreaterThan(0)
     const [{ n: gone }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM search_outbox WHERE page_id = ${PAGE}`
     expect(gone).toBe(0)
   })
