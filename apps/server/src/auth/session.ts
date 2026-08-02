@@ -13,7 +13,6 @@ import { enrollEligible } from './enroll-policy.js'
 import { getEnrollConfig } from './enroll-domains.js'
 import { enrolUnderSeatCap } from './invites.js'
 import { ensurePersonalSpace } from '../routes/spaces.js'
-import { evaluateDefaultRole } from '../routes/roles.js'
 import type { SearchDriver } from '../search/index.js'
 
 export const SESSION_COOKIE = 'wks_sess'
@@ -242,11 +241,10 @@ export async function establishMemberSession(
   // sequenced AFTER the upsert tx — the assign helpers open their own tx, so this is a separate
   // transaction, never nested. It is idempotent + re-run every login, so a failure self-heals and must
   // never block sign-in. searchDriver is passed through but a tenant-scope assignment never reindexes.
-  if (deps.searchDriver) {
-    try {
-      await evaluateDefaultRole(deps.db, deps.fga, deps.searchDriver, tenant, claims.sub, row.groups)
-    } catch { /* default-role application is best-effort; it self-heals at the next login */ }
-  }
+  // #578 / ADR-201 slice 5: the default role is retired. The tenant vocabulary is `createSpaces` and
+  // `issueApiKeys`, and the same admin screen already has an every-member toggle for each — the two
+  // said the same thing. Existing defaults were converted by migration 100 plus the one-shot toggle
+  // script, so nobody lost a capability when this call went away.
   // #578 / ADR-201 slice 4: login no longer materialises tenant admin from an IdP group. ADR-183 had
   // adopted that path and ADR-201 abolished it, for ADR-183's own stated reasons: whoever can edit the
   // group at the IdP takes the tenant, nothing records who holds it, and revocation lives outside the
