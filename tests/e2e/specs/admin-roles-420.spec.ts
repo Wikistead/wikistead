@@ -154,8 +154,7 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.getByTestId("members-filter").fill("dev");
   const roleCell = page.getByTestId("member-roles").first();
   await expect(roleCell).toBeVisible({ timeout: 8000 });
-  await roleCell.getByTestId("member-role-add").click();
-  await roleCell.getByTestId("member-role-add-select").click();
+  await roleCell.getByTestId("member-role-select").click();
   await page.getByRole("option", { name }).click();
   await expect(roleCell.getByTestId("member-role-chip").filter({ hasText: name })).toBeVisible({ timeout: 8000 });
 

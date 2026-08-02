@@ -39,20 +39,16 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(page.getByTestId("member-roles").first()).toBeVisible({ timeout: 8000 });
     const rowRoles = page.getByTestId("member-roles").first();
 
-    // #591 re-aim: the row asks TWO questions and each has its own control again — but for the opposite
-    // reason to the one #579 removed. The tier is now a DROPDOWN that is always visible (exclusive,
-    // changed in place), and the add control offers custom roles ONLY, so "add" means add. What #579
-    // pinned — that a person's tenant roles are managed on their own row and nowhere else — is
-    // unchanged, and the two `toHaveCount(0)` assertions above still say so.
-    await rowRoles.getByTestId("member-role-add").click();
-    await rowRoles.getByTestId("member-role-add-select").click();
-    await expect(page.getByRole("option").filter({ hasText: /^(member|admin)$/ }), "no tier in the ADD list").toHaveCount(0);
+    // #579 (third ruling) put the two controls back into one: the list carries the tier the member is
+    // NOT on together with the roles they do not hold. So the tier IS expected here — what #591 read as
+    // "a tier hiding in an add list" is answered by the label and by the chips, not by a second control.
+    await rowRoles.getByTestId("member-role-select").click();
+    await expect(page.getByRole("option").filter({ hasText: /^(member|admin)$/ }), "the other tier is in the same list").toHaveCount(1);
     await page.getByRole("option", { name: roleA }).click();
     await expect(rowRoles.getByTestId("member-role-chip").filter({ hasText: roleA })).toBeVisible({ timeout: 8000 });
 
     // a SECOND one sits beside it — this is the asymmetry a single Select could not show
-    await rowRoles.getByTestId("member-role-add").click();
-    await rowRoles.getByTestId("member-role-add-select").click();
+    await rowRoles.getByTestId("member-role-select").click();
     await page.getByRole("option", { name: roleB }).click();
     await expect(rowRoles.getByTestId("member-role-chip").filter({ hasText: roleB })).toBeVisible({ timeout: 8000 });
 
@@ -77,7 +73,7 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
 
     // the tier is still exactly one value, and it is the dropdown — it shows what the member IS and
     // changing it moves them rather than adding anything (#591). No × : you do not remove a tier.
-    await expect(reloaded.getByTestId("member-tier-select")).toHaveText(/^(member|admin)$/);
+    await expect(reloaded.getByTestId("member-tier-chip"), "the tier is shown as a chip; the picker offers the other one").toHaveText(/^(member|admin)$/);
 
     // the filter narrows the table — the search that used to live inside the assign form
     await page.getByTestId("members-filter").fill("nobody-matches-this");

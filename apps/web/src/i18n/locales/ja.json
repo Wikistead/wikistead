@@ -963,7 +963,8 @@
     "inviteFailed": "招待を作成できませんでした。",
     "pendingRow": "{{email}} · {{role}}",
     "inviteRoleOptional": "カスタムロール（任意）",
-    "inviteRoleNone": "カスタムロールなし"
+    "inviteRoleNone": "カスタムロールなし",
+    "roleChangeOrAdd": "ロールを変更・追加"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",
