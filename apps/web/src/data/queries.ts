@@ -947,6 +947,11 @@ export interface PageMeta {
 export type PageRelation = "view" | "comment" | "edit" | "manage" | "moderate"; // #100 comment grant; #330 moderate
 export interface PageGrant { grantee: string; relation: PageRelation; groupName?: string }
 
+// #596: the revoke/unassign honesty payload. `stillCovered` names what keeps granting a capability
+// after this removal (a custom role's name / a built-in capability), so surfaces can say "removed,
+// but X still grants this" instead of a success toast that implies the access is gone.
+export interface RevokeOutcome { removed: boolean; stillCovered: { capability: string; via: string }[] }
+
 export function usePageAccess(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
@@ -973,7 +978,7 @@ export function useRevokeAccess(pageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: { grantee?: string; groupName?: string; relation: PageRelation }) =>
-      apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/access`, token, { method: "DELETE", body: JSON.stringify(args) }),
+      apiFetch<RevokeOutcome>(`/pages/${encodeURIComponent(pageId)}/access`, token, { method: "DELETE", body: JSON.stringify(args) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["page-access", pageId] }),
   });
 }
@@ -1317,7 +1322,7 @@ export function useRevokeSpaceAccess(spaceId: string) {
     // #553 (a): `capabilities` is the folded-noun form — one request, one server transaction, so a
     // half-revoked principal is not reachable by a client that stops between two calls.
     mutationFn: (args: { grantee?: string; groupName?: string; capability?: PageRelation; capabilities?: string[] }) =>
-      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, {
+      apiFetch<RevokeOutcome>(`/spaces/${encodeURIComponent(spaceId)}/access`, token, {
         method: "DELETE",
         body: JSON.stringify(
           args.capabilities
@@ -1677,7 +1682,7 @@ export function useUnassignRole() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (assignmentId: string) => apiFetch<void>(`/admin/roles/assignments/${encodeURIComponent(assignmentId)}`, token, { method: "DELETE" }),
+    mutationFn: (assignmentId: string) => apiFetch<RevokeOutcome>(`/admin/roles/assignments/${encodeURIComponent(assignmentId)}`, token, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
   });
 }

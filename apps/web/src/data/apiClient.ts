@@ -19,6 +19,9 @@ export class ApiError extends Error {
   // existence-hiding, NEVER an affordance — see disclosureKindFromError in ui/upgrade-affordance).
   code?: string;
   upgrade?: boolean;
+  // #596: a `still_covered` revoke refusal names what keeps granting the capability, so the
+  // dialog can tell the manager what to remove instead of a generic failure.
+  coveredBy?: string[];
   constructor(public status: number, public path: string, message: string) {
     super(message);
     this.name = "ApiError";
@@ -35,6 +38,7 @@ export function apiErrorFrom(status: number, path: string, body: unknown): ApiEr
   const err = new ApiError(status, path, message);
   if (typeof b.code === "string") err.code = b.code;
   if (b.upgrade === true) err.upgrade = true;
+  if (Array.isArray(b.coveredBy) && b.coveredBy.every((v) => typeof v === "string")) err.coveredBy = b.coveredBy as string[];
   return err;
 }
 

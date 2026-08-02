@@ -154,7 +154,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
       method: 'DELETE', url: `/spaces/${spaceId}/access`, headers: dev,
       payload: { grantee: p, relations: ['edit', 'comment'] },
     })
-    expect(res.statusCode).toBe(204)
+    expect(res.statusCode).toBe(200) // #596: revoke answers 200 + the honesty payload
     expect((await rowsOf(p)).length, 'no arm left behind').toBe(0)
     expect(await canEdit(p)).toBe(false)
     expect(await canComment(p), 'the leftover this exists to prevent').toBe(false)

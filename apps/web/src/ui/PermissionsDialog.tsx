@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, usePageCommentAudience, useSetPageCommentAudience, usePageAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole, type PageRelation } from "../data/queries";
 import { resolveGrantDispatch } from "../settings/grant-dispatch";
+import { notifyRevokeOutcome, notifyRevokeError } from "../settings/revoke-feedback";
 import { MemberSearchInput } from "./MemberSearchInput";
 import { RoleTip } from "./RoleTip";
 import { capNoun } from "../settings/role-nouns";
@@ -345,9 +346,11 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
                 <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] tracking-wide text-fg-dim" data-testid="grant-role-badge">{capNoun(g.relation)}</span>
               </RoleTip>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label(g)}</span>
+              {/* #596: the server answers honestly now — success may carry "still covered by X"
+                  (say it), and a no-op revoke refuses with 409 still_covered (name the coverage). */}
               <IconButton aria-label={t("permissions.revoke")} data-testid="grant-revoke" variant="danger" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
-                onSuccess: () => notify.success(t("toast.accessRevoked")),
-                onError: () => notify.error(t("toast.actionFailed")),
+                onSuccess: (data) => notifyRevokeOutcome(t, data),
+                onError: (err) => notifyRevokeError(t, err),
               })}><X size={14} /></IconButton>
             </div>
           ))}
@@ -373,8 +376,8 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               </RoleTip>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{a.groupName ? `${a.groupName} (${t("spaceMembers.group")})` : (a.displayName ?? a.principal.replace(/^user:/, ""))}</span>
               <IconButton aria-label={t("permissions.revoke")} data-testid="grant-role-revoke" variant="danger" onClick={() => unassignRole.mutate(a.id, {
-                onSuccess: () => notify.success(t("toast.accessRevoked")),
-                onError: () => notify.error(t("toast.actionFailed")),
+                onSuccess: (data) => notifyRevokeOutcome(t, data),
+                onError: (err) => notifyRevokeError(t, err),
               })}><X size={14} /></IconButton>
             </div>
           ))}

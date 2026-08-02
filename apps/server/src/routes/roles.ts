@@ -378,7 +378,13 @@ export async function assignBuiltinCompositeInTx(
 
 // #497 / ADR-183: the UNASSIGN CORE by assignment id, extracted for the mapping DELETE path. The
 // caller has already checked authority (or, for a mapping delete, the mapping row proves ownership).
-// Returns true if an assignment was deleted.
+// #596: the outcome names what the principal STILL retains through other assignments (stillCovered),
+// so a surface can say "removed, but X still grants this" instead of a bare success that reads as
+// "they lost access" when they did not.
+export interface UnassignOutcome {
+  deleted: boolean
+  stillCovered: { capability: string; via: string }[]
+}
 export async function unassignRoleInTx(
   db: TenantDb, fga: OpenFgaClient, searchDriver: SearchDriver,
   args: {
@@ -387,14 +393,16 @@ export async function unassignRoleInTx(
     // matching note on assignRoleInTx).
     auditAction?: string; skipAudit?: boolean;
   },
-): Promise<boolean> {
+): Promise<UnassignOutcome> {
   let deleted = false
+  let stillCovered: { capability: string; via: string }[] = []
   let resourceType = 'page' as 'page' | 'space' | 'tenant'
   let resourceId = ''
   const oid = await db.tx(async (tx) => {
     const r = await unassignRoleTxCore(tx, args)
     if (!r) return null
     deleted = true
+    stillCovered = r.stillCovered
     resourceType = r.resourceType
     resourceId = r.resourceId
     // FGA LAST, inside the tx — a failure here rolls the row deletions back, and the composite caller
@@ -404,7 +412,7 @@ export async function unassignRoleInTx(
   })
   if (oid) processOutboxAsync(searchDriver, oid, { tenantId: args.tenant.id, pageId: resourceId, operation: 'upsert' })
   if (deleted && resourceType === 'space') await reindexPublishedPages(db, searchDriver, args.tenant.id, resourceId)
-  return deleted
+  return { deleted, stillCovered }
 }
 
 // #553 (a): the ONE-transaction unassign body, extracted for the same reason its assign twin was
@@ -417,6 +425,11 @@ export async function unassignRoleInTx(
 interface UnassignTxOutcome {
   resourceType: 'page' | 'space' | 'tenant'; resourceId: string; outboxId: string | null
   toDelete: { user: string; relation: string; object: string }[]
+  // #596: the capabilities THIS assignment conferred that the principal still retains through other
+  // assignments, labelled by what retains them (a custom role's name / a built-in capability). The
+  // row deletion is a real change and stays a success — but "removed and they still have access" must
+  // reach the surface as words, not as a success toast that implies the opposite.
+  stillCovered: { capability: string; via: string }[]
 }
 export async function unassignRoleTxCore(
   tx: Sql,
@@ -435,8 +448,10 @@ export async function unassignRoleTxCore(
     // Same LEFT join for the refcount: the capabilities a principal still holds through OTHER assignments
     // now include built-in grants. With the inner join, revoking a custom role that overlapped a built-in
     // grant deleted the shared leaves outright -- the grant was still there, and the access was not.
-    const others = await tx<{ id: string; capabilities: string[] }[]>`
-      SELECT a.id, COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS capabilities
+    // #596: `via` labels the covering assignment for the response (role name / built-in capability).
+    const others = await tx<{ id: string; capabilities: string[]; via: string }[]>`
+      SELECT a.id, COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS capabilities,
+             COALESCE(r.name, a.builtin_capability) AS via
       FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
       WHERE a.id != ${asg.id} AND a.resource_type = ${asg.resource_type} AND a.resource_id = ${asg.resource_id} AND a.principal = ${asg.principal}
       FOR UPDATE OF a`
@@ -450,7 +465,12 @@ export async function unassignRoleTxCore(
     await tx`DELETE FROM role_assignments WHERE id = ${asg.id}`
     if (!args.skipAudit) await auditIfEntitled(tx, args.tenant, { actor: `user:${args.actorSub}`, action: args.auditAction ?? 'role.unassigned', target: `${asg.resource_type}:${asg.resource_id}` })
     const o = asg.resource_type === 'page' ? await enqueueOutbox(tx, { tenantId: args.tenant.id, pageId: asg.resource_id, operation: 'upsert' }) : null
-    return { resourceType: asg.resource_type, resourceId: asg.resource_id, outboxId: o, toDelete }
+    // #596: report on the CONFERRED set (asg.capabilities), not just the owned set — an assignment
+    // that owned nothing (its leaves pre-existed) still conferred; after its removal the principal
+    // keeps those capabilities through whoever covers them, and the surface must say so.
+    const kept = (asg.capabilities ?? []).filter((c) => stillCovered.has(c))
+      .map((c) => ({ capability: c, via: others.find((o) => o.capabilities.includes(c))!.via }))
+    return { resourceType: asg.resource_type, resourceId: asg.resource_id, outboxId: o, toDelete, stillCovered: kept }
   }
 }
 
@@ -853,8 +873,11 @@ export async function rolesPlugin(app: FastifyInstance) {
     await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: pre.resource_type, resourceId: pre.resource_id, capabilities: pre.capabilities as AnyRoleCapability[] })
     // #497: the unassign core is the shared helper (HTTP route + mapping delete).
     const gone = await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: req.params.assignmentId, actorSub: req.user.sub })
-    if (!gone) throw Object.assign(new Error('not found'), { statusCode: 404 })
-    return reply.code(204).send()
+    if (!gone.deleted) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    // #596: 200 with the honesty payload, not a bare 204 — when the principal keeps a capability
+    // through another assignment, the client must be able to say which one instead of implying
+    // the access is gone.
+    return reply.code(200).send({ removed: true, stillCovered: gone.stillCovered })
   })
 
   app.delete<{ Params: { roleId: string } }>('/admin/roles/:roleId', async (req, reply) => {

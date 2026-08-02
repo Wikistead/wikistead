@@ -34,12 +34,16 @@ export const ALLOWLIST: Record<string, string> = {
   "TenantGroupRoles.tsx:unassign": "un-assignment is re-assignable in one step (#504 exception)",
   "AccountPage.tsx:removeAvatar": "re-uploading restores the avatar (#504 exception)",
   "WatchListPage.tsx:unwatch": "re-watching is one click on the page (#504 exception)",
-  "PermissionsDialog.tsx:revoke": "a page grant is re-grantable in one step (#504 exception)",
-  "SpaceMembersTab.tsx:revoke": "a space grant is re-grantable in one step (#504 exception)",
+  // #596 re-judgment: the exception's premise ("wrong click is reversible in one step") was broken
+  // while a covered revoke answered success and changed nothing — that lie is fixed (a no-op revoke
+  // now refuses with 409 still_covered and a real removal reports what still covers), so the premise
+  // holds again and the exemption STAYS. Nothing here deletes more than one re-grantable row.
+  "PermissionsDialog.tsx:revoke": "a page grant is re-grantable in one step (#504 exception; premise re-verified by #596)",
+  "SpaceMembersTab.tsx:revoke": "a space grant is re-grantable in one step (#504 exception; premise re-verified by #596)",
   // dash-ok: these strings are the guard's own rationale, read in test output, never on a screen
   "SpaceMembersTab.tsx:revokeCapsForRow": "pure helper — computes which caps a row's revoke covers, deletes nothing itself (#553)",
   "SpaceMembersTab.tsx:unassignRole": "a space role assignment is re-assignable in one step (#485/#504 exception)",
-  "PermissionsDialog.tsx:unassignRole": "a page role assignment is re-assignable in one step, the same as the capability grant beside it (#582/#504 exception)",
+  "PermissionsDialog.tsx:unassignRole": "a page role assignment is re-assignable in one step, the same as the capability grant beside it (#582/#504 exception; premise re-verified by #596)",
   // dash-ok: the guard's own rationale, read in test output
   "AdminEmbedsTab.tsx:remove": "the removal is STAGED until Save — undoable in place (#504 exception)",
   "SpaceSettingsPage.tsx:removeIcon": "re-uploading restores the space icon (#504 exception)",

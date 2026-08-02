@@ -1124,7 +1124,7 @@ export async function revokePageAccess(
   fga: OpenFgaClient,
   driver: SearchDriver,
   args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string; plan?: string },
-): Promise<void> {
+): Promise<{ stillCovered: { capability: string; via: string }[] }> {
   validateGrant(args.grantee, args.relation)
   await requireGrantAuthority(fga, args.userId, args.pageId, args.relation as PageRelation) // #420 Addendum 3: the ceiling — admin-class grants need manage
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
@@ -1135,23 +1135,35 @@ export async function revokePageAccess(
   const [row] = await db.sql<{ id: string }[]>`
     SELECT id FROM role_assignments
     WHERE builtin_capability = ${args.relation} AND resource_type = 'page' AND resource_id = ${args.pageId} AND principal = ${args.grantee}`
+  let stillCovered: { capability: string; via: string }[] = []
   if (row) {
-    await unassignRoleInTx(db, fga, driver, {
+    const r = await unassignRoleInTx(db, fga, driver, {
       tenant: { id: args.tenantId, plan: args.plan ?? '' },
       assignmentId: row.id, actorSub: args.userId,
       auditAction: 'page.access_revoked', skipAudit: args.plan === undefined,
     })
+    stillCovered = r.stillCovered
   } else {
-    const covering = await db.sql`
-      SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+    // #596: `via` names what covers the capability, for the refusal body.
+    const covering = await db.sql<{ via: string }[]>`
+      SELECT COALESCE(r.name, a.builtin_capability) AS via FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
       WHERE a.resource_type = 'page' AND a.resource_id = ${args.pageId} AND a.principal = ${args.grantee}
-        AND ${args.relation} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
+        AND ${args.relation} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability]))`
+    // #596: there is no row to delete and the covering assignment keeps the tuple — NOTHING would
+    // change. Answering success here wrote an audit line and fired a webhook for a revoke that never
+    // happened (the EE ledger is hash-chained: a false entry is a tamper-proof lie). Refuse honestly
+    // instead; the remedy is removing the covering assignment, and the body names it.
+    if (covering.length > 0) {
+      throw Object.assign(new Error('still granted by another assignment'), {
+        statusCode: 409, code: 'still_covered', coveredBy: covering.map((c) => c.via),
+      })
+    }
     const oid = await db.tx(async (tx) => {
       if (args.plan !== undefined) {
         await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.access_revoked', target: `page:${args.pageId}` })
       }
       const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-      if (covering.length === 0) await deleteTuples(fga, [{ user: args.grantee, relation: fgaRelationForCap(args.relation as PageRelation), object: `page:${args.pageId}` }])
+      await deleteTuples(fga, [{ user: args.grantee, relation: fgaRelationForCap(args.relation as PageRelation), object: `page:${args.pageId}` }])
       return o
     })
     // Reindex so the revoked grantee drops out of the search viewer set immediately
@@ -1162,6 +1174,7 @@ export async function revokePageAccess(
   // view re-check inside, so a watcher whose view survives via another path keeps their watch.
   void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {})
   emit({ type: 'page.access_revoked', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
+  return { stillCovered }
 }
 
 // #109 / ADR-072 monotonic deny: RESTRICT a principal from a page. Writes page#restricted so the
@@ -4182,11 +4195,23 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   app.delete<{ Params: { pageId: string }; Body: { grantee?: string; groupName?: string; relation: string } }>('/pages/:pageId/access', async (req, reply) => {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
-    await revokePageAccess(req.db, app.fga, app.searchDriver, {
-      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee, relation: req.body?.relation ?? '', plan: req.tenant.plan,
-    })
-    return reply.code(204).send()
+    try {
+      const r = await revokePageAccess(req.db, app.fga, app.searchDriver, {
+        pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
+        grantee, relation: req.body?.relation ?? '', plan: req.tenant.plan,
+      })
+      // #596: 200 with the honesty payload — `stillCovered` names what keeps granting the capability
+      // after this removal, so the client can say so instead of implying the access is gone.
+      return reply.code(200).send({ removed: true, stillCovered: r.stillCovered })
+    } catch (e) {
+      // #596: Fastify's default error shape drops custom props — send `coveredBy` explicitly so the
+      // dialog can name the covering assignment in the refusal.
+      const err = e as { statusCode?: number; code?: string; coveredBy?: string[]; message?: string }
+      if (err.statusCode === 409 && err.code === 'still_covered') {
+        return reply.code(409).send({ error: err.message, code: 'still_covered', coveredBy: err.coveredBy ?? [] })
+      }
+      throw e
+    }
   })
 
   // #109 / ADR-072 monotonic deny — restrict/unrestrict a principal from a page (manage-gated). The

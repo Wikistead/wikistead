@@ -7,6 +7,7 @@ import { GranteeRoleForm } from "./GranteeRoleForm";
 import { notify } from "../ui/toast";
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole, useTenantGroupNames } from "../data/queries";
 import { buildGroupRoleRows } from "./tenant-role-rows";
+import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 
 // #579: tenant roles for GROUPS. Members get their roles on their own row in the table above; a group
 // has no row there — it is not a person — so it gets a section, the same split the space screen makes
@@ -90,7 +91,7 @@ export function TenantGroupRoles() {
                     unassign it, so the affordance is not offered either */}
                 {!h.managed && (
                   <IconButton aria-label={t("adminRoles.unassign")} data-testid="tenant-group-role-remove" variant="danger"
-                    onClick={() => unassign.mutate(h.assignmentId, { onSuccess: () => notify.success(t("toast.saved")), onError })}><X size={14} /></IconButton>
+                    onClick={() => unassign.mutate(h.assignmentId, { onSuccess: (data) => notifyRevokeOutcome(t, data), onError: (err) => notifyRevokeError(t, err) })}><X size={14} /></IconButton>
                 )}
               </span>
             ))}

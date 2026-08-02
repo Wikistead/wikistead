@@ -803,7 +803,7 @@ export async function revokeSpaceAccessComposite(
   fga: OpenFgaClient,
   driver: SearchDriver,
   args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string },
-): Promise<void> {
+): Promise<{ stillCovered: { capability: string; via: string }[] }> {
   for (const cap of args.capabilities) validateSpaceGrant(args.grantee, cap)
   // The SAME allowlist the composite grant uses: only a ruled noun bundle may travel as a set, so this
   // cannot become a free-form multi-revoke that takes capabilities the caller never named.
@@ -832,6 +832,11 @@ export async function revokeSpaceAccessComposite(
   // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so this is bounded by the type's relation count, never by tenant size.
   const { tuples: heldTuples } = await fga.read({ user: args.grantee, object: `space:${args.spaceId}` })
   const heldRelations = new Set((heldTuples ?? []).map((t) => t.key?.relation ?? ''))
+  // #596: per-arm honesty ledger — which arms actually changed (row deleted / tuple deleted), and what
+  // still covers an arm after this call. An event is emitted only for arms that changed; a call where
+  // NOTHING changes refuses instead of narrating a revoke that never happened.
+  const changedCaps = new Set<string>(rows.map((r) => r.builtin_capability))
+  const stillCovered: { capability: string; via: string }[] = []
   await db.tx(async (tx) => {
     for (const row of rows) {
       // the core's own toDelete is deliberately ignored: it can only speak for the leaves that row
@@ -849,14 +854,15 @@ export async function revokeSpaceAccessComposite(
     // unowned migration row, the rowless legacy leaf and the already-missing arm with one rule.
     let sweptRowless = false
     for (const cap of args.capabilities) {
-      const covering = await tx`
-        SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+      const covering = await tx<{ via: string }[]>`
+        SELECT COALESCE(r.name, a.builtin_capability) AS via FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
         WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId} AND a.principal = ${args.grantee}
-          AND ${cap} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
-      if (covering.length > 0) continue
+          AND ${cap} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability]))`
+      if (covering.length > 0) { stillCovered.push({ capability: cap, via: covering[0].via }); continue }
       const present = spaceGrantTuples(args.grantee, cap as SpaceCapability, args.spaceId).filter((t) => heldRelations.has(t.relation))
       if (present.length === 0) continue
       if (!rows.some((r) => r.builtin_capability === cap)) sweptRowless = true
+      changedCaps.add(cap)
       toDelete.push(...present)
     }
     if (sweptRowless && args.plan !== undefined) {
@@ -867,11 +873,19 @@ export async function revokeSpaceAccessComposite(
     // half-revoked state cannot be reached by a failure either — not just by a client that gave up.
     if (toDelete.length) await deleteTuples(fga, toDelete)
   })
+  // #596: no row deleted, no tuple deleted — the whole call was a no-op. Refuse honestly (nothing was
+  // audited inside the tx either: no rows existed and sweptRowless never fired), naming the coverage.
+  if (changedCaps.size === 0) {
+    throw Object.assign(new Error('still granted by another assignment'), {
+      statusCode: 409, code: 'still_covered', coveredBy: [...new Set(stillCovered.map((s) => s.via))],
+    })
+  }
   void sweepUnviewableWatches(db, fga, [args.spaceId]).catch(() => {})
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   for (const cap of args.capabilities) {
-    emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: cap, actorId: args.userId })
+    if (changedCaps.has(cap)) emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: cap, actorId: args.userId })
   }
+  return { stillCovered }
 }
 
 export async function revokeSpaceAccess(
@@ -881,7 +895,7 @@ export async function revokeSpaceAccess(
   // #578 bounce ①: `groupName` is what the manager TYPED; the grantee is the id this server derived
   // from it. Both travel: the id is the authority, the name is what the listing can show.
   args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean; groupName?: string },
-): Promise<void> {
+): Promise<{ stillCovered: { capability: string; via: string }[] }> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
   // #536 / ADR-188 §6 item 1: revoke the ROW when there is one, so the reference count decides which
@@ -899,12 +913,14 @@ export async function revokeSpaceAccess(
   if (row?.origin === 'mapping') {
     throw Object.assign(new Error('managed by a group mapping — delete the mapping instead'), { statusCode: 409 })
   }
+  let stillCovered: { capability: string; via: string }[] = []
   if (row) {
-    await unassignRoleInTx(db, fga, driver, {
+    const r = await unassignRoleInTx(db, fga, driver, {
       tenant: { id: args.tenantId, plan: args.plan ?? '' },
       assignmentId: row.id, actorSub: args.userId,
       auditAction: 'space.access_revoked', skipAudit: args.plan === undefined,
     })
+    stillCovered = r.stillCovered
   } else {
     // A grant made before migration 086 has no row (deliberately — see 086: reconstructing rows from
     // tuples would assert grants nobody made). It stays revocable — but not refcount-blind (#536 review)
@@ -912,15 +928,24 @@ export async function revokeSpaceAccess(
     // bundling the same capability it deleted the shared leaf out from under it. If any row still covers
     // the capability, the tuples stay — the rowless grant is subsumed and "revoking" it removes nothing
     // the surviving assignment does not still confer.
-    const covering = await db.sql`
-      SELECT 1 FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+    const covering = await db.sql<{ via: string }[]>`
+      SELECT COALESCE(r.name, a.builtin_capability) AS via FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
       WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId} AND a.principal = ${args.grantee}
-        AND ${args.capability} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability])) LIMIT 1`
+        AND ${args.capability} = ANY(COALESCE(r.capabilities, ARRAY[a.builtin_capability]))`
+    // #596: with a covering assignment NOTHING here would change — no row to delete, tuples stay.
+    // Answering success wrote an audit line and fired a webhook for a revoke that never happened
+    // (a hash-chained EE ledger turns that into a tamper-proof lie). Refuse honestly and name the
+    // covering assignment; the remedy is removing it.
+    if (covering.length > 0) {
+      throw Object.assign(new Error('still granted by another assignment'), {
+        statusCode: 409, code: 'still_covered', coveredBy: covering.map((c) => c.via),
+      })
+    }
     await db.tx(async (tx) => {
       if (args.plan !== undefined) {
         await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
       }
-      if (covering.length === 0) await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
+      await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
     })
     await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   }
@@ -929,6 +954,7 @@ export async function revokeSpaceAccess(
   // (page-level fallout is covered by the display gate; page grants have their own sweep).
   void sweepUnviewableWatches(db, fga, [args.spaceId]).catch(() => {})
   emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
+  return { stillCovered }
 }
 
 export async function listSpaceAccess(
@@ -1394,20 +1420,28 @@ export async function spacesPlugin(app: FastifyInstance) {
 
   app.delete<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation?: string; relations?: string[] } }>('/spaces/:spaceId/access', async (req, reply) => {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
-    // #553 (a): the plural form revokes a folded noun in ONE transaction. The singular keeps
-    // meaning exactly one capability, as it always has.
-    if (Array.isArray(req.body?.relations) && req.body.relations.length > 0) {
-      await revokeSpaceAccessComposite(req.db, app.fga, app.searchDriver, {
-        spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
-        grantee, capabilities: req.body.relations, plan: req.tenant.plan,
-      })
-      return reply.code(204).send()
+    try {
+      // #553 (a): the plural form revokes a folded noun in ONE transaction. The singular keeps
+      // meaning exactly one capability, as it always has.
+      const r = Array.isArray(req.body?.relations) && req.body.relations.length > 0
+        ? await revokeSpaceAccessComposite(req.db, app.fga, app.searchDriver, {
+            spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+            grantee, capabilities: req.body.relations, plan: req.tenant.plan,
+          })
+        : await revokeSpaceAccess(req.db, app.fga, app.searchDriver, {
+            spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+            grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan,
+          })
+      // #596: 200 with the honesty payload (what still covers the capability after this removal).
+      return reply.code(200).send({ removed: true, stillCovered: r.stillCovered })
+    } catch (e) {
+      // #596: Fastify's default error shape drops custom props — send `coveredBy` explicitly.
+      const err = e as { statusCode?: number; code?: string; coveredBy?: string[]; message?: string }
+      if (err.statusCode === 409 && err.code === 'still_covered') {
+        return reply.code(409).send({ error: err.message, code: 'still_covered', coveredBy: err.coveredBy ?? [] })
+      }
+      throw e
     }
-    await revokeSpaceAccess(req.db, app.fga, app.searchDriver, {
-      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
-      grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan,
-    })
-    return reply.code(204).send()
   })
 
   // Comment audience setting (#100 / ADR-029): read + toggle who may comment on this space's pages

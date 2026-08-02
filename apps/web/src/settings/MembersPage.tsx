@@ -16,6 +16,7 @@ import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
 import { notify } from "../ui/toast";
+import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { buildTenantRoleRows, filterMembers, pickerOptions, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
@@ -149,8 +150,9 @@ export function MembersPage() {
                       {!c.managed && (
                         <IconButton aria-label={t("adminRoles.unassign")} data-testid="member-role-remove" variant="danger"
                           onClick={() => unassignRole.mutate(c.assignmentId, {
-                            onSuccess: () => notify.success(t("toast.saved")),
-                            onError: () => notify.error(t("toast.actionFailed")),
+                            // #596: a removal that leaves the capability covered by another role says so
+                            onSuccess: (data) => notifyRevokeOutcome(t, data),
+                            onError: (err) => notifyRevokeError(t, err),
                           })}><X size={12} /></IconButton>
                       )}
                     </span>
