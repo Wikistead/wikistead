@@ -1532,10 +1532,18 @@ export async function setTenantPublicEnabled(db: TenantDb, tenantId: string, ena
 export async function isPagePublic(db: TenantDb, fga: OpenFgaClient, args: { pageId: string; userId: string }): Promise<boolean> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  // #574: paginated — `view_base` carries per-principal leaves, so `user:*` can sit past page one
-  // and a PUBLIC page would report as private (the same shape as isSpacePublic, #553).
-  const tuples = await readObjectTuples(fga, `page:${args.pageId}`)
-  return tuples.some((k) => k.relation === 'view_base' && k.user === 'user:*')
+  // #574 review: I called this the twin of isSpacePublic and it is NOT. Whether a filtered Read
+  // can truncate is decided by the relation's DIRECT types in model.fga, not by how the relation reads
+  // in prose. `space#viewer` accepts [user, group#member, user:*, share_link…] — per-principal, so the
+  // deciding wildcard really can sit past page one (#553, a real bug). `page#view_base` accepts
+  // [user:*] and nothing else (model.fga:263); every per-principal leaf lives in `view_direct`, a
+  // different relation a filtered Read does not expand. So this answers with at most ONE tuple, and
+  // paginating it turned one round trip into three on a page with many grants — a pessimisation
+  // bought with no correctness at all. Measured: 120 sibling tuples, filtered read → 1 tuple, no
+  // continuation token, the wildcard still visible.
+  // fga-read-ok: view_base accepts only user:* directly (model.fga:263) — at most one tuple exists.
+  const { tuples } = await fga.read({ object: `page:${args.pageId}`, relation: 'view_base' })
+  return (tuples ?? []).some(({ key }) => key?.relation === 'view_base' && key.user === 'user:*')
 }
 
 // Is the page private (allowlist mode)? Manage-gated read for the permissions UI.
