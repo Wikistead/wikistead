@@ -10,6 +10,7 @@ import { FALLBACK_PRODUCT_NAME } from "./product-name";
 import { assetUrl } from "../data/apiClient";
 import { Button } from "../ui/Button";
 import { SocialIcon } from "./SocialIcon";
+import { LocalLoginForm } from "./LocalLoginForm";
 
 // #261: the sign-in screen (real auth mode). A centred, branded card — the tenant logo/name (public
 // /branding) ▷ the Wikistead lockup — kicks off the OIDC flow as a top-level navigation to /auth/login
@@ -106,8 +107,16 @@ export function LoginScreen() {
   const error = useAuthError();
   const { social, methods, connections } = useLoginOptions();
   const conns = connectionsFor(connections, methods);
-  const primary = conns[0] ?? null;
-  const secondary = conns.slice(1);
+  // #568 / ADR-198 §3: password sign-in is a connection, but it is not a BUTTON — there is nowhere
+  // to redirect to. It renders as a form here and is taken out of the button lists, so neither the
+  // primary slot nor "sign in another way" offers a link that goes nowhere. Its position in the
+  // tenant's order still decides whether it leads (form first) or follows (form under the buttons).
+  const localIndex = conns.findIndex((c) => c.kind === "local");
+  const hasLocal = localIndex !== -1;
+  const localLeads = localIndex === 0;
+  const buttons = conns.filter((c) => c.kind !== "local");
+  const primary = buttons[0] ?? null;
+  const secondary = buttons.slice(1);
   const platformId = conns.find((c) => c.kind === "platform")?.id ?? "";
   const logoUrl = branding.data?.logoUrl;
   const name = branding.data?.displayName;
@@ -145,6 +154,7 @@ export function LoginScreen() {
               {error}
             </div>
           )}
+          {hasLocal && localLeads && <LocalLoginForm returnTo={returnTo} disabled={navigating !== null} />}
           {primary !== null && (
             <Button
               variant="primary"
@@ -157,8 +167,13 @@ export function LoginScreen() {
               {connectionButtonText(primary, t)}
             </Button>
           )}
-          {primary === null && (
+          {primary === null && !hasLocal && (
             <p className="text-sm text-fg-dim" data-testid="login-none">{t("auth.noMethods")}</p>
+          )}
+          {hasLocal && !localLeads && (
+            <div className="mt-4 border-t border-border pt-4">
+              <LocalLoginForm returnTo={returnTo} disabled={navigating !== null} />
+            </div>
           )}
           {/* #554 S3 / ADR-197 §3: every non-primary connection folds behind "sign in another way",
               in the tenant's sort order. rev3 labels: a free label renders only when the server sent
