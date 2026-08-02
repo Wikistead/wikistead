@@ -4,6 +4,7 @@ import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
   useTenantRoleDefaults, useSetTenantRoleDefaults,
 } from "../data/queries";
+import { BUILTIN_EFFECTIVE_CAPS, type RoleNounKey } from "./role-nouns";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a role is irreversible — confirm first
@@ -48,25 +49,50 @@ function RoleBadges({ scope, builtIn = false }: { scope?: "resource" | "tenant";
 // #445 `lockLast` keeps a role from losing its LAST capability — the sole checked box renders
 // disabled (with a title explaining why), mirroring the server's non-empty validation (`role-save`'s
 // existing constraint) instead of letting the toggle round-trip to a 400.
+// #586 / ADR-203 (user ruling): the boxes SHOW subsumption instead of a sentence explaining it.
+//
+// The complaint: "checking these boxes, you could conclude commenting is not allowed" — because a role
+// with `moderate` grants comment through the model and the grid said nothing, so a note had to. Ticking
+// a superior capability now draws the ones it carries as CHECKED and not operable, with the reason
+// beside them.
+//
+// Display only. The saved set stays exactly what the administrator picked, for two reasons the ruling
+// names: writing the implied ones would erase the record of what was INTENDED ("moderate, and nothing
+// else"), and subsumption CHANGES — #553 severed `edit ⇒ comment` this week, and after such a change
+// there would be no telling an auto-written `comment` from a deliberate one.
+//
+// The source of subsumption is the measured table (`BUILTIN_EFFECTIVE_CAPS`), which a server test keeps
+// equal to what a real OpenFGA store answers. A second hand-written table here is exactly the drift
+// #485 and #536 were caused by.
 function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false, lockLast = false }: { value: string[]; onChange?: (caps: string[]) => void; idPrefix: string; list: readonly string[]; disabled?: boolean; lockLast?: boolean }) {
   const { t } = useTranslation();
   const lastLocked = lockLast && value.length === 1;
+  const implied = new Map<string, string>();
+  for (const held of value) {
+    for (const c of BUILTIN_EFFECTIVE_CAPS[held as RoleNounKey] ?? []) {
+      if (c !== held && !value.includes(c)) implied.set(c, held);
+    }
+  }
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1">
       {list.map((c) => {
         const itemLocked = lastLocked && value.includes(c);
-        const itemDisabled = disabled || itemLocked;
+        const impliedBy = implied.get(c);
+        const itemDisabled = disabled || itemLocked || impliedBy !== undefined;
         return (
-          <label key={c} className={`flex items-center gap-1.5 text-sm${disabled ? " text-fg-dim" : ""}`} data-tip={itemLocked ? t("adminRoles.lastCap") : undefined}>
+          <label key={c} className={`flex items-center gap-1.5 text-sm${disabled || impliedBy ? " text-fg-dim" : ""}`}
+            data-testid={impliedBy ? `${idPrefix}-implied-${c}` : undefined}
+            data-tip={itemLocked ? t("adminRoles.lastCap") : impliedBy ? t("adminRoles.impliedBy", { cap: t(`adminRoles.cap.${impliedBy}`) }) : undefined}>
             <input
               type="checkbox"
               data-testid={`${idPrefix}-cap-${c}`}
-              checked={value.includes(c)}
+              checked={value.includes(c) || impliedBy !== undefined}
               disabled={itemDisabled}
               onChange={itemDisabled ? undefined : (e) => onChange?.(e.target.checked ? [...value, c] : value.filter((x) => x !== c))}
               readOnly={itemDisabled}
             />
             <span>{t(`adminRoles.cap.${c}`)}</span>
+            {impliedBy && <span className="text-xs text-fg-dim">{t("adminRoles.impliedBy", { cap: t(`adminRoles.cap.${impliedBy}`) })}</span>}
           </label>
         );
       })}

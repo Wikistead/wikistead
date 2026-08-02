@@ -1278,7 +1278,8 @@
     "groupAssignEmpty": "テナントロールを持つグループはありません。",
     "groupLabel": "グループ",
     "groupPlaceholder": "グループを選択…",
-    "scopeQuestion": "どちらのロールを作りますか？"
+    "scopeQuestion": "どちらのロールを作りますか？",
+    "impliedBy": "（{{cap}} に含まれます）"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",
