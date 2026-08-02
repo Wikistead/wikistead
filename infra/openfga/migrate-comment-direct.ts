@@ -51,8 +51,21 @@ import { OpenFgaClient } from '@openfga/sdk'
     if (writes.length === 0 && deletes.length === 0) continue
     // Leaf first, stale delete second — a crash leaves a superset (temporary double grant on the same
     // capability), never a gap.
-    if (writes.length) await fga.write({ writes }).catch((e: unknown) => { console.error(`write failed for page:${id}`, e); throw e })
-    if (deletes.length) await fga.write({ deletes }).catch((e: unknown) => { console.error(`delete failed for page:${id}`, e); throw e })
+    // #574 review 2: paginating the read above made these writes reachable at the size they
+    // were paginated FOR. OpenFGA refuses a batch over max_tuples_per_write (measured on this stack:
+    // 100 accepted, 101 rejected), so a page with more than a hundred grants threw and the migration
+    // stopped on that page every run — fail-loud, but stuck. Chunked, the way the #553 migration and
+    // packages/authz already do it. Order is unchanged: every write chunk lands before any delete, so
+    // a crash still leaves a superset rather than a gap.
+    const CHUNK = 100
+    for (let i = 0; i < writes.length; i += CHUNK) {
+      const part = writes.slice(i, i + CHUNK)
+      await fga.write({ writes: part }).catch((e: unknown) => { console.error(`write failed for page:${id}`, e); throw e })
+    }
+    for (let i = 0; i < deletes.length; i += CHUNK) {
+      const part = deletes.slice(i, i + CHUNK)
+      await fga.write({ deletes: part }).catch((e: unknown) => { console.error(`delete failed for page:${id}`, e); throw e })
+    }
     moved += deletes.length
   }
   console.error(`migrated ${moved} comment grant tuple(s) to comment_direct`)
