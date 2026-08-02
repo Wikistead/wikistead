@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { classifyMentionKey, nextMentionIndex } from "./mention-nav";
 import { relTime } from "../ui/relative-time";
 import { Button } from "../ui/Button";
 import { RightPanel } from "../ui/RightPanel";
@@ -16,6 +17,9 @@ const hint = "m-0 text-sm text-fg-dim";
 const textareaCls = "box-border min-h-[56px] w-full resize-y rounded-md border border-border bg-background p-2 text-[0.92em] text-foreground focus-visible:border-[var(--accent)] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-[var(--accent)]";
 const suggestCls = "absolute bottom-full left-0 right-0 z-20 m-0 mb-1 list-none rounded-md border border-border bg-panel p-1 shadow-[0_6px_20px_rgba(0,0,0,0.25)]";
 const suggestBtn = "block w-full rounded px-2 py-[5px] text-left text-[0.9em] text-foreground hover:bg-panel-2";
+// #588: the selected row. Same treatment as the other pickers (a panel-2 fill), so the list reads the
+// same whether the pointer or the keyboard put the highlight there.
+const suggestBtnActive = `${suggestBtn} bg-panel-2`;
 
 // Composer with @mention autocomplete. Suggestions come from the page-scoped
 // mentionable directory (server limits it to members who can VIEW this page), so a
@@ -24,6 +28,11 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
   const { t } = useTranslation();
   const [text, setText] = useState("");
   const [suggest, setSuggest] = useState<Mentionable[]>([]);
+  // #588: the highlighted row. The list had NO keyboard handling at all — you could open it by typing
+  // and then had to reach for the mouse. The convention is the app's, not a new one: Ctrl-j / Ctrl-k
+  // plus the arrows (Ctrl-n / Ctrl-p are browser-reserved, which is why the palette chose j/k), Enter
+  // confirms, Esc closes.
+  const [active, setActive] = useState(0);
   const dir = useRef<Mentionable[] | null>(null);
   const picked = useRef<Map<string, string>>(new Map()); // "@name" → sub
 
@@ -36,13 +45,30 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
     if (!dir.current) dir.current = await fetchMentionable(token, pageId);
     const q = m[1]!.toLowerCase();
     setSuggest(dir.current.filter((x) => (x.displayName ?? x.sub).toLowerCase().includes(q)).slice(0, 5));
+    setActive(0); // a new query starts at the top (the same rule the embed picker follows)
   };
+
   const pick = (mn: Mentionable) => {
     const name = (mn.displayName ?? mn.sub).replace(/\s/g, "");
     setText((t) => t.replace(/@([\p{L}\p{N}._-]*)$/u, `@${name} `));
     picked.current.set(`@${name}`, mn.sub);
     setSuggest([]);
+    setActive(0);
   };
+
+  // #588 / #412: pointer movement over the list is as manual as an arrow key — it moves the highlight
+  // and the highlight stays where the user left it. Nothing yanks it back while the query is unchanged.
+  // The DECISION lives in mention-nav.ts (a value); this only executes it.
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (suggest.length === 0) return; // list closed → every key behaves exactly as it did before
+    const k = classifyMentionKey(e);
+    if (k.action === "pass") return;
+    e.preventDefault();
+    if (k.action === "move") setActive((i) => nextMentionIndex(i, suggest.length, k.delta));
+    else if (k.action === "confirm") pick(suggest[Math.min(active, suggest.length - 1)]!);
+    else setSuggest([]);
+  };
+
   const submit = () => {
     const body = text.trim();
     if (!body) return;
@@ -61,12 +87,25 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
         value={text}
         placeholder={placeholder}
         onChange={(e) => void onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        aria-controls={suggest.length > 0 ? "mention-suggest" : undefined}
+        aria-activedescendant={suggest.length > 0 ? `mention-option-${active}` : undefined}
       />
       {suggest.length > 0 && (
-        <ul className={suggestCls} data-testid="mention-suggest">
-          {suggest.map((s) => (
+        <ul className={suggestCls} id="mention-suggest" data-testid="mention-suggest" role="listbox">
+          {suggest.map((s, i) => (
             <li key={s.sub}>
-              <button type="button" className={suggestBtn} data-testid="mention-option" onMouseDown={(e) => { e.preventDefault(); pick(s); }}>
+              <button
+                type="button"
+                id={`mention-option-${i}`}
+                role="option"
+                aria-selected={i === active}
+                className={i === active ? suggestBtnActive : suggestBtn}
+                data-testid="mention-option"
+                data-active={i === active ? "true" : "false"}
+                onMouseMove={() => setActive(i)}
+                onMouseDown={(e) => { e.preventDefault(); pick(s); }}
+              >
                 {s.displayName ?? s.sub}
               </button>
             </li>
