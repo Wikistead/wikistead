@@ -559,7 +559,9 @@
     "managedByMapping": "グループマッピング由来の付与です。下の「グループマッピング」から削除してください。",
     "replaceConfirm": "「{{who}}」の現在のロール（{{current}}）を {{next}} に置き換えますか？",
     "managerReplaceConfirm": "「{{who}}」はこのスペースのマネージャです。マネージャ権限を {{next}} に置き換えますか？このスペースの管理権限をすべて失います（テナント管理者が付け直せます）。",
-    "replaceAction": "置き換える"
+    "replaceAction": "置き換える",
+    "groupNamePlaceholder": "グループ名を入力",
+    "groupUnconfirmed": "このグループを持つメンバーはまだいません。誰かがサインインした時点で有効になります。"
   },
   "auth": {
     "signInTitle": "{{product}} にサインイン",
