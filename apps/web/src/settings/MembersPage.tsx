@@ -16,7 +16,7 @@ import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
 import { notify } from "../ui/toast";
-import { buildTenantRoleRows, filterMembers } from "./tenant-role-rows";
+import { buildTenantRoleRows, filterMembers, pickerOptions, resolveRoleChoice } from "./tenant-role-rows";
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -118,22 +118,17 @@ export function MembersPage() {
                   {m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}
                 </span>
               </td>
-              {/* The row tells the truth about an asymmetry: the built-in role is EXACTLY ONE (a
-                  column on the member — picking admin unpicks member), custom roles are a SET (each
-                  one an assignment row). A single control cannot say both, so the built-in keeps its
-                  Select and the custom ones are chips with their own ×, plus one add control. */}
+              {/* #579 review: this was a built-in Select next to a separate "+ Role" button — two
+                  controls for one question, which is exactly what the space screen stopped doing. ONE
+                  picker offers the other tier and every custom role the member lacks; what a pick means
+                  is decided by resolveRoleChoice, not inferred here. The asymmetry still shows, in the
+                  chips rather than in the controls: the tier chip has no × because it is exclusive (you
+                  move to the other tier, you do not remove it), custom chips do. */}
               <td data-testid="member-roles">
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <Select
-                    value={m.role}
-                    onChange={(v) => void guarded(() => changeRole(token, m.sub, v as "admin" | "member"))()}
-                    ariaLabel={t("members.roleFor", { sub: m.sub })}
-                    size="sm"
-                    options={[
-                      { value: "member", label: t("members.roleMember") },
-                      { value: "admin", label: t("members.roleAdmin") },
-                    ]}
-                  />
+                  <span className="rounded-full border border-border px-2 py-px text-[11px] text-fg-dim" data-testid="member-tier-chip">
+                    {roleRows.get(m.sub)?.builtin ?? m.role}
+                  </span>
                   {(roleRows.get(m.sub)?.custom ?? []).map((c) => (
                     <span key={c.assignmentId} className="inline-flex items-center gap-1 rounded-full border border-[var(--accent)] px-2 py-px text-[11px] text-[var(--accent)]" data-testid="member-role-chip">
                       {c.roleName}
@@ -149,27 +144,30 @@ export function MembersPage() {
                       )}
                     </span>
                   ))}
-                  {(roleRows.get(m.sub)?.addable.length ?? 0) > 0 && (
-                    addingFor === m.sub ? (
-                      <Select
-                        size="sm"
-                        value=""
-                        ariaLabel={t("adminRoles.roleLabel")}
-                        testId="member-role-add-select"
-                        options={[{ value: "", label: t("adminRoles.rolePlaceholder") },
-                          ...(roleRows.get(m.sub)?.addable ?? []).map((r) => ({ value: r.id, label: r.name }))]}
-                        onChange={(roleId) => {
-                          if (!roleId) return;
-                          setAddingFor(null);
-                          assignRole.mutate({ roleId, resourceType: "tenant", resourceId: tenantId, principal: `user:${m.sub}` }, {
-                            onSuccess: () => notify.success(t("toast.saved")),
-                            onError: () => notify.error(t("toast.actionFailed")),
-                          });
-                        }}
-                      />
-                    ) : (
-                      <Button variant="ghost" size="sm" data-testid="member-role-add" onClick={() => setAddingFor(m.sub)}>{t("members.addRole")}</Button>
-                    )
+                  {addingFor === m.sub ? (
+                    <Select
+                      size="sm"
+                      value=""
+                      ariaLabel={t("members.roleFor", { sub: m.sub })}
+                      testId="member-role-add-select"
+                      options={[{ value: "", label: t("adminRoles.rolePlaceholder") },
+                        ...pickerOptions(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })]}
+                      onChange={(value) => {
+                        const choice = resolveRoleChoice(value, roleRows.get(m.sub)?.addable ?? []);
+                        if (choice.kind === "none") return;
+                        setAddingFor(null);
+                        if (choice.kind === "tier") {
+                          void guarded(() => changeRole(token, m.sub, choice.role))();
+                          return;
+                        }
+                        assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, principal: `user:${m.sub}` }, {
+                          onSuccess: () => notify.success(t("toast.saved")),
+                          onError: () => notify.error(t("toast.actionFailed")),
+                        });
+                      }}
+                    />
+                  ) : (
+                    <Button variant="ghost" size="sm" data-testid="member-role-add" onClick={() => setAddingFor(m.sub)}>{t("members.addRole")}</Button>
                   )}
                 </span>
               </td>

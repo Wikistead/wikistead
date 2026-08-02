@@ -8,7 +8,7 @@
 // row and a separate form above the table, which is what the user tripped over ("oh, THAT's what the
 // top half was").
 import { describe, it, expect } from "vitest";
-import { buildTenantRoleRows, buildGroupRoleRows, filterMembers, type TenantAssignment, type RowMember } from "./tenant-role-rows";
+import { buildTenantRoleRows, buildGroupRoleRows, filterMembers, pickerOptions, resolveRoleChoice, type TenantAssignment, type RowMember } from "./tenant-role-rows";
 
 const m = (sub: string, role: "admin" | "member" = "member", name: string | null = null): RowMember =>
   ({ sub, role, display_name: name, email: `${sub}@x.test` });
@@ -100,5 +100,48 @@ describe("#579: finding a member is a filter over the table, not a picker inside
     const before = [...people];
     filterMembers(people, "alice");
     expect(people).toEqual(before);
+  });
+});
+
+// #579 review: "why are the built-in and custom role UIs separate? put them in the same
+// selector." The row had a Select for the tier and a button that opened a second Select for custom
+// roles. One picker now offers both, so the decision — is this pick a tier swap or a role addition —
+// lives here, where it can be tested, rather than in the handler.
+describe("#579 review: one picker, two mechanisms underneath", () => {
+  const row = buildTenantRoleRows(
+    [m("alice", "member")],
+    [a("as1", "r1", "Space creators", "user:alice")],
+    ROLES,
+  )[0]!;
+
+  it("offers the tier the member is NOT on, plus the roles they do not hold", () => {
+    expect(pickerOptions(row)).toEqual([
+      { value: "tier:admin", label: "admin" },
+      { value: "role:r2", label: "Key issuers" },
+    ]);
+  });
+
+  it("an admin is offered member, not admin again", () => {
+    const adminRow = buildTenantRoleRows([m("bob", "admin")], [], ROLES)[0]!;
+    expect(pickerOptions(adminRow)[0]).toEqual({ value: "tier:member", label: "member" });
+  });
+
+  it("resolves a tier pick to a tier change and a role pick to an assignment", () => {
+    expect(resolveRoleChoice("tier:admin", row.addable)).toEqual({ kind: "tier", role: "admin" });
+    expect(resolveRoleChoice("role:r2", row.addable)).toEqual({ kind: "custom", roleId: "r2" });
+  });
+
+  it("refuses anything it did not offer — a stale id, the placeholder, a hand-made value", () => {
+    for (const v of ["", "role:r1", "role:nope", "admin", "tier:owner", "role:"]) {
+      expect(resolveRoleChoice(v, row.addable).kind, `${v} must not dispatch`).toBe("none");
+    }
+  });
+
+  it("a custom role NAMED admin cannot be mistaken for the tier (the prefix carries the mechanism)", () => {
+    const roles = [...ROLES, { id: "r9", name: "admin", scope: "tenant" }];
+    const r = buildTenantRoleRows([m("carol")], [], roles)[0]!;
+    const opts = pickerOptions(r);
+    expect(opts.filter((o) => o.label === "admin").map((o) => o.value).sort()).toEqual(["role:r9", "tier:admin"]);
+    expect(resolveRoleChoice("role:r9", r.addable)).toEqual({ kind: "custom", roleId: "r9" });
   });
 });

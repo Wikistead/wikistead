@@ -95,3 +95,35 @@ export function buildGroupRoleRows(
 }
 
 export { nameOf as memberLabel };
+
+// #579 review: the row had TWO controls — a Select for the built-in tier and a separate button
+// that opened a second Select for custom roles — and the user asked the same question they asked
+// about spaces: why is this two things? The reason given (the tier is exactly one, custom roles are a
+// set) is true and is not a reason to split the CONTROL. One picker offers both; what the pick MEANS
+// is decided here, so the component executes rather than infers (the #536rule).
+export type RoleChoice =
+  | { kind: "tier"; role: "admin" | "member" }
+  | { kind: "custom"; roleId: string }
+  | { kind: "none" };
+
+/** The picker's value is prefixed by mechanism, so a custom role named "admin" cannot be mistaken for
+ *  the built-in tier — the same guard the space picker uses. */
+export function resolveRoleChoice(value: string, addable: readonly TenantRoleDef[]): RoleChoice {
+  if (value === "tier:admin" || value === "tier:member") {
+    return { kind: "tier", role: value.slice("tier:".length) as "admin" | "member" };
+  }
+  if (value.startsWith("role:")) {
+    const roleId = value.slice("role:".length);
+    return addable.some((r) => r.id === roleId) ? { kind: "custom", roleId } : { kind: "none" };
+  }
+  return { kind: "none" };
+}
+
+/** What the one picker offers on a row: the tier the member is NOT on, then the roles they lack. */
+export function pickerOptions(row: TenantRoleRow): { value: string; label: string }[] {
+  const otherTier = row.builtin === "admin" ? "member" : "admin";
+  return [
+    { value: `tier:${otherTier}`, label: otherTier },
+    ...row.addable.map((r) => ({ value: `role:${r.id}`, label: r.name })),
+  ];
+}
