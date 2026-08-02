@@ -40,7 +40,8 @@
     "yes": "はい",
     "no": "いいえ",
     "edit": "編集",
-    "confirm": "実行"
+    "confirm": "実行",
+    "memberSearch": "メンバーを検索…"
   },
   "embedPicker": {
     "title": "ページを埋め込む",
@@ -527,7 +528,6 @@
     "customRolesBody": "このスペースで割り当てられているカスタムロールです。ロールの定義はテナント設定 → ロール、割り当ては上の選択肢から行います。権限はスペース全体に適用されます。",
     "customRolesEmpty": "このスペースにはまだカスタムロールの割当がありません。",
     "selectRole": "ロールを選択",
-    "addPlaceholder": "メンバーを検索…",
     "capability": "権限",
     "view": "閲覧可",
     "edit": "編集可",
@@ -719,7 +719,6 @@
     "title": "権限",
     "body": "このページへのアクセスをメンバーに付与します。未公開ページはここに記載された人だけが閲覧できます。",
     "member": "メンバー",
-    "memberPlaceholder": "メンバー ID",
     "relation": "権限",
     "view": "閲覧",
     "comment": "コメント",
@@ -762,7 +761,6 @@
     "privateConfirmBody": "このページの有効な共有リンク {{count}} 本が失効します（取り消せません）。スペースメンバーは継承アクセスを失います。",
     "privateConfirmAction": "非公開にする",
     "restrictTitle": "制限（スペース閲覧者でも拒否）",
-    "restrictPlaceholder": "メンバー ID（user sub）",
     "restrictAdd": "制限する",
     "unrestrict": "制限を解除",
     "commentAudienceTitle": "このページのコメント",
@@ -1272,7 +1270,6 @@
     "tenantAssignTitle": "テナントロールの割り当て",
     "tenantAssignBody": "テナントロール（スペースの作成など）はメンバーの属性なので、ここで付与します。スペースのロールは各スペースの「メンバー」タブで付与します。",
     "memberLabel": "メンバー",
-    "memberPlaceholder": "メンバーを検索…",
     "mixedScopeHint": "ロールはスペース/ページ用かテナント用のどちらかです。片方のチェックを外すと保存できます。",
     "sectionTenant": "テナント",
     "sectionResource": "スペース / ページ",

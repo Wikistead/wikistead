@@ -293,7 +293,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               picked={pickedGrant}
               onPick={(c) => setPickedGrant(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null)}
               candidates={grantCandidates.data ?? []}
-              placeholder={t("permissions.memberPlaceholder")}
+              placeholder={t("common.memberSearch")}
               ariaLabel={t("permissions.member")}
               inputTestId="grant-sub"
               listTestId="grant-candidates"
@@ -374,7 +374,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               picked={pickedRestrict}
               onPick={(c) => setPickedRestrict(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null)}
               candidates={restrictCandidates.data ?? []}
-              placeholder={t("permissions.restrictPlaceholder")}
+              placeholder={t("common.memberSearch")}
               ariaLabel={t("permissions.restrictTitle")}
               inputTestId="restrict-sub"
               listTestId="restrict-candidates"

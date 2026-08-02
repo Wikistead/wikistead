@@ -40,7 +40,8 @@
     "yes": "Yes",
     "no": "No",
     "edit": "Edit",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "memberSearch": "Search members…"
   },
   "embedPicker": {
     "title": "Embed a page",
@@ -527,7 +528,6 @@
     "customRolesBody": "Custom roles assigned in this space. Roles are defined in tenant settings → Roles, and assigned from the picker above. Capabilities apply across the space.",
     "customRolesEmpty": "No custom roles assigned in this space yet.",
     "selectRole": "Select a role",
-    "addPlaceholder": "Search members…",
     "capability": "Permission",
     "view": "Can view",
     "edit": "Can edit",
@@ -719,7 +719,6 @@
     "title": "Permissions",
     "body": "Grant members access to this page. An unpublished page is private to the people listed here.",
     "member": "Member",
-    "memberPlaceholder": "member id",
     "relation": "Relation",
     "view": "view",
     "comment": "comment",
@@ -736,7 +735,6 @@
     "selectGroup": "Select a group",
     "noGroups": "No groups (imported from your IdP)",
     "restrictTitle": "Restricted (denied even if a space viewer)",
-    "restrictPlaceholder": "member id (user sub)",
     "restrictAdd": "Restrict",
     "unrestrict": "Remove restriction",
     "privateTitle": "Make this page private",
@@ -1273,7 +1271,6 @@
     "tenantAssignTitle": "Tenant role assignments",
     "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
     "memberLabel": "Member",
-    "memberPlaceholder": "Search members…",
     "mixedScopeHint": "A role is either a space/page role or a tenant role. Uncheck one side to save.",
     "sectionTenant": "Tenant",
     "sectionResource": "Space / Page",

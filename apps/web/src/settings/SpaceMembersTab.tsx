@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
-import { MemberSearchInput } from "../ui/MemberSearchInput";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
   useCommentOpen, useSetCommentOpen,
