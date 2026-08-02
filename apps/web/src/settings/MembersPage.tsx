@@ -30,6 +30,10 @@ export function MembersPage() {
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "member">("member");
+  // #582 / ADR-202 §2: an invite may also carry a TENANT-scope custom role. The tier stays mandatory
+  // and separate — tenant membership IS the tier, and a custom role is additional (the same asymmetry
+  // #579 settled on the member row: tiers replace, custom roles add).
+  const [inviteRoleId, setInviteRoleId] = useState("");
   const [lastLink, setLastLink] = useState<{ url: string; emailed: boolean } | null>(null);
   // #504: every irreversible action here goes through one ConfirmDialog — removal (access + keys +
   // sessions die), DSAR erasure (the reading history is gone for good), invite revoke (the sent link
@@ -65,9 +69,10 @@ export function MembersPage() {
   const onInvite = async () => {
     setError(null);
     try {
-      const res = await createInvite(token, { email: email.trim(), role });
+      const res = await createInvite(token, { email: email.trim(), role, roleId: inviteRoleId || null });
       setLastLink({ url: res.inviteUrl, emailed: res.emailed });
       setEmail("");
+      setInviteRoleId("");
       await refresh();
     } catch (e) {
       setError(e instanceof ApiError && e.status === 403 ? t("members.seatLimit") : t("members.inviteFailed"));
@@ -200,6 +205,17 @@ export function MembersPage() {
             // screen, in every locale. The tenant screens used to translate these two while the space
             // screen showed them in English, so one role had two names depending where you looked.
             ...BUILT_IN_TIERS.map((r) => ({ value: r, label: r })),
+          ]}
+        />
+        <Select
+          size="sm"
+          value={inviteRoleId}
+          onChange={setInviteRoleId}
+          ariaLabel={t("members.inviteRoleOptional")}
+          testId="invite-role-id"
+          options={[
+            { value: "", label: t("members.inviteRoleNone") },
+            ...(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map((r) => ({ value: r.id, label: r.name })),
           ]}
         />
         <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>{t("members.sendInvite")}</Button>

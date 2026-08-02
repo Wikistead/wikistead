@@ -1,0 +1,11 @@
+-- #582 / ADR-202 §2: an invite may carry a custom role.
+--
+-- Ruled option (b): the invite names a TENANT-scope custom role, and acceptance assigns it in the same
+-- transaction that seats the member. The tier stays mandatory and separate — tenant membership IS the
+-- tier, and a custom role is additional (the asymmetry #579 settled on the member row).
+--
+-- ON DELETE SET NULL, matching `tenant_settings.default_role_id` and `group_role_mappings.role_id`:
+-- all three references to `roles` are plain FKs, and this one is the same KIND as default_role_id — a
+-- pointer to a role nobody holds yet. What must NOT be silent is the ACCEPTANCE: if the pointer is
+-- null by then, the person is seated with their tier and the dropped role is audited.
+ALTER TABLE invites ADD COLUMN IF NOT EXISTS role_id TEXT REFERENCES roles(id) ON DELETE SET NULL;

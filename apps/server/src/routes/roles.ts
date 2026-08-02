@@ -173,7 +173,7 @@ export async function assignRoleInTx(
   args: {
     tenant: { id: string; plan: string }; roleId: string | null; capabilities: AnyRoleCapability[];
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
-    actorSub: string; origin?: 'manual' | 'mapping' | 'default';
+    actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
     // #536 / ADR-188 §6 item 1: a BUILT-IN grant is the same mechanism with the other column set. A
     // built-in is virtual (no roles row) so it cannot be pointed at by role_id; the row carries the
     // capability instead. Set this and roleId must be null.
@@ -234,6 +234,34 @@ export async function assignRoleInTx(
   return outcome.id!
 }
 
+// #582 / ADR-202 §2: assign INSIDE a transaction the caller already owns.
+//
+// Invite acceptance is one tx — the invite flip, the seat check and the member INSERT commit together
+// (ADR-003) — and `assignRoleInTx` opens its OWN tx, so calling it from there would put the role in a
+// second transaction: a crash in between leaves a member without the role they were invited with. The
+// ADR named exporting this as a condition, in the same shape `unassignRoleTxCore` was exported for
+// #536.
+//
+// Same body as `assignRoleInTx`'s: the principal-scoped pre-read, the core, then the tuples LAST.
+export async function assignRoleWithinTx(
+  tx: Sql, fga: OpenFgaClient,
+  args: {
+    tenant: { id: string; plan: string }; roleId: string | null; capabilities: AnyRoleCapability[];
+    resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
+    actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
+    auditAction?: string; onDuplicate?: 'conflict' | 'ignore';
+  },
+): Promise<string | null> {
+  const tuples = args.capabilities.flatMap((c) => expansionTuples(args.resourceType, args.resourceId, args.principal, c, false))
+  // fga-read-ok: ONE principal on ONE object — bounded by the type's relation count, never by tenant size.
+  const { tuples: existingTuples } = await fga.read({ user: args.principal, object: `${args.resourceType}:${args.resourceId}` })
+  const existing = new Set((existingTuples ?? []).map((t: Tuple) => `${t.key?.relation}|${t.key?.user}`))
+  const toWrite = tuples.filter((t) => !existing.has(`${t.relation}|${t.user}`))
+  const outcome = await assignRoleTxCore(tx, args, { owned: args.capabilities, toWrite })
+  if (outcome.toWrite.length) await writeTuples(fga, outcome.toWrite)
+  return outcome.id ?? outcome.existingId
+}
+
 // #553 / ADR-199 §2: the ONE-transaction assign body, extracted so the editor-noun composite can run
 // N single-capability arms inside a single db.tx (row atomicity; the FGA tuples are collected and
 // written ONCE by the caller — FGA does not roll back with the tx, so batching narrows the window
@@ -245,7 +273,7 @@ async function assignRoleTxCore(
   args: {
     tenant: { id: string; plan: string }; roleId: string | null;
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
-    actorSub: string; origin?: 'manual' | 'mapping' | 'default';
+    actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
     builtinCapability?: string; onDuplicate?: 'conflict' | 'ignore'; auditAction?: string; skipAudit?: boolean;
     afterAssign?: (tx: Sql, assignmentId: string) => Promise<void>;
   },
@@ -296,7 +324,7 @@ export async function assignBuiltinCompositeInTx(
     // #497 re-review N1: a GROUP MAPPING's arms are machine-managed too — same composite, different
     // origin, and the mapping row is written in the SAME tx (afterArms) so a mapping can never
     // commit owning one arm and not the other.
-    origin?: 'manual' | 'mapping' | 'default';
+    origin?: 'manual' | 'mapping' | 'default' | 'invite';
     onDuplicate?: 'conflict' | 'ignore';
     afterArms?: (tx: Sql, ids: { cap: string; id: string }[]) => Promise<void>;
   },

@@ -26,7 +26,7 @@ export async function listMembers(token: string): Promise<Member[]> {
 export async function listInvites(token: string): Promise<Invite[]> {
   return (await apiFetch<{ invites: Invite[] }>("/members/invites", token))?.invites ?? [];
 }
-export async function createInvite(token: string, body: { email: string; role: "admin" | "member" }): Promise<{ inviteUrl: string; emailed: boolean }> {
+export async function createInvite(token: string, body: { email: string; role: "admin" | "member"; roleId?: string | null }): Promise<{ inviteUrl: string; emailed: boolean }> {
   return (await apiFetch<{ inviteUrl: string; emailed: boolean }>("/members/invites", token, { method: "POST", body: JSON.stringify(body) }))!;
 }
 export async function revokeInvite(token: string, id: string): Promise<void> {

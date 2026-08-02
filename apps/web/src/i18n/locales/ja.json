@@ -957,7 +957,9 @@
     "addRole": "＋ ロール",
     "seatLimit": "座席数の上限に達しました。メンバーを増やすにはアップグレードしてください。",
     "inviteFailed": "招待を作成できませんでした。",
-    "pendingRow": "{{email}} · {{role}}"
+    "pendingRow": "{{email}} · {{role}}",
+    "inviteRoleOptional": "カスタムロール（任意）",
+    "inviteRoleNone": "カスタムロールなし"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

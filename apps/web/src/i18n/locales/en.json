@@ -957,7 +957,9 @@
     "addRole": "+ Role",
     "seatLimit": "Seat limit reached. Upgrade to invite more members.",
     "inviteFailed": "Could not create the invite.",
-    "pendingRow": "{{email}} · {{role}}"
+    "pendingRow": "{{email}} · {{role}}",
+    "inviteRoleOptional": "Custom role (optional)",
+    "inviteRoleNone": "No custom role"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
