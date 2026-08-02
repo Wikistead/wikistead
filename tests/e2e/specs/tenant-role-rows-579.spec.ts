@@ -39,9 +39,12 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(page.getByTestId("member-roles").first()).toBeVisible({ timeout: 8000 });
     const rowRoles = page.getByTestId("member-roles").first();
 
-    // add the first role FROM THE ROW
+    // add the first role FROM THE ROW's single picker (#579 review: the built-in Select and the
+    // custom-role button were two controls for one question; now the picker offers both)
     await rowRoles.getByTestId("member-role-add").click();
     await rowRoles.getByTestId("member-role-add-select").click();
+    // whichever tier this member is NOT on — the fixture's member may be either
+    await expect(page.getByRole("option").filter({ hasText: /^(member|admin)$/ }).first(), "the tier is in the SAME list").toBeVisible();
     await page.getByRole("option", { name: roleA }).click();
     await expect(rowRoles.getByTestId("member-role-chip").filter({ hasText: roleA })).toBeVisible({ timeout: 8000 });
 
@@ -70,8 +73,10 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(reloaded.getByTestId("member-role-chip").filter({ hasText: roleB })).toBeVisible({ timeout: 10_000 });
     await expect(reloaded.getByTestId("member-role-chip").filter({ hasText: roleA })).toHaveCount(0);
 
-    // the built-in Select is untouched by all of this (non-regression: it is still exactly one value)
-    await expect(reloaded.getByRole("combobox").first()).toBeVisible();
+    // the tier is still exactly one value, shown as a chip with no × (you move to the other tier
+    // rather than removing this one) — the asymmetry the two controls used to express
+    await expect(reloaded.getByTestId("member-tier-chip")).toHaveText(/^(member|admin)$/);
+    await expect(reloaded.getByTestId("member-tier-chip").getByRole("button")).toHaveCount(0);
 
     // the filter narrows the table — the search that used to live inside the assign form
     await page.getByTestId("members-filter").fill("nobody-matches-this");
