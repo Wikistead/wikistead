@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { randomBytes } from 'node:crypto'
 import { escapeHtml } from '@wikistead/macro-render'
+import { productName } from '../product-name.js' // #575: the consent screen names the deployment
 import {
   savePendingAuthorize, consumePendingAuthorize, peekPendingAuthorize, saveAuthCode, redirectWithParams,
 } from '../auth/mcp-oauth-store.js'
@@ -116,7 +117,7 @@ export async function mcpOAuthFlowPlugin(app: FastifyInstance) {
   button[value=approve]{background:#2563eb;border-color:#2563eb;color:#fff}
 </style></head><body>
 <h1>Authorize ${name}?</h1>
-<p><strong>${name}</strong> is requesting access to your Wikistead content. If you approve, an authorization
+<p><strong>${name}</strong> is requesting access to your ${escapeHtml(productName())} content. If you approve, an authorization
 code is sent to:</p>
 <p class="host">${redirectHost}</p>
 <p>Requested permissions:</p>

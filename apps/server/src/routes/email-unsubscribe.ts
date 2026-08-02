@@ -7,8 +7,19 @@
 // the token asserts that intent and nothing else.
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { verifyUnsubToken, type UnsubTokenClaims } from '@wikistead/auth'
+import { getTenantBranding } from './branding.js'
+import { esc } from '../email/layout.js'
+import { productName } from '../product-name.js'
 
-const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+/** The tenant's display name, else the product's. Branding failures never block an unsubscribe. */
+async function workspaceName(req: FastifyRequest): Promise<string> {
+  try {
+    const b = await getTenantBranding(req.db, req.tenant.plan)
+    return b.displayName?.trim() || b.productName
+  } catch {
+    return productName()
+  }
+}
 
 export async function emailUnsubscribePlugin(app: FastifyInstance) {
   const cfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 0 /* verify-only here */ }
@@ -34,11 +45,17 @@ export async function emailUnsubscribePlugin(app: FastifyInstance) {
     if (!claims) return reply.code(404).send({ error: 'not found' })
     const kind = claims.action === 'immediate' ? 'mention email' : 'digest email'
     const action = `/email/unsubscribe?token=${encodeURIComponent((req.query as { token?: string }).token!)}`
+    // #575 slice B: the page says WHICH workspace is being left. It is a raw template on the same
+    // origin as the session cookie (ADR-016) and the display name is stored with only a trim and a
+    // length cap, so every interpolation of it here goes through `esc` — the shared one, so this page
+    // and the mails cannot drift apart on what escaping means.
+    const brand = esc(await workspaceName(req))
     return reply.type('text/html').send(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Unsubscribe</title></head>
+<html><head><meta charset="utf-8"><title>Unsubscribe from ${brand}</title></head>
 <body style="font-family:sans-serif;max-width:32rem;margin:4rem auto">
+<p style="color:#666;font-size:0.9rem;margin:0 0 0.5rem">${brand}</p>
 <h1 style="font-size:1.2rem">Stop receiving ${esc(kind)}?</h1>
-<p>This turns off ${esc(kind)} from this workspace for your account. You can turn it back on any time in your account settings.</p>
+<p>This turns off ${esc(kind)} from ${brand} for your account. You can turn it back on any time in your account settings.</p>
 <form method="post" action="${esc(action)}"><button type="submit">Unsubscribe</button></form>
 </body></html>`)
   })
@@ -51,6 +68,7 @@ export async function emailUnsubscribePlugin(app: FastifyInstance) {
     const col = claims.action === 'immediate' ? 'email_immediate' : 'email_digest'
     // RLS-scoped handle: the UPDATE can only ever touch this tenant's row for this sub
     await req.db.sql`UPDATE members SET ${req.db.sql(col)} = false WHERE sub = ${claims.sub}`
-    return reply.type('text/html').send('<!doctype html><html><body style="font-family:sans-serif;max-width:32rem;margin:4rem auto"><p>Unsubscribed. You can re-enable this email in your account settings.</p></body></html>')
+    const brand = esc(await workspaceName(req))
+    return reply.type('text/html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Unsubscribed</title></head><body style="font-family:sans-serif;max-width:32rem;margin:4rem auto"><p style="color:#666;font-size:0.9rem;margin:0 0 0.5rem">${brand}</p><p>Unsubscribed. You can re-enable this email in your account settings.</p></body></html>`)
   })
 }

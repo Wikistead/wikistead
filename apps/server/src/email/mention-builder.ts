@@ -15,10 +15,11 @@ import { mintUnsubToken } from '@wikistead/auth'
 import { acquireTenantDb, registry } from '../db/index.js'
 import { pageEventDisposition } from '../page-disposition.js'
 import { registerEmailBuilder, type EmailBuildResult, type EmailOutboxRow } from './outbox.js'
+import type { EmailBranding } from './outbox.js'
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null }): Promise<EmailBuildResult> {
+export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding }): Promise<EmailBuildResult> {
   const ids = rows.map((r) => r.notification_id).filter((v): v is string => v != null)
   if (ids.length === 0) return { kind: 'skip', reason: 'no notification ids on mention rows' }
   const tenant = await registry.findById(ctx.tenantId)
@@ -58,12 +59,23 @@ export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId:
     )
     const unsubUrl = `${ctx.baseUrl}/api/email/unsubscribe?token=${encodeURIComponent(unsubToken)}`
     // TITLE + LINK ONLY — never the comment body, never an excerpt (the Review ruling)
+    // #575 slice B: the shared branded shell. Still TITLE + LINK only — branding changes who the mail
+    // is FROM, never how much of the content it carries.
+    const { renderBrandedHtml, renderBrandedText, brandName } = await import('./layout.js')
     return {
       kind: 'send',
       message: {
-        subject: `You were mentioned in "${title}"${more}`,
-        text: `You were mentioned in "${title}"${more}.\n\nOpen the page:\n${link}\n\nStop these emails: ${unsubUrl}\n`,
-        html: `<p>You were mentioned in <strong>${esc(title)}</strong>${esc(more)}.</p><p><a href="${esc(link)}">Open the page</a></p><p style="font-size:12px;color:#666"><a href="${esc(unsubUrl)}">Stop these emails</a></p>`,
+        subject: `[${brandName(ctx.branding)}] You were mentioned in "${title}"${more}`,
+        text: renderBrandedText({
+          branding: ctx.branding,
+          body: `You were mentioned in "${title}"${more}.\n\nOpen the page:\n${link}`,
+          footer: `Stop these emails: ${unsubUrl}`,
+        }),
+        html: renderBrandedHtml({
+          branding: ctx.branding, baseUrl: ctx.baseUrl,
+          body: `<p>You were mentioned in <strong>${esc(title)}</strong>${esc(more)}.</p><p><a href="${esc(link)}">Open the page</a></p>`,
+          footer: `<a href="${esc(unsubUrl)}">Stop these emails</a>`,
+        }),
         headers: {
           'List-Unsubscribe': `<${unsubUrl}>`,
           'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
