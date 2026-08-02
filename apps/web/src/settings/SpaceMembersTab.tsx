@@ -323,7 +323,7 @@ export function SpaceMembersTab() {
                 here (the server 409s it anyway; this is the read-only-with-a-pointer rendering). It is
                 removed by deleting the MAPPING in the group-mappings section below. */}
             {r.managed ? (
-              <span className="flex-none rounded bg-bg-subtle px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="space-grant-managed" data-tip={t("spaceMembers.managedByMapping")}>{t("spaceMembers.managedBadge")}</span>
+              <span className="flex-none rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="space-grant-managed" data-tip={t("spaceMembers.managedByMapping")}>{t("spaceMembers.managedBadge")}</span>
             ) : r.kind === "grant" ? (
               /* #504: red at rest; no confirm — a grant is re-grantable in one step (exception candidate) */
               <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" variant="danger"

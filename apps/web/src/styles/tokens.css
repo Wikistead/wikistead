@@ -33,6 +33,12 @@
   --color-panel-2: var(--panel-2);
   --color-panel-3: var(--panel-3);
   --color-fg-dim: var(--fg-dim);
+  /* `text-fg` was written in three places and generated NOTHING (measured in the built CSS: no
+     `.text-fg` rule at all) — the dim variant was mapped and the full-strength one was not, so those
+     surfaces silently inherited whatever colour was around them. Same failure as the transparent
+     `bg-bg-subtle` above it in the file's own warning. undefined-color-utility-580.test.ts now fails
+     the build on the next one instead of leaving it to be found on a screen. */
+  --color-fg: var(--fg);
 }
 
 /* shadcn BARE-token alias layer (root cause of the recurring "undefined token" bugs).

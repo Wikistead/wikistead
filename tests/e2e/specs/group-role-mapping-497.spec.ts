@@ -71,7 +71,10 @@ test("#497 §3: the default-role setting persists across a reload", async ({ pag
 
   // Back to None, then delete the role (no live assignment yet).
   await page.getByTestId("default-role").click();
-  await page.getByRole("option", { name: "member (built-in default)" }).click();
+  // the option is named `member` — af16492b (#553/#536) dropped the "(built-in default)" gloss the copy
+  // was explaining to itself, and #582 made the built-in names proper nouns. Matched exactly so this
+  // fails again if the label starts explaining itself once more.
+  await page.getByRole("option", { name: "member", exact: true }).click();
   // #536③: the CLOSED trigger says the truth too — Radix rendered nothing for the empty-valued
   // option, so "no selection" looked broken exactly where the label matters most.
   await expect(page.getByTestId("default-role"), "the closed select names the member fallback").toContainText("member", { timeout: 8000 });

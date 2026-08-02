@@ -8,7 +8,7 @@ export interface SelectOption { value: string; label: string }
 // (`${testId}-${value}`) so tests click the trigger then the option.
 //
 // #536Radix treats `value=""` as "no value" — the item renders (and checks) in the OPEN list,
-// but the CLOSED trigger shows nothing, so an empty-valued option's label ("member (built-in default)")
+// but the CLOSED trigger shows nothing, so an empty-valued option's label ("member", the built-in fallback)
 // vanished exactly where it matters. Callers keep the natural `""` vocabulary; the wrapper maps it to a
 // sentinel both ways so Radix always has a real value to resolve a label for.
 const EMPTY_SENTINEL = "__wks-select-empty__";
