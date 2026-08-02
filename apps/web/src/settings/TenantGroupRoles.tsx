@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
+import { GroupPicker } from "./GroupPicker";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole, useTenantGroupNames } from "../data/queries";
@@ -45,9 +46,8 @@ export function TenantGroupRoles() {
         <Select size="sm" value={roleId} ariaLabel={t("adminRoles.roleLabel")} testId="tenant-group-assign-role"
           options={[{ value: "", label: t("adminRoles.rolePlaceholder") }, ...tenantRoles.map((r) => ({ value: r.id, label: r.name }))]}
           onChange={setRoleId} />
-        <Select size="sm" value={groupName} ariaLabel={t("adminRoles.groupLabel")} testId="tenant-group-assign-group"
-          options={[{ value: "", label: t("adminRoles.groupPlaceholder") }, ...(groups.data ?? []).map((g) => ({ value: g, label: g }))]}
-          onChange={setGroupName} />
+        <GroupPicker value={groupName} onChange={setGroupName} known={groups.data ?? []}
+          testId="tenant-group-assign-group" ariaLabel={t("adminRoles.groupLabel")} />
         <Button variant="primary" size="sm" data-testid="tenant-group-assign-add"
           disabled={!roleId || !groupName || assign.isPending}
           onClick={() => assign.mutate(
