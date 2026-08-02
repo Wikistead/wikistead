@@ -19,6 +19,7 @@ export interface TenantAssignment {
   principal: string;
   managed?: boolean;
   groupName?: string;
+  groupUnconfirmed?: boolean;
 }
 export interface TenantRoleDef { id: string; name: string; scope: string }
 export interface RowMember { sub: string; display_name: string | null; email: string | null; role: "admin" | "member" }
@@ -77,6 +78,9 @@ export function buildGroupRoleRows(
   assignments: readonly TenantAssignment[],
   unknownLabel: string,
   groupSuffix: string,
+  // #578 bounce ①: the note for a group the directory has not produced yet. Optional so the two
+  // callers that have nothing to say about it read the same as before.
+  notSeenLabel?: string,
 ): GroupRoleRow[] {
   const byPrincipal = new Map<string, GroupRoleRow>();
   for (const a of assignments) {
@@ -85,7 +89,9 @@ export function buildGroupRoleRows(
       principal: a.principal,
       // the server resolves the hash (group-sync.ts is the id authority); an id it cannot name gets
       // the explicit orphan label and keeps its revoke — never the raw hash (#536⑥)
-      label: `${a.groupName ?? unknownLabel} (${groupSuffix})`,
+      label: a.groupName
+        ? `${a.groupName} (${groupSuffix}${a.groupUnconfirmed && notSeenLabel ? `, ${notSeenLabel}` : ""})`
+        : `${unknownLabel} (${groupSuffix})`,
       held: [],
     };
     row.held.push({ assignmentId: a.id, roleName: a.roleName, managed: a.managed === true });

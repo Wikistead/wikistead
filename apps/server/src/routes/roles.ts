@@ -20,7 +20,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { reindexPublishedPages } from './spaces.js'
 import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
-import { groupGrantee, groupNameByFgaId, knownGroupNames, resolveGroupName } from '../auth/group-sync.js' // #497: mappings assign the group principal; #536names for display
+import { groupGrantee, groupNameByFgaId, knownGroupNames, confirmedGroupNames, resolveGroupName } from '../auth/group-sync.js' // #497: mappings assign the group principal; #536names for display
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: name user principals on the gated list
 import type { TenantDb } from '../db/index.js'
 import type { Sql } from 'postgres'
@@ -174,6 +174,11 @@ export async function assignRoleInTx(
     tenant: { id: string; plan: string }; roleId: string | null; capabilities: AnyRoleCapability[];
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
     actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
+    // #578 bounce ①: the NAME the grant was made with, when the principal is a group. A group's FGA id
+    // is a one-way hash, so a listing can only name it by reversing against names the product knows
+    // and after the mappings were retired, a group nobody carries yet had nowhere to keep its name.
+    // Stored here, next to the grant it belongs to, so it dies with the grant.
+    groupName?: string;
     // #536 / ADR-188 §6 item 1: a BUILT-IN grant is the same mechanism with the other column set. A
     // built-in is virtual (no roles row) so it cannot be pointed at by role_id; the row carries the
     // capability instead. Set this and roleId must be null.
@@ -249,6 +254,11 @@ export async function assignRoleWithinTx(
     tenant: { id: string; plan: string }; roleId: string | null; capabilities: AnyRoleCapability[];
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
     actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
+    // #578 bounce ①: the NAME the grant was made with, when the principal is a group. A group's FGA id
+    // is a one-way hash, so a listing can only name it by reversing against names the product knows
+    // and after the mappings were retired, a group nobody carries yet had nowhere to keep its name.
+    // Stored here, next to the grant it belongs to, so it dies with the grant.
+    groupName?: string;
     auditAction?: string; onDuplicate?: 'conflict' | 'ignore';
   },
 ): Promise<string | null> {
@@ -274,6 +284,11 @@ async function assignRoleTxCore(
     tenant: { id: string; plan: string }; roleId: string | null;
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
     actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
+    // #578 bounce ①: the NAME the grant was made with, when the principal is a group. A group's FGA id
+    // is a one-way hash, so a listing can only name it by reversing against names the product knows
+    // and after the mappings were retired, a group nobody carries yet had nowhere to keep its name.
+    // Stored here, next to the grant it belongs to, so it dies with the grant.
+    groupName?: string;
     builtinCapability?: string; onDuplicate?: 'conflict' | 'ignore'; auditAction?: string; skipAudit?: boolean;
     afterAssign?: (tx: Sql, assignmentId: string) => Promise<void>;
   },
@@ -303,8 +318,8 @@ async function assignRoleTxCore(
     if (!args.skipAudit) await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: args.auditAction ?? 'role.assigned', target: `${resourceType}:${resourceId}` })
     return { id: null, existingId: dup[0].id, outboxId: null, toWrite: [] }
   }
-  await tx`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin)
-           VALUES (${id}, ${tenant.id}, ${roleId}, ${builtin}, ${resourceType}, ${resourceId}, ${principal}, ${pre.owned as string[]}, ${origin})`
+  await tx`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin, group_name)
+           VALUES (${id}, ${tenant.id}, ${roleId}, ${builtin}, ${resourceType}, ${resourceId}, ${principal}, ${pre.owned as string[]}, ${origin}, ${args.groupName?.trim() || null})`
   if (args.afterAssign) await args.afterAssign(tx, id)
   if (!args.skipAudit) await auditIfEntitled(tx, tenant, { actor: `user:${actorSub}`, action: args.auditAction ?? 'role.assigned', target: `${resourceType}:${resourceId}` })
   const o = resourceType === 'page' ? await enqueueOutbox(tx, { tenantId: tenant.id, pageId: resourceId, operation: 'upsert' }) : null
@@ -321,6 +336,7 @@ export async function assignBuiltinCompositeInTx(
   args: {
     tenant: { id: string; plan: string }; spaceId: string; principal: string; actorSub: string;
     capabilities: string[]; auditAction?: string; skipAudit?: boolean;
+    groupName?: string; // #578 bounce ①: the typed name, carried onto every arm of the noun
     // #497 re-review N1: a GROUP MAPPING's arms are machine-managed too — same composite, different
     // origin, and the mapping row is written in the SAME tx (afterArms) so a mapping can never
     // commit owning one arm and not the other.
@@ -345,7 +361,7 @@ export async function assignBuiltinCompositeInTx(
         tenant, roleId: null, builtinCapability: arm.cap,
         resourceType: 'space', resourceId: spaceId, principal, actorSub,
         onDuplicate: args.onDuplicate ?? 'ignore', auditAction: args.auditAction, skipAudit: args.skipAudit,
-        origin: args.origin,
+        origin: args.origin, groupName: args.groupName,
       }, { owned: [arm.cap as AnyRoleCapability], toWrite: arm.toWrite })
       all.push(...o.toWrite)
       ids.push({ cap: arm.cap, id: (o.id ?? o.existingId)! })
@@ -683,12 +699,15 @@ export async function rolesPlugin(app: FastifyInstance) {
     // the row stays revocable.
     const hasGroups = rows.some((r) => r.principal.startsWith('group:'))
     const byId = groupNameByFgaId(req.tenant.id, hasGroups ? await knownGroupNames(req.db) : [])
+    // #578 bounce ①: same distinction as the space listing — a typed name is shown, and marked.
+    const confirmed = hasGroups ? await confirmedGroupNames(req.db) : new Set<string>()
     return rows.map((r) => {
       const groupName = resolveGroupName(r.principal, byId)
       return {
         id: r.id, roleId: r.role_id, roleName: r.name, principal: r.principal,
         ...(r.principal.startsWith('user:') ? { displayName: names.get(r.principal.slice(5))?.displayName ?? null } : {}),
         ...(groupName ? { groupName } : {}),
+        ...(groupName && !confirmed.has(groupName) ? { groupUnconfirmed: true } : {}),
         ...(r.origin === 'mapping' ? { managed: true } : {}),
       }
     })

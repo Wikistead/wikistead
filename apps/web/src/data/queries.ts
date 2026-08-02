@@ -1272,7 +1272,9 @@ export function usePage(pageId: string) {
 // #523 / ADR-190 slice A: the server resolves a USER grantee's full name (override ?? OIDC display_name)
 // over this manage-gated set, so an un-customized member reads as their name, not a sub. null for a
 // departed / cross-tenant sub (client keeps the sub); absent for group grantees.
-export interface SpaceGrant { grantee: string; capability: PageRelation; groupName?: string; displayName?: string | null; managed?: boolean }
+// #578 bounce ①: `groupUnconfirmed` = the name was typed for a group the directory has not produced
+// yet. It is a real name and is shown as one; the flag only changes what the row says beside it.
+export interface SpaceGrant { grantee: string; capability: PageRelation; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean }
 export interface MemberCandidate { sub: string; displayName: string | null }
 
 export function useSpaceAccess(spaceId: string, enabled = true) {
@@ -1647,7 +1649,7 @@ export function useDeleteRole() {
 // back to the raw sub. A group principal is a HASH (groupFgaId is one-way) — the server resolves it
 // back to the human name (`groupName`, #536); absent means the group no longer exists at the IdP
 // (the UI shows its explicit orphan label, never the hash).
-export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string; displayName?: string | null; groupName?: string; managed?: boolean }
+export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string; displayName?: string | null; groupName?: string; groupUnconfirmed?: boolean; managed?: boolean }
 export function useRoleAssignments(resourceType: string, resourceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({

@@ -536,6 +536,7 @@
     "empty": "No direct grants yet.",
     "group": "group",
     "unknownGroup": "unknown group",
+    "groupNotSeen": "not seen yet",
     "granteeType": "Grantee",
     "typeUser": "Member",
     "typeGroup": "Group",

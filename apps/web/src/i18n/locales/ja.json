@@ -536,6 +536,7 @@
     "empty": "直接付与はまだありません。",
     "group": "グループ",
     "unknownGroup": "不明なグループ",
+    "groupNotSeen": "未確認",
     "granteeType": "付与先",
     "typeUser": "メンバー",
     "typeGroup": "グループ",

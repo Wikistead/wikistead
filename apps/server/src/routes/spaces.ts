@@ -9,7 +9,7 @@ import { emit } from '@wikistead/events'
 import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
-import { groupGrantee, groupNameByFgaId, knownGroupNames, resolveGroupName } from '../auth/group-sync.js'
+import { groupGrantee, groupNameByFgaId, knownGroupNames, confirmedGroupNames, resolveGroupName } from '../auth/group-sync.js'
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: full name on the manage-gated grant list
 import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
 import { auditIfEntitled } from '../audit/outbox.js'
@@ -684,7 +684,9 @@ export async function grantSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean },
+  // #578 bounce ①: `groupName` is what the manager TYPED; the grantee is the id this server derived
+  // from it. Both travel: the id is the authority, the name is what the listing can show.
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean; groupName?: string },
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   requireGroupGrantEntitlement(args.grantee, args.plan)
@@ -719,6 +721,7 @@ export async function grantSpaceAccess(
     resourceType: 'space',
     resourceId: args.spaceId,
     principal: args.grantee,
+    groupName: args.groupName,
     actorSub: args.userId,
     // Granting what someone already has is not an error here: the Members control has no "already
     // granted" state to show, and the pre-#536 path simply wrote the tuple again.
@@ -748,7 +751,7 @@ export async function grantSpaceAccessComposite(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string; replace?: boolean },
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string; replace?: boolean; groupName?: string },
 ): Promise<void> {
   for (const cap of args.capabilities) validateSpaceGrant(args.grantee, cap)
   requireGroupGrantEntitlement(args.grantee, args.plan) // #578: the composite noun takes the same gate
@@ -776,6 +779,7 @@ export async function grantSpaceAccessComposite(
     tenant: { id: args.tenantId, plan: args.plan ?? '' },
     spaceId: args.spaceId, principal: args.grantee, actorSub: args.userId,
     capabilities: args.capabilities,
+    groupName: args.groupName,
     auditAction: 'space.access_granted',
     skipAudit: args.plan === undefined,
   })
@@ -874,7 +878,9 @@ export async function revokeSpaceAccess(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean },
+  // #578 bounce ①: `groupName` is what the manager TYPED; the grantee is the id this server derived
+  // from it. Both travel: the id is the authority, the name is what the listing can show.
+  args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean; groupName?: string },
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
@@ -929,13 +935,16 @@ export async function listSpaceAccess(
   fga: OpenFgaClient,
   db: TenantDb,
   args: { spaceId: string; tenantId: string; userId: string },
-): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null; managed?: boolean }[]> {
+): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean }[]> {
   await requireSpaceManage(fga, args.userId, args.spaceId)
   // #553 re-review N1: paginated — a bare read answers ONE page (50) and the comment arm falling off
   // it would draw an unfolded editor row whose revoke strips edit but leaves comment behind.
   const tuples = await readObjectTuples(fga, `space:${args.spaceId}`)
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
   const byId = groupNameByFgaId(args.tenantId, await knownGroupNames(db))
+  // #578 bounce ①: a name the directory has produced vs one a manager typed for a group nobody carries
+  // yet. Both are shown; only the second is marked.
+  const confirmed = await confirmedGroupNames(db)
   // #497 (088): a row conferred BY A MAPPING is machine-managed (ADR-183 §1) — the list says so, and
   // the UI drops the revoke affordance for it (the server refuses anyway; two layers, UI convenience).
   const managed = new Set((await db.sql<{ builtin_capability: string; principal: string }[]>`
@@ -957,7 +966,7 @@ export async function listSpaceAccess(
     WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId}`) {
     for (const c of r.caps ?? []) (r.builtin_capability != null ? builtinOwned : customOwned).add(`${r.principal} ${c}`)
   }
-  const out: { grantee: string; capability: SpaceCapability; groupName?: string; displayName?: string | null; managed?: boolean }[] = []
+  const out: { grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean }[] = []
   for (const key of tuples) {
     if (!(key.relation in RELATION_TO_CAP)) continue
     // Direct member/group grants only — never expose share_link, user:* (public)
@@ -966,7 +975,12 @@ export async function listSpaceAccess(
     const groupName = resolveGroupName(key.user, byId)
     const cap = RELATION_TO_CAP[key.relation]!
     if (cap !== 'manage' && customOwned.has(`${key.user} ${cap}`) && !builtinOwned.has(`${key.user} ${cap}`)) continue
-    out.push({ grantee: key.user, capability: cap, ...(groupName ? { groupName } : {}), ...(managed.has(`${key.user} ${cap}`) ? { managed: true } : {}) })
+    out.push({
+      grantee: key.user, capability: cap,
+      ...(groupName ? { groupName } : {}),
+      ...(groupName && !confirmed.has(groupName) ? { groupUnconfirmed: true } : {}),
+      ...(managed.has(`${key.user} ${cap}`) ? { managed: true } : {}),
+    })
   }
   // #523 / ADR-190: FULL name resolution (override ?? OIDC display_name) for the USER grantees. This is a
   // server-set, VIEW-GATED result set — the caller already passed requireSpaceManage, so these are grants
@@ -1366,12 +1380,14 @@ export async function spacesPlugin(app: FastifyInstance) {
       await grantSpaceAccessComposite(req.db, app.fga, app.searchDriver, {
         spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
         grantee, capabilities: req.body.relations, plan: req.tenant.plan, replace: req.body?.replace === true,
+        groupName: req.body?.groupName,
       })
       return reply.code(204).send()
     }
     await grantSpaceAccess(req.db, app.fga, app.searchDriver, {
       spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
       grantee, capability: req.body?.relation ?? '', plan: req.tenant.plan, replace: req.body?.replace === true,
+      groupName: req.body?.groupName,
     })
     return reply.code(204).send()
   })
