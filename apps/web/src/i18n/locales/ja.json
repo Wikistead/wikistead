@@ -553,7 +553,7 @@
     "commentGuestsOn": "ON：ページを閲覧できるゲスト全員がコメント可（閲覧・編集リンクとも）。",
     "commentGuestsOff": "OFF：ゲストはコメント不可（閲覧・編集リンクとも）。",
     "commentSummaryLead": "現在コメント可：",
-    "commentSummaryEditors": "管理者・モデレーター・コメント権を持つ人",
+    "commentSummaryEditors": "manager・moderator・コメント権を持つ人",
     "commentSummaryMembers": "閲覧できる全メンバー",
     "commentSummaryGuests": "リンクのゲスト",
     "managedBadge": "マッピング",
