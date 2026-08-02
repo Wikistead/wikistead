@@ -190,6 +190,33 @@ export function SpaceMembersTab() {
     addBuiltIn(action.capability as PageRelation, replace, () => dispatchAdd(action, true));
   };
 
+  // #591: what a row's dropdown may become. The row's CURRENT capability is always present even when it
+  // is not offered to new grants (`comment` left the picker in #552 but rows still hold it — a control
+  // that cannot show the value it has is worse than no control).
+  const rowRoleOptions = (current: PageRelation): { value: string; label: string }[] => {
+    const values = GRANTABLE.includes(current) ? GRANTABLE : [current, ...GRANTABLE];
+    return values.map((c) => ({ value: c, label: capNoun(c) }));
+  };
+
+  // Change in place. The grant lands first and the server sweeps the principal's other roles after it
+  // (spaces.ts sweepOtherSpaceRoles), which is why this cannot leave the person with nothing halfway.
+  // A manager losing manage is still the one change that asks first — the server refuses it without the
+  // confirmed flag, and the same dialog the add path uses handles the 409.
+  const changeRowRole = (row: { grantee: string; capability: PageRelation; label: string }, next: PageRelation) => {
+    if (next === row.capability) return;
+    const isGroup = row.grantee.startsWith("group:");
+    const target = isGroup ? { grantee: row.grantee } : { grantee: row.grantee };
+    const run = (replace = false) => grant.mutate({ ...target, capability: next, replace }, {
+      onSuccess: () => notify.success(t("toast.accessGranted")),
+      onError: (e) => onAddError(e, () => run(true), row.label, capNoun(next)),
+    });
+    if (row.capability === "manage") {
+      setPendingAdd({ run: () => run(true), who: row.label, current: capNoun(row.capability), next: capNoun(next), manager: true });
+      return;
+    }
+    run();
+  };
+
   const addBuiltIn = (capability: PageRelation, replace = false, retry?: () => void) => {
     const again = retry ?? (() => addBuiltIn(capability, true));
     if (mode === "group") {
@@ -299,10 +326,26 @@ export function SpaceMembersTab() {
       <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-member-list">
         {mergedRows.map((r) => (
           <div key={r.key} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-member-item" data-kind={r.kind}>
+            {/* #591 (user ruling): the EXCLUSIVE role is a dropdown, changed in place. A built-in grant is
+                exclusive here — the server's sweep leaves one role per principal (#536) — so demanding
+                × then re-add was asking for two operations and dropping the person's access in between.
+                The dropdown grants the new role FIRST and the server sweeps the old one after, so there
+                is no window with nothing.
+                Custom-role rows stay a chip: those are ADDITIVE, and a dropdown would imply swapping.
+                #582: no `uppercase` — a role name is a proper noun on every surface. */}
             {r.custom ? (
-              <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-[var(--accent)]">{r.badge}</span>
+              <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] tracking-[0.03em] text-[var(--accent)]">{r.badge}</span>
+            ) : r.managed ? (
+              <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability}>{r.badge}</span>
             ) : (
-              <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability}>{r.badge}</span>
+              <Select
+                size="sm"
+                value={r.capability}
+                ariaLabel={t("spaceMembers.capability")}
+                testId="space-member-role-select"
+                options={rowRoleOptions(r.capability)}
+                onChange={(next) => changeRowRole(r, next as PageRelation)}
+              />
             )}
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{r.label}</span>
             {/* #497 (088): a mapping-conferred row is machine-managed (ADR-183 §1) — no revoke affordance
