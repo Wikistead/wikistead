@@ -24,7 +24,17 @@ import { OpenFgaClient } from '@openfga/sdk'
 
   let moved = 0
   for (const { id } of pages) {
-    const { tuples } = await (fga as any).read({ object: `page:${id}` })
+    // #574 review: a truncated read leaves `comment` tuples past the first fifty unmigrated, and
+    // ADR-199's model flip then removes those people's comment access without a word.
+    const tuples: { key?: { user?: string; relation?: string; object?: string } }[] = []
+    {
+      let continuationToken: string | undefined
+      do {
+        const res = await (fga as any).read({ object: `page:${id}` }, { ...(continuationToken ? { continuationToken } : {}) })
+        tuples.push(...(res.tuples ?? []))
+        continuationToken = res.continuation_token || undefined
+      } while (continuationToken)
+    }
     const keys = (tuples ?? [])
       .map((t: { key?: { user?: string; relation?: string; object?: string } }) => t.key)
       .filter((k: { user?: string; relation?: string; object?: string } | undefined): k is { user: string; relation: string; object: string } => !!k?.user && !!k?.relation && !!k?.object)

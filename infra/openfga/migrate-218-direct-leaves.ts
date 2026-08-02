@@ -31,7 +31,19 @@ const LEAF: Record<string, string> = { manage: 'manage_direct', edit: 'edit_dire
   let moved = 0
   let published = 0
   for (const { id } of pages) {
-    const { tuples } = await (fga as any).read({ object: `page:${id}` })
+    // #574 review: this is the migration ADR-103 points at, and a truncated read here moves only the
+    // first fifty grants to their leaves — the rest are neither moved nor deleted, so the model flip takes
+    // their access away silently. Worse, a page whose `space` link fell past the page reads as a draft and
+    // never gets its `published` marker pair, so its published children stop inheriting folder grants.
+    const tuples: { key?: { user?: string; relation?: string; object?: string } }[] = []
+    {
+      let continuationToken: string | undefined
+      do {
+        const res = await (fga as any).read({ object: `page:${id}` }, { ...(continuationToken ? { continuationToken } : {}) })
+        tuples.push(...(res.tuples ?? []))
+        continuationToken = res.continuation_token || undefined
+      } while (continuationToken)
+    }
     type Cond = { name: string; context: Record<string, unknown> }
     const writes: { user: string; relation: string; object: string; condition?: Cond }[] = []
     const deletes: { user: string; relation: string; object: string }[] = []

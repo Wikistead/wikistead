@@ -35,6 +35,7 @@ import { OpenFgaClient } from '@openfga/sdk'
   for (const t of tenants) {
     if (t.policy === 'admins_only') { console.log(`tenant ${t.id}: policy=admins_only → no member tuple (admins only)`); continue }
     const tuple = { user: `tenant:${t.id}#member`, relation: 'api_key_issue', object: `tenant:${t.id}` }
+    // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (<20), never by tenant size.
     const { tuples } = await fga.read({ user: tuple.user, object: tuple.object })
     if ((tuples ?? []).some((x) => x.key?.relation === 'api_key_issue')) {
       console.log(`tenant ${t.id}: member tuple already present`)
