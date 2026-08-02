@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { PanelLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useDocumentTitle } from "./product-name";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
 import { UserMenu } from "./UserMenu";
@@ -37,6 +38,7 @@ export function AppShell({
 }) {
   const { t } = useTranslation();
   const branding = useBranding();
+  useDocumentTitle(); // #575 slice C: the tab says what this workspace is called, not a build-time literal
   const isMobile = useMediaQuery("(max-width: 767px)"); // Tailwind `md` cut (ADR-159 §2)
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("wks.sidebarCollapsed") === "1"; } catch { return false; }
