@@ -1152,6 +1152,10 @@ export interface SpaceAnalytics {
   pages: number;
   unique?: boolean;
   daily: { day: string; viewerClass: "member" | "guest" | "anon"; views: number }[];
+  // #595: distinct members over the WHOLE period. The daily rows are per-day distincts, so adding them up
+  // counts a member once per day they returned; only the server can answer the period-wide question,
+  // because it is the one holding the roster. Present in unique mode only.
+  memberUnique?: number;
 }
 export interface SpaceAnalyticsParams { from?: string; to?: string; viewerClass?: string; sort?: string; dir?: string; unique?: boolean }
 // The server-facing query string for the shaping params. Only NON-empty params are sent (so an untouched
