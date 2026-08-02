@@ -14,7 +14,10 @@
 //     mail shows a broken image. The BUNDLED product logo is an SPA asset and takes no prefix — the two
 //     path shapes are genuinely different, which is why this is written down rather than assumed.
 //   - The unentitled tenant falls back to the bundled product logo rather than to nothing: a message
-//     whose sender cannot be identified is worse than one wearing the product's own mark.
+//     whose sender cannot be identified is worse than one wearing the product's own mark. That bundled
+//     mark is a PNG with the light background baked in, NOT the SVG the app uses: Gmail draws nothing
+//     at all for an SVG <img>, and this fallback exists precisely for the deployments that have not
+//     uploaded a logo — CE's default, dev, and every unentitled tenant. An SVG here serves none of them.
 import type { EmailBranding } from './outbox.js'
 
 export const esc = (s: string): string =>
@@ -25,7 +28,7 @@ export const brandName = (b: EmailBranding): string => b.displayName?.trim() || 
 
 /** Absolute logo URL. Tenant logo (API path), else the bundled product mark (SPA asset). */
 export const brandLogoUrl = (b: EmailBranding, baseUrl: string): string =>
-  b.logoUrl ? `${baseUrl}/api${b.logoUrl}` : `${baseUrl}/icon-solid.svg`
+  b.logoUrl ? `${baseUrl}/api${b.logoUrl}` : `${baseUrl}/icon-email.png`
 
 /**
  * Wrap a message body in the shared shell: the mark, the name, the content, then the footer.
