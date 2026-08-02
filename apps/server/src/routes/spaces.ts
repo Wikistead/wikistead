@@ -848,6 +848,11 @@ export async function revokeSpaceAccessComposite(
       await unassignRoleTxCore(tx, {
         tenant: { id: args.tenantId, plan: args.plan ?? '' }, assignmentId: row.id, actorSub: args.userId,
         auditAction: 'space.access_revoked', skipAudit: args.plan === undefined,
+        // #596 re-review nit: the live tuples this function already read. Without them the core's
+        // audit-action choice falls back to rows alone, so an arm whose row exists but whose leaf is
+        // already gone could still be filed as `space.access_revoked` — the wrong half of the ledger
+        // for a removal that took no access away.
+        heldRelations,
       })
     }
     const toDelete: { user: string; relation: string; object: string }[] = []
