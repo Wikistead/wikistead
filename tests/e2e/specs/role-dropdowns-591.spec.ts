@@ -9,27 +9,13 @@ import { test, expect } from "@playwright/test";
 //
 // Driven in a real browser because the point is what a person can reach and press.
 
-test("#591: a tenant member's tier is a dropdown, and Add offers only custom roles", async ({ page }) => {
-  await page.goto("/admin/members");
-  await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 15000 });
-
-  // the DS Select is a Radix trigger (a button), not a native <select> — read what it SHOWS
-  const tier = page.getByTestId("member-tier-select").first();
-  await expect(tier, "the tier is visible without pressing anything").toBeVisible();
-  await expect(tier, "it shows what the member IS, not an empty pick-something state").toHaveText(/^(member|admin)$/);
-
-  // and the add control, when it exists, must not offer a tier — "add" has to mean add
-  const add = page.getByTestId("member-role-add").first();
-  if (await add.isVisible().catch(() => false)) {
-    await add.click();
-    const select = page.getByTestId("member-role-add-select").first();
-    await expect(select).toBeVisible();
-    await select.click();
-    const options = await page.getByRole("option").allInnerTexts();
-    await page.keyboard.press("Escape");
-    expect(options.join("|"), "no tier in the ADD list").not.toMatch(/\b(member|admin)\b/);
-  }
-});
+// RE-AIMED by #579 (third ruling, 2026-08-02). This half asserted the tenant row's TWO controls — a
+// tier dropdown plus an add control that offered only custom roles. The user's answer to that shape was
+// the same sentence a third time: one dropdown, everything chosen from it. #591's observation survives
+// (an exclusive tier must not hide behind a control labelled "add") but it is answered by the LABEL and
+// by the chips, not by a second control. The one-control assertion now lives in
+// one-role-control-579.spec.ts, measured in the row's own DOM; what stays here is the space half, which
+// #591 got right and which nothing has asked to change.
 
 test("#591: a space member's built-in role changes from the row, in one step", async ({ page }) => {
   await page.goto("/spaces/demo_space/settings/members");

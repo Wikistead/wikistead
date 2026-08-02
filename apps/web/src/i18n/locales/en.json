@@ -963,7 +963,8 @@
     "inviteFailed": "Could not create the invite.",
     "pendingRow": "{{email}} · {{role}}",
     "inviteRoleOptional": "Custom role (optional)",
-    "inviteRoleNone": "No custom role"
+    "inviteRoleNone": "No custom role",
+    "roleChangeOrAdd": "Change or add role"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",

@@ -139,24 +139,8 @@ export function pickerOptions(row: TenantRoleRow): { value: string; label: strin
   ];
 }
 
-// #591 (user ruling): the row asks TWO questions, not one, and each gets the shape that fits it.
-//
-// #579 merged them into one picker because the screen had a Select and a separate "+ Role" button for
-// what looked like a single question. It is not a single question: "which tier is this member on" is
-// EXCLUSIVE (picking admin unpicks member) and "which custom roles do they also hold" is ADDITIVE. The
-// merge made the exclusive answer hide behind a control labelled "add", so changing someone's tier
-// meant pressing Add — and the current tier was a chip you could not act on at all.
-//
-// So: the tier is a dropdown that is always visible and shows what the member IS (the exclusive
-// question, answered in place), and the add control offers ONLY custom roles (the additive question,
-// which really is an addition). Neither list can leak into the other's control.
-
-/** Both tiers, with the member's own marked by `value` at the call site — an exclusive, in-place change. */
-export function tierOptions(): { value: string; label: string }[] {
-  return BUILT_IN_TIERS.map((tier) => ({ value: tier, label: tier }));
-}
-
-/** Only the custom roles the member does not hold. "Add" must mean add. */
-export function addableRoleOptions(row: TenantRoleRow): { value: string; label: string }[] {
-  return row.addable.map((r) => ({ value: `role:${r.id}`, label: r.name }));
-}
+// #591 tried the other shape here — a dropdown for the tier and a separate control for adding custom
+// roles — and #579's third ruling reverted it: "the row asks two questions" is true, but the answer is
+// one picker with a label that does not say "add", not two controls. `tierOptions` and
+// `addableRoleOptions` went with it; `pickerOptions` above is what the row uses, and it is the only
+// list-builder there is, so a second control cannot quietly grow its own list again.
