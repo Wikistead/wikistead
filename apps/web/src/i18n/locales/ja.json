@@ -129,7 +129,7 @@
     "label": "アカウント",
     "accountSettings": "アカウント設定",
     "tenantAdmin": "テナント管理",
-    "devModeTitle": "dev トークンバイパスの identity(dev-user)です — 実 identity にはログインしてください"
+    "devModeTitle": "dev トークンバイパスの identity(dev-user)です。実 identity にはログインしてください。"
   },
   "accountNav": {
     "title": "アカウント",
@@ -146,12 +146,12 @@
     "activityFailed": "アクティビティを読み込めませんでした。",
     "activityLess": "少",
     "activityMore": "多",
-    "activityAria": "アクティビティのヒートマップ — 直近 1 年で {{count}} 件",
+    "activityAria": "アクティビティのヒートマップ。直近 1 年で {{count}} 件",
     "activityNone": "{{date}} は活動なし",
     "activityCount": "{{date}}：{{count}} 件",
     "activityCount_one": "{{date}}：{{count}} 件",
     "activityCount_other": "{{date}}：{{count}} 件",
-    "profileHint": "ワークスペース上のあなたの識別情報＝共同編集者からの見え方。",
+    "profileHint": "共同編集者からのあなたの見え方です。",
     "editorHint": "エディタの挙動：キーマップ・起動モード・フォント・ショートカット。",
     "displayName": "表示名",
     "displayNameHint": "ID プロバイダの名前を上書きします。共同編集者に表示されます。",
@@ -217,7 +217,7 @@
     "displayMode_wysiwyg": "常に WYSIWYG で開始",
     "notifications": {
       "title": "通知",
-      "desc": "アプリ内インボックスに届く通知を調整します。ここでの設定は受け取る量を減らすだけで、コンテンツへのアクセス制御は常に別途強制されます。",
+      "desc": "アプリ内インボックスに届く通知を調整します。",
       "enabled": "通知を有効にする",
       "enabledHint": "オフにするとアプリ内通知がすべて止まります（ウォッチ自体は保持されます）。",
       "emailImmediate": "メンション メール",
@@ -282,19 +282,19 @@
   },
   "adminPublic": {
     "title": "公開設定",
-    "body": "このワークスペースの匿名公開ページのマスタースイッチです。オフの間はすべての公開ページが到達不能（見つかりません）になり、誤公開を構造的に防ぎます。オフにしても非破壊で、ページ個別の公開設定は保持され、オンに戻すと復活します。",
+    "body": "このワークスペースの匿名公開ページのマスタースイッチです。オフの間はすべての公開ページが「見つかりません」になります。オフにしてもページ個別の公開設定は保持され、オンに戻すと復活します。",
     "toggleTitle": "このワークスペースで公開ページを許可する",
-    "onHint": "オン — 公開に設定したページはリンクを知る誰でも閲覧できます。",
-    "offHint": "オフ — 個別に公開設定されていても、すべての公開ページが非表示になります。"
+    "onHint": "オン：公開に設定したページはリンクを知る誰でも閲覧できます。",
+    "offHint": "オフ：個別に公開設定されていても、すべての公開ページが非表示になります。"
   },
   "adminEmbeds": {
     "title": "外部埋め込み",
-    "body": "サンドボックス iframe として埋め込みを許可するホスト（動画など）。外部埋め込みは既定でオフ — ここに無いものはリンクに降格します。https 前提。",
+    "body": "サンドボックス iframe として埋め込みを許可するホスト（動画など）。ここに無いホストはリンクに降格します。https のみ。",
     "addTitle": "ホストを許可",
     "host": "ホスト",
     "add": "追加",
     "remove": "削除",
-    "empty": "許可ホストなし — 外部埋め込みはすべてリンクに降格します。",
+    "empty": "許可ホストなし。外部埋め込みはすべてリンクに降格します。",
     "invalidHost": "有効なホストを入力してください（例：youtube.com）",
     "ownOrigin": "このアプリ自身のオリジンは埋め込めません。"
   },
@@ -304,14 +304,14 @@
     "empty": "孤立ドラフトはありません。",
     "untitled": "無題",
     "claim": "Claim",
-    "claimed": "Claim しました — 一時アクセスが付与されました。",
+    "claimed": "Claim しました。一時アクセスを付与しました。",
     "reassign": "再割り当て",
     "reassigned": "再割り当てしました。",
     "newOwnerPlaceholder": "新オーナー（メンバー sub）"
   },
   "billing": {
     "title": "課金",
-    "selfHosted": "これはセルフホストのワークスペースです — すべての機能が含まれ、プラン制限も課金もありません。",
+    "selfHosted": "これはセルフホストのワークスペースです。すべての機能が使え、プラン制限も課金もありません。",
     "currentPlan": "現在のプラン:",
     "plan_free": "Free",
     "plan_pro": "Pro",
@@ -322,7 +322,7 @@
     "upgradePro": "Pro にアップグレード",
     "manage": "課金を管理",
     "teamNote": "SSO プロビジョニング・監査ログ・年間請求が必要ですか？ Team プランについてお問い合わせください。",
-    "portalUnavailable": "まだ課金が設定されていません — 先にアップグレードしてください。"
+    "portalUnavailable": "まだ課金が設定されていません。先にアップグレードしてください。"
   },
   "adminApi": {
     "title": "API",
@@ -337,7 +337,7 @@
     "scope_read": "読み取り",
     "scope_write": "書き込み",
     "create": "作成",
-    "copyOnce": "このキーを今コピーしてください — 再表示されません。",
+    "copyOnce": "このキーを今コピーしてください。再表示されません。",
     "copy": "コピー",
     "revoke": "取り消し",
     "empty": "API キーはまだありません。",
@@ -359,9 +359,9 @@
     "enabled": "この ID プロバイダーでサインインする",
     "test": "接続テスト",
     "testing": "テスト中…",
-    "testOk": "ディスカバリに成功しました — この issuer に到達できます。",
+    "testOk": "ディスカバリに成功しました。この issuer に到達できます。",
     "testFail": "この issuer を検証できませんでした。",
-    "saveFailed": "保存できませんでした — 先に接続テストをしてください。",
+    "saveFailed": "保存できませんでした。先に接続テストをしてください。",
     "groupsClaim": "グループのクレーム名",
     "samlTitle": "SAML シングルサインオン",
     "samlBody": "メンバーを SAML IdP 経由でサインインさせます。SAML SSO を含むプランで利用できます。",
@@ -403,14 +403,14 @@
     "policyHint_open": "IdP でサインインした全ユーザーがメンバーになります（シート上限内）。",
     "policyHint_domain": "下で所有を検証したメールドメインのユーザーだけが自動登録されます。",
     "policyHint_groups": "許可した IdP グループのいずれかに属するユーザーだけが自動登録されます。",
-    "policyHint_invite_only": "自動登録なし — 招待の承諾でのみメンバーになります。",
+    "policyHint_invite_only": "自動登録なし。招待の承諾でのみメンバーになります。",
     "groupsLabel": "許可グループ（カンマ区切り）",
     "domainsLabel": "検証済みメールドメイン",
     "addDomain": "追加",
     "removeDomain": "ドメインを削除",
     "verify": "検証",
     "verified": "ドメインを検証しました。",
-    "verifyFailed": "検証できませんでした — DNS TXT レコードを公開してから再試行してください。",
+    "verifyFailed": "検証できませんでした。DNS TXT レコードを公開してから再試行してください。",
     "verifiedBadge": "検証済み",
     "pendingBadge": "保留中",
     "dnsHint": "この DNS TXT レコードを公開してください:",
@@ -522,7 +522,7 @@
     "title": "メンバーと権限",
     "body": "このスペースへのアクセスをメンバーに付与します。配下のすべての公開ページに波及します。",
     "customRolesTitle": "カスタムロール",
-    "customRolesBody": "このスペースで割り当てられているカスタムロールです。ロールの定義はテナント設定 → ロール、割り当ては上の選択肢から行います——ロールの権限はスペース全体に適用されます。",
+    "customRolesBody": "このスペースで割り当てられているカスタムロールです。ロールの定義はテナント設定 → ロール、割り当ては上の選択肢から行います。権限はスペース全体に適用されます。",
     "customRolesEmpty": "このスペースにはまだカスタムロールの割当がありません。",
     "selectRole": "ロールを選択",
     "addPlaceholder": "メンバーを検索…",
@@ -624,8 +624,8 @@
     "history": "履歴",
     "attachments": "添付ファイル",
     "permissions": "権限",
-    "frozenFull": "凍結中 — 管理者以外は閲覧のみ",
-    "frozenGuests": "ゲスト凍結中 — メンバーは編集可",
+    "frozenFull": "凍結中：管理者以外は閲覧のみ",
+    "frozenGuests": "ゲスト凍結中：メンバーは編集可",
     "delete": "ゴミ箱に移動",
     "notFound": "このページは存在しません。削除されたか、リンクが誤っている可能性があります。",
     "displayMode": "表示モード",
@@ -647,7 +647,7 @@
     "movePinUp": "ピンを上へ",
     "movePinDown": "ピンを下へ",
     "noSpacesMatch": "一致するスペースがありません。",
-    "moreSpacesHint": "他 {{count}} スペース — 検索で絞り込み",
+    "moreSpacesHint": "他 {{count}} スペース。検索で絞り込み",
     "showAllSpaces": "すべてのスペースを表示（他 {{count}} 件）",
     "newSpace": "新しいスペース",
     "renameSpace": "スペース名を変更",
@@ -669,8 +669,8 @@
     "untitledSpace": "無題のスペース",
     "loadFailed": "読み込みに失敗しました。",
     "retry": "再試行",
-    "noSpaces": "スペースがまだありません — 上から作成してください。",
-    "noPages": "ページがまだありません — 上から追加してください。",
+    "noSpaces": "スペースがまだありません。上から作成してください。",
+    "noPages": "ページがまだありません。上から追加してください。",
     "collapse": "折りたたむ",
     "expand": "展開する",
     "home": "ホーム",
@@ -791,7 +791,7 @@
     "logoHint": "ヘッダのワークスペース名の隣に表示されます。PNG・JPEG・WebP、512 KB まで。",
     "logoUpload": "ロゴをアップロード",
     "logoRemove": "削除",
-    "logoType": "対応していない画像形式です — PNG・JPEG・WebP を使ってください。",
+    "logoType": "対応していない画像形式です。PNG・JPEG・WebP を使ってください。",
     "logoSize": "画像が大きすぎます（最大 512 KB）。"
   },
   "accent": {
@@ -847,7 +847,7 @@
     "placeholderKbd": "ページを検索…  (Ctrl-K)",
     "searching": "検索中…",
     "noResults": "結果なし",
-    "previewUnpublished": "未公開 — プレビューなし"
+    "previewUnpublished": "未公開のためプレビューなし"
   },
   "lpToolbar": {
     "bold": "太字",
@@ -943,7 +943,7 @@
     "sendInvite": "招待を送信",
     "inviteLinkLabel": "招待リンク（メールが無効な場合は共有）:",
     "emailed": "受信者に送信しました。",
-    "notEmailed": "メール未送信 — 上のリンクをコピーしてください。",
+    "notEmailed": "メール未送信。上のリンクをコピーしてください。",
     "pendingTitle": "保留中の招待",
     "noEmail": "（メールなし）",
     "revoke": "取り消し",
@@ -952,7 +952,9 @@
     "revokeConfirm": "{{email}} への招待を取り消しますか？送信済みのリンクは使えなくなります。",
     "filterPlaceholder": "メンバーを絞り込む…",
     "filterLabel": "メンバーの絞り込み",
-    "addRole": "＋ ロール"
+    "addRole": "＋ ロール",
+    "seatLimit": "座席数の上限に達しました。メンバーを増やすにはアップグレードしてください。",
+    "inviteFailed": "招待を作成できませんでした。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",
@@ -987,7 +989,7 @@
     "graph": "ローカルグラフ",
     "graphEmpty": "描画するリンクがまだありません。",
     "graphExpand": "グラフを拡大",
-    "graphMore": "+{{count}} 件 — 全体グラフを開く",
+    "graphMore": "+{{count}} 件。全体グラフを開く",
     "graphTopN": "接続の多い {{count}} ページを表示しています。",
     "graphLegendLink": "リンク",
     "graphLegendEmbed": "埋め込み",
@@ -1014,8 +1016,8 @@
       "tenant": "テナントの全員が使えます。"
     },
     "warning": {
-      "space": "注意：現在の内容がこのスペースを閲覧できる全員に見えるようになります（意図的な再公開です）。",
-      "tenant": "注意：現在の内容がテナントの全員に見えるようになります（意図的な再公開です）。"
+      "space": "注意：現在の内容がこのスペースを閲覧できる全員に見えるようになります。",
+      "tenant": "注意：現在の内容がテナントの全員に見えるようになります。"
     },
     "needsPublish": "テンプレートとして保存するには、先にページを公開してください。"
   },
@@ -1023,12 +1025,12 @@
     "backlinkWarning_other": "このページは {{count}} ページから参照されています。削除するとリンク切れになります。"
   },
   "macro": {
-    "excalidrawEmpty": "空の図 — Ctrl+↵ で開く",
-    "embedEmpty": "空の埋め込み — Ctrl+↵ で URL を追加",
-    "pageEmbedEmpty": "空のページ埋め込み — Ctrl+↵ でページを追加",
+    "excalidrawEmpty": "空の図：Ctrl+↵ で開く",
+    "embedEmpty": "空の埋め込み：Ctrl+↵ で URL を追加",
+    "pageEmbedEmpty": "空のページ埋め込み：Ctrl+↵ でページを追加",
     "listEmpty": "該当ページはまだありません。",
-    "emptyEdit": "空の{{name}} — Ctrl+↵ で編集",
-    "emptyOpen": "空の{{name}} — Ctrl+↵ で開く",
+    "emptyEdit": "空の{{name}}：Ctrl+↵ で編集",
+    "emptyOpen": "空の{{name}}：Ctrl+↵ で開く",
     "diagramRendering": "図を生成中…",
     "diagramInvalid": "PlantUML の図が不正です",
     "diagramUnavailable": "図のレンダラーに接続できませんでした"
@@ -1138,7 +1140,7 @@
     "bannerText": "書き方に合わせてエディタを最適化できます。",
     "bannerCta": "設定する",
     "skippedNote": "バランス型のエディタ表示にしました（vim オフ・WYSIWYG あり）。設定または「最初の質問をやり直す」でいつでも変更できます。",
-    "atomHint": "ヒント：参照カード（埋め込み・トランスクルード・子ページ一覧）はひとかたまりで選択され、アクセント色のリングが付きます — Ctrl+Enter で参照先を変更。レイアウトやコールアウトはクリックして中に入って編集します。それ以外はそのまま書き込めます。"
+    "atomHint": "ヒント：参照カード（埋め込み・トランスクルード・子ページ一覧）はひとかたまりで選択されます。Ctrl+Enter で参照先を変更できます。レイアウトやコールアウトはクリックして中に入って編集します。それ以外はそのまま書き込めます。"
   },
   "frontmatter": {
     "tagsLabel": "タグ",
@@ -1202,7 +1204,7 @@
     "body": "改ざん検知つき（ハッシュチェーン・追記専用）のテナント操作台帳。管理操作・メンバー/権限の変更を記録します。",
     "verify": "チェーンを検証",
     "export": "JSONL エクスポート",
-    "verified": "チェーン検証 OK — {{count}} 件が無傷です。",
+    "verified": "チェーン検証 OK。{{count}} 件が無傷です。",
     "broken": "チェーン破損（seq {{seq}}）: {{reason}}",
     "time": "日時",
     "actor": "実行者",
@@ -1259,14 +1261,14 @@
     "assignTenantScope": "テナント全体に適用",
     "deleteConfirm": "ロール「{{name}}」を削除しますか？割り当ても一緒に削除され、元に戻せません。",
     "mappingTitle": "グループマッピング",
-    "mappingBody": "IdP グループのメンバー全員にカスタムロールを付与します。所属は ID プロバイダから随時解決され、メンバーの追加や課金は発生しません。グループに同期された時点でロールが有効になります。",
+    "mappingBody": "IdP グループのメンバー全員にカスタムロールを付与します。所属は ID プロバイダから随時解決され、メンバーの追加や課金は発生しません。",
     "mappingGroupLabel": "IdP グループ",
     "mappingGroupPlaceholder": "例: Engineering",
     "mappingAdd": "マッピングを追加",
     "mappingRemove": "マッピングを削除",
     "mappingEmpty": "グループマッピングはまだありません。",
     "mappingOrphan": "メンバー無し",
-    "mappingOrphanHint": "現在このグループを持つメンバーがいません（IdP 側で改名／空になった可能性）。マッピングは削除するまで残ります（自動移行はしません）。",
+    "mappingOrphanHint": "現在このグループを持つメンバーがいません（IdP 側で改名／空になった可能性）。マッピングは削除するまで残ります。",
     "mappingDeleteConfirm": "グループ「{{group}}」→「{{role}}」のマッピングを削除しますか？そのグループからロールが取り消されます。元に戻せません。",
     "defaultRoleTitle": "デフォルトロール",
     "defaultRoleBody": "どのグループマッピングにも該当しないメンバーに、次回サインインから付与されます。同じロールを手動で割り当てている場合は手動が優先されます。",

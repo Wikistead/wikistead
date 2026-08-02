@@ -1,7 +1,7 @@
 {
   "adminConnections": {
     "title": "Login connections",
-    "body": "The ways members can sign in, in screen order — the first connection is the primary button. Presets carry their own branding; a custom connection may carry a label.",
+    "body": "The ways members can sign in, in screen order. The first connection is the primary button. Presets carry their own branding; a custom connection may carry a label.",
     "add": "Add connection",
     "created": "Connection added",
     "deleted": "Connection deleted",
@@ -129,7 +129,7 @@
     "label": "Account",
     "accountSettings": "Account settings",
     "tenantAdmin": "Tenant admin",
-    "devModeTitle": "Dev-token bypass identity (dev-user) — sign in to use your real identity"
+    "devModeTitle": "Dev-token bypass identity (dev-user). Sign in to use your real identity."
   },
   "accountNav": {
     "title": "Account",
@@ -146,12 +146,12 @@
     "activityFailed": "Couldn't load your activity.",
     "activityLess": "Less",
     "activityMore": "More",
-    "activityAria": "Your activity heatmap — {{count}} contributions in the last year",
+    "activityAria": "Your activity heatmap. {{count}} contributions in the last year",
     "activityNone": "No activity on {{date}}",
     "activityCount": "{{count}} on {{date}}",
     "activityCount_one": "{{count}} on {{date}}",
     "activityCount_other": "{{count}} on {{date}}",
-    "profileHint": "Your identity across the workspace — how collaborators see you.",
+    "profileHint": "How collaborators see you across the workspace.",
     "editorHint": "How the editor behaves for you: keymap, startup mode, fonts, and shortcuts.",
     "displayName": "Display name",
     "displayNameHint": "Overrides the name from your identity provider. It is shown to collaborators.",
@@ -217,7 +217,7 @@
     "displayMode_wysiwyg": "Always start in WYSIWYG",
     "notifications": {
       "title": "Notifications",
-      "desc": "Control what lands in your in-app inbox. These only reduce what you receive — access to content is always enforced separately.",
+      "desc": "Control what lands in your in-app inbox.",
       "enabled": "Enable notifications",
       "enabledHint": "Turn off to stop all in-app notifications (your watches are kept).",
       "emailImmediate": "Mention email",
@@ -270,7 +270,7 @@
   },
   "spaceModeration": {
     "abuseTitle": "Space moderation policy",
-    "abuseBody": "Add to this workspace's abuse filter for this space only. Your rules can be stricter than the workspace floor — never weaker: banned words are added to it, and a shrink ratio must be at least the workspace's.",
+    "abuseBody": "Add to this workspace's abuse filter for this space only. Your rules can be stricter than the workspace floor, never weaker: banned words are added to it, and a shrink ratio must be at least the workspace's.",
     "tenantFloor": "Workspace floor: mass-delete {{ratio}}, {{count}} banned word(s). This space can only add to it.",
     "shrinkLabel": "Mass-delete guard (this space)",
     "shrinkHint": "Reject a publish whose new text is smaller than this fraction (0–1). Leave blank to inherit the workspace value; a lower value than the workspace's has no effect (the stricter one wins).",
@@ -282,19 +282,19 @@
   },
   "adminPublic": {
     "title": "Public access",
-    "body": "The master switch for this workspace's anonymous public pages. While it's off, every public page is unreachable (returns not-found) — a structural block against accidental exposure. Turning it off is non-destructive: per-page public settings are kept and restored when you turn it back on.",
+    "body": "The master switch for this workspace's anonymous public pages. While it's off, every public page returns not-found. Per-page public settings are kept and restored when you turn it back on.",
     "toggleTitle": "Allow public pages in this workspace",
-    "onHint": "On — pages marked public can be viewed by anyone with the link.",
-    "offHint": "Off — all public pages are hidden, even if individually marked public."
+    "onHint": "On: pages marked public can be viewed by anyone with the link.",
+    "offHint": "Off: all public pages are hidden, even if individually marked public."
   },
   "adminEmbeds": {
     "title": "External embeds",
-    "body": "Hosts allowed to be embedded as sandboxed iframes (e.g. video). External embeds are off by default — anything not listed here degrades to a plain link. https is implied.",
+    "body": "Hosts allowed to be embedded as sandboxed iframes (e.g. video). Anything not listed here degrades to a plain link. https only.",
     "addTitle": "Allow a host",
     "host": "Host",
     "add": "Add",
     "remove": "Remove",
-    "empty": "No allowed hosts — all external embeds degrade to a link.",
+    "empty": "No allowed hosts. All external embeds degrade to a link.",
     "invalidHost": "Enter a valid host, e.g. youtube.com",
     "ownOrigin": "This app's own origin can't be embedded."
   },
@@ -304,14 +304,14 @@
     "empty": "No orphaned drafts.",
     "untitled": "Untitled",
     "claim": "Claim",
-    "claimed": "Claimed — you now have temporary access.",
+    "claimed": "Claimed. You now have temporary access.",
     "reassign": "Reassign",
     "reassigned": "Reassigned.",
     "newOwnerPlaceholder": "New owner (member sub)"
   },
   "billing": {
     "title": "Billing",
-    "selfHosted": "This is a self-hosted workspace — all features are included, with no plan limits or billing.",
+    "selfHosted": "This is a self-hosted workspace. All features are included, with no plan limits or billing.",
     "currentPlan": "Current plan:",
     "plan_free": "Free",
     "plan_pro": "Pro",
@@ -322,7 +322,7 @@
     "upgradePro": "Upgrade to Pro",
     "manage": "Manage billing",
     "teamNote": "Need SSO provisioning, audit logs, or annual invoicing? Contact us about the Team plan.",
-    "portalUnavailable": "No billing set up yet — upgrade first."
+    "portalUnavailable": "No billing set up yet. Upgrade first."
   },
   "adminApi": {
     "title": "API",
@@ -337,7 +337,7 @@
     "scope_read": "Read",
     "scope_write": "Write",
     "create": "Create",
-    "copyOnce": "Copy this key now — it won't be shown again.",
+    "copyOnce": "Copy this key now. It won't be shown again.",
     "copy": "Copy",
     "revoke": "Revoke",
     "empty": "No API keys yet.",
@@ -349,7 +349,7 @@
   "adminAuth": {
     "title": "Authentication",
     "body": "Configure your organization's identity provider (OIDC) for member sign-in.",
-    "warning": "Changing these settings affects how everyone signs in. Use Test connection and enable only a verified configuration — your current session stays active so you can fix mistakes.",
+    "warning": "Changing these settings affects how everyone signs in. Use Test connection and enable only a verified configuration. Your current session stays active so you can fix mistakes.",
     "issuer": "Issuer URL",
     "clientId": "Client ID",
     "clientSecret": "Client secret",
@@ -359,9 +359,9 @@
     "enabled": "Use this identity provider for sign-in",
     "test": "Test connection",
     "testing": "Testing…",
-    "testOk": "Discovery succeeded — this issuer looks reachable.",
+    "testOk": "Discovery succeeded. This issuer looks reachable.",
     "testFail": "Could not verify this issuer.",
-    "saveFailed": "Couldn't save — test the connection first.",
+    "saveFailed": "Couldn't save. Test the connection first.",
     "groupsClaim": "Groups claim",
     "samlTitle": "SAML single sign-on",
     "samlBody": "Let members sign in through your SAML identity provider. Available on plans with SAML SSO.",
@@ -371,7 +371,7 @@
     "samlIdpEntityId": "IdP entity ID",
     "samlSsoUrl": "IdP SSO URL",
     "samlCert": "IdP signing certificate (PEM)",
-    "samlCertKeep": "A certificate is stored — leave blank to keep it",
+    "samlCertKeep": "A certificate is stored. Leave blank to keep it.",
     "samlCertRequired": "An IdP signing certificate is required",
     "samlSpEntityId": "SP entity ID",
     "samlAcsUrl": "ACS URL",
@@ -381,7 +381,7 @@
     "samlAttrGroups": "groups attribute",
     "samlEnabled": "Enable SAML sign-in",
     "methodsTitle": "Login methods",
-    "methodsBody": "What this workspace offers on its sign-in screen. Methods excluded by your deployment's policy are marked — your settings are kept and return when policy allows them.",
+    "methodsBody": "What this workspace offers on its sign-in screen. Methods excluded by your deployment's policy are marked; your settings are kept and return when policy allows them.",
     "methodTenantOidc": "OIDC",
     "methodPlatformOidc": "Platform login",
     "methodSaml": "SAML SSO",
@@ -403,14 +403,14 @@
     "policyHint_open": "Any user who signs in via your IdP becomes a member (within the seat limit).",
     "policyHint_domain": "Only users whose email domain you have verified below are auto-enrolled.",
     "policyHint_groups": "Only users in one of the allowed IdP groups are auto-enrolled.",
-    "policyHint_invite_only": "No auto-enrolment — members join only by accepting an invite.",
+    "policyHint_invite_only": "No auto-enrolment. Members join only by accepting an invite.",
     "groupsLabel": "Allowed groups (comma-separated)",
     "domainsLabel": "Verified email domains",
     "addDomain": "Add",
     "removeDomain": "Remove domain",
     "verify": "Verify",
     "verified": "Domain verified.",
-    "verifyFailed": "Couldn't verify — publish the DNS TXT record and try again.",
+    "verifyFailed": "Couldn't verify. Publish the DNS TXT record and try again.",
     "verifiedBadge": "verified",
     "pendingBadge": "pending",
     "dnsHint": "Publish this DNS TXT record:",
@@ -444,9 +444,9 @@
     "shareHint": "Create a share link to this whole space (all published pages). Choose view-only or editable (editable = an anonymously writable public wiki).",
     "publicLabel": "Public access",
     "publicTitle": "Make this space public on the web",
-    "publicHint": "Anyone on the internet can read this space's PUBLISHED pages — private pages and drafts stay hidden.",
+    "publicHint": "Anyone on the internet can read this space's PUBLISHED pages. Private pages and drafts stay hidden.",
     "publicOnHint": "This space is public: every published, non-private page is readable by anyone on the internet.",
-    "publicRestrictNote": "Note: a per-page \"restrict\" list does NOT hide a page from the public tree — only \"private\" removes it from public view.",
+    "publicRestrictNote": "Note: a per-page \"restrict\" list does NOT hide a page from the public tree. Only \"private\" removes it from public view.",
     "publicUrlLabel": "Public space URL",
     "publicErrorSurface": "The public surface is turned off for this workspace (an admin can enable it).",
     "shareSpace": "Share space…",
@@ -474,7 +474,7 @@
     "restore": "Restore",
     "purge": "Delete forever",
     "restored": "Page restored",
-    "restoredReparented": "Page restored (moved to the space root — its old parent is gone)",
+    "restoredReparented": "Page restored to the space root (its old parent is gone)",
     "purgeConfirmTitle": "Delete forever",
     "purgeConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone."
   },
@@ -522,7 +522,7 @@
     "title": "Members & permissions",
     "body": "Grant members access to this space. Access flows to every published page in it.",
     "customRolesTitle": "Custom roles",
-    "customRolesBody": "Custom roles assigned in this space. Roles are defined in tenant settings → Roles, and assigned from the picker above — the role's capabilities apply across the space.",
+    "customRolesBody": "Custom roles assigned in this space. Roles are defined in tenant settings → Roles, and assigned from the picker above. Capabilities apply across the space.",
     "customRolesEmpty": "No custom roles assigned in this space yet.",
     "selectRole": "Select a role",
     "addPlaceholder": "Search members…",
@@ -545,7 +545,7 @@
     "commentAudienceBody": "These toggles open commenting to everyone who can view, and to guests holding a link. To let one person comment, assign a custom role that includes comment, or grant comment on a single page from that page’s permissions. The two are independent: turning the toggles off does not remove a comment grant.",
     "commentGuests": "Link guests (view or edit) may comment",
     "commentMembers": "Anyone who can view (public) may comment",
-    "mappingBody": "Confer a role on everyone in an IdP group, for THIS space. Membership resolves live from your identity provider — nobody is added or billed.",
+    "mappingBody": "Confer a role on everyone in an IdP group, for THIS space. Membership resolves live from your identity provider; nobody is added or billed.",
     "commentBaselineEditors": "Managers and moderators can always comment; these toggles never take that away.",
     "commentMembersOn": "ON: view-only members can comment too (in addition to explicit comment grants).",
     "commentMembersOff": "OFF: view-only members cannot comment (explicit comment grants still can; managers and moderators always can).",
@@ -556,7 +556,7 @@
     "commentSummaryMembers": "all viewing members",
     "commentSummaryGuests": "link guests",
     "managedBadge": "mapping",
-    "managedByMapping": "Conferred by a group mapping - remove it in Group mappings below.",
+    "managedByMapping": "Conferred by a group mapping. Remove it in Group mappings below.",
     "replaceConfirm": "Replace {{who}}'s current role ({{current}}) with {{next}}?",
     "managerReplaceConfirm": "{{who}} is a MANAGER of this space. Replace their manager role with {{next}}? They lose every management capability here; a tenant admin can restore it.",
     "replaceAction": "Replace"
@@ -624,8 +624,8 @@
     "history": "History",
     "attachments": "Attachments",
     "permissions": "Permissions",
-    "frozenFull": "Frozen — read-only for everyone below manager",
-    "frozenGuests": "Frozen for guests — members can still edit",
+    "frozenFull": "Frozen: read-only for everyone below manager",
+    "frozenGuests": "Frozen for guests: members can still edit",
     "delete": "Move to trash",
     "notFound": "This page doesn't exist. It may have been deleted, or the link is wrong.",
     "displayMode": "Display mode",
@@ -647,7 +647,7 @@
     "movePinUp": "Move pin up",
     "movePinDown": "Move pin down",
     "noSpacesMatch": "No spaces match.",
-    "moreSpacesHint": "{{count}} more — search to filter",
+    "moreSpacesHint": "{{count}} more. Search to filter",
     "showAllSpaces": "Show all spaces ({{count}} more)",
     "newSpace": "New space",
     "renameSpace": "Rename space",
@@ -669,14 +669,14 @@
     "untitledSpace": "Untitled space",
     "loadFailed": "Failed to load.",
     "retry": "Retry",
-    "noSpaces": "No spaces yet — create one above.",
-    "noPages": "No pages yet — add one above.",
+    "noSpaces": "No spaces yet. Create one above.",
+    "noPages": "No pages yet. Add one above.",
     "collapse": "Collapse",
     "expand": "Expand",
     "home": "Home",
     "deleteForever": "Delete permanently",
     "deleteForeverTitle": "Delete permanently",
-    "deleteForeverConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone — there is no trash to restore from."
+    "deleteForeverConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone; there is no trash to restore from."
   },
   "dialogs": {
     "renamePageTitle": "Rename page",
@@ -687,7 +687,7 @@
   "shareDialog": {
     "title": "Share page",
     "spaceTitle": "Share space",
-    "spaceWarning": "Anyone with this link can view every published page in this space — including pages you add later. An editable link also allows anonymous editing and page creation.",
+    "spaceWarning": "Anyone with this link can view every published page in this space, including pages you add later. An editable link also allows anonymous editing and page creation.",
     "capability": "Capability",
     "canView": "Can view",
     "canEdit": "Can edit",
@@ -708,7 +708,7 @@
     "copied": "Copied link to clipboard.",
     "done": "Done",
     "password": "Password (optional)",
-    "revokeConfirm": "Revoke this link? Everyone holding the URL loses access — a new link is a new URL."
+    "revokeConfirm": "Revoke this link? Everyone holding the URL loses access, and a new link is a new URL."
   },
   "permissions": {
     "title": "Permissions",
@@ -736,19 +736,19 @@
     "unrestrict": "Remove restriction",
     "privateTitle": "Make this page private",
     "privateHint": "Only the people you list below can view or edit it; space members no longer inherit access, and it won't be public. Child pages are not made private automatically.",
-    "privateOnHint": "This page is private — only the people in the allow list below can access it. Space members do not inherit access.",
+    "privateOnHint": "This page is private. Only the people in the allow list below can access it; space members do not inherit access.",
     "freezeTitle": "Freeze (edit lock)",
     "freezeHint": "Lock the page body against edits. Managers can always edit; commenting stays open for viewers.",
-    "freezeGuestsHint": "Frozen for share-link guests — members can still edit. Managers can always edit.",
-    "freezeFullHint": "Frozen for everyone below manager — members and guests are read-only. Managers can always edit.",
+    "freezeGuestsHint": "Frozen for share-link guests. Members and managers can still edit.",
+    "freezeFullHint": "Frozen for everyone below manager. Members and guests are read-only; managers can always edit.",
     "freezeOff": "Off",
     "freezeGuests": "Guests only",
     "freezeFull": "Everyone",
     "publicTitle": "Make this page public",
-    "publicHint": "Anyone with the link can view the published page anonymously — no account needed. Only published pages can be made public; it's excluded from search engines.",
-    "publicOnHint": "This page is public — anyone can view the published version anonymously.",
+    "publicHint": "Anyone with the link can view the published page without an account. Only published pages can be made public, and they are excluded from search engines.",
+    "publicOnHint": "This page is public. Anyone can view the published version anonymously.",
     "publicPrivateConflict": "A private page can't be made public. Turn off private first.",
-    "publicDraftHint": "Publish the page first — only a published page can be made public.",
+    "publicDraftHint": "Publish the page first. Only a published page can be made public.",
     "publicErrorDraft": "Only a published page can be made public. Publish it first.",
     "publicErrorSurface": "The public surface is turned off for this workspace (an admin can enable it).",
     "publicErrorPrivate": "A private page can't be made public. Turn off private first.",
@@ -779,7 +779,7 @@
   },
   "upgrade": {
     "title": "This feature needs a plan upgrade",
-    "body": "Your data is kept — upgrade your plan to use this feature again."
+    "body": "Your data is kept. Upgrade your plan to use this feature again."
   },
   "tenantBranding": {
     "title": "Branding",
@@ -791,7 +791,7 @@
     "logoHint": "Shown next to the workspace name in the header. PNG, JPEG or WebP, up to 512 KB.",
     "logoUpload": "Upload logo",
     "logoRemove": "Remove",
-    "logoType": "Unsupported image type — use PNG, JPEG or WebP.",
+    "logoType": "Unsupported image type. Use PNG, JPEG or WebP.",
     "logoSize": "Image too large (max 512 KB)."
   },
   "accent": {
@@ -829,7 +829,7 @@
     "revertRunLabel": "This guest's edits: {{author}} ({{count}} revisions)",
     "revertRunConfirmTitle": "Revert this guest's edits",
     "revertRunConfirm": "Revert {{author}}'s latest {{count}} revisions in one step? The page is restored to just before their edits; their revisions stay in history, and checkbox states follow the current live values.",
-    "revertRunNoBaseline": "All visible revisions are by {{author}} — there is no earlier revision to revert to. Review the diffs and restore a version manually."
+    "revertRunNoBaseline": "All visible revisions are by {{author}}, so there is no earlier revision to revert to. Review the diffs and restore a version manually."
   },
   "attachments": {
     "header": "Attachments ({{count}})",
@@ -847,7 +847,7 @@
     "placeholderKbd": "Search pages…  (Ctrl-K)",
     "searching": "Searching…",
     "noResults": "No results",
-    "previewUnpublished": "Not published yet — no preview"
+    "previewUnpublished": "Not published yet, no preview"
   },
   "lpToolbar": {
     "bold": "Bold",
@@ -943,7 +943,7 @@
     "sendInvite": "Send invite",
     "inviteLinkLabel": "Invite link (share if email is off):",
     "emailed": "Emailed to recipient.",
-    "notEmailed": "Email not sent — copy the link above.",
+    "notEmailed": "Email not sent. Copy the link above.",
     "pendingTitle": "Pending invites",
     "noEmail": "(no email)",
     "revoke": "Revoke",
@@ -952,7 +952,9 @@
     "revokeConfirm": "Revoke the invite for {{email}}? The sent link stops working.",
     "filterPlaceholder": "Filter members…",
     "filterLabel": "Filter members",
-    "addRole": "+ Role"
+    "addRole": "+ Role",
+    "seatLimit": "Seat limit reached. Upgrade to invite more members.",
+    "inviteFailed": "Could not create the invite."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
@@ -987,7 +989,7 @@
     "graph": "Local graph",
     "graphEmpty": "No links to draw yet.",
     "graphExpand": "Expand graph",
-    "graphMore": "+{{count}} more — open the full graph",
+    "graphMore": "+{{count}} more. Open the full graph",
     "graphTopN": "Showing the {{count}} most connected pages.",
     "graphLegendLink": "Link",
     "graphLegendEmbed": "Embed",
@@ -1014,8 +1016,8 @@
       "tenant": "Everyone in the tenant can use it."
     },
     "warning": {
-      "space": "Heads up: the current content becomes visible to everyone who can view this space — this is an intentional re-publish.",
-      "tenant": "Heads up: the current content becomes visible to everyone in the tenant — this is an intentional re-publish."
+      "space": "Heads up: the current content becomes visible to everyone who can view this space.",
+      "tenant": "Heads up: the current content becomes visible to everyone in the tenant."
     },
     "needsPublish": "Publish the page first to save it as a template."
   },
@@ -1024,12 +1026,12 @@
     "backlinkWarning_other": "This page is referenced by {{count}} pages. Deleting it will leave broken links."
   },
   "macro": {
-    "excalidrawEmpty": "Empty drawing — Ctrl+↵ to open",
-    "embedEmpty": "Empty embed — Ctrl+↵ to add a URL",
-    "pageEmbedEmpty": "Empty page embed — Ctrl+↵ to add a page",
+    "excalidrawEmpty": "Empty drawing: Ctrl+↵ to open",
+    "embedEmpty": "Empty embed: Ctrl+↵ to add a URL",
+    "pageEmbedEmpty": "Empty page embed: Ctrl+↵ to add a page",
     "listEmpty": "No pages yet.",
-    "emptyEdit": "Empty {{name}} — Ctrl+↵ to edit",
-    "emptyOpen": "Empty {{name}} — Ctrl+↵ to open",
+    "emptyEdit": "Empty {{name}}: Ctrl+↵ to edit",
+    "emptyOpen": "Empty {{name}}: Ctrl+↵ to open",
     "diagramRendering": "Rendering the diagram…",
     "diagramInvalid": "Invalid PlantUML diagram",
     "diagramUnavailable": "Could not reach the diagram renderer"
@@ -1069,7 +1071,7 @@
     "createTitle": "Add a webhook",
     "url": "Webhook URL",
     "create": "Add",
-    "secretOnce": "Copy the signing secret now — it is shown only once.",
+    "secretOnce": "Copy the signing secret now. It is shown only once.",
     "copy": "Copy secret",
     "delete": "Delete webhook",
     "disabled": "Disabled",
@@ -1139,7 +1141,7 @@
     "bannerText": "Tailor the editor to how you write.",
     "bannerCta": "Set it up",
     "skippedNote": "We set up a balanced editor for you (vim off, with WYSIWYG). You can change this any time in Settings, or with “redo the questions”.",
-    "atomHint": "Tip: reference cards (embeds, transclusions, page lists) select as one unit with an accent ring — Ctrl+Enter changes what they point at. Layouts and callouts open for editing when you click into them; everything else you just type into."
+    "atomHint": "Tip: reference cards (embeds, transclusions, page lists) select as one unit, and Ctrl+Enter changes what they point at. Layouts and callouts open for editing when you click into them; everything else you just type into."
   },
   "frontmatter": {
     "tagsLabel": "Tags",
@@ -1203,7 +1205,7 @@
     "body": "The tenant's tamper-evident activity ledger (hash-chained, append-only). Admin actions, membership and access changes.",
     "verify": "Verify chain",
     "export": "Export JSONL",
-    "verified": "Chain verified — {{count}} entries intact.",
+    "verified": "Chain verified. {{count}} entries intact.",
     "broken": "CHAIN BROKEN at seq {{seq}}: {{reason}}",
     "time": "Time",
     "actor": "Actor",
@@ -1230,7 +1232,7 @@
     "delete": "Delete role",
     "nameLabel": "Role name",
     "namePlaceholder": "e.g. recycler",
-    "conflict": "Name in use, or the role still has assignments — unassign first.",
+    "conflict": "Name in use, or the role still has assignments. Unassign first.",
     "notEntitled": "Custom roles are an Enterprise feature on this plan.",
     "assignTitle": "Assignments",
     "assignBody": "Assign a custom role to a member on a space. The capabilities become real grants; unassigning removes exactly what the role added.",
@@ -1260,14 +1262,14 @@
     "assignTenantScope": "applies tenant-wide",
     "deleteConfirm": "Delete the role \"{{name}}\"? Its assignments are removed with it. This cannot be undone.",
     "mappingTitle": "Group mappings",
-    "mappingBody": "Confer a custom role on everyone in an IdP group. Membership resolves live from your identity provider — no one is added or billed, and the role appears the moment a member is synced into the group.",
+    "mappingBody": "Confer a custom role on everyone in an IdP group. Membership resolves live from your identity provider; nobody is added or billed.",
     "mappingGroupLabel": "IdP group",
     "mappingGroupPlaceholder": "e.g. Engineering",
     "mappingAdd": "Add mapping",
     "mappingRemove": "Remove mapping",
     "mappingEmpty": "No group mappings yet.",
     "mappingOrphan": "No members",
-    "mappingOrphanHint": "No member currently carries this group — likely renamed or emptied at the identity provider. The mapping stays until you remove it; nothing is auto-migrated.",
+    "mappingOrphanHint": "No member currently carries this group, so it was likely renamed or emptied at the identity provider. The mapping stays until you remove it.",
     "mappingDeleteConfirm": "Remove the mapping from group \"{{group}}\" to \"{{role}}\"? The role is revoked from that group. This cannot be undone.",
     "defaultRoleTitle": "Default role",
     "defaultRoleBody": "Given to any member no group mapping matches, from their next sign-in. A hand-placed assignment of the same role wins.",
@@ -1277,12 +1279,12 @@
     "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
     "memberLabel": "Member",
     "memberPlaceholder": "Search members…",
-    "mappingTenantBody": "Confer a TENANT role (like creating spaces) on everyone in an IdP group. Membership resolves live from your identity provider — nobody is added or billed. A mapping onto a space's role is made in that space's Members tab.",
-    "mixedScopeHint": "A role is either a space/page role or a tenant role - uncheck one side to save.",
+    "mappingTenantBody": "Confer a TENANT role (like creating spaces) on everyone in an IdP group. Membership resolves live from your identity provider; nobody is added or billed. A mapping onto a space's role is made in that space's Members tab.",
+    "mixedScopeHint": "A role is either a space/page role or a tenant role. Uncheck one side to save.",
     "sectionTenant": "Tenant",
     "sectionResource": "Space / Page",
     "groupAssignTitle": "Group roles",
-    "groupAssignBody": "Give a tenant role to an IdP group. Everyone in the group gets it — and loses it when they leave the group.",
+    "groupAssignBody": "Give a tenant role to an IdP group. Everyone in the group gets it, and loses it when they leave the group.",
     "groupAssignEmpty": "No group holds a tenant role.",
     "groupLabel": "Group",
     "groupPlaceholder": "Select a group…",
@@ -1303,7 +1305,7 @@
   },
   "transparency": {
     "title": "Vendor access",
-    "body": "Emergency (break-glass) accesses to this tenant by the service operator (vendor) — disclosed with a per-tenant chain you can verify for tampering.",
+    "body": "Emergency (break-glass) accesses to this tenant by the service operator (vendor), disclosed with a per-tenant chain you can verify for tampering.",
     "empty": "No operator access has occurred.",
     "operator": "Operator",
     "reason": "Reason",
@@ -1317,7 +1319,7 @@
   },
   "accountApiKeys": {
     "title": "API keys",
-    "body": "Keys act with your own permissions — a key can never do more than you can. The plaintext is shown once, when you create it.",
+    "body": "Keys act with your own permissions, so a key can never do more than you can. The plaintext is shown once, when you create it.",
     "restricted": "This tenant lets only administrators create API keys. Any key you already hold still works, and you can revoke it here.",
     "empty": "You have no API keys."
   },

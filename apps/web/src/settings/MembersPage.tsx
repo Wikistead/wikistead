@@ -70,7 +70,7 @@ export function MembersPage() {
       setEmail("");
       await refresh();
     } catch (e) {
-      setError(e instanceof ApiError && e.status === 403 ? "Seat limit reached — upgrade to invite more members." : "Could not create invite");
+      setError(e instanceof ApiError && e.status === 403 ? t("members.seatLimit") : t("members.inviteFailed"));
     }
   };
 
