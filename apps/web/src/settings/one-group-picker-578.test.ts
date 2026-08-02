@@ -33,11 +33,17 @@ describe("#578: the group name control has one implementation", () => {
     // this is the half the retired mapping form had and a picker alone did not
     expect(picker).toMatch(/data-testid=\{`\$\{testId\}-name`\}/);
     expect(picker).toMatch(/data-testid=\{`\$\{testId\}-unconfirmed`\}/);
-    expect(picker, "the marker appears only for a name the directory has not produced").toMatch(/value && !isKnown/);
+    expect(picker, "the marker appears only for a name the directory has not produced").toMatch(/!isKnown/);
   });
 
-  it("a typed name does not make the Select look like it selected something", () => {
-    expect(picker).toMatch(/value=\{isKnown \? value : ""\}/);
+  // #578 bounce ②: " UI UI UI ". The stacked
+  // Select is gone; what is left is one input that completes, the same shape the person picker beside
+  // it already had. A pin on the ABSENCE, because a second control creeping back is exactly how these
+  // two halves drifted apart the first time.
+  it("it is ONE input with completion, not a Select stacked on an Input", () => {
+    expect(picker, "no Select in the group control").not.toMatch(/<Select\b/);
+    expect(picker, "completion is offered as a list").toMatch(/data-testid=\{`\$\{testId\}-list`\}/);
+    expect(picker).toMatch(/data-testid=\{`\$\{testId\}-item`\}/);
   });
 
   it("#579's asymmetry is untouched — only the GROUP half is shared", () => {

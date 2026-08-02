@@ -816,6 +816,10 @@ export async function rolesPlugin(app: FastifyInstance) {
       const id = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
         tenant: req.tenant, roleId: role.id, capabilities: caps, resourceType, resourceId, principal,
         actorSub: req.user.sub, origin: 'manual',
+        // #578 bounce ①: the name travels with the grant. Without it a role given to a group nobody
+        // carries yet comes back as "unknown group" — the id is a one-way hash and this row is the
+        // only thing that knows what was typed.
+        groupName: typeof groupName === 'string' ? groupName.trim() : undefined,
       })
       if (resourceType === 'space') {
         const { sweepOtherSpaceRoles } = await import('./spaces.js')
