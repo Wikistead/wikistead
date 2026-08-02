@@ -78,21 +78,19 @@ describe("#553: the per-person route the copy names actually exists", () => {
 // carry comment. The en had "on its own", which makes both true; the ja had dropped it. Copy in two
 // languages drifts when only one is edited, so this checks the pair against each other rather than
 // against a remembered wording.
-describe("#553: the panel does not contradict itself about editor", () => {
-  const bodyOf = (loc: "en" | "ja") => (loc === "en" ? en : ja).spaceMembers;
-
+// RE-AIMED by #586: this compared the audience body against the BASELINE BOX, and the baseline box is
+// gone — the inclusion it spelled out is now shown on the role badges themselves (hover, focus or tap),
+// measured from the model rather than asserted in a sentence. The contradiction it guarded needed two
+// sentences to exist. What is worth keeping is the half that is still rendered: the body must not make a
+// blanket claim that the built-ins cannot grant comment, because the editor NOUN does exactly that.
+describe("#553/#586: the audience body makes no blanket claim about the built-ins", () => {
   for (const loc of ["en", "ja"] as const) {
-    it(`${loc}: if the text says the built-ins cannot grant comment, it says "on its own"`, () => {
-      const s = bodyOf(loc);
+    it(`${loc}: no unqualified "the built-ins cannot grant comment"`, () => {
+      const body = (loc === "en" ? en : ja).spaceMembers.commentAudienceBody;
       const blanket = loc === "en"
-        ? /cannot grant comment(?!\s+on its own)/i.test(s.commentAudienceBody)
-        : /comment\s*を付与できません/.test(s.commentAudienceBody);
-      // the sentence right below it, which the reader sees at the same time
-      const editorCarriesComment = loc === "en"
-        ? /Editors granted here carry an explicit comment grant/i.test(s.commentBaselineEditors)
-        : /editor には comment も明示的に付与されます/.test(s.commentBaselineEditors);
-      expect(blanket && editorCarriesComment,
-        `these two are on screen together and disagree:\n  ${s.commentAudienceBody}\n  ${s.commentBaselineEditors}`).toBe(false);
+        ? /cannot grant comment(?!\s+on its own)/i.test(body)
+        : /comment\s*を付与できません/.test(body);
+      expect(blanket, `this reads as false beside a role list that shows comment:\n  ${body}`).toBe(false);
     });
   }
 });

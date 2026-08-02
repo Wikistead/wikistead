@@ -549,7 +549,6 @@
     "commentGuests": "Link guests (view or edit) may comment",
     "commentMembers": "Anyone who can view (public) may comment",
     "mappingBody": "Confer a role on everyone in an IdP group, for THIS space. Membership resolves live from your identity provider; nobody is added or billed.",
-    "commentBaselineEditors": "manager and moderator can always comment; these toggles never take that away.",
     "commentMembersOn": "ON: view-only members can comment too (in addition to explicit comment grants).",
     "commentMembersOff": "OFF: view-only members cannot comment (explicit comment grants still can; managers and moderators always can).",
     "commentGuestsOn": "ON: every guest who can see the page can comment (view and edit links alike).",
@@ -1322,5 +1321,10 @@
     "unreviewedOnly": "Needs review",
     "empty": "Nothing has been flagged in this space.",
     "emptyUnreviewed": "Nothing is waiting for review."
+  },
+  "roleTip": {
+    "role": "This role can:",
+    "individual": "Granted individually. This person can:",
+    "label": "Can: {{caps}}"
   }
 }

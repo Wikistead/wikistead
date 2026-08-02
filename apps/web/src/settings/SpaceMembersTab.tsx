@@ -12,6 +12,7 @@ import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { GranteeRoleForm } from "./GranteeRoleForm";
 import { capNoun } from "./role-nouns";
+import { RoleTip } from "../ui/RoleTip";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
@@ -264,11 +265,14 @@ export function SpaceMembersTab() {
   // implementation fact, not a reason to split the screen. One sort rule: principal name, then badge.
   type MergedRow =
     | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; grantee: string; capability: PageRelation; foldedCaps?: PageRelation[]; principal?: undefined }
-    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; assignmentId: string; principal: string; grantee?: undefined };
+    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; assignmentId: string; principal: string; roleId: string; grantee?: undefined };
   // #553 / ADR-199 §2 (rev5 ruling): a principal holding BOTH the edit and comment built-in grants is
   // ONE editor — the pair folds into a single "editor" row whose revoke removes both arms. The word
   // "commenter" appears on no GRANT surface (#552 — the picker); a lone comment grant (an unfolded
   // arm) still wears the capability noun "commenter" as its ROW BADGE (the #529 pin keeps it).
+  // #586 / ADR-203 §4: a custom role IS its capabilities, and the assignment list carries only its id
+  // and name — so the tooltip joins against the definitions this screen already holds.
+  const roleCapsById = new Map(customRoles.map((r) => [r.id, r.capabilities as readonly string[]]));
   const foldedGrantees = foldedEditorGrantees(grants);
   const visibleGrants = grants.filter((g) => !(foldedGrantees.has(g.grantee) && g.capability === "comment"));
   const mergedRows: MergedRow[] = [
@@ -281,7 +285,7 @@ export function SpaceMembersTab() {
       kind: "assignment" as const, key: `a:${a.id}`, badge: a.roleName, custom: true as const,
       // #497 re-review N2: a mapping-owned assignment is read-only here too (ADR-183 §1) — the
       // badge below replaces its revoke exactly as it does for the builtin grant rows.
-      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal, managed: a.managed,
+      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal, roleId: a.roleId, managed: a.managed,
     })),
   ].sort((x, y) => x.label.localeCompare(y.label) || x.badge.localeCompare(y.badge));
 
@@ -333,7 +337,11 @@ export function SpaceMembersTab() {
                 Custom-role rows stay a chip: those are ADDITIVE, and a dropdown would imply swapping.
                 #582: no `uppercase` — a role name is a proper noun on every surface. */}
             {r.custom ? (
-              <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] tracking-[0.03em] text-[var(--accent)]">{r.badge}</span>
+              /* #586 §1: role-derived. The accent border is the ROLE colour; an individually granted
+                 capability wears the neutral one. The axis is role vs grant, never built-in vs custom. */
+              <RoleTip roleCapabilities={roleCapsById.get(r.roleId ?? "")} origin="role" testId="space-role-origin">
+                <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] tracking-[0.03em] text-[var(--accent)]">{r.badge}</span>
+              </RoleTip>
             ) : r.managed ? (
               <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability}>{r.badge}</span>
             ) : (
@@ -420,11 +428,12 @@ export function SpaceMembersTab() {
       <div className="mt-8 border-t border-border pt-4" data-testid="comment-open">
         <h3 className="mt-0 text-sm font-medium">{t("spaceMembers.commentAudienceTitle")}</h3>
         <p className="mt-0 mb-3 text-sm text-fg-dim">{t("spaceMembers.commentAudienceBody")}</p>
-        <div className="mb-3 rounded-md border border-border bg-panel p-2.5 text-sm" data-testid="comment-baseline">
-          {/* #552: the "individually granted commenters: N" line is gone with the built-in role. The
-              editors-always baseline stays — it is the route no toggle can touch (#529). */}
-          <p className="m-0">{t("spaceMembers.commentBaselineEditors")}</p>
-        </div>
+        {/* #586 (user ruling): the baseline sentence ("manager and moderator can always comment, and
+            this toggle cannot take it away") is gone. It existed to explain an inclusion the screen would
+            not show, and the screen shows it now: hover, focus or tap a role and it lists what that role
+            confers, measured from the model rather than from a bundle that gets it wrong. Explaining in
+            prose what the UI could display is the habit #553 spent four rounds removing. The effective
+            summary below stays — it reports the current state, which is a fact, not an explanation. */}
         {([
           { key: "guests" as const, label: t("spaceMembers.commentGuests"), testId: "comment-open-guests", onKey: "spaceMembers.commentGuestsOn", offKey: "spaceMembers.commentGuestsOff" },
           { key: "members" as const, label: t("spaceMembers.commentMembers"), testId: "comment-open-members", onKey: "spaceMembers.commentMembersOn", offKey: "spaceMembers.commentMembersOff" },

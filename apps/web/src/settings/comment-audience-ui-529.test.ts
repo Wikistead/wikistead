@@ -58,13 +58,16 @@ describe("#529/#552: the effective comment-audience summary", () => {
     });
   }
 
-  it("#552: the baseline renders WITHOUT the grants line; the summary never grows a grants clause", () => {
+  // RE-AIMED by #586: the BASELINE BOX is gone. It carried a sentence explaining that managers and
+  // moderators always comment, and the ruling replaced that explanation with the thing itself — the role
+  // badges list what they confer. #552's actual subject survives and is asserted here: the grants count
+  // line, and its vocabulary, must not come back.
+  it("#552: the grants line stays gone, and the effective summary is still rendered", () => {
     const src = readFileSync(resolve(import.meta.dirname, "./SpaceMembersTab.tsx"), "utf8");
-    expect(src).toContain('data-testid="comment-baseline"'); // the editors-always box stays
     expect(src).not.toContain("comment-baseline-grants"); // #552: the count line must not come back
     expect(src).not.toContain("commenterGrants");
     expect(src).toContain('data-testid="comment-effective-summary"');
-    expect(src.indexOf('data-testid="comment-baseline"'), "baseline sits above the toggle map").toBeLessThan(src.indexOf("comment-open-guests"));
+    expect(src, "#586: the prose baseline is not reintroduced").not.toContain('data-testid="comment-baseline"');
   });
 
   it("#552: `comment` left the picker but NOT the display (API-made rows must still render + sort)", () => {
