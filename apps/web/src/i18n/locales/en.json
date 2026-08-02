@@ -92,6 +92,11 @@
     "title": "Workspace analytics",
     "hint": "Page views across every page you manage in this workspace. Private pages you don't manage are never included, so this is not a workspace-wide total."
   },
+  "signInMethods": {
+    "title": "Sign-in methods",
+    "body": "One row per way in. The order is the order of the buttons on the login screen.",
+    "edit": "Edit this sign-in method"
+  },
   "toast": {
     "published": "Published",
     "publishFailed": "Couldn't publish",

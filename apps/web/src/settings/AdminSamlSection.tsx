@@ -60,8 +60,9 @@ export function AdminSamlSection() {
   if (state.kind === "hidden") return null;
   if (state.kind === "locked") {
     return (
-      <div className="mt-8 border-t border-border pt-6" data-testid="admin-saml">
-        <h3 className="mt-0">{t("adminAuth.samlTitle")}</h3>
+      // #589: this lives INSIDE the SAML row of the sign-in methods list now — the row draws the
+      // frame and says the name, so the section brings only its own contents.
+      <div className="border-t border-border pt-2" data-testid="admin-saml">
         <UpgradeNotice kind={disclosureKindFromError(saml.error as ApiError)} isAdmin testId="saml-upgrade"
           title={t("adminAuth.samlLockedTitle")} body={t("adminAuth.samlLockedBody")} />
       </div>
@@ -90,8 +91,7 @@ export function AdminSamlSection() {
   };
 
   return (
-    <div className="mt-8 border-t border-border pt-6" data-testid="admin-saml">
-      <h3 className="mt-0">{t("adminAuth.samlTitle")}</h3>
+    <div className="border-t border-border pt-2" data-testid="admin-saml">
       <p className="mt-0 text-sm text-fg-dim">{t("adminAuth.samlBody")}</p>
       {/* What the IdP side needs from us — shown up front so the admin can register the SP first. */}
       <div className="mb-4 rounded-lg border border-border bg-panel px-3 py-2.5 text-xs text-fg-dim" data-testid="saml-sp-metadata">

@@ -1,115 +1,30 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useTenantOidc, useUpdateTenantOidc, useTestTenantOidc } from "../data/queries";
-import { Button } from "../ui/Button";
-import { Input } from "../ui/Input";
-import { notify } from "../ui/toast";
-import { Switch } from "../ui/Switch";
-import { cn } from "../lib/utils";
 import { AdminEnrollmentSection } from "./AdminEnrollmentSection";
-import { AdminSamlSection } from "./AdminSamlSection";
-import { AdminLoginMethodsSection } from "./AdminLoginMethodsSection";
-import { AdminConnectionsSection } from "./AdminConnectionsSection";
+import { AdminSignInMethodsSection } from "./AdminSignInMethodsSection";
 
-const label = "mb-1 mt-3.5 block text-sm text-fg-dim";
-
-// Tenant OIDC (members' SSO) settings (Phase 5e). tenant#admin. Enabling a broken
-// IdP would break every new login, so "Test connection" validates discovery and the
-// server re-validates on save (enabling a bad issuer is rejected). The secret is
-// write-only (blank keeps the stored one). The admin's live session is the recovery
-// path if a change goes wrong.
+// The tenant's ways in (tenant#admin). #589 / ADR-195 addendum reduced this tab to two questions:
+// HOW someone signs in (one list of sign-in methods, each row edited in place) and WHO becomes a
+// member when they do (the enrolment policy below it).
+//
+// What used to be here and is not any more: a status card that repeated what each row already says,
+// and a single-OIDC form that always wrote the FIRST connection — so a second connection could not
+// be edited at all, and editing the first never said which one it was writing.
 export function AdminAuthTab() {
   const { t } = useTranslation();
-  const oidc = useTenantOidc();
-  const update = useUpdateTenantOidc();
-  const test = useTestTenantOidc();
-
-  const [issuer, setIssuer] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [scopes, setScopes] = useState("openid email profile");
-  const [redirectUri, setRedirectUri] = useState("");
-  const [groupsClaim, setGroupsClaim] = useState(""); // #102: blank → default 'groups'
-  const [enabled, setEnabled] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; error: string | null } | null>(null);
-
-  // Seed the form from the stored config once it loads.
-  const data = oidc.data;
-  useEffect(() => {
-    if (!data) return;
-    setIssuer(data.issuer); setClientId(data.clientId); setScopes(data.scopes);
-    setRedirectUri(data.redirectUri); setEnabled(data.enabled); setGroupsClaim(data.groupsClaim ?? "");
-  }, [data]);
-
-  const onTest = () => {
-    setTestResult(null);
-    test.mutate(issuer.trim(), { onSuccess: (r) => setTestResult(r), onError: () => setTestResult({ ok: false, error: t("adminAuth.testFail") }) });
-  };
-  const onSave = () => {
-    update.mutate(
-      { issuer, clientId, clientSecret: clientSecret ? clientSecret : undefined, scopes, redirectUri, enabled, groupsClaim: groupsClaim.trim() || null },
-      {
-        onSuccess: () => { notify.success(t("toast.saved")); setClientSecret(""); },
-        onError: () => notify.error(t("adminAuth.saveFailed")),
-      },
-    );
-  };
-
   return (
     <div className="max-w-[560px] p-6" data-testid="admin-auth">
       <h2 className="mt-0">{t("adminAuth.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("adminAuth.body")}</p>
-      {/* #537 Slice 3: which ways in exist — per-method state + the platform-login toggle. */}
-      <AdminLoginMethodsSection />
-      {/* #554 S4: N login connections (add/reorder/enable/delete) */}
-      <AdminConnectionsSection />
-
+      {/* Enabling a broken IdP breaks every new login, so a row's editor offers "Test connection"
+          and the server re-validates discovery on save (enabling a bad issuer is refused). The
+          client secret is write-only — blank keeps the stored one. */}
       <div className="mb-5 rounded-lg border border-l-[3px] border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] border-l-[var(--danger)] px-3 py-2.5 text-xs text-fg-dim" data-testid="oidc-warning">{t("adminAuth.warning")}</div>
 
-      <label className={label}>{t("adminAuth.issuer")}</label>
-      <Input value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://idp.example.com/" data-testid="oidc-issuer" />
+      <AdminSignInMethodsSection />
 
-      <label className={label}>{t("adminAuth.clientId")}</label>
-      <Input value={clientId} onChange={(e) => setClientId(e.target.value)} data-testid="oidc-client-id" />
-
-      <label className={label}>{t("adminAuth.clientSecret")}</label>
-      <Input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)}
-        placeholder={data?.hasSecret ? t("adminAuth.clientSecretKeep") : ""} data-testid="oidc-client-secret" />
-
-      <label className={label}>{t("adminAuth.scopes")}</label>
-      <Input value={scopes} onChange={(e) => setScopes(e.target.value)} data-testid="oidc-scopes" />
-
-      <label className={label}>{t("adminAuth.redirectUri")}</label>
-      <Input value={redirectUri} onChange={(e) => setRedirectUri(e.target.value)} placeholder="https://your-tenant.example.com/auth/callback" data-testid="oidc-redirect" />
-
-      {/* #102 / ADR-055: the id_token claim that carries the user's groups (blank → 'groups'). */}
-      <label className={label}>{t("adminAuth.groupsClaim")}</label>
-      <Input value={groupsClaim} onChange={(e) => setGroupsClaim(e.target.value)} placeholder="groups" data-testid="oidc-groups-claim" />
-
-      <label className="my-4 mb-1 flex items-center gap-2 text-sm">
-        {/* #389 / ADR-146: bare checkbox -> DS Switch (on/off state). */}
-        <Switch checked={enabled} onChange={setEnabled} testId="oidc-enabled" />
-        {t("adminAuth.enabled")}
-      </label>
-
-      {testResult && (
-        <div className={cn("mt-3.5 text-sm", testResult.ok ? "text-[#2da44e]" : "text-destructive")} data-testid="oidc-test-result">
-          {testResult.ok ? t("adminAuth.testOk") : (testResult.error ?? t("adminAuth.testFail"))}
-        </div>
-      )}
-
-      <div className="mt-5 flex gap-2">
-        <Button variant="default" size="sm" disabled={!issuer.trim() || test.isPending} onClick={onTest} data-testid="oidc-test">
-          {test.isPending ? t("adminAuth.testing") : t("adminAuth.test")}
-        </Button>
-        <Button variant="primary" size="sm" disabled={update.isPending} onClick={onSave} data-testid="oidc-save">{t("common.save")}</Button>
-      </div>
-
-      {/* #101 / ADR-034: auto-enrolment policy for successful OIDC logins (below the IdP config). */}
+      {/* #101 / ADR-034: auto-enrolment policy for successful logins — a different question (who
+          becomes a member), so it stays its own section below the list. */}
       <AdminEnrollmentSection />
-
-      {/* #537 / ADR-195 §5: SAML on the same tab — renders nothing on CE, upgrade notice when unentitled. */}
-      <AdminSamlSection />
     </div>
   );
 }

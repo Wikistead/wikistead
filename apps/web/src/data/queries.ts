@@ -1862,26 +1862,14 @@ export function useReassignOrphanDraft() {
   });
 }
 
-// Tenant OIDC (members' SSO) settings (Phase 5e) — tenant#admin only. The secret is
-// never returned (write-only); hasSecret signals whether one is stored.
-export interface TenantOidcDTO { issuer: string; clientId: string; scopes: string; redirectUri: string; enabled: boolean; hasSecret: boolean; groupsClaim: string | null }
-export interface TenantOidcInput { issuer: string; clientId: string; clientSecret?: string | null; scopes: string; redirectUri: string; enabled: boolean; groupsClaim?: string | null }
-export function useTenantOidc() {
-  const { token } = useSession();
-  return useQuery({
-    queryKey: ["tenant-oidc"],
-    queryFn: () => apiFetch<TenantOidcDTO | null>("/admin/oidc", token),
-    staleTime: 30_000,
-  });
-}
-export function useUpdateTenantOidc() {
-  const { token } = useSession();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: TenantOidcInput) => apiFetch<null>("/admin/oidc", token, { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tenant-oidc"] }),
-  });
-}
+// Tenant OIDC (members' SSO) — the CONNECTION TEST. #589 retired this surface's read and write hooks
+// with the single-OIDC form they served: that form wrote whatever `ORDER BY sort, id LIMIT 1`
+// returned, so it could only ever edit the first connection. Editing goes through
+// PATCH /admin/connections/:id now, per row.
+//
+// The TEST endpoint stays, and is the reason the legacy routes are not simply gone: it is the
+// product's only connection-test path (there is no equivalent under /admin/connections), and the
+// row's Test button calls it. Retiring GET/PATCH /admin/oidc server-side is a separate step (#572).
 export function useTestTenantOidc() {
   const { token } = useSession();
   return useMutation({
