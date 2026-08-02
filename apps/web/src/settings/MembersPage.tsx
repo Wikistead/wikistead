@@ -217,7 +217,7 @@ export function MembersPage() {
           <ul>
             {invites.map((i) => (
               <li key={i.id} style={{ marginBottom: 4 }}>
-                {i.email || t("members.noEmail")} — {i.role}{" "}
+                {t("members.pendingRow", { email: i.email || t("members.noEmail"), role: i.role })}{" "}
                 {/* #504: revoking kills the sent link for good — confirm first. */}
                 <Button variant="dangerGhost" size="sm" data-testid="invite-revoke"
                   onClick={() => setConfirming({ message: t("members.revokeConfirm", { email: i.email || t("members.noEmail") }), run: () => void guarded(() => revokeInvite(token, i.id))() })}>{t("members.revoke")}</Button>
