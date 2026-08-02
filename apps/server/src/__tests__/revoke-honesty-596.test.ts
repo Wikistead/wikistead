@@ -214,6 +214,22 @@ describe('#596 review: coverage is FGA truth, names are manage-only, and the led
     expect(await canView(p), 'and the role still confers view').toBe(true)
   }, 120_000)
 
+  it('and a REAL revocation still fires its webhook and files it as an access revocation', async () => {
+    // The other half of F3. Suppressing the event for a removal that took nothing away is only right
+    // if the event still fires when access really goes — without this, inverting the condition (or
+    // dropping the emit entirely) stays green.
+    const p = sub('pg-real-revoke')
+    await grantPageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' })
+    expect(await canView(p), 'granted').toBe(true)
+    const before = await auditRows(`page:${pageId}`)
+    const fired = await firedRevokes(() =>
+      revokePageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' }),
+    )
+    expect(fired, 'the webhook fires for a revocation that really happened').toEqual(['page.access_revoked'])
+    expect(await auditRows(`page:${pageId}`) - before, 'and the ledger gets its line').toBe(1)
+    expect(await canView(p), 'access really went').toBe(false)
+  }, 120_000)
+
   it('F1: a share-only manager gets the refusal WITHOUT the tenant role name', async () => {
     // The page grant/revoke verb is `share`; role DEFINITIONS are gated on `manage` (ADR-202 §1). A
     // coverage report must not be the back door that hands a share-only holder the tenant's role names.
