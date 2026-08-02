@@ -263,7 +263,12 @@ export async function accountPlugin(app: FastifyInstance) {
   app.get<{ Querystring: { tz?: string } }>('/me/activity', async (req) => getMyActivity(req.db, { subject: req.user.sub, tz: req.query?.tz }))
 
   app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean } }>('/me/settings', async (req) =>
-    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted, notificationsEnabled: req.body?.notificationsEnabled, defaultEventMask: req.body?.defaultEventMask }),
+    // #583: emailImmediate/emailDigest were DECLARED in the body type and then not forwarded, so the
+    // two toggles on /settings/account returned 204 and changed nothing. Both fields are optional, so
+    // nothing in the type system noticed; the tests all called updateAccountSettings directly, so
+    // nothing in the suite noticed either. account-settings-wiring-583.test.ts now compares the
+    // declared keys against the forwarded ones, which catches the next field to be added and dropped.
+    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted, notificationsEnabled: req.body?.notificationsEnabled, defaultEventMask: req.body?.defaultEventMask, emailImmediate: req.body?.emailImmediate, emailDigest: req.body?.emailDigest }),
   )
 
   app.put<{ Body: { data?: string } }>('/me/avatar', { bodyLimit: AVATAR_BODY_LIMIT }, async (req, reply) => {
