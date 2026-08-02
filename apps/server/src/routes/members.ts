@@ -288,7 +288,7 @@ export async function membersPlugin(app: FastifyInstance) {
   // Create an invite. Seat cap is enforced in createInvite (UNLIMITED self-host
   // skips it). Email is BEST-EFFORT (P1.3) — the invite link is authoritative, so
   // we always return it; `emailed` reports whether delivery was attempted+ok.
-  app.post<{ Body: { email?: string; role?: string } }>('/members/invites', async (req, reply) => {
+  app.post<{ Body: { email?: string; role?: string; roleId?: string | null } }>('/members/invites', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     const role = (req.body?.role ?? 'member') as InviteRole
     if (!ROLES.includes(role)) return reply.code(400).send({ error: 'invalid role' })
@@ -299,7 +299,7 @@ export async function membersPlugin(app: FastifyInstance) {
     let token: string
     let seatWarning = false
     try {
-      ;({ token, seatWarning } = await createInvite(req.db, { tenantId: req.tenant.id, plan: req.tenant.plan, invitedBy: req.user.sub, email, role }))
+      ;({ token, seatWarning } = await createInvite(req.db, { tenantId: req.tenant.id, plan: req.tenant.plan, invitedBy: req.user.sub, email, role, roleId: req.body?.roleId ?? null }))
     } catch {
       return reply.code(500).send({ error: 'could not create invite' })
     }

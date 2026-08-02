@@ -89,15 +89,25 @@ export async function lockSeats(sql: Sql, tenantId: string): Promise<void> {
 // the PLAINTEXT token so the caller can build the link + email it; only the hash persists.
 export async function createInvite(
   db: TenantDb,
-  args: { tenantId: string; plan: string; invitedBy: string; email: string | null; role: InviteRole },
+  args: { tenantId: string; plan: string; invitedBy: string; email: string | null; role: InviteRole; roleId?: string | null },
 ): Promise<{ id: string; token: string; expiresAt: Date; seatWarning: boolean }> {
   const ent = resolveEntitlements(args.plan)
   const seatWarning = isFinite(ent.maxSeats) && (await seatsReservable(db.sql)) >= ent.maxSeats
+  // #582 / ADR-202 §2: only a TENANT-scope custom role can ride an invite — a resource role has no
+  // resource here. Refused at ISSUE time, where the admin is still looking at the screen, rather than
+  // at acceptance, where the person who sees the failure did not choose the role.
+  if (args.roleId) {
+    const [role] = await db.sql<{ id: string; scope: string }[]>`SELECT id, scope FROM roles WHERE id = ${args.roleId}`
+    if (!role) throw Object.assign(new Error('not found'), { statusCode: 404 })
+    if (role.scope !== 'tenant') {
+      throw Object.assign(new Error('an invite can only carry a tenant-scope role'), { statusCode: 400 })
+    }
+  }
   const token = generateToken()
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS)
   const [row] = await db.sql<[{ id: string }]>`
-    INSERT INTO invites (tenant_id, token_hash, email, role, invited_by, expires_at)
-    VALUES (${args.tenantId}, ${hashInviteToken(token)}, ${args.email}, ${args.role}, ${args.invitedBy}, ${expiresAt})
+    INSERT INTO invites (tenant_id, token_hash, email, role, invited_by, expires_at, role_id)
+    VALUES (${args.tenantId}, ${hashInviteToken(token)}, ${args.email}, ${args.role}, ${args.invitedBy}, ${expiresAt}, ${args.roleId ?? null})
     RETURNING id
   `
   return { id: row.id, token, expiresAt, seatWarning }
@@ -142,21 +152,61 @@ export async function acceptInvite(
 
     // Consume-once: only a pending, non-expired invite for THIS tenant wins, and
     // exactly one concurrent caller can flip it (single UPDATE ... RETURNING).
-    const flipped = await tx<{ role: InviteRole }[]>`
+    // #582: the flip also returns the carried role and WHO invited them. The inviter is the audit
+    // actor: `assignRoleTxCore` records `user:<actorSub>`, so passing the accepting member would write
+    // "they gave themselves this role" into the ledger.
+    const flipped = await tx<{ role: InviteRole; role_id: string | null; invited_by: string }[]>`
       UPDATE invites
          SET status = 'accepted', accepted_sub = ${claims.sub}, accepted_at = now()
        WHERE token_hash = ${hashInviteToken(token)}
          AND tenant_id  = ${tenant.id}
          AND status     = 'pending'
          AND expires_at > now()
-      RETURNING role
+      RETURNING role, role_id, invited_by
     `
     if (flipped.length === 0) return false // unknown / expired / consumed / revoked / cross-tenant
     // The seat fortress (lock already held above): idempotent for an existing member, cap-checked,
     // atomic member INSERT + FGA. Shared with #101 auto-enrolment so EVERY new-member path goes through
     // the ONE gate. Returns whether it created; acceptInvite answers true either way (membership held).
-    await enrolUnderSeatCap(tx, deps.fga, tenant, claims, flipped[0]!.role, 'invite')
+    const seated = await enrolUnderSeatCap(tx, deps.fga, tenant, claims, flipped[0]!.role, 'invite')
+    await applyInviteRole(tx, deps.fga, tenant, claims.sub, flipped[0]!, seated)
     return true
+  })
+}
+
+// #582 / ADR-202 §2: apply the role the invite carried, in the SAME tx that seated the member.
+//
+// Three decisions the ADR made explicit, all visible here:
+//   - the role rides the tier, never replaces it — tenant membership IS the tier (#579's asymmetry).
+//   - if the `customRoles` entitlement is gone by acceptance, the person is seated with their tier and
+//     the dropped role is AUDITED. Refusing the acceptance would keep someone out of a tenant over a
+//     billing state they cannot see; dropping it silently would be a role nobody can account for.
+//   - a NEW member only. An existing member accepting an invite keeps what they have — an invite is
+//     how someone JOINS, and using it to top up a colleague's roles is a different act with a
+//     different screen.
+async function applyInviteRole(
+  tx: Sql, fga: OpenFgaClient, tenant: { id: string; plan: string }, sub: string,
+  invite: { role_id: string | null; invited_by: string }, seated: 'created' | 'exists',
+): Promise<void> {
+  if (!invite.role_id || seated !== 'created') return
+  const { assignRoleWithinTx } = await import('../routes/roles.js')
+  const { auditIfEntitled } = await import('../audit/outbox.js')
+  const [role] = await tx<{ id: string; capabilities: string[]; scope: string }[]>`
+    SELECT id, capabilities, scope FROM roles WHERE id = ${invite.role_id}`
+  // The pointer can be null by now (ON DELETE SET NULL) or the role can have changed scope. Either way
+  // the acceptance is NOT silenced: seat them and say what was dropped.
+  const entitled = resolveEntitlements(tenant.plan).customRoles
+  if (!role || role.scope !== 'tenant' || !entitled) {
+    await auditIfEntitled(tx, tenant, {
+      actor: `user:${invite.invited_by}`, action: 'invite.role_dropped',
+      target: invite.role_id ? `role:${invite.role_id}` : `member:${sub}`,
+    }).catch(() => {})
+    return
+  }
+  await assignRoleWithinTx(tx, fga, {
+    tenant, roleId: role.id, capabilities: role.capabilities as never[],
+    resourceType: 'tenant', resourceId: tenant.id, principal: `user:${sub}`,
+    actorSub: invite.invited_by, origin: 'invite', onDuplicate: 'ignore',
   })
 }
 
