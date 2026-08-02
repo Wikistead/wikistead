@@ -20,6 +20,7 @@ import { SESSION_COOKIE, establishMemberSession, sessionCookieOptions } from '..
 import { localLoginEnabled } from '../auth/login-methods.js'
 import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/password-hash.js'
 import { safeReturnTo } from '../auth/return-to.js'
+import { validatePasswordPolicy, PASSWORD_MIN_LENGTH } from '../auth/password-policy.js'
 
 // ADR-198 §5, ruled on #568: an identifier is locked after 5 failures in 15 minutes, an IP after 30,
 // and a lock lasts 30 minutes. Env-overridable because the e2e and server suites hammer this path
@@ -75,6 +76,55 @@ export function sameOriginOk(headers: Record<string, unknown>, host: string | un
 }
 
 export async function authLocalPlugin(app: FastifyInstance) {
+  // #568 / ADR-198 §2: accept a password invite. Unauthenticated and token-addressed — the person
+  // holding the link is not a member yet, which is the whole point.
+  //
+  // Every refusal answers the SAME shape: an unknown, expired, consumed or revoked token, a token for
+  // an OIDC invite, and a tenant that has since switched password sign-in off are one response. The
+  // holder of a dead link learns "this link does not work", never anything about the tenant.
+  app.post<{ Body: { token?: string; password?: string } }>(
+    '/auth/local/accept', { config: { public: true } }, async (req, reply) => {
+      if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
+        return reply.code(403).send({ error: 'forbidden' })
+      }
+      const token = (req.body?.token ?? '').trim()
+      const password = req.body?.password ?? ''
+      if (!token) return reply.code(404).send({ error: 'invite not available' })
+      // The policy failure is its own answer, and deliberately so: the person is choosing a password
+      // right now and needs to know it was too short. It says nothing about the invite.
+      if (!validatePasswordPolicy(password)) {
+        return reply.code(400).send({ error: `password must be at least ${PASSWORD_MIN_LENGTH} characters`, code: 'weak_password' })
+      }
+      // Accepting mints a member: rate-limit by source so a leaked-token guessing run cannot seat
+      // accounts as fast as it can POST.
+      if (await overLimit(app.valkey, `rl:local:accept:${req.tenant.id}:${req.ip}`, LOCAL_LOGIN_IP_MAX)) {
+        return reply.code(404).send({ error: 'invite not available' })
+      }
+      await countFailure(app.valkey, `rl:local:accept:${req.tenant.id}:${req.ip}`, LOCAL_LOGIN_WINDOW_S)
+
+      const { acceptLocalInvite } = await import('../auth/invites.js')
+      let outcome: { ok: true; sub: string } | { ok: false }
+      try {
+        outcome = await acceptLocalInvite({ db: req.db, fga: app.fga }, req.tenant, token, password)
+      } catch (e) {
+        // A seat-cap refusal is its own answer (402), as it is for every other acceptance path: it is
+        // about the tenant's plan, not about whether the link is real.
+        if ((e as { code?: string }).code === 'seat_limit') return reply.code(402).send({ error: 'seat limit reached', code: 'seat_limit' })
+        throw e
+      }
+      if (!outcome.ok) return reply.code(404).send({ error: 'invite not available' })
+
+      const sid = await establishMemberSession(
+        { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
+        req.tenant,
+        { sub: outcome.sub },
+        { localIdentity: true },
+      )
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      return reply.code(201).send({ ok: true })
+    },
+  )
+
   // Host-resolved tenant, no session required — this is where a session comes from.
   app.post<{ Body: { identifier?: string; password?: string; returnTo?: string } }>(
     '/auth/local/login', { config: { public: true } }, async (req, reply) => {
