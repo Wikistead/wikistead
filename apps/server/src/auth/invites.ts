@@ -222,6 +222,11 @@ export async function enrolUnderSeatCap(
   claims: { sub: string; email?: string | null; name?: string | null },
   role: InviteRole,
   via: 'invite' | 'auto',
+  // #568 / ADR-198 §1 M5: who issued this identity. Defaults to 'oidc' so every existing caller is
+  // unchanged; the local acceptance transaction passes 'local', which is what makes ADR-190's rule
+  // ("only local members may edit their display name") mean what it says — an OIDC member's name
+  // comes back from their IdP at every login, so letting them edit it would be a lie.
+  identitySource: 'oidc' | 'local' = 'oidc',
 ): Promise<'created' | 'exists'> {
   await lockSeats(tx, tenant.id)
   if (await isMember(tx, claims.sub)) return 'exists'
@@ -230,8 +235,8 @@ export async function enrolUnderSeatCap(
     throw Object.assign(new Error('seat limit reached'), { statusCode: 402, code: 'seat_limit' })
   }
   await tx`
-    INSERT INTO members (tenant_id, sub, email, display_name, role)
-    VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${role})
+    INSERT INTO members (tenant_id, sub, email, display_name, role, identity_source)
+    VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${role}, ${identitySource})
     ON CONFLICT (tenant_id, sub) DO NOTHING
   `
   await writeTuples(fga, memberTuples(tenant.id, claims.sub, role))

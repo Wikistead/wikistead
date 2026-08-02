@@ -194,6 +194,12 @@ export async function membersPlugin(app: FastifyInstance) {
       // for them (tenant-scoped explicitly — the outbox has no RLS). The aggregate counts (page_view_daily)
       // are anonymous and stay. The drain's membership re-check is the second defence against a fold that
       // lands after this delete (erasure-race double-defence, reviewer condition 1).
+      // #568 / ADR-198 §1 M4: the member's PASSWORD goes too, explicitly. The composite FK cascades,
+      // but relying on it leaves the deletion invisible here — and this is the transaction the #474
+      // rule ("removal strips every other credential") lives in; a password is not less of a
+      // credential than an API key. Written out so re-inviting the same address is never blocked by
+      // UNIQUE (tenant_id, identifier), and no dormant hash outlives its member.
+      await tx`DELETE FROM local_credentials WHERE member_sub = ${req.params.sub}`
       await tx`DELETE FROM page_view_roster WHERE member_sub = ${req.params.sub}`
       await tx`DELETE FROM analytics_outbox WHERE tenant_id = ${req.tenant.id} AND viewer_class = 'member' AND member_sub = ${req.params.sub}`
       // #474: the member's API keys go too. Removal already strips every other credential — sessions
