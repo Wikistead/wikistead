@@ -59,7 +59,10 @@ describe("#537 SAML admin section wiring (source pins)", () => {
   });
   it("both locales carry the SAML keys", () => {
     for (const loc of [en, ja] as Array<{ adminAuth: Record<string, string> }>) {
-      for (const k of ["samlTitle", "samlLockedTitle", "samlLockedBody", "samlCertKeep", "samlCertRequired", "samlSpHint"]) {
+      // #589: `samlTitle` went with the section heading — the SAML row of the sign-in methods list
+      // names the method itself (`methodSaml`), so a second title would have said it twice. The pin
+      // follows the copy that is actually rendered rather than guarding a string nobody draws.
+      for (const k of ["methodSaml", "samlLockedTitle", "samlLockedBody", "samlCertKeep", "samlCertRequired", "samlSpHint"]) {
         expect(loc.adminAuth[k], k).toBeTruthy();
       }
     }

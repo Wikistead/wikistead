@@ -1,7 +1,5 @@
 {
   "adminConnections": {
-    "title": "Login connections",
-    "body": "The ways members can sign in, in screen order. The first connection is the primary button. Presets carry their own branding; a custom connection may carry a label.",
     "add": "Add connection",
     "created": "Connection added",
     "deleted": "Connection deleted",
@@ -93,6 +91,9 @@
     "hint": "Page views across every page you manage in this workspace. Private pages you don't manage are never included, so this is not a workspace-wide total."
   },
   "signInMethods": {
+    "selectionOn": "Selected",
+    "selectionOff": "Not selected",
+    "notWorking": "Not working right now",
     "title": "Sign-in methods",
     "body": "One row per way in. The order is the order of the buttons on the login screen.",
     "edit": "Edit this sign-in method"
@@ -367,14 +368,12 @@
     "clientSecretKeep": "Leave blank to keep the current secret",
     "scopes": "Scopes",
     "redirectUri": "Redirect URI",
-    "enabled": "Use this identity provider for sign-in",
     "test": "Test connection",
     "testing": "Testing…",
     "testOk": "Discovery succeeded. This issuer looks reachable.",
     "testFail": "Could not verify this issuer.",
     "saveFailed": "Couldn't save. Test the connection first.",
     "groupsClaim": "Groups claim",
-    "samlTitle": "SAML single sign-on",
     "samlBody": "Let members sign in through your SAML identity provider. Available on plans with SAML SSO.",
     "samlLockedTitle": "SAML SSO is not on your plan",
     "samlLockedBody": "Upgrade to configure SAML single sign-on for your members. Any stored configuration is kept.",
@@ -391,9 +390,6 @@
     "samlAttrName": "name attribute",
     "samlAttrGroups": "groups attribute",
     "samlEnabled": "Enable SAML sign-in",
-    "methodsTitle": "Login methods",
-    "methodsBody": "What this workspace offers on its sign-in screen. Methods excluded by your deployment's policy are marked; your settings are kept and return when policy allows them.",
-    "methodTenantOidc": "OIDC",
     "methodPlatformOidc": "Platform login",
     "methodSaml": "SAML SSO",
     "method_effective": "Active",

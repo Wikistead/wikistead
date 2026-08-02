@@ -1,7 +1,5 @@
 {
   "adminConnections": {
-    "title": "ログイン接続",
-    "body": "メンバーのサインイン方法を画面表示順に管理します。先頭の接続がメインボタンになります。プリセットは固有のブランド表示、カスタム接続にはラベルを付けられます。",
     "add": "接続を追加",
     "created": "接続を追加しました",
     "deleted": "接続を削除しました",
@@ -93,6 +91,9 @@
     "hint": "このワークスペースであなたが管理する全ページのビュー数です。管理していない非公開ページは含まれないため、ワークスペース全体の総数ではありません。"
   },
   "signInMethods": {
+    "selectionOn": "選択中",
+    "selectionOff": "未選択",
+    "notWorking": "いまは機能していません",
     "title": "サインイン方法",
     "body": "1 行が 1 つのサインイン方法です。並び順はログイン画面のボタンの並び順になります。",
     "edit": "このサインイン方法を編集"
@@ -367,14 +368,12 @@
     "clientSecretKeep": "空欄にすると現在のシークレットを維持",
     "scopes": "スコープ",
     "redirectUri": "リダイレクト URI",
-    "enabled": "この ID プロバイダーでサインインする",
     "test": "接続テスト",
     "testing": "テスト中…",
     "testOk": "ディスカバリに成功しました。この issuer に到達できます。",
     "testFail": "この issuer を検証できませんでした。",
     "saveFailed": "保存できませんでした。先に接続テストをしてください。",
     "groupsClaim": "グループのクレーム名",
-    "samlTitle": "SAML シングルサインオン",
     "samlBody": "メンバーを SAML IdP 経由でサインインさせます。SAML SSO を含むプランで利用できます。",
     "samlLockedTitle": "SAML SSO は現在のプランに含まれていません",
     "samlLockedBody": "アップグレードするとメンバー向けの SAML シングルサインオンを設定できます。保存済みの設定は保持されます。",
@@ -391,9 +390,6 @@
     "samlAttrName": "name 属性",
     "samlAttrGroups": "groups 属性",
     "samlEnabled": "SAML サインインを有効にする",
-    "methodsTitle": "ログイン方式",
-    "methodsBody": "このワークスペースのサインイン画面で提供する方式です。デプロイのポリシーで除外された方式は表示され、設定は保持されます（ポリシーが戻れば再び有効になります）。",
-    "methodTenantOidc": "OIDC",
     "methodPlatformOidc": "プラットフォームログイン",
     "methodSaml": "SAML SSO",
     "method_effective": "有効",
