@@ -49,6 +49,11 @@ export function resolveGrantDispatch(args: {
   mode: "user" | "group";
   picked: { grantee: string } | null; // member mode: the chosen member, principal ALREADY formed upstream
   groupName: string; // group mode: the raw name the server derives the id from
+  // #582 / ADR-202 §1: the PAGE grant route takes one relation per call where the space route takes an
+  // array, and ADR-199 settled which surface carries the noun — "Space scope only — the page dialog
+  // offers bare capabilities, no role noun". So the fold is suppressed here rather than silently
+  // dropping `comment` from a composite the caller cannot execute.
+  noComposite?: boolean;
 }): GrantAction {
   const target: GrantTarget | null =
     args.mode === "group"
@@ -63,7 +68,7 @@ export function resolveGrantDispatch(args: {
   if (args.pick.startsWith("builtin:")) {
     const capability = args.pick.slice("builtin:".length);
     if (!capability) return { path: "none" };
-    const bundle = Object.hasOwn(COMPOSITE_BUILTINS, capability) ? COMPOSITE_BUILTINS[capability] : undefined;
+    const bundle = args.noComposite ? undefined : (Object.hasOwn(COMPOSITE_BUILTINS, capability) ? COMPOSITE_BUILTINS[capability] : undefined);
     if (bundle) return { path: "grant-composite", capabilities: bundle, target };
     return { path: "grant", capability, target };
   }

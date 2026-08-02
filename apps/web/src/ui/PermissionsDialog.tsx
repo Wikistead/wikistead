@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, usePageCommentAudience, useSetPageCommentAudience, type PageRelation } from "../data/queries";
+import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, usePageCommentAudience, useSetPageCommentAudience, usePageAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole, type PageRelation } from "../data/queries";
+import { resolveGrantDispatch } from "../settings/grant-dispatch";
 import { MemberSearchInput } from "./MemberSearchInput";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
@@ -25,6 +26,10 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const { data: page } = usePage(pageId);
   const { data: groups } = useTenantGroups(page?.spaceId ?? "", open && !!page?.spaceId);
   const grant = useGrantAccess(pageId);
+  const assignable = usePageAssignableRoles(pageId, open);
+  const pageAssignments = useRoleAssignments("page", pageId, open);
+  const assignRole = useAssignRole();
+  const unassignRole = useUnassignRole();
   const revoke = useRevokeAccess(pageId);
   const { data: restrictions } = usePageRestrictions(pageId, open); // #109
   const restrict = useRestrict(pageId);
@@ -98,7 +103,10 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const [mode, setMode] = useState<"user" | "group">("user");
   const [sub, setSub] = useState("");
   const [groupName, setGroupName] = useState("");
-  const [relation, setRelation] = useState<PageRelation>("view");
+  // #582: the picker's value carries its MECHANISM as a prefix, so a custom role named `edit` can
+  // never be mistaken for the capability (the #536 lesson, same encoding).
+  const [pick, setPick] = useState<string>("builtin:view");
+  const relation = (pick.startsWith("builtin:") ? pick.slice("builtin:".length) : "view") as PageRelation;
   const [restrictSub, setRestrictSub] = useState("");
   // #416 / ADR-161: member typeahead (page#manage-gated endpoint). A pick fills the grantee; RAW input
   // stays valid (the picker assists — a pasted sub still works, as before).
@@ -119,6 +127,22 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   };
 
   const add = () => {
+    // #582: the DECISION is the shared pure function the space screen uses — `noComposite` because the
+    // page grant route takes ONE relation per call (ADR-199 keeps the editor noun at space scope).
+    const action = resolveGrantDispatch({
+      pick, mode, groupName,
+      picked: pickedGrant ? { grantee: pickedGrant.grantee } : (sub.trim() ? { grantee: `user:${sub.trim()}` } : null),
+      noComposite: true,
+    });
+    if (action.path === "assign") {
+      assignRole.mutate(
+        { roleId: action.roleId, resourceType: "page", resourceId: pageId,
+          ...(action.target.kind === "group" ? { groupName: action.target.groupName } : { principal: action.target.principal }) },
+        { onSuccess: () => { notify.success(t("toast.accessGranted")); setSub(""); setPickedGrant(null); },
+          onError: () => notify.error(t("toast.actionFailed")) },
+      );
+      return;
+    }
     if (mode === "group") {
       if (!groupName) return;
       grant.mutate({ groupName, relation }, {
@@ -275,18 +299,24 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               itemTestId="grant-candidate"
             />
           )}
+          {/* #582 / ADR-202 §1: ONE picker. The five capabilities the dialog always offered, then the
+              tenant's resource-scope custom roles — the same merged shape the space Members tab settled
+              on in #536, so "give this person a role" does not mean two different things on two
+              screens. The per-page `comment` grant stays in the list: ADR-199 severed comment from
+              edit and #553's copy sends people here to grant it. */}
           <Select
-            value={relation}
-            onChange={(v) => setRelation(v as PageRelation)}
+            value={pick}
+            onChange={setPick}
             ariaLabel={t("permissions.relation")}
             testId="grant-relation"
             size="sm"
             options={[
-              { value: "view", label: t("permissions.view") },
-              { value: "comment", label: t("permissions.comment") }, // #100: per-member comment grant
-              { value: "edit", label: t("permissions.edit") },
-              { value: "moderate", label: t("permissions.moderate") }, // #330: per-page moderator (freeze/revert/patrol; not manage)
-              { value: "manage", label: t("permissions.manage") },
+              { value: "builtin:view", label: t("permissions.view") },
+              { value: "builtin:comment", label: t("permissions.comment") }, // #100: per-member comment grant
+              { value: "builtin:edit", label: t("permissions.edit") },
+              { value: "builtin:moderate", label: t("permissions.moderate") }, // #330: per-page moderator (freeze/revert/patrol; not manage)
+              { value: "builtin:manage", label: t("permissions.manage") },
+              ...(assignable.data?.custom ?? []).map((r) => ({ value: `role:${r.id}`, label: r.name })),
             ]}
           />
           <Button variant="primary" size="sm" data-testid="grant-add" disabled={grant.isPending} onClick={add}>{t("permissions.add")}</Button>
@@ -304,7 +334,22 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               })}><X size={14} /></IconButton>
             </div>
           ))}
-          {(grants?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("permissions.empty")}</p>}
+          {/* #582 / ADR-202 §1: role-conferred access is its OWN row kind, revoked by unassigning. Not
+              because the × would corrupt the reference count — the page revoke already routes through
+              unassignRoleInTx or leaves a covered tuple alone — but because it would report success,
+              write an audit entry, fire a webhook, and change nothing in FGA. The user removes someone
+              and they still have access. A row that offers the button that lies is the defect. */}
+          {(pageAssignments.data ?? []).map((a) => (
+            <div key={a.id} className="flex items-center gap-2" data-testid="grant-role-item">
+              <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] uppercase tracking-wide text-fg-dim">{a.roleName}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-foreground">{a.groupName ? `${a.groupName} (${t("spaceMembers.group")})` : (a.displayName ?? a.principal.replace(/^user:/, ""))}</span>
+              <IconButton aria-label={t("permissions.revoke")} data-testid="grant-role-revoke" variant="danger" onClick={() => unassignRole.mutate(a.id, {
+                onSuccess: () => notify.success(t("toast.accessRevoked")),
+                onError: () => notify.error(t("toast.actionFailed")),
+              })}><X size={14} /></IconButton>
+            </div>
+          ))}
+          {(grants?.length ?? 0) === 0 && (pageAssignments.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("permissions.empty")}</p>}
         </div>
 
         </TabsContent>
