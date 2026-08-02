@@ -215,3 +215,77 @@ describe('#568 §3 M8: local is a connection, so the lockout guard can see it', 
     expect(others.length, 'nothing else would be left').toBe(0)
   }, 120_000)
 })
+
+describe('#568 §6: changing a password evicts everyone else, and cannot grow one on an SSO account', () => {
+  const DEV = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
+
+  it('an OIDC member cannot acquire a password here (the rev2 hole)', async () => {
+    // dev-token authenticates `dev-user`, an OIDC-source member with no credential row. If this
+    // route upserted, a tenant that runs on SSO would grow a password door nobody authorised.
+    await setLocalLogin(true)
+    const res = await app.inject({
+      method: 'POST', url: '/auth/local/password', headers: DEV,
+      payload: { currentPassword: 'anything', newPassword: 'a-brand-new-passphrase' },
+    })
+    expect(res.statusCode, 'not available, and not a hint about why').toBe(404)
+    const rows = await db.sql`SELECT 1 FROM local_credentials WHERE member_sub = 'dev-user'`
+    expect(rows.length, 'and nothing was written').toBe(0)
+  }, 120_000)
+
+  it('the wrong current password is refused, and the stored hash is untouched', async () => {
+    const { sub, identifier } = await makeLocalMember('change-wrong')
+    await clearCounters(identifier)
+    const before = (await db.sql<{ password_hash: string }[]>`SELECT password_hash FROM local_credentials WHERE member_sub = ${sub}`)[0]!
+    // Authenticate AS that member the way the product does: sign in and use the cookie.
+    const signed = await login(identifier, PASSWORD)
+    expect(signed.statusCode).toBe(200)
+    const sid = signed.cookies.find((c) => c.name === 'wks_sess')!.value
+    const res = await app.inject({
+      method: 'POST', url: '/auth/local/password',
+      headers: { host: 'dev.localhost', 'content-type': 'application/json', cookie: `wks_sess=${sid}` },
+      payload: { currentPassword: 'not-the-current-one', newPassword: 'a-brand-new-passphrase' },
+    })
+    expect(res.statusCode, 'the current password is checked, session or no session').toBe(403)
+    const after = (await db.sql<{ password_hash: string }[]>`SELECT password_hash FROM local_credentials WHERE member_sub = ${sub}`)[0]!
+    expect(after.password_hash).toBe(before.password_hash)
+  }, 120_000)
+
+  it('the right current password changes it, and signs every OTHER session out', async () => {
+    const { sub, identifier } = await makeLocalMember('change-ok')
+    await clearCounters(identifier)
+    const first = await login(identifier, PASSWORD)
+    const second = await login(identifier, PASSWORD)
+    const keep = first.cookies.find((c) => c.name === 'wks_sess')!.value
+    const doomed = second.cookies.find((c) => c.name === 'wks_sess')!.value
+    const NEXT = 'the-next-passphrase-please'
+    const res = await app.inject({
+      method: 'POST', url: '/auth/local/password',
+      headers: { host: 'dev.localhost', 'content-type': 'application/json', cookie: `wks_sess=${keep}` },
+      payload: { currentPassword: PASSWORD, newPassword: NEXT },
+    })
+    expect(res.statusCode, res.body).toBe(204)
+    expect(await app.valkey.get(`sess:${doomed}`), 'the other session was signed out').toBeNull()
+    expect(await app.valkey.get(`sess:${keep}`), 'the tab they typed in survived').not.toBeNull()
+    await clearCounters(identifier)
+    expect((await login(identifier, NEXT)).statusCode, 'the new password works').toBe(200)
+    await clearCounters(identifier)
+    expect((await login(identifier, PASSWORD)).statusCode, 'and the old one does not').toBe(401)
+    void sub
+  }, 180_000)
+
+  it('a spared session stays REVOCABLE — the survivor is put back in the index', async () => {
+    // The trap the review named: sparing a session by deleting the index leaves a live session that
+    // no later revocation (removal, force-logout, the next password change) can find.
+    const { destroyMemberSessions, createSession } = await import('../auth/session.js')
+    const sub = `wlocal_sess568-${STAMP}`
+    subs.push(sub)
+    const keep = await createSession(app.valkey, { tenantId: TENANT, sub, email: null, role: 'member', groups: [] })
+    const other = await createSession(app.valkey, { tenantId: TENANT, sub, email: null, role: 'member', groups: [] })
+    await destroyMemberSessions(app.valkey, TENANT, sub, keep)
+    expect(await app.valkey.get(`sess:${other}`), 'the other session is gone').toBeNull()
+    expect(await app.valkey.get(`sess:${keep}`), 'the current one survived').not.toBeNull()
+    // ...and a LATER blanket revocation still reaches it
+    await destroyMemberSessions(app.valkey, TENANT, sub)
+    expect(await app.valkey.get(`sess:${keep}`), 'the survivor was still findable').toBeNull()
+  }, 120_000)
+})

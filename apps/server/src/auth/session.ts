@@ -143,10 +143,24 @@ export async function destroySession(valkey: IORedis, sid: string): Promise<void
 // Revoke EVERY session of a member: used on removal and admin force-logout. This
 // is what makes "removed → can no longer enter" take effect immediately rather
 // than at TTL expiry. Deletes each indexed session entry, then the index itself.
-export async function destroyMemberSessions(valkey: IORedis, tenantId: string, sub: string): Promise<void> {
+export async function destroyMemberSessions(
+  valkey: IORedis, tenantId: string, sub: string,
+  // #568 / ADR-198 §6: keep ONE session alive — the one that just changed the password. Signing
+  // someone out of the tab they are typing in punishes them for securing their account, and they
+  // would simply sign back in with the password they just set, which revokes nothing.
+  exceptSid?: string,
+): Promise<void> {
   const sids = await valkey.smembers(memberKey(tenantId, sub))
-  if (sids.length > 0) await valkey.del(...sids.map(key))
+  const doomed = exceptSid ? sids.filter((s) => s !== exceptSid) : sids
+  if (doomed.length > 0) await valkey.del(...doomed.map(key))
   await valkey.del(memberKey(tenantId, sub))
+  // The index was just deleted, so a SURVIVOR has to be put back — otherwise it is a live session
+  // that no future revocation can find (member removal, admin force-logout and the next password
+  // change all work through this index), which is worse than not sparing it at all.
+  if (exceptSid && sids.includes(exceptSid)) {
+    await valkey.sadd(memberKey(tenantId, sub), exceptSid)
+    await valkey.expire(memberKey(tenantId, sub), ABSOLUTE_TTL_S)
+  }
 }
 
 // Turn already-verified identity claims into a membership-checked session.

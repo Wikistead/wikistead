@@ -114,6 +114,10 @@ export type DomainEvent =
   // exist, and resolving one would hand a webhook consumer the enumeration answer the login response
   // deliberately withholds. The lock always expires on its own.
   | { type: 'member.locked';        tenantId: string; identifier: string }
+  // #568 / ADR-198 §6 (OQ7): a member changed their own password. Named by SUB, unlike the lock —
+  // this one is about a known member, and an account-takeover investigation starts by asking when
+  // the password last moved.
+  | { type: 'member.password_changed'; tenantId: string; targetSub: string }
   | { type: 'invite.created';      tenantId: string; actorId: string; role: string }
   | { type: 'invite.revoked';      tenantId: string; actorId: string }
   // ── Comments (P4) ─────────────────────────────────────────────────────

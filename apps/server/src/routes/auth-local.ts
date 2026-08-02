@@ -16,7 +16,7 @@
 import type { FastifyInstance } from 'fastify'
 import type IORedis from 'ioredis'
 import { emit } from '@wikistead/events'
-import { SESSION_COOKIE, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
+import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
 import { localLoginEnabled } from '../auth/login-methods.js'
 import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/password-hash.js'
 import { safeReturnTo } from '../auth/return-to.js'
@@ -124,6 +124,48 @@ export async function authLocalPlugin(app: FastifyInstance) {
       return reply.code(201).send({ ok: true })
     },
   )
+
+  // #568 / ADR-198 §6: change your own password. Authenticated, and it asks for the CURRENT one —
+  // a live session is not proof that the person at the keyboard is the account's owner (a borrowed
+  // laptop, a stolen cookie), and a password change is precisely the move an attacker makes to keep
+  // an account they have temporary access to.
+  //
+  // Only a LOCAL member can do this, and only while the tenant offers password sign-in: an OIDC
+  // member has no credential row, and creating one here would grow them a password the tenant's SSO
+  // policy never authorised (the defect the ADR's rev2 shipped and the review caught).
+  app.post<{ Body: { currentPassword?: string; newPassword?: string } }>('/auth/local/password', async (req, reply) => {
+    const [row] = await req.db.sql<{ password_hash: string }[]>`
+      SELECT password_hash FROM local_credentials WHERE member_sub = ${req.user.sub}`
+    // No credential = not a local member. 404, not 403: whether this member signs in with a password
+    // is not something this route needs to confirm to whoever is asking.
+    if (!row || !(await localLoginEnabled(req.db))) return reply.code(404).send({ error: 'not available' })
+
+    const current = req.body?.currentPassword ?? ''
+    const next = req.body?.newPassword ?? ''
+    if (!validatePasswordPolicy(next)) {
+      return reply.code(400).send({ error: `password must be at least ${PASSWORD_MIN_LENGTH} characters`, code: 'weak_password' })
+    }
+    // Rate-limited like the login: this is a password-guessing surface too (an attacker with a
+    // borrowed session guessing the current password), and it burns a real KDF per attempt.
+    const guessKey = `rl:local:change:${req.tenant.id}:${req.user.sub}`
+    if (await overLimit(app.valkey, guessKey, LOCAL_LOGIN_ID_MAX)) return reply.code(429).send({ error: 'too many attempts' })
+    if (!(await verifyPassword(current, row.password_hash))) {
+      await countFailure(app.valkey, guessKey, LOCAL_LOGIN_WINDOW_S)
+      emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'local', reason: 'invalid credentials' })
+      return reply.code(403).send({ error: 'invalid credentials' })
+    }
+    await app.valkey.del(guessKey).catch(() => {})
+
+    const hash = await hashPassword(next)
+    // UPDATE, never INSERT: the row must already exist (checked above). An upsert here is how a
+    // password gets grown on an account that never had one.
+    await req.db.sql`UPDATE local_credentials SET password_hash = ${hash}, updated_at = now() WHERE member_sub = ${req.user.sub}`
+    // Every OTHER session goes: a password change is how someone evicts whoever they think is in
+    // their account, and leaving the other sessions alive makes the change cosmetic.
+    await destroyMemberSessions(app.valkey, req.tenant.id, req.user.sub, req.cookies?.[SESSION_COOKIE])
+    emit({ type: 'member.password_changed', tenantId: req.tenant.id, targetSub: req.user.sub })
+    return reply.code(204).send()
+  })
 
   // Host-resolved tenant, no session required — this is where a session comes from.
   app.post<{ Body: { identifier?: string; password?: string; returnTo?: string } }>(
