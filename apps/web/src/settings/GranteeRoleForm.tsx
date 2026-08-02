@@ -75,8 +75,8 @@ export function GranteeRoleForm(p: GranteeRoleFormProps) {
           picked={p.picked}
           onPick={p.onPick}
           candidates={[...p.candidates]}
-          placeholder={t("spaceMembers.addPlaceholder")}
-          ariaLabel={t("spaceMembers.addPlaceholder")}
+          placeholder={t("common.memberSearch")}
+          ariaLabel={t("common.memberSearch")}
           inputTestId={`${p.testId}-input`}
           listTestId={`${p.testId}-candidates`}
           itemTestId={`${p.testId}-candidate`}
