@@ -31,7 +31,12 @@ export type EmailBuildResult =
   | { kind: 'send'; message: Omit<EmailMessage, 'to'> }
   | { kind: 'skip'; reason: string }
   | { kind: 'retry'; reason: string }
-export type EmailBuilder = (rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null }) => Promise<EmailBuildResult>
+// #575 / ADR-200 slice B: the builders also get the tenant's BRANDING. It is resolved here, beside
+// tenant and baseUrl, for the reason `outbox.ts` already records above: `tenant_settings` is RLS'd, so
+// a bare-pool read from a builder answers empty and every mail would silently wear the deployment
+// default. Resolving it once per row also means one read instead of one per builder.
+export interface EmailBranding { productName: string; displayName: string | null; logoUrl: string | null; whitelabel: boolean }
+export type EmailBuilder = (rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding }) => Promise<EmailBuildResult>
 
 const builders = new Map<string, EmailBuilder>()
 export function registerEmailBuilder(cls: string, builder: EmailBuilder): void {
@@ -107,6 +112,11 @@ export async function drainEmailOutbox(deps: { fallback: EmailDriver; log?: (m: 
       if (!to) { await drop([row.id], log, 'member has no address'); handled++; continue }
       const { tenantBaseUrl } = await import('./base-url.js')
       const baseUrl = await withTenantTx(tenant, async (tx) => tenantBaseUrl(tx as never, { id: tenant.id, slug: tenant.slug }))
+      // #575 slice B: the same short tenant tx shape — inside it because tenant_settings is FORCE RLS.
+      const { getTenantBranding } = await import('../routes/branding.js')
+      const { productName } = await import('../product-name.js')
+      const b = await withTenantTx(tenant, async (tx) => getTenantBranding({ sql: tx } as never, tenant.plan))
+      const branding = { productName: productName(), displayName: b.displayName, logoUrl: b.logoUrl, whitelabel: b.whitelabel }
       // fold (§6): gather this key's DUE siblings so K pending rows become one message. The advisory
       // lock serializes competing workers on the key; rows claimed here are marked so the batch that
       // claimed them elsewhere skips them (claimed_at was just refreshed by our claim).
@@ -123,7 +133,7 @@ export async function drainEmailOutbox(deps: { fallback: EmailDriver; log?: (m: 
         group = [row, ...siblings]
       }
       for (const g of group) done.add(g.id)
-      const built = await builder(group, { tenantId: tenant.id, baseUrl })
+      const built = await builder(group, { tenantId: tenant.id, baseUrl, branding })
       if (built.kind === 'skip') { await drop(group.map((g) => g.id), log, `builder skip: ${built.reason}`); handled++; continue }
       if (built.kind === 'retry') { for (const g of group) await retryOrDrop(g, log, built.reason); handled++; continue }
       const driver = resolveTenantEmailDriver({ tenantId: tenant.id, plan: String(tenant.plan) }, deps.fallback)

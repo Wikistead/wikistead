@@ -93,6 +93,30 @@ describe('#578: the space mapping surface is closed', () => {
   }, 60_000)
 })
 
+describe('#578: what the built-in mapping did, the grant does', () => {
+  // `builtin-group-mapping-497.test.ts` drove the retired route and is removed with it. Its subjects,
+  // named rather than dropped quietly (ADR-201's rule for a pin whose subject is gone):
+  //   - "a group gains a built-in capability on a space, and delete revokes it" → PROVED BELOW, and for
+  //     `view` in group-grant.test.ts (#163), through the surviving grant path.
+  //   - "the client-sent principal is not what membership lives under" → role-assign-group-536.test.ts.
+  //   - "a mapping-owned grant 409s at the Members surface" / "the converge script pulls in strays" →
+  //     RETIRED WITH THE MECHANISM. Ownership existed to keep a declaration row and its assignment in
+  //     step; with one mechanism there is no second writer to disagree with, and migration 098 turned
+  //     those assignments into ordinary manual grants on purpose.
+  //   - "a built-in editor mapping confers the whole noun" → the edit⇒comment inclusion was itself
+  //     retired (#553/#552); comment is its own capability, so that subject no longer exists either.
+  it('a group gains EDIT on a space through the grant path, and revoke takes it back', async () => {
+    const { groupGrantee } = await import('../auth/group-sync.js')
+    const { checkRelation } = await import('@wikistead/authz')
+    const { grantSpaceAccess, revokeSpaceAccess } = await import('../routes/spaces.js')
+    const grantee = groupGrantee(TENANT, `smr-editors-${STAMP}`)
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee, capability: 'edit' })
+    expect(await checkRelation(fgaClient, grantee, 'editor', { type: 'space', id: spaceId })).toBe(true)
+    await revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee, capability: 'edit' })
+    expect(await checkRelation(fgaClient, grantee, 'editor', { type: 'space', id: spaceId })).toBe(false)
+  }, 60_000)
+})
+
 describe('#578: the migration converts rather than deletes', () => {
   const sql = readFileSync(resolve(import.meta.dirname, '../../../../infra/db/migrations/098_retire_space_group_mappings.sql'), 'utf8')
 

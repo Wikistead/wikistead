@@ -35,6 +35,8 @@ const CAP_RELATION: Record<string, string> = { createSpaces: 'space_creator', is
     if (wanted.length === 0) continue
     // #574's lesson: read the existing tuples with the SAME filter and skip what is already there —
     // OpenFGA 400s a duplicate write, which would abort the whole tenant.
+    // fga-read-ok: both user and object are pinned to a single pair, so the result holds at most one
+    // tuple per relation the tenant type declares — a handful, fixed by the model, not by tenant size.
     const res = await (fga as any).read({ user: `tenant:${tenantId}#member`, object: `tenant:${tenantId}` })
     const have = new Set(((res.tuples ?? []) as { key?: { relation?: string } }[]).map((t) => t.key?.relation))
     const writes = wanted.filter((r) => !have.has(r)).map((relation) => ({

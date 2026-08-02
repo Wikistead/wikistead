@@ -9,6 +9,7 @@ import { createPageComment } from './comments.js'
 import { mcpEditDraft, CollabUnavailableError } from '../collab-mcpedit.js'
 import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
 import { authenticateMcpRequest, type McpPrincipal } from '../auth/mcp-request-auth.js'
+import { productName } from '../product-name.js' // #575: the syntax reference names the deployment
 
 // #369 / ADR-144: an edit_body body is a DRAFT edit, not a bulk import — cap it (defense-in-depth; the size
 // travels to the pod which re-enforces it). 256k chars is ample for a page body and refuses an abusive payload.
@@ -33,7 +34,7 @@ const SERVER_INFO = { name: 'wikistead', version: '0.1.0' }
 // the macro registry, so a new first-party macro cannot ship without its syntax entry (the
 // exportFidelity pattern). Only the curated FORMAT prose below stays hand-written — it documents
 // CommonMark/frontmatter/inline marks, not macros.
-const SYNTAX_PREAMBLE = `# Wikistead authoring syntax
+const SYNTAX_PREAMBLE = `# ${productName()} authoring syntax
 
 Bodies are **CommonMark + GitHub-Flavored Markdown** (headings, **bold**, *italic*, \`code\`, lists, tables,
 task lists \`- [ ]\`, links \`[text](/p/<pageId>)\` for internal pages). On top of that, these macros are available

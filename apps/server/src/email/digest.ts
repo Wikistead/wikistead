@@ -22,6 +22,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, registry } from '../db/index.js'
 import { pageEventDisposition } from '../page-disposition.js'
 import { registerEmailBuilder, type EmailBuildResult, type EmailOutboxRow } from './outbox.js'
+import type { EmailBranding } from './outbox.js'
 import { startOutboxDrainWorker } from '../db/outbox-lease.js'
 
 const DIGEST_PRODUCER_LOCK = 547_004
@@ -66,7 +67,7 @@ export async function produceDigestJobs(log: (m: string) => void = () => {}): Pr
 
 const DIGEST_ITEM_CAP = 100
 
-export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null }): Promise<EmailBuildResult> {
+export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding }): Promise<EmailBuildResult> {
   const memberSub = rows[0]!.member_sub
   const tenant = await registry.findById(ctx.tenantId)
   if (!tenant) return { kind: 'skip', reason: 'tenant gone' }
@@ -117,12 +118,35 @@ export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: 
       const link = g.pageId ? `${ctx.baseUrl}/p/${g.pageId}` : `${ctx.baseUrl}/`
       return { label: `${g.eventType}: ${g.title ?? ''}`, link }
     })
+    // #575 slice B: the digest wears the same shell as the mention mail — and gains the unsubscribe it
+    // never had. The token's ACTION is `digest`: minting an `immediate` one here (the shape a copy of
+    // the mention builder would produce) means "stop the digest" silently stops MENTIONS instead, which
+    // is the one realistic bug in this area and is pinned as such.
+    const { mintUnsubToken } = await import('@wikistead/auth')
+    const { renderBrandedHtml, renderBrandedText, brandName } = await import('./layout.js')
+    const unsubToken = await mintUnsubToken(
+      { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: Number(process.env.UNSUB_TOKEN_TTL_S ?? 30 * 86400) },
+      { tenantId: ctx.tenantId, sub: rows[0]!.member_sub, action: 'digest' },
+    )
+    const unsubUrl = `${ctx.baseUrl}/api/email/unsubscribe?token=${encodeURIComponent(unsubToken)}`
     return {
       kind: 'send',
       message: {
-        subject: `Your digest: ${gated.length} update${gated.length === 1 ? '' : 's'}`,
-        text: lines.map((l) => `${l.label}\n${l.link}`).join('\n\n') + '\n',
-        html: `<ul>${lines.map((l) => `<li>${esc(l.label)} — <a href="${esc(l.link)}">open</a></li>`).join('')}</ul>`,
+        subject: `[${brandName(ctx.branding)}] Your digest: ${gated.length} update${gated.length === 1 ? '' : 's'}`,
+        text: renderBrandedText({
+          branding: ctx.branding,
+          body: lines.map((l) => `${l.label}\n${l.link}`).join('\n\n'),
+          footer: `Stop these emails: ${unsubUrl}`,
+        }),
+        html: renderBrandedHtml({
+          branding: ctx.branding, baseUrl: ctx.baseUrl,
+          body: `<ul>${lines.map((l) => `<li>${esc(l.label)}: <a href="${esc(l.link)}">open</a></li>`).join('')}</ul>`,
+          footer: `<a href="${esc(unsubUrl)}">Stop these emails</a>`,
+        }),
+        headers: {
+          'List-Unsubscribe': `<${unsubUrl}>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        },
       },
     }
   } finally {

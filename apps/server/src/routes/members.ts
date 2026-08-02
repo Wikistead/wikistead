@@ -18,6 +18,7 @@ import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEntitlements } from '@wikistead/entitlements' // #520: EE gate for the tenant analytics roll-up
 import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
 import { emit } from '@wikistead/events'
+import { productName } from '../product-name.js' // #575: the name is a deployment value
 
 const ROLES: InviteRole[] = ['admin', 'member']
 
@@ -316,9 +317,9 @@ export async function membersPlugin(app: FastifyInstance) {
         const { resolveTenantEmailDriver } = await import('@wikistead/hooks')
         await resolveTenantEmailDriver({ tenantId: req.tenant.id, plan: req.tenant.plan }, req.server.email).send({
           to: email,
-          subject: `You're invited to ${req.tenant.slug} on wikistead`,
+          subject: `You're invited to ${req.tenant.slug} on ${productName()}`,
           text: `You've been invited to join ${req.tenant.slug}. Open this link to accept:\n\n${inviteUrl}`,
-          html: `<p>You've been invited to join <strong>${req.tenant.slug}</strong> on wikistead.</p><p><a href="${inviteUrl}">Accept your invitation</a></p>`,
+          html: `<p>You've been invited to join <strong>${req.tenant.slug}</strong> on ${productName()}.</p><p><a href="${inviteUrl}">Accept your invitation</a></p>`,
         })
         emailed = true
       } catch (err) {
