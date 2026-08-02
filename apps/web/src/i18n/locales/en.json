@@ -1286,6 +1286,7 @@
     "sectionResource": "Space / Page",
     "groupAssignTitle": "Group roles",
     "groupAssignBody": "Give a tenant role to an IdP group. Everyone in the group gets it, and loses it when they leave the group.",
+    "groupTiersNote": "Custom roles only. member and admin are set on each person's row, so the record shows who holds admin.",
     "groupAssignEmpty": "No group holds a tenant role.",
     "groupLabel": "Group",
     "groupPlaceholder": "Select a group…",
