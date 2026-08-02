@@ -86,10 +86,14 @@ describe("#536one roles list, one creation flow", () => {
 
   // #536③: the default-role "no selection" label says the TRUTH (everyone falls back to the
   // built-in member role) — not "None", which read as "no role at all".
-  it("③: the default-role empty option names the member fallback (en/ja)", () => {
+  // #536 review (2026-08-02): and it says ONLY that. The first version added "(built-in
+  // default)", which the user called redundant — the label names a built-in role, and #582 rules that
+  // a built-in role name is a proper noun: not translated, not decorated. So the assertion is now
+  // exact rather than "contains member".
+  it("③: the default-role empty option is the bare built-in name (en/ja)", () => {
     for (const loc of ["en", "ja"]) {
       const j = JSON.parse(readFileSync(resolve(import.meta.dirname, `../i18n/locales/${loc}.json`), "utf8"));
-      expect(j.adminRoles.defaultRoleNone, `${loc} names member`).toMatch(/member/);
+      expect(j.adminRoles.defaultRoleNone, `${loc}: the role name, undecorated`).toBe("member");
     }
   });
 

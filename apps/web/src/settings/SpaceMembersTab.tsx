@@ -356,12 +356,19 @@ export function SpaceMembersTab() {
       </div>
 
       {/* #536②: the replacement confirm — adding over a different existing role swaps it. */}
+      {/* #553 review: this asked "replace their role?" over a RED button labelled Delete, because
+          omitting confirmLabel/tone inherits ConfirmDialog's delete defaults. Nothing is deleted here —
+          a role is swapped. The button says what happens, and the red is kept for the ONE case that
+          really takes something away: demoting a manager, who loses every management capability on
+          this space. An ordinary swap is reversible in a click, which #504 says is not red. */}
       <ConfirmDialog
         open={pendingAdd !== null}
         message={pendingAdd
           ? t(pendingAdd.manager ? "spaceMembers.managerReplaceConfirm" : "spaceMembers.replaceConfirm",
               { who: pendingAdd.who, current: pendingAdd.current, next: pendingAdd.next })
           : ""}
+        confirmLabel={t("spaceMembers.replaceAction")}
+        tone={pendingAdd?.manager ? "danger" : "primary"}
         confirmTestId="space-role-replace-confirm"
         onClose={() => setPendingAdd(null)}
         onConfirm={() => { pendingAdd?.run(); setPendingAdd(null); }}
