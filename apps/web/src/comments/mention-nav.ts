@@ -36,3 +36,32 @@ export function nextMentionIndex(current: number, length: number, delta: 1 | -1)
   if (length <= 0) return 0;
   return (((current + delta) % length) + length) % length;
 }
+
+// #594 (user ruling): the composer takes the chat convention — Enter posts, Shift-Enter breaks the
+// line. Two industry conventions exist and this product picked the chat one; the other (Enter breaks,
+// Ctrl-Enter posts) is what GitHub and Jira do.
+//
+// The decision is a value for the same reason the mention keys are: the interesting part is IME.
+// Confirming a Japanese conversion candidate is an Enter keydown, and posting on it would make the
+// composer unusable in Japanese — the comment goes out mid-word, every time. A browser cannot be made
+// to run a real IME in a test, so the rule lives here where a synthetic event with `isComposing` set
+// proves it, and the browser test covers what only a browser can.
+export type ComposerKey = { action: "submit" } | { action: "newline" };
+
+export function classifyComposerKey(e: {
+  key: string;
+  shiftKey: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  isComposing?: boolean;
+  keyCode?: number;
+}): ComposerKey {
+  if (e.key !== "Enter") return { action: "newline" };
+  // The conversion-confirming Enter. `keyCode === 229` is the older browsers' way of saying the same
+  // thing and costs nothing to keep — this is the one branch whose absence breaks a whole language.
+  if (e.isComposing === true || e.keyCode === 229) return { action: "newline" };
+  if (e.shiftKey) return { action: "newline" };
+  // Ctrl-Enter / Cmd-Enter also post: Slack accepts both, and a Mac user's fingers arrive with Cmd
+  // held. Nothing is lost by accepting the modifier that means the same thing.
+  return { action: "submit" };
+}
