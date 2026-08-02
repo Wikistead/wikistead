@@ -30,10 +30,18 @@ import { methodBadge } from "./login-method-badge";
 // cannot be decrypted is enabled and not effective, and saying only one of them hides that.
 
 // A blank editor form for a connection row.
-interface Draft { issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes: string; groupsClaim: string; label: string }
+interface Draft {
+  issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes: string
+  groupsClaim: string; label: string; trustGroups: boolean; bootstrapEligible: boolean
+}
 const draftOf = (c: AdminConnectionDTO): Draft => ({
   issuer: c.issuer, clientId: c.clientId, clientSecret: "", redirectUri: c.redirectUri,
   scopes: c.scopes ?? "", groupsClaim: c.groupsClaim ?? "", label: c.label ?? "",
+  // review F6: the two trust flags are part of the DRAFT, not immediate switches. An editor where
+  // some controls apply on Save and others apply on touch has a Cancel button that silently means
+  // "cancel some of it" — and these two are the ones an admin is most likely to toggle while
+  // deciding.
+  trustGroups: c.trustGroups, bootstrapEligible: c.bootstrapEligible,
 });
 
 // The row's name: the brand for a preset, else the admin's label, else the issuer's host.
@@ -69,8 +77,16 @@ export function AdminSignInMethodsSection() {
   const rows = connections.data ?? [];
   const m = methods.data?.methods;
   const onError = (e: unknown) => {
-    // the server names the refusal (code login_lockout) — never sniff English message text
-    notify.error((e as { code?: string })?.code === "login_lockout" ? t("adminConnections.lockoutRefused") : t("toast.actionFailed"));
+    // the server names the refusal by CODE — never sniff English message text. review F7: an
+    // unreachable issuer is the failure an admin hits most while editing a connection, and the
+    // legacy form said so; "Something went wrong" would send them looking anywhere but at the
+    // issuer they just typed.
+    const code = (e as { code?: string })?.code;
+    notify.error(
+      code === "login_lockout" ? t("adminConnections.lockoutRefused")
+      : code === "oidc_unreachable" ? t("adminAuth.saveFailed")
+      : t("toast.actionFailed"),
+    );
   };
   const move = (idx: number, dir: -1 | 1) => {
     const ids = rows.map((r) => r.id);
@@ -99,6 +115,8 @@ export function AdminSignInMethodsSection() {
         redirectUri: draft.redirectUri,
         scopes: draft.scopes,
         groupsClaim: draft.groupsClaim.trim() || null,
+        trustGroups: draft.trustGroups,
+        bootstrapEligible: draft.bootstrapEligible,
       },
       {
         onSuccess: () => { notify.success(t("toast.saved")); setDraft({ ...draft, clientSecret: "" }); },
@@ -135,27 +153,42 @@ export function AdminSignInMethodsSection() {
     });
   };
 
-  // Two badges, because they are two facts: what the tenant chose, and what a login would actually
-  // find. The second is only worth a badge when it CONTRADICTS the first (policy, plan, or a
-  // configuration that cannot answer) — an effective row would otherwise carry a badge saying what
-  // its own switch already says.
-  const stateBadges = (enabled: boolean, method?: LoginMethodState & { entitled?: boolean }) => {
+  // Two badges, because they are two facts — and the first one must not borrow the second's word.
+  // The SELECTION badge says what the tenant chose (`Selected` / `Not selected`), never "Active":
+  // a connection whose secret cannot be decrypted is selected and NOT active, and calling that
+  // "Active" in green is the lie the two badges exist to prevent. The second badge appears only when
+  // something CONTRADICTS the selection — deployment policy, the plan, or a configuration that
+  // cannot answer a login — and green is reserved for a row that is genuinely working.
+  //
+  // `method` is the aggregate state for the METHOD; for a row it can only be trusted about
+  // method-wide facts (policy, entitlement). Whether THIS row is off is the row's own `enabled`.
+  const stateBadges = (enabled: boolean, method?: LoginMethodState & { entitled?: boolean }, working?: boolean) => {
     const badge = method ? methodBadge(method) : undefined;
-    const contradiction = enabled && badge && badge !== "effective" ? badge : null;
+    const blocked = enabled && badge && (badge === "byPolicy" || badge === "unentitled") ? badge : null;
+    // "selected but nothing is working" — only claimable when the method-wide answer is knowable
+    // and no more specific reason applies.
+    const notWorking = enabled && !blocked && working === false;
     return (
       <span className="flex items-center gap-2">
-        <span className={enabled ? "text-xs text-[#2da44e]" : "text-xs text-fg-dim"} data-testid="sign-in-method-state">
-          {t(enabled ? "adminAuth.method_effective" : "adminAuth.method_off")}
+        <span className={enabled && working !== false && !blocked ? "text-xs text-[#2da44e]" : "text-xs text-fg-dim"} data-testid="sign-in-method-state">
+          {t(enabled ? "signInMethods.selectionOn" : "signInMethods.selectionOff")}
         </span>
-        {contradiction && (
-          <span className="text-xs text-fg-dim" data-testid="sign-in-method-blocked">{t(`adminAuth.method_${contradiction}`)}</span>
+        {blocked && (
+          <span className="text-xs text-fg-dim" data-testid="sign-in-method-blocked">{t(`adminAuth.method_${blocked}`)}</span>
+        )}
+        {notWorking && (
+          <span className="text-xs text-fg-dim" data-testid="sign-in-method-blocked">{t("signInMethods.notWorking")}</span>
         )}
       </span>
     );
   };
 
   const samlState = samlSectionState(saml);
-  const showPlatform = !!m && m["platform-oidc"].configured && m["platform-oidc"].inCeiling;
+  // review F1 / ADR-195 §1: "the deployment has not configured it" and "the deployment's policy
+  // excludes it" are different answers. The first has nothing to show; the second has something and
+  // is refusing it, and dropping THAT row is the silent disappearance §1 forbids — so the row stays
+  // and its badge says why, with the toggle withheld (there is nothing a tenant can decide).
+  const showPlatform = !!m && m["platform-oidc"].configured;
 
   return (
     <div data-testid="sign-in-methods">
@@ -177,7 +210,10 @@ export function AdminSignInMethodsSection() {
                   {c.preset ? t("adminConnections.presetBadge", { preset: c.preset }) : c.issuer}
                 </span>
               </div>
-              {stateBadges(c.enabled, m?.["tenant-oidc"])}
+              {/* review F3: the aggregate's `selected` is the FIRST row's enabled flag, so it cannot
+                  speak for this row. Pass only what is method-wide — the ceiling and the plan — and
+                  let the row's own switch answer "is this one on". */}
+              {stateBadges(c.enabled, m && { ...m["tenant-oidc"], selected: c.enabled })}
               {/* Order IS the login screen's order, so it only means something with more than one row. */}
               {rows.length > 1 && (
                 <>
@@ -257,13 +293,13 @@ export function AdminSignInMethodsSection() {
                     left a connection permanently unable to sync groups — the flags an admin most needs
                     to change are the ones they could not. */}
                 <label className="flex w-fit items-center gap-2 text-xs text-fg-dim">
-                  <Switch checked={c.trustGroups} ariaLabel={t("adminConnections.trustGroups")} testId={`admin-connection-trust-groups-${c.id}`}
-                    onChange={(on: boolean) => update.mutate({ id: c.id, trustGroups: on }, { onError })} />
+                  <Switch checked={draft.trustGroups} ariaLabel={t("adminConnections.trustGroups")} testId={`admin-connection-trust-groups-${c.id}`}
+                    onChange={(on: boolean) => setDraft({ ...draft, trustGroups: on })} />
                   {t("adminConnections.trustGroups")}
                 </label>
                 <label className="flex w-fit items-center gap-2 text-xs text-fg-dim">
-                  <Switch checked={c.bootstrapEligible} ariaLabel={t("adminConnections.bootstrapEligible")} testId={`admin-connection-bootstrap-${c.id}`}
-                    onChange={(on: boolean) => update.mutate({ id: c.id, bootstrapEligible: on }, { onError })} />
+                  <Switch checked={draft.bootstrapEligible} ariaLabel={t("adminConnections.bootstrapEligible")} testId={`admin-connection-bootstrap-${c.id}`}
+                    onChange={(on: boolean) => setDraft({ ...draft, bootstrapEligible: on })} />
                   {t("adminConnections.bootstrapEligible")}
                 </label>
                 {testResult && (
@@ -291,14 +327,21 @@ export function AdminSignInMethodsSection() {
         {/* SAML is a way in like any other, so it is a row. CE has no SAML at all (the routes live in
             the EE package and answer 404) and gets NO row — a build that cannot offer a feature does
             not advertise it. An unentitled EE plan keeps its row, carrying the upgrade notice. */}
-        {samlState.kind !== "hidden" && (
+        {/* review F5: `samlSectionState` reads a NOT-YET-ANSWERED query as "form", so drawing on it
+            flashed a SAML row on CE — the one build that must never show one. Wait for the answer. */}
+        {!saml.isPending && samlState.kind !== "hidden" && (
           <div className="flex flex-col gap-1.5 rounded-md border border-border bg-panel px-3 py-2 text-sm" data-testid="sign-in-method-saml">
             <div className="flex items-center gap-2">
               <IconButton aria-label={t("signInMethods.edit")} data-testid="sign-in-method-saml-edit" onClick={() => setExpanded(expanded === "saml" ? null : "saml")}>
                 {expanded === "saml" ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </IconButton>
               <div className="min-w-0 flex-1 font-medium">{t("adminAuth.methodSaml")}</div>
-              {stateBadges(samlState.kind === "form" && !!samlState.data?.enabled, m?.saml)}
+              {/* review F4: an unentitled tenant's row must READ as unentitled without being opened —
+                  the upgrade notice lives in the expansion, and a row that says only "Not selected"
+                  hides the reason (ADR-072: an entitlement loss on an admin surface is named). */}
+              {samlState.kind === "locked"
+                ? <span className="text-xs text-fg-dim" data-testid="sign-in-method-blocked">{t("adminAuth.method_unentitled")}</span>
+                : stateBadges(samlState.kind === "form" && !!samlState.data?.enabled, m?.saml, m?.saml.effective)}
             </div>
             {expanded === "saml" && <AdminSamlSection />}
           </div>
@@ -309,9 +352,11 @@ export function AdminSignInMethodsSection() {
         {showPlatform && m && (
           <div className="flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-2 text-sm" data-testid="sign-in-method-platform">
             <div className="min-w-0 flex-1 font-medium">{t("adminAuth.methodPlatformOidc")}</div>
-            {stateBadges(m["platform-oidc"].selected, m["platform-oidc"])}
-            <Switch checked={m["platform-oidc"].selected} onChange={onTogglePlatform} testId="platform-login-toggle"
-              ariaLabel={t("adminAuth.methodPlatformOidc")} />
+            {stateBadges(m["platform-oidc"].selected, m["platform-oidc"], m["platform-oidc"].effective)}
+            {m["platform-oidc"].inCeiling && (
+              <Switch checked={m["platform-oidc"].selected} onChange={onTogglePlatform} testId="platform-login-toggle"
+                ariaLabel={t("adminAuth.methodPlatformOidc")} />
+            )}
           </div>
         )}
 

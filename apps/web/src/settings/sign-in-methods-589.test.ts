@@ -54,7 +54,7 @@ describe("#589: one list, one place to edit a sign-in method", () => {
   });
 
   it("a cleared label is SENT, so a label can be unset and not only set", () => {
-    // The server reads "" as "clear it" (sanitizeConnectionLabel). Sending `label || undefined`
+    // The server reads as "clear it" (sanitizeConnectionLabel). Sending `label || undefined`
     // would drop the empty string, and the old label would silently survive the clear.
     const list = read("./AdminSignInMethodsSection.tsx");
     expect(list).toContain("label: draft.label");
@@ -88,9 +88,72 @@ describe("#589: one list, one place to edit a sign-in method", () => {
     expect(list).toContain("admin-connection-mcp-note-");
   });
 
+  // ── the review's findings, pinned so they cannot come back ────────────────
+  it("F1: a ceiling-excluded method keeps its ROW and loses only its toggle (ADR-195 §1)", () => {
+    const list = read("./AdminSignInMethodsSection.tsx");
+    // "not configured here" is the only reason a row disappears; policy exclusion must be VISIBLE
+    expect(list).toContain('m["platform-oidc"].configured;');
+    expect(list).not.toMatch(/showPlatform\s*=.*inCeiling/);
+    expect(list, "the toggle is what the ceiling withholds").toContain('m["platform-oidc"].inCeiling && (');
+  });
+
+  it("F2: the selection badge never borrows the word for 'working'", () => {
+    const list = read("./AdminSignInMethodsSection.tsx");
+    // a selected-but-broken connection must not read as Active/
+    expect(list).toContain('t(enabled ? "signInMethods.selectionOn" : "signInMethods.selectionOff")');
+    expect(list).not.toContain('t(enabled ? "adminAuth.method_effective"');
+  });
+
+  it("F3: a row is never judged by the aggregate's first-row `selected` flag", () => {
+    // /admin/login-methods computes `selected` from `ORDER BY sort, id LIMIT 1` — the FIRST row
+    // so handing it to every row makes rows 2..n claim row 1's state.
+    const list = read("./AdminSignInMethodsSection.tsx");
+    expect(list).toContain('{ ...m["tenant-oidc"], selected: c.enabled }');
+  });
+
+  it("F4: an unentitled SAML row says so while collapsed", () => {
+    const list = read("./AdminSignInMethodsSection.tsx");
+    expect(list).toContain('samlState.kind === "locked"');
+    expect(list).toContain('adminAuth.method_unentitled');
+  });
+
+  it("F5: the SAML row waits for its query — CE must never flash a row it may not show", () => {
+    const list = read("./AdminSignInMethodsSection.tsx");
+    expect(list).toContain("!saml.isPending && samlState.kind !== \"hidden\"");
+  });
+
+  it("F6: everything in the editor is part of the draft, so Cancel cancels all of it", () => {
+    const list = read("./AdminSignInMethodsSection.tsx");
+    for (const field of ["trustGroups: draft.trustGroups", "bootstrapEligible: draft.bootstrapEligible"]) {
+      expect(list, field).toContain(field);
+    }
+    // ...and the switches write the draft, not the server
+    expect(list).toContain("setDraft({ ...draft, trustGroups: on })");
+    expect(list).toContain("setDraft({ ...draft, bootstrapEligible: on })");
+  });
+
+  it("F7: an unreachable issuer keeps its own message instead of the generic failure", () => {
+    const list = read("./AdminSignInMethodsSection.tsx");
+    expect(list).toContain('code === "oidc_unreachable"');
+  });
+
+  it("F8: the retired surfaces' copy went with them", () => {
+    for (const loc of [en, ja] as unknown as Array<Record<string, Record<string, string> | undefined>>) {
+      for (const [section, key] of [
+        ["adminAuth", "methodsTitle"], ["adminAuth", "methodsBody"], ["adminAuth", "methodTenantOidc"],
+        ["adminAuth", "enabled"], ["adminAuth", "samlTitle"],
+        ["adminConnections", "title"], ["adminConnections", "body"],
+      ] as const) {
+        expect(loc[section]?.[key], `${section}.${key} belongs to a surface that no longer exists`).toBeUndefined();
+      }
+    }
+  });
+
   it("both locales carry the list's own copy", () => {
     for (const loc of [en, ja] as Array<{ signInMethods: Record<string, string> }>) {
-      for (const k of ["title", "body", "edit"]) expect(loc.signInMethods?.[k], k).toBeTruthy();
+      for (const k of ["title", "body", "edit", "selectionOn", "selectionOff", "notWorking"]) {
+        expect(loc.signInMethods?.[k], k).toBeTruthy();
+      }
     }
   });
 });
