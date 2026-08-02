@@ -43,7 +43,7 @@ describe("#536: space access is granted from one control", () => {
 
   it("still LISTS role assignments — now inside the ONE merged member list (#536 ①)", () => {
     // The merge must not lose the assignments: an assignment is a role the grant machinery cannot show,
-    // and its revoke must still reach the assignment mechanism. The old split list testids are GONE —
+    // and its revoke must still reach the assignment mechanism. The old split list testids are GONE
     // the red-check: they must not coexist with the merged list.
     expect(src).toContain('data-testid="space-member-list"');
     expect(src).toContain('data-testid="space-role-assign-revoke"');
@@ -58,5 +58,33 @@ describe("#536: space access is granted from one control", () => {
     const at = src.indexOf('data-testid="space-member-list"');
     const before = src.slice(Math.max(0, at - 400), at);
     expect(before, "no customRoles-length gate wraps the merged list").not.toMatch(/customRoles\.length/);
+  });
+});
+
+// #553 review: the replace confirm asked "replace their role?" over a RED button that said
+// Delete — ConfirmDialog defaults to `confirmLabel ?? t("common.delete")` and `tone = "danger"`, and
+// this call site passed neither. Nothing is deleted by answering it. The reviewer swept all 18 call
+// sites: every other omission is a real delete, so this was the only one wearing the wrong word.
+// Lexical, like the rest of this file — what must not come back is the silent inheritance.
+describe("#553: the role-replace confirm names what it does", () => {
+  const src = readFileSync(resolve(import.meta.dirname, "./SpaceMembersTab.tsx"), "utf8");
+  const dialog = src.slice(src.indexOf('confirmTestId="space-role-replace-confirm"') - 900, src.indexOf('confirmTestId="space-role-replace-confirm"') + 200);
+
+  it("passes its own label instead of inheriting the delete default", () => {
+    expect(dialog).toContain('confirmLabel={t("spaceMembers.replaceAction")}');
+    expect(dialog, "the label must not be the delete default").not.toMatch(/confirmLabel=\{t\("common\.delete"\)\}/);
+  });
+
+  it("is red only for the manager demotion, which is the one that really takes something away", () => {
+    expect(dialog).toContain('tone={pendingAdd?.manager ? "danger" : "primary"}');
+  });
+
+  it("the copy states the outcome and stops there (no mechanism footnote)", () => {
+    for (const loc of ["en", "ja"]) {
+      const j = JSON.parse(readFileSync(resolve(import.meta.dirname, `../i18n/locales/${loc}.json`), "utf8"));
+      const s = j.spaceMembers.replaceConfirm as string;
+      expect(s, `${loc}: names the current role and the next one`).toMatch(/\{\{current\}\}[\s\S]*\{\{next\}\}/);
+      expect(s, `${loc}: the "one principal one role" footnote is gone`).not.toMatch(/One principal|1 ロール/);
+    }
   });
 });
