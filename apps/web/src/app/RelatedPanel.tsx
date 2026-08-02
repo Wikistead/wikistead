@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { RadioGroup } from "../ui/RadioGroup";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Link as LinkIcon, Maximize2 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -40,21 +41,19 @@ function LocalGraphModal({ pageId, open, onClose }: { pageId: string; open: bool
         <DialogHeader>
           <DialogTitle>{t("related.graph")}</DialogTitle>
         </DialogHeader>
-        <div className="flex items-center gap-1" data-testid="graph-depth-select" role="radiogroup" aria-label={t("related.graphDepth")}>
+        {/* #587: the DS segmented radiogroup (arrow keys and roving tabindex come with it). */}
+        <div className="flex items-center gap-1">
           <span className="mr-1 text-[12px] text-fg-dim">{t("related.graphDepth")}</span>
-          {([1, 2, 3] as const).map((d) => (
-            <button
-              key={d}
-              type="button"
-              role="radio"
-              aria-checked={depth === d}
-              data-testid={`graph-depth-${d}`}
-              className={`rounded border px-2 py-0.5 text-[12px] ${depth === d ? "border-transparent bg-accent text-accent-foreground" : "border-border text-fg-dim hover:text-fg"}`}
-              onClick={() => setDepth(d)}
-            >
-              {d}
-            </button>
-          ))}
+          <span data-testid="graph-depth-select">
+            <RadioGroup
+              variant="segmented"
+              value={String(depth)}
+              onChange={(v) => setDepth(Number(v) as 1 | 2 | 3)}
+              ariaLabel={t("related.graphDepth")}
+              testId="graph-depth"
+              options={[1, 2, 3].map((d) => ({ value: String(d), label: String(d) }))}
+            />
+          </span>
         </div>
         {data && (
           <LocalGraphCanvas

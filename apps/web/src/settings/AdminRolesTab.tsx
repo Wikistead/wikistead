@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
@@ -12,6 +12,7 @@ import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a role is irreversible — confirm first
 import { Input } from "../ui/Input";
 import { MemberSearchInput } from "../ui/MemberSearchInput";
+import { RadioGroup } from "../ui/RadioGroup";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { Pencil, X, ArrowRight } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
@@ -108,43 +109,28 @@ function RoleEditor({ onSave, onCancel, pending }: {
   // they were supposed to be doing their job. Opening scrolls the form into view.
   const formRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { formRef.current?.scrollIntoView({ block: "center" }); }, []);
-  // #580 review 3: it calls itself a radiogroup, so it moves like one — arrows change the
-  // choice, and only the chosen segment is in the tab order (roving tabindex).
-  // With exactly two segments every arrow lands on the other one — a radiogroup wraps at the ends, so
-  // "next" and "previous" are the same move here. Written as a toggle rather than as index arithmetic
-  // that pretends to handle a third segment nobody has.
-  const onSegmentKey = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(e.key)) return;
-    e.preventDefault();
-    const to = scope === "resource" ? "tenant" : "resource";
-    pickScope(to);
-    (e.currentTarget.parentElement?.querySelector(`[data-testid=role-scope-${to}]`) as HTMLElement | null)?.focus();
-  };
   return (
     <div ref={formRef} className="flex flex-col gap-2 rounded-md border border-border p-3">
       <Input inputSize="sm" className="max-w-xs" value={name} placeholder={t("adminRoles.namePlaceholder")}
         aria-label={t("adminRoles.nameLabel")} data-testid="role-name-input" onChange={(e) => setName(e.target.value)} />
       <div className="flex flex-col gap-1">
         <span className="text-xs text-fg-dim">{t("adminRoles.scopeQuestion")}</span>
-        {/* segments, not a Select: the choice is the frame for everything below it, so it is visible
-            without opening anything (the #536 complaint was a control nobody found) */}
-        <div className="inline-flex w-fit rounded-md border border-border p-0.5" role="radiogroup" aria-label={t("adminRoles.scopeQuestion")} data-testid="role-scope-segments">
-          {(["resource", "tenant"] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              role="radio"
-              aria-checked={scope === s}
-              tabIndex={scope === s ? 0 : -1}
-              data-testid={`role-scope-${s}`}
-              onKeyDown={onSegmentKey}
-              onClick={() => pickScope(s)}
-              className={`rounded px-3 py-1 text-sm ${scope === s ? "bg-panel-2 font-medium text-fg" : "text-fg-dim"}`}
-            >
-              {t(s === "tenant" ? "adminRoles.scopeTenant" : "adminRoles.scopeResource")}
-            </button>
-          ))}
-        </div>
+        {/* #587: the DS segmented radiogroup, not a hand-rolled one. #580 built this by hand and had to
+            add roving tabindex and arrow keys by hand too, one review later; the component has
+            carried both since #389. The wrapper keeps the container test-id the #580 pins use. */}
+        <span data-testid="role-scope-segments" className="w-fit">
+          <RadioGroup
+            variant="segmented"
+            value={scope}
+            onChange={(v) => pickScope(v as "resource" | "tenant")}
+            ariaLabel={t("adminRoles.scopeQuestion")}
+            testId="role-scope"
+            options={[
+              { value: "resource", label: t("adminRoles.scopeResource") },
+              { value: "tenant", label: t("adminRoles.scopeTenant") },
+            ]}
+          />
+        </span>
       </div>
       <CapabilityPicker value={caps} onChange={setCaps} idPrefix="role" list={list} />
       <div className="flex gap-2">

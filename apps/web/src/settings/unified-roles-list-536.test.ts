@@ -24,13 +24,18 @@ describe("#536 one roles list, one creation flow", () => {
   // had ticked something. The rule that survives is the one that mattered: NO hidden scope control.
   // The choice is visible segments now, and a mixed role is unbuildable rather than refused at save,
   // so the mixed hint has nothing left to warn about.
+  // #587 re-points the SHAPE, not the rule: the segments are the DS RadioGroup now, so the hand-rolled
+  // buttons (and the literal `data-testid={`role-scope-${s}`}` this used to read) are gone. The rule
+  // that survives is unchanged — the scope is chosen in the open, never through a Select. `testId` is
+  // no longer evidence of a Select: it is how the DS names its options, so the assertion moved to the
+  // element that would actually be the regression.
   it("creation asks for the scope in the open — segments, never a hidden Select", () => {
-    expect(src).not.toContain('testId="role-scope"'); // the Select stays gone
+    expect(src).not.toMatch(/<Select[^>]*role-scope/); // the Select stays gone
     expect(src).toContain('data-testid="role-scope-segments"');
-    // the two segments are rendered from the pair, so the ids are a template — the e2e spec drives
-    // the real `role-scope-tenant` / `role-scope-resource` ids
-    expect(src).toMatch(/\(\["resource", "tenant"\] as const\)\.map/);
-    expect(src).toMatch(/data-testid=\{`role-scope-\$\{s\}`\}/);
+    expect(src, "the DS segmented radiogroup, not a hand-rolled one (#587)").toMatch(/variant="segmented"[\s\S]{0,400}testId="role-scope"/);
+    // the two options are still the pair, and their ids are what the e2e spec drives
+    expect(src).toMatch(/value: "resource"/);
+    expect(src).toMatch(/value: "tenant"/);
     // the capability list follows the segment — that is what makes a mix impossible to compose
     expect(src).toMatch(/const list = scope === "tenant" \? TENANT_CAPABILITIES : CAPABILITIES/);
     expect(src).toContain('list={list}');

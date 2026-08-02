@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { RadioGroup } from "../ui/RadioGroup";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -49,24 +50,21 @@ export function SaveTemplateDialog({
             placeholder={t("template.namePlaceholder")}
             data-testid="template-name"
           />
-          <div role="radiogroup" aria-label={t("template.scopeLabel")} className="flex flex-col gap-1.5">
-            {SCOPES.map((s) => (
-              <label key={s} className="flex cursor-pointer items-start gap-2 text-[length:var(--text-ui)]">
-                <input
-                  type="radio"
-                  name="template-scope"
-                  className="mt-0.5"
-                  checked={scope === s}
-                  onChange={() => setScope(s)}
-                  data-testid={`template-scope-${s}`}
-                />
-                <span>
-                  <span className="font-medium">{t(`template.scope.${s}`)}</span>
-                  <span className="block text-fg-dim">{t(`template.scopeHint.${s}`)}</span>
-                </span>
-              </label>
-            ))}
-          </div>
+          {/* #587: the DS card radiogroup — each option carries a description line, which is exactly
+              what `variant="card"` is for. The native <input type="radio"> rows it replaces had no
+              shared styling with the rest of the app. */}
+          <RadioGroup
+            variant="card"
+            value={scope}
+            onChange={(v) => setScope(v as (typeof SCOPES)[number])}
+            ariaLabel={t("template.scopeLabel")}
+            testId="template-scope"
+            options={SCOPES.map((s) => ({
+              value: s,
+              label: t(`template.scope.${s}`),
+              description: t(`template.scopeHint.${s}`),
+            }))}
+          />
           {scope !== "personal" && (
             <p
               data-testid="template-scope-warning"

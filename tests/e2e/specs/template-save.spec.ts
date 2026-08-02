@@ -20,13 +20,15 @@ test("#248: Save as template — dialog, scope warning, and save", async ({ brow
 
   // Default name follows the page title; personal scope is default (no warning).
   await expect(page.getByTestId("template-name")).toHaveValue("tpl-save-src");
-  await expect(page.getByTestId("template-scope-personal")).toBeChecked();
+  // #587: the scope rows are the DS card radiogroup now (they were native <input type=radio>), so the
+  // state is Radix's aria-checked rather than the input's checkedness, and choosing is a click.
+  await expect(page.getByTestId("template-scope-personal")).toHaveAttribute("aria-checked", "true");
   await expect(page.getByTestId("template-scope-warning")).toHaveCount(0);
 
   // Choosing a shared scope reveals the re-publish warning; back to personal hides it.
-  await page.getByTestId("template-scope-tenant").check();
+  await page.getByTestId("template-scope-tenant").click();
   await expect(page.getByTestId("template-scope-warning")).toBeVisible();
-  await page.getByTestId("template-scope-personal").check();
+  await page.getByTestId("template-scope-personal").click();
   await expect(page.getByTestId("template-scope-warning")).toHaveCount(0);
 
   // Save → the dialog closes (success).
