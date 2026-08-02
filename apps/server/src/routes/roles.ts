@@ -411,47 +411,6 @@ export async function unassignRoleTxCore(
 }
 
 // #497 / ADR-183 §3: the tenant DEFAULT role evaluator. A member whom NO mapping matches gets the
-// tenant's `default_role_id` (a TENANT-scope custom role, origin='default'); the moment a mapping
-// starts matching their groups it is removed; clearing the setting removes it. `manual` wins — the
-// evaluator never creates a row where a manual/mapping one of the same role exists, and never deletes
-// a row it does not own (origin='default' only). Idempotent + self-healing: it is re-run every login,
-// so a transient failure corrects itself and it must never be on the login-blocking path. Runs as its
-// OWN assign/unassign tx (thehelpers open their own) — sequenced after the member upsert, not
-// nested. Tenant scope only, so the search reindex is a genuine no-op (searchDriver is passed through
-// but never dereferenced for tenant assignments).
-export async function evaluateDefaultRole(
-  db: TenantDb, fga: OpenFgaClient, searchDriver: SearchDriver,
-  tenant: { id: string; plan: string }, sub: string, groups: readonly string[],
-): Promise<void> {
-  const [settings] = await db.sql<{ default_role_id: string | null }[]>`SELECT default_role_id FROM tenant_settings WHERE tenant_id = ${tenant.id}`
-  const defaultRoleId = settings?.default_role_id ?? null
-  const principal = `user:${sub}`
-  // A mapping "matches" when the member currently carries its group name (the same DB source the
-  // orphan badge reads). Any match → the member is covered by a mapping → no default.
-  const matched = groups.length > 0
-    && (await db.sql`SELECT 1 FROM group_role_mappings WHERE group_name = ANY(${db.sql.array(groups as string[])}) LIMIT 1`).length > 0
-  const [current] = await db.sql<{ id: string; role_id: string }[]>`
-    SELECT id, role_id FROM role_assignments
-    WHERE resource_type = 'tenant' AND resource_id = ${tenant.id} AND principal = ${principal} AND origin = 'default'`
-  const desired = defaultRoleId && !matched ? defaultRoleId : null
-  // Remove a stale default (setting cleared, a mapping now matches, or the default role changed).
-  if (current && current.role_id !== desired) {
-    await unassignRoleInTx(db, fga, searchDriver, { tenant, assignmentId: current.id, actorSub: sub })
-  }
-  if (desired && (!current || current.role_id !== desired)) {
-    // manual-wins: a hand-placed (or mapping-owned) assignment of the same role blocks the default.
-    const dup = await db.sql`
-      SELECT 1 FROM role_assignments
-      WHERE resource_type = 'tenant' AND resource_id = ${tenant.id} AND principal = ${principal} AND role_id = ${desired} AND origin <> 'default' LIMIT 1`
-    if (dup.length) return
-    const [role] = await db.sql<{ id: string; capabilities: string[]; scope: string }[]>`SELECT id, capabilities, scope FROM roles WHERE id = ${desired}`
-    if (!role || role.scope !== 'tenant') return // the default must be a tenant-scope custom role (defensive)
-    await assignRoleInTx(db, fga, searchDriver, {
-      tenant, roleId: role.id, capabilities: role.capabilities as AnyRoleCapability[],
-      resourceType: 'tenant', resourceId: tenant.id, principal, actorSub: sub, origin: 'default',
-    })
-  }
-}
 
 export async function requireAssignmentAuthority(
   fga: OpenFgaClient,
@@ -906,35 +865,10 @@ export async function rolesPlugin(app: FastifyInstance) {
   // A TENANT-scope custom role conferred on any member no mapping matches (evaluated at login by
   // evaluateDefaultRole). NULL = today's behaviour (plain member). Setting it does NOT retro-apply to
   // every member here — each member's row is created/removed at their next login (self-healing), the
-  // same freshness the #111 group sync has.
-  app.get('/admin/roles/default-role', async (req) => {
-    await adminGate(req)
-    requireEntitlement(req)
-    const [row] = await req.db.sql<{ default_role_id: string | null }[]>`SELECT default_role_id FROM tenant_settings WHERE tenant_id = ${req.tenant.id}`
-    return { defaultRoleId: row?.default_role_id ?? null }
-  })
-
-  app.put<{ Body: { defaultRoleId?: string | null } }>('/admin/roles/default-role', async (req, reply) => {
-    await adminGate(req)
-    requireEntitlement(req)
-    const roleId = req.body?.defaultRoleId ?? null
-    if (roleId !== null) {
-      // Must be a TENANT-scope custom role of THIS tenant (RLS SELECT → a cross-tenant/unknown id 404s;
-      // a resource-scope role is a 400 — a bare role id names no resource, so only tenant scope is
-      // well-defined as a default, ADR-183 §3).
-      const [role] = await req.db.sql<{ scope: string }[]>`SELECT scope FROM roles WHERE id = ${roleId}`
-      if (!role) throw Object.assign(new Error('not found'), { statusCode: 404 })
-      if (role.scope !== 'tenant') throw Object.assign(new Error('the default role must be a tenant-scope role'), { statusCode: 400 })
-    }
-    await req.db.tx(async (tx) => {
-      // tenant_settings always has a row per tenant, but guard with an UPSERT so a brand-new tenant
-      // (no settings row yet) still records the default. Only the default_role_id column is touched.
-      await tx`INSERT INTO tenant_settings (tenant_id, default_role_id) VALUES (${req.tenant.id}, ${roleId})
-               ON CONFLICT (tenant_id) DO UPDATE SET default_role_id = ${roleId}`
-      await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.default_role_changed', target: `tenant:${req.tenant.id}` })
-    })
-    return reply.send({ defaultRoleId: roleId })
-  })
+  // #578 / ADR-201 slice 5: the DEFAULT ROLE is retired. It said the same thing as the every-member
+  // toggles below (the tenant vocabulary is createSpaces and issueApiKeys, and both have one), so one
+  // of the two had to go. Existing settings were converted rather than dropped — see migration 100 and
+  // the one-shot toggle script.
 
   // ---- #497 / ADR-183: declarative group → role MAPPINGS (EE — customRoles entitlement) ----
   // A mapping is a ROW that OWNS a group-principal role assignment. Creating it = the existing gated

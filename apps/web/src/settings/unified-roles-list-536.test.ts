@@ -89,19 +89,11 @@ describe("#536one roles list, one creation flow", () => {
     expect(resourceSeg.indexOf("roles.data?.builtIn")).toBeLessThan(resourceSeg.indexOf('scope !== "tenant"'));
   });
 
-  // #536③: the default-role "no selection" label says the TRUTH (everyone falls back to the
-  // built-in member role) — not "None", which read as "no role at all".
-  // #536 review (2026-08-02): and it says ONLY that. The first version added "(built-in
-  // default)", which the user called redundant — the label names a built-in role, and #582 rules that
-  // a built-in role name is a proper noun: not translated, not decorated. So the assertion is now
-  // exact rather than "contains member".
-  it("③: the default-role empty option is the bare built-in name (en/ja)", () => {
-    for (const loc of ["en", "ja"]) {
-      const j = JSON.parse(readFileSync(resolve(import.meta.dirname, `../i18n/locales/${loc}.json`), "utf8"));
-      expect(j.adminRoles.defaultRoleNone, `${loc}: the role name, undecorated`).toBe("member");
-    }
-  });
-
+  // RETIRED by #578 / ADR-201 rev3 slice 5: the tenant default role is gone, so its "no selection"
+  // label has nothing left to label. The rule that survived the case — a built-in role name is a proper
+  // noun, undecorated and untranslated — is #582's, and it is pinned where the names are actually
+  // rendered (tenant-role-rows-579.test.ts and comment-panel-vocabulary-582.test.ts). Removed rather
+  // than left asserting a key that no locale carries.
   it("built-ins stay read-only in the same control custom roles edit with", () => {
     // the four resource built-ins and admin render CapabilityPicker with `disabled`
     expect(src).toMatch(/idPrefix=\{`builtin-\$\{r\.name\}`\} list=\{CAPABILITIES\} disabled/);
