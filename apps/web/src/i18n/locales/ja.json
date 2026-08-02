@@ -99,6 +99,8 @@
     "restoreFailed": "復元できませんでした",
     "accessGranted": "アクセスを付与しました",
     "accessRevoked": "アクセスを取り消しました",
+    "accessRevokedStillCovered": "取り消しました。ただし {{via}} が同じ権限を与えています。",
+    "accessRevokeCovered": "取り消せません：{{via}} が同じ権限を与えています。そちらを外してください。",
     "linkCreated": "共有リンクを作成しました",
     "linkRevoked": "共有リンクを取り消しました",
     "copied": "リンクをクリップボードにコピーしました",

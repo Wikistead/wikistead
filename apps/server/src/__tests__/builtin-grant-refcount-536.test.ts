@@ -205,17 +205,23 @@ describe('#536 review: a re-granted rowless tuple is still revocable', () => {
     }
   }, 120_000)
 
-  it('the ROWLESS fallback consults live assignments before deleting raw tuples', async () => {
+  it('the ROWLESS fallback consults live assignments before deleting raw tuples (#596: and SAYS so)', async () => {
     // The reviewer-read third scenario: legacy tuple + a live custom-role assignment + a built-in grant.
     // After the first revoke removes the row, a SECOND revoke falls back to the pre-086 path — which used
     // to delete tuples with no reference count, taking the role assignment's leaf with it.
+    //
+    // #596 re-pins the OTHER half of this branch. Not deleting the covered leaf is right; ANSWERING
+    // SUCCESS for it was not — nothing changed at all, yet the caller was told the access was revoked
+    // (and an audit line + webhook said so). The refusal is now the contract; the original invariant
+    // this test exists for — the live assignment keeps conferring view — is asserted unchanged.
     const p = sub('fallback')
     await writeTuples(fgaClient, [
       { user: p, relation: 'viewer', object: `space:${spaceId}` },
       { user: p, relation: 'viewer_member', object: `space:${spaceId}` },
     ])
     await assign(p) // live custom role bundling view
-    await revoke(p, 'view') // no builtin row exists -> fallback path
+    await expect(revoke(p, 'view'), '#596: a revoke that would change nothing refuses instead of lying')
+      .rejects.toMatchObject({ statusCode: 409, code: 'still_covered' })
     expect(await canView(p), 'the live assignment still confers view after a rowless revoke').toBe(true)
   }, 120_000)
 

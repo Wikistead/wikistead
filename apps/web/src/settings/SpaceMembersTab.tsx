@@ -16,6 +16,7 @@ import { RoleTip } from "../ui/RoleTip";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
+import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -371,9 +372,10 @@ export function SpaceMembersTab() {
                   // the comment arm standing — "revoked, but they can still comment" is a leftover
                   // nobody goes looking for, so the server takes the whole set in one transaction.
                   const caps = revokeCapsForRow(r) as PageRelation[];
+                  // #596: honest feedback — "still covered by X" on success, the named 409 on a no-op.
                   revoke.mutate(caps.length > 1 ? { grantee: r.grantee, capabilities: caps } : { grantee: r.grantee, capability: caps[0]! }, {
-                    onSuccess: () => notify.success(t("toast.accessRevoked")),
-                    onError: () => notify.error(t("toast.actionFailed")),
+                    onSuccess: (data) => notifyRevokeOutcome(t, data),
+                    onError: (err) => notifyRevokeError(t, err),
                   });
                 }}>
                 <X size={14} />
@@ -382,8 +384,8 @@ export function SpaceMembersTab() {
               /* #504: red at rest; no confirm — an unassignment is re-assignable in one step */
               <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-role-assign-revoke" variant="danger"
                 onClick={() => unassignRole.mutate(r.assignmentId, {
-                  onSuccess: () => notify.success(t("toast.accessRevoked")),
-                  onError: () => notify.error(t("toast.actionFailed")),
+                  onSuccess: (data) => notifyRevokeOutcome(t, data),
+                  onError: (err) => notifyRevokeError(t, err),
                 })}>
                 <X size={14} />
               </IconButton>

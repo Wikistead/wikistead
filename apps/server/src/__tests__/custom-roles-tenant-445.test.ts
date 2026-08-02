@@ -123,9 +123,9 @@ describe('tenant-scope custom roles (#445 / ADR-171)', () => {
       const role2 = (r2.json() as { id: string }).id
       const a2 = await assign(role2, 'tenant', tenant.id, `user:${MEMBER}`)
       expect(a2.statusCode).toBe(201)
-      expect((await unassign((a1.json() as { id: string }).id)).statusCode).toBe(204)
+      expect((await unassign((a1.json() as { id: string }).id)).statusCode).toBe(200) // #596
       expect(await canCreate(MEMBER), 'covering assignment keeps the leaf').toBe(true)
-      expect((await unassign((a2.json() as { id: string }).id)).statusCode).toBe(204)
+      expect((await unassign((a2.json() as { id: string }).id)).statusCode).toBe(200) // #596
       expect(await canCreate(MEMBER), 'last unassign deletes the leaf').toBe(false)
     } finally {
       await writeTuples(fgaClient, [wildcard()]).catch(() => {})

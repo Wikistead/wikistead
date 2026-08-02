@@ -97,7 +97,7 @@ describe('role assignment expansion (#420 increment 3)', () => {
     // duplicate assignment → 409
     expect((await assign(roleId, 'page', pageId, u)).statusCode).toBe(409)
 
-    expect((await unassign(asgId)).statusCode).toBe(204)
+    expect((await unassign(asgId)).statusCode).toBe(200) // #596: 200 + honesty payload
     expect(await check(fgaClient, u, 'delete', P(pageId))).toBe(false)
     expect(await check(fgaClient, u, 'view', P(pageId))).toBe(false)
   })
@@ -113,11 +113,11 @@ describe('role assignment expansion (#420 increment 3)', () => {
     expect(a2.ownedCapabilities).not.toContain('delete')
     expect(a2.ownedCapabilities).toContain('comment')
 
-    expect((await unassign(a1.id)).statusCode).toBe(204)
+    expect((await unassign(a1.id)).statusCode).toBe(200) // #596
     // r2 still includes 'delete' → the shared leaf must SURVIVE (themulti-source pin), and
     // OWNERSHIP TRANSFERS to r2's assignment (else unassigning the coverer later would orphan it).
     expect(await check(fgaClient, u, 'delete', P(pageId)), 'shared leaf survives the first unassign').toBe(true)
-    expect((await unassign(a2.id)).statusCode).toBe(204)
+    expect((await unassign(a2.id)).statusCode).toBe(200) // #596
     expect(await check(fgaClient, u, 'delete', P(pageId)), 'the last covering assignment removes the leaf (no orphan)').toBe(false)
     expect(await check(fgaClient, u, 'comment', P(pageId)), 'comment leaf removed with its owner').toBe(false)
   })
@@ -130,7 +130,7 @@ describe('role assignment expansion (#420 increment 3)', () => {
     const a = res.json() as { id: string; ownedCapabilities: string[] }
     expect(a.ownedCapabilities, 'pre-existing direct grant is NOT owned').not.toContain('share')
     expect(a.ownedCapabilities).toContain('settings')
-    expect((await unassign(a.id)).statusCode).toBe(204)
+    expect((await unassign(a.id)).statusCode).toBe(200) // #596
     expect(await check(fgaClient, u, 'share', P(pageId)), 'the direct grant survives').toBe(true)
     expect(await check(fgaClient, u, 'settings', P(pageId)), 'the owned leaf is removed').toBe(false)
   })
@@ -143,7 +143,7 @@ describe('role assignment expansion (#420 increment 3)', () => {
     const a = res.json() as { id: string }
     expect(await check(fgaClient, u, 'publish', P(pageId)), 'publisher reaches the published page via the space').toBe(true)
     expect(await check(fgaClient, u, 'edit', P(pageId))).toBe(false)
-    expect((await unassign(a.id)).statusCode).toBe(204)
+    expect((await unassign(a.id)).statusCode).toBe(200) // #596
     expect(await check(fgaClient, u, 'publish', P(pageId))).toBe(false)
 
     // #529 / ADR-193: `comment` gained its space leaf (space#commenter), so a comment-bearing role is
@@ -155,7 +155,7 @@ describe('role assignment expansion (#420 increment 3)', () => {
     const c = ok.json() as { id: string }
     expect(await check(fgaClient, u, 'comment', P(pageId)), 'the space grant reaches the page').toBe(true)
     expect(await check(fgaClient, u, 'edit', P(pageId)), 'and confers no edit').toBe(false)
-    expect((await unassign(c.id)).statusCode).toBe(204)
+    expect((await unassign(c.id)).statusCode).toBe(200) // #596
     expect(await check(fgaClient, u, 'comment', P(pageId)), 'revoked cleanly').toBe(false)
   })
 
