@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { CAP_NOUN } from "./role-nouns";
 import { fileURLToPath } from "node:url";
 
 // #529 review rejection: "why is a role that isn't in the roles list showing up here?". The space grant
@@ -13,11 +14,10 @@ import { fileURLToPath } from "node:url";
 // while the picker must not OFFER anything the roles list does not name.
 const SRC = readFileSync(fileURLToPath(new URL("./SpaceMembersTab.tsx", import.meta.url)), "utf8");
 
-const nounKeys = (): string[] => {
-  const m = SRC.match(/CAP_NOUN: Record<PageRelation, string> = \{([^}]+)\}/);
-  if (!m) throw new Error("CAP_NOUN not found — the display table was renamed; re-aim this pin rather than deleting it");
-  return m[1]!.split(",").map((s) => s.split(":")[0]!.trim()).filter(Boolean);
-};
+// #582 bounce: the table moved to role-nouns.ts so the page dialog reads the same one. Re-aimed as the
+// pin's own note instructed — and now it reads the VALUE rather than parsing a literal, which is the
+// stronger form: a rename of the module cannot make it pass vacuously.
+const nounKeys = (): string[] => Object.keys(CAP_NOUN);
 const listOf = (name: string): string[] => {
   const m = SRC.match(new RegExp(`const ${name}: PageRelation\\[\\] = \\[([^\\]]*)\\]`));
   if (!m) throw new Error(`${name} not found — the lists were renamed; re-aim this pin rather than deleting it`);
