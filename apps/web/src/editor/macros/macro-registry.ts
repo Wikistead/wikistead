@@ -232,7 +232,9 @@ function renderEntry(e: RegistryIndexEntry): string {
 
 /** The discovery site's index page: a deterministic, self-contained HTML string (no scripts, no assets). */
 export function renderRegistrySiteHtml(index: RegistryIndex, opts: { title?: string } = {}): string {
-  const title = escapeHtml(opts.title ?? "Wikistead macro registry");
+  // #575: the caller passes the product name; the literal is only the last resort for a caller that
+  // has not got one yet (this module is also used outside a React tree).
+  const title = escapeHtml(opts.title ?? "Macro registry");
   const body = index.macros.length
     ? index.macros.map(renderEntry).join("\n")
     : "<p>No macros published yet.</p>";

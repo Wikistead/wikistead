@@ -1348,7 +1348,7 @@ export function useSetCommentOpen(spaceId: string) {
 // it works for members, guests, and unauthenticated visitors — it drives the header
 // wordmark and the tenant layer of the accent cascade. The server strips branding
 // when the plan isn't entitled.
-export interface BrandingDTO { displayName: string | null; accentKey: string | null; logoUrl: string | null; whitelabel?: boolean } // #430: paid = white-label public pages
+export interface BrandingDTO { displayName: string | null; accentKey: string | null; logoUrl: string | null; whitelabel?: boolean; productName?: string } // #430: paid = white-label public pages
 export function useBranding() {
   const { token } = useSession();
   return useQuery({

@@ -9,6 +9,7 @@
 // spammed.
 import nodemailer from 'nodemailer'
 import type { EmailDriver, EmailMessage } from '@wikistead/hooks'
+import { productName } from '../product-name.js'
 
 class SmtpEmailDriver implements EmailDriver {
   private readonly transporter: nodemailer.Transporter
@@ -50,7 +51,9 @@ export function resolveEmailDriver(announce?: (msg: string) => void): EmailDrive
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER || undefined,
     pass: process.env.SMTP_PASS || undefined,
-    from: process.env.EMAIL_FROM ?? 'wikistead <noreply@wikistead.local>',
+    // #575 slice A: the name a recipient reads in their inbox list, before opening anything. It
+    // follows the deployment's product name; the address part stays a deployment concern (EMAIL_FROM).
+    from: process.env.EMAIL_FROM ?? `${productName()} <noreply@wikistead.local>`,
   })
 }
 

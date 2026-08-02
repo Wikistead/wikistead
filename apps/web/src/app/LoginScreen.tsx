@@ -6,6 +6,7 @@ import { TenantBrand } from "./BrandLockup";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
 import { useBranding } from "../data/queries";
+import { FALLBACK_PRODUCT_NAME } from "./product-name";
 import { assetUrl } from "../data/apiClient";
 import { Button } from "../ui/Button";
 import { SocialIcon } from "./SocialIcon";
@@ -100,6 +101,7 @@ function useAuthError(): string | null {
 export function LoginScreen() {
   const { t } = useTranslation();
   const branding = useBranding();
+  const product = branding.data?.productName || FALLBACK_PRODUCT_NAME;
   const returnTo = window.location.pathname === "/login" ? "/" : window.location.pathname + window.location.search;
   const error = useAuthError();
   const { social, methods, connections } = useLoginOptions();
@@ -132,7 +134,7 @@ export function LoginScreen() {
             {/* #442: the shared TenantBrand lockup (same component as the app header). */}
             <TenantBrand logoUrl={logoUrl} name={name} size="login" logoTestId="login-brand-logo" nameTestId="login-brand" />
           </div>
-          <h1 className="mb-1 text-xl font-semibold">{t("auth.signInTitle")}</h1>
+          <h1 className="mb-1 text-xl font-semibold">{t("auth.signInTitle", { product })}</h1>
           <p className="mb-5 text-sm text-fg-dim">{t("auth.signInBody")}</p>
           {error && (
             <div

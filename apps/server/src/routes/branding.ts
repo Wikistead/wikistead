@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
+import { productName } from '../product-name.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -30,7 +31,13 @@ const LOGO_BODY_LIMIT = 1_000_000
 // #430 (owner ruling a): `whitelabel` rides the SAME branding entitlement — the ONE seam. Paid tenants
 // may white-label their PUBLIC pages (no Wikistead mark); the free plan's public reader shows a subtle
 // "Powered by Wikistead" (freemium). CE/self-host resolves through the same entitlement table.
-export interface TenantBranding { displayName: string | null; accentKey: string | null; logoUrl: string | null; whitelabel: boolean }
+export interface TenantBranding {
+  displayName: string | null; accentKey: string | null; logoUrl: string | null; whitelabel: boolean
+  // #575 / ADR-200 rev3: the DEPLOYMENT's name, so a client that has no tenant display name still has
+  // something to call the product. Rides this response because it is already the public, host-resolved
+  // read every surface uses — a second endpoint would be a second thing to keep in sync.
+  productName: string
+}
 
 // Sniff the real image type from magic bytes — never trust the client content-type.
 // SVG is intentionally EXCLUDED: it can carry <script>, and the logo is served as a
@@ -55,7 +62,8 @@ export async function getTenantBranding(db: TenantDb, plan: string): Promise<Ten
     displayName: row?.display_name ?? null,
     accentKey: row?.accent_key ?? null,
     logoUrl: entitled && row?.logo_key ? '/branding/logo' : null, // logo only (name/colour are basic)
-    whitelabel: entitled, // #430: paid = white-label public pages; free = "Powered by Wikistead"
+    whitelabel: entitled, // #430: paid = white-label public pages; free = "Powered by <product>"
+    productName: productName(),
   }
 }
 

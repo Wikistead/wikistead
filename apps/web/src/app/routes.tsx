@@ -207,6 +207,7 @@ import { PageTree, type PageTreeNode } from "../sidebar/PageTree"; // #227: reus
 import { SearchBox } from "../search/SearchBox";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
+import { FALLBACK_PRODUCT_NAME, useProductName } from "./product-name";
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
 import { TenantBrand } from "./BrandLockup"; // #430 the public header uses the shared two-slot lockup
 import { Avatar } from "../ui/Avatar"; // #430 the public header's space chip (shared primitive)
@@ -1331,10 +1332,11 @@ function GuestPage({ minted }: { minted: GuestToken }) {
 // platform-IdP flow as a top-level navigation to /signup/login (proxied to the API).
 function JoinRoute() {
   const { t } = useTranslation();
+  const productName = useProductName();
   return (
     <AppShell>
       <div style={{ padding: 24, maxWidth: 440 }}>
-        <h2 style={{ marginTop: 0 }}>{t("auth.joinTitle")}</h2>
+        <h2 style={{ marginTop: 0 }}>{t("auth.joinTitle", { product: productName })}</h2>
         <p style={{ color: "var(--fg-dim)" }}>{t("auth.joinBody")}</p>
         <Button variant="primary" onClick={() => { window.location.href = "/signup/login"; }}>{t("auth.signUp")}</Button>
       </div>
@@ -1591,6 +1593,7 @@ function PublicHeader({ space }: { space?: PublicSpaceContext | null }) {
   const { t } = useTranslation();
   const branding = useBranding();
   const b = branding.data;
+  const productName = b?.productName || FALLBACK_PRODUCT_NAME;
   return (
     <header className="flex h-10 flex-none items-center gap-2 border-b border-border bg-panel px-4" data-testid="public-header">
       {/* #143 two-slot rule, via the ONE shared lockup (#442 TenantBrand): the icon slot is a custom
@@ -1617,7 +1620,7 @@ function PublicHeader({ space }: { space?: PublicSpaceContext | null }) {
       )}
       <div className="flex-1" />
       {b && !b.whitelabel && (
-        <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy")}</span>
+        <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy", { product: productName })}</span>
       )}
       {/* #429 ruling: theme AND language ride the minimal public header (JA is core to positioning
           one click away for anonymous readers too; the space reader gets both via the AppShell header) */}
@@ -1697,8 +1700,9 @@ function PublicPoweredBy() {
   const { t } = useTranslation();
   const branding = useBranding();
   const b = branding.data;
+  const productName = b?.productName || FALLBACK_PRODUCT_NAME;
   if (!b || b.whitelabel) return null;
-  return <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy")}</span>;
+  return <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy", { product: productName })}</span>;
 }
 
 function PublicSpaceRoute() {

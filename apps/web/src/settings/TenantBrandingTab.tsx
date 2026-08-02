@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useProductName } from "../app/product-name";
 import { useBranding, useEntitlements, useUpdateTenantBranding, useUploadTenantLogo, useRemoveTenantLogo } from "../data/queries";
 import { Button } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
@@ -20,6 +21,7 @@ const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
 // upgrade affordance and the disabled state are scoped to the logo control alone
 // (never the whole tab — a wholesale feature ban is the level-cap anti-pattern).
 export function TenantBrandingTab() {
+  const productName = useProductName();
   const { t } = useTranslation();
   const { isAdmin } = useSession();
   const branding = useBranding();
@@ -77,7 +79,7 @@ export function TenantBrandingTab() {
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("tenantBranding.displayName")}</label>
       <FormRow className="mb-7">
         <Input className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)}
-          placeholder={t("tenantBranding.displayNamePlaceholder")} aria-label={t("tenantBranding.displayName")} data-testid="tenant-name-input" />
+          placeholder={t("tenantBranding.displayNamePlaceholder", { product: productName })} aria-label={t("tenantBranding.displayName")} data-testid="tenant-name-input" />
         <Button variant="primary" disabled={update.isPending || name.trim() === (branding.data?.displayName ?? "")} onClick={saveName} data-testid="tenant-name-save">{t("common.save")}</Button>
       </FormRow>
 

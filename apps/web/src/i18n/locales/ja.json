@@ -562,14 +562,14 @@
     "replaceAction": "置き換える"
   },
   "auth": {
-    "signInTitle": "wikistead にサインイン",
+    "signInTitle": "{{product}} にサインイン",
     "signInBody": "組織の ID プロバイダーで続行します。",
     "signIn": "サインイン",
     "socialHint": "または次の方法で続行",
     "continueWith": "{{provider}} で続行",
     "errorAccess": "サインインを完了できませんでした。もう一度お試しいただくか、ワークスペース管理者にお問い合わせください。",
     "errorSeatFull": "このワークスペースはメンバー上限に達しています。管理者に席の解放またはアップグレードを依頼してください。",
-    "joinTitle": "wikistead ワークスペースを作成",
+    "joinTitle": "{{product}} ワークスペースを作成",
     "joinBody": "ID プロバイダーでサインアップして始めましょう。",
     "signUp": "サインアップ",
     "workspaceTitle": "ワークスペース名を設定",
@@ -785,7 +785,7 @@
     "title": "ブランディング",
     "body": "ワークスペース名とアクセントカラーを設定します。既定で全体に適用され、スペースごとにアクセントを上書きできます。",
     "displayName": "ワークスペース名",
-    "displayNamePlaceholder": "wikistead",
+    "displayNamePlaceholder": "{{product}}",
     "default": "デフォルト",
     "logo": "ロゴ",
     "logoHint": "ヘッダのワークスペース名の隣に表示されます。PNG・JPEG・WebP、512 KB まで。",
@@ -1092,7 +1092,7 @@
     "done": "{{pages}} ページ（添付 {{attachments}} 件）を下書きとしてインポートしました",
     "tooLarge": "アーカイブがサイズ上限を超えています。",
     "forbidden": "このスペースにインポートする権限がありません。",
-    "invalid": "有効な Wikistead エクスポート ZIP ではありません。"
+    "invalid": "有効な {{product}} エクスポート ZIP ではありません。"
   },
   "notifications": {
     "title": "通知",
@@ -1296,7 +1296,7 @@
     "content": "本文"
   },
   "publicReader": {
-    "poweredBy": "Powered by Wikistead"
+    "poweredBy": "Powered by {{product}}"
   },
   "deleteMode": {
     "trash_only": "ゴミ箱経由のみ（30日間復元可能）",
