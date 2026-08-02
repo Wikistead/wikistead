@@ -78,7 +78,7 @@ export function AdminConnectionsSection() {
               <div className="min-w-0 flex-1">
                 <span className="font-medium">{name(c)}</span>
                 <span className="ml-2 text-xs text-fg-dim">{c.preset ? t("adminConnections.presetBadge", { preset: c.preset }) : c.issuer}</span>
-                {c.subjectPrefix === null && <span className="ml-2 rounded bg-bg-subtle px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim">{t("adminConnections.legacyBadge")}</span>}
+                {c.subjectPrefix === null && <span className="ml-2 rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim">{t("adminConnections.legacyBadge")}</span>}
               </div>
               <IconButton aria-label={t("adminConnections.moveUp")} disabled={i === 0} onClick={() => move(i, -1)}><ArrowUp size={14} /></IconButton>
               <IconButton aria-label={t("adminConnections.moveDown")} disabled={i === rows.length - 1} onClick={() => move(i, 1)}><ArrowDown size={14} /></IconButton>

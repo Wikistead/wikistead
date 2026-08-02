@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
@@ -37,7 +37,7 @@ function RoleBadges({ scope, builtIn = false }: { scope?: "resource" | "tenant";
   return (
     <>
       {scope && (
-        <span className="rounded bg-bg-subtle px-1 text-[10px] uppercase tracking-wide text-fg-dim" data-testid="role-scope-badge">
+        <span className="rounded bg-panel-2 px-1 text-[10px] uppercase tracking-wide text-fg-dim" data-testid="role-scope-badge">
           {t(scope === "tenant" ? "adminRoles.scopeTenant" : "adminRoles.scopeResource")}
         </span>
       )}
@@ -102,8 +102,26 @@ function RoleEditor({ onSave, onCancel, pending }: {
   // switching scope drops what was ticked: keeping it would rebuild the mixed role this removes, and
   // a capability from the other vocabulary is not "the same choice" in the new scope.
   const pickScope = (next: "resource" | "tenant") => { setScope(next); setCaps([]); };
+  // #580 review 2: "the form says what it is building" only holds if the form is ON SCREEN.
+  // /admin/roles is a long page, so the trigger sits near the bottom edge and the form opened BELOW
+  // it — measured at top=759 on a 720px viewport, i.e. the segments were off screen at the moment
+  // they were supposed to be doing their job. Opening scrolls the form into view.
+  const formRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { formRef.current?.scrollIntoView({ block: "center" }); }, []);
+  // #580 review 3: it calls itself a radiogroup, so it moves like one — arrows change the
+  // choice, and only the chosen segment is in the tab order (roving tabindex).
+  // With exactly two segments every arrow lands on the other one — a radiogroup wraps at the ends, so
+  // "next" and "previous" are the same move here. Written as a toggle rather than as index arithmetic
+  // that pretends to handle a third segment nobody has.
+  const onSegmentKey = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(e.key)) return;
+    e.preventDefault();
+    const to = scope === "resource" ? "tenant" : "resource";
+    pickScope(to);
+    (e.currentTarget.parentElement?.querySelector(`[data-testid=role-scope-${to}]`) as HTMLElement | null)?.focus();
+  };
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+    <div ref={formRef} className="flex flex-col gap-2 rounded-md border border-border p-3">
       <Input inputSize="sm" className="max-w-xs" value={name} placeholder={t("adminRoles.namePlaceholder")}
         aria-label={t("adminRoles.nameLabel")} data-testid="role-name-input" onChange={(e) => setName(e.target.value)} />
       <div className="flex flex-col gap-1">
@@ -117,9 +135,11 @@ function RoleEditor({ onSave, onCancel, pending }: {
               type="button"
               role="radio"
               aria-checked={scope === s}
+              tabIndex={scope === s ? 0 : -1}
               data-testid={`role-scope-${s}`}
+              onKeyDown={onSegmentKey}
               onClick={() => pickScope(s)}
-              className={`rounded px-3 py-1 text-sm ${scope === s ? "bg-bg-subtle font-medium text-fg" : "text-fg-dim"}`}
+              className={`rounded px-3 py-1 text-sm ${scope === s ? "bg-panel-2 font-medium text-fg" : "text-fg-dim"}`}
             >
               {t(s === "tenant" ? "adminRoles.scopeTenant" : "adminRoles.scopeResource")}
             </button>
