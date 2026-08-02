@@ -7,7 +7,7 @@
 // closes, and a CLOSED list leaves Enter to the composer); this covers where the highlight lands and
 // which keys the composer must not swallow.
 import { describe, it, expect } from "vitest";
-import { classifyMentionKey, nextMentionIndex } from "./mention-nav";
+import { classifyMentionKey, nextMentionIndex, classifyComposerKey } from "./mention-nav";
 
 const key = (k: string, mods: { ctrlKey?: boolean; shiftKey?: boolean } = {}) =>
   classifyMentionKey({ key: k, ctrlKey: !!mods.ctrlKey, shiftKey: !!mods.shiftKey });
@@ -65,5 +65,45 @@ describe("#588: where the highlight lands", () => {
   it("an empty list answers 0 rather than NaN", () => {
     // reachable in the frame between a query change and the new suggestions arriving
     expect(nextMentionIndex(3, 0, 1)).toBe(0);
+  });
+});
+
+// #594 (user ruling): Enter posts, Shift-Enter breaks the line — the chat convention, chosen over the
+// document one (GitHub/Jira: Enter breaks, Ctrl-Enter posts).
+//
+// The IME case is why this is a value and not three lines inside a handler. Confirming a Japanese
+// conversion candidate IS an Enter keydown; posting on it sends the comment mid-word every single time,
+// which makes the composer unusable in Japanese, Chinese and Korean alike. A real IME cannot be driven
+// from a browser test, so the rule is proved here with the flag the browser sets, and the e2e covers
+// what only a browser can.
+describe("#594: what Enter does in the comment composer", () => {
+  it("posts", () => {
+    expect(classifyComposerKey({ key: "Enter", shiftKey: false })).toEqual({ action: "submit" });
+  });
+
+  it("breaks the line with Shift", () => {
+    expect(classifyComposerKey({ key: "Enter", shiftKey: true })).toEqual({ action: "newline" });
+  });
+
+  it("does NOT post while an IME conversion is being confirmed", () => {
+    expect(classifyComposerKey({ key: "Enter", shiftKey: false, isComposing: true })).toEqual({ action: "newline" });
+    // the older browsers' way of saying the same thing
+    expect(classifyComposerKey({ key: "Enter", shiftKey: false, keyCode: 229 })).toEqual({ action: "newline" });
+  });
+
+  it("posts on the Enter AFTER the conversion is confirmed", () => {
+    // the sequence that matters: compositionend clears the flag, and the next Enter is an ordinary one
+    expect(classifyComposerKey({ key: "Enter", shiftKey: false, isComposing: false })).toEqual({ action: "submit" });
+  });
+
+  it("accepts the modifier a Mac user arrives with", () => {
+    expect(classifyComposerKey({ key: "Enter", shiftKey: false, metaKey: true })).toEqual({ action: "submit" });
+    expect(classifyComposerKey({ key: "Enter", shiftKey: false, ctrlKey: true })).toEqual({ action: "submit" });
+  });
+
+  it("leaves every other key to the textarea", () => {
+    for (const key of ["a", "Escape", "ArrowDown", "Tab"]) {
+      expect(classifyComposerKey({ key, shiftKey: false }), key).toEqual({ action: "newline" });
+    }
   });
 });

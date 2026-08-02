@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { classifyMentionKey, nextMentionIndex } from "./mention-nav";
+import { classifyMentionKey, nextMentionIndex, classifyComposerKey } from "./mention-nav";
 import { relTime } from "../ui/relative-time";
 import { Button } from "../ui/Button";
 import { RightPanel } from "../ui/RightPanel";
@@ -60,13 +60,23 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
   // and the highlight stays where the user left it. Nothing yanks it back while the query is unchanged.
   // The DECISION lives in mention-nav.ts (a value); this only executes it.
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (suggest.length === 0) return; // list closed → every key behaves exactly as it did before
-    const k = classifyMentionKey(e);
-    if (k.action === "pass") return;
+    if (suggest.length > 0) {
+      // #588: while the list is open it owns Enter — confirming a suggestion is a different intent from
+      // posting, and the list closes on confirm so the NEXT Enter posts.
+      const k = classifyMentionKey(e);
+      if (k.action !== "pass") {
+        e.preventDefault();
+        if (k.action === "move") setActive((i) => nextMentionIndex(i, suggest.length, k.delta));
+        else if (k.action === "confirm") pick(suggest[Math.min(active, suggest.length - 1)]!);
+        else setSuggest([]);
+        return;
+      }
+    }
+    // #594: Enter posts, Shift-Enter breaks the line — and an Enter that is confirming an IME
+    // conversion does neither. See classifyComposerKey for why that branch is the load-bearing one.
+    if (classifyComposerKey(e).action !== "submit") return;
     e.preventDefault();
-    if (k.action === "move") setActive((i) => nextMentionIndex(i, suggest.length, k.delta));
-    else if (k.action === "confirm") pick(suggest[Math.min(active, suggest.length - 1)]!);
-    else setSuggest([]);
+    submit();
   };
 
   const submit = () => {
