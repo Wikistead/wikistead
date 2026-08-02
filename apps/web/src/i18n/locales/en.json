@@ -932,8 +932,6 @@
     "adminOnly": "Admin only.",
     "member": "Member",
     "role": "Role",
-    "roleMember": "member",
-    "roleAdmin": "admin",
     "you": " (you)",
     "remove": "Remove",
     "eraseAnalytics": "Erase analytics",

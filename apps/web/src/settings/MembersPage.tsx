@@ -16,7 +16,7 @@ import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
 import { notify } from "../ui/toast";
-import { buildTenantRoleRows, filterMembers, pickerOptions, resolveRoleChoice } from "./tenant-role-rows";
+import { buildTenantRoleRows, filterMembers, pickerOptions, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -196,8 +196,10 @@ export function MembersPage() {
           onChange={(v) => setRole(v as "admin" | "member")}
           ariaLabel={t("members.inviteRole")}
           options={[
-            { value: "member", label: t("members.roleMember") },
-            { value: "admin", label: t("members.roleAdmin") },
+            // #582 (user ruling): a built-in role NAME is a proper noun — the same string on every
+            // screen, in every locale. The tenant screens used to translate these two while the space
+            // screen showed them in English, so one role had two names depending where you looked.
+            ...BUILT_IN_TIERS.map((r) => ({ value: r, label: r })),
           ]}
         />
         <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>{t("members.sendInvite")}</Button>

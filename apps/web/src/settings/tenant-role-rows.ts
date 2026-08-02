@@ -101,6 +101,11 @@ export { nameOf as memberLabel };
 // about spaces: why is this two things? The reason given (the tier is exactly one, custom roles are a
 // set) is true and is not a reason to split the CONTROL. One picker offers both; what the pick MEANS
 // is decided here, so the component executes rather than infers (the #536 rule).
+// #582: the built-in tenant tiers, in one place. Their NAMES are proper nouns — not translated, not
+// decorated — so every surface renders the same string and a pin can mirror this list instead of
+// copying it (the #553 lesson: a hand-written copy rots silently).
+export const BUILT_IN_TIERS = ["member", "admin"] as const;
+
 export type RoleChoice =
   | { kind: "tier"; role: "admin" | "member" }
   | { kind: "custom"; roleId: string }
