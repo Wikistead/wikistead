@@ -214,3 +214,30 @@ describe("#579 ②: the group section says why it holds no tiers", () => {
     for (const tier of BUILT_IN_TIERS) expect(assignable).not.toContain(tier);
   });
 });
+
+// #578 bounce ①: a group nobody carries yet keeps its name. The row used to fall back to "unknown
+// group" the moment the name had nowhere to live, which told the manager their grant had gone wrong
+// when it had not. Two facts, two labels: "not seen yet" resolves itself when someone signs in;
+// "unknown group" means the id names nothing at all and never will unless the IdP brings it back.
+describe("#578 ①: the group row distinguishes 'not seen yet' from 'unknown'", () => {
+  const groupRow = (extra: Partial<TenantAssignment>) =>
+    buildGroupRoleRows([a("as1", "r1", "Space creators", "group:abc#member", extra)], "unknown group", "group", "not seen yet")[0]!;
+
+  it("names a group the directory has not produced yet, and says so", () => {
+    expect(groupRow({ groupName: "Contractors", groupUnconfirmed: true }).label).toBe("Contractors (group, not seen yet)");
+  });
+
+  it("drops the note once the group is confirmed", () => {
+    expect(groupRow({ groupName: "Engineering" }).label).toBe("Engineering (group)");
+  });
+
+  it("still says 'unknown' when there is no name at all", () => {
+    // the id resolves to nothing — a different fact, and a different next step for the reader
+    expect(groupRow({}).label).toBe("unknown group (group)");
+  });
+
+  it("a caller that passes no note reads exactly as before", () => {
+    const rows = buildGroupRoleRows([a("as1", "r1", "R", "group:abc#member", { groupName: "X", groupUnconfirmed: true })], "unknown group", "group");
+    expect(rows[0]!.label).toBe("X (group)");
+  });
+});

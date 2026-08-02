@@ -106,8 +106,12 @@ export function SpaceMembersTab() {
   );
   // #536 ⑥: a group principal is a HASH — the server resolves the name (group-sync.ts is the id
   // authority); an orphan (group gone at the IdP) gets the explicit label and STAYS revocable.
-  const rolePrincipalLabel = (a: { principal: string; groupName?: string }): string => {
-    if (a.principal.startsWith("group:")) return `${a.groupName ?? t("spaceMembers.unknownGroup")} (${t("spaceMembers.group")})`;
+  const rolePrincipalLabel = (a: { principal: string; groupName?: string; groupUnconfirmed?: boolean }): string => {
+    if (a.principal.startsWith("group:")) {
+      if (!a.groupName) return `${t("spaceMembers.unknownGroup")} (${t("spaceMembers.group")})`;
+      const suffix = a.groupUnconfirmed ? `, ${t("spaceMembers.groupNotSeen")}` : "";
+      return `${a.groupName} (${t("spaceMembers.group")}${suffix})`;
+    }
     const sub = a.principal.replace(/^user:/, "");
     return roleNameBySub.get(sub) || sub; // server-resolved name; raw sub only for a departed/cross-tenant one
   };
@@ -211,8 +215,15 @@ export function SpaceMembersTab() {
   // display_name) on the manage-gated grant list (slice A), so an un-customized member reads as their
   // name, not a sub — the #513 root fix. A departed / cross-tenant sub comes back null and falls back to
   // the sub, unchanged. (This supersedes the customized-only /members/identities lookup here.)
-  const label = (g: { grantee: string; groupName?: string; displayName?: string | null }) => {
-    if (g.groupName) return `${g.groupName} (${t("spaceMembers.group")})`;
+  const label = (g: { grantee: string; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null }) => {
+    // #578 bounce ①: a group nobody carries yet keeps its NAME and says why it looks empty. Before the
+    // mappings were retired their row held the typed name; now the grant does, so the two facts stay
+    // apart — "this group has no members yet" is a normal state on the way to having some, while
+    // "unknown group" below means the id resolves to nothing we can name at all.
+    if (g.groupName) {
+      const suffix = g.groupUnconfirmed ? `, ${t("spaceMembers.groupNotSeen")}` : "";
+      return `${g.groupName} (${t("spaceMembers.group")}${suffix})`;
+    }
     // #536 ⑥: an unresolvable group id is an ORPHAN (group gone at the IdP) — say so instead of
     // printing the hash; the row keeps its revoke (unreadable must not mean unremovable).
     if (g.grantee.startsWith("group:")) return `${t("spaceMembers.unknownGroup")} (${t("spaceMembers.group")})`;

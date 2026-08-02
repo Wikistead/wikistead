@@ -29,7 +29,7 @@ export function TenantGroupRoles() {
   const [groupName, setGroupName] = useState("");
 
   const tenantRoles = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
-  const rows = buildGroupRoleRows(assignments.data ?? [], t("spaceMembers.unknownGroup"), t("spaceMembers.group"));
+  const rows = buildGroupRoleRows(assignments.data ?? [], t("spaceMembers.unknownGroup"), t("spaceMembers.group"), t("spaceMembers.groupNotSeen"));
   // A tenant with no groups and nothing assigned would get an empty box on every visit. Stay out of
   // the way — but keep the section as soon as either side exists, so an existing assignment is never
   // hidden just because the IdP stopped sending the group.
