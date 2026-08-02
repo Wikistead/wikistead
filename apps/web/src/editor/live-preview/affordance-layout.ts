@@ -141,6 +141,37 @@ export function focusedWrap(view: EditorView, pointer: { x: number; y: number } 
 // write pass will make visible, not against what is visible right now — otherwise an affordance shown by
 // this very pass was never measured, and lands unplaced. (That is exactly what a first cut of the owner-
 // driven visibility did: the static case came back with the original 8px collision.)
+// #577: the slot decision, as data. It used to live inline in the loop below, where the only way to
+// test it was to reproduce a whole browser state — which is how the first attempt at this ticket
+// shipped a pin that could not go red. Everything it needs is geometry, so it takes geometry: the
+// element's own rect, the surface it may occupy, its host's rect (for the sideways room) and whatever
+// is already placed. The caller still owns the DOM.
+export interface Rect { top: number; bottom: number; left: number; right: number }
+export interface SlotInput {
+  r: Rect & { width: number; height: number };
+  bounds: Rect;
+  content: Rect | null;
+  peers: Rect[];
+  step: number;
+}
+export function chooseSlot({ r, bounds, content, peers, step }: SlotInput): { dy: number; dx: number } | null {
+  const inlineRoom = content ? content.right - r.left - r.width : 0;
+  const cands: { dy: number; dx: number }[] = [{ dy: 0, dx: 0 }];
+  for (let i = 1; i <= 4; i++) cands.push({ dy: -i * step, dx: 0 });
+  // sideways: flush right inside the host, then the mirror to the left, both on the ORIGINAL row
+  if (inlineRoom > 0) cands.push({ dy: 0, dx: Math.round(inlineRoom) });
+  if (content && r.left - content.left > 0) cands.push({ dy: 0, dx: -Math.round(r.left - content.left) });
+  for (let i = 1; i <= 4; i++) cands.push({ dy: i * step, dx: 0 });
+  for (const { dy, dx } of cands) {
+    const cand = { top: r.top + dy, bottom: r.bottom + dy, left: r.left + dx, right: r.right + dx };
+    if (cand.top < bounds.top || cand.bottom > bounds.bottom) continue; // would leave the visible surface
+    if (cand.left < bounds.left || cand.right > bounds.right) continue; // …in either axis
+    if (peers.some((p) => !(cand.right <= p.left || cand.left >= p.right || cand.bottom <= p.top || cand.top >= p.bottom))) continue;
+    return { dy, dx };
+  }
+  return null; // nothing free anywhere on screen
+}
+
 export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | null = null): Placed[] {
   const els = Array.from(view.dom.querySelectorAll<HTMLElement>(AFFORDANCE_SEL));
   // With fewer than two affordances present there is nothing to resolve, so the owner says NOTHING rather
@@ -190,7 +221,21 @@ export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | n
     .filter((c) => c.r.width > 0 && c.r.height > 0)
     .sort((a, b) => rank(a.el) - rank(b.el) || a.r.top - b.r.top);
 
-  const bounds = view.scrollDOM.getBoundingClientRect();
+  // #577 (review, root cause measured): the bound is the surface the chrome is DRAWN on, which is
+  // not always this view's own scroller. Inside a nested edit island the island's scroller starts at the
+  // block's top edge, so every upward candidate — and the inline ones, which keep dy = 0 — was rejected
+  // as "off screen" and the downward flip was the only survivor. Downward means onto the block's own
+  // drawing: measured at 1111px² inside an excalidraw canvas, with NO other affordance in play, so this
+  // was never a collision problem. A pill in an island renders on the outer page and may legally sit
+  // above the island, so the outermost editor's scroller is what decides visibility.
+  const outerScroller = (() => {
+    let node: HTMLElement | null = view.scrollDOM;
+    for (let hop = view.scrollDOM.parentElement; hop; hop = hop.parentElement) {
+      if (hop.classList.contains("cm-scroller")) node = hop; // an ancestor scroller means we are nested
+    }
+    return node;
+  })();
+  const bounds = outerScroller.getBoundingClientRect();
   const placed: Placed[] = [];
   for (const { el, r } of candidates) {
     const cur: Placed = { el, top: r.top, bottom: r.bottom, left: r.left, right: r.right, dy: 0, dx: 0 };
@@ -206,20 +251,9 @@ export function resolveAffordanceLayout(view: EditorView, focus: HTMLElement | n
     // a column too narrow to hold both.
     const host = el.closest<HTMLElement>(FOCUS_HOSTS);
     const content = host ? host.getBoundingClientRect() : null;
-    const inlineRoom = content ? content.right - r.left - r.width : 0;
-    const cands: { dy: number; dx: number }[] = [{ dy: 0, dx: 0 }];
-    for (let i = 1; i <= 4; i++) cands.push({ dy: -i * step, dx: 0 });
-    // sideways: flush right inside the host, then the mirror to the left, both on the ORIGINAL row
-    if (inlineRoom > 0) cands.push({ dy: 0, dx: Math.round(inlineRoom) });
-    if (content && r.left - content.left > 0) cands.push({ dy: 0, dx: -Math.round(r.left - content.left) });
-    for (let i = 1; i <= 4; i++) cands.push({ dy: i * step, dx: 0 });
-    for (const { dy, dx } of cands) {
-      const cand: Placed = { ...cur, top: r.top + dy, bottom: r.bottom + dy, left: r.left + dx, right: r.right + dx, dy, dx };
-      if (cand.top < bounds.top || cand.bottom > bounds.bottom) continue; // would leave the visible surface
-      if (cand.left < bounds.left || cand.right > bounds.right) continue; // …in either axis
-      if (placed.some((p) => overlaps(cand, p))) continue;
-      placed.push(cand);
-      break;
+    const slot = chooseSlot({ r, bounds, content, peers: placed, step });
+    if (slot) {
+      placed.push({ ...cur, top: r.top + slot.dy, bottom: r.bottom + slot.dy, left: r.left + slot.dx, right: r.right + slot.dx, dy: slot.dy, dx: slot.dx });
     }
     // Nothing free anywhere on screen: keep the element where it is. Overlapping is bad; vanishing is worse.
     if (!placed.includes(cur) && !placed.some((p) => p.el === el)) placed.push(cur);
