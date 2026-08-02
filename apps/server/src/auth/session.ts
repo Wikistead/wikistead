@@ -161,12 +161,21 @@ export async function establishMemberSession(
   // #554 S4 / ADR-197 §5 rev3 (the gate flip): true ONLY when the CALLER validated the raw
   // external sub and minted the namespaced form (wc<conn8>_<raw>) itself — the gate below would
   // otherwise refuse the very subs this seam exists to protect. Never set from request data.
-  opts?: { subMintedInternally?: boolean },
+  opts?: {
+    subMintedInternally?: boolean
+    // #568 / ADR-198 §0 §3: this identity is OURS — a local member signing in with a password. Two
+    // things must not happen on that path. It must not AUTO-ENROL (a password proves who you are;
+    // membership was decided when the invite was accepted, and re-deciding it here would let the
+    // enrol policy admit someone through a door that has no IdP behind it), and it must not upsert
+    // the PROFILE from claims (there are no claims — an OIDC login refreshes name/picture/groups
+    // from the IdP at every sign-in; a local member's profile is their own to edit, ADR-190).
+    localIdentity?: boolean
+  },
 ): Promise<string> {
   // #554 / ADR-197 §5 (S0): the reserved internal sub space — an externally-asserted subject that
   // wears a future connection's prefix (or exceeds the FGA-safe length) is refused with this seam's
   // own failure (a non-member 403), never a distinguishable oracle.
-  if (!opts?.subMintedInternally) {
+  if (!opts?.subMintedInternally && !opts?.localIdentity) {
     const { assertExternalSub } = await import('./reserved-subs.js')
     assertExternalSub(claims.sub, () => Object.assign(new Error('not a member of this tenant'), { statusCode: 403 }))
   }
@@ -180,6 +189,9 @@ export async function establishMemberSession(
     // path shares one atomic gate. invite_only (the default) → not eligible → 403, and the caller (auth /
     // saml) falls through to the invite/bootstrap paths — behaviour unchanged for existing tenants. An
     // existing member never reaches here (allowed=true above), so this adds no cost to the common path.
+    // A local sign-in never creates membership (see localIdentity above): a non-member gets the
+    // same 403 a non-member always got.
+    if (opts?.localIdentity) throw Object.assign(new Error('not a member of this tenant'), { statusCode: 403 })
     const cfg = await getEnrollConfig(deps.db)
     const eligible = enrollEligible({
       policy: cfg.policy,
@@ -212,7 +224,13 @@ export async function establishMemberSession(
   // (#111). Both in one tx: if the FGA sync fails the row rolls back, so members.groups and
   // FGA stay aligned and the next login re-derives the same diff. (Login already requires FGA
   // — the membership check above — so this adds no new "FGA down" failure mode.)
-  const row = await deps.db.tx(async (tx) => {
+  // A local session READS the member row it already has; an OIDC one rewrites it from the claims it
+  // just received. Sharing the write here would have a password login blank out the display name the
+  // member set for themselves.
+  const row = opts?.localIdentity
+    ? (await deps.db.sql<[{ role: string; groups: string[] }]>`
+        SELECT role, groups FROM members WHERE tenant_id = ${tenant.id} AND sub = ${claims.sub}`)[0]
+    : await deps.db.tx(async (tx) => {
     const [prevRow] = await tx<[{ groups: string[] }?]>`
       SELECT groups FROM members WHERE tenant_id = ${tenant.id} AND sub = ${claims.sub}`
     const [r] = await tx<[{ role: string; groups: string[] }]>`

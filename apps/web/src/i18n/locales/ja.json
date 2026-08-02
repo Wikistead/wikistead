@@ -391,6 +391,8 @@
     "samlAttrGroups": "groups 属性",
     "samlEnabled": "SAML サインインを有効にする",
     "methodPlatformOidc": "プラットフォームログイン",
+    "methodLocal": "パスワード",
+    "localBody": "メールアドレスとパスワードでサインインします。パスワードは招待の中で本人が設定します。",
     "methodSaml": "SAML SSO",
     "method_effective": "有効",
     "method_byPolicy": "デプロイポリシーにより利用不可",

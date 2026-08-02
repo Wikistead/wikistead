@@ -15,8 +15,11 @@ import { loadPlatformOidc, type TenantOidcConfig } from './oidc.js'
 // way to break bootstrap. Social is NOT a method here (ruling 3): it is a hint on the platform issuer,
 // silently dropped when unavailable (ADR-121's existing contract).
 
-export type LoginMethod = 'tenant-oidc' | 'platform-oidc' | 'saml'
-const ALL_METHODS: readonly LoginMethod[] = ['tenant-oidc', 'platform-oidc', 'saml']
+// #568 / ADR-198 §3 M8: `local` is a CONNECTION like any other — same ceiling vocabulary, same
+// effective-set arithmetic, same "you cannot disable your only way back in" guard. Password sign-in
+// that lived outside this module would be a second way in that the lockout guard cannot see.
+export type LoginMethod = 'tenant-oidc' | 'platform-oidc' | 'saml' | 'local'
+const ALL_METHODS: readonly LoginMethod[] = ['tenant-oidc', 'platform-oidc', 'saml', 'local']
 
 // The deployment ceiling. Unset = everything (the CE default: no new config required). Tokens are
 // validated; an env that names ONLY unknown tokens is a configuration error, not an empty product —
@@ -55,6 +58,20 @@ async function tenantOidcEnabled(db: TenantDb): Promise<boolean> {
 // Only the missing-table case (a server running ahead of migration 087) is tolerated — anything
 // else THROWS so a real failure surfaces as a 500 instead of silently un-enforcing SSO
 // (design-review Slice 3, finding 2: a broad catch here was fail-open on the security-relevant side).
+// #568 / ADR-198 §3: does this tenant offer password sign-in? Unlike every other method this one has
+// no configuration row of its own, so the answer lives with the other stance a tenant takes about a
+// method it does not configure (migration 087/106). Absent row = OFF: acquiring a password door
+// because a migration ran is not a decision anyone made. Same missing-table tolerance as the platform
+// pref (a server running ahead of its migration), and anything else throws rather than quietly
+// answering "off" — a read failure must not look like a tenant's choice.
+export async function localLoginEnabled(db: TenantDb): Promise<boolean> {
+  const [row] = await db.sql<{ local_login_enabled: boolean }[]>`SELECT local_login_enabled FROM tenant_login_prefs LIMIT 1`.catch((err: unknown) => {
+    if ((err as { code?: string }).code === '42P01' || (err as { code?: string }).code === '42703') return [] as { local_login_enabled: boolean }[]
+    throw err
+  })
+  return !!row?.local_login_enabled
+}
+
 async function platformLoginDisabled(db: TenantDb): Promise<boolean> {
   const [row] = await db.sql<{ platform_login_disabled: boolean }[]>`SELECT platform_login_disabled FROM tenant_login_prefs LIMIT 1`.catch((err: unknown) => {
     if ((err as { code?: string }).code === '42P01') return [] as { platform_login_disabled: boolean }[] // undefined_table
@@ -102,6 +119,10 @@ export async function resolveAvailableLogin(
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) {
     methods.add('saml')
   }
+  // #568 / ADR-198 §3 M8 + §9: local is an OWN way in (no external IdP involved) and carries no
+  // entitlement gate — the ruling is that edition never decides which authentication methods exist.
+  // It is decided before platform for the same reason saml is: it counts toward ownIdpEffective.
+  if (ceiling.has('local') && (await localLoginEnabled(db))) methods.add('local')
   // Ruling 4: the tenant may have turned the platform IdP off (SSO enforcement). The pref is a
   // CONDITIONAL, re-evaluated at read time exactly like the rest of the effective set: it bites only
   // WHILE an own IdP (tenant-oidc or saml, above) is effective. When that stops being true — plan
@@ -139,7 +160,7 @@ export async function resolveAvailableLogin(
 // throws/null) while this lists it — S3 must not render a button the start route cannot honor.
 export interface LoginConnection {
   id: string
-  kind: 'oidc' | 'saml' | 'platform'
+  kind: 'oidc' | 'saml' | 'platform' | 'local'
   label: string | null
   brand: string | null
   bootstrapEligible: boolean
@@ -173,6 +194,12 @@ export async function resolveLoginConnections(
       throw err
     })
     if (row) out.push({ id: row.id, kind: 'saml', label: null, brand: null, bootstrapEligible: false, trustGroups: row.trust_groups, subjectPrefix: null })
+  }
+  // #568: local is a connection with no configuration to point at — a fixed id, like platform, which
+  // cannot collide with a minted uuid. It never bootstraps an admin (§7 keeps that on the CLI) and
+  // asserts no groups, so it trusts none.
+  if (ceiling.has('local') && (await localLoginEnabled(db))) {
+    out.push({ id: 'local', kind: 'local', label: null, brand: null, bootstrapEligible: false, trustGroups: false, subjectPrefix: null })
   }
   const ownIdpEffective = out.length > 0
   let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null

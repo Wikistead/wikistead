@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   useAdminConnections, useCreateConnection, useUpdateConnection, useDeleteConnection, useReorderConnections,
-  useLoginMethods, useUpdatePlatformLogin, useTenantSaml, useTestTenantOidc,
+  useLoginMethods, useUpdatePlatformLogin, useUpdateLocalLogin, useTenantSaml, useTestTenantOidc,
   type AdminConnectionDTO, type LoginMethodState,
 } from "../data/queries";
 import { ApiError } from "../data/apiClient";
@@ -62,6 +62,7 @@ export function AdminSignInMethodsSection() {
   const reorder = useReorderConnections();
   const methods = useLoginMethods();
   const platform = useUpdatePlatformLogin();
+  const localLogin = useUpdateLocalLogin();
   const saml = useTenantSaml();
   const test = useTestTenantOidc();
 
@@ -344,6 +345,28 @@ export function AdminSignInMethodsSection() {
                 : stateBadges(samlState.kind === "form" && !!samlState.data?.enabled, m?.saml, m?.saml.effective)}
             </div>
             {expanded === "saml" && <AdminSamlSection />}
+          </div>
+        )}
+
+        {/* #568 / ADR-198 §3: password sign-in — the fifth row ADR-195's addendum reserved a seat for.
+            Nothing to configure, so the row is its switch and one line saying what it means. Turning
+            it off is refused when it is the only way in (the server answers 409 login_lockout, the
+            same rule every other method obeys). */}
+        {m && m.local.inCeiling && (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-2 text-sm" data-testid="sign-in-method-local">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("adminAuth.methodLocal")}</div>
+              <div className="text-xs text-fg-dim">{t("adminAuth.localBody")}</div>
+            </div>
+            {stateBadges(m.local.selected, m.local, m.local.effective)}
+            <Switch checked={m.local.selected} testId="local-login-toggle" ariaLabel={t("adminAuth.methodLocal")}
+              onChange={(on: boolean) => localLogin.mutate(on, {
+                onSuccess: () => notify.success(t("toast.saved")),
+                onError: (e) => {
+                  const code = e instanceof ApiError ? e.code : undefined;
+                  notify.error(code === "login_lockout" ? t("adminConnections.lockoutRefused") : t("adminAuth.methodsSaveFailed"));
+                },
+              })} />
           </div>
         )}
 

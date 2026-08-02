@@ -52,7 +52,7 @@ export async function inspectLoginMethods(sql: postgres.Sql, args: { slug: strin
   // writes below flip ALL of the tenant's oidc connections — TODO(#554 S4): per-connection --connection.
   const [oidc] = await sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc WHERE tenant_id = ${tenant.id} ORDER BY sort, id LIMIT 1`
   const [saml] = await sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml WHERE tenant_id = ${tenant.id}`.catch(() => [] as { enabled: boolean }[])
-  const [pref] = await sql<{ platform_login_disabled: boolean }[]>`SELECT platform_login_disabled FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`
+  const [pref] = await sql<{ platform_login_disabled: boolean; local_login_enabled: boolean }[]>`SELECT platform_login_disabled, local_login_enabled FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`
   const platformCfg = !!loadPlatformOidc()
   const entitledSaml = resolveEntitlements(tenant.plan).samlSso
 
@@ -79,7 +79,11 @@ export async function inspectLoginMethods(sql: postgres.Sql, args: { slug: strin
   const samlPic = pick({ inCeiling: ceiling.has('saml'), configured: saml != null, selected: !!saml?.enabled, entitled: entitledSaml })
   // Mirror the resolver's CONDITIONAL pref (Slice 3 finding 1): "platform off" bites only while an
   // own IdP is effective; otherwise it LAPSES and platform login is back open (no lockout by pref).
-  const ownIdpEffective = tenantOidc.effective || samlPic.effective
+  // #568 / ADR-198 §3: local is an own way in — it counts toward the lapse condition below exactly
+  // as tenant-oidc and saml do. "Configured" has no meaning for a method with nothing to configure,
+  // so the tenant's switch IS both the configuration and the selection.
+  const localPic = pick({ inCeiling: ceiling.has('local'), configured: true, selected: !!pref?.local_login_enabled })
+  const ownIdpEffective = tenantOidc.effective || samlPic.effective || localPic.effective
   const platformSelected = !pref?.platform_login_disabled
   const platform = pick({
     inCeiling: ceiling.has('platform-oidc'),
@@ -90,6 +94,7 @@ export async function inspectLoginMethods(sql: postgres.Sql, args: { slug: strin
     'tenant-oidc': tenantOidc,
     'platform-oidc': { ...platform, selected: platformSelected }, // report the STORED intent, effect includes the lapse
     saml: samlPic,
+    local: localPic,
   }
   return {
     tenantId: tenant.id,

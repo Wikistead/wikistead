@@ -71,6 +71,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `member.added` | A member was added to the tenant. |
 | `member.role_changed` | A member's role was changed. |
 | `member.removed` | A member was removed from the tenant. |
+| `member.locked` | Password sign-in was locked for an identifier after repeated failures (it expires on its own). |
 | `invite.created` | A member invite was created. |
 | `invite.revoked` | A member invite was revoked. |
 | `comment.created` | A comment was created on a page. |
