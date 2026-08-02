@@ -166,6 +166,73 @@ describe('#596 page scope: a revoke that changes nothing refuses instead of lyin
   }, 120_000)
 })
 
+// Review findings F1–F3, each pinned where it was found.
+describe('#596 review: coverage is FGA truth, names are manage-only, and the ledger says what happened', () => {
+  it('F2: a ROWLESS covering tuple is reported too — the row-only rule called this a clean removal', async () => {
+    // The mirror image of scenario (c): the rowless grant is what SURVIVES, and the role is what is
+    // removed. assignRoleInTx does not own a leaf that already existed, so nothing is deleted and the
+    // access plainly remains — while a coverage rule that reads only role_assignments rows saw no
+    // covering row and answered `stillCovered: []`, i.e. a plain success toast over unchanged access.
+    const p = sub('pg-rowless-covers')
+    await writeTuples(fgaClient, [{ user: p, relation: 'view_direct', object: `page:${pageId}` }])
+    const a = await assign(roleA, 'page', pageId, p)
+    const out = await unassignRoleInTx(db, fgaClient, app.searchDriver, { tenant, assignmentId: a, actorSub: OWNER })
+    expect(out.deleted).toBe(true)
+    expect(await canView(p), 'the rowless grant still confers view').toBe(true)
+    // named by the capability itself: a direct grant of `view` IS what the client calls a viewer
+    expect(out.stillCovered).toEqual([{ capability: 'view', via: 'view' }])
+  }, 120_000)
+
+  it('F3: when nothing was lost, the ledger records the UNASSIGNMENT — not an access revocation', async () => {
+    // `page.access_revoked` means "a principal LOST a relation" (the event catalog's own words).
+    // Writing it into a hash-chained ledger while the principal kept every capability is the same lie
+    // in a different column, so the audit falls back to the vocabulary that is true: role.unassigned.
+    const p = sub('pg-audit-action')
+    await grantPageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' })
+    await assign(roleA, 'page', pageId, p) // covers `view` from another row
+    const [grantRow] = await adminPool<{ id: string }[]>`
+      SELECT id FROM role_assignments WHERE resource_type = 'page' AND resource_id = ${pageId} AND principal = ${p} AND builtin_capability = 'view'`
+    // A DELTA around this one call — a time window would sweep in the legitimate revocations the
+    // earlier tests in this file wrote against the same page (measured: it did).
+    const actions = async () => {
+      await drainAuditFor(adminPool, TENANT)
+      const [r] = await adminPool<[{ revoked: string; unassigned: string }]>`
+        SELECT count(*) FILTER (WHERE action = 'page.access_revoked')::text AS revoked,
+               count(*) FILTER (WHERE action = 'role.unassigned')::text AS unassigned
+        FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`page:${pageId}`}`
+      return { revoked: Number(r.revoked), unassigned: Number(r.unassigned) }
+    }
+    const before = await actions()
+    const fired = await firedRevokes(() =>
+      revokePageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' }),
+    )
+    expect(grantRow, 'the grant really had a row (else this pins the wrong branch)').toBeTruthy()
+    expect(fired, 'no access_revoked webhook: the principal lost nothing').toEqual([])
+    const after = await actions()
+    expect(after.revoked - before.revoked, 'no "access revoked" line for access that was not revoked').toBe(0)
+    expect(after.unassigned - before.unassigned, 'the removal that DID happen is recorded').toBe(1)
+    expect(await canView(p), 'and the role still confers view').toBe(true)
+  }, 120_000)
+
+  it('F1: a share-only manager gets the refusal WITHOUT the tenant role name', async () => {
+    // The page grant/revoke verb is `share`; role DEFINITIONS are gated on `manage` (ADR-202 §1). A
+    // coverage report must not be the back door that hands a share-only holder the tenant's role names.
+    const victim = sub('pg-redact-victim')
+    const sharer = sub('pg-redact-sharer')
+    await writeTuples(fgaClient, [{ user: victim, relation: 'view_direct', object: `page:${pageId}` }])
+    await assign(roleA, 'page', pageId, victim)
+    await writeTuples(fgaClient, [{ user: sharer, relation: 'share_direct', object: `page:${pageId}` }])
+    expect(await check(fgaClient, sharer, 'manage', P), 'the sharer is deliberately NOT a manager').toBe(false)
+
+    const asSharer = { pageId, tenantId: TENANT, userId: sharer.slice('user:'.length), grantee: victim, relation: 'view', plan: 'business' }
+    await expect(revokePageAccess(db, fgaClient, app.searchDriver, asSharer))
+      .rejects.toMatchObject({ statusCode: 409, code: 'still_covered', coveredBy: [] })
+    // ...and a manager, who could read the same name from the role endpoints, still gets it
+    await expect(revokePageAccess(db, fgaClient, app.searchDriver, { ...asSharer, userId: OWNER }))
+      .rejects.toMatchObject({ statusCode: 409, coveredBy: [roleA] })
+  }, 120_000)
+})
+
 describe('#596 space scope: the same three shapes', () => {
   const canViewSpace = (p: string) => check(fgaClient, p, 'view', P) // page inherits space viewer
 

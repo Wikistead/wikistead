@@ -101,6 +101,8 @@
     "accessRevoked": "アクセスを取り消しました",
     "accessRevokedStillCovered": "取り消しました。ただし {{via}} が同じ権限を与えています。",
     "accessRevokeCovered": "取り消せません：{{via}} が同じ権限を与えています。そちらを外してください。",
+    "accessRevokedStillCoveredUnnamed": "取り消しました。ただし別の割り当てが同じ権限を与えています。",
+    "accessRevokeCoveredUnnamed": "取り消せません：別の割り当てが同じ権限を与えています。そちらを外してください。",
     "linkCreated": "共有リンクを作成しました",
     "linkRevoked": "共有リンクを取り消しました",
     "copied": "リンクをクリップボードにコピーしました",

@@ -54,4 +54,27 @@ describe("#596: revoke feedback tells the truth about what happened", () => {
     notifyRevokeOutcome(t, null);
     expect(notify.success).toHaveBeenCalledWith("toast.accessRevoked");
   });
+
+  // review F5: a coverer is named as a ROLE. The raw wire capability is not a name any of these
+  // screens shows (#582 removed exactly that), so a built-in coverer wears its noun.
+  it("a built-in coverer is named by its noun, not its wire capability", () => {
+    notifyRevokeOutcome(t, { removed: true, stillCovered: [{ capability: "view", via: "view" }] });
+    expect(notify.info).toHaveBeenCalledWith("toast.accessRevokedStillCovered:viewer");
+  });
+
+  // review F1: the server omits `via` for a caller who may not read role definitions on the resource.
+  // The fact still has to reach them — without inventing a name.
+  it("coverage with no name still says the access remains", () => {
+    notifyRevokeOutcome(t, { removed: true, stillCovered: [{ capability: "view" }] });
+    expect(notify.info).toHaveBeenCalledWith("toast.accessRevokedStillCoveredUnnamed");
+    expect(notify.success).not.toHaveBeenCalled();
+  });
+
+  it("a 409 with no names refuses in words that do not name anything", () => {
+    const err = new ApiError(409, "/pages/p/access", "still granted by another assignment");
+    err.code = "still_covered";
+    err.coveredBy = [];
+    notifyRevokeError(t, err);
+    expect(notify.error).toHaveBeenCalledWith("toast.accessRevokeCoveredUnnamed");
+  });
 });

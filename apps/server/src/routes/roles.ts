@@ -383,7 +383,21 @@ export async function assignBuiltinCompositeInTx(
 // "they lost access" when they did not.
 export interface UnassignOutcome {
   deleted: boolean
-  stillCovered: { capability: string; via: string }[]
+  // `via` names the covering assignment (a custom role's name, or the built-in capability a direct
+  // grant is). #596 review F1: it is OMITTED for a caller who may not read role definitions on this
+  // resource — see redactCoverage.
+  stillCovered: { capability: string; via?: string }[]
+}
+
+// #596 review F1: role NAMES are tenant-wide information. ADR-202 §1 deliberately gated reading them
+// on the target's `manage` (the page grant/revoke verb is the wider `share`), so a coverage report
+// must not become the back door that hands a share-only holder the tenant's role names. The refusal
+// and the "still granted" fact stay — they are about the page the caller already administers — but
+// the NAME travels only to callers who could read it from the role endpoints anyway.
+export function redactCoverage<T extends { capability: string; via?: string }>(
+  covered: T[], mayReadNames: boolean,
+): { capability: string; via?: string }[] {
+  return mayReadNames ? covered : covered.map((c) => ({ capability: c.capability }))
 }
 export async function unassignRoleInTx(
   db: TenantDb, fga: OpenFgaClient, searchDriver: SearchDriver,
@@ -395,11 +409,25 @@ export async function unassignRoleInTx(
   },
 ): Promise<UnassignOutcome> {
   let deleted = false
-  let stillCovered: { capability: string; via: string }[] = []
+  let stillCovered: { capability: string; via?: string }[] = []
   let resourceType = 'page' as 'page' | 'space' | 'tenant'
   let resourceId = ''
+  // #596 review F2: coverage must be decided from what FGA ACTUALLY HOLDS, not from assignment rows
+  // alone. A pre-086 rowless tuple confers the capability with no row to count, so a row-only rule
+  // answered "nothing else grants this" while the access plainly remained. Read the principal's live
+  // tuples BEFORE the transaction (the shape revokeSpaceAccessComposite already uses) and let the core
+  // decide per capability. The pre-read needs the principal, so resolve the row first — the tx re-reads
+  // it FOR UPDATE, which stays the authority.
+  const [pre] = await db.sql<{ principal: string; resource_type: 'page' | 'space' | 'tenant'; resource_id: string }[]>`
+    SELECT principal, resource_type, resource_id FROM role_assignments WHERE id = ${args.assignmentId}`
+  let held: Set<string> | undefined
+  if (pre) {
+    // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so this is bounded by the type's relation count, never by tenant size.
+    const { tuples } = await fga.read({ user: pre.principal, object: `${pre.resource_type}:${pre.resource_id}` })
+    held = new Set((tuples ?? []).map((t: Tuple) => t.key?.relation ?? ''))
+  }
   const oid = await db.tx(async (tx) => {
-    const r = await unassignRoleTxCore(tx, args)
+    const r = await unassignRoleTxCore(tx, { ...args, heldRelations: held })
     if (!r) return null
     deleted = true
     stillCovered = r.stillCovered
@@ -429,11 +457,17 @@ interface UnassignTxOutcome {
   // assignments, labelled by what retains them (a custom role's name / a built-in capability). The
   // row deletion is a real change and stays a success — but "removed and they still have access" must
   // reach the surface as words, not as a success toast that implies the opposite.
-  stillCovered: { capability: string; via: string }[]
+  stillCovered: { capability: string; via?: string }[]
 }
 export async function unassignRoleTxCore(
   tx: Sql,
-  args: { tenant: { id: string; plan: string }; assignmentId: string; actorSub: string; auditAction?: string; skipAudit?: boolean },
+  args: {
+    tenant: { id: string; plan: string }; assignmentId: string; actorSub: string; auditAction?: string; skipAudit?: boolean
+    // #596: the principal's LIVE relations on the resource, read by the caller before the tx. Coverage
+    // is then decided from FGA truth (a rowless legacy tuple counts) rather than from rows alone.
+    // Absent = row-only reasoning (the composite caller computes its own delete set from live tuples).
+    heldRelations?: Set<string>
+  },
 ): Promise<UnassignTxOutcome | null> {
   interface AsgRow { id: string; role_id: string; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; principal: string; owned_capabilities: string[]; capabilities: string[] }
   {
@@ -463,13 +497,32 @@ export async function unassignRoleTxCore(
       await tx`UPDATE role_assignments SET owned_capabilities = array_append(owned_capabilities, ${c}) WHERE id = ${heir.id} AND NOT (${c} = ANY(owned_capabilities))`
     }
     await tx`DELETE FROM role_assignments WHERE id = ${asg.id}`
-    if (!args.skipAudit) await auditIfEntitled(tx, args.tenant, { actor: `user:${args.actorSub}`, action: args.auditAction ?? 'role.unassigned', target: `${asg.resource_type}:${asg.resource_id}` })
-    const o = asg.resource_type === 'page' ? await enqueueOutbox(tx, { tenantId: args.tenant.id, pageId: asg.resource_id, operation: 'upsert' }) : null
     // #596: report on the CONFERRED set (asg.capabilities), not just the owned set — an assignment
     // that owned nothing (its leaves pre-existed) still conferred; after its removal the principal
     // keeps those capabilities through whoever covers them, and the surface must say so.
-    const kept = (asg.capabilities ?? []).filter((c) => stillCovered.has(c))
-      .map((c) => ({ capability: c, via: others.find((o) => o.capabilities.includes(c))!.via }))
+    //
+    // review F2: a capability survives this removal when a SURVIVING ROW confers it (named by that
+    // row) OR when its leaves are simply still in FGA after the delete set is applied — the rowless
+    // pre-086 grant, which no row can speak for. A rowless holder is named by the capability itself
+    // that is exactly what a direct grant of it is called (the client renders it as the same noun the
+    // pickers use).
+    const goingAway = new Set(toDelete.map((t) => t.relation))
+    const survivesInFga = (c: AnyRoleCapability): boolean => {
+      if (!args.heldRelations) return false
+      const leaves = expansionTuples(asg.resource_type, asg.resource_id, asg.principal, c, asg.role_id === null)
+      return leaves.length > 0 && leaves.every((t) => args.heldRelations!.has(t.relation) && !goingAway.has(t.relation))
+    }
+    const kept = (asg.capabilities ?? []).filter((c) => stillCovered.has(c) || survivesInFga(c as AnyRoleCapability))
+      .map((c) => ({ capability: c, via: others.find((o) => o.capabilities.includes(c))?.via ?? c }))
+    // #596 review F3: the audit ACTION must describe what happened. `page.access_revoked` /
+    // `space.access_revoked` mean "a principal LOST a relation" (the event catalog says so); writing
+    // one while the principal keeps every capability the row conferred is the same class of lie this
+    // ticket removes — a hash-chained ledger makes it permanent. The removal is real, so it is still
+    // recorded, under the vocabulary that is true of it: the ASSIGNMENT was unassigned.
+    const lostSomething = (asg.capabilities ?? []).some((c) => !kept.some((k) => k.capability === c))
+    const action = lostSomething ? (args.auditAction ?? 'role.unassigned') : 'role.unassigned'
+    if (!args.skipAudit) await auditIfEntitled(tx, args.tenant, { actor: `user:${args.actorSub}`, action, target: `${asg.resource_type}:${asg.resource_id}` })
+    const o = asg.resource_type === 'page' ? await enqueueOutbox(tx, { tenantId: args.tenant.id, pageId: asg.resource_id, operation: 'upsert' }) : null
     return { resourceType: asg.resource_type, resourceId: asg.resource_id, outboxId: o, toDelete, stillCovered: kept }
   }
 }
@@ -877,7 +930,11 @@ export async function rolesPlugin(app: FastifyInstance) {
     // #596: 200 with the honesty payload, not a bare 204 — when the principal keeps a capability
     // through another assignment, the client must be able to say which one instead of implying
     // the access is gone.
-    return reply.code(200).send({ removed: true, stillCovered: gone.stillCovered })
+    // review F1: at PAGE scope this route's authority is `share` (requireAssignmentAuthority), while
+    // role names are readable at `manage` (ADR-202 §1) — so the names travel only that far.
+    const mayName = pre.resource_type !== 'page'
+      || await check(app.fga, `user:${req.user.sub}`, 'manage', { type: 'page', id: pre.resource_id })
+    return reply.code(200).send({ removed: true, stillCovered: redactCoverage(gone.stillCovered, mayName) })
   })
 
   app.delete<{ Params: { roleId: string } }>('/admin/roles/:roleId', async (req, reply) => {

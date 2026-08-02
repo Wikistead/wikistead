@@ -803,7 +803,7 @@ export async function revokeSpaceAccessComposite(
   fga: OpenFgaClient,
   driver: SearchDriver,
   args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string },
-): Promise<{ stillCovered: { capability: string; via: string }[] }> {
+): Promise<{ stillCovered: { capability: string; via?: string }[] }> {
   for (const cap of args.capabilities) validateSpaceGrant(args.grantee, cap)
   // The SAME allowlist the composite grant uses: only a ruled noun bundle may travel as a set, so this
   // cannot become a free-form multi-revoke that takes capabilities the caller never named.
@@ -836,7 +836,10 @@ export async function revokeSpaceAccessComposite(
   // still covers an arm after this call. An event is emitted only for arms that changed; a call where
   // NOTHING changes refuses instead of narrating a revoke that never happened.
   const changedCaps = new Set<string>(rows.map((r) => r.builtin_capability))
-  const stillCovered: { capability: string; via: string }[] = []
+  // #596 review F3: an arm whose TUPLES actually went. Only these are access losses — a row that went
+  // while a surviving assignment keeps the leaf changed the paperwork, not the access.
+  const lostCaps = new Set<string>()
+  const stillCovered: { capability: string; via?: string }[] = []
   await db.tx(async (tx) => {
     for (const row of rows) {
       // the core's own toDelete is deliberately ignored: it can only speak for the leaves that row
@@ -863,6 +866,7 @@ export async function revokeSpaceAccessComposite(
       if (present.length === 0) continue
       if (!rows.some((r) => r.builtin_capability === cap)) sweptRowless = true
       changedCaps.add(cap)
+      lostCaps.add(cap)
       toDelete.push(...present)
     }
     if (sweptRowless && args.plan !== undefined) {
@@ -883,7 +887,7 @@ export async function revokeSpaceAccessComposite(
   void sweepUnviewableWatches(db, fga, [args.spaceId]).catch(() => {})
   await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   for (const cap of args.capabilities) {
-    if (changedCaps.has(cap)) emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: cap, actorId: args.userId })
+    if (lostCaps.has(cap)) emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: cap, actorId: args.userId })
   }
   return { stillCovered }
 }
@@ -895,7 +899,7 @@ export async function revokeSpaceAccess(
   // #578 bounce ①: `groupName` is what the manager TYPED; the grantee is the id this server derived
   // from it. Both travel: the id is the authority, the name is what the listing can show.
   args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean; groupName?: string },
-): Promise<{ stillCovered: { capability: string; via: string }[] }> {
+): Promise<{ stillCovered: { capability: string; via?: string }[] }> {
   validateSpaceGrant(args.grantee, args.capability)
   await requireSpaceManage(fga, args.userId, args.spaceId)
   // #536 / ADR-188 §6 item 1: revoke the ROW when there is one, so the reference count decides which
@@ -913,7 +917,7 @@ export async function revokeSpaceAccess(
   if (row?.origin === 'mapping') {
     throw Object.assign(new Error('managed by a group mapping — delete the mapping instead'), { statusCode: 409 })
   }
-  let stillCovered: { capability: string; via: string }[] = []
+  let stillCovered: { capability: string; via?: string }[] = []
   if (row) {
     const r = await unassignRoleInTx(db, fga, driver, {
       tenant: { id: args.tenantId, plan: args.plan ?? '' },
@@ -953,7 +957,11 @@ export async function revokeSpaceAccess(
   // whose view survives via another path keeps their watch). Space-scoped: sweeps watches ON the space id
   // (page-level fallout is covered by the display gate; page grants have their own sweep).
   void sweepUnviewableWatches(db, fga, [args.spaceId]).catch(() => {})
-  emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
+  // #596 review F3: the event means the principal LOST the relation. A surviving assignment that still
+  // confers it makes that false, and a consumer mirroring permissions would de-provision on it.
+  if (!stillCovered.some((c) => c.capability === args.capability)) {
+    emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
+  }
   return { stillCovered }
 }
 

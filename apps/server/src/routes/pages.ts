@@ -1124,25 +1124,28 @@ export async function revokePageAccess(
   fga: OpenFgaClient,
   driver: SearchDriver,
   args: { pageId: string; tenantId: string; userId: string; grantee: string; relation: string; plan?: string },
-): Promise<{ stillCovered: { capability: string; via: string }[] }> {
+): Promise<{ stillCovered: { capability: string; via?: string }[] }> {
   validateGrant(args.grantee, args.relation)
   await requireGrantAuthority(fga, args.userId, args.pageId, args.relation as PageRelation) // #420 Addendum 3: the ceiling — admin-class grants need manage
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // #536 review 3: revoke the ROW when there is one (refcount decides which leaves go); a rowless
   // legacy grant falls back to the direct delete — guarded by the same coverage check as the space path,
   // so it cannot take a live assignment's leaf with it.
-  const { unassignRoleInTx } = await import('./roles.js')
+  const { unassignRoleInTx, redactCoverage } = await import('./roles.js')
+  // #596 review F1: this route's gate is `share`; reading role DEFINITIONS is gated on `manage`
+  // (ADR-202 §1). Name the coverage only for a caller who could read those names anyway.
+  const mayNameCoverage = await check(fga, `user:${args.userId}`, 'manage', { type: 'page', id: args.pageId })
   const [row] = await db.sql<{ id: string }[]>`
     SELECT id FROM role_assignments
     WHERE builtin_capability = ${args.relation} AND resource_type = 'page' AND resource_id = ${args.pageId} AND principal = ${args.grantee}`
-  let stillCovered: { capability: string; via: string }[] = []
+  let stillCovered: { capability: string; via?: string }[] = []
   if (row) {
     const r = await unassignRoleInTx(db, fga, driver, {
       tenant: { id: args.tenantId, plan: args.plan ?? '' },
       assignmentId: row.id, actorSub: args.userId,
       auditAction: 'page.access_revoked', skipAudit: args.plan === undefined,
     })
-    stillCovered = r.stillCovered
+    stillCovered = redactCoverage(r.stillCovered, mayNameCoverage)
   } else {
     // #596: `via` names what covers the capability, for the refusal body.
     const covering = await db.sql<{ via: string }[]>`
@@ -1155,7 +1158,9 @@ export async function revokePageAccess(
     // instead; the remedy is removing the covering assignment, and the body names it.
     if (covering.length > 0) {
       throw Object.assign(new Error('still granted by another assignment'), {
-        statusCode: 409, code: 'still_covered', coveredBy: covering.map((c) => c.via),
+        // #596 review F1: the refusal is the caller's own page, but the NAMES are tenant-wide role
+        // information — omitted unless they may read them (ADR-202 §1's line).
+        statusCode: 409, code: 'still_covered', coveredBy: mayNameCoverage ? covering.map((c) => c.via) : [],
       })
     }
     const oid = await db.tx(async (tx) => {
@@ -1173,7 +1178,14 @@ export async function revokePageAccess(
   // #362 E1: revocation watch sweep (post-FGA, best-effort — the display gate is the bastion). Per-watcher
   // view re-check inside, so a watcher whose view survives via another path keeps their watch.
   void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {})
-  emit({ type: 'page.access_revoked', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
+  // #596 review F3: `page.access_revoked` means "a principal LOST a relation on a page" (the event
+  // catalog's own wording). Firing it while a surviving assignment still confers the relation tells a
+  // permission-mirroring consumer to de-provision someone who did not lose access — a false positive
+  // with real effects downstream. The row removal is recorded in the audit; the webhook speaks only
+  // for the access change, and here there was none.
+  if (!stillCovered.some((c) => c.capability === args.relation)) {
+    emit({ type: 'page.access_revoked', tenantId: args.tenantId, pageId: args.pageId, grantee: args.grantee, relation: args.relation, actorId: args.userId })
+  }
   return { stillCovered }
 }
 
