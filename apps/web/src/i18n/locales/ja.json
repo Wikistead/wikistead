@@ -516,7 +516,8 @@
     "moveNoTargets": "移動先にできるスペース（自分が管理しているもの）がありません。",
     "bulkMoveDone": "{{count}} 件のページを移動しました。",
     "bulkMovePartial": "{{moved}} 件を移動・{{skipped}} 件をスキップ。",
-    "bulkMoveNested": "{{moved}} 件を移動・{{nested}} 件は親と一緒に移動しました。"
+    "bulkMoveNested": "{{moved}} 件を移動・{{nested}} 件は親と一緒に移動しました。",
+    "movePlaceholder": "スペースを選択"
   },
   "spaceMembers": {
     "title": "メンバーと権限",
@@ -954,7 +955,8 @@
     "filterLabel": "メンバーの絞り込み",
     "addRole": "＋ ロール",
     "seatLimit": "座席数の上限に達しました。メンバーを増やすにはアップグレードしてください。",
-    "inviteFailed": "招待を作成できませんでした。"
+    "inviteFailed": "招待を作成できませんでした。",
+    "pendingRow": "{{email}} · {{role}}"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

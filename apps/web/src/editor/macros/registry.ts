@@ -415,7 +415,8 @@ function validateMacro(macro: Macro): void {
     // depends on the workspace at read time. Declaring it while claiming `preserve` would promise an export
     // fidelity the macro cannot keep, which is the Open-formats contract (ADR-023) told as a lie.
     if (caps.includes("host-list") && m.exportFidelity !== "degrade") {
-      throw new Error('a macro declaring "host-list" must set exportFidelity: "degrade" — a host-resolved list cannot be reproduced in a static export');
+      // dash-ok: a developer-facing throw, never rendered — #585 is about UI copy
+    throw new Error('a macro declaring "host-list" must set exportFidelity: "degrade" — a host-resolved list cannot be reproduced in a static export');
     }
   }
   const rich = m.richEditUI;
@@ -436,8 +437,10 @@ function validateMacro(macro: Macro): void {
     const hasContainer = typeof m.containerClass === "string";
     const hasBlock = typeof m.liveRender === "function";
     if (hasContainer && hasBlock)
-      throw new Error(`directive macro "${m.name}" declares BOTH containerClass and liveRender — pick one render mode`);
+      // dash-ok: developer-facing throws, never rendered
+    throw new Error(`directive macro "${m.name}" declares BOTH containerClass and liveRender — pick one render mode`);
     if (!hasContainer && !hasBlock)
+      // dash-ok: developer-facing throw, never rendered
       throw new Error(`directive macro "${m.name}" declares neither containerClass nor liveRender — needs one render mode`);
   }
 }

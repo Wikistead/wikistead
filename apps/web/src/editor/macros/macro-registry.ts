@@ -224,7 +224,7 @@ function renderEntry(e: RegistryIndexEntry): string {
     href ? `<p class="homepage"><a href="${escapeHtml(href)}" rel="noopener noreferrer nofollow">${escapeHtml(href)}</a></p>` : "",
     `<p class="install">Install from your workspace admin console using the id <code>${escapeHtml(e.id)}</code>.</p>`,
     `<details><summary>${e.versions.length} version(s)</summary><ul>`,
-    ...e.versions.map((v) => `<li><code>${escapeHtml(v.version)}</code> — ${escapeHtml(v.publishedAt)} — sha <code>${escapeHtml(v.contentHash)}</code> — key <code>${escapeHtml(v.signatureKeyId)}</code></li>`),
+    ...e.versions.map((v) => `<li><code>${escapeHtml(v.version)}</code>, ${escapeHtml(v.publishedAt)}, sha <code>${escapeHtml(v.contentHash)}</code>, key <code>${escapeHtml(v.signatureKeyId)}</code></li>`),
     `</ul></details>`,
     `</article>`,
   ].filter(Boolean).join("\n");

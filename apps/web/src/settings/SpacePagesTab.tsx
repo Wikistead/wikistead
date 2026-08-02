@@ -272,7 +272,7 @@ export function SpacePagesTab() {
                   value={moveTarget}
                   onChange={(e) => setMoveTarget(e.target.value)}
                 >
-                  <option value="">—</option>
+                  <option value="">{t("spacePages.movePlaceholder")}</option>
                   {moveTargets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </label>

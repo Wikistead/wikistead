@@ -8,6 +8,19 @@
 // It is DISCOVERY-based: it walks whatever is in the locale files rather than holding a list of the
 // hundred strings that were fixed, so a NEW string with a dash fails on the commit that adds it.
 //
+// SCOPE, widened after the review found two it could not see (#585): the locale files are
+// not the only place UI text lives. A pending-invite row read `{email} — {role}` straight out of JSX,
+// and the macro registry built `<code>1.0.0</code> — date — sha …` as HTML. A pin that reads like
+// "no dashes in the UI" while checking one directory is worse than one that says what it checks — so
+// this now walks apps/web/src as well.
+//
+// Source text is not locale text, and the difference is handled explicitly rather than by hoping
+// comments are stripped (this file is FULL of dashes, and so is every file it reads), the ASCII
+// hyphen is not searched for at all in source (it is subtraction, in 200-odd places), and a dash that
+// belongs — a developer-facing throw, a policy table's own rationale — is kept with a `// dash-ok:`
+// note on the line above. The annotation is the same shape as the repo's `// fga-read-ok:` markers
+// the exception has to be written down, and it says why.
+//
 // The other half of #585 — deleting the "here is why the mechanism works this way" sentences — is not
 // pinned, and cannot be: no rule distinguishes a sentence that explains a consequence (keep) from one
 // that explains an implementation (drop). That half is enforced by review, and saying so here is
@@ -17,6 +30,8 @@
 // would make the copy worse. So the rule is "no em dash anywhere, and no SPACED dash of any kind",
 // which is exactly the shape that was being used as a separator.
 import { describe, it, expect } from "vitest";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
 
@@ -35,6 +50,45 @@ const offenders = (tree: Tree) =>
     .filter(([, v]) => SEPARATOR.test(v))
     .map(([k, v]) => `${k}: ${v}`);
 
+const WEB_SRC = resolve(import.meta.dirname, "..");
+
+const sourceFiles = (): string[] => {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const p = join(dir, entry);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(p) && !/\.(test|spec)\./.test(p)) out.push(p);
+    }
+  };
+  walk(WEB_SRC);
+  return out;
+};
+
+/** Comments carry dashes freely — this file included — so they are removed before the search. */
+const withoutComments = (src: string): string[] =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, ""));
+
+/** In SOURCE only the real dashes are searched for: the ASCII hyphen is subtraction, ~200 times. */
+const SOURCE_DASH = /[—–]/;
+
+const sourceOffenders = (): string[] => {
+  const found: string[] = [];
+  for (const file of sourceFiles()) {
+    const raw = readFileSync(file, "utf8").split("\n");
+    withoutComments(readFileSync(file, "utf8")).forEach((line, i) => {
+      if (!SOURCE_DASH.test(line)) return;
+      // an exception is declared on the line above, and has to say why
+      if (/\/\/\s*dash-ok:/.test(raw[i - 1] ?? "")) return;
+      found.push(`${file.slice(WEB_SRC.length + 1)}:${i + 1}  ${line.trim().slice(0, 100)}`);
+    });
+  }
+  return found;
+};
+
 describe("#585: no dash punctuation in UI copy", () => {
   it("English", () => {
     expect(offenders(en as Tree), "use a full stop, a colon, or a comma").toEqual([]);
@@ -42,6 +96,20 @@ describe("#585: no dash punctuation in UI copy", () => {
 
   it("Japanese", () => {
     expect(offenders(ja as Tree), "use 。 or ： instead").toEqual([]);
+  });
+
+  it("source files outside the locales", () => {
+    expect(sourceOffenders(), "UI text in JSX or generated HTML — or mark it `// dash-ok:` with a reason").toEqual([]);
+  });
+
+  it("the source scan is looking at something (guard against a vacuous pass)", () => {
+    expect(sourceFiles().length, "walked apps/web/src").toBeGreaterThan(100);
+    // and it must not be blind to the two shapes the review found
+    const raw = ["const x = <li>{a} — {b}</li>;", "  `<li>${v} — ${d}</li>`,"];
+    for (const line of raw) expect(SOURCE_DASH.test(withoutComments(line)[0]!), line).toBe(true);
+    // ...while a comment and an arithmetic hyphen are invisible to it
+    expect(SOURCE_DASH.test(withoutComments("// a comment — with a dash")[0]!)).toBe(false);
+    expect(SOURCE_DASH.test(withoutComments("const n = a.length - 1;")[0]!)).toBe(false);
   });
 
   it("keeps ranges, which are not punctuation", () => {

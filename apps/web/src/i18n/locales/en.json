@@ -516,7 +516,8 @@
     "moveNoTargets": "There is no other space you manage.",
     "bulkMoveDone": "Moved {{count}} page(s).",
     "bulkMovePartial": "Moved {{moved}}; skipped {{skipped}}.",
-    "bulkMoveNested": "Moved {{moved}} page(s); {{nested}} moved with their parent."
+    "bulkMoveNested": "Moved {{moved}} page(s); {{nested}} moved with their parent.",
+    "movePlaceholder": "Choose a space"
   },
   "spaceMembers": {
     "title": "Members & permissions",
@@ -954,7 +955,8 @@
     "filterLabel": "Filter members",
     "addRole": "+ Role",
     "seatLimit": "Seat limit reached. Upgrade to invite more members.",
-    "inviteFailed": "Could not create the invite."
+    "inviteFailed": "Could not create the invite.",
+    "pendingRow": "{{email}} · {{role}}"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
