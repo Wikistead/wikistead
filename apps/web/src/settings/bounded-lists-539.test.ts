@@ -21,7 +21,9 @@ const BOUNDED_LISTS: { file: string; testid: string; ticket: string }[] = [
   { file: "SpaceMembersTab.tsx", testid: "space-member-list", ticket: "#539/#536 space members" },
   //(review reject): the FOURTH instance was missed in the very fix that promised "add a row
   // here" — the mapping list sat unbounded right below the two lists that were fixed.
-  { file: "SpaceGroupMappings.tsx", testid: "space-mapping-list", ticket: "#539 group mappings" },
+  // #578 slice 3: the space group-mapping list was RETIRED (its job moved to the group grant on the
+  // Members tab, which this file already covers). The entry is removed rather than left pointing at a
+  // file that no longer exists — a pin whose subject is gone is not a pin.
 ];
 
 // The element's own class list — read back from the tag that carries the testid.

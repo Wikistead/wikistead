@@ -92,10 +92,12 @@ describe('tenant default role (#497 / ADR-183 §3)', () => {
 
   it('anti-test 2 + 3: a matching mapping suppresses the default, and it flips off/on across evals', async () => {
     const roleId = await makeRole('dr497-flip', ['createSpaces'], 'tenant')
-    const spaceRole = await makeRole('dr497-spacerole', ['view'], 'resource')
     const group = `Eng-${tag}`
-    // A mapping exists for group `Eng` (any mapping — the evaluator matches by group NAME).
-    const m = await app.inject({ method: 'POST', url: '/admin/roles/mappings', headers: H, payload: { groupName: group, roleId: spaceRole, resourceType: 'space', resourceId: spaceId } })
+    // #578 slice 3: this used to create a SPACE mapping, which is retired (410). The evaluator matches
+    // by group NAME regardless of the mapping's scope, so a TENANT mapping proves the same rule and
+    // survives until slices 4 and 5 retire the default role itself.
+    const tenantRole2 = await makeRole('dr497-tenrole2', ['issueApiKeys'], 'tenant')
+    const m = await app.inject({ method: 'POST', url: '/admin/roles/mappings', headers: H, payload: { groupName: group, roleId: tenantRole2, resourceType: 'tenant', resourceId: tenant.id } })
     expect(m.statusCode).toBe(201)
     expect((await setDefault(roleId)).statusCode).toBe(200)
     const u = `dr497-bob-${tag}`

@@ -953,12 +953,21 @@ export async function rolesPlugin(app: FastifyInstance) {
       if (!groupName || !groupName.trim() || (!roleId && !builtinCapability) || (roleId && builtinCapability) || (resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
         throw Object.assign(new Error('groupName, roleId XOR builtinCapability, resourceType (space|tenant), resourceId required'), { statusCode: 400 })
       }
-      // #497 (088): a mapping may name a BUILT-IN. Space scope only (the tenant built-ins — member/
-      // admin — are identity tiers, not mappable roles), and `comment` is NOT in the set: the
-      // ruling removed the commenter noun from every grant surface (comment-only stays a custom-role
-      // composition).
-      if (builtinCapability != null && (resourceType !== 'space' || !BUILTIN_MAPPABLE.has(builtinCapability))) {
-        throw Object.assign(new Error('builtinCapability must be one of view|edit|moderate|manage at space scope'), { statusCode: 400 })
+      // #578 / ADR-201 rev3 slice 3: SPACE-scope mappings are retired. A group grant on the space
+      // Members tab does the same thing with one mechanism instead of two, and since slice 1 the grant
+      // picker also takes a group nobody carries yet — which was the only thing this surface could do
+      // that the picker could not. Existing rows are converted by migration 098 rather than left to
+      // rot; this refusal is what stops new ones appearing between the migration and the UI's removal.
+      if (resourceType === 'space') {
+        throw Object.assign(new Error('space group mappings are retired — grant the role to the group on the space Members tab'), {
+          statusCode: 410, code: 'mapping_retired',
+        })
+      }
+      // #497 (088) allowed a mapping to name a BUILT-IN, at SPACE scope only — the tenant built-ins
+      // (member / admin) are identity tiers, not mappable roles. #578 retired space scope, so a
+      // built-in mapping has nowhere left to live: the only remaining scope refuses it.
+      if (builtinCapability != null) {
+        throw Object.assign(new Error('a built-in role is conferred on a group by granting it, not by mapping'), { statusCode: 400 })
       }
       const [role] = roleId
         ? await req.db.sql<RoleRow[]>`SELECT id, name, capabilities, scope, created_at, updated_at FROM roles WHERE id = ${roleId}`
