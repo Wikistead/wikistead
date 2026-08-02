@@ -23,7 +23,9 @@
     "entraPlaceholder": "Entra tenant ID (GUID)",
     "clientIdPlaceholder": "Client ID",
     "secretPlaceholder": "Client secret (leave empty for a public client)",
-    "redirectPlaceholder": "Redirect URI"
+    "redirectPlaceholder": "Redirect URI",
+    "mcpEnabled": "AI tool access (MCP)",
+    "mcpUnavailable": "(not available for this connection)"
   },
   "common": {
     "cancel": "Cancel",

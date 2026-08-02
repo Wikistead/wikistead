@@ -72,12 +72,18 @@ interface ConnRow {
   id: string; issuer: string; client_id: string; client_secret_enc: string | null; scopes: string
   redirect_uri: string; enabled: boolean; sort: number; label: string | null; preset: string | null
   bootstrap_eligible: boolean; trust_groups: boolean; subject_prefix: string | null; groups_claim: string | null
+  mcp_enabled: boolean
 }
 const toView = (r: ConnRow) => ({
   id: r.id, kind: 'oidc' as const, issuer: r.issuer, clientId: r.client_id, hasSecret: r.client_secret_enc != null,
   scopes: r.scopes, redirectUri: r.redirect_uri, enabled: r.enabled, sort: r.sort, label: r.label,
   preset: r.preset, bootstrapEligible: r.bootstrap_eligible, trustGroups: r.trust_groups,
   subjectPrefix: r.subject_prefix, groupsClaim: r.groups_claim,
+  // #592 / ADR-204: whether this connection's members may reach MCP. `mcpEnforceable` is the honest
+  // half: the MCP entry identifies a connection by the `wc<conn8>_` prefix its members' subs carry, so
+  // a connection that does not namespace (the pre-#570 legacy row) cannot be told apart there. The UI
+  // shows the switch as unavailable rather than letting an admin set a refusal nobody can make.
+  mcpEnabled: r.mcp_enabled, mcpEnforceable: r.subject_prefix != null,
 })
 
 export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { discoveryFetch?: DiscoveryFetch }) {
@@ -87,7 +93,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     const rows = await req.db.sql<ConnRow[]>`
       SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, label, preset,
-             bootstrap_eligible, trust_groups, subject_prefix, groups_claim
+             bootstrap_eligible, trust_groups, subject_prefix, groups_claim, mcp_enabled
       FROM tenant_oidc ORDER BY sort, id`
     return rows.map(toView)
   })
@@ -154,11 +160,12 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
   app.patch<{ Params: { id: string }; Body: {
     issuer?: string; clientId?: string; clientSecret?: string | null; redirectUri?: string; scopes?: string
     label?: string | null; enabled?: boolean; bootstrapEligible?: boolean; trustGroups?: boolean; groupsClaim?: string | null
+    mcpEnabled?: boolean
   } }>('/admin/connections/:id', async (req, reply) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     const [row] = await req.db.sql<ConnRow[]>`
       SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, label, preset,
-             bootstrap_eligible, trust_groups, subject_prefix, groups_claim
+             bootstrap_eligible, trust_groups, subject_prefix, groups_claim, mcp_enabled
       FROM tenant_oidc WHERE id = ${req.params.id}`
     if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
     const b = req.body ?? {}
@@ -186,6 +193,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
         scopes = ${(b.scopes ?? row.scopes).trim() || 'openid email profile'}, redirect_uri = ${(b.redirectUri ?? row.redirect_uri).trim()},
         enabled = ${enabled}, label = ${labelRes.label}, bootstrap_eligible = ${b.bootstrapEligible ?? row.bootstrap_eligible},
         trust_groups = ${b.trustGroups ?? row.trust_groups}, groups_claim = ${b.groupsClaim !== undefined ? (b.groupsClaim?.trim() || null) : row.groups_claim},
+        mcp_enabled = ${b.mcpEnabled ?? row.mcp_enabled},
         updated_at = now()
       WHERE id = ${row.id}`
     emit({ type: 'tenant.oidc_updated', tenantId: req.tenant.id, actorId: req.user.sub, enabled })

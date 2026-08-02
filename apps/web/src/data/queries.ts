@@ -2081,11 +2081,16 @@ export interface AdminConnectionDTO {
   id: string; kind: "oidc"; issuer: string; clientId: string; hasSecret: boolean; scopes: string
   redirectUri: string; enabled: boolean; sort: number; label: string | null; preset: string | null
   bootstrapEligible: boolean; trustGroups: boolean; subjectPrefix: string | null; groupsClaim: string | null
+  // #592 / ADR-204: may this connection's members reach MCP. `mcpEnforceable` is false for a
+  // connection that does not namespace its subs (the pre-#570 legacy row): the MCP entry recognises a
+  // connection by the prefix on a member's sub, so there the switch would promise a refusal the server
+  // cannot make. The row shows it as unavailable rather than lying.
+  mcpEnabled: boolean; mcpEnforceable: boolean
 }
 export interface AdminConnectionInput {
   preset?: string; issuer?: string; clientId?: string; clientSecret?: string | null; redirectUri?: string
   scopes?: string; label?: string; entraTenantId?: string; enabled?: boolean
-  bootstrapEligible?: boolean; trustGroups?: boolean; groupsClaim?: string | null
+  bootstrapEligible?: boolean; trustGroups?: boolean; groupsClaim?: string | null; mcpEnabled?: boolean
 }
 export function useAdminConnections() {
   const { token } = useSession();
