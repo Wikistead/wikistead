@@ -396,6 +396,24 @@ export const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view'
 const spaceGrantTuples = spaceGrantTuplesFor // the shared expansion (#514 §6); the viewer/viewer_member
 // pairing that used to be special-cased here is the `view` entry of that one table.
 
+// #578 / ADR-201 rev3 (OQ1's consequence): conferring a role on an IdP GROUP is an EE capability, and
+// it always has been for custom roles — the assignment route gates those on `customRoles`. The BUILT-IN
+// capabilities reached a group through this route with no gate at all, which did not matter while the
+// group mapping surface (itself EE-gated) was the way an admin thought about it. Retiring the mappings
+// would therefore have moved the edition boundary by accident: the same act, previously EE, would land
+// in CE the day the mappings went. The ruling was "do not open it", so the gate goes on the path that
+// survives, BEFORE the one that is going away is removed.
+//
+// Self-hosted CE is unaffected: `UNLIMITED` entitles everything. This is a Cloud-tier line.
+// A grant to a USER is untouched — that was never an EE feature and is not becoming one.
+function requireGroupGrantEntitlement(grantee: string, plan: string | undefined): void {
+  if (!/^group:/.test(grantee)) return
+  if (resolveEntitlements(plan ?? 'free').customRoles) return
+  throw Object.assign(new Error('conferring a role on an IdP group requires an upgrade'), {
+    statusCode: 403, code: 'upgrade_required',
+  })
+}
+
 function validateSpaceGrant(grantee: string, capability: string): asserts capability is SpaceCapability {
   if (!SPACE_CAPS.includes(capability as SpaceCapability)) {
     throw Object.assign(new Error('relation must be view, comment, edit, moderate, or manage'), { statusCode: 400 })
@@ -669,6 +687,7 @@ export async function grantSpaceAccess(
   args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean },
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
+  requireGroupGrantEntitlement(args.grantee, args.plan)
   await requireSpaceManage(fga, args.userId, args.spaceId)
   // #536 / ADR-188 §6 item 1: a built-in grant IS a role assignment now. It goes through the same helper a
   // custom role does, differing only in which column of the row identifies what was granted -- so a
@@ -732,6 +751,7 @@ export async function grantSpaceAccessComposite(
   args: { spaceId: string; tenantId: string; userId: string; grantee: string; capabilities: string[]; plan?: string; replace?: boolean },
 ): Promise<void> {
   for (const cap of args.capabilities) validateSpaceGrant(args.grantee, cap)
+  requireGroupGrantEntitlement(args.grantee, args.plan) // #578: the composite noun takes the same gate
   // #553 review D: the plural wire form is NOT a free-form multi-grant — only the ruled noun
   // bundles pass (today: editor = edit+comment). An arbitrary capability list would slip N roles
   // past the one-principal-one-role convergence (#536) through the sweep's keep-set.
