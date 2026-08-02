@@ -8,7 +8,7 @@
 // token / signup session / OIDC state): random 256-bit, plaintext ONLY in the
 // emailed link, SHA-256 hash at rest (like API keys), tenant-bound, role-bound,
 // short-lived, consume-once, admin-revocable.
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { writeTuples } from '@wikistead/authz'
@@ -89,7 +89,15 @@ export async function lockSeats(sql: Sql, tenantId: string): Promise<void> {
 // the PLAINTEXT token so the caller can build the link + email it; only the hash persists.
 export async function createInvite(
   db: TenantDb,
-  args: { tenantId: string; plan: string; invitedBy: string; email: string | null; role: InviteRole; roleId?: string | null },
+  args: {
+    tenantId: string; plan: string; invitedBy: string; email: string | null; role: InviteRole; roleId?: string | null
+    // #568 / ADR-198 §2: 'local' means the person sets a PASSWORD during acceptance instead of
+    // signing in at an IdP. Refused at ISSUE time when it cannot work — no email to be the
+    // identifier, or a tenant that does not offer password sign-in — because the admin is still
+    // looking at the screen here, while the person who would see a failure at acceptance did not
+    // choose any of this.
+    kind?: 'oidc' | 'local'
+  },
 ): Promise<{ id: string; token: string; expiresAt: Date; seatWarning: boolean }> {
   const ent = resolveEntitlements(args.plan)
   const seatWarning = isFinite(ent.maxSeats) && (await seatsReservable(db.sql)) >= ent.maxSeats
@@ -103,11 +111,21 @@ export async function createInvite(
       throw Object.assign(new Error('an invite can only carry a tenant-scope role'), { statusCode: 400 })
     }
   }
+  const kind = args.kind ?? 'oidc'
+  if (kind === 'local') {
+    if (!args.email) {
+      throw Object.assign(new Error('a password invite needs an email address — it becomes the sign-in name'), { statusCode: 400 })
+    }
+    const { localLoginEnabled } = await import('./login-methods.js')
+    if (!(await localLoginEnabled(db))) {
+      throw Object.assign(new Error('password sign-in is off for this tenant — turn it on before inviting with a password'), { statusCode: 400, code: 'local_login_disabled' })
+    }
+  }
   const token = generateToken()
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS)
   const [row] = await db.sql<[{ id: string }]>`
-    INSERT INTO invites (tenant_id, token_hash, email, role, invited_by, expires_at, role_id)
-    VALUES (${args.tenantId}, ${hashInviteToken(token)}, ${args.email}, ${args.role}, ${args.invitedBy}, ${expiresAt}, ${args.roleId ?? null})
+    INSERT INTO invites (tenant_id, token_hash, email, role, invited_by, expires_at, role_id, kind)
+    VALUES (${args.tenantId}, ${hashInviteToken(token)}, ${args.email}, ${args.role}, ${args.invitedBy}, ${expiresAt}, ${args.roleId ?? null}, ${kind})
     RETURNING id
   `
   return { id: row.id, token, expiresAt, seatWarning }
@@ -171,6 +189,62 @@ export async function acceptInvite(
     const seated = await enrolUnderSeatCap(tx, deps.fga, tenant, claims, flipped[0]!.role, 'invite')
     await applyInviteRole(tx, deps.fga, tenant, claims.sub, flipped[0]!, seated)
     return true
+  })
+}
+
+// #568 / ADR-198 §2: accept a LOCAL invite — the variant where the person sets a password instead of
+// signing in at an IdP. One transaction: consume the invite, mint the subject, seat the member, write
+// the credential. Anything that throws rolls all of it back, so a half-accepted invite (a member with
+// no password, or a password with no membership) is not a state this can reach.
+//
+// The subject is minted HERE, not asserted: `wlocal_<uuid>` in the space #569 reserved. The request
+// carries an identifier and a password and never a sub, so there is nothing for the external-subject
+// gate to inspect — it is bypassed structurally rather than exempted.
+//
+// A stale link for a tenant that has since turned password sign-in OFF answers exactly like a
+// consumed one (M8). "Your link expired" and "this tenant stopped offering passwords" are the same
+// sentence to whoever is holding the link, and telling them apart would say something about the
+// tenant to someone who is not in it.
+export async function acceptLocalInvite(
+  deps: { db: TenantDb; fga: OpenFgaClient },
+  tenant: { id: string; plan: string },
+  token: string,
+  password: string,
+): Promise<{ ok: true; sub: string } | { ok: false }> {
+  const { localLoginEnabled } = await import('./login-methods.js')
+  if (!(await localLoginEnabled(deps.db))) return { ok: false }
+  const { hashPassword } = await import('./password-hash.js')
+  const { validatePasswordPolicy } = await import('./password-policy.js')
+  if (!validatePasswordPolicy(password)) {
+    throw Object.assign(new Error('password does not meet the policy'), { statusCode: 400, code: 'weak_password' })
+  }
+  // The KDF runs OUTSIDE the transaction: it holds a CPU for ~60ms and a database connection has no
+  // business waiting for it (the share-link lesson).
+  const passwordHash = await hashPassword(password)
+  const sub = `wlocal_${randomUUID()}`
+
+  return deps.db.tx(async (tx) => {
+    await lockSeats(tx, tenant.id)
+    const flipped = await tx<{ role: InviteRole; role_id: string | null; invited_by: string; email: string | null }[]>`
+      UPDATE invites
+         SET status = 'accepted', accepted_sub = ${sub}, accepted_at = now()
+       WHERE token_hash = ${hashInviteToken(token)}
+         AND tenant_id  = ${tenant.id}
+         AND kind       = 'local'
+         AND status     = 'pending'
+         AND expires_at > now()
+      RETURNING role, role_id, invited_by, email
+    `
+    if (flipped.length === 0) return { ok: false as const } // unknown / expired / consumed / revoked / not a local invite
+    const invite = flipped[0]!
+    const identifier = (invite.email ?? '').trim().toLowerCase()
+    if (!identifier) return { ok: false as const } // the CHECK makes this unreachable; belt and braces
+    const claims = { sub, email: identifier, name: null }
+    await enrolUnderSeatCap(tx, deps.fga, tenant, claims, invite.role, 'invite', 'local')
+    await tx`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
+             VALUES (${tenant.id}, ${sub}, ${identifier}, ${passwordHash})`
+    await applyInviteRole(tx, deps.fga, tenant, sub, invite, 'created')
+    return { ok: true as const, sub }
   })
 }
 
