@@ -74,7 +74,9 @@ const BUILTIN_NOUN: Record<string, string> = { view: 'viewer', edit: 'editor', m
 // edit + comment (severing edit ⇒ comment left the bare capability unable to comment). The Members
 // picker already grants the bundle; a GROUP MAPPING offering the same word has to mean the same
 // thing, or "Engineering → editor" produces editors who cannot comment. Mirrors the web's
-// COMPOSITE_BUILTINS — one table per side, same content, both pinned.
+// COMPOSITE_BUILTINS: one table per side, same content, compared by
+// apps/web/src/settings/composite-builtins-lockstep.test.ts (the claim that they were "both pinned"
+// was true of each side alone and of neither together, until that test).
 const COMPOSITE_BUILTINS: Record<string, string[]> = { edit: ['edit', 'comment'] }
 export const builtinBundle = (cap: string): string[] => COMPOSITE_BUILTINS[cap] ?? [cap]
 const RESERVED_NAMES = new Set([...BUILT_IN_ROLES.map((r) => r.name), 'admin', 'owner'])
