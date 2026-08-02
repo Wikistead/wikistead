@@ -1037,10 +1037,16 @@ async function requireGrantAuthority(fga: OpenFgaClient, userId: string, pageId:
 // #399 / ADR-158 §1: read the page's OWN comment_open wildcard tuples (the override state; the
 // effective audience is this OR the space's — the model's monotonic union).
 async function readPageCommentAudience(fga: OpenFgaClient, pageId: string): Promise<{ guests: boolean; members: boolean }> {
-  const tuples = await readObjectTuples(fga, `page:${pageId}`) // #574: paginated — the wildcards are written last and would fall off page one
+  // #574 review: the same lesson as isPagePublic, applied rather than repeated. `comment_open`
+  // accepts [user:*, share_link:*] directly (model.fga:265) and everything else it unions is computed,
+  // which a filtered Read does not expand — so this is bounded at TWO tuples and needs one round trip.
+  // Scanning every tuple on the page was the pessimisation I had to withdraw once already.
+  // fga-read-ok: comment_open accepts only the two wildcards directly (model.fga:265) — at most two tuples.
+  const { tuples } = await fga.read({ object: `page:${pageId}`, relation: 'comment_open' })
   let guests = false, members = false
-  for (const key of tuples) {
-    if (key.relation !== 'comment_open') continue
+  for (const t of tuples ?? []) {
+    const key = t.key
+    if (key?.relation !== 'comment_open') continue
     if (key.user === 'share_link:*') guests = true
     else if (key.user === 'user:*') members = true
   }

@@ -66,6 +66,7 @@ const groupFgaId = (tenantId: string, name: string): string =>
   // and safe to re-run. Reads are scoped to the exact (user, object) so a re-run is cheap at dev/migration scale.
   let wrote = 0
   async function ensure(t: TupleKey) {
+    // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (<20), never by tenant size.
     const { tuples } = await fga.read({ user: t.user, object: t.object })
     if ((tuples ?? []).some((x: { key?: TupleKey }) => x.key?.relation === t.relation && x.key?.user === t.user)) return
     await fga.write({ writes: [t] })

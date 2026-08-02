@@ -32,6 +32,7 @@ import { OpenFgaClient } from '@openfga/sdk'
     const wildcard = { user: 'user:*', relation: 'space_creator', object }
 
     const has = async (user: string) =>
+      // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so the row count is bounded by the type's relation count (<20), never by tenant size.
       ((await fga.read({ user, object })).tuples ?? []).some((x) => x.key?.relation === 'space_creator')
     const hasUserset = await has(userset.user)
     const hasWildcard = await has(wildcard.user)
