@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Pencil, Share2, MessageSquare, History, Download, Printer, Shield, SquareTerminal, X, UploadCloud, MoreHorizontal, Paperclip, Trash2, Copy, Eye, EyeOff, Code, BookOpen, Zap, List, FileStack, Check, BarChart3, Link as LinkIcon } from "lucide-react";
 import { useWatchState, useToggleWatch } from "../notifications/useNotifications";
 import { useTranslation } from "react-i18next";
+import { RadioGroup } from "../ui/RadioGroup";
 import { IconButton } from "../ui/Button";
 import { ToggleButton } from "../ui/ToggleButton";
 import { OverflowMenu, type OverflowItem } from "../ui/OverflowMenu";
@@ -249,21 +250,27 @@ export function PageVim(p: PageControlsProps) {
           click switches DIRECTLY. The current mode is always visible (highlight) so there is NO
           per-switch toast. The Ctrl+Alt+E shortcut still CYCLES (onCycleDisplayMode). Toolbar-only —
           display-mode is display-only (never touches doc/offset/presence; reveal-on-cursor un-animated). */}
+      {/* #587: the DS segmented radiogroup, wearing the floating pill's own shape. It was hand-built
+          here, which is why it had no arrow keys and left every segment at tabIndex 0 — both come from
+          the component. Icon-only, so each option's label is visually hidden (it stays the accessible
+          name) and the hover text rides the in-house tooltip. */}
       {p.onSetDisplayMode && (
-        <div role="radiogroup" aria-label={t("page.displayMode")} data-testid="displaymode-segment" data-mode={dm}
-          className="pointer-events-auto inline-flex items-center gap-0.5 rounded-full bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] p-1 shadow-md backdrop-blur">
-          {DISPLAY_MODES.filter(({ mode }) => !p.visibleModes || p.visibleModes.includes(mode)).map(({ mode, Icon, labelKey }) => {
-            const active = dm === mode;
-            return (
-              <button key={mode} type="button" role="radio" aria-checked={active}
-                data-testid={`displaymode-${mode}`} data-active={active}
-                data-tip={t(labelKey)} aria-label={t(labelKey)} onClick={() => p.onSetDisplayMode!(mode)}
-                className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors ${active ? "bg-[var(--accent)] text-white" : "text-fg-dim hover:bg-panel-2"}`}>
-                <Icon size={14} />
-              </button>
-            );
-          })}
-        </div>
+        <span data-testid="displaymode-segment" data-mode={dm} className="pointer-events-auto">
+          <RadioGroup
+            variant="segmented"
+            value={dm}
+            onChange={(v) => p.onSetDisplayMode!(v as "live" | "source" | "reading" | "wysiwyg")}
+            ariaLabel={t("page.displayMode")}
+            testId="displaymode"
+            className="gap-0.5 rounded-full border-0 bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] p-1 shadow-md backdrop-blur"
+            options={DISPLAY_MODES.filter(({ mode }) => !p.visibleModes || p.visibleModes.includes(mode)).map(({ mode, Icon, labelKey }) => ({
+              value: mode,
+              tip: t(labelKey),
+              icon: <Icon size={14} />,
+              label: <span className="sr-only">{t(labelKey)}</span>,
+            }))}
+          />
+        </span>
       )}
     </div>
   );

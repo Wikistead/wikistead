@@ -62,8 +62,11 @@ test("display-mode segment: direct switch live/source/reading (display-only)", a
   expect(await page.locator("[data-pane=preview] .cm-content").getAttribute("contenteditable")).toBe("true");
 
   // The active mode button is marked (highlight = the always-visible "current mode" cue; no toast).
-  await expect(page.getByTestId("displaymode-live")).toHaveAttribute("data-active", "true");
-  await expect(page.getByTestId("displaymode-source")).toHaveAttribute("data-active", "false");
+  // #587: the segment is the DS radiogroup now, so the selected state is Radix's own attribute pair
+  // (the hand-rolled `data-active` is gone with the hand-rolled buttons). `aria-checked` is the one
+  // that matters to a screen reader, so it is the one asserted.
+  await expect(page.getByTestId("displaymode-live")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("displaymode-source")).toHaveAttribute("aria-checked", "false");
 
   // Ctrl+Alt+E still CYCLES (live → source), proving the keyboard path survives the segment UI.
   await page.click("[data-pane=preview] .cm-content");
