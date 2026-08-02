@@ -1,0 +1,11 @@
+-- Migration 106: whether this tenant offers password sign-in (#568 / ADR-198 §3).
+--
+-- Every other method keeps its `enabled` flag beside its configuration (tenant_oidc, tenant_saml).
+-- Local login HAS no configuration — there is no issuer, no client, no certificate — so the only
+-- thing to store is the tenant's answer to "do we offer it", which belongs with the other stance the
+-- tenant takes about a method it does not configure (platform login, migration 087).
+--
+-- DEFAULT FALSE, and deliberately so: turning it on is a decision. A tenant that runs on SSO must not
+-- acquire a password door because a migration ran, and the invite flow refuses to mint a credential
+-- while this is off (§2 M8) — a stale local invite link then answers exactly like a consumed one.
+ALTER TABLE tenant_login_prefs ADD COLUMN IF NOT EXISTS local_login_enabled BOOLEAN NOT NULL DEFAULT FALSE;

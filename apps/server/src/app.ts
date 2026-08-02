@@ -46,6 +46,7 @@ import { pinsPlugin } from './routes/pins.js'
 import { notificationsPlugin } from './routes/notifications.js'
 import { webhooksPlugin } from './routes/webhooks.js'
 import { authPlugin } from './routes/auth.js'
+import { authLocalPlugin } from './routes/auth-local.js'
 import { accountPlugin } from './routes/account.js'
 import { signupPlugin } from './routes/signup.js'
 import { membersPlugin } from './routes/members.js'
@@ -448,6 +449,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.addHook('onError',    async (req) => { await req.db?.release() })
 
   await app.register(authPlugin)
+  await app.register(authLocalPlugin) // #568: password sign-in (public route, host-resolved tenant)
   await app.register(accountPlugin)
   await app.register(signupPlugin)
   await app.register(membersPlugin)

@@ -1903,7 +1903,12 @@ export function useTenantSaml() {
 // #537 Slice 3: the admin's login-methods view + the platform-login toggle (ruling 4).
 export interface LoginMethodState { inCeiling: boolean; configured: boolean; selected: boolean; effective: boolean }
 export interface LoginMethodsDTO {
-  methods: { "tenant-oidc": LoginMethodState; "platform-oidc": LoginMethodState; saml: LoginMethodState & { entitled: boolean } }
+  // #568: `local` is password sign-in. It has nothing to configure, so `configured` is always true
+  // and the tenant's switch is the whole story.
+  methods: {
+    "tenant-oidc": LoginMethodState; "platform-oidc": LoginMethodState
+    saml: LoginMethodState & { entitled: boolean }; local: LoginMethodState
+  }
 }
 export function useLoginMethods() {
   const { token } = useSession();
@@ -1920,6 +1925,18 @@ export function useUpdatePlatformLogin() {
   return useMutation({
     mutationFn: (platformLoginEnabled: boolean) =>
       apiFetch<null>("/admin/login-methods", token, { method: "PATCH", body: JSON.stringify({ platformLoginEnabled }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
+  });
+}
+
+// #568 / ADR-198 §3: the local switch. Its own hook rather than a parameter on the platform one —
+// they are different decisions, and the server refuses to close the last door in either case.
+export function useUpdateLocalLogin() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (localLoginEnabled: boolean) =>
+      apiFetch<null>("/admin/login-methods", token, { method: "PATCH", body: JSON.stringify({ localLoginEnabled }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
   });
 }

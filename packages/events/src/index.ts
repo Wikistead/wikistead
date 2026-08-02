@@ -109,6 +109,11 @@ export type DomainEvent =
   | { type: 'member.added';        tenantId: string; targetSub: string; role: string; via: 'invite' | 'provision' | 'bootstrap' | 'auto' }
   | { type: 'member.role_changed'; tenantId: string; actorId: string; targetSub: string; role: string }
   | { type: 'member.removed';      tenantId: string; actorId: string; targetSub: string }
+  // #568 / ADR-198 §5 (OQ7): password sign-in locked an identifier out after repeated failures. The
+  // IDENTIFIER, not a member sub — the failures that trip it may name an account that does not
+  // exist, and resolving one would hand a webhook consumer the enumeration answer the login response
+  // deliberately withholds. The lock always expires on its own.
+  | { type: 'member.locked';        tenantId: string; identifier: string }
   | { type: 'invite.created';      tenantId: string; actorId: string; role: string }
   | { type: 'invite.revoked';      tenantId: string; actorId: string }
   // ── Comments (P4) ─────────────────────────────────────────────────────

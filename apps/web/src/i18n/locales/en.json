@@ -391,6 +391,8 @@
     "samlAttrGroups": "groups attribute",
     "samlEnabled": "Enable SAML sign-in",
     "methodPlatformOidc": "Platform login",
+    "methodLocal": "Password",
+    "localBody": "Members sign in with an email address and a password you invite them to set.",
     "methodSaml": "SAML SSO",
     "method_effective": "Active",
     "method_byPolicy": "Unavailable by deployment policy",
