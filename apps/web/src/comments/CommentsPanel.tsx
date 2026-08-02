@@ -29,7 +29,9 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
 
   const onChange = async (v: string) => {
     setText(v);
-    const m = /@(\w*)$/.exec(v);
+    // #584: `\w` is ASCII-only, so an @mention of a Japanese (or accented) display name never opened
+    // the suggestion list at all — the same names the server now matches out of the text.
+    const m = /@([\p{L}\p{N}._-]*)$/u.exec(v);
     if (!m) return setSuggest([]);
     if (!dir.current) dir.current = await fetchMentionable(token, pageId);
     const q = m[1]!.toLowerCase();
@@ -37,7 +39,7 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
   };
   const pick = (mn: Mentionable) => {
     const name = (mn.displayName ?? mn.sub).replace(/\s/g, "");
-    setText((t) => t.replace(/@(\w*)$/, `@${name} `));
+    setText((t) => t.replace(/@([\p{L}\p{N}._-]*)$/u, `@${name} `));
     picked.current.set(`@${name}`, mn.sub);
     setSuggest([]);
   };
