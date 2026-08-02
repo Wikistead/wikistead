@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, usePageCommentAudience, useSetPageCommentAudience, usePageAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole, type PageRelation } from "../data/queries";
 import { resolveGrantDispatch } from "../settings/grant-dispatch";
 import { MemberSearchInput } from "./MemberSearchInput";
+import { RoleTip } from "./RoleTip";
 import { capNoun } from "../settings/role-nouns";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
@@ -29,6 +30,11 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const grant = useGrantAccess(pageId);
   const assignable = usePageAssignableRoles(pageId, open);
   const pageAssignments = useRoleAssignments("page", pageId, open);
+  // #586 / ADR-203 §4: a custom role IS its capability list, and the assignment list carries only the
+  // role's id and name — so the tooltip joins against the definitions this dialog already holds. The
+  // join is on the payload the ADR-202 endpoint returns for THIS page, which is the §3 ruling in
+  // practice: what the roles in front of you do, never the tenant's whole vocabulary.
+  const roleCapsById = new Map((assignable.data?.custom ?? []).map((r) => [r.id, r.capabilities as readonly string[]]));
   const assignRole = useAssignRole();
   const unassignRole = useUnassignRole();
   const revoke = useRevokeAccess(pageId);
@@ -331,7 +337,13 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               {/* #582 bounce: the same badge a role-conferred row wears, with the same noun the picker
                   offered. It used to print the raw wire value as loose text beside a badge — one panel,
                   two designs for one idea. */}
-              <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] tracking-wide text-fg-dim" data-testid="grant-role-badge">{capNoun(g.relation)}</span>
+              {/* #586 §1 (user ruling): the axis that matters is ROLE-DERIVED vs GRANTED INDIVIDUALLY
+                  not built-in vs custom, which must never be split into separate lists. Two rows can now
+                  read `commenter` legitimately (a role of that name, and a comment grant), so the colour
+                  and the tooltip tell them apart instead of a rename. Colours are DS tokens. */}
+              <RoleTip builtinCapability={g.relation} origin="grant" testId="grant-origin">
+                <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] tracking-wide text-fg-dim" data-testid="grant-role-badge">{capNoun(g.relation)}</span>
+              </RoleTip>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label(g)}</span>
               <IconButton aria-label={t("permissions.revoke")} data-testid="grant-revoke" variant="danger" onClick={() => revoke.mutate({ grantee: g.grantee, relation: g.relation }, {
                 onSuccess: () => notify.success(t("toast.accessRevoked")),
@@ -348,7 +360,9 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             <div key={a.id} className="flex items-center gap-2" data-testid="grant-role-item">
               {/* no `uppercase`: shouting a tenant's role name back at them is changing it (kakunin-582
                   rendered as KAKUNIN-582). A role name is a proper noun on every surface. */}
-              <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] tracking-wide text-fg-dim" data-testid="grant-role-badge">{a.roleName}</span>
+              <RoleTip roleCapabilities={roleCapsById.get(a.roleId)} origin="role" testId="grant-origin">
+                <span className="whitespace-nowrap rounded border border-[var(--accent)] px-1 text-[10px] tracking-wide text-[var(--accent)]" data-testid="grant-role-badge">{a.roleName}</span>
+              </RoleTip>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{a.groupName ? `${a.groupName} (${t("spaceMembers.group")})` : (a.displayName ?? a.principal.replace(/^user:/, ""))}</span>
               <IconButton aria-label={t("permissions.revoke")} data-testid="grant-role-revoke" variant="danger" onClick={() => unassignRole.mutate(a.id, {
                 onSuccess: () => notify.success(t("toast.accessRevoked")),

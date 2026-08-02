@@ -549,7 +549,6 @@
     "commentGuests": "リンク（閲覧・編集）のゲストがコメント可",
     "commentMembers": "閲覧できる全員（公開）がコメント可",
     "mappingBody": "IdP グループのメンバー全員に、**このスペース**のロールを付与します。メンバーシップは ID プロバイダから随時解決されます（メンバー追加や課金は発生しません）。",
-    "commentBaselineEditors": "manager と moderator は常にコメントできます。このトグルで外れることはありません。",
     "commentMembersOn": "ON：閲覧のみのメンバーもコメント可（明示的な comment 付与に加えて）。",
     "commentMembersOff": "OFF：閲覧のみのメンバーはコメント不可（明示的な comment 付与は引き続き可・manager / moderator は常に可）。",
     "commentGuestsOn": "ON：ページを閲覧できるゲスト全員がコメント可（閲覧・編集リンクとも）。",
@@ -1321,5 +1320,10 @@
     "unreviewedOnly": "未確認のみ",
     "empty": "このスペースにフラグはありません。",
     "emptyUnreviewed": "確認待ちはありません。"
+  },
+  "roleTip": {
+    "role": "このロールでできること:",
+    "individual": "個別に付与された権限です。できること:",
+    "label": "できること: {{caps}}"
   }
 }

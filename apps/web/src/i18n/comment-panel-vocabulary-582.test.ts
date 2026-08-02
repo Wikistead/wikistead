@@ -19,26 +19,30 @@ const LOCALES = { en, ja } as Record<string, { spaceMembers: Record<string, stri
 // The two built-ins this panel names. They are proper nouns (#582), so they appear verbatim.
 const NOUNS = ["manager", "moderator"];
 
-describe("#582: one panel, one vocabulary for the built-in roles", () => {
+// RE-AIMED by #586: the BASELINE BOX is gone. It existed to explain in prose an inclusion the screen
+// would not show ("manager and moderator can always comment"), and the ruling replaced explanation with
+// display — the role badges now list what they confer, measured against the model. So the pair this
+// compared no longer exists as a pair. What survives is the half that is still on screen: the effective
+// summary, which must keep naming the built-ins as proper nouns (#582's ruling is untouched).
+describe("#582: the comment panel names built-in roles as proper nouns", () => {
   for (const [name, dict] of Object.entries(LOCALES)) {
-    it(`${name}: the baseline box and the effective summary name the roles the same way`, () => {
-      const baseline = dict.spaceMembers.commentBaselineEditors!;
+    it(`${name}: the effective summary names the roles by their own names`, () => {
       const summary = dict.spaceMembers.commentSummaryEditors!;
       for (const noun of NOUNS) {
-        expect(baseline.toLowerCase(), `the baseline box names ${noun}`).toContain(noun);
-        expect(summary.toLowerCase(), `and so does the summary, in the same word`).toContain(noun);
+        expect(summary.toLowerCase(), `the summary names ${noun}`).toContain(noun);
       }
     });
 
-    it(`${name}: neither line falls back to a translated role name`, () => {
+    it(`${name}: it does not fall back to a translated role name`, () => {
       // the exact words that were on screen before this fix, so a revert is named rather than merely
       // "different"
-      const translated = ["管理者", "モデレーター", "managers,", "moderators"];
-      for (const key of ["commentBaselineEditors", "commentSummaryEditors"]) {
-        for (const word of translated) {
-          expect(dict.spaceMembers[key]!, `${key} uses the proper noun, not "${word}"`).not.toContain(word);
-        }
+      for (const word of ["管理者", "モデレーター", "managers,", "moderators"]) {
+        expect(dict.spaceMembers.commentSummaryEditors!, `the summary uses the proper noun, not "${word}"`).not.toContain(word);
       }
+    });
+
+    it(`${name}: and the prose that explained the inclusion is gone (the badges say it now)`, () => {
+      expect(dict.spaceMembers.commentBaselineEditors, "removed by #586 — do not reintroduce").toBeUndefined();
     });
   }
 });

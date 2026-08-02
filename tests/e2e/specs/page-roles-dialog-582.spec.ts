@@ -58,3 +58,48 @@ test("#582: the page dialog offers custom roles beside the capabilities, and rol
     }, { api: API, roleId, pageId });
   }
 });
+
+// #586 / ADR-203 §2: hovering — and focusing, and tapping — a role says what it confers.
+//
+// Driven in a real browser because the whole point is reachability: the delegated `data-tip` tooltip
+// renders one line and cannot show a list, and a Radix tooltip that is not controlled closes itself on
+// pointerdown, which on a tablet means the tap that should open it is the tap that closes it.
+test("#586: a role badge lists what it lets someone do", async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  await openDemo(page);
+  const { pageId } = await page.evaluate(async ({ api, stamp }) => {
+    const p = await fetch(`${api}/spaces/demo_space/pages`, {
+      method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ title: `role tip ${stamp}` }),
+    });
+    const pageId = ((await p.json()) as { id: string }).id;
+    // one individually granted capability, so the dialog has a row to describe
+    await fetch(`${api}/pages/${pageId}/access`, {
+      method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+      body: JSON.stringify({ grantee: "user:dev-user", relation: "edit" }),
+    });
+    return { pageId };
+  }, { api: API, stamp });
+
+  try {
+    await page.goto(`/p/${pageId}`);
+    await page.waitForSelector("[data-pane=preview] .cm-content");
+    await sleep(400);
+    await page.click("[data-testid=page-overflow-trigger]");
+    await page.click("[data-testid=permissions-open]");
+    await expect(page.getByTestId("grant-relation")).toBeVisible({ timeout: 10_000 });
+
+    const badge = page.getByTestId("grant-origin").first();
+    await expect(badge, "the granted row is there to describe").toBeVisible({ timeout: 8000 });
+    // keyboard first: a tooltip only a mouse can reach is not
+    await badge.focus();
+    const tip = page.getByRole("tooltip").first();
+    await expect(tip).toBeVisible({ timeout: 4000 });
+    expect((await tip.innerText()).trim().length, "it lists capabilities rather than showing an empty box").toBeGreaterThan(0);
+    expect(["role", "grant"], "and the badge says which kind of access it is").toContain(await badge.getAttribute("data-origin"));
+  } finally {
+    await page.evaluate(async ({ api, pageId }) => {
+      await fetch(`${api}/pages/${pageId}`, { method: "DELETE", headers: { Authorization: "Bearer dev-token" } }).catch(() => {});
+    }, { api: API, pageId });
+  }
+});
