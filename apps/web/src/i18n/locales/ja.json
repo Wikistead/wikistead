@@ -932,8 +932,6 @@
     "adminOnly": "管理者のみ。",
     "member": "メンバー",
     "role": "ロール",
-    "roleMember": "メンバー",
-    "roleAdmin": "管理者",
     "you": "（あなた）",
     "remove": "削除",
     "eraseAnalytics": "閲覧履歴を消去",

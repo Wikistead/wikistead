@@ -27,6 +27,20 @@ const RAGGED = `((gapPx) => {
   const CONTROLS = "button, [data-slot=select-trigger], input:not([type=hidden]), select, textarea";
   const seen = [...root.querySelectorAll(CONTROLS)]
     .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().height > 0 && e.getBoundingClientRect().width > 0)
+    // A control scrolled out of a bounded list still HAS a rect, and that rect can line up with a
+    // control in the section below the box — reported as a ragged row nobody can see. #581 gave the
+    // roles list the same 26rem box the audit ledger and patrol queue already had, which is what
+    // surfaced this. "On the same visual line" cannot include something that is not on screen, so a
+    // control clipped by a scrolling ancestor is not measured.
+    .filter((e) => {
+      for (let p = e.parentElement; p; p = p.parentElement) {
+        const st = getComputedStyle(p);
+        if (!/(auto|scroll)/.test(st.overflowY + st.overflow)) continue;
+        const pr = p.getBoundingClientRect(), er = e.getBoundingClientRect();
+        if (er.bottom <= pr.top + 1 || er.top >= pr.bottom - 1) return false; // clipped away
+      }
+      return true;
+    })
     .map((e) => {
       const r = e.getBoundingClientRect();
       const cls = typeof e.className === "string" ? e.className : (e.className && e.className.baseVal) || "";

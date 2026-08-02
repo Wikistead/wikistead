@@ -8,7 +8,7 @@
 // row and a separate form above the table, which is what the user tripped over ("oh, THAT's what the
 // top half was").
 import { describe, it, expect } from "vitest";
-import { buildTenantRoleRows, buildGroupRoleRows, filterMembers, pickerOptions, resolveRoleChoice, type TenantAssignment, type RowMember } from "./tenant-role-rows";
+import { buildTenantRoleRows, buildGroupRoleRows, filterMembers, pickerOptions, resolveRoleChoice, BUILT_IN_TIERS, type TenantAssignment, type RowMember } from "./tenant-role-rows";
 
 const m = (sub: string, role: "admin" | "member" = "member", name: string | null = null): RowMember =>
   ({ sub, role, display_name: name, email: `${sub}@x.test` });
@@ -105,7 +105,7 @@ describe("#579: finding a member is a filter over the table, not a picker inside
 
 // #579 review: "why are the built-in and custom role UIs separate? put them in the same
 // selector." The row had a Select for the tier and a button that opened a second Select for custom
-// roles. One picker now offers both, so the decision — is this pick a tier swap or a role addition —
+// roles. One picker now offers both, so the decision — is this pick a tier swap or a role addition
 // lives here, where it can be tested, rather than in the handler.
 describe("#579 review: one picker, two mechanisms underneath", () => {
   const row = buildTenantRoleRows(
@@ -143,5 +143,34 @@ describe("#579 review: one picker, two mechanisms underneath", () => {
     const opts = pickerOptions(r);
     expect(opts.filter((o) => o.label === "admin").map((o) => o.value).sort()).toEqual(["role:r9", "tier:admin"]);
     expect(resolveRoleChoice("role:r9", r.addable)).toEqual({ kind: "custom", roleId: "r9" });
+  });
+});
+
+// #582 (user ruling): "member admin ". A built-in role name is a
+// proper noun — the same string on every screen and in every locale. Before this, the tenant screens
+// translated these two / ) while the space screen showed viewer/editor/moderator/manager
+// in English, so one role had two names depending on where you looked. The pin mirrors the real list
+// rather than copying it, because a hand-written copy is what rotted the last three copy pins.
+describe("#582: built-in role names are proper nouns", () => {
+  it("the tier list is exported so every surface and this pin read the same thing", () => {
+    expect([...BUILT_IN_TIERS]).toEqual(["member", "admin"]);
+  });
+
+  it("no locale carries a translation for them any more", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    for (const loc of ["en", "ja"]) {
+      const j = JSON.parse(readFileSync(resolve(import.meta.dirname, `../i18n/locales/${loc}.json`), "utf8"));
+      expect(j.members.roleMember, `${loc}: the translated tier name is gone`).toBeUndefined();
+      expect(j.members.roleAdmin, `${loc}`).toBeUndefined();
+      // and nothing else in this section reintroduces them by another key
+      const values = Object.values(j.members).filter((v): v is string => typeof v === "string");
+      expect(values, `${loc}: no key spells a tier in prose`).not.toContain("管理者");
+    }
+  });
+
+  it("the picker labels a tier with its own name, not a translation key", () => {
+    const row = buildTenantRoleRows([m("alice", "member")], [], ROLES)[0]!;
+    expect(pickerOptions(row).map((o) => o.label)).toContain("admin");
   });
 });
