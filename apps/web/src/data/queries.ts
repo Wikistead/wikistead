@@ -950,7 +950,9 @@ export interface PageGrant { grantee: string; relation: PageRelation; groupName?
 // #596: the revoke/unassign honesty payload. `stillCovered` names what keeps granting a capability
 // after this removal (a custom role's name / a built-in capability), so surfaces can say "removed,
 // but X still grants this" instead of a success toast that implies the access is gone.
-export interface RevokeOutcome { removed: boolean; stillCovered: { capability: string; via: string }[] }
+// `via` is OMITTED when the caller may not read role definitions on that resource (#596 review F1:
+// a page grant is `share`-gated, role names are `manage`-gated by ADR-202 §1).
+export interface RevokeOutcome { removed: boolean; stillCovered: { capability: string; via?: string }[] }
 
 export function usePageAccess(pageId: string, enabled = true) {
   const { token } = useSession();

@@ -101,6 +101,8 @@
     "accessRevoked": "Access removed",
     "accessRevokedStillCovered": "Removed. {{via}} still grants the same permission.",
     "accessRevokeCovered": "Not removed: {{via}} grants the same permission. Remove that instead.",
+    "accessRevokedStillCoveredUnnamed": "Removed. Another assignment still grants the same permission.",
+    "accessRevokeCoveredUnnamed": "Not removed: another assignment grants the same permission. Remove that instead.",
     "linkCreated": "Share link created",
     "linkRevoked": "Share link revoked",
     "copied": "Link copied to clipboard",
