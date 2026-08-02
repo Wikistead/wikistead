@@ -94,6 +94,18 @@ export function AdminConnectionsSection() {
                 onChange={(on: boolean) => update.mutate({ id: c.id, enabled: on }, { onError })} />
               {t("adminConnections.enabled")}
             </label>
+            {/* #592 / ADR-204: MCP access, per connection — in the row, not on a screen of its own. The
+                server is the wall (a member of a switched-off connection is refused at the MCP entry
+                even holding a valid token); this is the place to say so. A connection that does not
+                namespace its subs cannot be recognised there, so its switch is unavailable with the
+                reason next to it rather than settable and inert. */}
+            <label className="flex w-fit items-center gap-2 text-xs text-fg-dim">
+              <Switch checked={c.mcpEnabled} disabled={!c.mcpEnforceable} ariaLabel={t("adminConnections.mcpEnabled")}
+                testId={`admin-connection-mcp-${c.id}`}
+                onChange={(on: boolean) => update.mutate({ id: c.id, mcpEnabled: on }, { onError })} />
+              {t("adminConnections.mcpEnabled")}
+              {!c.mcpEnforceable && <span data-testid={`admin-connection-mcp-note-${c.id}`}>{t("adminConnections.mcpUnavailable")}</span>}
+            </label>
           </div>
         ))}
         {rows.length === 0 && !connections.isLoading && <p className="text-sm text-fg-dim">{t("adminConnections.empty")}</p>}

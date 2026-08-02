@@ -63,9 +63,18 @@ describe('#554 S0: the reserved sub space', () => {
     }
   })
 
-  it('no reserved-prefix sub pre-exists in members (the internal read-back exemption cannot be a standing bypass)', async () => {
-    const rows = await adminPool<{ sub: string }[]>`SELECT sub FROM members WHERE sub ~ '^(wc[0-9a-f]{8}_|wlocal_)'`
-    expect(rows, 'ingress gates guard the door; this pins that nothing is already inside').toEqual([])
+  // RE-AIMED by #592 / ADR-204 (OQ2). This counted reserved-prefix rows across the whole `members`
+  // table and read the count as "the exemption is not a standing bypass". It passed only because the
+  // one suite that creates a namespaced member deletes it in a `finally`: in a real database a single
+  // legitimate login through a namespacing connection turns it red, and a legitimate login is not a
+  // breach. The proposition worth pinning was never the row count — it is that no reserved sub gets
+  // in through an EXTERNAL assertion, which is proved by driving the external seam rather than by
+  // counting. (The seam-1 pin below drives the login upsert itself; this one states the invariant on
+  // the table afterwards, scoped to the subs THIS suite asserted.)
+  it('no reserved sub enters members through an external assertion', async () => {
+    const claimed = await adminPool<{ sub: string }[]>`
+      SELECT sub FROM members WHERE tenant_id = ${TENANT} AND sub = ANY(${[...RESERVED, TOO_LONG]})`
+    expect(claimed, 'every seam that turns an outside claim into a member row refused these').toEqual([])
   })
 
   // Non-vacuous by construction (S0 review 2): the reserved sub IS made a tenant member
@@ -118,26 +127,24 @@ describe('#554 S0: the reserved sub space', () => {
     }
   }, 60_000)
 
-  // Non-vacuous the same way: the reserved sub holds membership, so the gate — not the membership
-  // check three lines below it — is what answers 401.
-  it('seam 7 — MCP broker: a minted token bearing a reserved sub is the seam\'s own 401, even AS a member', async () => {
-    const { writeTuples, deleteTuples } = await import('@wikistead/authz')
-    const tuple = [{ user: `user:${RESERVED[0]!}`, relation: 'member', object: `tenant:${TENANT}` }]
-    await writeTuples(fgaClient, tuple)
-    try {
-      const token = await mintMcpAccessToken(
-        { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 },
-        { tenantId: TENANT, sub: RESERVED[0]!, scopes: ['read'], groups: [] },
-      )
-      const res = await app.inject({
-        method: 'POST', url: '/mcp',
-        headers: { host: 'dev.localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
-      })
-      expect(res.statusCode).toBe(401)
-    } finally {
-      await deleteTuples(fgaClient, tuple).catch(() => {})
-    }
+  // RE-AIMED by #592 / ADR-204. This asserted that a reserved-prefix sub is 401 at the MCP entry "even
+  // AS a member" — and the identity it called an intruder is the exact shape a legitimate namespaced
+  // member carries (#570 stamps `wc<conn8>_` on every connection it creates). The pin was green for the
+  // right mechanical reason and wrong about who it was describing; the flip makes membership the
+  // authority here, so the pair below replaces it. Its two faces live in mcp-connection-gate-592, with
+  // the whole OAuth chain rather than a hand-minted token.
+  it('seam 7 — MCP broker: a reserved-prefix sub that is NOT a member is still refused', async () => {
+    // The half that must not move: dropping the prefix check did not make the entry admit strangers.
+    const token = await mintMcpAccessToken(
+      { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 },
+      { tenantId: TENANT, sub: RESERVED[0]!, scopes: ['read'], groups: [] },
+    )
+    const res = await app.inject({
+      method: 'POST', url: '/mcp',
+      headers: { host: 'dev.localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    })
+    expect(res.statusCode, 'membership is what admits, and this sub has none').toBe(401)
   }, 60_000)
 
   it('seam 5b — the EE auth-provider extension point: one gate covers every provider (S0 review 懸念 3)', async () => {

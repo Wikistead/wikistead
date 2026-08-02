@@ -1,0 +1,12 @@
+-- #592 / ADR-204 (OQ3, ruled in): a login connection may withhold MCP from its members.
+--
+-- The default is TRUE, and that is the whole point of the default: today every member of every
+-- connection can reach MCP, so anything else would silently take a working integration away from
+-- someone the moment this migration ran. A new control starts by describing what is already true.
+--
+-- Only tenant_oidc gets the column. The gate at the MCP entry identifies a member's connection from
+-- the `wc<conn8>_` subject prefix (ADR-197 §5) — the only in-band signal there is, since a member row
+-- records no connection — and `subject_prefix` exists on tenant_oidc alone. Putting the column on
+-- tenant_saml as well would ship a switch that cannot be enforced, which is worse than not offering
+-- it: the admin surface would promise a refusal the server could not make.
+ALTER TABLE tenant_oidc ADD COLUMN IF NOT EXISTS mcp_enabled BOOLEAN NOT NULL DEFAULT true;

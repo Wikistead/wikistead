@@ -23,7 +23,9 @@
     "entraPlaceholder": "Entra テナント ID（GUID）",
     "clientIdPlaceholder": "クライアント ID",
     "secretPlaceholder": "クライアントシークレット（public client は空欄）",
-    "redirectPlaceholder": "リダイレクト URI"
+    "redirectPlaceholder": "リダイレクト URI",
+    "mcpEnabled": "AI ツール接続（MCP）",
+    "mcpUnavailable": "（この接続では設定できません）"
   },
   "common": {
     "cancel": "キャンセル",
