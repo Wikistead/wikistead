@@ -6,7 +6,6 @@ import { startWebhookDrainWorker } from './routes/webhooks.js'
 import { startAnalyticsDrainWorker } from './analytics/outbox.js'
 import { startEmailDrainWorker } from './email/outbox.js'
 import { startShareLinkSweepWorker } from './routes/share-links.js'
-import { startAdminDriftWorker } from './auth/admin-mapping.js' // #497 / ADR-183 2b
 import { pool } from './db/pool.js'
 import { startCustomDomainRecheckWorker, recheckIntervalFromEnv } from './routes/custom-domains.js' // #576: a domain that stopped being ours must stop deciding link hosts
 import { startTrashRetentionWorker } from './routes/pages.js'
@@ -49,7 +48,6 @@ export async function startServer(): Promise<FastifyInstance> {
   startShareLinkSweepWorker(fgaClient, Number(process.env.SHARE_LINK_SWEEP_POLL_MS ?? 60000))
   // #497 / ADR-183 §2b: revoke admin materialised from an IdP group the member no longer carries. Login
   // fixes the member who signs in; this is the only thing that fixes the one who never does again.
-  startAdminDriftWorker(fgaClient, Number(process.env.ADMIN_DRIFT_POLL_MS ?? 900000))
   startCustomDomainRecheckWorker(recheckIntervalFromEnv(process.env.CUSTOM_DOMAIN_RECHECK_MS))
 
   // Background webhook delivery (#228 / ADR-108): drains the in-tx webhook outbox, signs (HMAC) and POSTs

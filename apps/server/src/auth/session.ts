@@ -14,7 +14,6 @@ import { getEnrollConfig } from './enroll-domains.js'
 import { enrolUnderSeatCap } from './invites.js'
 import { ensurePersonalSpace } from '../routes/spaces.js'
 import { evaluateDefaultRole } from '../routes/roles.js'
-import { evaluateAdminMapping } from './admin-mapping.js'
 import type { SearchDriver } from '../search/index.js'
 
 export const SESSION_COOKIE = 'wks_sess'
@@ -248,24 +247,12 @@ export async function establishMemberSession(
       await evaluateDefaultRole(deps.db, deps.fga, deps.searchDriver, tenant, claims.sub, row.groups)
     } catch { /* default-role application is best-effort; it self-heals at the next login */ }
   }
-  // #497 / ADR-183 §2b: materialise (or withdraw) tenant admin conferred by an IdP group. Runs on the
-  // member's CURRENT groups, i.e. after the upsert above, and as its own transaction — never nested in
-  // the upsert tx. Unlike the default role this is NOT swallowed silently on failure: a promotion that
-  // fails is harmless (they stay a member and the next login retries), but a DEMOTION that fails leaves
-  // someone holding tenant admin they should not have, so it is logged for the drift sweep to be seen
-  // chasing. Login still proceeds either way — refusing to sign someone in because a group lookup broke
-  // would be a self-inflicted outage, and the sweep is the backstop that does not depend on this call.
-  let role = row.role
-  try {
-    const outcome = await evaluateAdminMapping(deps.db, deps.fga, tenant, claims.sub, row.groups)
-    // The session below caches the role, so use what the evaluation just produced rather than the row
-    // read before it — otherwise a member promoted at this login carries `member` until they sign in
-    // again (and, worse, a demoted one carries `admin`).
-    if (outcome === 'promoted') role = 'admin'
-    else if (outcome === 'demoted') role = 'member'
-  } catch (err) {
-    console.error('[establishMemberSession] admin mapping evaluation failed (drift sweep will retry)', { tenantId: tenant.id, sub: claims.sub, err })
-  }
+  // #578 / ADR-201 slice 4: login no longer materialises tenant admin from an IdP group. ADR-183 had
+  // adopted that path and ADR-201 abolished it, for ADR-183's own stated reasons: whoever can edit the
+  // group at the IdP takes the tenant, nothing records who holds it, and revocation lives outside the
+  // product. Existing group-derived admins were converted to `manual` by migration 099 rather than
+  // stripped, so nobody lost administration when this call went away.
+  const role = row.role
   return createSession(deps.valkey, {
     tenantId: tenant.id,
     sub: claims.sub,

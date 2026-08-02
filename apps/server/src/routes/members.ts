@@ -11,7 +11,7 @@ import type { SearchDriver } from '../search/index.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/outbox.js'
 import { reindexPublishedPages } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
-import { isLastAdmin } from '../auth/admin-mapping.js' // #573: ONE last-admin predicate
+import { isLastAdmin } from '../auth/last-admin.js' // #573: ONE last-admin predicate
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { auditIfEntitled } from '../audit/outbox.js'
