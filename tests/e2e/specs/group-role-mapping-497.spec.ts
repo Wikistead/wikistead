@@ -4,52 +4,13 @@ import { test, expect } from "@playwright/test";
 // define a custom role → map an IdP group to it on a space → the mapping lists → delete it (with the
 // #504 confirm). The server behaviour (assignment expansion, live group resolution, per-scope
 // authority, orphan badge) is anti-tested server-side; this pins the UI wiring.
-test("#497: group→role mapping — create a custom role, map a group, list, delete", async ({ page }) => {
-  const role = `e2e-maprole-${Date.now()}`;
-  const group = `e2e-grp-${Date.now()}`;
-  await page.goto("/admin/roles");
-  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
-
-  // A space-scope custom role to confer.
-  await page.getByTestId("role-create").click();
-  await page.getByTestId("role-name-input").fill(role);
-  await page.getByTestId("role-cap-view").check();
-  await page.getByTestId("role-save").click();
-  await expect(page.getByTestId("roles-list")).toContainText(role, { timeout: 8000 });
-
-  // Map an IdP group to the role ON THE SPACE. #514 / ADR-188 §8 moved space-scope mappings off the
-  // tenant Roles tab (whose form is tenant-scope only now) and into the space's own Members tab — the
-  // space is the page's context, so the row needs no space column (the c50eedbdb naming property now
-  // only applies to the tenant tab's own rows, which all say "· Tenant").
-  await page.goto("/spaces/demo_space/settings/members");
-  await expect(page.getByTestId("space-group-mappings")).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId("space-mapping-group").fill(group);
-  await page.getByTestId("space-mapping-role").click();
-  await page.getByRole("option", { name: role }).click();
-  await expect(page.getByRole("option")).toHaveCount(0); // the role listbox closed (radix pointer-events restored)
-  await page.getByTestId("space-mapping-add").click();
-
-  const row = page.getByTestId("space-mapping-row").filter({ hasText: group });
-  await expect(row).toContainText(group, { timeout: 8000 });
-  await expect(row).toContainText(role);
-
-  // Delete confirms first (#504 danger), then the row is gone.
-  await row.getByTestId("space-mapping-remove").click();
-  await page.getByTestId("space-mapping-delete-confirm").click();
-  await expect(page.getByTestId("space-mapping-list")).not.toContainText(group, { timeout: 8000 });
-
-  await page.goto("/admin/roles");
-  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
-
-  // Cleanup: the role now has no live assignment, so delete succeeds.
-  await page.getByTestId("custom-role-row").filter({ hasText: role }).getByTestId("role-delete").click();
-  await page.getByTestId("role-delete-confirm").click();
-  await expect(page.getByTestId("roles-list")).not.toContainText(role, { timeout: 8000 });
-});
-
-// #497 / ADR-183 §3: the tenant default role setting persists (a tenant-scope custom role becomes the
-// default; the choice survives a reload = the PUT landed). The login-time application is anti-tested
-// server-side; this pins the console wiring.
+// RETIRED by #578 / ADR-201 rev3 slice 3: the SPACE group-mapping console is gone. Its job — conferring
+// a role on an IdP group for a space — is the group grant on the space Members tab, and the one thing
+// it could do that the grant could not (naming a group nobody carries yet) moved into the grant picker
+// in slice 1. Both are pinned: group-grant-freetext-578.spec.ts drives the picker, and
+// space-mapping-retired-578.test.ts pins the closed door plus the migration that converted what
+// already existed. Removed rather than left driving a surface that answers 410 — a spec whose subject
+// is gone reports nothing, loudly.
 test("#497 §3: the default-role setting persists across a reload", async ({ page }) => {
   const role = `e2e-defrole-${Date.now()}`;
   await page.goto("/admin/roles");

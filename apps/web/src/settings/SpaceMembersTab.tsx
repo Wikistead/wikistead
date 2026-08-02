@@ -20,7 +20,6 @@ import { ConfirmDialog } from "../ui/dialogs";
 import { ApiError } from "../data/apiClient";
 // #536 the server's refusal code — the client mirrors the constant instead of a string literal.
 export const MANAGER_REPLACEMENT_CODE = "manager_replacement_requires_confirmation";
-import { SpaceGroupMappings } from "./SpaceGroupMappings";
 
 interface SpaceCtx { spaceId: string; name: string }
 // #330 / ADR-141: `moderate` → space#moderator (revert/freeze/patrol + edit; grants/settings stay manage-only).
@@ -402,7 +401,6 @@ export function SpaceMembersTab() {
           filtered list answers to the same authority. */}
       {/* #497 re-review N4: builtin mappings need NO custom role — gating the section on
           customRoles.length made it unreachable for exactly the tenants #497 opened it to. */}
-      <SpaceGroupMappings spaceId={spaceId} />
 
       {/* #100 / ADR-029: comment AUDIENCE toggles — who may comment on this space's pages. A resource
           setting (space#comment_open), separate from the per-member grants above. Default OFF.
