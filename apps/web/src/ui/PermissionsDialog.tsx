@@ -351,7 +351,15 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               })}><X size={14} /></IconButton>
             </div>
           ))}
-          {/* #582 / ADR-202 §1: role-conferred access is its OWN row kind, revoked by unassigning. Not
+          {/* #591 (B), settled 2026-08-02: the rows here stay CHIPS with an ×, and there is no per-row
+              dropdown. #591 asked whether every surface should let you swap a role in place, and the two
+              surfaces that got one have something this page does not: an exclusive role. At page scope a
+              principal may legitimately hold `view` AND `edit` — nothing sweeps the other, and no
+              equivalent of the space's sweepOtherSpaceRoles exists — so a dropdown here would assert an
+              exclusivity the authorization model does not have. Changing that is an authz decision, not a
+              UI one. The #579 review reached the same place from the other side: this dialog already
+              offers ONE control to choose a role, which is what the user asked for.
+              #582 / ADR-202 §1: role-conferred access is its OWN row kind, revoked by unassigning. Not
               because the × would corrupt the reference count — the page revoke already routes through
               unassignRoleInTx or leaves a covered tuple alone — but because it would report success,
               write an audit entry, fire a webhook, and change nothing in FGA. The user removes someone

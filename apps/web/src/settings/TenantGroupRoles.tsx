@@ -16,6 +16,11 @@ import { buildGroupRoleRows } from "./tenant-role-rows";
 // (group-sync.ts is the single id authority). A client that builds `group:<name>#member` itself writes
 // a tuple no membership points at — the assignment reports success and reaches nobody, which is
 // exactly the bug #536found on the space side.
+// #591 (B), settled 2026-08-02: a group's roles stay CHIPS with an ×, not a per-row dropdown. #579
+// ruled these ADDITIVE — a group can hold several tenant roles at once — and a dropdown reads as "swap
+// this for that", which would be a promise the mechanism does not keep. The surfaces that did get a
+// dropdown (the member row's tier, the space's built-in role) are the ones where the model really is
+// exclusive and the server really does sweep the old value.
 export function TenantGroupRoles() {
   const { t } = useTranslation();
   const { tenantId } = useSession();
