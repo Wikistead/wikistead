@@ -5,10 +5,15 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 // is the CURRENT (dark, data-active) item under a TALL (2-line) band. (2 → #345) The old bottom CLAMP is gone: a
 // short final section is covered by the LIGHT layer (data-visible = on screen) instead of being forced dark. (4)
 // The rail grows into the right whitespace. Real Chromium, wide viewport, a deliberately LONG page title.
+//
+// #593 re-aim: 1360 used to be "wide" because the check asked the VIEWPORT. With the sidebar open that
+// leaves 148px beside the reading column — under the rail's 210px minimum — and the rail used to render
+// there anyway and hang off the screen. It now measures the container it actually sits in, so these
+// cases (whose subject is the highlight, not the breakpoint) run at a width that genuinely fits one.
 const LONG_TITLE = "A deliberately very long page title that wraps onto two lines in the frosted header band";
 
 test("#304/#345: TOC jump = dark active under a 2-line band; the short last section is LIGHT-visible; elastic rail", async ({ browser }) => {
-  const page = await (await browser.newContext({ viewport: { width: 1360, height: 720 } })).newPage();
+  const page = await (await browser.newContext({ viewport: { width: 1600, height: 720 } })).newPage();
   await openScratch(page, LONG_TITLE);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -59,7 +64,7 @@ test("#304/#345: TOC jump = dark active under a 2-line band; the short last sect
 // sample range) AND its colour (`text-foreground/80`) was grey-vs-grey with idle. Now the visible set covers the
 // WHOLE on-screen area (≥2 short sections light at once) and the light tier is legibly distinct from idle.
 test("#345 several on-screen sections are LIGHT-visible with a legible contrast vs idle", async ({ browser }) => {
-  const page = await (await browser.newContext({ viewport: { width: 1360, height: 780 } })).newPage();
+  const page = await (await browser.newContext({ viewport: { width: 1600, height: 780 } })).newPage();
   await openScratch(page, "toc-visible-layers");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -95,7 +100,7 @@ test("#345 several on-screen sections are LIGHT-visible with a legible contrast 
 // window sat before the first heading) → "nothing is highlighted". Now the active layer FALLS BACK to the
 // topmost on-screen heading, so a visible heading is never unlit.
 test("#345 Issue B: a heading below a top intro still lights (active falls back to the topmost visible)", async ({ browser }) => {
-  const page = await (await browser.newContext({ viewport: { width: 1360, height: 720 } })).newPage();
+  const page = await (await browser.newContext({ viewport: { width: 1600, height: 720 } })).newPage();
   await openScratch(page, "toc-intro-fallback");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -122,7 +127,7 @@ test("#345 Issue B: a heading below a top intro still lights (active falls back 
 // rail-only (TocChrome passed visibleFroms only to the rail). Real Chromium, narrow viewport, scroll to reveal.
 test("#345 Issue A: the narrow overlay TOC carries the two-layer highlight", async ({ browser }) => {
   // Set up at a WIDE viewport (the edit toggle lives in the header chrome), then narrow to force the overlay.
-  const page = await (await browser.newContext({ viewport: { width: 1360, height: 720 } })).newPage();
+  const page = await (await browser.newContext({ viewport: { width: 1600, height: 720 } })).newPage();
   await openScratch(page, "toc-overlay-visible");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -143,7 +148,10 @@ test("#345 Issue A: the narrow overlay TOC carries the two-layer highlight", asy
 // #345 Issue 1: on a long TOC the rail auto-follows the highlight so the active item never scrolls out of
 // the rail as the reader nears the bottom (the old single-active centring dropped it off).
 test("#345 the rail follows the highlight to the bottom — the active item stays visible", async ({ browser }) => {
-  const page = await (await browser.newContext({ viewport: { width: 1360, height: 520 } })).newPage();
+  // #593: wide enough that the rail actually fits beside the reading column (the width is incidental to
+  // this case — the subject is the follow behaviour on a rail long enough to overflow), short enough that
+  // it still overflows vertically.
+  const page = await (await browser.newContext({ viewport: { width: 1600, height: 520 } })).newPage();
   await openScratch(page, "toc-follow-bottom");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
@@ -170,7 +178,7 @@ test("#345 the rail follows the highlight to the bottom — the active item stay
 // #345 Issue 3: hovering the narrow-screen overlay TOC holds it open (it no longer fades from under the
 // reader after the ~1.2s scroll timeout).
 test("#345 hovering the overlay TOC holds it open past the fade timeout", async ({ browser }) => {
-  const page = await (await browser.newContext({ viewport: { width: 1360, height: 720 } })).newPage();
+  const page = await (await browser.newContext({ viewport: { width: 1600, height: 720 } })).newPage();
   await openScratch(page, "toc-overlay-hover");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
