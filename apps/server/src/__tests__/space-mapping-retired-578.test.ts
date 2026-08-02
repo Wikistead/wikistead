@@ -72,7 +72,11 @@ describe('#578: the space mapping surface is closed', () => {
     expect(res.statusCode).toBeGreaterThanOrEqual(400)
   }, 60_000)
 
-  it('TENANT mappings still work — this slice retires one scope, not the mechanism', async () => {
+  // RE-AIMED by slice 7. This used to read "TENANT mappings still work — this slice retires one scope,
+  // not the mechanism", and it was true for exactly as long as slice 7 took to land. The tenant scope
+  // was the LAST one (#514 had already moved space mappings off the admin tab), so the mechanism is now
+  // gone entirely and the same call answers the same 410 the space scope does.
+  it('and so is the TENANT scope — the last one the mechanism had', async () => {
     const tenantRole = await app.inject({
       method: 'POST', url: '/admin/roles', headers: H,
       payload: { name: `smr-trole-${STAMP}`, capabilities: ['createSpaces'], scope: 'tenant' },
@@ -83,9 +87,11 @@ describe('#578: the space mapping surface is closed', () => {
         method: 'POST', url: '/admin/roles/mappings', headers: H,
         payload: { groupName: `smr-tg-${STAMP}`, roleId: tid, resourceType: 'tenant', resourceId: TENANT },
       })
-      expect(res.statusCode, 'tenant scope is slices 4 and 5, not this one').toBeLessThan(300)
-      const created = res.json() as { id?: string }
-      if (created.id) await app.inject({ method: 'DELETE', url: `/admin/roles/mappings/${created.id}`, headers: H })
+      expect(res.statusCode, 'gone, not invalid').toBe(410)
+      expect(res.json()).toMatchObject({ code: 'mapping_retired' })
+      expect(JSON.stringify(res.json()), 'and it names where a group takes a tenant role now').toMatch(/tenant settings/i)
+      const [{ n }] = await admin<[{ n: string }]>`SELECT count(*)::text AS n FROM role_assignments WHERE tenant_id = ${TENANT} AND role_id = ${tid}`
+      expect(n, 'a refused create writes nothing').toBe('0')
     } finally {
       await admin`DELETE FROM role_assignments WHERE role_id = ${tid}`.catch(() => {})
       await admin`DELETE FROM roles WHERE id = ${tid}`.catch(() => {})

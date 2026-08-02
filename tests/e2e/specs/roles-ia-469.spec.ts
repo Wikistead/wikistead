@@ -41,3 +41,18 @@ test("#469: the roles tab lists built-ins by scope; the space-creation preset is
   await expect.poll(() => read().then((d) => d.member.createSpaces), { timeout: 8000 }).toBe(initial);
   await sleep(200);
 });
+
+// #578 / ADR-201 slice 7: the group→role MAPPING section is gone from this tab. It was the last place
+// the mechanism could be reached (space mappings went in slice 3), and it survived the slice that
+// reported the work complete — so its absence is asserted here rather than assumed. A group takes a
+// tenant role from the group section on the Members page (#579), which tenant-role-rows-579 covers.
+test("#578: the tenant Roles tab no longer maps groups to roles", async ({ page }) => {
+  await page.goto("/admin/roles");
+  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
+  for (const id of ["mapping-form", "mapping-group", "mapping-role", "mapping-add", "mapping-list", "mapping-tenant-note"]) {
+    await expect(page.getByTestId(id), `${id} belongs to the retired mapping surface`).toHaveCount(0);
+  }
+  // and the heading with it — a section whose controls are gone but whose title remains reads as broken
+  await expect(page.getByText("Group mappings", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("グループマッピング", { exact: true })).toHaveCount(0);
+});

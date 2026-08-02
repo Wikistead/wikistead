@@ -946,168 +946,29 @@ export async function rolesPlugin(app: FastifyInstance) {
   // of the two had to go. Existing settings were converted rather than dropped — see migration 100 and
   // the one-shot toggle script.
 
-  // ---- #497 / ADR-183: declarative group → role MAPPINGS (EE — customRoles entitlement) ----
-  // A mapping is a ROW that OWNS a group-principal role assignment. Creating it = the existing gated
-  // assign path with principal `group:<id>#member` (origin='mapping'); deleting it = the
-  // ref-counted unassign. It adds NO new FGA write path — group membership already resolves LIVE at
-  // check time (#111 sync). v1 maps CUSTOM roles at SPACE or TENANT scope only (built-ins are
-  // virtual — no roles row — so the role lookup 404s them; page scope is out of v1). Per ADR-183 §1
-  // the WRITE surface carries the SAME per-scope authority as assign (`requireAssignmentAuthority`)
-  // tenant-scope mappings are admin-only; space-scope mappings are open to that space's manager (#485).
-
-  app.post<{ Body: { groupName?: string; roleId?: string; builtinCapability?: string; resourceType?: string; resourceId?: string } }>(
-    '/admin/roles/mappings', async (req, reply) => {
-      // Entitlement (customRoles) up front — a plan gate, not an existence oracle (mirrors assign).
-      requireEntitlement(req)
-      const { groupName, roleId, builtinCapability, resourceType, resourceId } = req.body ?? {}
-      if (!groupName || !groupName.trim() || (!roleId && !builtinCapability) || (roleId && builtinCapability) || (resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
-        throw Object.assign(new Error('groupName, roleId XOR builtinCapability, resourceType (space|tenant), resourceId required'), { statusCode: 400 })
-      }
-      // #578 / ADR-201 rev3 slice 3: SPACE-scope mappings are retired. A group grant on the space
-      // Members tab does the same thing with one mechanism instead of two, and since slice 1 the grant
-      // picker also takes a group nobody carries yet — which was the only thing this surface could do
-      // that the picker could not. Existing rows are converted by migration 098 rather than left to
-      // rot; this refusal is what stops new ones appearing between the migration and the UI's removal.
-      if (resourceType === 'space') {
-        throw Object.assign(new Error('space group mappings are retired — grant the role to the group on the space Members tab'), {
-          statusCode: 410, code: 'mapping_retired',
-        })
-      }
-      // #497 (088) allowed a mapping to name a BUILT-IN, at SPACE scope only — the tenant built-ins
-      // (member / admin) are identity tiers, not mappable roles. #578 retired space scope, so a
-      // built-in mapping has nowhere left to live: the only remaining scope refuses it.
-      if (builtinCapability != null) {
-        throw Object.assign(new Error('a built-in role is conferred on a group by granting it, not by mapping'), { statusCode: 400 })
-      }
-      const [role] = roleId
-        ? await req.db.sql<RoleRow[]>`SELECT id, name, capabilities, scope, created_at, updated_at FROM roles WHERE id = ${roleId}`
-        : [undefined]
-      if (roleId && !role) throw Object.assign(new Error('not found'), { statusCode: 404 })
-      if (role && (role.scope === 'tenant') !== (resourceType === 'tenant')) {
-        throw Object.assign(new Error(`a ${role.scope} role cannot be mapped at ${resourceType} scope`), { statusCode: 400 })
-      }
-      // Resource existence bind (RLS) — the same cross-tenant/unknown → uniform 404 as assign.
-      if (resourceType === 'tenant') {
-        if (resourceId !== req.tenant.id) throw Object.assign(new Error('not found'), { statusCode: 404 })
-      } else {
-        const exists = await req.db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${resourceId}`
-        if (!exists.length) throw Object.assign(new Error('not found'), { statusCode: 404 })
-      }
-      const caps = (role ? role.capabilities : [builtinCapability]) as AnyRoleCapability[]
-      // Per-scope authority AFTER the existence-bind (a cross-tenant/unknown id is a uniform 404, never
-      // a 403 that confirms it exists) — space manager for space scope, tenant admin for tenant scope.
-      await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps })
-      // The group NAME resolves to the SAME FGA id the #111 sync writes (tenant-salted hash), so the
-      // mapping's assignment lands on exactly the members synced into that group.
-      const principal = groupGrantee(req.tenant.id, groupName.trim())
-      const id = randomUUID()
-      // Create the assignment AND its owning mapping row in ONE tx (the afterAssign hook writes the
-      // group_role_mappings row inside the assign tx, referencing the just-inserted assignment). A
-      // duplicate group+role+resource 409s on the assignment dup-check — which mirrors the mapping's
-      // own UNIQUE — so a concurrent double-create can't slip through; a mapping-row UNIQUE violation
-      // rolls the whole assign back (no orphaned origin='mapping' assignment).
-      // For a built-in, a pre-existing assignment for the same (group, capability, space) — e.g. a
-      // DIRECT group grant from the Members tab — 409s here, exactly as a duplicate custom assign
-      // does: a mapping must OWN its assignment, and one it didn't create is not its to own.
-      const writeMappingRow = async (tx: Sql, asgId: string) => {
-        await tx`INSERT INTO group_role_mappings (id, tenant_id, group_name, role_id, builtin_capability, resource_type, resource_id, assignment_id, created_by)
-                 VALUES (${id}, ${req.tenant.id}, ${groupName.trim()}, ${role ? role.id : null}, ${role ? null : builtinCapability!}, ${resourceType}, ${resourceId}, ${asgId}, ${req.user.sub})`
-        await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.mapping_created', target: role ? `role:${role.id}` : `role:builtin:${builtinCapability}` })
-      }
-      let assignmentId: string
-      if (!role && builtinBundle(builtinCapability!).length > 1) {
-        // #497 re-review N1 / ADR-199 §2 rev5: the NOUN is composite, so the mapping confers the whole
-        // bundle — N single-capability rows, all origin='mapping', in ONE tx with the mapping row. The
-        // mapping row points at the PRIMARY arm (the capability the admin picked); the siblings are
-        // found by bundle on delete, so no schema grows a second foreign key.
-        const ids = await assignBuiltinCompositeInTx(req.db, app.fga, app.searchDriver, {
-          tenant: req.tenant, spaceId: resourceId, principal, actorSub: req.user.sub,
-          capabilities: builtinBundle(builtinCapability!), origin: 'mapping', onDuplicate: 'conflict',
-          afterArms: async (tx, ids) => {
-            await writeMappingRow(tx, ids.find((i) => i.cap === builtinCapability)!.id)
-          },
-        })
-        assignmentId = ids.find((i) => i.cap === builtinCapability)!.id
-      } else {
-        assignmentId = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
-          tenant: req.tenant, roleId: role ? role.id : null, builtinCapability: role ? undefined : builtinCapability,
-          capabilities: caps, resourceType, resourceId, principal,
-          actorSub: req.user.sub, origin: 'mapping',
-          afterAssign: writeMappingRow,
-        })
-      }
-      return reply.code(201).send({ id, groupName: groupName.trim(), roleId: role ? role.id : null, builtinCapability: role ? null : builtinCapability, roleName: role ? role.name : BUILTIN_NOUN[builtinCapability!] ?? builtinCapability, resourceType, resourceId, assignmentId })
+  // ---- #497 / ADR-183 → RETIRED by #578 / ADR-201 (slices 3 and 7) ----
+  // A mapping was a declaration row that OWNED a group-principal role assignment. It never added an FGA
+  // write path: the assignment it created is the very same one the grant path writes, on the very same
+  // principal. What it added was a SECOND way to reach that result, and with it the ownership rules,
+  // the 409s and the drift sweep that existed to keep the two stories consistent. ADR-201 ruled one
+  // mechanism; the grant is the one that survives, and since slice 1 the grant picker also accepts a
+  // group nobody carries yet — the one thing this surface could do that the picker could not.
+  //
+  // Slice 3 closed the SPACE scope; this closes the TENANT scope, which #514 had made the only place a
+  // mapping could still be created. The replacement is the tenant settings' group assignment (#579)
+  // one assignment row on `group:<id>#member`, the same principal, no declaration to keep honest.
+  //
+  // The routes stay declared and answer 410 rather than vanishing, so a stale client (or a script) is
+  // told the surface is gone and where to go, instead of getting a 404 it will read as "wrong URL".
+  // Existing rows were CONVERTED, not deleted — migrations 098 (space) and 103 (tenant) re-own each
+  // assignment as an ordinary manual grant, carrying the group NAME onto the row so the listing can
+  // still resolve it (the one-way hash means a dropped name renders as "unknown group" — #578 bounce ①).
+  const mappingRetired = (): never => {
+    throw Object.assign(new Error('group mappings are retired — assign the role to the group in tenant settings, or on the space Members tab'), {
+      statusCode: 410, code: 'mapping_retired',
     })
-
-  app.get<{ Querystring: { resourceType?: string; resourceId?: string } }>('/admin/roles/mappings', async (req) => {
-    requireEntitlement(req)
-    // Filtered by one resource → the #485 per-resource LIST authority (a space manager sees their own
-    // space's mappings). Unfiltered → the tenant-wide config view, which is admin-only (no
-    // cross-space enumeration; same rule as the assignments list).
-    const { resourceType, resourceId } = req.query
-    if (resourceType || resourceId) {
-      if ((resourceType !== 'page' && resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
-        throw Object.assign(new Error('resourceType (page|space|tenant) and resourceId required together'), { statusCode: 400 })
-      }
-      if (resourceType === 'tenant' && resourceId !== req.tenant.id) throw Object.assign(new Error('not found'), { statusCode: 404 })
-      await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId })
-    } else {
-      await adminGate(req)
-    }
-    const rows = await req.db.sql<{ id: string; group_name: string; role_id: string | null; builtin_capability: string | null; name: string | null; resource_type: string; resource_id: string; assignment_id: string | null }[]>`
-      SELECT m.id, m.group_name, m.role_id, m.builtin_capability, r.name, m.resource_type, m.resource_id, m.assignment_id
-      FROM group_role_mappings m LEFT JOIN roles r ON r.id = m.role_id
-      WHERE ${resourceType ? req.db.sql`m.resource_type = ${resourceType} AND m.resource_id = ${resourceId!}` : req.db.sql`TRUE`}
-      ORDER BY m.group_name, COALESCE(r.name, m.builtin_capability)`
-    // Orphan badge (ADR-183 §1): a mapping whose group NAME no longer appears in any member's groups
-    // (renamed/emptied at the IdP). It still owns its assignment — surfaced, never auto-migrated.
-    const live = await req.db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`
-    const liveSet = new Set(live.map((r) => r.g))
-    return rows.map((r) => ({
-      id: r.id, groupName: r.group_name, roleId: r.role_id, builtinCapability: r.builtin_capability,
-      roleName: r.name ?? (r.builtin_capability ? BUILTIN_NOUN[r.builtin_capability] ?? r.builtin_capability : ''),
-      resourceType: r.resource_type, resourceId: r.resource_id,
-      assignmentId: r.assignment_id, orphaned: !liveSet.has(r.group_name),
-    }))
-  })
-
-  app.delete<{ Params: { mappingId: string } }>('/admin/roles/mappings/:mappingId', async (req, reply) => {
-    requireEntitlement(req)
-    // Read the mapping + its role's scope/caps on the RLS handle first — a cross-tenant / unknown id is
-    // a uniform 404. The mapping's resource/role are immutable, so gating on this pre-read is safe.
-    const [m] = await req.db.sql<{ id: string; assignment_id: string | null; resource_type: 'page' | 'space' | 'tenant'; resource_id: string; capabilities: AnyRoleCapability[] }[]>`
-      SELECT m.id, m.assignment_id, m.resource_type, m.resource_id,
-             COALESCE(r.capabilities, ARRAY[m.builtin_capability]) AS capabilities
-      FROM group_role_mappings m LEFT JOIN roles r ON r.id = m.role_id WHERE m.id = ${req.params.mappingId}`
-    if (!m) throw Object.assign(new Error('not found'), { statusCode: 404 })
-    // Same per-scope authority as create/assign — a space manager may remove their space's mapping.
-    await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: m.resource_type, resourceId: m.resource_id, capabilities: m.capabilities as AnyRoleCapability[] })
-    // Remove the owned assignment via theref-counted unassign (a NULL assignment_id — a
-    // transient/orphaned mapping — just drops the row). Then delete the mapping row + audit.
-    if (m.assignment_id) {
-      await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: m.assignment_id, actorSub: req.user.sub })
-      // #497 re-review N1/N3: a composite mapping owns MORE than the row it points at. Its sibling
-      // arms are the bundle's other capabilities, mapping-owned, on the same principal + resource
-      // strip them with it, or "delete the mapping" leaves a comment grant nobody can reach (the
-      // Members surface refuses to revoke machine-managed rows, correctly).
-      const [mapRow] = await req.db.sql<{ builtin_capability: string | null; group_name: string }[]>`
-        SELECT builtin_capability, group_name FROM group_role_mappings WHERE id = ${m.id}`
-      const siblings = mapRow?.builtin_capability ? builtinBundle(mapRow.builtin_capability).filter((c) => c !== mapRow.builtin_capability) : []
-      if (siblings.length) {
-        const principal = groupGrantee(req.tenant.id, mapRow!.group_name)
-        const rows = await req.db.sql<{ id: string }[]>`
-          SELECT id FROM role_assignments
-          WHERE resource_type = ${m.resource_type} AND resource_id = ${m.resource_id} AND principal = ${principal}
-            AND origin = 'mapping' AND builtin_capability = ANY(${siblings})`
-        for (const r of rows) {
-          await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: r.id, actorSub: req.user.sub })
-        }
-      }
-    }
-    await req.db.tx(async (tx) => {
-      await tx`DELETE FROM group_role_mappings WHERE id = ${req.params.mappingId}`
-      await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.mapping_deleted', target: `role:mapping:${req.params.mappingId}` })
-    })
-    return reply.code(204).send()
-  })
+  }
+  app.post('/admin/roles/mappings', async () => mappingRetired())
+  app.get('/admin/roles/mappings', async () => mappingRetired())
+  app.delete('/admin/roles/mappings/:mappingId', async () => mappingRetired())
 }

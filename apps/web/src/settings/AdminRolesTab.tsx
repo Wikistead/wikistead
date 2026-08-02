@@ -2,19 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
-  useRoleAssignments, useAssignRole, useUnassignRole, useAdminSpaces,
-  useTenantRoleDefaults, useSetTenantRoleDefaults, useTenantMemberCandidates,
-  useRoleMappings, useCreateRoleMapping, useDeleteRoleMapping,
+  useTenantRoleDefaults, useSetTenantRoleDefaults,
 } from "../data/queries";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a role is irreversible — confirm first
 import { Input } from "../ui/Input";
-import { MemberSearchInput } from "../ui/MemberSearchInput";
 import { RadioGroup } from "../ui/RadioGroup";
-import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
-import { Pencil, X, ArrowRight } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
+import { Pencil, X } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
 
 // #420 / ADR-164 increment 5: the custom-role manager (tenant-admin console). Definitions =
 // named bundles of the atomic capabilities; assignments expand to fixed FGA tuples server-side.
@@ -155,34 +151,10 @@ export function AdminRolesTab() {
   // #504: deleting a role is irreversible (its assignments go with it) — red trigger + confirm.
   const [deletingRole, setDeletingRole] = useState<{ id: string; name: string } | null>(null);
 
-  // #514 slice 4: the assignment panel moved off this tab (see the note in the JSX). `spaces` stays —
-  // the group→role MAPPING form below still needs a space picker for space-scope mappings.
-  const spaces = useAdminSpaces();
   // #445: default tenant-role presets (CE).
   const { tenantId } = useSession();
   const defaults = useTenantRoleDefaults();
   const setDefaults = useSetTenantRoleDefaults();
-
-  // #497 / ADR-183: declarative group → role mappings. A mapping owns a group-principal role
-  // assignment; group members resolve live at check time (no reconcile). The role's scope decides
-  // the target (tenant → this tenant; space → a picked space), mirroring the assignment form.
-  const mappings = useRoleMappings();
-  // #497: "· <scope>" for a mapping row — the tenant, or the space it targets by NAME (resolved from the
-  // space list already loaded above). Unknown space → no suffix, never the uuid.
-  const mappingScope = (m: { resourceType: string; resourceId: string }): string => {
-    if (m.resourceType === "tenant") return ` · ${t("adminRoles.scopeTenant")}`;
-    const space = (spaces.data ?? []).find((s) => s.id === m.resourceId);
-    return space ? ` · ${space.name || space.id}` : "";
-  };
-  const createMapping = useCreateRoleMapping();
-  const deleteMapping = useDeleteRoleMapping();
-  const [mapGroup, setMapGroup] = useState("");
-  const [mapRoleId, setMapRoleId] = useState("");
-  const [mapSpaceId, setMapSpaceId] = useState("");
-  const [deletingMapping, setDeletingMapping] = useState<{ id: string; groupName: string; roleName: string } | null>(null);
-  const mapRole = (roles.data?.custom ?? []).find((r) => r.id === mapRoleId);
-  const mapScope: "space" | "tenant" = mapRole?.scope === "tenant" ? "tenant" : "space";
-  const mapResourceId = mapScope === "tenant" ? tenantId : mapSpaceId;
 
   // #497 / ADR-183 §3: the tenant default role — a tenant-scope custom role conferred on any member
   // no mapping matches (applied at their next login). Only tenant-scope roles are eligible.
@@ -339,57 +311,13 @@ export function AdminRolesTab() {
           role on members no mapping matched — and the tenant vocabulary is createSpaces and
           issueApiKeys, both of which already have an every-member toggle on this screen. Two controls,
           one meaning. Existing settings were converted to those toggles rather than dropped. */}
-      {/* #497 / ADR-183: declarative group → role mappings. A mapping confers a custom role on an IdP
-          group; membership resolves live (no reconcile). Same server machinery as assignment (,
-          #485 per-scope authority) — the console lists every mapping and flags an orphaned one whose
-          group no member currently carries (IdP rename/empty; surfaced, never auto-migrated). */}
-      {/* #514 / ADR-188 §8: TENANT-scope mappings only. A mapping onto a SPACE role is that space's own
-          configuration and is made in its Members tab — the same symmetry as assignment (slice 4), so a
-          space manager can set it up without a screen only tenant admins can open. */}
-      <h3 className="mt-8 text-sm font-medium">{t("adminRoles.mappingTitle")}</h3>
-      <p className="mt-0 mb-2 text-xs text-fg-dim">{t("adminRoles.mappingTenantBody")}</p>
-      <div className="mb-3 flex flex-wrap items-end gap-3" data-testid="mapping-form">
-        <label className="flex w-56 flex-col gap-1 text-xs text-fg-dim">
-          {t("adminRoles.mappingGroupLabel")}
-          <Input inputSize="sm" value={mapGroup} placeholder={t("adminRoles.mappingGroupPlaceholder")}
-            aria-label={t("adminRoles.mappingGroupLabel")} data-testid="mapping-group" onChange={(e) => setMapGroup(e.target.value)} />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-fg-dim">
-          {t("adminRoles.roleLabel")}
-          <Select size="sm" value={mapRoleId} ariaLabel={t("adminRoles.roleLabel")} testId="mapping-role"
-            options={(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map((r) => ({ value: r.id, label: r.name }))}
-            onChange={setMapRoleId} />
-        </label>
-        <span className="pb-1.5 text-xs text-fg-dim" data-testid="mapping-tenant-note">{t("adminRoles.assignTenantScope")}</span>
-        <Button variant="primary" size="sm" data-testid="mapping-add"
-          disabled={!mapGroup.trim() || !mapRoleId || !mapResourceId || createMapping.isPending}
-          onClick={() => createMapping.mutate({ groupName: mapGroup.trim(), roleId: mapRoleId, resourceType: mapScope, resourceId: mapResourceId }, {
-            onSuccess: () => { notify.success(t("toast.saved")); setMapGroup(""); },
-            onError,
-          })}>{t("adminRoles.mappingAdd")}</Button>
-      </div>
-      <div className="flex flex-col gap-1" data-testid="mapping-list">
-        {mappings.data?.map((m) => (
-          <div key={m.id} className="flex items-center gap-2 text-sm" data-testid="mapping-row">
-            <span className="min-w-0 truncate font-medium">{m.groupName}</span>
-            <ArrowRight size={12} className="shrink-0 text-fg-dim" aria-hidden />
-            {/* #497: a space-scope mapping said only which ROLE it confers, so two mappings of the same
-                role to different spaces read identically — the row could not tell you what it did. The
-                space name comes from the list this tab already holds; nothing new is asked of the server,
-                so no projection and no authority changes. A space that is not in that list (a space
-                manager looking at a filtered view) shows no scope rather than a raw id. */}
-            <span className="min-w-0 flex-1 truncate text-xs text-fg-dim">{m.roleName}{mappingScope(m)}</span>
-            {m.orphaned && (
-              <span className="rounded border border-[var(--callout-warning)] px-1 text-[10px] uppercase tracking-wide text-[var(--callout-warning)]" data-testid="mapping-orphan" data-tip={t("adminRoles.mappingOrphanHint")}>{t("adminRoles.mappingOrphan")}</span>
-            )}
-            {/* #504: deleting a mapping revokes its group assignment — red trigger + confirm. */}
-            <IconButton aria-label={t("adminRoles.mappingRemove")} data-testid="mapping-remove" variant="danger"
-              onClick={() => setDeletingMapping({ id: m.id, groupName: m.groupName, roleName: m.roleName })}><X size={14} /></IconButton>
-          </div>
-        ))}
-        {(mappings.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.mappingEmpty")}</p>}
-      </div>
-
+      {/* #497 / ADR-183 → RETIRED by #578 / ADR-201 (slice 7). The group→role MAPPING section stood
+          here. It was the second way to reach a result the grant path already produces: one assignment
+          on `group:<id>#member`. Groups now take a role the same way a person does — in tenant settings
+          for a tenant role, on a space's Members tab for a space one — and the picker there accepts a
+          group nobody carries yet, which was the only thing this section could do that it could not.
+          Existing mappings were converted to ordinary assignments (migrations 098 and 103), carrying the
+          group NAME onto the assignment so the listing still resolves it. */}
       {/* #504: the role-delete confirm — names the role, danger tone. */}
       <ConfirmDialog
         open={deletingRole !== null}
@@ -400,18 +328,6 @@ export function AdminRolesTab() {
           if (!deletingRole) return;
           deleteRole.mutate(deletingRole.id, { onSuccess: () => notify.success(t("toast.saved")), onError });
           setDeletingRole(null);
-        }}
-      />
-      {/* #497: deleting a mapping revokes the group's conferred role — name it, danger tone. */}
-      <ConfirmDialog
-        open={deletingMapping !== null}
-        message={deletingMapping ? t("adminRoles.mappingDeleteConfirm", { group: deletingMapping.groupName, role: deletingMapping.roleName }) : ""}
-        confirmTestId="mapping-delete-confirm"
-        onClose={() => setDeletingMapping(null)}
-        onConfirm={() => {
-          if (!deletingMapping) return;
-          deleteMapping.mutate(deletingMapping.id, { onSuccess: () => notify.success(t("toast.saved")), onError });
-          setDeletingMapping(null);
         }}
       />
     </div>
