@@ -1285,6 +1285,7 @@
     "sectionResource": "スペース / ページ",
     "groupAssignTitle": "グループのロール",
     "groupAssignBody": "IdP のグループにテナントロールを付与します。グループのメンバー全員に効き、グループを抜けると外れます。",
+    "groupTiersNote": "対象はカスタムロールです。member と admin は各メンバーの行で設定します（誰が admin を持つかを記録に残すため）。",
     "groupAssignEmpty": "テナントロールを持つグループはありません。",
     "groupLabel": "グループ",
     "groupPlaceholder": "グループを選択…",

@@ -174,3 +174,43 @@ describe("#582: built-in role names are proper nouns", () => {
     expect(pickerOptions(row).map((o) => o.label)).toContain("admin");
   });
 });
+
+// #579 bounce ②, ruled by ADR-201: "why does the GROUP list have custom roles only?" The answer is a
+// decision, not an oversight, and the screen has to carry it — an absence explains nothing.
+//
+// - `member` is universal. Everyone already holds it, so conferring it on a group is a no-op.
+// - `admin` is granted per person on purpose. ADR-201 retired group-conferred admin (option (c) from
+// ADR-183) so the tenant can read off WHO holds admin and revoke it without going to the IdP; the
+// FGA model backs that up, `tenant#admin` taking `[user]` and no userset.
+//
+// The space screen DOES offer built-ins to a group (a space relation accepts `group#member`), so the
+// difference between the two screens is real and needs a sentence rather than silence.
+describe("#579 ②: the group section says why it holds no tiers", () => {
+  it("both locales carry the note", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    for (const loc of ["en", "ja"]) {
+      const j = JSON.parse(readFileSync(resolve(import.meta.dirname, `../i18n/locales/${loc}.json`), "utf8"));
+      const note = j.adminRoles.groupTiersNote as string | undefined;
+      expect(note, `${loc}: the note exists`).toBeTruthy();
+      for (const tier of BUILT_IN_TIERS) {
+        expect(note, `${loc}: it names ${tier} so the reader knows which roles it means`).toContain(tier);
+      }
+    }
+  });
+
+  it("the section renders it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const src = readFileSync(resolve(import.meta.dirname, "./TenantGroupRoles.tsx"), "utf8");
+    expect(src, "the copy is shown, not merely defined").toContain("adminRoles.groupTiersNote");
+  });
+
+  it("and the picker still offers tenant-scope CUSTOM roles only", () => {
+    // the note would be a lie if a tier ever appeared in this list; the filter is the same one the
+    // component applies, kept here as the statement of what belongs in a group picker
+    const assignable = ROLES.filter((r) => r.scope === "tenant").map((r) => r.name);
+    expect(assignable).toEqual(["Space creators", "Key issuers"]);
+    for (const tier of BUILT_IN_TIERS) expect(assignable).not.toContain(tier);
+  });
+});

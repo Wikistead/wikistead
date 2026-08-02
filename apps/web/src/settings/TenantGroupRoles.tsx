@@ -41,6 +41,13 @@ export function TenantGroupRoles() {
     <section className="mb-8" data-testid="tenant-group-roles">
       <h3 className="mt-0 text-sm font-medium">{t("adminRoles.groupAssignTitle")}</h3>
       <p className="mt-0 mb-2 text-xs text-fg-dim">{t("adminRoles.groupAssignBody")}</p>
+      {/* #579 bounce ②, ruled by ADR-201: the picker holds custom roles and no tiers, and it now says
+          so instead of leaving the reader to infer it from an absence. `member` is universal (everyone
+          already has it, so conferring it by group means nothing) and `admin` is granted per person on
+          purpose — ADR-201 retired group-conferred admin so that the tenant can always read off WHO
+          holds it and revoke without going to the IdP. The space screen does offer built-ins to a
+          group, which is why the difference needs a sentence here rather than silence. */}
+      <p className="mt-0 mb-2 text-xs text-fg-dim" data-testid="tenant-group-tiers-note">{t("adminRoles.groupTiersNote")}</p>
 
       <div className="mb-3 flex flex-wrap items-end gap-3" data-testid="tenant-group-assign-form">
         <Select size="sm" value={roleId} ariaLabel={t("adminRoles.roleLabel")} testId="tenant-group-assign-role"
