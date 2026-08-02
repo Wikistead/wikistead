@@ -40,7 +40,6 @@ import { publicPlugin } from './routes/public.js'
 import { publicShellPlugin, publicRobotsPlugin } from './routes/public-shell.js'
 import { auditPlugin } from './routes/audit.js'
 import { rolesPlugin } from './routes/roles.js'
-import { adminMappingsPlugin } from './routes/admin-mappings.js' // #497 / ADR-183 §2b
 import { apiKeysPlugin } from './routes/api-keys.js'
 import { shareLinksPlugin } from './routes/share-links.js'
 import { pinsPlugin } from './routes/pins.js'
@@ -483,7 +482,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(publicShellPlugin) // #409 / ADR-154: /pub HTML shell (no-op unless PUBLIC_SHELL_INDEX is set)
   await app.register(publicRobotsPlugin) // #408 / ADR-154 §2: robots.txt + sitemap.xml (parent-switch gated)
   await app.register(auditPlugin) // #401 / ADR-155: audit-log viewer (tenant-admin + auditLog entitlement)
-  await app.register(adminMappingsPlugin) // #497 / ADR-183 §2b: IdP group -> tenant admin (declaration only; the grant is materialised per user)
   await app.register(rolesPlugin) // #420 / ADR-164: custom-role definitions (tenant-admin + customRoles entitlement)
   await app.register(apiKeysPlugin)
   await app.register(shareLinksPlugin)
