@@ -39,10 +39,12 @@ const KNOWN_RED = {
   // #598 identity slice: elements the saved document does not carry under their own name. Recorded
   // rather than hidden, and the assertion is EQUALITY — fixing one fails the gate until the line goes.
   //
-  // `tabs` is the first thing this dimension found, and it is a real one: every other macro in the
-  // fixture arrives in the saved file under its own name and this one does not appear at all. Whether
-  // the export drops it or renders it as something anonymous is the next slice's question — it is
-  // recorded here so the gate is green and honest rather than green and quiet.
+  // `tabs` is the first thing this dimension found, and the follow-up measurement narrowed it: the
+  // CONTENT is in the saved file (its pane text is there), so the export does not drop it — it arrives
+  // ANONYMOUS. `columns`, the same kind of container, is named. The difference worth chasing is that the
+  // tabs widget REBUILDS itself (it keeps an active-tab index across re-renders), which would replace the
+  // element the stamp was put on. Not yet measured, so not yet asserted — recorded here so the gate is
+  // green and honest rather than green and quiet.
   unidentified: ["tabs"] as string[],
 } as const;
 
