@@ -462,6 +462,9 @@ export function buildLinkList(
 // intercepted before any anchor role) arrive here already made — this class only builds allowlisted DOM.
 class DomSink implements MdSink {
   private stack: Node[];
+  // #598: did a registered macro's own rendering produce the element the visitor is about to stamp?
+  // Set by `fence` / `directive` on their way through; read once by `stamp` (see the note there).
+  private drewMacro = false;
   constructor(root: Node) { this.stack = [root]; }
   private top(): Node { return this.stack[this.stack.length - 1]!; }
   private push(el: HTMLElement): void { this.top().appendChild(el); this.stack.push(el); }
@@ -527,12 +530,24 @@ class DomSink implements MdSink {
   // dispatch, because every branch of `directive` below ends by appending its result to the same parent
   // stamping inside each of them is how two of them would come to disagree.
   //
+  // #598(review, measured): the name used to come from the SOURCE — what the opening line
+  // parsed as. That named the generic fallback box too, so a macro that is registered and NOT WIRED UP on
+  // this surface came out wearing its own name and the gate's identity dimension passed. A dummy macro
+  // registered with no working renderer was measured to stay green, which is the exact defect this ticket
+  // exists to catch ( — the usual shape is an element that draws while
+  // editing and is not connected to the export).
+  //
+  // So the name now says WHO DREW IT. `drewMacro` is set by the two dispatch hooks below on the paths
+  // where a registered macro's own rendering produced the element; the fallback paths leave it false and
+  // the element is stamped `data-wks-el-fallback` instead — present, named, and visibly nobody's work.
+  //
   // Only if nothing claimed a name already: a macro that stamps its own (a nested embed placeholder, say)
   // knows better than this does.
   stamp(el: { kind: "fence" | "directive"; name: string | null }): void {
     if (!el.name) return;
     const last = (this.top() as Element).lastElementChild;
-    if (last && !last.hasAttribute("data-wks-el")) last.setAttribute("data-wks-el", el.name);
+    if (!last || last.hasAttribute("data-wks-el") || last.hasAttribute("data-wks-el-fallback")) return;
+    last.setAttribute(this.drewMacro ? "data-wks-el" : "data-wks-el-fallback", el.name);
   }
 
   text(s: string): void { this.top().appendChild(document.createTextNode(s)); }
@@ -605,6 +620,10 @@ class DomSink implements MdSink {
   fence(args: { blockName: "FencedCode" | "CodeBlock"; info: string | null; body: string; nodeFrom: number }): void {
     const into = this.top();
     const body = args.body;
+    // #598: nothing has drawn anything yet. A lang with no registered macro is set back to true at the
+    // plain card below — an ordinary ```ts fence IS drawn by that card, and calling it a fallback would
+    // say a code block failed when it did exactly what it should.
+    this.drewMacro = false;
     let fenceMeta: { lang: string; title?: string; showLineNumbers?: boolean; highlight?: readonly (readonly [number, number])[] } = { lang: "" }; // for the plain-code header below
     if (args.blockName === "FencedCode") {
       const fence = args.info != null ? parseFenceInfo(args.info) : null; // #267: full parse for lang + align=
@@ -613,7 +632,7 @@ class DomSink implements MdSink {
       const macro = lang ? findFenceMacro(lang) : undefined;
       // #351static mode never dispatches a fence macro (mermaid/plantuml/excalidraw would mount a
       // widget / render async) — a compact chip instead of the (long) raw source keeps the card small.
-      if (staticRender && macro?.liveRender) { into.appendChild(staticMacroChip(lang!)); return; }
+      if (staticRender && macro?.liveRender) { this.drewMacro = true; into.appendChild(staticMacroChip(lang!)); return; }
       // ADR-085 shared macro renderer: a FENCE whose info string names a registered fence macro dispatches
       // to its liveRender — the SINGLE source of truth. Unknown lang / no liveRender / a macro that THROWS
       // → the plain card below (never break the whole render). liveRender only gets `{theme}` (ADR-024).
@@ -623,6 +642,7 @@ class DomSink implements MdSink {
         // Nothing exercises that today — no fence macro re-renders markdown — but the SDK's `renderMarkdown`
         // is exactly the handle that would, and the cap has to exist BEFORE the handle does.
         if (nestedDirectiveDepth >= MAX_NESTED_DIRECTIVE_DEPTH) {
+          this.drewMacro = true; // the chip is the macro naming itself — a deliberate floor, not a miss
           into.appendChild(staticMacroChip(lang!)); // same floor the directive branch takes: show, stop recursing
           return;
         }
@@ -655,6 +675,7 @@ class DomSink implements MdSink {
           // #267: a rendered diagram is centred by default (#255); this path has no widget wrap, so apply
           // the SAME cm-lp-align-* class (global CSS backs it outside .cm-editor).
           if (DIAGRAM_MACROS.has(lang!)) el.classList.add(`cm-lp-align-${fence!.align ?? "center"}`);
+          this.drewMacro = true;
           into.appendChild(el);
           return;
         }
@@ -663,6 +684,11 @@ class DomSink implements MdSink {
     }
     // #381the static fence is the SAME card as the CM surface — a shared header (filename tab +
     // lang + copy button, buildFenceHeader) over the code body.
+    //
+    // #598: this card is the RIGHT renderer for a language nobody registered (```ts is a code block, and
+    // that is all it ever was), and the WRONG one for a registered fence macro — reaching here means its
+    // liveRender threw or returned nothing, so the reader is looking at source where a figure belongs.
+    this.drewMacro = !(fenceMeta.lang && findFenceMacro(fenceMeta.lang));
     const card = document.createElement("div");
     card.className = "cm-lp-fence-card";
     card.appendChild(buildFenceHeader({ lang: fenceMeta.lang, title: fenceMeta.title, code: body, canCopy: true }));
@@ -703,6 +729,7 @@ class DomSink implements MdSink {
   directive(args: { name: string | null; label: string | null; attrs: Record<string, string> | null; full: string; body: string; nodeFrom: number; resolved: boolean; walkChildren: () => void }): void {
     const into = this.top();
     const { full, body } = args;
+    this.drewMacro = false; // #598: until one of the macro paths below produces the element (see `stamp`)
     const nl = full.indexOf("\n");
     const parsed = args.name != null ? { name: args.name, label: args.label } : parseDirectiveOpen(nl === -1 ? full : full.slice(0, nl));
     const macro = parsed ? findDirectiveMacro(parsed.name) : undefined;
@@ -726,6 +753,7 @@ class DomSink implements MdSink {
       const holder = document.createElement("div");
       holder.className = "cm-lp-macro";
       holder.setAttribute("data-testid", "macro-embed-page-nested");
+      this.drewMacro = true; // the transclude host owns this element, placeholder and all
       into.appendChild(holder);
       void host.resolve(body.trim()).then((content) => {
         holder.replaceChildren();
@@ -744,6 +772,7 @@ class DomSink implements MdSink {
     // #351static mode never dispatches a directive liveRender. Markdown-CONTENT containers
     // (columns/tabs/details) fall through to the plain-content fallback so their body still shows.
     if (staticRender && macro?.liveRender && !STATIC_PLAIN_DIRECTIVES.has(parsed!.name)) {
+      this.drewMacro = true; // the chip is the macro naming itself (a hover card stays fetch-free)
       into.appendChild(staticMacroChip(parsed!.name));
       return;
     }
@@ -762,6 +791,7 @@ class DomSink implements MdSink {
         // so a centred table read as flush left in Reading, in the public reader and in every export.
         const align = parsed!.name === "table" ? args.attrs?.align : undefined;
         const alignClass = align === "left" ? "cm-lp-align-left" : align === "right" ? "cm-lp-align-right" : align === "center" ? "cm-lp-align-center" : null;
+        this.drewMacro = true;
         if (alignClass) {
           const alignWrap = document.createElement("div");
           alignWrap.className = alignClass;
@@ -795,6 +825,7 @@ class DomSink implements MdSink {
           ? renderDisclosure(parsed?.label ?? "", body, nestedBodyBase ?? undefined)
           : renderCalloutPanel(macro.containerClass, macro.icon ?? "", parsed?.label ?? "", body, nestedBodyBase ?? undefined);
         tagMacro(el, args.nodeFrom, parsed!.name); // #215: anchor in the OUTER src coords
+        this.drewMacro = true;
         into.appendChild(el);
       } finally { nestedDirectiveDepth--; }
       return;

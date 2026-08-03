@@ -59,6 +59,10 @@ const KNOWN_RED = {
   // #85 ③ / ADR-194 addendum (ruling pending): the copied CSS carries @font-face rules whose url is
   // root-absolute, so opening the file asks the filesystem root for fonts that are not there.
   failedRequests: [/wikistead-mono|udevgothic|\.woff2$/],
+  // #598registered macros that ended up in the GENERIC BOX — present, but nothing rendered them.
+  // (empty) — this dimension exists because the review measured the gate passing on a dummy macro
+  // registered with no working renderer, which is the exact failure the ticket was opened for.
+  unrendered: [] as string[],
   // #598 identity slice: elements the saved document does not carry under their own name. Recorded
   // rather than hidden, and the assertion is EQUALITY — fixing one fails the gate until the line goes.
   //
@@ -217,7 +221,32 @@ test("#598: every registered element survives the export, the file, and the page
   await opened.goto(`file://${savedPath}`);
   await sleep(700);
 
-  // ---- 1a. per-element identity: is THIS element on the page a reader gets? ----
+  // ---- 1a. nobody drew it: a registered macro that ended up in the generic box ----
+  //
+  // The identity dimension below asks whether an element is on the surface. This one asks whether anything
+  // RENDERED it, which is a different question and the one the ticket is about: a macro that is registered
+  // and not wired into a surface still produces a box there (the generic fallback), and while the name came
+  // from the source text that box wore the macro's own name — so the identity check passed on a macro
+  // nothing drew. Measured in the review with a dummy macro: green, on the defect this gate exists
+  // for.
+  //
+  // The name now says who drew it: a macro's own renderer stamps `data-wks-el`, the fallback stamps
+  // `data-wks-el-fallback`. So an unwired macro fails BOTH lines, and this one says why in one word.
+  //
+  // Asked of the app surface as well as the file: the mirror failure (wired for export, not for reading)
+  // is the same defect facing the other way.
+  const fellBackOn = async (p: Page, where: string) => (await p.evaluate(() =>
+    [...new Set([...document.querySelectorAll("[data-wks-el-fallback]")].map((el) => el.getAttribute("data-wks-el-fallback") ?? ""))]))
+    .filter((name) => elements.some((e) => e.name === name))
+    .map((name) => `${name}: nothing rendered it in the ${where} (generic box)`);
+  const unrendered = [...await fellBackOn(opened, "saved file"), ...await fellBackOn(page, "app")].sort();
+  expect(
+    unrendered,
+    "a registered macro fell through to the generic box — it is not wired to that surface. " +
+    "If you FIXED one, delete it from KNOWN_RED",
+  ).toEqual([...KNOWN_RED.unrendered].sort());
+
+  // ---- 1a′. per-element identity: is THIS element on the page a reader gets? ----
   //
   // The slice this replaces was withdrawn for a good reason: it compared a per-macro CSS marker across
   // surfaces and called `details` missing, because a CONTAINER macro is a CSS box while editing and a
