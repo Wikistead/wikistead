@@ -40,6 +40,9 @@ export const LOCAL_LOGIN_LOCK_S = num(process.env.LOCAL_LOGIN_LOCK_S, 30 * 60)
 // tighter than a login's: it bounds how often anyone can be mailed, not how often a password is
 // guessed.
 export const RESET_REQ_ADDR_MAX = num(process.env.LOCAL_RESET_ADDR_MAX, 3)
+// RFC 5321's ceiling on an address. An identifier longer than this cannot match a credential, and
+// letting one through would put attacker-chosen bytes into a Valkey key and a webhook payload.
+export const MAX_IDENTIFIER_LEN = 320
 
 // READ a counter without incrementing (C2: the lock must be consulted before the password is even
 // looked at). A Valkey failure here FAILS CLOSED — a limiter that disappears under load is not a
@@ -81,6 +84,25 @@ export function sameOriginOk(headers: Record<string, unknown>, host: string | un
 }
 
 export async function authLocalPlugin(app: FastifyInstance) {
+  // #568 review B2: what KIND of invite is this link? The landing page has an opaque token and no
+  // way to know whether to send the person to an IdP or ask them to choose a password — and sending
+  // a password invite to the IdP burned the token on an OIDC seat, leaving the credential the invite
+  // existed to create unwritten, with nothing telling either party.
+  //
+  // Answering is not a disclosure: holding the token IS the capability, so its holder learning what
+  // to do with it tells them nothing they do not already have. A token that is unknown, expired,
+  // consumed or revoked gets the same 404 every other invite surface gives.
+  app.get<{ Querystring: { token?: string } }>('/auth/invite-kind', { config: { public: true } }, async (req, reply) => {
+    const token = (req.query?.token ?? '').trim()
+    if (!token) return reply.code(404).send({ error: 'invite not available' })
+    const { hashInviteToken } = await import('../auth/invites.js')
+    const [row] = await req.db.sql<{ kind: string }[]>`
+      SELECT kind FROM invites
+       WHERE token_hash = ${hashInviteToken(token)} AND status = 'pending' AND expires_at > now()`
+    if (!row) return reply.code(404).send({ error: 'invite not available' })
+    return { kind: row.kind }
+  })
+
   // #568 / ADR-198 §2: accept a password invite. Unauthenticated and token-addressed — the person
   // holding the link is not a member yet, which is the whole point.
   //
@@ -266,7 +288,10 @@ export async function authLocalPlugin(app: FastifyInstance) {
       }
       const identifier = (req.body?.identifier ?? '').trim().toLowerCase()
       const password = req.body?.password ?? ''
-      if (!identifier || !password) return deny()
+      // review N1: the identifier is attacker-controlled and reaches a Valkey key and an event
+      // payload. Bound it at the RFC's maximum address length — a longer one cannot belong to any
+      // account here, so refusing it costs nothing and keeps both out of an attacker's reach.
+      if (!identifier || identifier.length > MAX_IDENTIFIER_LEN || !password) return deny()
 
       const ip = req.ip
       const idKey = `rl:local:id:${req.tenant.id}:${identifier}`
@@ -275,7 +300,15 @@ export async function authLocalPlugin(app: FastifyInstance) {
 
       // ── C2: the lock is evaluated BEFORE anything is verified ──────────────
       const locked = await overLimit(app.valkey, lockKey, 1)
-      const ipFlooded = await overLimit(app.valkey, ipKey, LOCAL_LOGIN_IP_MAX)
+      // review B4 / ADR-198 §5: an IP over its limit is refused HERE, before the KDF. This one can
+      // return early without becoming an oracle, because the answer depends only on that source's
+      // own history and says nothing about any account — and it is the only thing standing between
+      // an unauthenticated caller and the libuv thread pool (scrypt is ~60ms on a pool of four, so
+      // roughly 65 requests a second starves fs and dns for the whole process).
+      if (await overLimit(app.valkey, ipKey, LOCAL_LOGIN_IP_MAX)) {
+        await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
+        return reply.code(429).send({ error: 'too many attempts' })
+      }
 
       // The credential row is read even when locked, because the refusal must cost the same either
       // way (a "locked" branch that skips the KDF is the timing oracle C1 closes).
@@ -288,7 +321,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       const stored = row?.password_hash ?? (await dummyHash())
       const ok = await verifyPassword(password, stored)
 
-      if (locked || ipFlooded || !enabled || !row || !ok) {
+      if (locked || !enabled || !row || !ok) {
         // A correct password during a lockout clears NOTHING (C2) — it is still a failure here.
         await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
         await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
@@ -304,11 +337,6 @@ export async function authLocalPlugin(app: FastifyInstance) {
         return deny()
       }
 
-      // Success: the counters for this identifier go, so a legitimate user who mistyped twice is not
-      // one failure away from a lock for the next quarter of an hour. The IP counter STAYS — it
-      // counts a source's behaviour, and one success does not vouch for the rest.
-      await app.valkey.del(idKey).catch(() => {})
-
       // Opportunistic upgrade: the only moment the plaintext is in hand (ADR-198 §4).
       if (needsRehash(stored)) {
         const fresh = await hashPassword(password)
@@ -319,12 +347,31 @@ export async function authLocalPlugin(app: FastifyInstance) {
       // Membership is still the authority: `localIdentity` tells the session machinery this subject
       // is ours (skip the external-sub gate), that it must NOT auto-enrol (a password proves who you
       // are, not that you belong), and that there are no claims to overwrite the profile with.
-      const sid = await establishMemberSession(
-        { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
-        req.tenant,
-        { sub: row.member_sub },
-        { localIdentity: true },
-      )
+      // review B1: establishMemberSession has refusals of its OWN — a member frozen by a plan
+      // downgrade (403 member_deactivated), or one whose FGA membership is gone while the row
+      // survives. Letting either escape made the response say "your password was right" to anyone
+      // holding a frozen account's address: 403 for the correct password, 401 for a wrong one. It is
+      // also the one branch that skipped the failure counters, so it could be probed without limit.
+      // Every one of them is the same 401 as any other refusal, counted like any other refusal.
+      let sid: string
+      try {
+        sid = await establishMemberSession(
+          { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
+          req.tenant,
+          { sub: row.member_sub },
+          { localIdentity: true },
+        )
+      } catch (err) {
+        req.log.info({ err, method: 'local' }, 'local login refused after a valid credential')
+        await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+        await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
+        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'local', reason: 'invalid credentials' })
+        return deny()
+      }
+      // Only NOW are the counters for this identifier cleared — after a session actually exists. A
+      // legitimate user who mistyped twice is not one failure away from a lock, and a refusal that
+      // happens after the password matched still counts (review B1).
+      await app.valkey.del(idKey).catch(() => {})
       reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
       return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
     },

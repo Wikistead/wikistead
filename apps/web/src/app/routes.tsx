@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate, Link as RouterLink } from "react-router-dom";
 
@@ -33,6 +33,7 @@ function LazyFallback() {
 }
 import { AppShell } from "./AppShell";
 import { LoginScreen } from "./LoginScreen";
+import { SetPasswordForm } from "./SetPasswordForm";
 
 
 
@@ -1383,23 +1384,71 @@ function WorkspaceRoute() {
   );
 }
 
-// Invite acceptance landing: the link carries ?token. Accepting starts the OIDC
-// login with the token attached (?invite=) — the callback accepts the invite and
-// seats the user (the new membership grant). The token is opaque to the SPA.
+// Invite acceptance landing: the link carries ?token, which is opaque to the SPA — so the page ASKS
+// what kind of invite it is before deciding what to offer.
+//
+// #568 review B2: it used to send everyone to the IdP. A PASSWORD invite followed that path, burned
+// its token on a member seated as `identity_source='oidc'`, and never wrote the credential it
+// existed to create — silently, for both the person and the admin who sent it.
 function InviteRoute() {
   const { t } = useTranslation();
   const token = new URLSearchParams(window.location.search).get("token") ?? "";
+  const kind = useQuery({
+    queryKey: ["invite-kind", token],
+    queryFn: () =>
+      fetch(assetUrl(`/auth/invite-kind?token=${encodeURIComponent(token)}`))
+        .then((r) => (r.ok ? (r.json() as Promise<{ kind: string }>) : null))
+        .catch(() => null),
+    enabled: token.length > 0,
+    retry: false,
+  });
   const accept = () => {
     window.location.href = `/auth/login?invite=${encodeURIComponent(token)}&returnTo=${encodeURIComponent("/p/demo")}`;
   };
+  // A dead link degrades to the OIDC button rather than a dead end: the token may simply be for a
+  // server that does not publish kinds, and the acceptance itself refuses uniformly anyway.
+  const isLocal = kind.data?.kind === "local";
   return (
     <AppShell>
       <div style={{ padding: 24, maxWidth: 440 }}>
         <h2 style={{ marginTop: 0 }}>{t("auth.inviteTitle")}</h2>
-        <p style={{ color: "var(--fg-dim)" }}>{t("auth.inviteBody")}</p>
-        <Button variant="primary" disabled={!token} onClick={accept}>{t("auth.acceptInvite")}</Button>
+        <p style={{ color: "var(--fg-dim)" }}>{isLocal ? t("auth.inviteLocalBody") : t("auth.inviteBody")}</p>
+        {isLocal ? (
+          <SetPasswordForm token={token} mode="accept" onDone={() => { window.location.href = "/"; }} />
+        ) : (
+          <Button variant="primary" disabled={!token || kind.isPending} onClick={accept}>{t("auth.acceptInvite")}</Button>
+        )}
       </div>
     </AppShell>
+  );
+}
+
+// #568 / ADR-198 §6: the page a reset link lands on. Unauthenticated by nature — the person is here
+// BECAUSE they cannot sign in — so it renders outside the app shell's session assumptions and sends
+// them to the login screen when they are done.
+function ResetPasswordRoute() {
+  const { t } = useTranslation();
+  const token = new URLSearchParams(window.location.search).get("token") ?? "";
+  const [done, setDone] = useState(false);
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+      <div className="w-full max-w-sm rounded-xl border border-border bg-panel p-8 shadow-md" data-testid="reset-card">
+        <h1 className="mb-1 text-xl font-semibold">{t("auth.resetTitle")}</h1>
+        {done ? (
+          <>
+            <p className="mb-4 text-sm text-fg-dim" data-testid="reset-done">{t("auth.resetDone")}</p>
+            <Button variant="primary" className="w-full" onClick={() => { window.location.href = "/login"; }}>
+              {t("auth.signIn")}
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="mb-4 text-sm text-fg-dim">{t("auth.resetBody")}</p>
+            <SetPasswordForm token={token} mode="reset" onDone={() => setDone(true)} />
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1814,6 +1863,8 @@ export function AppRoutes() {
       <Route path="/pub/:pageId" element={<PublicPageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />
       <Route path="/invite" element={<InviteRoute />} />
+      {/* #568: a reset link lands here — no session required, that is the point */}
+      <Route path="/reset-password" element={<ResetPasswordRoute />} />
       <Route path="/templates" element={<Suspense fallback={<LazyFallback />}><TemplatesRoute /></Suspense>} />
       <Route path="/changes" element={<Suspense fallback={<LazyFallback />}><RecentChangesRoute /></Suspense>} />
       <Route path="/watches" element={<Suspense fallback={<LazyFallback />}><WatchListRoute /></Suspense>} /> {/* #362 the bell's watch list */}

@@ -149,3 +149,51 @@ describe('#568 §2: acceptance creates the member and the credential together', 
     expect((await accept(token)).ok, 'and the invite was not touched').toBe(true)
   }, 120_000)
 })
+
+describe('#568 review B2: the two invite doors do not accept each other\'s tokens', () => {
+  it('a PASSWORD invite cannot be consumed by signing in at the IdP', async () => {
+    // Without the kind filter this burned the token on a member seated as identity_source='oidc',
+    // and the credential the invite existed to create was never written — silently, for both the
+    // person and the admin who sent it.
+    const { acceptInvite } = await import('../auth/invites.js')
+    const addr = email('kind-oidc-door')
+    const { token } = await makeInvite(addr)
+    const intruder = `oidc-b2-${STAMP}`
+    const took = await acceptInvite({ db, fga: fgaClient }, { id: TENANT, plan: 'business' }, token, { sub: intruder, email: addr })
+    expect(took, 'the OIDC door refuses a password invite').toBe(false)
+    const rows = await adminPool`SELECT status FROM invites WHERE tenant_id = ${TENANT} AND email = ${addr}`
+    expect((rows[0] as { status: string }).status, 'and the token was not burned').toBe('pending')
+    // ...and it still works through its own door
+    expect((await accept(token)).ok).toBe(true)
+    await adminPool`DELETE FROM members WHERE sub = ${intruder}`.catch(() => {})
+  }, 120_000)
+
+  it('the landing page can ask which door a token belongs to, and a dead one says nothing', async () => {
+    const addr = email('kind-endpoint')
+    const { token } = await makeInvite(addr)
+    const ok = await app.inject({ method: 'GET', url: `/auth/invite-kind?token=${encodeURIComponent(token)}`, headers: { host: 'dev.localhost' } })
+    expect(ok.statusCode).toBe(200)
+    expect(ok.json()).toEqual({ kind: 'local' })
+    for (const bad of ['inv_nothing', '']) {
+      const res = await app.inject({ method: 'GET', url: `/auth/invite-kind?token=${encodeURIComponent(bad)}`, headers: { host: 'dev.localhost' } })
+      expect(res.statusCode, bad || '(empty)').toBe(404)
+    }
+    // consumed is dead too
+    await accept(token)
+    const spent = await app.inject({ method: 'GET', url: `/auth/invite-kind?token=${encodeURIComponent(token)}`, headers: { host: 'dev.localhost' } })
+    expect(spent.statusCode).toBe(404)
+  }, 120_000)
+
+  it('N3: a taken identifier refuses BEFORE any FGA tuple is written', async () => {
+    // The membership tuple does not roll back with the transaction, so a UNIQUE violation after it
+    // was written left an orphan grant for a member the database had discarded.
+    const addr = email('collision')
+    const first = await makeInvite(addr)
+    expect((await accept(first.token)).ok).toBe(true)
+    const second = await makeInvite(addr)
+    const out = await accept(second.token, 'a-second-passphrase-ok')
+    expect(out.ok, 'the second acceptance refuses like any dead link').toBe(false)
+    const creds = await db.sql`SELECT 1 FROM local_credentials WHERE identifier = ${addr}`
+    expect(creds.length, 'one credential, not two').toBe(1)
+  }, 120_000)
+})

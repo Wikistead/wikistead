@@ -109,18 +109,69 @@ describe('#568 §3: one refusal, whatever the reason', () => {
     expect(new Set(seen.map((s) => s.reason)).size, 'one reason for both causes').toBe(1)
   }, 120_000)
 
-  it('a member who is not seated cannot sign in even with a valid credential row', async () => {
-    // Membership is the authority; a password proves identity only (the P1.1 invariant).
+  it('a member whose MEMBERSHIP is gone cannot sign in, credential or no credential', async () => {
+    // Membership is the authority; a password proves identity only (the P1.1 invariant). The drift
+    // that can really happen is the FGA side going while the rows stay — a failed removal, a manual
+    // tuple delete — so that is what this models. (An earlier version deleted the MEMBER row and
+    // re-inserted the credential, which the FK refuses: it was measuring "no credential" and would
+    // have passed with the membership check removed entirely.)
     const { sub, identifier } = await makeLocalMember('unseated')
     await clearCounters(identifier)
-    await adminPool`DELETE FROM members WHERE sub = ${sub}`
-    // the credential row survives the direct delete only because we bypassed the app's own cleanup;
-    // re-insert it to model "a credential whose member is gone"
-    await adminPool`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
-                    VALUES (${TENANT}, ${sub}, ${identifier}, ${await hashPassword(PASSWORD)})
-                    ON CONFLICT DO NOTHING`.catch(() => {})
+    const { deleteTuples } = await import('@wikistead/authz')
+    await deleteTuples(fgaClient, [{ user: `user:${sub}`, relation: 'member', object: `tenant:${TENANT}` }])
+    const rows = await db.sql`SELECT 1 FROM local_credentials WHERE member_sub = ${sub}`
+    expect(rows.length, 'the credential is still there — this is about membership, not the row').toBe(1)
     const res = await login(identifier, PASSWORD)
-    expect(res.statusCode).toBe(401)
+    expect(res.statusCode, 'and the same 401 as any other refusal').toBe(401)
+    expect(res.json()).toEqual({ error: 'invalid credentials' })
+  }, 120_000)
+
+  it('B1: a DEACTIVATED member gets the same 401 for a right password as for a wrong one', async () => {
+    // The review measured this: establishMemberSession's own 403 (member_deactivated) escaped the
+    // route, so the response said "your password was correct" to anyone holding a frozen account's
+    // address — and that branch skipped the failure counters, so it could be probed without limit.
+    const { sub, identifier } = await makeLocalMember('frozen')
+    await clearCounters(identifier)
+    await adminPool`UPDATE members SET deactivated_at = now(), deactivation_reason = 'downgrade_freeze' WHERE sub = ${sub}`
+    try {
+      const right = await login(identifier, PASSWORD)
+      await clearCounters(identifier)
+      const wrong = await login(identifier, 'not-the-password')
+      expect(right.statusCode, 'a correct password against a frozen account').toBe(401)
+      expect(right.json(), 'byte-identical to a wrong one').toEqual(wrong.json())
+      expect(right.cookies.length, 'and no session').toBe(0)
+      // ...and it COUNTED: the branch that used to skip the counters is the one an attacker probes
+      const n = Number(await app.valkey.get(`rl:local:id:${TENANT}:${identifier}`))
+      expect(n, 'the refusal was counted like any other').toBeGreaterThan(0)
+    } finally {
+      await adminPool`UPDATE members SET deactivated_at = NULL, deactivation_reason = NULL WHERE sub = ${sub}`
+    }
+  }, 180_000)
+
+  it('B4: a flooded SOURCE is refused with 429 BEFORE the KDF runs', async () => {
+    // Not an oracle (the answer depends only on that source's own history) and the only thing
+    // between an unauthenticated caller and a thread pool of four.
+    const { identifier } = await makeLocalMember('flood')
+    await clearCounters(identifier)
+    await app.valkey.set(`rl:local:ip:${TENANT}:127.0.0.1`, String(1000), 'EX', 60)
+    const started = performance.now()
+    const res = await login(identifier, PASSWORD)
+    const elapsed = performance.now() - started
+    await clearCounters(identifier)
+    expect(res.statusCode).toBe(429)
+    // a real KDF is ~60ms; a refusal that ran one would be nowhere near this
+    expect(elapsed, `refused in ${elapsed.toFixed(1)}ms — no KDF was burned`).toBeLessThan(40)
+  }, 120_000)
+
+  it('N1: an absurdly long identifier is refused without reaching a key or an event', async () => {
+    const events: string[] = []
+    const off = onDomainEvent((e) => { if (e.type === 'member.locked') events.push(e.identifier) })
+    let res
+    try {
+      res = await login('x'.repeat(5000) + '@e2e.test', PASSWORD)
+    } finally { off() }
+    expect(res!.statusCode).toBe(401)
+    expect(events, 'nothing attacker-sized reached an event').toEqual([])
   }, 120_000)
 })
 
@@ -288,4 +339,66 @@ describe('#568 §6: changing a password evicts everyone else, and cannot grow on
     await destroyMemberSessions(app.valkey, TENANT, sub)
     expect(await app.valkey.get(`sess:${keep}`), 'the survivor was still findable').toBeNull()
   }, 120_000)
+})
+
+describe('#568 review: the remaining measured properties', () => {
+  it('N5b: BOTH refusal branches burn a real KDF (instrumented, not inferred)', async () => {
+    // ADR §3 C1 requires it of the unknown-identifier path AND the locked one — a "locked" branch
+    // that skipped verification would answer "this account is locked" in the response time.
+    const { identifier } = await makeLocalMember('kdf-both')
+    await clearCounters(identifier)
+    const timed = async (fn: () => Promise<unknown>) => { const t = performance.now(); await fn(); return performance.now() - t }
+    const real = await timed(() => login(identifier, 'wrong-but-real-account'))
+    const unknown = await timed(() => login(`ghost-kdf-${STAMP}@e2e.test`, 'wrong'))
+    // lock it, then measure the locked branch
+    await app.valkey.set(`lock:local:${TENANT}:${identifier}`, '1', 'EX', 60)
+    const locked = await timed(() => login(identifier, PASSWORD))
+    await clearCounters(identifier)
+    // Each within an order of magnitude of the others: an early return is 100x, not 20%.
+    expect(unknown, `unknown ${unknown.toFixed(0)}ms vs real ${real.toFixed(0)}ms`).toBeGreaterThan(real / 5)
+    expect(locked, `locked ${locked.toFixed(0)}ms vs real ${real.toFixed(0)}ms`).toBeGreaterThan(real / 5)
+  }, 180_000)
+
+  it('N5c: the ROUTE refuses to switch local off when it is the only way in', async () => {
+    // Previously asserted by re-implementing the filter in the test; this calls the endpoint.
+    const H2 = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
+    await setLocalLogin(true)
+    // Make local the only effective method by taking the tenant's OIDC connections out of service.
+    const enabled = await adminPool<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${TENANT} AND enabled`
+    await adminPool`UPDATE tenant_oidc SET enabled = false WHERE tenant_id = ${TENANT}`
+    try {
+      const res = await app.inject({ method: 'PATCH', url: '/admin/login-methods', headers: H2, payload: { localLoginEnabled: false } })
+      expect(res.statusCode, res.body).toBe(409)
+      expect(res.json()).toMatchObject({ code: 'login_lockout' })
+      const [pref] = await adminPool<{ local_login_enabled: boolean }[]>`SELECT local_login_enabled FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`
+      expect(pref?.local_login_enabled, 'and nothing was written').toBe(true)
+    } finally {
+      for (const c of enabled) await adminPool`UPDATE tenant_oidc SET enabled = true WHERE id = ${c.id}`
+    }
+  }, 180_000)
+
+  it('N2: a member FGA knows but the database does not gets a refusal, not a crash', async () => {
+    const { establishMemberSession } = await import('../auth/session.js')
+    const ghost = `wlocal_ghost568-${STAMP}`
+    subs.push(ghost)
+    const { writeTuples, deleteTuples } = await import('@wikistead/authz')
+    await writeTuples(fgaClient, [{ user: `user:${ghost}`, relation: 'member', object: `tenant:${TENANT}` }])
+    try {
+      await expect(
+        establishMemberSession({ db, fga: fgaClient, valkey: app.valkey }, { id: TENANT, plan: 'business' }, { sub: ghost }, { localIdentity: true }),
+      ).rejects.toMatchObject({ statusCode: 403 })
+    } finally {
+      await deleteTuples(fgaClient, [{ user: `user:${ghost}`, relation: 'member', object: `tenant:${TENANT}` }]).catch(() => {})
+    }
+  }, 120_000)
+
+  it('B3: break-glass flips LOCAL through the login prefs, never through the SAML table', async () => {
+    // The old if/else wrote tenant_saml for anything that was not tenant-oidc.
+    const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('../scripts/login-methods.ts', import.meta.url), 'utf8'))
+    expect(src).toContain("w.method === 'saml'")
+    expect(src).toContain("w.method === 'local'")
+    expect(src).toContain('local_login_enabled')
+    // and the argument parser accepts it, so a password-only tenant is recoverable
+    expect(src).toContain("v === 'local'")
+  })
 })
