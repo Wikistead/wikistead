@@ -30,18 +30,15 @@ test("#568: an invited member sets a password and signs in with it", async ({ pa
     const token = new URL(inviteUrl).searchParams.get("token")!;
     expect(token, "the link carries a token").toBeTruthy();
 
-    // Acceptance: the person sets their own password. Cross-origin fetch from the page's context so
-    // the same-origin proof is genuine rather than forged by the test.
-    await page.goto(`${REAL}/login`);
-    const accepted = await page.evaluate(async ([tok, pw]) => {
-      const r = await fetch("/api/auth/local/accept", {
-        method: "POST", credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token: tok, password: pw }),
-      });
-      return { status: r.status, body: await r.text() };
-    }, [token, PASSWORD]);
-    expect(accepted.status, `accept said ${accepted.body}`).toBe(201);
+    // review B2: the LINK is what a person actually opens, and it used to send them to the IdP —
+    // burning the token on an OIDC seat and never writing the credential. Walk the real page.
+    await page.goto(`${REAL}/invite?token=${encodeURIComponent(token)}`);
+    await expect(page.getByTestId("set-password"), "a password invite offers a password form").toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("set-password-input").fill(PASSWORD);
+    await page.getByTestId("set-password-confirm").fill(PASSWORD);
+    await page.getByTestId("set-password-submit").click();
+    await page.waitForURL((u) => !u.pathname.startsWith("/invite"), { timeout: 15_000 });
+    expect((await page.context().cookies()).some((c) => c.name === "wks_sess"), "accepting signed them in").toBe(true);
 
     // Sign OUT so the next step proves the password, not the acceptance session.
     await page.context().clearCookies();
