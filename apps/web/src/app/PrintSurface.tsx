@@ -65,7 +65,7 @@ export function PrintSurface({ md, title, diagram }: {
       // closed <details> as its summary line and nothing else, which is the content-loss class this
       // ticket exists for, one macro over from the tabs that were just fixed. Same treatment here. The
       // portal is print-only DOM (hidden on screen), so opening costs nothing on screen.
-      for (const d of bodyRef.current.querySelectorAll("details:not([open])")) d.setAttribute("open", "");
+      bodyRef.current.querySelectorAll("details:not([open])").forEach((d) => d.setAttribute("open", ""));
     });
     return () => { cancelled = true; };
   }, [md, diagram]);
