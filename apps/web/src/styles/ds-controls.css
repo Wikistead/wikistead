@@ -75,3 +75,21 @@
     transition: none;
   }
 }
+
+/* #586: a role OPTION shows its name, and what that role confers when you point at it or arrow onto it.
+   Plain CSS because the reveal has to react to state this app does not own: Radix marks the active item
+   with `data-highlighted` when the list is driven from the keyboard, and hover is the pointer's own
+   business. Both are selectors; neither is a React prop, and a JS listener on the item was measured not
+   to fire at all inside the open list. */
+.wks-role-caps {
+  /* hidden, but still taking its space: revealing it must not resize the option. A `display: none`
+     version was measured flickering — the row grew when the pointer arrived, the list re-positioned
+     around it, the option moved out from under the pointer, and the text vanished again. */
+  visibility: hidden;
+}
+[role="option"]:hover .wks-role-caps,
+[role="option"][data-highlighted] .wks-role-caps,
+[role="option"]:focus .wks-role-caps,
+[role="option"]:focus-within .wks-role-caps {
+  visibility: visible;
+}

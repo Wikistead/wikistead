@@ -12,6 +12,7 @@ import {
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
 import { TenantGroupRoles } from "./TenantGroupRoles";
+import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
@@ -141,7 +142,7 @@ export function MembersPage() {
                   value={currentRoleValue(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })}
                   ariaLabel={t("members.roleFor", { sub: m.sub })}
                   testId="member-role-select"
-                  options={roleOptions(roles.data?.custom ?? [])}
+                  options={withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant")}
                   onChange={(value) => {
                     const row = roleRows.get(m.sub);
                     const choice = resolveRoleChoice(value, (roles.data?.custom ?? []).filter((r) => r.scope === "tenant"));
@@ -197,13 +198,10 @@ export function MembersPage() {
           onChange={setInviteChoice}
           ariaLabel={t("members.inviteRole")}
           testId="invite-role"
-          options={[
-            // #582 (user ruling): a built-in role NAME is a proper noun — the same string on every
-            // screen, in every locale. The tenant screens used to translate these two while the space
-            // screen showed them in English, so one role had two names depending where you looked.
-            ...BUILT_IN_TIERS.map((r) => ({ value: `tier:${r}`, label: r })),
-            ...(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map((r) => ({ value: `role:${r.id}`, label: r.name })),
-          ]}
+          // #582 (user ruling): a built-in role NAME is a proper noun — the same string on every screen,
+          // in every locale. #586: the same list-builder the rows use, so the invite form cannot drift
+          // into explaining roles differently from the table above it.
+          options={withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant")}
         />
         <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>{t("members.sendInvite")}</Button>
       </FormRow>

@@ -107,9 +107,13 @@ export function closureOf(held: readonly string[], table: Record<string, readonl
 export const effectiveCaps = (args: {
   builtinCapability?: string | null;
   roleCapabilities?: readonly string[] | null;
-  scope?: "space" | "page";
+  scope?: "space" | "page" | "tenant";
 }): readonly string[] => {
-  const table = args.scope === "page" ? PAGE_GRANT_CAPS : BUILTIN_EFFECTIVE_CAPS;
+  // TENANT capabilities (createSpaces / issueApiKeys) are independent leaves — one capability, one
+  // relation, nothing subsumed. `tenant-role-converges-579` measures that 1:1 in a real store. So the
+  // closure is the empty table rather than the space one: borrowing a table from another scope is how
+  // the page rows came to claim `comment` (review ①).
+  const table: Record<string, readonly string[]> = args.scope === "tenant" ? {} : args.scope === "page" ? PAGE_GRANT_CAPS : BUILTIN_EFFECTIVE_CAPS;
   if (args.roleCapabilities?.length) return closureOf(args.roleCapabilities, table);
   if (!args.builtinCapability) return [];
   return table[args.builtinCapability as RoleNounKey] ?? [args.builtinCapability];

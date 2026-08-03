@@ -21,7 +21,7 @@ export interface TenantAssignment {
   groupName?: string;
   groupUnconfirmed?: boolean;
 }
-export interface TenantRoleDef { id: string; name: string; scope: string }
+export interface TenantRoleDef { id: string; name: string; scope: string; capabilities?: readonly string[] }
 export interface RowMember { sub: string; display_name: string | null; email: string | null; role: "admin" | "member" }
 
 export interface TenantRoleRow {
@@ -135,10 +135,12 @@ export function resolveRoleChoice(value: string, addable: readonly TenantRoleDef
 // keep pretending otherwise. That makes the option list the WHOLE vocabulary (every tier, every tenant
 // role), not "the ones they lack": a picker that hides the current value has nothing to display as its
 // value, which is exactly how chips grew here in the first place.
-export function roleOptions(allRoles: readonly TenantRoleDef[]): { value: string; label: string }[] {
+export function roleOptions(allRoles: readonly TenantRoleDef[]): { value: string; label: string; roleCapabilities?: readonly string[] }[] {
   return [
+    // #586: a tier carries no capability list — see role-option-tips.tsx for why it stays bare rather
+    // than being handed a hand-written one.
     ...BUILT_IN_TIERS.map((tier) => ({ value: `tier:${tier}`, label: tier })),
-    ...allRoles.filter((r) => r.scope === "tenant").map((r) => ({ value: `role:${r.id}`, label: r.name })),
+    ...allRoles.filter((r) => r.scope === "tenant").map((r) => ({ value: `role:${r.id}`, label: r.name, roleCapabilities: r.capabilities })),
   ];
 }
 

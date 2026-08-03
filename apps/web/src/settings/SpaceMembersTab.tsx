@@ -194,15 +194,14 @@ export function SpaceMembersTab() {
   // #591: what a row's dropdown may become. The row's CURRENT capability is always present even when it
   // is not offered to new grants (`comment` left the picker in #552 but rows still hold it — a control
   // that cannot show the value it has is worse than no control).
-  // #586 ①: each choice carries what it would confer. A row's badge only ever explains a decision
-  // already taken; the question at a picker is what the thing about to be granted does. Space scope, so
-  // the composite NOUN table answers (a page grant is a single arm and reads from the other one).
+  // #586 (review rejection): each choice is the NAME, and hovering it says what that name confers. Space
+  // scope, so the composite NOUN table answers (a page grant is a single arm and reads from the other).
   const rowRoleOptions = (current: PageRelation): SelectOption[] => {
     const values = GRANTABLE.includes(current) ? GRANTABLE : [current, ...GRANTABLE];
     return values.map((c) => ({
       value: c,
       label: capNoun(c),
-      hint: effectiveCaps({ builtinCapability: c }).map((v) => t(`adminRoles.cap.${v}`, v)),
+      wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" builtinCapability={c}>{l}</RoleTip>,
     }));
   };
 
@@ -324,12 +323,12 @@ export function SpaceMembersTab() {
           ...GRANTABLE.map((c) => ({
             value: `builtin:${c}`,
             label: capNoun(c),
-            hint: effectiveCaps({ builtinCapability: c }).map((v) => t(`adminRoles.cap.${v}`, v)),
+            wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" builtinCapability={c}>{l}</RoleTip>,
           })),
           ...customRoles.map((r) => ({
             value: `role:${r.id}`,
             label: r.name,
-            hint: effectiveCaps({ roleCapabilities: r.capabilities }).map((v) => t(`adminRoles.cap.${v}`, v)),
+            wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" roleCapabilities={r.capabilities}>{l}</RoleTip>,
           })),
         ]}
         role={pick}

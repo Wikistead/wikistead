@@ -323,20 +323,20 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             // instead of translated verbs, which is what made sit beside "kakunin-582" as if they
             // were different kinds of thing. Capability words still exist — on the surface that EDITS a
             // role definition, where they describe what the role may do.
-            // #586 ①: what each choice confers, under its name. The tooltip on a ROW only ever
-            // explains a decision already made; the question a person has at a picker is what the thing
-            // they are about to grant would do. Same measured tables as the rows (page scope here), so
-            // the answer cannot differ between choosing and reading back.
+            // #586 (review rejection): the option is the NAME, and hovering it says what that name confers.
+            // Printing the capabilities under every label made the reader read the whole vocabulary before
+            // picking one of nine. Same measured table as the rows (page scope here), so the answer cannot
+            // differ between choosing and reading back.
             options={[
               ...(["view", "comment", "edit", "moderate", "manage"] as const).map((c) => ({
                 value: `builtin:${c}`,
                 label: capNoun(c),
-                hint: effectiveCaps({ builtinCapability: c, scope: "page" }).map((v) => t(`adminRoles.cap.${v}`, v)),
+                wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="page" builtinCapability={c}>{l}</RoleTip>,
               })),
               ...(assignable.data?.custom ?? []).map((r) => ({
                 value: `role:${r.id}`,
                 label: r.name,
-                hint: effectiveCaps({ roleCapabilities: r.capabilities, scope: "page" }).map((v) => t(`adminRoles.cap.${v}`, v)),
+                wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="page" roleCapabilities={r.capabilities}>{l}</RoleTip>,
               })),
             ]}
           />
