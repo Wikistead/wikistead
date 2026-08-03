@@ -50,6 +50,9 @@ const KNOWN_RED = {
   typographyDrift: [] as string[],
   // #598 colour slice: text in the saved file that fails the 3:1 floor against its own background.
   illegible: [] as string[],
+  // #598 print slice: named elements whose box collapses under print media (present, visible, and
+  // occupying nothing — the failure a display-value check cannot see).
+  flatOnPaper: [] as string[],
 } as const;
 
 // Macros that legitimately render NOTHING with the fixture's data: a tag list with no tagged pages and
@@ -336,6 +339,21 @@ test("#598: every registered element survives the export, the file, and the page
     return out;
   });
   expect(hidden, "print media hides content that is on screen").toEqual([]);
+
+  // …and NOT ONLY by `display: none`. A block can be present, visible and still occupy nothing — a
+  // collapsed height, a zero width, a container whose children were absolutely positioned out of it. On
+  // screen an author would notice; on paper nobody looks until it is printed. Now that every macro is
+  // named, each one can be asked for its box under print media rather than for its display value.
+  const flattened = await opened.evaluate(() =>
+    [...document.querySelectorAll("main.wks-export-doc [data-wks-el]")]
+      .map((el) => ({ name: el.getAttribute("data-wks-el") ?? "?", r: el.getBoundingClientRect() }))
+      .filter(({ r }) => r.width < 1 || r.height < 1)
+      .map(({ name, r }) => `${name}: ${Math.round(r.width)}x${Math.round(r.height)} on paper`)
+      .sort());
+  expect(
+    flattened,
+    "an element occupies nothing on paper. If you FIXED one, delete it from KNOWN_RED",
+  ).toEqual([...KNOWN_RED.flatOnPaper].sort());
   await opened.emulateMedia({ media: "screen" });
 
   // ---- 4. the file is self-contained ----
