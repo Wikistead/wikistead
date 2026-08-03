@@ -2,6 +2,9 @@ import { EditorView, minimalSetup } from "codemirror"; // meta-package: history 
 import { EditorState, type Extension } from "@codemirror/state";
 import { vim, getCM } from "@replit/codemirror-vim"; // the SAME vim the outer editor uses (not a second engine)
 import { yCollab } from "y-codemirror.next"; // #502: shared-ephemeral-doc binding (library, not host internals — sandbox boundary unchanged)
+// #601: the app's caret/selection colours. A style module (CSS variables and nothing else) — no host
+// internals cross here, and no MACRO gains reach: macros call mountSourceEditor, they do not import this.
+import { cmSelectionTheme } from "../../styles/cm-theme";
 
 // #243 / ADR-111 C3 (slice 1): the editUI source pane for a text-source fence macro (mermaid / plantuml)
 // upgrades from a bare <textarea> to a small CodeMirror 6 editor — the "rich panel" the ticket asks for
@@ -104,7 +107,16 @@ export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle
         minimalSetup, // history + default/history keymaps + drawSelection (the host surface uses this too)
         EditorView.lineWrapping,
         opts.theme ?? baseTheme, // #278 rev4: content-editing callers restyle; source-code macros keep the code face
-
+        // #601: AFTER the caller's theme, so a surface that restyles cannot lose it. Every nested editor
+        // reaches the DOM through this one function, so putting the caret and selection here fixes the
+        // slot islands, the callout panel, the layout islands and the mermaid/plantuml source panes in
+        // one place — none of them had it, and CodeMirror's built-in LIGHT selection (#d7d4f0) was what
+        // showed instead, on dark surfaces too.
+        cmSelectionTheme,
+        // ...and this is what makes CodeMirror agree the surface is dark. The `cm-dark` class it carried
+        // before was read by nobody (not by CodeMirror, which uses its own generated class, and not by
+        // any app CSS), so the built-in theme kept choosing its light branch.
+        EditorView.darkTheme.of(!!opts.dark),
         EditorView.editorAttributes.of({ class: opts.dark ? "cm-dark" : "" }),
         EditorView.updateListener.of((u) => { if (u.docChanged) opts.onInput(u.state.doc.toString()); }),
         // Commit-on-blur → the single offset-invariant Y.Text write (never per-keystroke; see header).
