@@ -5,7 +5,7 @@ import { resolveGrantDispatch } from "../settings/grant-dispatch";
 import { notifyRevokeOutcome, notifyRevokeError } from "../settings/revoke-feedback";
 import { MemberSearchInput } from "./MemberSearchInput";
 import { RoleTip } from "./RoleTip";
-import { capNoun } from "../settings/role-nouns";
+import { capNoun, effectiveCaps } from "../settings/role-nouns";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
 import { Select } from "./Select";
@@ -323,9 +323,21 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             // instead of translated verbs, which is what made sit beside "kakunin-582" as if they
             // were different kinds of thing. Capability words still exist — on the surface that EDITS a
             // role definition, where they describe what the role may do.
+            // #586 ①: what each choice confers, under its name. The tooltip on a ROW only ever
+            // explains a decision already made; the question a person has at a picker is what the thing
+            // they are about to grant would do. Same measured tables as the rows (page scope here), so
+            // the answer cannot differ between choosing and reading back.
             options={[
-              ...(["view", "comment", "edit", "moderate", "manage"] as const).map((c) => ({ value: `builtin:${c}`, label: capNoun(c) })),
-              ...(assignable.data?.custom ?? []).map((r) => ({ value: `role:${r.id}`, label: r.name })),
+              ...(["view", "comment", "edit", "moderate", "manage"] as const).map((c) => ({
+                value: `builtin:${c}`,
+                label: capNoun(c),
+                hint: effectiveCaps({ builtinCapability: c, scope: "page" }).map((v) => t(`adminRoles.cap.${v}`, v)),
+              })),
+              ...(assignable.data?.custom ?? []).map((r) => ({
+                value: `role:${r.id}`,
+                label: r.name,
+                hint: effectiveCaps({ roleCapabilities: r.capabilities, scope: "page" }).map((v) => t(`adminRoles.cap.${v}`, v)),
+              })),
             ]}
           />
           <Button variant="primary" size="sm" data-testid="grant-add" disabled={grant.isPending} onClick={add}>{t("permissions.add")}</Button>
@@ -342,7 +354,10 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
                   not built-in vs custom, which must never be split into separate lists. Two rows can now
                   read `commenter` legitimately (a role of that name, and a comment grant), so the colour
                   and the tooltip tell them apart instead of a rename. Colours are DS tokens. */}
-              <RoleTip builtinCapability={g.relation} origin="grant" testId="grant-origin">
+              {/* #586 review ①: scope="page". A page grant writes ONE capability, so this row is a single arm
+                  and its closure is the page table's, not the space NOUN's. Reading it out of the noun
+                  table told a reader a page `edit` grant could comment; the store says it cannot. */}
+              <RoleTip builtinCapability={g.relation} origin="grant" scope="page" testId="grant-origin">
                 <span className="whitespace-nowrap rounded bg-panel-2 px-1 text-[10px] tracking-wide text-fg-dim" data-testid="grant-role-badge">{capNoun(g.relation)}</span>
               </RoleTip>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{label(g)}</span>
@@ -371,7 +386,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             <div key={a.id} className="flex items-center gap-2" data-testid="grant-role-item">
               {/* no `uppercase`: shouting a tenant's role name back at them is changing it (kakunin-582
                   rendered as KAKUNIN-582). A role name is a proper noun on every surface. */}
-              <RoleTip roleCapabilities={roleCapsById.get(a.roleId)} origin="role" testId="grant-origin">
+              <RoleTip roleCapabilities={roleCapsById.get(a.roleId)} origin="role" scope="page" testId="grant-origin">
                 <span className="whitespace-nowrap rounded border border-[var(--accent)] px-1 text-[10px] tracking-wide text-[var(--accent)]" data-testid="grant-role-badge">{a.roleName}</span>
               </RoleTip>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{a.groupName ? `${a.groupName} (${t("spaceMembers.group")})` : (a.displayName ?? a.principal.replace(/^user:/, ""))}</span>

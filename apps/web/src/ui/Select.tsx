@@ -1,7 +1,14 @@
 import { Select as SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 import { useControlScale } from "./FormRow";
 
-export interface SelectOption { value: string; label: string }
+export interface SelectOption {
+  value: string;
+  label: string;
+  /** #586 ①: what choosing this option would confer. Rendered under the label so it is readable
+   *  BEFORE the choice is made — a row-only explanation only ever describes what has already been done,
+   *  and on a coarse pointer there is no hover to reveal one anyway (ADR-159). */
+  hint?: readonly string[];
+}
 
 // DS select wrapper over shadcn/Radix Select. Drop-in for the common single-value
 // pattern; keeps the stable trigger testid plus per-option testids
@@ -34,7 +41,14 @@ export function Select({
       <SelectContent>
         {options.map((o) => (
           <SelectItem key={o.value} value={o.value === "" ? EMPTY_SENTINEL : o.value} data-testid={testId ? `${testId}-${o.value}` : undefined}>
-            {o.label}
+            {o.hint?.length
+              ? (
+                <span className="flex flex-col items-start">
+                  <span>{o.label}</span>
+                  <span className="text-[10px] text-fg-dim" data-testid={testId ? `${testId}-${o.value}-caps` : undefined}>{o.hint.join(", ")}</span>
+                </span>
+              )
+              : o.label}
           </SelectItem>
         ))}
       </SelectContent>

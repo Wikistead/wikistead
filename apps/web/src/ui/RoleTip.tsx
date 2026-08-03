@@ -22,7 +22,7 @@ import { effectiveCaps } from "../settings/role-nouns";
 //
 // The list is not a sentence (#585): no dash, no explanation of why a bundle is what it is.
 export function RoleTip({
-  children, builtinCapability, roleCapabilities, origin, testId,
+  children, builtinCapability, roleCapabilities, origin, scope, testId,
 }: {
   children: React.ReactNode;
   /** the wire capability a built-in row holds (its closure is looked up), if this is a built-in */
@@ -31,11 +31,14 @@ export function RoleTip({
   roleCapabilities?: readonly string[] | null;
   /** #586 §1 (user ruling): the axis is ROLE vs INDIVIDUAL GRANT. Never built-in vs custom. */
   origin: "role" | "grant";
+  /** #586 review ①: WHICH measured table answers. A space row holds a composite noun, a page row a
+   *  single arm, and they confer different things — a page `edit` grant cannot comment. */
+  scope?: "space" | "page";
   testId?: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const caps = effectiveCaps({ builtinCapability, roleCapabilities });
+  const caps = effectiveCaps({ builtinCapability, roleCapabilities, scope });
   const label = t("roleTip.label", { caps: caps.map((c) => t(`adminRoles.cap.${c}`, c)).join(", ") });
   return (
     <Tooltip

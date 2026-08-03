@@ -24,7 +24,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check } from '@wikistead/authz'
 import { createSpace, deleteSpace, grantSpaceAccess, grantSpaceAccessComposite } from '../routes/spaces.js'
-import { createPage, deletePage, publishPage } from '../routes/pages.js'
+import { createPage, deletePage, publishPage, grantPageAccess } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { FastifyInstance } from 'fastify'
 import type { Tenant } from '@wikistead/types'
@@ -58,11 +58,11 @@ afterAll(async () => {
 /** Every page verb worth listing to a human, in the order the UI shows them. */
 const VERBS = ['view', 'comment', 'edit', 'moderate', 'publish', 'delete', 'share', 'manage'] as const
 
-/** The table the UI renders, read from the web source (one table, two readers — never two tables). */
-function uiTable(): Record<string, string[]> {
+/** A table the UI renders, read from the web source (one table, two readers — never two tables). */
+function uiTable(name = 'BUILTIN_EFFECTIVE_CAPS'): Record<string, string[]> {
   const src = readFileSync(resolve(import.meta.dirname, '../../../web/src/settings/role-nouns.ts'), 'utf8')
-  const block = /BUILTIN_EFFECTIVE_CAPS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(src)?.[1]
-  expect(block, 'the web table is where this test says it is').toBeTruthy()
+  const block = new RegExp(`${name}[^=]*=\\s*\\{([\\s\\S]*?)\\n\\};`).exec(src)?.[1]
+  expect(block, `the web table ${name} is where this test says it is`).toBeTruthy()
   const out: Record<string, string[]> = {}
   for (const m of block!.matchAll(/(\w+):\s*\[([^\]]*)\]/g)) {
     out[m[1]!] = [...m[2]!.matchAll(/"([a-z]+)"/g)].map((c) => c[1]!)
@@ -86,6 +86,44 @@ async function measured(noun: 'view' | 'comment' | 'edit' | 'moderate' | 'manage
   for (const v of VERBS) if (await check(fgaClient, sub, v, { type: 'page', id: pageId })) held.push(v)
   return held
 }
+
+/**
+ * What a BARE page grant of `relation` confers on that page.
+ *
+ * Different from the noun above, and the difference is the defect this measures. A space grant of the
+ * editor NOUN writes a composite (#553 severed edit ⇒ comment, so the bundle is what lets an editor
+ * comment). A page grant writes ONE capability — `grantPageAccess` passes `capabilities: [relation]` —
+ * so the page dialog's rows are single arms, every one of them, not only the legacy ones. Looking their
+ * badge up in the noun table told a reader that a page `edit` grant could comment, which the store
+ * denies.
+ */
+async function measuredPageGrant(relation: 'view' | 'comment' | 'edit' | 'moderate' | 'manage'): Promise<string[]> {
+  const sub = `user:caps586-pg-${relation}-${STAMP}`
+  await grantPageAccess(db, fgaClient, app.searchDriver, {
+    pageId, tenantId: TENANT, userId: OWNER, grantee: sub, relation, plan: 'business',
+  })
+  const held: string[] = []
+  for (const v of VERBS) if (await check(fgaClient, sub, v, { type: 'page', id: pageId })) held.push(v)
+  return held
+}
+
+describe('#586 review ①: a page grant is a single arm, and says only what that arm confers', () => {
+  it.each(['view', 'comment', 'edit', 'moderate', 'manage'] as const)(
+    'a page grant of %s lists exactly what it confers', async (relation) => {
+      const held = await measuredPageGrant(relation)
+      expect(
+        uiTable('PAGE_GRANT_CAPS')[relation],
+        `the UI table for a page ${relation} grant is stale — the store says [${held.join(', ')}]`,
+      ).toEqual(held)
+    }, 180_000)
+
+  it('the two tables DIFFER, which is why there are two of them', async () => {
+    // If they were ever equal, one of them would be redundant and the next person would delete the
+    // wrong one. The edit row is the case the review caught: the noun comments, the arm does not.
+    expect(uiTable('PAGE_GRANT_CAPS').edit, 'a page edit grant does not confer comment (#553)').not.toContain('comment')
+    expect(uiTable().edit, 'the editor noun does').toContain('comment')
+  })
+})
 
 describe('#586: the built-in display table is the store\'s answer', () => {
   it.each(['view', 'comment', 'edit', 'moderate', 'manage'] as const)(

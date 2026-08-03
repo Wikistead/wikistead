@@ -53,8 +53,64 @@ export const BUILTIN_EFFECTIVE_CAPS: Record<RoleNounKey, readonly string[]> = {
   manage: ["view", "comment", "edit", "moderate", "publish", "delete", "share", "manage"],
 };
 
-/** What to list for a row: a built-in noun's measured closure, or a custom role's own capabilities. */
-export const effectiveCaps = (args: { builtinCapability?: string | null; roleCapabilities?: readonly string[] | null }): readonly string[] =>
-  args.roleCapabilities?.length
-    ? args.roleCapabilities
-    : BUILTIN_EFFECTIVE_CAPS[args.builtinCapability as RoleNounKey] ?? (args.builtinCapability ? [args.builtinCapability] : []);
+// #586 review ①: what a PAGE grant of a single relation confers — a different question, so a different
+// table.
+//
+// The page dialog grants ONE capability per row (`grantPageAccess` writes `capabilities: [relation]`),
+// so its rows are single arms, all of them. Reading their badge out of the noun table above said a page
+// `edit` grant could comment; the store says it cannot, and `role-capability-truth-586` pins exactly
+// that. Replacing a hedge with a confident falsehood is the landing ADR-203 §4 named as the worst one,
+// and this was a live instance of it.
+//
+// Measured, like its sibling: the same test grants each relation on a real page in a real store and
+// reads back every verb, then compares. Both tables are caches of the store's answer.
+export const PAGE_GRANT_CAPS: Record<RoleNounKey, readonly string[]> = {
+  view: ["view"],
+  comment: ["view", "comment"],
+  // no `comment`: the arm the review caught. Its sibling above lists one, because a space editor is a
+  // composite that includes the comment arm.
+  edit: ["view", "edit", "publish"],
+  moderate: ["view", "comment", "edit", "moderate", "publish"],
+  // no `moderate` either, and that one is a surprise: the space MANAGER noun moderates (it arrives
+  // through `space#moderator = … or manager`), but a page manage grant does not reach that leaf.
+  manage: ["view", "comment", "edit", "publish", "delete", "share", "manage"],
+};
+
+/** Display order, so the same set reads the same wherever it appears. */
+const CAP_ORDER = ["view", "comment", "edit", "moderate", "publish", "delete", "share", "settings", "manage"];
+
+/**
+ * What a held set really confers: each capability plus everything it subsumes, per the measured table
+ * for that scope.
+ *
+ * #586 review ②: a custom role used to be listed as its DECLARED capabilities, while the role editor
+ * showed the closure — so a `moderate`-only role read as one line in a tooltip and as five ticked boxes
+ * in the editor. Same role, two answers, depending on which screen you were standing on. One function
+ * now, so there is one answer.
+ */
+export function closureOf(held: readonly string[], table: Record<string, readonly string[]> = BUILTIN_EFFECTIVE_CAPS): readonly string[] {
+  const out = new Set<string>();
+  for (const h of held) {
+    out.add(h);
+    for (const c of table[h] ?? []) out.add(c);
+  }
+  return [...CAP_ORDER.filter((c) => out.has(c)), ...[...out].filter((c) => !CAP_ORDER.includes(c))];
+}
+
+/**
+ * What to list for a row.
+ *
+ * `scope` decides WHICH measured table answers, and it is not a detail: a space row holds a built-in
+ * NOUN (a composite), a page row holds a single ARM. Looking a page row up in the noun table told a
+ * reader that a page `edit` grant could comment — the store says otherwise, and the review caught it.
+ */
+export const effectiveCaps = (args: {
+  builtinCapability?: string | null;
+  roleCapabilities?: readonly string[] | null;
+  scope?: "space" | "page";
+}): readonly string[] => {
+  const table = args.scope === "page" ? PAGE_GRANT_CAPS : BUILTIN_EFFECTIVE_CAPS;
+  if (args.roleCapabilities?.length) return closureOf(args.roleCapabilities, table);
+  if (!args.builtinCapability) return [];
+  return table[args.builtinCapability as RoleNounKey] ?? [args.builtinCapability];
+};
