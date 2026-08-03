@@ -38,6 +38,32 @@ describe("#600: every macro names itself when it cannot show its content", () =>
     }
   });
 
+  it("every macro's name is a localised one, not its raw id", () => {
+    // #600 bounce (measured on the device): a Japanese UI said "table". `table` has no slash entry
+    // a table is inserted from the toolbar — so `macroDisplayName` fell through to the directive id and
+    // the sentence this ticket unified was English in one slot out of five. The palette already had the
+    // word; nothing new had to be written. Pinned as "every macro resolves through a key that exists in
+    // BOTH locales", so the next macro without a name fails here rather than on someone's screen.
+    const flat = (o: Record<string, unknown>, p = ""): Set<string> => {
+      const out = new Set<string>();
+      for (const [k, v] of Object.entries(o)) {
+        if (v && typeof v === "object") for (const x of flat(v as Record<string, unknown>, `${p}${k}.`)) out.add(x);
+        else out.add(`${p}${k}`);
+      }
+      return out;
+    };
+    const inEn = flat(en as unknown as Record<string, unknown>);
+    const inJa = flat(ja as unknown as Record<string, unknown>);
+    const nameless: string[] = [];
+    for (const macro of registeredMacros()) {
+      const id = macro.kind === "fence" ? macro.lang : macro.name;
+      const key = (macro as { nameKey?: string }).nameKey ?? macro.slash?.labelKey;
+      if (!key) nameless.push(`${id}: no nameKey and no palette label — its placeholder would show "${id}"`);
+      else if (!inEn.has(key) || !inJa.has(key)) nameless.push(`${id}: ${key} is missing from ${inEn.has(key) ? "ja" : "en"}`);
+    }
+    expect(nameless).toEqual([]);
+  });
+
   it("no macro builds its own placeholder sentence — they all go through the one template", () => {
     // The defect being pinned is FOUR shapes in one slot ("Empty drawing: …", "Invalid PlantUML
     // diagram", "Could not reach the diagram renderer", "Cannot display this content"), which happened
@@ -46,7 +72,7 @@ describe("#600: every macro names itself when it cannot show its content", () =>
     for (const file of readdirSync(here).filter((f) => f.endsWith(".ts") && !f.includes(".test."))) {
       if (file === "placeholder.ts") continue;
       const src = readFileSync(resolve(here, file), "utf8");
-      // a placeholder key read directly, rather than through macroPlaceholder()
+      // a placeholder key read directly, rather than through macroPlaceholder
       if (/i18n\.t\(\s*["'`]macro\.(placeholder|state|next)/.test(src)) offenders.push(`${file}: reads a placeholder key directly`);
       // an English sentence assigned straight to textContent (the hardcoded-copy shape)
       for (const m of src.matchAll(/textContent\s*=\s*"([^"]{12,})"/g)) {
@@ -83,7 +109,7 @@ describe("#600: every macro names itself when it cannot show its content", () =>
     add(en.macro as unknown as Record<string, unknown>, "macro.");
     const missing: string[] = [];
     for (const f of files) {
-      // Every quoted `macro.*` in CODE, not just the ones passed straight to t(): the caller that got
+      // Every quoted `macro.*` in CODE, not just the ones passed straight to t: the caller that got
       // left behind chose its key with a ternary, which a `t("…")` pattern walks right past. Comments
       // are stripped so a note ABOUT a retired key is not mistaken for a call.
       const code = readFileSync(f, "utf8")

@@ -20,6 +20,23 @@ import { parseFrontmatterRange, FrontmatterWidget } from "./frontmatter";
 import { parseFenceLine, parseFenceInfo, serializeFenceInfo, CALLOUT_TYPES, type FenceAlign } from "@wikistead/macro-render"; // #198: code-fence attribute parser; #174: callout types; #255: align rewrite
 // #255: rendered diagram macros are centred by default and take a fence `align=` attribute (others don't).
 const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
+
+/**
+ * The align class a macro wrap should carry, or null for plain flow.
+ *
+ * Every rule about alignment lives here. Which macros align, and whether "left" is a class or plain
+ * flow, differ per macro; the rule that an EMPTY macro is never aligned does not — a macro with no body
+ * is showing its placeholder, and a placeholder is full width for every macro (#455). That rule used to
+ * be written beside each macro's own condition, and the copy that came second (`:::table`, #393) left it
+ * out, so an empty centred table shrank its dashed box to content width while every other empty macro
+ * stayed full width. One caller cannot get half of this right any more.
+ */
+export function alignClassFor(name: string, body: string, align: FenceAlign): string | null {
+  if (body.trim() === "") return null;
+  if (DIAGRAM_MACROS.has(name)) return `cm-lp-align-${align}`; // centred by default, so every side is a class
+  if (name === "table" && align !== "left") return `cm-lp-align-${align}`; // left IS the default → no class
+  return null;
+}
 // #395 / ADR-156: the ATOM interaction class — macros with nothing to TYPE at the block itself
 // (picker-chosen reference, modal-edited scene, zero-arg dynamic block, slot container). Their body
 // must never suggest text editing: `cursor: default` (the cm-lp-atom-body sweep), no I-beam. The
@@ -2807,16 +2824,11 @@ class MacroWidget extends WidgetType {
     wrap.className = `cm-lp-macro-wrap ${ATOM_BOX_CLASS}`;
     // #395 / ADR-156 rule 2: an atom-class body never shows the text I-beam (cursor: default via CSS).
     if (ATOM_CLASS_MACROS.has(this.name)) wrap.classList.add("cm-lp-atom-body");
-    // #255: a rendered DIAGRAM macro (mermaid/plantuml/excalidraw) is centred by DEFAULT (align="center")
-    // and can be pushed left/right via the fence `align=` attribute. Only diagrams align (text macros
-    // callout/table/columns — are unaffected). The class drives `text-align` on the wrap (below).
-    // #455: only a RENDERED diagram centres/aligns — the EMPTY placeholder must be a full-width
-    // block like every other macro's (the centre class shrank the dashed box to content width).
-    if (DIAGRAM_MACROS.has(this.name) && this.body.trim() !== "") wrap.classList.add(`cm-lp-align-${this.align}`);
-    // #393 / ADR-151 (+ addendum): a `:::table{align=center|right}` aligns as a block; LEFT is
-    // the default and adds no class, so an untagged table keeps plain flow layout. This used to
-    // exclude `center` instead, which silently made "centre" mean "no class" — i.e. left.
-    if (this.name === "table" && this.align !== "left") wrap.classList.add(`cm-lp-align-${this.align}`);
+    // #255 / #393 / #455 — one decision, made in alignClassFor and nowhere else. It used to be two
+    // `if`s four lines apart, and only the diagram one carried the "empty stays full width" rule, so
+    // `:::table{align=center}` shrank its placeholder to content width (#600 bounce).
+    const alignClass = alignClassFor(this.name, this.body, this.align);
+    if (alignClass) wrap.classList.add(alignClass);
     // ADR-024: the caret resting ON the atom selects it (no separate key) — a ring shows
     // it's selected as a unit (dd/yy operate on it; Ctrl+Enter enters).
     // #215 comment 813/817: when a NESTED macro is selected the caret sits on THIS container (so
@@ -3341,23 +3353,12 @@ class MacroWidget extends WidgetType {
     dom.classList.toggle("cm-lp-atom-sel", this.selected); // selection ring only — the rendered content stays
     // #255 an align-only change is applied IN PLACE (keep the rendered SVG/img) — rebuilding would
     // re-render mermaid / re-resolve the diagram async, collapsing its height → the doc shrinks → CM jumps.
-    if (DIAGRAM_MACROS.has(this.name)) {
-      // #455 an EMPTY macro shows its placeholder full width, never nudged left or right
-      // there is no diagram to align yet. toDOM guards for that; this in-place path did not, so
-      // picking an alignment on an empty diagram (or emptying an aligned one) shoved the hint aside.
-      const alignable = this.body.trim() !== "";
-      for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, alignable && a === this.align);
+    // #393 / ADR-151 (+): a table's block-align applies in place too. Both kinds ask the same
+    // function toDOM asks, so an alignment picked here and an alignment rendered there cannot disagree.
+    if (DIAGRAM_MACROS.has(this.name) || this.name === "table") {
+      const want = alignClassFor(this.name, this.body, this.align);
+      for (const a of ["left", "center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, want === `cm-lp-align-${a}`);
       const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg"); // #255 update the segment's active side
-      if (seg) updateAlignSegment(seg, this.align);
-      if (prev) prev.align = this.align;
-    }
-    // #393 / ADR-151 (+): table block-align changes apply in place too (same no-rebuild
-    // rule). Unlike diagrams the default (LEFT) carries no class, so every non-default side is toggled
-    // here — listing only left/right was how a fresh centre pick left the DOM untouched.
-    if (this.name === "table") {
-      const alignable = this.body.trim() !== "" // #455 same guard — an empty table's placeholder stays full width
-      for (const a of ["center", "right"] as const) dom.classList.toggle(`cm-lp-align-${a}`, alignable && a === this.align);
-      const seg = dom.querySelector<HTMLElement>(".cm-lp-align-seg");
       if (seg) updateAlignSegment(seg, this.align);
       if (prev) prev.align = this.align;
     }

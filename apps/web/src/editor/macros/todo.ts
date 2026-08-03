@@ -17,6 +17,9 @@ import { todoHtmlRender } from "@wikistead/macro-render";
 export const todoMacro: DirectiveMacro = {
   kind: "directive",
   name: "todo",
+  // #600 bounce: same as `table` — reached by promoting a plain task list, so it has no slash entry and
+  // no name of its own. `palette.todoRing` is what the product already calls this block.
+  nameKey: "palette.todoRing",
   containerClass: "cm-lp-callout cm-lp-todo",
   exportFidelity: "preserve",
   htmlRender: todoHtmlRender,
