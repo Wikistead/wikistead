@@ -87,6 +87,22 @@ export async function lockSeats(sql: Sql, tenantId: string): Promise<void> {
 // SEAT CAP itself (the primary paid lever) is enforced atomically in acceptInvite.
 // UNLIMITED (self-host) has maxSeats = Infinity → never warns = Community First. Returns
 // the PLAINTEXT token so the caller can build the link + email it; only the hash persists.
+/**
+ * Is this address already a member of this tenant?
+ *
+ * #606: the one question both ends of the password-invite flow ask — the issue path so the admin is
+ * told, and the acceptance path because an invite issued before somebody joined is still a valid token
+ * afterwards. Two copies of this comparison is how the two ends would come to disagree about what
+ * counts as the same address.
+ */
+export async function memberWithEmail(sql: Sql, tenantId: string, email: string | null | undefined): Promise<boolean> {
+  const wanted = (email ?? '').trim().toLowerCase()
+  if (!wanted) return false
+  const [hit] = await sql<{ sub: string }[]>`
+    SELECT sub FROM members WHERE tenant_id = ${tenantId} AND lower(email) = ${wanted} LIMIT 1`
+  return !!hit
+}
+
 export async function createInvite(
   db: TenantDb,
   args: {
@@ -119,6 +135,20 @@ export async function createInvite(
     const { localLoginEnabled } = await import('./login-methods.js')
     if (!(await localLoginEnabled(db))) {
       throw Object.assign(new Error('password sign-in is off for this tenant — turn it on before inviting with a password'), { statusCode: 400, code: 'local_login_disabled' })
+    }
+    // #606: a password invite MINTS a new identity (`acceptLocalInvite` always allocates a fresh
+    // `wlocal_` sub), so sending one to somebody who is already in this tenant does not give them a
+    // password — it makes a second person who happens to share their address, holding a second seat and
+    // a second set of FGA tuples. Refused at ISSUE time, like the two checks above, because the admin is
+    // standing here and the person who would meet the consequence never chose any of it.
+    //
+    // The address is compared case-insensitively: an invite's identifier is lower-cased on acceptance,
+    // so `Ada@example.com` and `ada@example.com` are the same sign-in name and must be the same answer.
+    if (await memberWithEmail(db.sql, args.tenantId, args.email)) {
+      throw Object.assign(
+        new Error('that address already belongs to a member of this tenant — an invite would create a second account for them'),
+        { statusCode: 400, code: 'already_member' },
+      )
     }
   }
   const token = generateToken()
@@ -253,6 +283,12 @@ export async function acceptLocalInvite(
     // Asking first turns that into the ordinary "this link no longer works" answer.
     const taken = await tx`SELECT 1 FROM local_credentials WHERE identifier = ${identifier}`
     if (taken.length > 0) return { ok: false as const }
+    // #606: and the same question the issue path asked, asked again here. A link issued while the
+    // address was free is still a valid token after that person joins by some other route (SCIM, an
+    // OIDC first sign-in), and accepting it then would seat them a SECOND time under a new sub. The
+    // answer is the ordinary "this link no longer works": the same uniform outcome as an expired or
+    // consumed token, which is all this path can say without telling a stranger who is a member here.
+    if (await memberWithEmail(tx, tenant.id, identifier)) return { ok: false as const }
     await enrolUnderSeatCap(tx, deps.fga, tenant, claims, invite.role, 'invite', 'local')
     await tx`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
              VALUES (${tenant.id}, ${sub}, ${identifier}, ${passwordHash})`

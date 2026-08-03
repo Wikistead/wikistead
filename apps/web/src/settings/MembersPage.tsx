@@ -83,7 +83,14 @@ export function MembersPage() {
       setInviteChoice("tier:member");
       await refresh();
     } catch (e) {
-      setError(e instanceof ApiError && e.status === 403 ? t("members.seatLimit") : t("members.inviteFailed"));
+      // #606: the server refuses an invite to somebody who is already here, and says so — that answer
+      // is worth repeating rather than flattening into "could not create the invite", because the admin
+      // was trying to do something reasonable and the next step depends on knowing why it failed.
+      setError(
+        e instanceof ApiError && e.code === "already_member" ? t("members.inviteAlreadyMember")
+        : e instanceof ApiError && e.status === 403 ? t("members.seatLimit")
+        : t("members.inviteFailed"),
+      );
     }
   };
 

@@ -187,10 +187,14 @@ describe('#568 review B2: the two invite doors do not accept each other\'s token
   it('N3: a taken identifier refuses BEFORE any FGA tuple is written', async () => {
     // The membership tuple does not roll back with the transaction, so a UNIQUE violation after it
     // was written left an orphan grant for a member the database had discarded.
+    // RE-AIMED by #606: both links are now issued BEFORE either is accepted. Issuing the second one
+    // afterwards is refused at the door now (`already_member`), which is a different, earlier defence —
+    // this test is about what ACCEPTANCE does when it meets a taken identifier, and that path still has
+    // to hold for the two links that were legitimately outstanding at the same time.
     const addr = email('collision')
     const first = await makeInvite(addr)
-    expect((await accept(first.token)).ok).toBe(true)
     const second = await makeInvite(addr)
+    expect((await accept(first.token)).ok).toBe(true)
     const out = await accept(second.token, 'a-second-passphrase-ok')
     expect(out.ok, 'the second acceptance refuses like any dead link').toBe(false)
     const creds = await db.sql`SELECT 1 FROM local_credentials WHERE identifier = ${addr}`
