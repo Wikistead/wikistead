@@ -5,7 +5,7 @@ import type { TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { mintMemberCollabToken } from '@wikistead/auth'
 import { SESSION_COOKIE, destroySession, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
-import { buildLogin, exchangeCode, loadSocialLogin, loadPlatformOidc, type TenantOidcConfig } from '../auth/oidc.js'
+import { buildLogin, exchangeCode, loadPlatformOidc, type TenantOidcConfig } from '../auth/oidc.js'
 import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
@@ -113,13 +113,11 @@ export async function authPlugin(app: FastifyInstance) {
       }
       if (!resolved) return reply.code(404).send({ error: 'not found' })
       const redirectUri = `${req.protocol}://${req.headers.host}/auth/callback`
-      // #281 / ADR-121 §2: a social button passes ?provider=<slug>. Only ALLOWLISTED slugs
-      // (PLATFORM_SOCIAL_PROVIDERS) become the broker's source-hint param, and only on the
-      // PLATFORM issuer path (a tenant's own IdP gets no social hint). Unknown/absent → no
-      // extra param (the broker shows its own picker) — never an error, never user-echoed.
-      const social = loadSocialLogin()
-      const provider = !resolved.viaTenantOidc && req.query?.provider && social.providers.includes(req.query.provider) ? req.query.provider : undefined
-      const { url, state, nonce, codeVerifier } = await buildLogin(resolved.cfg, redirectUri, provider ? { [social.hintParam]: provider } : undefined)
+      // #602 / ADR-206 §3 (user ruling): the `?provider=` source hint is GONE with the social path it
+      // served. Choosing Google is choosing a preset CONNECTION now — one mechanism, named by id in the
+      // URL — instead of a second one that reached the same broker with a hint the tenant-IdP path
+      // silently dropped.
+      const { url, state, nonce, codeVerifier } = await buildLogin(resolved.cfg, redirectUri)
       const returnTo = safeReturnTo(req.query?.returnTo)
       // An invite link starts login with ?invite=<token>; carry it (opaque) through
       // the round-trip so the callback can accept the invite after identity is proven.
@@ -169,15 +167,14 @@ export async function authPlugin(app: FastifyInstance) {
       }
       // #537 §6/§7 legacy fields (kept for byte-compat during the N-up transition): the method
       // KINDS are published facts (approved secrecy line: what stays hidden is WHY something is
-      // absent). Derived from the same connection list now — `social` appears iff the platform
-      // connection is effective (ADR-197 §3 retires socialProvidersFor's "tenant OIDC wins →
-      // hide social" rule together with the N-up screen: the platform button and its social
+      // absent). Derived from the same connection list. #602 retired the `social` field itself: a
+      // provider is a preset CONNECTION in this list, so the screen has one thing to read (ADR-197 §3
+      // had already retired socialProvidersFor's "tenant OIDC wins → hide social" rule: the platform
       // slugs render whenever platform is effective, not only when it is the default pick).
       const methods: string[] = []
       if (connections.some((c) => c.kind === 'oidc' || c.kind === 'platform')) methods.push('oidc')
       if (connections.some((c) => c.kind === 'saml')) methods.push('saml')
-      const social = connections.some((c) => c.kind === 'platform') ? loadSocialLogin().providers : []
-      return reply.send({ social, methods, connections })
+      return reply.send({ methods, connections })
     } finally {
       await db.release()
     }

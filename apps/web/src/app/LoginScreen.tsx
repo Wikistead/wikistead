@@ -9,7 +9,7 @@ import { useBranding } from "../data/queries";
 import { FALLBACK_PRODUCT_NAME } from "./product-name";
 import { assetUrl } from "../data/apiClient";
 import { Button } from "../ui/Button";
-import { SocialIcon } from "./SocialIcon";
+import { ProviderMark } from "./ProviderMark";
 import { LocalLoginForm } from "./LocalLoginForm";
 
 // #261: the sign-in screen (real auth mode). A centred, branded card — the tenant logo/name (public
@@ -19,25 +19,26 @@ import { LocalLoginForm } from "./LocalLoginForm";
 // enumeration — matches the server's existence-hiding).
 // #281 / ADR-121 §2: which social buttons to render — the PUBLIC login-options endpoint
 // (slugs only; empty on CE / tenant-OIDC tenants, so the buttons simply don't render).
-const SOCIAL_LABELS: Record<string, string> = { google: "Google", github: "GitHub", microsoft: "Microsoft" };
+// #602: the preset vocabulary, and the display name each one goes by. A preset the server sends that
+// is not here still renders — as its label — so adding a provider server-side cannot blank a button.
+const PRESET_LABELS: Record<string, string> = { google: "Google", github: "GitHub", microsoft: "Microsoft" };
 // #537 §6: the screen shows what is OPEN — the method kinds are published facts (ADR-195 §7). On
 // fetch failure we fall back to the historical single-button screen (fail-open DISPLAY only; every
 // button is still a server-refused URL — the UI is convenience, the server is the fortress).
 export interface LoginConnection { id: string; kind: string; label: string | null; brand: string | null }
-interface LoginOptions { social: string[]; methods: string[]; connections?: LoginConnection[] }
+interface LoginOptions { methods: string[]; connections?: LoginConnection[] }
 function useLoginOptions(): LoginOptions {
   const q = useQuery({
     queryKey: ["login-options"],
     queryFn: () =>
       fetch(assetUrl("/auth/login-options"))
-        .then((r) => (r.ok ? (r.json() as Promise<{ social?: string[]; methods?: string[]; connections?: LoginConnection[] }>) : null))
+        .then((r) => (r.ok ? (r.json() as Promise<{ methods?: string[]; connections?: LoginConnection[] }>) : null))
         .catch(() => null),
     staleTime: 60_000,
   });
   // Render only KNOWN providers (branding assets exist for these); unknown slugs are ignored.
   // A pre-#537 server (no `methods` field) or a failed fetch degrades to the plain OIDC button.
   return {
-    social: (q.data?.social ?? []).filter((s) => s in SOCIAL_LABELS),
     methods: q.data ? (q.data.methods ?? ["oidc"]) : ["oidc"],
     connections: q.data?.connections,
   };
@@ -73,19 +74,13 @@ export function connectionButtonText(conn: LoginConnection, t: (k: string, o?: R
   // #554 S4: a PRESET connection wears its fixed first-party brand ("Continue with Google") —
   // rev3: the label field never carries through a branded connection (the server enforces it;
   // this is display truth, not a gate).
-  if (conn.brand && conn.brand in SOCIAL_LABELS) return t("auth.continueWith", { provider: SOCIAL_LABELS[conn.brand]! });
+  if (conn.brand && conn.brand in PRESET_LABELS) return t("auth.continueWith", { provider: PRESET_LABELS[conn.brand]! });
   return conn.label ?? t("auth.signIn");
 }
 
-// #554 S3 review N4: the social start URL, pure and pinned. It must NAME the platform connection —
-// the bare URL starts the legacy pick, which is the tenant IdP once one exists, and the provider
-// hint is then silently dropped (the worst failure shape: "Continue with Google" launching the
-// corporate IdP). Empty platformId = pre-S3 server, where social only rendered when platform WAS
-// the pick, so the bare URL stays correct there.
-export function socialStartUrl(platformId: string, slug: string, returnTo: string): string {
-  const conn = platformId ? `connection=${encodeURIComponent(platformId)}&` : "";
-  return `/auth/login?${conn}provider=${encodeURIComponent(slug)}&returnTo=${encodeURIComponent(returnTo)}`;
-}
+// #602 / ADR-206 §3 (user ruling): the social start URL is GONE with the route it called. Signing in
+// with Google is a preset CONNECTION now — one path, one place the mark comes from — instead of a
+// second mechanism that reached the same broker with a `?provider=` hint.
 
 function useAuthError(): string | null {
   const { t } = useTranslation();
@@ -105,7 +100,7 @@ export function LoginScreen() {
   const product = branding.data?.productName || FALLBACK_PRODUCT_NAME;
   const returnTo = window.location.pathname === "/login" ? "/" : window.location.pathname + window.location.search;
   const error = useAuthError();
-  const { social, methods, connections } = useLoginOptions();
+  const { methods, connections } = useLoginOptions();
   const conns = connectionsFor(connections, methods);
   // #568 / ADR-198 §3: password sign-in is a connection, but it is not a BUTTON — there is nowhere
   // to redirect to. It renders as a form here and is taken out of the button lists, so neither the
@@ -163,7 +158,9 @@ export function LoginScreen() {
               disabled={navigating !== null}
               onClick={() => go("signin", connectionStartUrl(primary, returnTo))}
             >
-              {navigating === "signin" && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
+              {navigating === "signin"
+                ? <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />
+                : primary.brand && <ProviderMark preset={primary.brand} />}
               {connectionButtonText(primary, t)}
             </Button>
           )}
@@ -192,34 +189,14 @@ export function LoginScreen() {
                     disabled={navigating !== null}
                     onClick={() => go(c.id || c.kind, connectionStartUrl(c, returnTo))}
                   >
-                    {navigating === (c.id || c.kind) && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
+                    {navigating === (c.id || c.kind)
+                      ? <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />
+                      : c.brand && <ProviderMark preset={c.brand} />}
                     {connectionButtonText(c, t)}
                   </Button>
                 ))}
               </div>
             </details>
-          )}
-          {social.length > 0 && (
-            <div className="mt-4 border-t border-border pt-4" data-testid="login-social">
-              <p className="mb-2 text-xs text-fg-dim">{t("auth.socialHint")}</p>
-              <div className="flex flex-col gap-2">
-                {social.map((slug) => (
-                  <Button
-                    key={slug}
-                    variant="default"
-                    className="w-full"
-                    data-testid={`login-social-${slug}`}
-                    disabled={navigating !== null}
-                    onClick={() => go(slug, socialStartUrl(platformId, slug, returnTo))}
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      {navigating === slug ? <Loader2 size={16} className="animate-spin" data-testid="login-spinner" /> : <SocialIcon slug={slug} />}
-                      {t("auth.continueWith", { provider: SOCIAL_LABELS[slug] })}
-                    </span>
-                  </Button>
-                ))}
-              </div>
-            </div>
           )}
         </div>
       </main>
