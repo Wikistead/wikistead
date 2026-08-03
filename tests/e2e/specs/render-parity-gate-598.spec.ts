@@ -2,7 +2,30 @@ import { test, expect, type Page } from "@playwright/test";
 import { readFileSync, readdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { openScratch, enterEdit, sleep, API } from "../helpers";
+import { openScratch, enterEdit, sleep, API, setPublicSurface } from "../helpers";
+import { fileURLToPath } from "node:url";
+
+// #598 public slice: the public surface is gated by an FGA tuple, written straight against the e2e store
+// the way public-page.spec.ts does it — the product has no "make this public" button that a gate should
+// be exercising here, and borrowing that spec's idiom keeps one way of doing it.
+const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
+const FGA_STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
+const FGA_MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
+// From the SAME env file the store id comes from. public-page.spec.ts hardcodes 8090, which is the
+// unoffset stack — this stack is offset-isolated (WKS_STACK_OFFSET), so the port moves with it and a
+// literal would write the tuple into somebody else's store, or nowhere.
+const FGA_URL = /OPENFGA_API_URL=(.+)/.exec(repoEnv)![1]!.trim();
+async function makePublic(pageId: string): Promise<void> {
+  const res = await fetch(`${FGA_URL}/stores/${FGA_STORE}/write`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      writes: { tuple_keys: [{ user: "user:*", relation: "view_base", object: `page:${pageId}` }] },
+      authorization_model_id: FGA_MODEL,
+    }),
+  });
+  if (!res.ok && !(await res.text()).includes("already exists")) throw new Error(`could not publish ${pageId}`);
+}
 
 // #598 / ADR-191: the parity gate. Every element, every surface, one run — and it goes red when a
 // surface loses something instead of a person finding it five reviews later.
@@ -53,6 +76,8 @@ const KNOWN_RED = {
   // #598 print slice: named elements whose box collapses under print media (present, visible, and
   // occupying nothing — the failure a display-value check cannot see).
   flatOnPaper: [] as string[],
+  // #598 public slice: elements the SERVER-rendered public page does not carry under their own name.
+  missingPublicly: [] as string[],
 } as const;
 
 // Macros that legitimately render NOTHING with the fixture's data: a tag list with no tagged pages and
@@ -167,7 +192,7 @@ test("#598: every registered element survives the export, the file, and the page
   }, { api: API, pageId: target });
   TRANSCLUDE_TARGET.ref = target;
 
-  await authorAndPublish(page, fixture(elements));
+  const fixturePageId = await authorAndPublish(page, fixture(elements));
 
   await page.click("[data-testid=page-overflow-trigger]");
   const dl = page.waitForEvent("download");
@@ -324,6 +349,41 @@ test("#598: every registered element survives the export, the file, and the page
     }, name);
     expect(drawn, `${name}: the saved file carries its source, not a figure`).toBe("figure");
   }
+
+  // ---- 1e. the PUBLIC reader gets the same elements ----
+  //
+  // The fourth surface: what a reader with no account gets. MEASURED, not assumed — the first version of
+  // this comment said the public page is server-rendered HTML, and the break-check disproved it: removing
+  // a name from the SERVER sink changed nothing here, while removing it from the DOM sink turned this red.
+  // The public page is built in the browser from the same visitor the export uses. That is worth pinning
+  // exactly because it is not obvious: the surface most likely to be assumed static is not.
+  //
+  // (The server sink therefore stays unstamped. Naming its output would have cost thirteen byte-exact
+  // pins their current form and bought no measurement — the seam is there when a surface that consumes
+  // it needs comparing.)
+  //
+  // Read from an anonymous context on purpose: a reader with no session is who this surface exists for,
+  // and a signed-in fetch would quietly measure a different code path.
+  await makePublic(fixturePageId);
+  await setPublicSurface(page, true); // #253: the tenant switch gates the whole surface
+  const anon = await browser.newContext();
+  const anonPage = await anon.newPage();
+  await anonPage.goto(`/pub/${fixturePageId}`);
+  await sleep(800);
+  const publicNames = await anonPage.evaluate(() =>
+    [...new Set([...document.querySelectorAll("[data-wks-el]")].map((el) => el.getAttribute("data-wks-el") ?? ""))]);
+  const missingPublicly = elements
+    .map((e) => e.name)
+    .filter((name) => !publicNames.includes(name))
+    .filter((name) => !RENDERS_NOTHING_WITHOUT_DATA.includes(name))
+    .sort();
+  expect(publicNames.length, "the public page rendered named elements (an empty set proves nothing)").toBeGreaterThan(3);
+  expect(
+    missingPublicly,
+    `an element is not on the public page under its own name (present: ${publicNames.sort().join(", ")}). ` +
+    "If you FIXED one, delete it from KNOWN_RED",
+  ).toEqual([...KNOWN_RED.missingPublicly].sort());
+  await anon.close();
 
   // ---- 2. nothing is invisible on paper ----
   await opened.emulateMedia({ media: "print" });
