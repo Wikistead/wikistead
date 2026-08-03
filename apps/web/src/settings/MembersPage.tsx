@@ -11,7 +11,7 @@ import {
   listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
-import { User, Users } from "lucide-react"; // #579 ①: the row says which KIND of principal it is
+import { User, Users, KeyRound, Eraser, UserMinus } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
 import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
@@ -20,6 +20,7 @@ import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
+import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -177,6 +178,12 @@ export function MembersPage() {
           });
         }}
       />
+      {/* #579 (review rejection, 2026-08-04): this sentence used to sit under the table, where the section it
+          described no longer existed and nobody could tell what "these" meant. It belongs to the form
+          above it — the one place that offers a group a role — and says why that list has no tiers in it.
+          The difference is real (ADR-201: a tier is held by a person so the record shows who), and an
+          unexplained absence is what made the earlier shape look arbitrary. */}
+      <p className="mt-0 mb-6 text-xs text-fg-dim" data-testid="tenant-group-tiers-note">{t("adminRoles.groupTiersNote")}</p>
 
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 32 }}>
         <thead>
@@ -280,21 +287,38 @@ export function MembersPage() {
                 />
               </td>
               <td style={{ textAlign: "right" }}>
-                {/* #464 / ADR-175 §6 (DSAR): erase this member's page-analytics reading history on request
-                    (the member keeps their access — distinct from Remove).
-                    #504: both are irreversible — red at rest and confirmed before running. */}
-                {/* #606 / ADR-205 §2: the member keeps their sub and gains a password — the thing an admin
+                {/* #579 (review rejection, 2026-08-04): three word-buttons per row made the ACTIONS louder than
+                    the name and the role, which are what the row is about. Folded into the ⋯ menu the
+                    product already uses for occasional actions (#212), rather than inventing a fourth way
+                    to show row actions.
+                    #464 / ADR-175 §6 (DSAR): erasing a member's reading history is not removing them.
+                    #504: both irreversible ones stay red and still confirm before running.
+                    #606 / ADR-205 §2: the member keeps their sub and gains a password — the thing an admin
                     was trying to do by sending a password invite, which used to make a second person. */}
-                <Button variant="default" size="sm" data-testid="member-enable-password"
-                  onClick={() => void guarded(async () => {
-                    const res = await enablePassword(token, m.sub);
-                    setLastLink({ url: res.setupUrl, emailed: false });
-                    notify.success(t("members.enablePasswordDone"));
-                  })()}>{t("members.enablePassword")}</Button>
-                <Button variant="dangerGhost" size="sm" data-testid="member-erase-analytics"
-                  onClick={() => setConfirming({ message: t("members.eraseAnalyticsConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => eraseMemberAnalytics(token, m.sub))() })}>{t("members.eraseAnalytics")}</Button>
-                <Button variant="dangerGhost" size="sm" data-testid="member-remove"
-                  onClick={() => setConfirming({ message: t("members.removeConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => removeMember(token, m.sub))() })}>{t("members.remove")}</Button>
+                <OverflowMenu
+                  testId="member-actions"
+                  label={t("members.rowActions", { name: m.display_name || m.email || m.sub })}
+                  items={[
+                    { value: "password", label: t("members.enablePassword"), icon: <KeyRound size={14} />, testId: "member-enable-password" },
+                    { value: "erase", label: t("members.eraseAnalytics"), icon: <Eraser size={14} />, testId: "member-erase-analytics", danger: true },
+                    { value: "remove", label: t("members.remove"), icon: <UserMinus size={14} />, testId: "member-remove", danger: true },
+                  ]}
+                  onSelect={(v) => {
+                    if (v === "password") {
+                      void guarded(async () => {
+                        const res = await enablePassword(token, m.sub);
+                        setLastLink({ url: res.setupUrl, emailed: false });
+                        notify.success(t("members.enablePasswordDone"));
+                      })();
+                      return;
+                    }
+                    if (v === "erase") {
+                      setConfirming({ message: t("members.eraseAnalyticsConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => eraseMemberAnalytics(token, m.sub))() });
+                      return;
+                    }
+                    setConfirming({ message: t("members.removeConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => removeMember(token, m.sub))() });
+                  }}
+                />
               </td>
             </tr>
               );
@@ -302,11 +326,6 @@ export function MembersPage() {
           ))}
         </tbody>
       </table>
-
-      {/* #579 ①: the section that used to be here is gone — groups are rows above. The sentence that
-          explained why a group cannot hold a tier stays, because that difference is real (ADR-201) and
-          an unexplained absence is what made the previous shape look arbitrary. */}
-      <p className="mt-0 mb-6 text-xs text-fg-dim" data-testid="tenant-group-tiers-note">{t("adminRoles.groupTiersNote")}</p>
 
       <h3>{t("members.inviteTitle")}</h3>
       <FormRow>

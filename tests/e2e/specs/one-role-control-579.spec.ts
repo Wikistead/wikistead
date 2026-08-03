@@ -70,3 +70,37 @@ test("#579: the invite form chooses its role from one dropdown too", async ({ pa
   expect(options.join("|"), 'and the "no custom role" placeholder that only existed to mark the other control is gone')
     .not.toMatch(/no custom role|カスタムロールなし/i);
 });
+
+// #579 (review rejection, 2026-08-04): " UI
+//
+// Measured as a COUNT of what a row puts in front of the reader, not as a list of the three buttons that
+// happened to be there — the next action added to a member row has to land in the same place, and a pin
+// naming today's three would wave it through.
+test("#579: a member row's actions are folded away, not spelled out", async ({ page }) => {
+  await page.goto("/admin/members");
+  await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 15000 });
+  const rows = page.locator("tbody tr").filter({ has: page.getByTestId("member-roles") });
+  await expect(rows.first()).toBeVisible({ timeout: 15000 });
+  const n = await rows.count();
+  expect(n, "there are rows to measure").toBeGreaterThan(0);
+
+  for (let i = 0; i < n; i++) {
+    const row = rows.nth(i);
+    // a group row has no per-person actions at all; a person's row has exactly one affordance for them
+    const trigger = row.getByTestId("member-actions-trigger");
+    if (await trigger.count() === 0) continue;
+    const loose = row.locator("button:visible").filter({ hasNotText: "" });
+    // the role Select is a button too, and so is the ⋯ trigger: anything beyond those two is a row
+    // action that did not fold
+    const buttons = await row.locator("button:visible").count();
+    expect(buttons, `row ${i}: the role control and the ⋯ menu, nothing else`).toBeLessThanOrEqual(2);
+    expect(await loose.count(), "sanity: the row does render buttons").toBeGreaterThan(0);
+  }
+
+  // and the actions are still reachable, with their words, inside the menu
+  const first = rows.filter({ has: page.getByTestId("member-actions-trigger") }).first();
+  await first.getByTestId("member-actions-trigger").click();
+  for (const id of ["member-enable-password", "member-erase-analytics", "member-remove"]) {
+    await expect(page.getByTestId(id), `${id} is in the menu`).toBeVisible();
+  }
+});
