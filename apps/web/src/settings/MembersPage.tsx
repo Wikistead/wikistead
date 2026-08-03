@@ -8,7 +8,7 @@ import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import {
-  listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics,
+  listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
 import { User, Users } from "lucide-react"; // #579 ①: the row says which KIND of principal it is
@@ -265,6 +265,14 @@ export function MembersPage() {
                 {/* #464 / ADR-175 §6 (DSAR): erase this member's page-analytics reading history on request
                     (the member keeps their access — distinct from Remove).
                     #504: both are irreversible — red at rest and confirmed before running. */}
+                {/* #606 / ADR-205 §2: the member keeps their sub and gains a password — the thing an admin
+                    was trying to do by sending a password invite, which used to make a second person. */}
+                <Button variant="default" size="sm" data-testid="member-enable-password"
+                  onClick={() => void guarded(async () => {
+                    const res = await enablePassword(token, m.sub);
+                    setLastLink({ url: res.setupUrl, emailed: false });
+                    notify.success(t("members.enablePasswordDone"));
+                  })()}>{t("members.enablePassword")}</Button>
                 <Button variant="dangerGhost" size="sm" data-testid="member-erase-analytics"
                   onClick={() => setConfirming({ message: t("members.eraseAnalyticsConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => eraseMemberAnalytics(token, m.sub))() })}>{t("members.eraseAnalytics")}</Button>
                 <Button variant="dangerGhost" size="sm" data-testid="member-remove"

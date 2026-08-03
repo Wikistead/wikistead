@@ -1,0 +1,18 @@
+-- #606 / ADR-205 §2 (ruled option A, 2026-08-04): an EXISTING member may be given a password entrance.
+--
+-- 105 wrote `CHECK (member_sub LIKE 'wlocal\_%')` because, at the time, the only way to hold a password
+-- was to accept a password invite — which mints a `wlocal_` sub. The CHECK made that a property of the
+-- data rather than of the code, which was right for what the product then allowed.
+--
+-- The ruling changes what it allows: an admin can give a password to somebody who is ALREADY here, and
+-- an SSO tenant's members are entirely IdP-derived (`wc<conn>_` subs). Refusing those is refusing the
+-- case the feature exists for — #605's break-glass, where the IdP is down and somebody has to get in.
+--
+-- What the CHECK protected is NOT lost: an external IdP still may not ASSERT a reserved sub (the ingress
+-- validators of #569/#592 are where that is enforced, and they are untouched). This row says only that a
+-- member of this tenant has a password here; the sub's origin is a separate fact, still recorded by its
+-- prefix, and now visible in the audit ledger as `member.password_enabled` — the moment the IdP stopped
+-- being that account's only authority.
+--
+-- The composite FK to members is unchanged, so a credential still cannot outlive its member.
+ALTER TABLE local_credentials DROP CONSTRAINT IF EXISTS local_credentials_member_sub_check;

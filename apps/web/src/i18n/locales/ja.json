@@ -991,7 +991,9 @@
     "pendingRow": "{{email}} · {{role}}",
     "inviteRoleOptional": "カスタムロール（任意）",
     "inviteRoleNone": "カスタムロールなし",
-    "inviteAlreadyMember": "そのアドレスは既にメンバーのものです。もう一度招待すると、その人のアカウントがもう 1 つできてしまいます。"
+    "inviteAlreadyMember": "そのアドレスは既にメンバーのものです。もう一度招待すると、その人のアカウントがもう 1 つできてしまいます。",
+    "enablePassword": "パスワードの入口を追加",
+    "enablePasswordDone": "パスワード設定リンクを作成しました"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",
