@@ -14,11 +14,15 @@ export function AdminAuthTab() {
   return (
     <div className="max-w-[560px] p-6" data-testid="admin-auth">
       <h2 className="mt-0">{t("adminAuth.title")}</h2>
+      {/* Names the tab's two questions and nothing narrower. It used to read "configure your
+          organization's identity provider (OIDC)", written when OIDC was the only way in; the list
+          below now also carries SAML, password sign-in and platform login, so a method-specific
+          sentence sat above methods it did not describe. Advice that belongs to ONE method belongs
+          in that method's row (the connection editor carries the test-before-enabling line). */}
       <p className="mt-0 text-sm text-fg-dim">{t("adminAuth.body")}</p>
-      {/* Enabling a broken IdP breaks every new login, so a row's editor offers "Test connection"
-          and the server re-validates discovery on save (enabling a bad issuer is refused). The
-          client secret is write-only — blank keeps the stored one. */}
-      <div className="mb-5 rounded-lg border border-l-[3px] border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] border-l-[var(--danger)] px-3 py-2.5 text-xs text-fg-dim" data-testid="oidc-warning">{t("adminAuth.warning")}</div>
+      {/* True of every row, not just OIDC: turning a method off can take away someone's way in, and
+          the session you are holding survives the change so a mistake is recoverable. */}
+      <div className="mb-5 rounded-lg border border-l-[3px] border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] border-l-[var(--danger)] px-3 py-2.5 text-xs text-fg-dim" data-testid="sign-in-warning">{t("adminAuth.warning")}</div>
 
       <AdminSignInMethodsSection />
 
