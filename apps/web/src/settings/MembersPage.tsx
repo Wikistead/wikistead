@@ -44,7 +44,10 @@ export function MembersPage() {
   // #582 / ADR-202 §2: an invite may also carry a TENANT-scope custom role. #579 (third ruling) merged
   // the two Selects that expressed this into ONE: the choice is a tier OR a custom role, and a custom
   // role implies the `member` tier, because a tenant role is something a member also has.
-  const [lastLink, setLastLink] = useState<{ url: string; emailed: boolean } | null>(null);
+  // `kind` decides the words: an invite mints a person, a password setup adds an entrance to one who is
+  // already here — the review found the second reusing the first's toast, which resurrects exactly
+  // the misreading (#606: "an invite = a new person") this ticket exists to remove.
+  const [lastLink, setLastLink] = useState<{ url: string; emailed: boolean; kind: "invite" | "password" } | null>(null);
   // #504: every irreversible action here goes through one ConfirmDialog — removal (access + keys +
   // sessions die), DSAR erasure (the reading history is gone for good), invite revoke (the sent link
   // stops working). The pending action carries its own message + handler.
@@ -86,7 +89,7 @@ export function MembersPage() {
         role: choice.kind === "tier" ? choice.role : "member",
         roleId: choice.kind === "custom" ? choice.roleId : null,
       });
-      setLastLink({ url: res.inviteUrl, emailed: res.emailed });
+      setLastLink({ url: res.inviteUrl, emailed: res.emailed, kind: "invite" });
       setEmail("");
       setInviteChoice("tier:member");
       await refresh();
@@ -305,10 +308,20 @@ export function MembersPage() {
                   ]}
                   onSelect={(v) => {
                     if (v === "password") {
-                      void guarded(async () => {
-                        const res = await enablePassword(token, m.sub);
-                        setLastLink({ url: res.setupUrl, emailed: false });
-                        notify.success(t("members.enablePasswordDone"));
+                      // NOT through `guarded`: its catch-all is a hard-coded English "Action failed",
+                      // which is what the review saw. The refusal is deliberately UNIFORM on the
+                      // server (`password_setup_unavailable` never says which precondition failed), and
+                      // it stays uniform here — one readable sentence, no reason branch.
+                      void (async () => {
+                        try {
+                          const res = await enablePassword(token, m.sub);
+                          setLastLink({ url: res.setupUrl, emailed: false, kind: "password" });
+                          notify.success(t("members.enablePasswordDone"));
+                        } catch (e) {
+                          notify.error(e instanceof ApiError && e.status === 400
+                            ? t("members.passwordSetupUnavailable")
+                            : t("toast.actionFailed"));
+                        }
                       })();
                       return;
                     }
@@ -348,8 +361,13 @@ export function MembersPage() {
       </FormRow>
       {lastLink && (
         <p style={{ marginTop: 12 }}>
-          {t("members.inviteLinkLabel")} <code data-testid="invite-link">{lastLink.url}</code>
-          <br /><span style={{ color: "var(--fg-dim)" }}>{lastLink.emailed ? t("members.emailed") : t("members.notEmailed")}</span>
+          {/* #606 (review rejection): a password-setup link is NOT an invite — nobody new is minted — so it
+              does not wear the invite's words. The emailed/not-emailed note is the invite flow's fact
+              (a setup link is always handed over in person) and only renders there. */}
+          {lastLink.kind === "invite"
+            ? <>{t("members.inviteLinkLabel")} <code data-testid="invite-link">{lastLink.url}</code>
+                <br /><span style={{ color: "var(--fg-dim)" }}>{lastLink.emailed ? t("members.emailed") : t("members.notEmailed")}</span></>
+            : <>{t("members.passwordLinkLabel")} <code data-testid="password-setup-link">{lastLink.url}</code></>}
         </p>
       )}
 
