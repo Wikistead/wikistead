@@ -26,10 +26,30 @@ async function renderBody(md: string, hosts?: ExportHosts): Promise<HTMLElement>
   host.setAttribute("aria-hidden", "true");
   host.style.cssText = "position:fixed;left:-10000px;top:0;width:46rem;pointer-events:none;";
   document.body.appendChild(host);
-  withDiagramHost(hosts?.diagram ?? null, () => host.appendChild(renderMarkdownToDom(md)));
+  // #85 (review rejection ④, "the plantuml block came out as its source"): a HOST-rendered diagram is a
+  // network round trip, and `settle` below only samples the markup for stillness with a 4s ceiling. A
+  // renderer that answers in 4.1s therefore produced a file with the source card in it — silently, and
+  // only sometimes, which is exactly the shape of a defect that survives every green test. So the
+  // promises are TRACKED: the host is wrapped, every render it starts is remembered, and the document
+  // is not serialized until they have all answered (or the cap below gives up).
+  const pending: Promise<unknown>[] = [];
+  const tracked = hosts?.diagram
+    ? { handles: (l: string) => hosts.diagram!.handles(l),
+        render: (l: string, src: string) => { const p = hosts.diagram!.render(l, src); pending.push(p.catch(() => null)); return p } }
+    : null;
+  withDiagramHost(tracked, () => host.appendChild(renderMarkdownToDom(md)));
+  // The cap is generous because the alternative is a file that quietly lost a figure, and it only binds
+  // when a renderer is genuinely slow — a normal render resolves long before it.
+  await Promise.race([
+    Promise.allSettled(pending),
+    new Promise((r) => setTimeout(r, DIAGRAM_BUDGET_MS)),
+  ]);
   await settle(host);
   return host;
 }
+
+/** How long the export waits for host-rendered diagrams before giving up on them (#85 ④). */
+const DIAGRAM_BUDGET_MS = 20_000;
 
 // Wait for the asynchronous macro renders to stop changing the subtree. There is no completion signal to
 // subscribe to — each macro fills itself in when its own renderer resolves — so this samples the markup
