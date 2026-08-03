@@ -157,6 +157,12 @@ export async function acceptInvite(
   // namespaced form itself. Never set from request data.
   opts?: { subMintedInternally?: boolean },
 ): Promise<boolean> {
+  // #568 review B2: this door accepts OIDC invites ONLY. Without the `kind` filter a PASSWORD invite
+  // could be consumed by signing in at the IdP — the token would be burned on a member seated as
+  // `identity_source='oidc'`, and the credential the invite existed to create would never be
+  // written, with nothing telling either party it had gone wrong. `acceptLocalInvite` guards the
+  // mirror image; this is the other half of the pair.
+  //
   // #554 / ADR-197 §5 (S0): a claims.sub wearing a reserved connection/local prefix (or FGA-unsafe
   // length) never becomes a member through an invite — refused as this seam's own failure shape
   // (indistinguishable from an unknown/expired invite).
@@ -178,6 +184,7 @@ export async function acceptInvite(
          SET status = 'accepted', accepted_sub = ${claims.sub}, accepted_at = now()
        WHERE token_hash = ${hashInviteToken(token)}
          AND tenant_id  = ${tenant.id}
+         AND kind       = 'oidc'
          AND status     = 'pending'
          AND expires_at > now()
       RETURNING role, role_id, invited_by
@@ -240,6 +247,12 @@ export async function acceptLocalInvite(
     const identifier = (invite.email ?? '').trim().toLowerCase()
     if (!identifier) return { ok: false as const } // the CHECK makes this unreachable; belt and braces
     const claims = { sub, email: identifier, name: null }
+    // review N3: the identifier collision is checked BEFORE any FGA write. enrolUnderSeatCap writes
+    // the membership tuple, and FGA does not roll back with the transaction — so a UNIQUE violation
+    // on the credential INSERT afterwards left a tuple for a member the database then discarded.
+    // Asking first turns that into the ordinary "this link no longer works" answer.
+    const taken = await tx`SELECT 1 FROM local_credentials WHERE identifier = ${identifier}`
+    if (taken.length > 0) return { ok: false as const }
     await enrolUnderSeatCap(tx, deps.fga, tenant, claims, invite.role, 'invite', 'local')
     await tx`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
              VALUES (${tenant.id}, ${sub}, ${identifier}, ${passwordHash})`

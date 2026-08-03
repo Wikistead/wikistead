@@ -170,10 +170,25 @@ export async function recoverLoginMethods(sql: postgres.Sql, args: RecoverArgs):
           )
         }
         if (cur.selected === w.on) continue
+        // #568 review B3: an EXPLICIT branch per method. This was an if/else where anything that was
+        // not tenant-oidc wrote `tenant_saml`, so `local` — which is "configured" by construction and
+        // therefore never hit the guard above — would have silently flipped SAML instead. The CLI's
+        // argument parser refuses `local` today, so it was a mine rather than a live bug; a mine in
+        // the break-glass path is worse than most, because it is used at 3am on a tenant nobody can
+        // get into.
         if (w.method === 'tenant-oidc') {
           await tx`UPDATE tenant_oidc SET enabled = ${w.on}, updated_at = now() WHERE tenant_id = ${before.tenantId}`
-        } else {
+        } else if (w.method === 'saml') {
           await tx`UPDATE tenant_saml SET enabled = ${w.on}, updated_at = now() WHERE tenant_id = ${before.tenantId}`
+        } else if (w.method === 'local') {
+          // Password sign-in has no config of its own; the tenant's switch IS the whole state.
+          await tx`
+            INSERT INTO tenant_login_prefs (tenant_id, local_login_enabled)
+            VALUES (${before.tenantId}, ${w.on})
+            ON CONFLICT (tenant_id) DO UPDATE SET local_login_enabled = ${w.on}, updated_at = now()
+          `
+        } else {
+          throw Object.assign(new Error(`break-glass does not know how to flip "${w.method}"`), { code: 'unknown_method' })
         }
       }
       changed = true
@@ -228,8 +243,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const opt = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
   const asMethod = (v: string | undefined): LoginMethod | undefined => {
     if (v === undefined) return undefined
-    if (v === 'tenant-oidc' || v === 'platform-oidc' || v === 'saml') return v
-    console.error(`unknown method "${v}" (valid: tenant-oidc, platform-oidc, saml)`)
+    // #568 §3 M8: break-glass learns `local` — a tenant whose only way in is password sign-in must
+    // be recoverable from the same place as every other one.
+    if (v === 'tenant-oidc' || v === 'platform-oidc' || v === 'saml' || v === 'local') return v
+    console.error(`unknown method "${v}" (valid: tenant-oidc, platform-oidc, saml, local)`)
     process.exit(2)
   }
   const platformLogin = opt('platform-login')

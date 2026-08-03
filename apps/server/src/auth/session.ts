@@ -153,13 +153,13 @@ export async function destroyMemberSessions(
   const sids = await valkey.smembers(memberKey(tenantId, sub))
   const doomed = exceptSid ? sids.filter((s) => s !== exceptSid) : sids
   if (doomed.length > 0) await valkey.del(...doomed.map(key))
-  await valkey.del(memberKey(tenantId, sub))
-  // The index was just deleted, so a SURVIVOR has to be put back — otherwise it is a live session
-  // that no future revocation can find (member removal, admin force-logout and the next password
-  // change all work through this index), which is worse than not sparing it at all.
+  // #568 review N4: when a session is SPARED, remove only the doomed ones from the index rather than
+  // deleting it and adding the survivor back — between those two writes the survivor is invisible,
+  // and a removal landing in that gap would miss it. When nothing is spared the index goes whole.
   if (exceptSid && sids.includes(exceptSid)) {
-    await valkey.sadd(memberKey(tenantId, sub), exceptSid)
-    await valkey.expire(memberKey(tenantId, sub), ABSOLUTE_TTL_S)
+    if (doomed.length > 0) await valkey.srem(memberKey(tenantId, sub), ...doomed)
+  } else {
+    await valkey.del(memberKey(tenantId, sub))
   }
 }
 
@@ -241,9 +241,18 @@ export async function establishMemberSession(
   // A local session READS the member row it already has; an OIDC one rewrites it from the claims it
   // just received. Sharing the write here would have a password login blank out the display name the
   // member set for themselves.
-  const row = opts?.localIdentity
-    ? (await deps.db.sql<[{ role: string; groups: string[] }]>`
+  const localRow = opts?.localIdentity
+    ? (await deps.db.sql<{ role: string; groups: string[] }[]>`
         SELECT role, groups FROM members WHERE tenant_id = ${tenant.id} AND sub = ${claims.sub}`)[0]
+    : undefined
+  // #568 review N2: FGA said member and the row is not there (a partially-applied removal, a manual
+  // tuple). Reading `.role` off nothing is a 500 that tells the caller something went wrong INSIDE;
+  // the honest answer is the one a non-member gets.
+  if (opts?.localIdentity && !localRow) {
+    throw Object.assign(new Error('not a member of this tenant'), { statusCode: 403 })
+  }
+  const row = opts?.localIdentity
+    ? localRow!
     : await deps.db.tx(async (tx) => {
     const [prevRow] = await tx<[{ groups: string[] }?]>`
       SELECT groups FROM members WHERE tenant_id = ${tenant.id} AND sub = ${claims.sub}`
