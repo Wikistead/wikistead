@@ -1300,7 +1300,8 @@
       "moderate": "モデレート",
       "manage": "管理",
       "createSpaces": "スペース作成",
-      "issueApiKeys": "API キー発行"
+      "issueApiKeys": "API キー発行",
+      "manageConnections": "サインイン方法を管理"
     },
     "scopeResource": "スペース / ページ",
     "scopeTenant": "テナント",

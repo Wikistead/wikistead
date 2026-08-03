@@ -44,7 +44,7 @@ const ADMIN_CLASS_ROLE_CAPS = new Set<RoleCapability>(['delete', 'share', 'setti
 // #496 / ADR-181 adds `issueApiKeys` (→ the `api_key_issue` relation) as the SECOND tenant capability,
 // retiring #462's api_key_issue_policy enum: who may mint an API key is now a role capability like any
 // other, so authority lives in FGA alone.
-export const TENANT_ROLE_CAPABILITIES = ['createSpaces', 'issueApiKeys'] as const
+export const TENANT_ROLE_CAPABILITIES = ['createSpaces', 'issueApiKeys', 'manageConnections'] as const
 export type TenantRoleCapability = (typeof TENANT_ROLE_CAPABILITIES)[number]
 export type AnyRoleCapability = RoleCapability | TenantRoleCapability
 export type RoleScope = 'resource' | 'tenant'
@@ -105,6 +105,9 @@ const PAGE_CAP_RELATION: Record<RoleCapability, string> = {
 const TENANT_CAP_RELATION: Record<TenantRoleCapability, string> = {
   createSpaces: 'space_creator',
   issueApiKeys: 'api_key_issue', // #496 / ADR-181 — camelCase token → snake_case relation, same as above
+  // #604 / ADR-208 (ruling B): the first verb carved out of `admin`. A tenant role carrying it lets
+  // somebody run the sign-in methods without being handed the tenant.
+  manageConnections: 'manage_connections',
 }
 
 // `allowSuperset` is set ONLY by the built-in grant path (#536 / ADR-188 §6 item 1). `manage` is the

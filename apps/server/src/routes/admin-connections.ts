@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { randomUUID } from 'node:crypto'
-import { requireTenantAdmin } from '@wikistead/authz'
+// #604 / ADR-208 (ruling B): this surface is gated on the VERB now, not on the tier. `manage_connections`
+// unions `or admin`, so every current admin passes exactly as before; what changes is that a tenant can
+// hand out sign-in management alone, which "admin only" could not express.
+import { requireConnectionManager } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
@@ -90,7 +93,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
   const fetchJson = opts?.discoveryFetch ?? safeFetchJson
 
   app.get('/admin/connections', async (req) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
     const rows = await req.db.sql<ConnRow[]>`
       SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, label, preset,
              bootstrap_eligible, trust_groups, subject_prefix, groups_claim, mcp_enabled
@@ -103,7 +106,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     scopes?: string; label?: string; entraTenantId?: string; enabled?: boolean
     bootstrapEligible?: boolean; trustGroups?: boolean; groupsClaim?: string | null
   } }>('/admin/connections', async (req, reply) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
     const b = req.body ?? {}
     const preset = b.preset ?? null
     if (preset !== null && !(preset in PRESETS)) {
@@ -162,7 +165,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     label?: string | null; enabled?: boolean; bootstrapEligible?: boolean; trustGroups?: boolean; groupsClaim?: string | null
     mcpEnabled?: boolean
   } }>('/admin/connections/:id', async (req, reply) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
     const [row] = await req.db.sql<ConnRow[]>`
       SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, label, preset,
              bootstrap_eligible, trust_groups, subject_prefix, groups_claim, mcp_enabled
@@ -201,7 +204,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
   })
 
   app.delete<{ Params: { id: string } }>('/admin/connections/:id', async (req, reply) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
     const [row] = await req.db.sql<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE id = ${req.params.id}`
     if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
     await assertNotLastWayIn(req.db, req.tenant, row.id)
@@ -215,7 +218,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
   })
 
   app.post<{ Body: { ids?: string[] } }>('/admin/connections/reorder', async (req, reply) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
     const ids = req.body?.ids
     if (!Array.isArray(ids) || ids.length === 0 || ids.some((i) => typeof i !== 'string')) {
       throw Object.assign(new Error('ids required'), { statusCode: 400 })

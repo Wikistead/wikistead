@@ -54,6 +54,13 @@ type tenant
     # `admins_only` are now "the member userset tuple exists" and "it doesn't". RESTRICT-ONLY: it
     # gates minting, grants nothing else. No `user:*` / share_link — guests never reach tenant actions.
     define api_key_issue: [user, group#member, tenant#member] or admin
+    # #604 / ADR-208 (ruling B): who may manage this tenant's SIGN-IN METHODS. The first verb carved out
+    # of `admin`, which until now carried connections, roles, billing, the public surface, audit and SCIM
+    # as one indivisible thing — so "let someone run the IdP connections" meant handing over the tenant.
+    # Same shape as the two above minus the `tenant#member` arm: this is never an all-members default,
+    # and a tenant with it seeded would be one toggle away from every member editing sign-in.
+    # `or admin` keeps every existing admin exactly as capable as they are today.
+    define manage_connections: [user, group#member] or admin
 
 type space
   relations
