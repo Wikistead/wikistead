@@ -335,7 +335,9 @@ export function SpaceMembersTab() {
                 × then re-add was asking for two operations and dropping the person's access in between.
                 The dropdown grants the new role FIRST and the server sweeps the old one after, so there
                 is no window with nothing.
-                Custom-role rows stay a chip: those are ADDITIVE, and a dropdown would imply swapping.
+                Custom-role rows stay a chip at SPACE scope, where a principal can still hold a role and a
+                separate built-in grant. (#579's "roles do not stack" was ruled for the tenant scope, where
+                the server now converges; the space sweep already keeps one role per principal here.)
                 #582: no `uppercase` — a role name is a proper noun on every surface. */}
             {r.custom ? (
               /* #586 §1: role-derived. The accent border is the ROLE colour; an individually granted

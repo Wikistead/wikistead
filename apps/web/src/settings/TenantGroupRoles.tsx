@@ -17,11 +17,14 @@ import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 // (group-sync.ts is the single id authority). A client that builds `group:<name>#member` itself writes
 // a tuple no membership points at — the assignment reports success and reaches nobody, which is
 // exactly the bug #536 found on the space side.
-// #591 (B), settled 2026-08-02: a group's roles stay CHIPS with an ×, not a per-row dropdown. #579
-// ruled these ADDITIVE — a group can hold several tenant roles at once — and a dropdown reads as "swap
-// this for that", which would be a promise the mechanism does not keep. The surfaces that did get a
-// dropdown (the member row's tier, the space's built-in role) are the ones where the model really is
-// exclusive and the server really does sweep the old value.
+// SUPERSEDED 2026-08-03 (#579 ruling): the sentence that used to stand here said a group's tenant roles
+// are ADDITIVE, and that is no longer true — was ruled, and the tenant assign
+// path now converges a principal to one role (a71d8100). The chips below are therefore drawing a set
+// that cannot exist, and this whole section is being folded into the member table: people and groups in
+// one list, one control each. That slice is not landed yet because removing this section without the
+// merged search would take away the only way to name a group nobody has signed in with (#578), so the
+// section stays for now — with its premise corrected rather than left standing as a lie a reader would
+// take at face value.
 export function TenantGroupRoles() {
   const { t } = useTranslation();
   const { tenantId } = useSession();
