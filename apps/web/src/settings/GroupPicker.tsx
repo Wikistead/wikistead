@@ -34,43 +34,59 @@ export function GroupPicker({
     ? known.filter((g) => g.toLowerCase().includes(typed.toLowerCase())).slice(0, 8)
     : [];
 
+  // The note is OUT OF FLOW and the list is anchored to the INPUT. Both were bounced for the same
+  // reason: they were siblings of the input inside a flex column, so the column took their size.
+  // Measured on the device — the note is wider than the field, so showing it doubled the input's width
+  // (199px → 405px), grew the column, and the row's vertical centring pushed the role select and the
+  // add button 11px down; the list's `top: 100%` resolved against the COLUMN, so it drifted away from
+  // the field it belongs to. A hint must not move the control it is hinting about.
+  const suggesting = open && matches.length > 0;
   return (
-    <span className="relative flex min-w-0 flex-col gap-1">
-      <Input
-        inputSize="sm"
-        value={value}
-        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        // a blur that lands ON a suggestion must not close the list before the click registers
-        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-        placeholder={t("spaceMembers.groupNamePlaceholder")}
-        aria-label={ariaLabel}
-        data-testid={`${testId}-name`}
-      />
-      {open && matches.length > 0 && (
-        <ul
-          className="absolute left-0 right-0 top-[calc(100%+2px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-md border border-border bg-panel p-1 shadow-md"
-          data-testid={`${testId}-list`}
-        >
-          {matches.map((g) => (
-            <li key={g}>
-              <button
-                type="button"
-                className="w-full cursor-pointer rounded-sm border-none bg-transparent px-2 py-1.5 text-left text-sm text-foreground hover:bg-panel-2"
-                data-testid={`${testId}-item`}
-                onClick={() => { onChange(g); setOpen(false); }}
-              >
-                {g}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {typed !== "" && !isKnown && (
+    <span className="relative flex min-w-0 flex-col">
+      <span className="relative block">
+        <Input
+          inputSize="sm"
+          value={value}
+          onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          // a blur that lands ON a suggestion must not close the list before the click registers
+          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          placeholder={t("spaceMembers.groupNamePlaceholder")}
+          aria-label={ariaLabel}
+          data-testid={`${testId}-name`}
+        />
+        {suggesting && (
+          <ul
+            className="absolute left-0 right-0 top-[calc(100%+2px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-md border border-border bg-panel p-1 shadow-md"
+            data-testid={`${testId}-list`}
+          >
+            {matches.map((g) => (
+              <li key={g}>
+                <button
+                  type="button"
+                  className="w-full cursor-pointer rounded-sm border-none bg-transparent px-2 py-1.5 text-left text-sm text-foreground hover:bg-panel-2"
+                  data-testid={`${testId}-item`}
+                  onClick={() => { onChange(g); setOpen(false); }}
+                >
+                  {g}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </span>
+      {typed !== "" && !isKnown && !suggesting && (
         // The point of the free half: a name the directory has not returned must not look identical to
         // one it has. The note says what happens next rather than implying the name is wrong — the
         // grant applies the moment somebody carrying it signs in.
-        <span className="text-[11px] text-fg-dim" data-testid={`${testId}-unconfirmed`}>
+        //
+        // NOT while suggestions are open: half-typed "wiki" would be called unconfirmed while the list
+        // is still offering "wiki Editors" to complete it. The note is about a name that is finished
+        // and unmatched, so it waits until there is nothing left to choose.
+        <span
+          className="absolute left-0 top-[calc(100%+2px)] z-10 w-max max-w-[22rem] text-[11px] text-fg-dim"
+          data-testid={`${testId}-unconfirmed`}
+        >
           {t("spaceMembers.groupUnconfirmed")}
         </span>
       )}

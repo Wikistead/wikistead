@@ -75,8 +75,12 @@ export function GranteeRoleForm(p: GranteeRoleFormProps) {
           picked={p.picked}
           onPick={p.onPick}
           candidates={[...p.candidates]}
-          placeholder={t("common.memberSearch")}
-          ariaLabel={t("common.memberSearch")}
+          // #578 bounce ③: this form takes a member OR a group — the type beside it switches which —
+          // and the field used to say "Search members…" while the group half said "or type a group
+          // name", an "or" left over from the stacked select that is gone. Both halves name the same
+          // act now, so the screen says what it accepts instead of making somebody find the switch.
+          placeholder={t("common.granteeSearch")}
+          ariaLabel={t("common.granteeSearch")}
           inputTestId={`${p.testId}-input`}
           listTestId={`${p.testId}-candidates`}
           itemTestId={`${p.testId}-candidate`}

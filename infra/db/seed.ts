@@ -46,9 +46,13 @@ import { subjectPrefixFor } from '../../apps/server/src/routes/admin-connections
     // Keeps the members table consistent with FGA so the tenant is NOT member-less
     // (the first-admin bootstrap must not fire for an already-admined tenant).
     await tx`
-      INSERT INTO members (tenant_id, sub, email, display_name, role)
-      VALUES ('tenant_dev', 'dev-user', 'dev@example.com', 'Dev User', 'admin')
-      ON CONFLICT (tenant_id, sub) DO NOTHING
+      INSERT INTO members (tenant_id, sub, email, display_name, role, groups)
+      -- #578: the seeded member CARRIES a group. Every group feature (the completion list in the grant
+      -- picker, the reverse lookup that turns a hashed id back into a name, the not-seen-yet
+      -- distinction) reads the members.groups column, so with an empty directory none of them can be
+      -- exercised at all: a test either skips or measures the empty case and reports nothing.
+      VALUES ('tenant_dev', 'dev-user', 'dev@example.com', 'Dev User', 'admin', ARRAY['wiki Editors'])
+      ON CONFLICT (tenant_id, sub) DO UPDATE SET groups = EXCLUDED.groups
     `
     console.log('seeded: tenant_dev / demo_space / demo (page) / admin member')
 

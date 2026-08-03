@@ -15,7 +15,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOTS = ["settings", "ui"].map((d) => resolve(import.meta.dirname, "..", d));
-const SHARED_KEY = "common.memberSearch";
+// RE-AIMED by #578 bounce ③. The rule was "every member search reads THIS key", and it caught what it
+// was built for (three screen-local copies of one sentence). It is now two keys, because there are two
+// honest contexts: a field that takes a member (the page permissions dialog) and the shared grantee
+// form, where the same control sits beside a type switch that also accepts a GROUP — telling a reader
+// there that they may only search members is what made them conclude groups were impossible.
+//
+// The subject is unchanged: no screen writes its own. Both keys live in `common`, and the assertion is
+// that the placeholder comes from there — a fourth screen-local copy still fails.
+const SHARED_KEYS = ["common.memberSearch", "common.granteeSearch"];
 
 /** Every `<MemberSearchInput …>` element in the app, with its props, as source text. */
 function memberSearchElements(): { file: string; element: string }[] {
@@ -42,7 +50,7 @@ describe("#582: one field, one sentence", () => {
     const line = element.split("\n")[0]!.trim();
     it(`${file}: ${line.slice(0, 40)}… reads the shared key`, () => {
       const placeholder = /placeholder=\{t\("([^"]+)"\)\}/.exec(element)?.[1];
-      expect(placeholder, `${file}: a member search must show the shared copy, not its own`).toBe(SHARED_KEY);
+      expect(SHARED_KEYS, `${file}: a member search must show shared copy, not its own`).toContain(placeholder);
     });
   }
 
@@ -50,6 +58,7 @@ describe("#582: one field, one sentence", () => {
     for (const loc of ["en", "ja"]) {
       const bundle = JSON.parse(readFileSync(resolve(import.meta.dirname, "../i18n/locales", `${loc}.json`), "utf8"));
       expect(bundle.common?.memberSearch, `${loc}: the shared key exists`).toBeTruthy();
+      expect(bundle.common?.granteeSearch, `${loc}: and the grantee one, which names groups too`).toBeTruthy();
       expect(bundle.permissions?.memberPlaceholder, `${loc}: the "member id" copy is retired`).toBeUndefined();
       expect(bundle.permissions?.restrictPlaceholder, `${loc}: so is its twin on the restrict field`).toBeUndefined();
       expect(bundle.spaceMembers?.addPlaceholder, `${loc}: and the space side's own copy`).toBeUndefined();
