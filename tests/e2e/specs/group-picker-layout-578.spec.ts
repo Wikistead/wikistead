@@ -70,3 +70,74 @@ test("#578 ②: the completion list hangs off the field, not off whatever else i
     "a name still being completed is not yet an unconfirmed name — the two answers contradict",
   ).toHaveCount(0);
 });
+
+// #578 (review rejection, 2026-08-04): the correction to the correction. Taking the note out of flow fixed
+// the movement and created an overlap — measured landing ON the member list below, 6px into its first
+// row. Both must hold at once, so both are measured here: the row does not move (above) AND nothing
+// underneath is covered.
+test("#578 ②: the note does not land on the list below it", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openGroupHalf(page);
+  await page.getByTestId(GROUP_ROW.input).fill(`zzz-nobody-carries-${Date.now().toString(36)}`);
+  const note = page.getByTestId(GROUP_ROW.note);
+  await expect(note).toBeVisible();
+  const noteBox = (await note.boundingBox())!;
+  const list = (await page.getByTestId("space-member-list").boundingBox())!;
+  expect(noteBox.y + noteBox.height, `the note ends above the member list (note bottom ${Math.round(noteBox.y + noteBox.height)}, list top ${Math.round(list.y)})`)
+    .toBeLessThanOrEqual(Math.round(list.y));
+});
+
+// #578 (review rejection ③): every row is changed the same way. A custom role used to be a chip with only
+// an × — the one kind of role a tenant writes for itself was the one kind nobody could re-assign — which
+// contradicts both the standing ruling that built-in and custom share a picker and #591's "an exclusive
+// role is changed in a dropdown".
+//
+// Discovery, not a list: every row on the screen is asked, so a row shape added later is covered without
+// touching this file.
+test("#578 ③: every space member row carries the same role control", async ({ page }) => {
+  test.setTimeout(120_000);
+  // A CUSTOM-role row has to be on the screen or this measures nothing: the built-in rows always had a
+  // dropdown, and the defect was that the custom ones did not. So one is made here, assigned, and then
+  // looked for by name — the row that used to be a chip with only an ×.
+  const stamp = Date.now().toString(36);
+  const roleName = `e2e-578row-${stamp}`;
+  await page.goto("/spaces/demo_space/settings/members");
+  await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
+  const made = await page.evaluate(async ({ name }) => {
+    const h = { Authorization: "Bearer dev-token", "content-type": "application/json" };
+    const roleRes = await fetch("/api/admin/roles", {
+      method: "POST", headers: h,
+      // scope is 'resource' | 'tenant' at creation (ADR-171); a space assignment takes a resource role
+      body: JSON.stringify({ name, capabilities: ["view", "comment"], scope: "resource" }),
+    });
+    const role = await roleRes.json();
+    const assignRes = await fetch(`/api/admin/roles/${role.id}/assignments`, {
+      method: "POST", headers: h,
+      body: JSON.stringify({ resourceType: "space", resourceId: "demo_space", groupName: `e2e-group-${name}` }),
+    });
+    return { role: roleRes.status, assign: assignRes.status, body: await assignRes.text() };
+  }, { name: roleName });
+  expect(made.role, `creating the role: ${JSON.stringify(made)}`).toBeLessThan(300);
+  expect(made.assign, `assigning it: ${JSON.stringify(made)}`).toBeLessThan(300);
+  await page.reload();
+  await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
+  const customRow = page.getByTestId("space-member-item").filter({ hasText: `e2e-group-${roleName}` });
+  await expect(customRow, "the custom-role row is on screen").toHaveCount(1);
+  await expect(customRow.getByTestId("space-member-role-select"), "and it is changed like every other row").toHaveCount(1);
+
+  await page.goto("/spaces/demo_space/settings/members");
+  await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
+  const rows = page.getByTestId("space-member-item");
+  const n = await rows.count();
+  expect(n, "there are rows to measure (an empty list would pass forever)").toBeGreaterThan(0);
+  const offenders: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const row = rows.nth(i);
+    // a machine-managed row is read-only BY RULE (ADR-183 §1) — it says so with its own badge
+    if (await row.getByTestId("space-grant-managed").count()) continue;
+    if (!(await row.getByTestId("space-member-role-select").count())) {
+      offenders.push((await row.textContent())?.trim().slice(0, 40) ?? `row ${i}`);
+    }
+  }
+  expect(offenders, "a row whose role cannot be changed").toEqual([]);
+});

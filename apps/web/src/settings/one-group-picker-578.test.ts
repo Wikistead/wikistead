@@ -29,10 +29,12 @@ describe("#578: the group name control has one implementation", () => {
     const form = read("./GranteeRoleForm.tsx");
     expect(form, "the shared form owns the group control").toMatch(/<GroupPicker\b/);
     expect(space, "space Members tab").toMatch(/<GranteeRoleForm\b/);
-    // the tenant screen names a group through its search instead of a form: a typed name that matches
-    // no existing row offers itself as one, which is the same capability reached from the same box a
-    // reader is already typing in
-    expect(tenant, "tenant member table").toMatch(/member-row-new-group/);
+    // RE-AIMED AGAIN by the bounce (2026-08-04, user ruling " UI
+    // "): naming a group from the FILTER field was rejected on the device — nothing on the screen
+    // said the route existed, and it gave neither completion nor the confirmed/unconfirmed distinction
+    // the space side has. Both screens render the shared form now, so both get all three for free.
+    expect(tenant, "tenant member table").toMatch(/<GranteeRoleForm\b/);
+    expect(tenant, "and the filter field is not a second way in").not.toMatch(/member-row-new-group/);
   });
 
   it("neither screen keeps a hand-rolled group Select beside it", () => {
@@ -84,12 +86,12 @@ describe("#578 ③: both screens run the same add-flow", () => {
   // second one.
   const tenant = read("./MembersPage.tsx");
 
-  it("the space screen renders the shared form, and the tenant screen names a group from its search", () => {
-    // Two shapes on purpose now, and the ruling is why: the tenant screen has no add-flow at all
-    // people get their role on their row and a group that is not yet a row is named in the search box.
-    // Pinning "both render the form" would now be pinning a form the ruling removed.
+  it("both screens render the shared form", () => {
+    // ONE shape again. The previous round split them — the tenant screen named a group from its filter
+    // field — and the review rejected it: an add-flow nobody can see is not an add-flow. What is
+    // still deliberately different is the ARGUMENT (below), not the component.
     expect(space).toMatch(/<GranteeRoleForm\b/);
-    expect(tenant).toMatch(/member-row-new-group/);
+    expect(tenant).toMatch(/<GranteeRoleForm\b/);
   });
 
   it("neither screen keeps its own copy of the row", () => {
@@ -101,9 +103,10 @@ describe("#578 ③: both screens run the same add-flow", () => {
   it("the form takes the grantee kinds as an argument, and hides the control when there is one", () => {
     expect(form).toMatch(/types\.length > 1/);
     expect(space, "the space screen offers both").toMatch(/types=\{\["user", "group"\]\}/);
-    // the tenant screen no longer offers a KIND at all: its table already holds both, and a group is
-    // named by typing it (#579 ①). Nothing there should be constructing a grantee-type control.
-    expect(tenant, "the tenant screen has no grantee-type control left").not.toMatch(/types=\{/);
+    // The tenant screen offers GROUPS only, and that is the ruling rather than an oversight: a person's
+    // tenant role is given on their own row (#579) and their arrival is the invite. One entry in `types`
+    // is also what makes the form hide the kind control, so the screen has no choice to explain.
+    expect(tenant, "the tenant screen offers groups only").toMatch(/types=\{\["group"\]\}/);
   });
 
   it("it owns no state and knows no endpoint — the caller decides what add means", () => {

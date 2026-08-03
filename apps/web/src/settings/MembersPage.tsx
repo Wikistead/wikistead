@@ -19,6 +19,7 @@ import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole, useTenant
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
+import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -27,6 +28,12 @@ export function MembersPage() {
   const { t } = useTranslation();
   const { token, sub: me, tenantId } = useSession();
   const [members, setMembers] = useState<Member[]>([]);
+  // #578 bounce ④: the tenant screen's own half of the shared add-flow. Groups only — a person's tenant
+  // role is given on their row (#579) and their arrival is the invite above; a group has neither, and
+  // before this the only way to give one a role was to type a name that matched nothing in the FILTER
+  // field and notice that a row appeared. Nothing on the screen said so.
+  const [groupName, setGroupName] = useState("");
+  const [groupRole, setGroupRole] = useState("");
   const [invites, setInvites] = useState<Invite[]>([]);
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +108,7 @@ export function MembersPage() {
   };
 
   // pure, so the asymmetry and the "already held" exclusion are pinned without a DOM
+  const groupNames = useTenantGroupNames();
   const roleRows = new Map(
     buildTenantRoleRows(members, assignments.data ?? [], roles.data?.custom ?? []).map((r) => [r.sub, r]),
   );
@@ -111,12 +119,12 @@ export function MembersPage() {
   const groupRows = buildGroupRoleRows(assignments.data ?? [], t("spaceMembers.unknownGroup"), t("spaceMembers.group"), t("spaceMembers.groupNotSeen"));
   const shownGroups = filter.trim() ? groupRows.filter((g) => g.label.toLowerCase().includes(filter.trim().toLowerCase())) : groupRows;
   const unified = buildUnifiedRows(shownMembers, shownGroups);
-  // #579 ③: the search is where a group nobody carries yet gets its role. The retired section had a
-  // free-text field for that (#578 OQ4); folding the section in without folding that in would have
-  // taken the capability away, so a name that matches nothing offers itself as a row.
-  const typed = filter.trim();
-  const offerNewGroup = typed.length > 1 && !unified.some((r) => r.label.toLowerCase().includes(typed.toLowerCase()));
+  // #578 bounce ④: the filter field no longer doubles as a way to CREATE a grant. It was the only route
+  // a group had, and it was invisible — a reader had to type a name that matched nothing and notice a
+  // row appear. Two routes to the same result is what this ticket exists to remove, so the add-flow
+  // above is the one route and the filter went back to filtering.
   const tenantCustom = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
+  const knownGroups = groupNames.data ?? [];
 
   if (forbidden) {
     return <div style={{ padding: 24, maxWidth: 560 }}><h2>{t("members.title")}</h2><p style={{ color: "var(--fg-dim)" }}>{t("members.adminOnly")}</p></div>;
@@ -135,6 +143,41 @@ export function MembersPage() {
           placeholder={t("members.filterPlaceholder")} aria-label={t("members.filterLabel")} data-testid="members-filter" />
       </FormRow>
 
+      {/* #578 bounce ④ (user ruling: " UI "): the SAME form the
+          space screen uses — find the grantee, choose the role, add. Only `types` differs: a space offers
+          people and groups, and here a person's tenant role lives on their own row (#579) while their
+          arrival is the invite below, so groups are what is left to add. Using the shared component is
+          also what gives this screen completion and the confirmed/unconfirmed distinction the space side
+          has had since #578 slice 6 — both were missing here because the flow was a filter-field
+          side effect rather than a form. */}
+      <GranteeRoleForm
+        testId="tenant-grant"
+        types={["group"]}
+        type="group"
+        onTypeChange={() => {}}
+        query=""
+        onQueryChange={() => {}}
+        picked={null}
+        onPick={() => {}}
+        candidates={[]}
+        groupName={groupName}
+        onGroupNameChange={setGroupName}
+        knownGroups={knownGroups}
+        // ADR-201: a group holds a tenant CUSTOM role and never a tier, which is why this list is not
+        // the row's list. The rule is stated where the options are built rather than filtered in later.
+        roleOptions={withRoleTips(tenantCustom.map((r) => ({ value: r.id, label: r.name, roleCapabilities: r.capabilities })), "tenant")}
+        role={groupRole}
+        onRoleChange={setGroupRole}
+        pending={assignRole.isPending}
+        onAdd={() => {
+          if (!groupName.trim() || !groupRole) return;
+          assignRole.mutate({ roleId: groupRole, resourceType: "tenant", resourceId: tenantId, groupName: groupName.trim() }, {
+            onSuccess: () => { notify.success(t("toast.saved")); setGroupName(""); setGroupRole(""); },
+            onError: () => notify.error(t("toast.actionFailed")),
+          });
+        }}
+      />
+
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 32 }}>
         <thead>
           <tr style={{ textAlign: "left", borderBottom: "1px solid var(--border, #333)" }}>
@@ -142,35 +185,6 @@ export function MembersPage() {
           </tr>
         </thead>
         <tbody>
-          {offerNewGroup && (
-            /* the typed name matches nothing here: offer it as a group nobody carries yet, which is the
-               one thing the retired section could do that a table of existing rows cannot */
-            <tr style={{ borderBottom: "1px solid var(--border, #222)" }} data-testid="member-row-new-group">
-              <td style={{ padding: "8px 4px" }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <Users size={16} aria-hidden />
-                  {typed} <span className="text-xs text-fg-dim">({t("spaceMembers.group")}, {t("spaceMembers.groupNotSeen")})</span>
-                </span>
-              </td>
-              <td data-testid="member-roles">
-                <Select
-                  size="sm"
-                  value=""
-                  ariaLabel={t("members.roleFor", { sub: typed })}
-                  testId="new-group-role-select"
-                  options={[{ value: "", label: t("adminRoles.rolePlaceholder") }, ...withRoleTips(tenantCustom.map((r) => ({ value: r.id, label: r.name, roleCapabilities: r.capabilities })), "tenant")]}
-                  onChange={(roleId) => {
-                    if (!roleId) return;
-                    assignRole.mutate({ roleId, resourceType: "tenant", resourceId: tenantId, groupName: typed }, {
-                      onSuccess: () => { notify.success(t("toast.saved")); setFilter(""); },
-                      onError: () => notify.error(t("toast.actionFailed")),
-                    });
-                  }}
-                />
-              </td>
-              <td />
-            </tr>
-          )}
           {unified.map((row) => row.kind === "group" ? (
             <tr key={row.key} style={{ borderBottom: "1px solid var(--border, #222)" }} data-testid="member-row-group">
               <td style={{ padding: "8px 4px" }}>

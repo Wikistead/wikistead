@@ -37,7 +37,7 @@ export function RoleTip({
    * click (it is the choice) and Radix keeps focus on the list rather than on the item, so the tooltip
    * follows the item's HIGHLIGHT instead — which is what a keyboard user moves with the arrow keys.
    */
-  as?: "badge" | "option";
+  as?: "badge" | "option" | "control";
   /** #586 review ①: WHICH measured table answers. A space row holds a composite noun, a page row a
    *  single arm, and they confer different things — a page `edit` grant cannot comment. */
   scope?: "space" | "page" | "tenant";
@@ -47,6 +47,10 @@ export function RoleTip({
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLSpanElement>(null);
   const option = as === "option";
+  // #578 bounce ③: a row whose role is CHANGED in place wraps a Select, not a badge. Same tooltip, same
+  // origin colour, but the control inside owns the focus stop and the click — taking either would make
+  // choosing a role a two-step affair and put a second tab stop in front of it.
+  const control = as === "control";
   const [hovered, setHovered] = useState(false);
   // #586 review (bounce 3, minor): once the list is being driven from the keyboard, the row the pointer
   // happens to rest on stops being the row the reader is looking at — and two open rows at once reads as
@@ -118,18 +122,22 @@ export function RoleTip({
           and the label make it reachable and readable; the click handler is what makes it work on touch. */}
       <span
         ref={anchor}
-        tabIndex={option ? undefined : 0}
+        tabIndex={option || control ? undefined : 0}
         // Only on a badge. Inside a listbox the span's label BECOMES the option's accessible name, so
         // labelling it with the capability list renamed every option after what it confers — measured
         // the option "editor" announced itself as "Can: View, Edit, Publish". The option keeps its name;
         // Radix links the tooltip as its description.
-        aria-label={option ? undefined : label}
+        aria-label={option || control ? undefined : label}
         data-testid={testId}
         data-origin={origin}
         // Not on an option: the click there IS the selection, and swallowing it to toggle a tooltip
         // would make picking a role a two-tap affair.
-        onClick={option ? undefined : () => setOpen((o) => !o)}
-        className="inline-flex cursor-help items-center outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={option || control ? undefined : () => setOpen((o) => !o)}
+        className={control
+          // the origin reads off the control itself: a role-derived row wears the accent the role badges
+          // wore, an individually granted one stays neutral. Tokens only (#586 §1: never a hex here).
+          ? "inline-flex items-center data-[origin=role]:[&_button]:border-[var(--accent)] data-[origin=role]:[&_button]:text-[var(--accent)]"
+          : "inline-flex cursor-help items-center outline-none focus-visible:ring-2 focus-visible:ring-ring"}
       >
         {children}
       </span>

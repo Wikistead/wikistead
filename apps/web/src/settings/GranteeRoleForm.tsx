@@ -49,6 +49,7 @@ export interface GranteeRoleFormProps {
 export function GranteeRoleForm(p: GranteeRoleFormProps) {
   const { t } = useTranslation();
   const ready = p.type === "group" ? p.groupName.trim() !== "" : p.picked !== null;
+  const searchCopy = p.types.length > 1 ? "common.memberSearch" : "common.granteeSearch";
   return (
     <FormRow className="mb-6">
       {p.types.length > 1 && (
@@ -75,12 +76,14 @@ export function GranteeRoleForm(p: GranteeRoleFormProps) {
           picked={p.picked}
           onPick={p.onPick}
           candidates={[...p.candidates]}
-          // #578 bounce ③: this form takes a member OR a group — the type beside it switches which —
-          // and the field used to say "Search members…" while the group half said "or type a group
-          // name", an "or" left over from the stacked select that is gone. Both halves name the same
-          // act now, so the screen says what it accepts instead of making somebody find the switch.
-          placeholder={t("common.granteeSearch")}
-          ariaLabel={t("common.granteeSearch")}
+          // #578 (bounce, then its correction): what this field accepts depends on whether the surface
+          // asks WHO first. With a type control beside it the answer is already given — the field takes
+          // members, and calling it "members or groups" would be untrue of the state the screen is in.
+          // Without one, people and groups arrive in the same field and it must say so. The rule is the
+          // control's own shape rather than a list of screen names, so a third surface gets it right by
+          // construction.
+          placeholder={t(searchCopy)}
+          ariaLabel={t(searchCopy)}
           inputTestId={`${p.testId}-input`}
           listTestId={`${p.testId}-candidates`}
           itemTestId={`${p.testId}-candidate`}

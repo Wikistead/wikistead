@@ -196,29 +196,68 @@ export function SpaceMembersTab() {
   // that cannot show the value it has is worse than no control).
   // #586 (review rejection): each choice is the NAME, and hovering it says what that name confers. Space
   // scope, so the composite NOUN table answers (a page grant is a single arm and reads from the other).
-  const rowRoleOptions = (current: PageRelation): SelectOption[] => {
-    const values = GRANTABLE.includes(current) ? GRANTABLE : [current, ...GRANTABLE];
-    return values.map((c) => ({
-      value: c,
-      label: capNoun(c),
-      wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" builtinCapability={c}>{l}</RoleTip>,
-    }));
+  // #578 bounce ③: ONE list, on every row. A custom role used to be drawn as a chip with only an ×,
+  // which meant the one kind of role a tenant writes for itself was the one kind nobody could change
+  // against both the standing ruling ("built-in and custom are the same picker, row and look") and #591
+  // ("an exclusive role is changed in a dropdown"). The value carries which mechanism answers, exactly
+  // as the add form's does, so the row and the form speak one vocabulary.
+  const rowValue = (r: { custom: boolean; capability?: PageRelation; roleId?: string }): string =>
+    r.custom ? `role:${r.roleId}` : `builtin:${r.capability}`;
+  const rowRoleOptions = (current: string): SelectOption[] => {
+    const currentCap = current.startsWith("builtin:") ? (current.slice(8) as PageRelation) : null;
+    // The row's CURRENT capability is always present even when new grants are not offered it (`comment`
+    // left the picker in #552 but rows still hold it — a control that cannot show the value it has is
+    // worse than no control).
+    const caps = currentCap && !GRANTABLE.includes(currentCap) ? [currentCap, ...GRANTABLE] : GRANTABLE;
+    return [
+      ...caps.map((c) => ({
+        value: `builtin:${c}`,
+        label: capNoun(c),
+        wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" builtinCapability={c}>{l}</RoleTip>,
+      })),
+      ...customRoles.map((r) => ({
+        value: `role:${r.id}`,
+        label: r.name,
+        wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" roleCapabilities={r.capabilities}>{l}</RoleTip>,
+      })),
+    ];
   };
 
   // Change in place. The grant lands first and the server sweeps the principal's other roles after it
   // (spaces.ts sweepOtherSpaceRoles), which is why this cannot leave the person with nothing halfway.
   // A manager losing manage is still the one change that asks first — the server refuses it without the
   // confirmed flag, and the same dialog the add path uses handles the 409.
-  const changeRowRole = (row: { grantee: string; capability: PageRelation; label: string }, next: PageRelation) => {
-    if (next === row.capability) return;
-    const isGroup = row.grantee.startsWith("group:");
-    const target = isGroup ? { grantee: row.grantee } : { grantee: row.grantee };
-    const run = (replace = false) => grant.mutate({ ...target, capability: next, replace }, {
-      onSuccess: () => notify.success(t("toast.accessGranted")),
-      onError: (e) => onAddError(e, () => run(true), row.label, capNoun(next)),
-    });
-    if (row.capability === "manage") {
-      setPendingAdd({ run: () => run(true), who: row.label, current: capNoun(row.capability), next: capNoun(next), manager: true });
+  const changeRowRole = (row: MergedRow, next: string) => {
+    const current = rowValue(row);
+    if (next === current) return;
+    // A group is addressed by NAME on both mechanisms (the id is a hash the server owns); a person by
+    // the principal the row already carries. Whichever it is, the server converges afterwards
+    // (sweepOtherSpaceRoles), so the new role lands before the old one goes and nobody is left with
+    // nothing halfway.
+    const who = row.groupName ? { groupName: row.groupName } : null;
+    const principal = row.kind === "grant" ? row.grantee : row.principal;
+    const nextLabel = next.startsWith("role:")
+      ? (customRoles.find((r) => `role:${r.id}` === next)?.name ?? "")
+      : capNoun(next.slice(8) as PageRelation);
+    const run = (replace = false) => {
+      if (next.startsWith("role:")) {
+        assignRole.mutate({
+          roleId: next.slice(5), resourceType: "space", resourceId: spaceId,
+          ...(who ?? { principal }), replace,
+        }, {
+          onSuccess: () => notify.success(t("toast.accessGranted")),
+          onError: (e) => onAddError(e, () => run(true), row.label, nextLabel),
+        });
+        return;
+      }
+      grant.mutate({ ...(who ?? { grantee: principal }), capability: next.slice(8) as PageRelation, replace }, {
+        onSuccess: () => notify.success(t("toast.accessGranted")),
+        onError: (e) => onAddError(e, () => run(true), row.label, nextLabel),
+      });
+    };
+    // Demoting a manager is the one change that asks first (the server refuses it without the flag).
+    if (row.kind === "grant" && row.capability === "manage" && next !== "builtin:manage") {
+      setPendingAdd({ run: () => run(true), who: row.label, current: row.badge, next: nextLabel, manager: true });
       return;
     }
     run();
@@ -271,8 +310,8 @@ export function SpaceMembersTab() {
   // two mechanisms stay underneath (each row's revoke goes to its own machinery); that is an
   // implementation fact, not a reason to split the screen. One sort rule: principal name, then badge.
   type MergedRow =
-    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; grantee: string; capability: PageRelation; foldedCaps?: PageRelation[]; principal?: undefined }
-    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; assignmentId: string; principal: string; roleId: string; grantee?: undefined };
+    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; grantee: string; groupName?: string; capability: PageRelation; foldedCaps?: PageRelation[]; principal?: undefined; roleId?: undefined }
+    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; assignmentId: string; principal: string; groupName?: string; roleId: string; grantee?: undefined; capability?: undefined };
   // #553 / ADR-199 §2 (rev5 ruling): a principal holding BOTH the edit and comment built-in grants is
   // ONE editor — the pair folds into a single "editor" row whose revoke removes both arms. The word
   // "commenter" appears on no GRANT surface (#552 — the picker); a lone comment grant (an unfolded
@@ -285,14 +324,14 @@ export function SpaceMembersTab() {
   const mergedRows: MergedRow[] = [
     ...visibleGrants.map((g) => ({
       kind: "grant" as const, key: `g:${g.grantee}:${g.capability}`, badge: capNoun(g.capability), custom: false as const,
-      label: label(g), managed: g.managed, grantee: g.grantee, capability: g.capability,
+      label: label(g), managed: g.managed, grantee: g.grantee, groupName: g.groupName, capability: g.capability,
       ...(foldedGrantees.has(g.grantee) && g.capability === "edit" ? { foldedCaps: ["edit", "comment"] as PageRelation[] } : {}),
     })),
     ...(roleAssignments.data ?? []).map((a) => ({
       kind: "assignment" as const, key: `a:${a.id}`, badge: a.roleName, custom: true as const,
       // #497 re-review N2: a mapping-owned assignment is read-only here too (ADR-183 §1) — the
       // badge below replaces its revoke exactly as it does for the builtin grant rows.
-      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal, roleId: a.roleId, managed: a.managed,
+      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal, groupName: a.groupName, roleId: a.roleId, managed: a.managed,
     })),
   ].sort((x, y) => x.label.localeCompare(y.label) || x.badge.localeCompare(y.badge));
 
@@ -355,23 +394,30 @@ export function SpaceMembersTab() {
                 separate built-in grant. (#579's "roles do not stack" was ruled for the tenant scope, where
                 the server now converges; the space sweep already keeps one role per principal here.)
                 #582: no `uppercase` — a role name is a proper noun on every surface. */}
-            {r.custom ? (
-              /* #586 §1: role-derived. The accent border is the ROLE colour; an individually granted
-                 capability wears the neutral one. The axis is role vs grant, never built-in vs custom. */
-              <RoleTip roleCapabilities={roleCapsById.get(r.roleId ?? "")} origin="role" testId="space-role-origin">
-                <span className="min-w-[52px] flex-none rounded-full border border-[var(--accent)] px-2 py-px text-center text-[11px] tracking-[0.03em] text-[var(--accent)]">{r.badge}</span>
-              </RoleTip>
-            ) : r.managed ? (
+            {r.managed ? (
+              /* Machine-managed (ADR-183 §1): read-only here, so it stays a badge — there is nothing to
+                 choose, and offering a control the server 409s would be a lie about who is in charge. */
               <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability}>{r.badge}</span>
             ) : (
-              <Select
-                size="sm"
-                value={r.capability}
-                ariaLabel={t("spaceMembers.capability")}
-                testId="space-member-role-select"
-                options={rowRoleOptions(r.capability)}
-                onChange={(next) => changeRowRole(r, next as PageRelation)}
-              />
+              /* #586 §1: the ORIGIN is the axis — role-derived wears the accent, an individually granted
+                 capability the neutral one — and it now reads off the control instead of a badge beside
+                 it. #578 bounce ③: a custom role was the one thing this screen could not change. */
+              <RoleTip
+                as="control"
+                origin={r.custom ? "role" : "grant"}
+                scope="space"
+                {...(r.custom ? { roleCapabilities: roleCapsById.get(r.roleId ?? "") } : { builtinCapability: r.capability })}
+                testId="space-role-origin"
+              >
+                <Select
+                  size="sm"
+                  value={rowValue(r)}
+                  ariaLabel={t("spaceMembers.capability")}
+                  testId="space-member-role-select"
+                  options={rowRoleOptions(rowValue(r))}
+                  onChange={(next) => changeRowRole(r, next)}
+                />
+              </RoleTip>
             )}
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{r.label}</span>
             {/* #497 (088): a mapping-conferred row is machine-managed (ADR-183 §1) — no revoke affordance
