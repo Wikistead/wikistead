@@ -529,6 +529,21 @@ class BulletWidget extends WidgetType {
   }
 }
 
+// #600: the label an empty block shows, as a display-only widget on the open line. Its text comes from
+// the same template every other placeholder uses — this widget only decides WHERE it hangs.
+class MacroEmptyLabelWidget extends WidgetType {
+  constructor(readonly label: string) { super(); }
+  eq(o: MacroEmptyLabelWidget): boolean { return o.label === this.label; }
+  toDOM(): HTMLElement {
+    const el = document.createElement("span");
+    el.className = "cm-lp-macro-empty";
+    el.setAttribute("data-testid", "macro-empty");
+    el.textContent = this.label;
+    return el;
+  }
+  ignoreEvent(): boolean { return false; }
+}
+
 // #290 / ADR-114: the :::todo open-line PROGRESS RING (done/total of the block's checkboxes). Display-only,
 // offset-invariant (a side:1 widget on the open line — never shifts offsets, remote carets stay correct). The
 // ring is absolutely positioned to the line's right edge (callout-icons.css) so it doesn't fight the CSS
@@ -4221,6 +4236,13 @@ const RENDERERS: BlockRenderer[] = [
           let bodyTxt = "";
           for (let n = first.number + 1; n < lastLine.number; n++) bodyTxt += doc.line(n).text + "\n";
           const { done, total } = countTasks(bodyTxt);
+          // #600 bounce (2026-08-04): a todo block with NO task lines drew nothing at all — the block is
+          // line decorations, and there are no lines to decorate, so three blank rows sat where a block
+          // was. Every other macro says what it is when it is empty; this one vanished, which is worse
+          // than saying nothing because the block is still there to be typed into and nothing shows it.
+          if (bodyTxt.trim() === "") {
+            ctx.add(Decoration.widget({ widget: new MacroEmptyLabelWidget(macroPlaceholder(macro, "empty-edit")), side: 1 }), first.to);
+          }
           if (total > 0) ctx.add(Decoration.widget({ widget: new TodoRingWidget(done, total), side: 1 }), first.to);
           // #290: a "remove ring" (demote) button in the header, editable surface only (hover-shown).
           if (!ctx.state.readOnly) ctx.add(Decoration.widget({ widget: new TodoDemoteWidget(first.from), side: 1 }), first.to);

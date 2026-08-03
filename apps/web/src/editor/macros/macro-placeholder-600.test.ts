@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { registeredMacros } from "./index";
-import { dispatchMacroRender } from "./md-render";
+import { renderMarkdownToDom, dispatchMacroRender } from "./md-render";
 import { macroPlaceholder, macroDisplayName, deniedEmbedLabel, type MacroPlaceholderState } from "./placeholder";
 import en from "../../i18n/locales/en.json";
 import ja from "../../i18n/locales/ja.json";
@@ -24,18 +24,32 @@ describe("#600: every macro names itself when it cannot show its content", () =>
     expect(registeredMacros().length).toBeGreaterThan(10);
   });
 
-  it("an empty body never renders as a blank box or a bare ellipsis", () => {
+  it("an empty macro is never NOTHING — it renders, and what it renders names it", () => {
+    // REWRITTEN by the 2026-08-04 bounce. This walked `dispatchMacroRender` and skipped any macro that
+    // returned null: "renders nothing" was the one answer it accepted silently, which is worse than the
+    // enumerated list #544 warned about — an enumerated list at least SHOWS what it excludes. `:::todo`
+    // was empty-renders-nothing the whole time and this pin waved it through.
+    //
+    // So it measures the SURFACE now: the macro's own source with an empty body, through the renderer a
+    // reader actually meets. A block that occupies three blank lines and says nothing is the defect;
+    // whether its liveRender returned null is an implementation detail of how it got there.
+    const offenders: string[] = [];
     for (const macro of registeredMacros()) {
-      const el = dispatchMacroRender(macro as never, "", { theme: ctx });
-      if (!el) continue; // container directives (callout, columns) have no liveRender — the body IS the content
-      const text = (el.textContent ?? "").trim();
       const id = macro.kind === "fence" ? macro.lang : macro.name;
-      // The body is EMPTY, so there is no content this could legitimately be showing: whatever comes
-      // back is a placeholder, and a placeholder has to say what it stands for.
-      expect(text, `${id} renders an empty box for an empty body`).not.toBe("");
-      expect(text, `${id} renders "…", which tells a reader nothing`).not.toBe("…");
-      expect(text, `${id}'s placeholder does not name it`).toContain(macroDisplayName(macro));
+      const src = macro.kind === "fence" ? "```" + id + "\n```\n" : `:::${id}\n:::\n`;
+      const host = document.createElement("div");
+      host.appendChild(renderMarkdownToDom(src));
+      const text = (host.textContent ?? "").trim();
+      if (host.querySelectorAll("*").length === 0) { offenders.push(`${id}: renders nothing at all`); continue; }
+      if (text === "…") { offenders.push(`${id}: renders "…", which tells a reader nothing`); continue; }
+      // A container macro (callout, columns) draws a BOX whose content is the body — an empty one is a
+      // visible empty box, which is honest. What must never happen is an empty macro that says nothing
+      // AND shows nothing. So: either the text names the macro, or there is a visible container.
+      const named = text.includes(macroDisplayName(macro));
+      const boxed = host.querySelector("[class*=cm-lp-], table, details, section, ul, ol") !== null;
+      if (!named && !boxed) offenders.push(`${id}: neither names itself nor draws a box (text: ${JSON.stringify(text)})`);
     }
+    expect(offenders).toEqual([]);
   });
 
   it("every macro's name is a localised one, not its raw id", () => {
