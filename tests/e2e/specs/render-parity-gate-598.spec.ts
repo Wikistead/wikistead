@@ -82,14 +82,14 @@ const KNOWN_RED = {
   flatOnPaper: [] as string[],
   // #598 public slice: elements the SERVER-rendered public page does not carry under their own name.
   missingPublicly: [] as string[],
-  // #598 (review, 2026-08-04): elements whose STRUCTURE differs between the app and the saved
-  // file — present, complete, correctly named, and a different KIND of thing. The reject that opened
-  // this dimension: :::table draws a bordered grid on screen and borderless plain text in the file,
-  // because .cm-lp-table's decoration lives in the CodeMirror theme (.cm-editor scope) and never
-  // reaches a surface outside the editor. None of the other dimensions can see it: the box has area
-  // (flatOnPaper passes), the text is right (typography passes), the name is right (identity passes).
-  // #207 owns the product fix; this line comes out with it.
-  structureDrift: ["table: draws internal borders in the app and none in the saved file"] as string[],
+  // #598 (review, 2026-08-04): elements whose STRUCTURE differs between surfaces — present,
+  // complete, correctly named, and a different KIND of thing. The reject that opened this dimension
+  // :::table drew a bordered grid on screen and borderless plain text everywhere else, because its
+  // decoration lived in the CodeMirror theme (.cm-editor scope). No other dimension could see it: the
+  // box has area (flatOnPaper), the text is right (typography), the name is right (identity).
+  // (empty) — #207 moved the rule to prose.css, where every surface can reach it, and this dimension
+  // demanded its own line's removal the moment the borders arrived. The list only shrinks.
+  structureDrift: [] as string[],
   // #207 the fifth surface — the print PORTAL, which is what the BROWSER's own File → Print takes.
   // Three of that review's findings were measured here first and are FIXED: a tab strip hid the
   // panels nobody had selected, plantuml printed as its own source, and an external embed printed the
@@ -380,12 +380,19 @@ test("#598: every registered element survives the export, the file, and the page
   // the comparison was the file against a copy of itself and the table's missing grid stayed invisible.
   const exportStructure = await structureOf(opened, "main.wks-export-doc [data-wks-el]");
   const appStructure = await structureOf(page, ".cm-editor [data-wks-el]");
+  // #207 the PORTAL is measured against the editor too — "1 " is exactly what a
+  // file-only comparison would allow (a CSS rule reaching the file but not the portal, or vice versa).
+  const portalStructure = await structureOf(page, "[data-print-root] [data-wks-el]");
   const structureShared = Object.keys(exportStructure).filter((name) => name in appStructure);
   expect(structureShared.length, "named elements exist on BOTH surfaces to compare (an empty intersection passes forever)").toBeGreaterThan(3);
-  const structureDrift = structureShared
-    .filter((name) => appStructure[name] !== exportStructure[name])
-    .map((name) => `${name}: draws internal borders in the ${appStructure[name] ? "app" : "saved file"} and none in the ${appStructure[name] ? "saved file" : "app"}`)
-    .sort();
+  const structureDrift = [
+    ...structureShared
+      .filter((name) => appStructure[name] !== exportStructure[name])
+      .map((name) => `${name}: draws internal borders in the ${appStructure[name] ? "app" : "saved file"} and none in the ${appStructure[name] ? "saved file" : "app"}`),
+    ...Object.keys(portalStructure).filter((name) => name in appStructure)
+      .filter((name) => appStructure[name] !== portalStructure[name])
+      .map((name) => `${name}: draws internal borders in the ${appStructure[name] ? "app" : "print portal"} and none in the ${appStructure[name] ? "print portal" : "app"}`),
+  ].sort();
   expect(
     structureDrift,
     "an element is a different kind of thing in the saved file. If you FIXED one, delete it from KNOWN_RED",
@@ -513,10 +520,29 @@ test("#598: every registered element survives the export, the file, and the page
       if (cs.display === "none" || cs.visibility === "hidden") bad.push(`${name}: hidden on paper`);
       else if (r.width < 1 || r.height < 1) bad.push(`${name}: occupies nothing on paper`);
     }
-    // content that is INSIDE a macro and hidden — the tab-panel shape, which the loop above cannot see
-    // because a panel is not itself a named element
-    for (const el of root.querySelectorAll(".cm-lp-tabpanel")) {
-      if (getComputedStyle(el).display === "none") bad.push(`a tab panel is hidden on paper: ${(el.textContent ?? "").trim().slice(0, 24)}`);
+    // #207 content hidden INSIDE a container — asked kind-agnostically, because naming
+    // `.cm-lp-tabpanel` here waved the closed <details> through, and the next disclosure macro would
+    // slip past the same way. The question is the general one: does any element carry real text that
+    // paper does not render? A closed details' body, a display:none panel, and whatever the third
+    // disclosure macro hides all answer it without this file learning their names.
+    // What must not happen is text being LOST: a hidden node whose words appear nowhere visible. Two
+    // hidden-but-fine shapes taught this check its wording (measured, not guessed): a <style> inside a
+    // mermaid SVG carries text that was never meant to render, and a tab bar's labels are hidden on
+    // paper because the panels re-print them as their headings — the words are there, once each.
+    const visibleText = (root as HTMLElement).innerText; // innerText is layout-aware: hidden text is absent
+    for (const el of root.querySelectorAll("*")) {
+      if (/^(STYLE|SCRIPT|TEMPLATE|TITLE|DEFS)$/i.test(el.tagName)) continue;
+      const ownText = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent ?? "").join("").trim();
+      if (ownText.length < 3) continue;
+      // checkVisibility, not display/visibility/rect: a CLOSED <details>' body is hidden by
+      // content-visibility on an internal slot, so it reports display:block AND a full-width rect while
+      // painting nothing (measured: 1280x24 and invisible). checkVisibility is the browser's own
+      // answer to "is this rendered", and it covers all three hiding mechanisms at once.
+      const r = el.getBoundingClientRect();
+      const hidden = !(el as Element & { checkVisibility(): boolean }).checkVisibility() || (r.width < 1 && r.height < 1);
+      if (hidden && !visibleText.includes(ownText)) {
+        bad.push(`text is lost on paper: "${ownText.slice(0, 24)}"`);
+      }
     }
     // nobody printed a "this surface cannot show it" sentence
     for (const el of root.querySelectorAll("[data-wks-placeholder]")) {

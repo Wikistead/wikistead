@@ -127,6 +127,28 @@
 .wks-prose .cm-lp-md-table :is(th, td) { border: var(--wks-table-cell-border); padding: var(--wks-table-cell-padding); text-align: left; vertical-align: top; height: 1.8em; min-width: 5em; /* #406 a column floor, so a wide table scrolls instead of collapsing to one character per line */ }
 .wks-prose .cm-lp-md-table th { font-weight: 700; background: var(--wks-table-th-bg); color: var(--fg); }
 
+/* #207 (review rejection, 2026-08-04): the :::table macro's grid (`.cm-lp-table`, renderHtmlTable) had its
+ * entire look in the CodeMirror THEME, which is scoped to .cm-editor — so on paper (the print portal,
+ * the export file, the public reader) the same element printed as bare unruled text while the GFM table
+ * beside it kept its grid, because THAT class (.cm-lp-md-table) lives here. Anything both sinks emit
+ * must be styled where both surfaces can reach it; same shared tokens as the editor's rules, so the two
+ * cannot drift apart in value. (The lesson, third occurrence: an element that arrives with no rule
+ * anywhere it lands.) */
+.wks-prose .cm-lp-table { border-collapse: collapse; font-size: 0.95em; max-width: 100%; }
+.wks-prose .cm-lp-table :is(th, td) { border: var(--wks-table-cell-border); padding: var(--wks-table-cell-padding); text-align: left; vertical-align: top; height: 1.8em; min-width: 5em; }
+.wks-prose .cm-lp-table th { font-weight: 700; background: var(--wks-table-th-bg); color: var(--fg); }
+
+/* Same sweep, same reason: the tagged/children LIST (`cm-lp-backlinks-*`, the shared list-slot DOM) and
+ * the embed degrade link had their look only in the CM theme too. Values mirror the theme's (shared
+ * tokens where they exist) so the surfaces cannot disagree. */
+.wks-prose .cm-lp-backlinks { margin: 0.3em 0; }
+.wks-prose .cm-lp-backlinks-label { font-size: 0.85em; font-weight: 600; color: var(--fg-dim, #888); margin-bottom: 0.3em; }
+.wks-prose .cm-lp-backlinks-list { list-style: disc; margin: 0; padding: 0 0 0 1.4em; }
+.wks-prose .cm-lp-backlinks-list li { margin: 0.1em 0; }
+.wks-prose .cm-lp-backlinks-item { color: var(--link, #4ea1ff); text-decoration: none; }
+.wks-prose .cm-lp-backlinks-empty { font-size: 0.85em; color: var(--fg-dim, #888); font-style: italic; padding: 0.2em 0; }
+.wks-prose .cm-lp-embed-degrade { color: var(--link, #4ea1ff); word-break: break-all; }
+
 /* inline images (#305): Tailwind preflight makes img a block; an image sharing its paragraph with
  * text goes back inline (thumbnail); a standalone image (only child of its paragraph) is a full block. */
 .wks-prose p img { display: inline-block; max-height: 1.6em; width: auto; vertical-align: text-bottom; }
