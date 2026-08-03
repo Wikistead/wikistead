@@ -1327,7 +1327,8 @@
     "groupLabel": "Group",
     "groupPlaceholder": "Select a group…",
     "scopeQuestion": "Which kind of role is this?",
-    "impliedBy": "(included in {{cap}})"
+    "impliedBy": "(included in {{cap}})",
+    "editCaps": "Edit capabilities"
   },
   "detailsEdit": {
     "title": "Edit collapsible",

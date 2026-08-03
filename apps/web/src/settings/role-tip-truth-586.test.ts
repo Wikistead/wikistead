@@ -173,13 +173,17 @@ describe("#586 review ①(bounce 3): the roles list ticks what the store confers
     expect(builtinDisplayCaps("manager", columns), "a manager moderates — the store says so").toContain("moderate");
   });
 
-  it("the list renders THAT, not the server's declared bundle", () => {
-    // The BUILT-IN row only. A custom role's own declaration is the right source for ITS grid — the
-    // closure is what the implied ticks add on top — so this must not be a blanket ban on reading
-    // `r.capabilities`, or the next person deletes the wrong one.
-    const builtinRow = tab.slice(tab.indexOf("idPrefix={`builtin-${r.name}`}") - 400, tab.indexOf("idPrefix={`builtin-${r.name}`}") + 80);
-    expect(builtinRow, "the built-in row asks the measured table").toContain("builtinDisplayCaps(");
-    expect(builtinRow, "…and not the server's declared bundle").not.toMatch(/value=\{r\.capabilities\}/);
+  it("the list renders the MEASURED answer, not the server's declared bundle", () => {
+    // RE-AIMED by #586 ②: the read-only grid left the list ("
+    // "), so what carries the measured answer now is the name's hover window. The built-in rows hand
+    // RoleTip the measured sources — the noun for a space built-in, the measured tier table for admin
+    // and never the server's declared bundle.
+    const builtinRow = tab.slice(tab.indexOf("roles.data?.builtIn"), tab.indexOf("roles.data?.builtIn") + 900);
+    expect(builtinRow, "a space built-in explains itself through the measured closure").toMatch(/RoleTip[\s\S]{0,120}builtinCapability=\{nounCapability\(r\.name\)\}/);
+    expect(builtinRow, "…and not the declared bundle").not.toMatch(/value=\{r\.capabilities\}/);
+    const adminRow = tab.slice(tab.indexOf('data-testid="builtin-role-admin"'), tab.indexOf('data-testid="builtin-role-admin"') + 900);
+    expect(adminRow, "the admin tier reads the measured tier table (#604's verbs arrive with it)").toContain("TENANT_TIER_CAPS.admin");
+    expect(adminRow, "the hand-written two-capability value is gone").not.toContain('value={["createSpaces", "issueApiKeys"]}');
   });
 
   it("a name the nouns do not know ticks nothing rather than guessing", () => {

@@ -4,14 +4,15 @@ import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
   useTenantRoleDefaults, useSetTenantRoleDefaults,
 } from "../data/queries";
-import { builtinDisplayCaps, closureOf } from "./role-nouns";
+import { closureOf, nounCapability, TENANT_TIER_CAPS } from "./role-nouns";
+import { RoleTip } from "../ui/RoleTip"; // #586 the role NAME raises the "what it can do" window
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a role is irreversible — confirm first
 import { Input } from "../ui/Input";
 import { RadioGroup } from "../ui/RadioGroup";
 import { notify } from "../ui/toast";
-import { Pencil, X } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
+import { Pencil, SlidersHorizontal, X } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
 
 // #420 / ADR-164 increment 5: the custom-role manager (tenant-admin console). Definitions =
 // named bundles of the atomic capabilities; assignments expand to fixed FGA tuples server-side.
@@ -29,7 +30,7 @@ const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys", "manageConnections"
 
 // #536 gave every row a scope badge because the sections it sat in were not readable as sections.
 // #581 fixes the sections instead and drops the badge here: where POSITION carries the information,
-// repeating it on every row is noise the user asked us to remove. The badge is still available —
+// repeating it on every row is noise the user asked us to remove. The badge is still available
 // `scope` is optional now — for a surface that mixes scopes in one list (a search result, a member
 // row's chips), where position says nothing. "BUILT-IN" always stays: no position implies it.
 function RoleBadges({ scope, builtIn = false }: { scope?: "resource" | "tenant"; builtIn?: boolean }) {
@@ -107,7 +108,7 @@ function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false, l
 
 // #580: the scope is CHOSEN, and it is the first thing on the form.
 //
-// #536 removed a scope <Select> nobody could find and derived the scope from the boxes instead —
+// #536 removed a scope <Select> nobody could find and derived the scope from the boxes instead
 // which fixed the hidden control and created a new problem the user then hit: you cannot tell which
 // kind of role you are making until you have already ticked something, and both vocabularies sit in
 // one undifferentiated grid until then. The answer is not to bring back the hidden Select: the choice
@@ -198,6 +199,7 @@ export function AdminRolesTab() {
 
   // #536 ④: one renderer for a custom-role row, used by BOTH scope sections (the row itself is
   // scope-agnostic; only which section it sits in changed).
+  const [capsOpenId, setCapsOpenId] = useState<string | null>(null); // #586 ②: which row shows its editing grid
   const renderCustomRole = (r: { id: string; name: string; capabilities: string[]; scope: string }) => {
     const commitRename = () => {
       if (renamingId !== r.id) return; // Enter already committed; the trailing blur is a no-op
@@ -223,10 +225,16 @@ export function AdminRolesTab() {
               }} />
           ) : (
             <>
-              <span className="font-medium">{r.name}</span>
+              {/* #586 ②: the NAME is what you hover — the same floating "what this role can do"
+                  window every other surface raises, via the same component. */}
+              <RoleTip origin="role" scope={r.scope === "tenant" ? "tenant" : "space"} roleCapabilities={r.capabilities} testId={`role-tip-${r.name}`}>
+                <span className="font-medium">{r.name}</span>
+              </RoleTip>
               <RoleBadges />
               <IconButton aria-label={t("adminRoles.rename")} data-tip={t("adminRoles.rename")} data-testid="role-rename"
                 onClick={() => { setRenamingId(r.id); setRenameValue(r.name); }}><Pencil size={14} /></IconButton>
+              <IconButton aria-label={t("adminRoles.editCaps")} data-tip={t("adminRoles.editCaps")} data-testid="role-edit-caps"
+                onClick={() => setCapsOpenId(capsOpenId === r.id ? null : r.id)}><SlidersHorizontal size={14} /></IconButton>
             </>
           )}
           <span className="flex-1" />
@@ -234,20 +242,25 @@ export function AdminRolesTab() {
           <IconButton aria-label={t("adminRoles.delete")} data-testid="role-delete" variant="danger"
             onClick={() => setDeletingRole({ id: r.id, name: r.name })}><X size={14} /></IconButton>
         </div>
-        <CapabilityPicker
-          value={r.capabilities}
-          idPrefix="custom"
-          list={r.scope === "tenant" ? TENANT_CAPABILITIES : CAPABILITIES}
-          disabled={updateRole.isPending}
-          lockLast
-          onChange={(caps) => {
-            if (caps.length === 0) return; // belt + braces under lockLast — never PUT an empty bundle
-            updateRole.mutate({ id: r.id, name: r.name, capabilities: caps }, {
-              onSuccess: () => notify.success(t("toast.saved")),
-              onError,
-            });
-          }}
-        />
+        {/* #586 ②: the grid is an EDITING surface, so it shows when editing — at rest the list is
+            names, and the name's hover window says what each confers ("
+            Per-op semantics inside are unchanged. */}
+        {capsOpenId === r.id && (
+          <CapabilityPicker
+            value={r.capabilities}
+            idPrefix="custom"
+            list={r.scope === "tenant" ? TENANT_CAPABILITIES : CAPABILITIES}
+            disabled={updateRole.isPending}
+            lockLast
+            onChange={(caps) => {
+              if (caps.length === 0) return; // belt + braces under lockLast — never PUT an empty bundle
+              updateRole.mutate({ id: r.id, name: r.name, capabilities: caps }, {
+                onSuccess: () => notify.success(t("toast.saved")),
+                onError,
+              });
+            }}
+          />
+        )}
       </div>
     );
   };
@@ -256,7 +269,7 @@ export function AdminRolesTab() {
     <div className="max-w-[860px] p-6" data-testid="admin-roles">
       <h2 className="mt-0">{t("adminRoles.title")}</h2>
 
-      {/* #536 (user re-ruling) + ④: ONE set of roles, presented in TWO scope sections —
+      {/* #536 (user re-ruling) + ④: ONE set of roles, presented in TWO scope sections
           "Tenant" above, "Space / Page" below (the ruling: tenant roles and resource roles mixed in one
           flat list read as a jumble; the dividing axis is SCOPE, not built-in/custom). Within each
           section the order is built-in → custom (DOM-pinned). What each row keeps:
@@ -297,10 +310,15 @@ export function AdminRolesTab() {
           </div>
           <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">admin</span>
+              {/* #586 ①: this row hard-coded two capabilities while the store answers true for
+                  five — #604 carved verbs out of `admin` as `… or admin`, and a hand-written value
+                  missed every one of them. The measured tier table is the display source now, shown the
+                  way every other role shows itself: hover the name. */}
+              <RoleTip origin="role" scope="tenant" roleCapabilities={TENANT_TIER_CAPS.admin} testId="role-tip-admin">
+                <span className="text-sm font-medium">admin</span>
+              </RoleTip>
               <RoleBadges builtIn />
             </div>
-            <CapabilityPicker value={["createSpaces", "issueApiKeys"]} idPrefix="builtin-admin" list={TENANT_CAPABILITIES} disabled />
           </div>
           {(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map(renderCustomRole)}
           </div>
@@ -309,17 +327,17 @@ export function AdminRolesTab() {
           <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-resource">{t("adminRoles.sectionResource")}</h3>
           <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-resource">
           {(roles.data?.builtIn ?? []).map((r) => (
-            <div key={r.name} className="flex flex-col gap-1">
+            <div key={r.name} className="flex flex-col gap-1" data-testid={`builtin-role-${r.name}`}>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">{r.name}</span>
+                {/* #586 ②: at rest a role is its NAME, and hovering it raises the measured "what
+                    it can do" window — the same component every other surface uses. The read-only grid
+                    that stood here drew the measured closure correctly since the last bounce, but a
+                    9-column lattice per row is the shape the ruling rejected. */}
+                <RoleTip origin="role" scope="space" builtinCapability={nounCapability(r.name)} testId={`role-tip-${r.name}`}>
+                  <span className="text-sm font-medium">{r.name}</span>
+                </RoleTip>
                 <RoleBadges builtIn />
               </div>
-              {/* #586 review ①(bounce 3): the MEASURED closure, not the server's declared bundle. The
-                  bundle omits `manage` from `manager`, so the closure below had no starting point to
-                  reach `moderate` from and this screen showed a manager who cannot moderate — the very
-                  error ADR-203 §4 named when the ticket was opened. `manage` still has no column here,
-                  which is correct: the display vocabulary and the grantable one stay apart. */}
-              <CapabilityPicker value={builtinDisplayCaps(r.name, CAPABILITIES)} idPrefix={`builtin-${r.name}`} list={CAPABILITIES} disabled />
             </div>
           ))}
           {(roles.data?.custom ?? []).filter((r) => r.scope !== "tenant").map(renderCustomRole)}

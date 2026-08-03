@@ -1326,7 +1326,8 @@
     "groupLabel": "グループ",
     "groupPlaceholder": "グループを選択…",
     "scopeQuestion": "どちらのロールを作りますか？",
-    "impliedBy": "（{{cap}} に含まれます）"
+    "impliedBy": "（{{cap}} に含まれます）",
+    "editCaps": "できることを編集"
   },
   "detailsEdit": {
     "title": "折りたたみを編集",

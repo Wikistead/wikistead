@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { sleep } from "../helpers";
 
-// #420 / ADR-164 increment 5: the Admin → Roles console. Real Chromium over the full loop:
+// #420 / ADR-164 increment 5: the Admin → Roles console. Real Chromium over the full loop
 // define a custom role → edit it → assign it to a member on a space (the server expands to FGA
 // tuples — behaviour anti-tested server-side; this pins the UI wiring + provenance display) →
 // unassign → delete. Built-ins always listed (every plan).
@@ -23,13 +23,17 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   // form/save). The check must survive a full reload = the PUT really landed, not local state.
   // (publish is space-assignable — comment has NO space-scoped relation and a space assignment
   // of a comment-bearing role is correctly refused whole by the server.)
+  // #586 ②: at rest a row is its NAME — the grid opens behind the edit affordance now.
   const row = page.getByTestId("custom-role-row").filter({ hasText: name });
+  await row.getByTestId("role-edit-caps").click();
   await row.getByTestId("custom-cap-publish").click(); // controlled input — assert the state below, not in check()
   await expect(row.getByTestId("custom-cap-publish")).toBeChecked({ timeout: 8000 });
   await sleep(500);
   await page.reload();
-  await expect(page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("custom-cap-publish"))
-    .toBeChecked({ timeout: 10_000 });
+  const rowAfter = page.getByTestId("custom-role-row").filter({ hasText: name });
+  await expect(rowAfter).toBeVisible({ timeout: 10_000 });
+  await rowAfter.getByTestId("role-edit-caps").click();
+  await expect(rowAfter.getByTestId("custom-cap-publish")).toBeChecked({ timeout: 10_000 });
 
   // Assign on the demo space. #514 / ADR-188 slice 4 moved this control OFF the Roles tab (which now only
   // DEFINES roles) and into the space's own Members tab, so the role's lifecycle is exercised where the
@@ -85,6 +89,7 @@ test("#445 last capability is locked; rename works via the inline affordance", a
   await page.getByTestId("role-save").click();
   const row = page.getByTestId("custom-role-row").filter({ hasText: name });
   await expect(row).toBeVisible({ timeout: 8000 });
+  await row.getByTestId("role-edit-caps").click(); // #586 ②: the grid opens behind the edit affordance
 
   // The sole checked box is LOCKED (disabled) — the last capability cannot be removed.
   await expect(row.getByTestId("custom-cap-view")).toBeChecked();
@@ -116,7 +121,7 @@ test("#445 last capability is locked; rename works via the inline affordance", a
 });
 
 // #445 / ADR-171: tenant-scope roles + the default presets. The member default toggle IS the
-// tenant#space_creator wildcard (CE); a custom TENANT role (createSpaces) assigns tenant-wide —
+// tenant#space_creator wildcard (CE); a custom TENANT role (createSpaces) assigns tenant-wide
 // no space picker appears for it. Behaviour (gate flips, write bind, reference count) is
 // anti-tested server-side; this pins the console wiring.
 test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no space picker)", async ({ page }) => {
@@ -154,7 +159,7 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.getByTestId("members-filter").fill("dev");
   const roleCell = page.getByTestId("member-roles").first();
   await expect(roleCell).toBeVisible({ timeout: 8000 });
-  // remember what this member IS: the cleanup below puts them back, and it must be their own tier —
+  // remember what this member IS: the cleanup below puts them back, and it must be their own tier
   // dev-user is the tenant's admin, and "demote the last admin" is refused by the server (correctly)
   const originalRole = (await roleCell.getByTestId("member-role-select").innerText()).trim();
   await roleCell.getByTestId("member-role-select").click();
@@ -173,23 +178,23 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await expect(page.getByTestId("roles-list")).not.toContainText(name, { timeout: 8000 });
 });
 
-// #420 the console's vocabulary. A built-in role is shown as the SAME capability grid used to
-// build a custom one (checked, disabled) rather than a run-on line of names; the two dropdowns in the
-// assignment row say which is which; and the member field is a name search rather than a request for
-// an internal "sub".
-test("#420 built-ins render as read-only capability checkboxes, and members are picked by name", async ({ page }) => {
+// #420, RE-AIMED by #586 ②: what banned was the run-on "cap · cap · cap" line, and
+// what replaced it has changed shape once more — at rest a built-in is its NAME, and hovering the name
+// raises the measured "what it can do" window (the read-only grid rows left the list with the ruling
+// ). What this keeps: the vocabulary rules — no run-on line,
+// members picked by name, definitions tab defines only.
+test("#420 a built-in explains itself from its name, and members are picked by name", async ({ page }) => {
   await page.goto("/admin/roles");
   await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
 
-  // built-in `manager` shows its capabilities as checked, disabled checkboxes
-  const managerView = page.getByTestId("builtin-manager-cap-view");
-  await expect(managerView).toBeVisible();
-  await expect(managerView).toBeChecked();
-  await expect(managerView).toBeDisabled();
-  // …and a capability it does NOT have is present but unchecked (the grid is the whole vocabulary)
-  const viewerDelete = page.getByTestId("builtin-viewer-cap-delete");
-  await expect(viewerDelete).toBeVisible();
-  await expect(viewerDelete).not.toBeChecked();
+  // hovering (here: tapping — the same controlled toggle) `manager` raises the measured list
+  await page.getByTestId("role-tip-manager").click();
+  // Radix renders the content twice (the floating tooltip + an offscreen aria copy) — read the one
+  // inside the tooltip role, which is the one a person sees
+  const tip = page.getByRole("tooltip").getByTestId("role-tip-manager-content");
+  await expect(tip, "the manager name raises its capability window").toBeVisible({ timeout: 5000 });
+  await expect(tip, "…including the verb the declared bundle omits (the store confers moderate)").toContainText(/Moderate|モデレート/);
+  await page.getByTestId("role-tip-manager").click(); // fold it again
   await expect(page.getByTestId("roles-list"), "the cap · cap · cap text is gone").not.toContainText(" · ");
 
   // The ruling was about VOCABULARY — "never ask for an internal sub, search by name" — not about
