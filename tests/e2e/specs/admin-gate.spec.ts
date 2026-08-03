@@ -129,6 +129,10 @@ test("non-admin member is denied: admin → 403 (no menu entry); unviewable spac
   const admin = await adminCtx.newPage();
   await admin.goto(`${REAL_WEB}/auth/login`);
   await admin.waitForURL((u) => !u.pathname.startsWith("/auth/"), { timeout: 15_000 });
+  // #608: a REJECTED sign-in also leaves /auth/ — the callback bounces to /login?error=access, which
+  // satisfied the wait above and let the failure surface three asserts later as "the console did not
+  // render". Say what actually happened at the door instead.
+  expect(admin.url(), "the sign-in was accepted (an error redirect is a rejection, not a landing)").not.toMatch(/[?&]error=/);
   await admin.goto(`${REAL_WEB}/admin/members`);
   await expect(admin.getByRole("heading", { name: "Members" })).toBeVisible();
   // #436: the real-mode profile has no persisted chrome prefs, so the onboarding BANNER (#339 class)
