@@ -107,7 +107,16 @@ function svgBtn(svg: string, testid: string, title: string): HTMLButtonElement {
 
 export const tableInlineEditor: InlineEditor = {
   mount(container: HTMLElement, host: InnerEditHost): InlineController {
-    const grid: Grid = parseTableSource(host.getSource());
+    const parsed: Grid = parseTableSource(host.getSource());
+    // #609: an EMPTY :::table parses to zero rows, and a grid with nothing to draw rendered as a 10px
+    // sliver — the editor the placeholder advertises ("Ctrl+↵ to edit") opened onto something invisible.
+    // An empty table's editor starts as a small starter grid instead: a header row and a body row to type
+    // into. Display until touched — nothing is written back unless the user edits a cell or runs an op,
+    // the same rule every other entry into this editor follows (per-op commit, ADR-025).
+    const grid: Grid = parsed.length > 0 ? parsed : [
+      [{ text: "", header: true, colspan: 1, rowspan: 1 }, { text: "", header: true, colspan: 1, rowspan: 1 }],
+      [{ text: "", header: false, colspan: 1, rowspan: 1 }, { text: "", header: false, colspan: 1, rowspan: 1 }],
+    ];
     container.className = "cm-lp-table-edit";
     container.setAttribute("data-testid", "table-edit");
 

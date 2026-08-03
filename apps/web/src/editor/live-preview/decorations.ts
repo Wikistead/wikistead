@@ -2820,6 +2820,16 @@ class MacroWidget extends WidgetType {
   // #278 §2a: a STABLE key (container offsets + index) so the widget rebuilds ONLY when the edited slot
   // changes (mount / unmount the island) — never per-render churn (theeq-churn anti-test concern).
   private slotKey(v: SlotEdit | null) { return v ? `${v.container.from}:${v.container.to}:${v.index}` : ""; }
+  // #609: "this widget is showing the empty placeholder" — ONE definition, read by the placeholder branch
+  // AND by the click dispatch below. It was inline in toDOM, and the click path asked a different question
+  // ("does this macro click-edit"), so an empty :::table clicked into an editor whose grid had nothing to
+  // draw — a 10px sliver, which on the device read as "the placeholder vanished". The same rule written
+  // twice is how #600's empty/align split happened; this is it written once.
+  // (backlinks/children are exempt for the reason the placeholder branch documents: their body is ALWAYS
+  // empty and their content is host-resolved, so an empty body is their normal state, not an unfinished one.)
+  private showsEmptyPlaceholder(): boolean {
+    return this.body.trim() === "" && this.name !== "backlinks" && this.name !== "children";
+  }
   eq(other: MacroWidget) {
     // Compare by `name` (the registry key), NOT the `macro` object: the directive renderer
     // passes a FRESH { liveRender, richEditUI } literal every render, so a `macro` identity
@@ -2861,7 +2871,7 @@ class MacroWidget extends WidgetType {
     // like blank space even though a block widget occupies it (so vertical caret motion
     // "jumps" past invisible content). Render a common, visible placeholder for ALL macros
     // when the body is empty, so the block is obviously present and obviously editable.
-    if (this.body.trim() === "" && this.name !== "backlinks" && this.name !== "children") {
+    if (this.showsEmptyPlaceholder()) {
       // #307 / ADR-127: `:::backlinks` has an ALWAYS-empty body (its content is the host-resolved list, not
       // the source), so it must NOT take this generic "Empty macro" placeholder — it flows to the liveRender +
       // host-resolve path below (which renders the list, or collapses/placeholders when there are no backlinks).
@@ -3088,7 +3098,11 @@ class MacroWidget extends WidgetType {
       // editModeOf defaults to "inline" for a macro with NO edit UI at all, so a zero-arg dynamic
       // block (:::children) hit this branch and a body click became EXPLICIT ENTRY (raw reveal with
       // nothing to type) instead of the atom selection its class demands.
-      const clickEdits = !this.macro.editUI && this.macro.richEditUI?.present === "inline"; // table (#154) only
+      // #609: the click-to-edit exception applies to a table WITH CONTENT (#154's cell-edit UX rides the
+      // body click). While the widget is showing the empty placeholder, the click behaves like every other
+      // macro's — select the atom, keep the placeholder — which is also what the placeholder's own words
+      // promise ("Ctrl+↵ to edit" is the entry, and it stays visible to be read).
+      const clickEdits = !this.macro.editUI && this.macro.richEditUI?.present === "inline" && !this.showsEmptyPlaceholder(); // table (#154) only
       const isLayout = this.name === "columns" || this.name === "tabs";
       wrap.addEventListener("mousedown", (e) => {
         e.preventDefault();
