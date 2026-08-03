@@ -2,9 +2,8 @@
 //
 // These are properties of the DATA, not of the code that writes it, and each one closes a specific
 // hole: a credential must not outlive its member (or a removed person keeps a way in), a re-invite of
-// the same address must not be blocked forever by a dormant row, only OUR OWN subjects may carry a
-// password (an external IdP asserting `wlocal_` is the #569/#592 spoof), and one tenant must never
-// read another's hashes.
+// the same address must not be blocked forever by a dormant row, a password belongs to a member of THIS
+// tenant, and one tenant must never read another's hashes.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -70,18 +69,27 @@ describe('#568 §1: a password cannot outlive, escape, or be spoofed into its me
     await expect(putCredential(sub, `${sub}@e2e.test`, await hashPassword('pw'))).rejects.toThrow()
   }, 120_000)
 
-  it('only a subject THIS product minted may carry a password', async () => {
-    // The `wlocal_` grammar is the whole point of #569's reservation: an external IdP may not assert
-    // one, so a row that is not one cannot be a local credential either. Enforced by the table, not
-    // only by the code that inserts.
+  // #606 / ADR-205 §2 (ruled A, 2026-08-04): this used to assert the opposite — the table refused a
+  // credential for any subject that was not `wlocal_`. That rule described what the product happened to
+  // allow (a password only ever arrived by minting one), not what it must forbid, and it made the ruled
+  // feature impossible: an SSO tenant's members are ALL IdP-derived, so "give this member a password
+  // entrance too" could never be given to the people who need it (#605's break-glass).
+  //
+  // What the CHECK was protecting is still protected, one layer up: an external IdP may not ASSERT a
+  // reserved subject (#569/#592), so an IdP-derived member's sub is one this product wrote down for them.
+  // Both halves are measured here — the credential attaches, and the assertion is still refused.
+  it('an IdP-derived member may hold a password — and an IdP still cannot assert a reserved sub', async () => {
     const foreign = `oidc-sub-lc568-${STAMP}`
     subs.push(foreign)
     await db.tx((tx) => enrolUnderSeatCap(tx, fgaClient, { id: TENANT, plan: 'business' }, { sub: foreign, email: `${foreign}@e2e.test` }, 'member', 'invite'))
-    await expect(
-      db.sql`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
-             VALUES (${TENANT}, ${foreign}, ${`${foreign}@e2e.test`}, ${'s2$1$1$1$AA$BB'})`,
-      'an OIDC subject has no business holding a password here',
-    ).rejects.toThrow()
+    await putCredential(foreign, `${foreign}@e2e.test`, await hashPassword('pw'))
+    expect((await db.sql`SELECT 1 FROM local_credentials WHERE member_sub = ${foreign}`).length,
+      'the password attaches to the sub the member already has — nobody is duplicated').toBe(1)
+
+    const { externalSubViolation } = await import('../auth/reserved-subs.js')
+    expect(externalSubViolation(`wlocal_${STAMP}`),
+      'the spoof the dropped CHECK was standing in for is refused where it arrives').toBeTruthy()
+    expect(externalSubViolation(foreign), 'an ordinary external subject is untouched').toBeFalsy()
   }, 120_000)
 
   it('one identifier per tenant — and removing the member frees it again (M4)', async () => {
