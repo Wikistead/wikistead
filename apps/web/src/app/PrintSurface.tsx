@@ -60,6 +60,12 @@ export function PrintSurface({ md, title, diagram }: {
       withDiagramHost(diagram ?? null, () => withEmbedHost(embed, () => {
         bodyRef.current!.replaceChildren(renderMarkdownToDom(md));
       }));
+      // #207 (review rejection, 2026-08-04): paper has no "click to open". The export document already opens
+      // every disclosure on the way out; the portal — the one path the app cannot intercept — printed a
+      // closed <details> as its summary line and nothing else, which is the content-loss class this
+      // ticket exists for, one macro over from the tabs that were just fixed. Same treatment here. The
+      // portal is print-only DOM (hidden on screen), so opening costs nothing on screen.
+      for (const d of bodyRef.current.querySelectorAll("details:not([open])")) d.setAttribute("open", "");
     });
     return () => { cancelled = true; };
   }, [md, diagram]);

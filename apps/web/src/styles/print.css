@@ -104,7 +104,11 @@
      Paper has no selection, so every panel is shown and each is headed by its own label. The heading
      borrows the accent underline the active tab wears on screen, so the printed page reads as the same
      document rather than as a stack of unlabelled prose. */
-  [data-print-root] .cm-lp-tabbar { display: none !important; } /* the labels are on the panels now */
+  /* The bar STAYS: its labels are the only place the tab names exist as real text (the per-panel
+     headings below are ::before content, which no text measurement — and no screen reader — sees).
+     Hiding it printed a page where "Alpha" existed nowhere the DOM could show; on paper the bar reads
+     as a small legend above the expanded panels. */
+  [data-print-root] .cm-lp-tabbar { pointer-events: none; }
   [data-print-root] .cm-lp-tabpanel {
     display: block !important;
     margin-bottom: 1.2em;
