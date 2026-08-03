@@ -68,6 +68,10 @@ export function renderHtmlTable(html: string): HTMLTableElement {
 export const tableMacro: DirectiveMacro = {
   kind: "directive",
   name: "table",
+  // #600 bounce: the placeholder said "Empty table" in a Japanese UI, because this macro has no slash
+  // entry (a table is inserted from the toolbar) and so had no localised name to fall back on. The
+  // palette already had one; it is reused rather than a second name being written for the same block.
+  nameKey: "palette.table",
   exportFidelity: "preserve", // HTML is standard Markdown; round-trips verbatim
   richEditUI: { present: "inline", editor: tableInlineEditor }, // #154: in-editor WYSIWYG table editing (was #86 modal)
   tier: tableTier, // ADR-025 step 3: host auto-demotes pipe ⟷ :::table
