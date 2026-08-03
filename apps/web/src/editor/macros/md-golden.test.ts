@@ -9,6 +9,12 @@ import { renderMarkdownToHtml, builtinMacroRegistry } from "@wikistead/macro-ren
 // The corpus is byte-pinned precisely so a change like this cannot happen quietly; it happened loudly,
 // with a ruling behind it, and the new bytes are the record of it.
 //
+// #598 (2026-08-03): the DOM-sink snapshots moved on purpose. Every macro element now carries the name
+// of what it is (`data-wks-el`, stamped once at the dispatch in the shared visitor) so the parity gate can
+// ask "is THIS element in the exported document" per element, instead of counting raw markers and hoping.
+// Display is unchanged — it is an attribute, and the SafeHtml snapshot below is untouched, which is the
+// evidence that only the DOM sink learned to name things.
+//
 // #384 / ADR-160 stage 1: the GOLDEN CORPUS byte-pin. One fixture document exercising every construct in
 // the walker inventory; the CURRENT DOM serialization and the CURRENT SafeHtml string are pinned as
 // snapshots BEFORE the visitor extraction and must stay byte-stable through every migration stage

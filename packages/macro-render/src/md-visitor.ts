@@ -59,6 +59,19 @@ export interface MdSink {
     resolved: boolean;
     walkChildren: () => void; // render the lezer node's children through this same sink (generic fallback)
   }): void;
+  /**
+   * #598 (parity gate, identity slice): name what was just emitted.
+   *
+   * Called immediately after a `fence` / `directive` hook returns, with the element's own vocabulary (a
+   * fence's language, a directive's name). A sink that can carry the name stamps it on whatever it just
+   * produced; a sink that cannot leaves this out.
+   *
+   * It exists because the gate could only ask "did SOMETHING render here" — it compared surfaces by
+   * counting raw markers and looking for placeholder text, which cannot tell a table that rendered from a
+   * table that silently became a paragraph. With a name on the element, the question becomes "is this
+   * element on that surface", per element, which is what the ticket asked for.
+   */
+  stamp?(el: { kind: "fence" | "directive"; name: string | null }): void;
 }
 
 // Mark/structural nodes whose own text must NOT be emitted.
@@ -288,7 +301,9 @@ function walkBlock(st: WalkState, node: MdNode): number | void {
     case "FencedCode": case "CodeBlock": {
       const t = node.getChild("CodeText");
       const info = node.name === "FencedCode" ? node.getChild("CodeInfo") : null;
+      const lang = info ? txt(src, info).trim().split(/\s+/)[0] ?? null : null;
       sink.fence({ blockName: node.name, info: info ? txt(src, info) : null, body: t ? txt(src, t) : "", nodeFrom: node.from });
+      sink.stamp?.({ kind: "fence", name: lang });
       return;
     }
     case "HorizontalRule": sink.leaf("hr"); return;
@@ -332,6 +347,7 @@ function walkBlock(st: WalkState, node: MdNode): number | void {
         resolved: !!rd,
         walkChildren: () => walkBlockChildren(st, node),
       });
+      sink.stamp?.({ kind: "directive", name: parsed?.name ?? null });
       return end;
     }
     // Unknown block (incl. HTMLBlock — the #89 XSS lifeline: literal source, never a live element).

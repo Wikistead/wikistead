@@ -36,6 +36,14 @@ const KNOWN_RED = {
   // #85 ③ / ADR-194 addendum (ruling pending): the copied CSS carries @font-face rules whose url is
   // root-absolute, so opening the file asks the filesystem root for fonts that are not there.
   failedRequests: [/wikistead-mono|udevgothic|\.woff2$/],
+  // #598 identity slice: elements the saved document does not carry under their own name. Recorded
+  // rather than hidden, and the assertion is EQUALITY — fixing one fails the gate until the line goes.
+  //
+  // `tabs` is the first thing this dimension found, and it is a real one: every other macro in the
+  // fixture arrives in the saved file under its own name and this one does not appear at all. Whether
+  // the export drops it or renders it as something anonymous is the next slice's question — it is
+  // recorded here so the gate is green and honest rather than green and quiet.
+  unidentified: ["tabs"] as string[],
 } as const;
 
 // Macros that legitimately render NOTHING with the fixture's data: a tag list with no tagged pages and
@@ -175,20 +183,29 @@ test("#598: every registered element survives the export, the file, and the page
   await opened.goto(`file://${savedPath}`);
   await sleep(700);
 
-  // ---- 1a. NOT IN THIS SLICE: per-element "it rendered on both surfaces" ----
+  // ---- 1a. per-element identity: is THIS element on the page a reader gets? ----
   //
-  // Tried and withdrawn, with the reason, because a half-right gate is worse than an honest gap. The
-  // check compared a per-macro marker (`.cm-lp-<name>`) across the two surfaces, and it immediately
-  // found `details` "missing from the file" — which is not a defect: a CONTAINER macro (registry.ts
-  // `containerClass`) is a CSS box on the editing surface and a semantic `<details>` in the export, so
-  // the marker legitimately changes shape. Landing it would have meant either a false red on every
-  // container macro or a hand-written per-macro mapping — an enumerated list, which is the thing #544
-  // ruled out.
+  // The slice this replaces was withdrawn for a good reason: it compared a per-macro CSS marker across
+  // surfaces and called `details` missing, because a CONTAINER macro is a CSS box while editing and a
+  // semantic `<details>` in the export. The marker legitimately changes shape, so the comparison was
+  // measuring the styling rather than the element.
   //
-  // The next slice gives each macro a per-surface IDENTITY the renderers agree on (a data attribute
-  // emitted by the shared visitor, so it travels), and then this check is exact for every macro
-  // including the ones that transform. Until then the gate proves the four dimensions below, and this
-  // paragraph is the record of what it does not yet prove.
+  // The shared visitor now NAMES what it emitted (`data-wks-el`, stamped once at the dispatch, so every
+  // surface built on that visitor carries it). The question is exact: for each macro in the registry,
+  // is an element with its name in the saved document. A macro that transforms is still itself; a macro
+  // that silently degraded into a paragraph is not.
+  const identified = await opened.evaluate(() =>
+    [...new Set([...document.querySelectorAll("main.wks-export-doc [data-wks-el]")].map((el) => el.getAttribute("data-wks-el") ?? ""))]);
+  const missing = elements
+    .map((e) => e.name)
+    .filter((name) => !identified.includes(name))
+    .filter((name) => !RENDERS_NOTHING_WITHOUT_DATA.includes(name))
+    .sort();
+  expect(
+    missing,
+    `an element is not in the exported document under its own name (present: ${identified.sort().join(", ")}). ` +
+    "If you FIXED one, delete it from KNOWN_RED — the list only shrinks",
+  ).toEqual([...KNOWN_RED.unidentified].sort());
 
   // ---- 1b. no element rendered as an ellipsis placeholder ----
   const placeholders = await opened.evaluate(() => Array.from(document.querySelectorAll("main.wks-export-doc *"))
