@@ -149,6 +149,52 @@ describe("#589: one list, one place to edit a sign-in method", () => {
     }
   });
 
+  // review: the tab still opened with "configure your organization's identity provider (OIDC)",
+  // written when OIDC was the only way in. Below it the list now carries SAML, password sign-in and
+  // platform login, so a method-specific sentence introduced methods it did not describe.
+  it("the shared header names no single sign-in method", () => {
+    for (const loc of [en, ja] as unknown as Array<{ adminAuth: Record<string, string> }>) {
+      // Discovery: every method's display name is an `adminAuth.methodXxx` key, so a sixth method
+      // joins this check by existing. An enumerated list would pass the next one through (#544).
+      const names = Object.entries(loc.adminAuth)
+        .filter(([k]) => /^method[A-Z]/.test(k))
+        .map(([, v]) => v);
+      expect(names.length, "the discovery found the method names").toBeGreaterThanOrEqual(3);
+      for (const header of [loc.adminAuth.body!, loc.adminAuth.warning!]) {
+        for (const name of names) {
+          expect(header, `"${name}" is one method; a header above all of them must not name it`)
+            .not.toContain(name);
+        }
+        // the retired `methodTenantOidc` key is gone (F8), so OIDC has no name left to discover
+        for (const oidc of ["OIDC", "identity provider", "ID プロバイダー"]) {
+          expect(header, `${oidc} is one method`).not.toContain(oidc);
+        }
+      }
+    }
+  });
+
+  it("the header does not repeat what the list already says about itself", () => {
+    for (const loc of [en, ja] as unknown as Array<{ adminAuth: Record<string, string>; signInMethods: Record<string, string> }>) {
+      const listBody = loc.signInMethods.body!;
+      expect(loc.adminAuth.body).not.toBe(listBody);
+      for (const claim of listBody.split(/[。.]/).map((s) => s.trim()).filter((s) => s.length > 8)) {
+        expect(loc.adminAuth.body, `the list already says "${claim}"`).not.toContain(claim);
+      }
+    }
+  });
+
+  it("advice about ONE method lives in that method's row", () => {
+    // Testing a connection is about an issuer, so it belongs beside the issuer field rather than
+    // above every method in the tab.
+    const tab = read("./AdminAuthTab.tsx");
+    const list = read("./AdminSignInMethodsSection.tsx");
+    expect(list).toContain("adminConnections.verifyBeforeEnable");
+    expect(tab, "the tab must not carry connection-specific advice").not.toContain("verifyBeforeEnable");
+    for (const loc of [en, ja] as unknown as Array<{ adminConnections: Record<string, string> }>) {
+      expect(loc.adminConnections.verifyBeforeEnable).toBeTruthy();
+    }
+  });
+
   it("both locales carry the list's own copy", () => {
     for (const loc of [en, ja] as Array<{ signInMethods: Record<string, string> }>) {
       for (const k of ["title", "body", "edit", "selectionOn", "selectionOff", "notWorking"]) {

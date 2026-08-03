@@ -308,6 +308,12 @@ export function AdminSignInMethodsSection() {
                     {testResult.ok ? t("adminAuth.testOk") : (testResult.error ?? t("adminAuth.testFail"))}
                   </div>
                 )}
+                {/* This advice used to sit above the whole tab, from when OIDC was the only way in.
+                    It is about an issuer, so it belongs next to the issuer: the server re-validates
+                    discovery whenever an enabled row is saved, and refuses one it cannot reach. */}
+                <p className="mt-0 mb-0 text-xs text-fg-dim" data-testid={`admin-connection-verify-${c.id}`}>
+                  {t("adminConnections.verifyBeforeEnable")}
+                </p>
                 <div className="flex gap-2">
                   {/* The only connection-test path in the product (POST /admin/oidc/test): it validates
                       an issuer's discovery document, so it serves any row. */}

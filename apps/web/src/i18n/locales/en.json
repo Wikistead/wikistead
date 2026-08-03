@@ -9,6 +9,7 @@
     "deleteTitle": "Delete this connection?",
     "deleteConfirm": "Delete \"{{name}}\"? Members who signed in through it keep their content, but their sign-in identities will NOT reconnect if you re-create it.",
     "lockoutRefused": "That would remove the last way to sign in. Enable another connection first.",
+    "verifyBeforeEnable": "Test the connection before you enable it. An enabled connection whose issuer cannot be reached is refused at save.",
     "presetBadge": "preset: {{preset}}",
     "moveUp": "Move up",
     "moveDown": "Move down",
@@ -365,8 +366,8 @@
   },
   "adminAuth": {
     "title": "Authentication",
-    "body": "Configure your organization's identity provider (OIDC) for member sign-in.",
-    "warning": "Changing these settings affects how everyone signs in. Use Test connection and enable only a verified configuration. Your current session stays active so you can fix mistakes.",
+    "body": "How people sign in to this workspace, and who becomes a member when they do.",
+    "warning": "Changing these settings affects how everyone signs in. Your current session stays active, so you can fix a mistake.",
     "issuer": "Issuer URL",
     "clientId": "Client ID",
     "clientSecret": "Client secret",

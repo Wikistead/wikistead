@@ -100,7 +100,7 @@ test("admin Auth tab edits a sign-in method in its row, and Test reports a bad i
   await openDemo(page);
   await page.goto("/admin/auth");
   await expect(page.getByTestId("admin-auth")).toBeVisible();
-  await expect(page.getByTestId("oidc-warning")).toBeVisible();
+  await expect(page.getByTestId("sign-in-warning")).toBeVisible();
   await expect(page.getByTestId("sign-in-methods-list")).toBeVisible();
 
   const row = page.locator("[data-testid^=admin-connection-]").filter({ has: page.locator("[data-testid^=admin-connection-edit-]") }).first();
