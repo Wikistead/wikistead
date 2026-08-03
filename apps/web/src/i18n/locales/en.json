@@ -984,13 +984,11 @@
     "revokeConfirm": "Revoke the invite for {{email}}? The sent link stops working.",
     "filterPlaceholder": "Filter members…",
     "filterLabel": "Filter members",
-    "addRole": "+ Role",
     "seatLimit": "Seat limit reached. Upgrade to invite more members.",
     "inviteFailed": "Could not create the invite.",
     "pendingRow": "{{email}} · {{role}}",
     "inviteRoleOptional": "Custom role (optional)",
-    "inviteRoleNone": "No custom role",
-    "roleChangeOrAdd": "Change or add role"
+    "inviteRoleNone": "No custom role"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",

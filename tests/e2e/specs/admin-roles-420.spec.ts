@@ -154,13 +154,19 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.getByTestId("members-filter").fill("dev");
   const roleCell = page.getByTestId("member-roles").first();
   await expect(roleCell).toBeVisible({ timeout: 8000 });
+  // remember what this member IS: the cleanup below puts them back, and it must be their own tier —
+  // dev-user is the tenant's admin, and "demote the last admin" is refused by the server (correctly)
+  const originalRole = (await roleCell.getByTestId("member-role-select").innerText()).trim();
   await roleCell.getByTestId("member-role-select").click();
   await page.getByRole("option", { name }).click();
-  await expect(roleCell.getByTestId("member-role-chip").filter({ hasText: name })).toBeVisible({ timeout: 8000 });
+  // #579 (2026-08-03): the row shows ONE role in its control — chips are gone with the additive model.
+  await expect(roleCell.getByTestId("member-role-select")).toHaveText(name, { timeout: 8000 });
 
-  // Unassign + delete (leave the board clean).
-  await roleCell.getByTestId("member-role-chip").filter({ hasText: name }).getByTestId("member-role-remove").click();
-  await expect(roleCell.getByTestId("member-role-chip").filter({ hasText: name })).toHaveCount(0, { timeout: 8000 });
+  // Put them back on a tier and delete the role (leave the board clean). #579 (2026-08-03): there is no
+  // per-chip ×, because there are no chips — you move them to another value, which replaces.
+  await roleCell.getByTestId("member-role-select").click();
+  await page.getByRole("option", { name: originalRole, exact: true }).click();
+  await expect(roleCell.getByTestId("member-role-select")).toHaveText(originalRole, { timeout: 8000 });
   await page.goto("/admin/roles");
   await page.getByTestId("custom-role-row").filter({ hasText: name }).getByTestId("role-delete").click();
   await page.getByTestId("role-delete-confirm").click(); // #504: delete confirms first

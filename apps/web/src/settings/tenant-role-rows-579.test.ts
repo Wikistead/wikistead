@@ -8,7 +8,7 @@
 // row and a separate form above the table, which is what the user tripped over ("oh, THAT's what the
 // top half was").
 import { describe, it, expect } from "vitest";
-import { buildTenantRoleRows, buildGroupRoleRows, filterMembers, pickerOptions, resolveRoleChoice, BUILT_IN_TIERS, type TenantAssignment, type RowMember } from "./tenant-role-rows";
+import { buildTenantRoleRows, buildGroupRoleRows, filterMembers, roleOptions, currentRoleValue, resolveRoleChoice, BUILT_IN_TIERS, type TenantAssignment, type RowMember } from "./tenant-role-rows";
 
 const m = (sub: string, role: "admin" | "member" = "member", name: string | null = null): RowMember =>
   ({ sub, role, display_name: name, email: `${sub}@x.test` });
@@ -107,23 +107,42 @@ describe("#579: finding a member is a filter over the table, not a picker inside
 // selector." The row had a Select for the tier and a button that opened a second Select for custom
 // roles. One picker now offers both, so the decision — is this pick a tier swap or a role addition
 // lives here, where it can be tested, rather than in the handler.
-describe("#579 review: one picker, two mechanisms underneath", () => {
+// RE-AIMED by #579 (2026-08-03 ruling): the picker used to offer "the tier you are NOT on plus the
+// roles you do not hold", because the row drew what you HAD as chips beside it. Roles do not stack
+// the server converges a tenant principal to one (a71d8100) — so the control now shows the role itself
+// and offers the whole vocabulary. Asserting the old option list would be asserting the additive model
+// this ticket removed.
+describe("#579: one control, showing the role the member has", () => {
   const row = buildTenantRoleRows(
     [m("alice", "member")],
     [a("as1", "r1", "Space creators", "user:alice")],
     ROLES,
   )[0]!;
 
-  it("offers the tier the member is NOT on, plus the roles they do not hold", () => {
-    expect(pickerOptions(row)).toEqual([
+  it("offers every tier and every tenant role — including the one they hold", () => {
+    // a control whose value is the current role must be able to SHOW it; hiding held roles is what
+    // forced the chips
+    expect(roleOptions(ROLES)).toEqual([
+      { value: "tier:member", label: "member" },
       { value: "tier:admin", label: "admin" },
+      { value: "role:r1", label: "Space creators" },
       { value: "role:r2", label: "Key issuers" },
     ]);
   });
 
-  it("an admin is offered member, not admin again", () => {
-    const adminRow = buildTenantRoleRows([m("bob", "admin")], [], ROLES)[0]!;
-    expect(pickerOptions(adminRow)[0]).toEqual({ value: "tier:member", label: "member" });
+  it("shows the custom role when they hold one, and their tier when they do not", () => {
+    expect(currentRoleValue(row)).toBe("role:r1");
+    const plain = buildTenantRoleRows([m("bob", "admin")], [], ROLES)[0]!;
+    expect(currentRoleValue(plain)).toBe("tier:admin");
+  });
+
+  it("a row carrying more than one role (data from before the convergence) still shows one value", () => {
+    const two = buildTenantRoleRows(
+      [m("carol", "member")],
+      [a("as1", "r1", "Space creators", "user:carol"), a("as2", "r2", "Key issuers", "user:carol")],
+      ROLES,
+    )[0]!;
+    expect(currentRoleValue(two), "one value, and choosing anything folds the rest server-side").toBe("role:r1");
   });
 
   it("resolves a tier pick to a tier change and a role pick to an assignment", () => {
@@ -140,9 +159,10 @@ describe("#579 review: one picker, two mechanisms underneath", () => {
   it("a custom role NAMED admin cannot be mistaken for the tier (the prefix carries the mechanism)", () => {
     const roles = [...ROLES, { id: "r9", name: "admin", scope: "tenant" }];
     const r = buildTenantRoleRows([m("carol")], [], roles)[0]!;
-    const opts = pickerOptions(r);
-    expect(opts.filter((o) => o.label === "admin").map((o) => o.value).sort()).toEqual(["role:r9", "tier:admin"]);
-    expect(resolveRoleChoice("role:r9", r.addable)).toEqual({ kind: "custom", roleId: "r9" });
+    const opts = roleOptions(roles);
+    expect(opts.filter((o: { label: string }) => o.label === "admin").map((o: { value: string }) => o.value).sort()).toEqual(["role:r9", "tier:admin"]);
+    expect(resolveRoleChoice("role:r9", roles.filter((x) => x.scope === "tenant"))).toEqual({ kind: "custom", roleId: "r9" });
+    void r;
   });
 });
 
@@ -170,8 +190,7 @@ describe("#582: built-in role names are proper nouns", () => {
   });
 
   it("the picker labels a tier with its own name, not a translation key", () => {
-    const row = buildTenantRoleRows([m("alice", "member")], [], ROLES)[0]!;
-    expect(pickerOptions(row).map((o) => o.label)).toContain("admin");
+    expect(roleOptions(ROLES).map((o: { label: string }) => o.label)).toContain("admin");
   });
 });
 
