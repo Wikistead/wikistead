@@ -1,5 +1,4 @@
-import type React from "react";
-import { RoleTip } from "../ui/RoleTip";
+import { RoleCaps } from "../ui/RoleTip";
 import type { SelectOption } from "../ui/Select";
 
 // #586 (review rejection, 2026-08-03): — every surface that
@@ -29,12 +28,8 @@ export function withRoleTips(options: readonly RoleChoice[], scope: "space" | "p
   return options.map((o) => {
     const caps = o.roleCapabilities;
     if (!caps) return { value: o.value, label: o.label };
-    return {
-      value: o.value,
-      label: o.label,
-      wrap: (label: React.ReactNode) => (
-        <RoleTip as="option" origin="role" scope={scope} roleCapabilities={caps}>{label}</RoleTip>
-      ),
-    };
+    // #582 (review rejection): a floating panel beside the list, not a reveal inside the row. Same component
+    // the row badges raise, so there is one design rather than two that drift.
+    return { value: o.value, label: o.label, hint: <RoleCaps origin="role" scope={scope} roleCapabilities={caps} /> };
   });
 }

@@ -102,10 +102,13 @@ describe("#586 a surface that offers a role says what the role does", () => {
         const before = src.slice(Math.max(0, m.index! - 220), m.index!);
         const after = src.slice(m.index!, m.index! + 300);
         const where = `${f.slice(web.length + 1)}: ${after.replace(/\s+/g, " ").slice(0, 90)}`;
-        if (/hint:/.test(after)) { offenders.push(`${where} — prints the capabilities instead of revealing them`); continue; }
-        // Two idioms are equally fine: the option was passed through `withRoleTips`, or it carries its
-        // own `wrap:`. Either way the name can be asked what it means.
-        const revealed = /withRoleTips\(/.test(before) || /wrap:[\s\S]{0,120}RoleTip/.test(after);
+        // RE-AIMED by #582 (review rejection, 2026-08-04). For one round the reveal was drawn INSIDE the
+        // option, and the ruling rejected that too: "…" — a floating
+        // panel, the one the row badges already raise. So both idioms now hand the Select a PANEL
+        // through `withRoleTips`, or as an inline `hint: <RoleCaps …>`. What must not come back is a
+        // wrapper that renders capability text into the row.
+        if (/wrap:/.test(after)) { offenders.push(`${where} — draws the capabilities inside the option`); continue; }
+        const revealed = /withRoleTips\(/.test(before) || /hint:[\s\S]{0,120}RoleCaps/.test(after);
         if (!revealed) offenders.push(`${where} — a role name with no way to ask what it does`);
       }
     }
@@ -114,21 +117,24 @@ describe("#586 a surface that offers a role says what the role does", () => {
   });
 
   it("nothing anywhere prints a capability list under an option", () => {
-    // The reject was about the SHAPE, not about one screen: a list under every label. Any file that
-    // hands the Select a `hint:` has grown it back, whether or not it uses capNoun to build the label
-    // which is how a custom-role option would slip past the walk above.
+    // The reject was about the SHAPE, not about one screen: capability text living in the row. Two shapes
+    // have now been rejected for it — a printed line, then an in-row reveal — so what is banned is text
+    // rendered INTO the option, whichever prop carries it.
     const offenders = appFiles()
-      .filter((f) => !f.endsWith("AnalyticsDashboard.tsx")) // its `hint` is a metric's description, a different prop on a different component
-      .filter((f) => /hint:\s*(effectiveCaps|closureOf|\[)/.test(readFileSync(f, "utf8")))
+      .filter((f) => /hint:\s*(effectiveCaps|closureOf|\[)|wrap:[\s\S]{0,120}(RoleTip|capNoun)/.test(readFileSync(f, "utf8")))
       .map((f) => f.slice(web.length + 1));
-    expect(offenders, "capabilities are revealed on hover, not printed under every choice").toEqual([]);
+    expect(offenders, "capabilities are shown in a floating panel, not inside the choice").toEqual([]);
   });
 
-  it("the Select component no longer has a way to print one", () => {
-    // Belt and braces: as long as the prop exists, a screen can reach for it again and the walk above
-    // only catches the callers it can recognise.
-    expect(read("ui/Select.tsx"), "the `hint` prop went with the shape it drew").not.toMatch(/hint\?:/);
-    expect(read("ui/Select.tsx"), "and the wrapper that replaced it is there").toContain("wrap?:");
+  it("the Select raises a floating panel, and has no way to draw one inside the row", () => {
+    // Belt and braces: as long as a prop that renders into the item exists, a screen can reach for it
+    // again and the walk above only catches the callers it can recognise.
+    const select = read("ui/Select.tsx");
+    expect(select, "the in-row wrapper went with the shape it drew").not.toMatch(/wrap\?:/);
+    expect(select, "and the panel slot is there").toMatch(/hint\?:/);
+    expect(select, "raised above the select's own layer, outside the box that clips it").toContain("createPortal");
+    // the highlight is what a keyboard user moves; a focus-based reveal never opens for them
+    expect(select).toContain("data-highlighted");
   });
 
   it("the capability vocabulary is complete, so nothing falls through as a raw wire value", () => {

@@ -12,7 +12,7 @@ import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { GranteeRoleForm } from "./GranteeRoleForm";
 import { capNoun, effectiveCaps } from "./role-nouns";
-import { RoleTip } from "../ui/RoleTip";
+import { RoleTip, RoleCaps } from "../ui/RoleTip";
 import { Input } from "../ui/Input";
 import { Select, type SelectOption } from "../ui/Select";
 import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
@@ -213,12 +213,12 @@ export function SpaceMembersTab() {
       ...caps.map((c) => ({
         value: `builtin:${c}`,
         label: capNoun(c),
-        wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" builtinCapability={c}>{l}</RoleTip>,
+        hint: <RoleCaps origin="role" scope="space" builtinCapability={c} />,
       })),
       ...customRoles.map((r) => ({
         value: `role:${r.id}`,
         label: r.name,
-        wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" roleCapabilities={r.capabilities}>{l}</RoleTip>,
+        hint: <RoleCaps origin="role" scope="space" roleCapabilities={r.capabilities} />,
       })),
     ];
   };
@@ -362,12 +362,12 @@ export function SpaceMembersTab() {
           ...GRANTABLE.map((c) => ({
             value: `builtin:${c}`,
             label: capNoun(c),
-            wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" builtinCapability={c}>{l}</RoleTip>,
+            hint: <RoleCaps origin="role" scope="space" builtinCapability={c} />,
           })),
           ...customRoles.map((r) => ({
             value: `role:${r.id}`,
             label: r.name,
-            wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="space" roleCapabilities={r.capabilities}>{l}</RoleTip>,
+            hint: <RoleCaps origin="role" scope="space" roleCapabilities={r.capabilities} />,
           })),
         ]}
         role={pick}

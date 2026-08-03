@@ -4,7 +4,7 @@ import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, us
 import { resolveGrantDispatch } from "../settings/grant-dispatch";
 import { notifyRevokeOutcome, notifyRevokeError } from "../settings/revoke-feedback";
 import { MemberSearchInput } from "./MemberSearchInput";
-import { RoleTip } from "./RoleTip";
+import { RoleTip, RoleCaps } from "./RoleTip";
 import { capNoun, effectiveCaps } from "../settings/role-nouns";
 import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
@@ -331,12 +331,12 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               ...(["view", "comment", "edit", "moderate", "manage"] as const).map((c) => ({
                 value: `builtin:${c}`,
                 label: capNoun(c),
-                wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="page" builtinCapability={c}>{l}</RoleTip>,
+                hint: <RoleCaps origin="role" scope="page" builtinCapability={c} />,
               })),
               ...(assignable.data?.custom ?? []).map((r) => ({
                 value: `role:${r.id}`,
                 label: r.name,
-                wrap: (l: React.ReactNode) => <RoleTip as="option" origin="role" scope="page" roleCapabilities={r.capabilities}>{l}</RoleTip>,
+                hint: <RoleCaps origin="role" scope="page" roleCapabilities={r.capabilities} />,
               })),
             ]}
           />

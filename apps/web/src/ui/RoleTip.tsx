@@ -32,12 +32,14 @@ export function RoleTip({
   /** #586 §1 (user ruling): the axis is ROLE vs INDIVIDUAL GRANT. Never built-in vs custom. */
   origin: "role" | "grant";
   /**
-   * Where this name is drawn. A BADGE sits in a row and carries its own focus stop and tap toggle. An
-   * OPTION sits inside an open dropdown, where both of those would be wrong: the option already owns the
-   * click (it is the choice) and Radix keeps focus on the list rather than on the item, so the tooltip
-   * follows the item's HIGHLIGHT instead — which is what a keyboard user moves with the arrow keys.
+   * Where this name is drawn. A BADGE carries its own focus stop and tap toggle; a CONTROL wraps a Select
+   * and lets the control inside own both.
+   *
+   * #582 (review rejection, 2026-08-04): the third mode — an OPTION that revealed its capabilities INSIDE the
+   * row — is gone. The ruling asked for a floating panel like the badge's, and `ui/Select` now raises one
+   * for whichever option is highlighted, using `RoleCaps` below. One design, two hosts.
    */
-  as?: "badge" | "option" | "control";
+  as?: "badge" | "control";
   /** #586 review ①: WHICH measured table answers. A space row holds a composite noun, a page row a
    *  single arm, and they confer different things — a page `edit` grant cannot comment. */
   scope?: "space" | "page" | "tenant";
@@ -46,76 +48,24 @@ export function RoleTip({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLSpanElement>(null);
-  const option = as === "option";
   // #578 bounce ③: a row whose role is CHANGED in place wraps a Select, not a badge. Same tooltip, same
   // origin colour, but the control inside owns the focus stop and the click — taking either would make
   // choosing a role a two-step affair and put a second tab stop in front of it.
   const control = as === "control";
-  const [hovered, setHovered] = useState(false);
-  // #586 review (bounce 3, minor): once the list is being driven from the keyboard, the row the pointer
-  // happens to rest on stops being the row the reader is looking at — and two open rows at once reads as
-  // a glitch. Arrowing folds the hover one. Only armed while something IS hovered, so the common case
-  // adds no listener.
-  useEffect(() => {
-    if (!hovered) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") setHovered(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [hovered]);
+  const option = false; // the in-row option mode is retired (see `as` above)
   const caps = effectiveCaps({ builtinCapability, roleCapabilities, scope });
   const label = t("roleTip.label", { caps: caps.map((c) => t(`adminRoles.cap.${c}`, c)).join(", ") });
-  const capsList = caps.map((c) => t(`adminRoles.cap.${c}`, c)).join(", ");
   // An OPTION reveals in place instead of in a tooltip. Measured, not preferred: a Radix tooltip raised
   // from inside an open Radix Select never appears — the select is a modal layer, and a tooltip portalled
   // out of it lands in the part of the document that layer has hidden. Rendering it inside the option
   // keeps the behaviour the ruling asked for (the name at rest, what it confers when you point at it)
   // without a floating layer fighting another one. Hover and the arrow-key highlight both reveal it,
   // because Radix moves `data-highlighted` rather than focus when the list is driven from the keyboard.
-  if (option) {
-    return (
-      <span
-        ref={anchor}
-        data-origin={origin}
-        // React's own handlers, on the element this component owns. Listeners attached to the Radix item
-        // and a `:hover` rule on it were both measured NOT to reveal anything, even with the option
-        // genuinely hovered — the item is Radix's, and what it does to it between renders is Radix's
-        // business. This span is ours.
-        onPointerEnter={() => setHovered(true)}
-        onPointerMove={() => setHovered(true)}
-        onPointerLeave={() => setHovered(false)}
-        className="inline-flex items-center gap-2"
-      >
-        <span>{children}</span>
-        {/* always present so the option does not resize when it reveals (a growing row moves itself out
-            from under the pointer); hidden until asked for, so the list reads as names. */}
-        <span
-          data-testid={testId ? `${testId}-caps` : "role-option-caps"}
-          className="wks-role-caps text-[10px] text-fg-dim"
-          style={{ visibility: hovered ? "visible" : undefined }}
-        >
-          {capsList}
-        </span>
-      </span>
-    );
-  }
   return (
     <Tooltip
       open={open}
       onOpenChange={setOpen}
-      content={
-        <div data-testid={testId ? `${testId}-content` : undefined}>
-          <span className="block text-[11px] font-medium">
-            {origin === "grant" ? t("roleTip.individual") : t("roleTip.role")}
-          </span>
-          <ul className="m-0 mt-1 list-none p-0">
-            {caps.map((c) => (
-              <li key={c} className="text-[11px]">{t(`adminRoles.cap.${c}`, c)}</li>
-            ))}
-          </ul>
-        </div>
-      }
+      content={<RoleCaps origin={origin} scope={scope} builtinCapability={builtinCapability} roleCapabilities={roleCapabilities} testId={testId} />}
     >
       {/* a span, not a button: these badges sit in rows that already carry actions, and a nested button
           would take a stop in the row's focus order away from the control that does something. tabIndex
@@ -142,5 +92,39 @@ export function RoleTip({
         {children}
       </span>
     </Tooltip>
+  );
+}
+
+/**
+ * The PANEL: a heading that says where the capabilities come from, and the capabilities under it, one
+ * per line.
+ *
+ * #582 (review rejection, 2026-08-04): "
+ * ". The badge tooltip was already exactly that,
+ * so the option hint is the SAME component in a different host rather than a second design — which is
+ * what the in-place reveal it replaces had become.
+ */
+export function RoleCaps({
+  builtinCapability, roleCapabilities, origin, scope, testId,
+}: {
+  builtinCapability?: string | null;
+  roleCapabilities?: readonly string[] | null;
+  origin: "role" | "grant";
+  scope?: "space" | "page" | "tenant";
+  testId?: string;
+}) {
+  const { t } = useTranslation();
+  const caps = effectiveCaps({ builtinCapability, roleCapabilities, scope });
+  return (
+    <div data-testid={testId ? `${testId}-content` : undefined}>
+      <span className="block text-[11px] font-medium">
+        {origin === "grant" ? t("roleTip.individual") : t("roleTip.role")}
+      </span>
+      <ul className="m-0 mt-1 list-none p-0">
+        {caps.map((c) => (
+          <li key={c} className="text-[11px]">{t(`adminRoles.cap.${c}`, c)}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
