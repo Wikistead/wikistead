@@ -993,7 +993,8 @@
     "inviteRoleNone": "No custom role",
     "inviteAlreadyMember": "That address already belongs to a member. Inviting them again would create a second account.",
     "enablePassword": "Add a password entrance",
-    "enablePasswordDone": "Password link created"
+    "enablePasswordDone": "Password link created",
+    "rowActions": "Actions for {{name}}"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
@@ -1319,7 +1320,7 @@
     "sectionResource": "Space / Page",
     "groupAssignTitle": "Group roles",
     "groupAssignBody": "Give a tenant role to an IdP group. Everyone in the group gets it, and loses it when they leave the group.",
-    "groupTiersNote": "Custom roles only. member and admin are set on each person's row, so the record shows who holds admin.",
+    "groupTiersNote": "A group can be given a custom role above. member and admin are set on a person's own row, so the record shows who holds admin.",
     "groupAssignEmpty": "No group holds a tenant role.",
     "groupLabel": "Group",
     "groupPlaceholder": "Select a group…",
