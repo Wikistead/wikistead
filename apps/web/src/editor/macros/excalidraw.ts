@@ -3,7 +3,7 @@ import { applyIntrinsicSvgSize } from "./svg-intrinsic-size"; // #465
 import { asMacroSource } from "./registry";
 import { writeLocalElements, readSceneElements, allElements, reconcile, elementsMap } from "./excalidraw-collab";
 import { excalidrawHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
-import i18n from "../../i18n"; // #174 comment 911: empty-state text is localized (en/ja), points at the ✎ button
+import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 
 // ```excalidraw — body is an Excalidraw scene JSON. The PREVIEW (liveRender) uses
 // Excalidraw's NON-React exportToSvg, so no React enters CodeMirror (ADR-013). The
@@ -52,6 +52,9 @@ export function themeAdaptStrokes(elements: any[], dark: boolean): any[] {
 
 export const excalidrawMacro: FenceMacro = {
   kind: "fence",
+  // #600: the palette entry is "Excalidraw drawing"; inside a sentence the empty state has said
+  // "drawing" since #174, so that stays the name.
+  nameKey: "macro.name.drawing",
   lang: "excalidraw",
   // #85 / ADR-059: degrade — the export emits a placeholder (never inline SVG, an explicit security
   // decision), so the drawing itself does not reach the static document. The fence JSON round-trips
@@ -67,7 +70,7 @@ export const excalidrawMacro: FenceMacro = {
     const scene = parseScene(body);
     if (!scene.elements.length) {
       el.classList.add("cm-lp-macro-empty");
-      el.textContent = i18n.t("macro.excalidrawEmpty");
+      el.textContent = macroPlaceholder(excalidrawMacro, "empty-open");
       return el;
     }
     const dark = ctx.theme === "dark";
@@ -90,7 +93,9 @@ export const excalidrawMacro: FenceMacro = {
         applyIntrinsicSvgSize(svg); // #465: exportToSvg has the same percentage-width shape as mermaid
       } catch {
         el.classList.add("cm-lp-macro-error");
-        el.textContent = "Invalid Excalidraw drawing";
+        // #600: was a hardcoded English sentence in a localized product, and it did not match the
+        // shape of any other placeholder.
+        el.textContent = macroPlaceholder(excalidrawMacro, "invalid");
       }
     });
     return el;

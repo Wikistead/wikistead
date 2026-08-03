@@ -7,6 +7,7 @@ import { renderMarkdownToDom, appendMarkdownInto, instanceKeyFor } from "./md-re
 // truth in @wikistead/macro-render, shared with the server export renderer. This file adds only the
 // DOM liveRender + editor metadata on top.
 import { parseLayoutItems, columnsHtmlRender, tabsHtmlRender, detailsHtmlRender } from "@wikistead/macro-render";
+import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 
 export { parseLayoutItems }; // re-export: existing editor imports (tabs/columns liveRender + tests) unchanged
 
@@ -39,7 +40,16 @@ export function columnsLiveRender(body: string, ctx?: MacroContext): HTMLElement
   const row = document.createElement("div");
   row.className = "cm-lp-columns";
   row.setAttribute("data-testid", "macro-columns");
-  for (const c of parseLayoutItems(body, "column")) {
+  const cols = parseLayoutItems(body, "column");
+  // #600: a container with no slots at all laid out an empty flex row — a block with zero height that
+  // a reader cannot see, click or identify. (An empty SLOT is a different thing and keeps its own
+  // hover affordance below.)
+  if (cols.length === 0) {
+    row.classList.add("cm-lp-macro-empty");
+    row.textContent = macroPlaceholder(columnsMacro, "empty-edit");
+    return row;
+  }
+  for (const c of cols) {
     const col = document.createElement("div");
     col.className = "cm-lp-column";
     if (!c.content.trim()) col.classList.add("cm-lp-column-empty"); // #278H: hover affordance for an empty slot
@@ -227,6 +237,12 @@ export function tabsLiveRender(body: string, ctx?: MacroContext): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "cm-lp-tabs";
   wrap.setAttribute("data-testid", "macro-tabs");
+  // #600: see columnsLiveRender — no tabs at all renders an invisible block.
+  if (items.length === 0) {
+    wrap.classList.add("cm-lp-macro-empty");
+    wrap.textContent = macroPlaceholder(tabsMacro, "empty-edit");
+    return wrap;
+  }
   const bar = document.createElement("div");
   bar.className = "cm-lp-tabbar";
   const panels = document.createElement("div");

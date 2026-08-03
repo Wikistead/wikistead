@@ -1,6 +1,6 @@
 import type { DirectiveMacro } from "./registry";
 import { embedHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender shared (degrades to a link)
-import i18n from "../../i18n"; // #174 comment 911: empty-state text localized (en/ja)
+import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 import { safeHref } from "./md-render"; // #319one shared scheme check for the degrade href (no js:/data:)
 
 // :::embed-external — embed an external resource by URL (the body is the URL). #108 / ADR-071 (551)
@@ -13,6 +13,9 @@ import { safeHref } from "./md-render"; // #319one shared scheme check for the d
 // Server HTML export also degrades to a link (the sanitizer forbids <iframe>).
 export const embedMacro: DirectiveMacro = {
   kind: "directive",
+  // #600: the palette entry reads "Embed external content" (an action). In a sentence the name is
+  // "embed", which is the word the empty-state copy has used since #174.
+  nameKey: "macro.name.embed",
   name: "embed-external",
   exportFidelity: "degrade", // an external iframe can't round-trip to static HTML → a link is the faithful degrade
   revealOnCursor: true, // paired with atomSelectable below (the URL is edited via the modal, not caret-in raw)
@@ -36,10 +39,14 @@ export const embedMacro: DirectiveMacro = {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-embed-external";
     el.setAttribute("data-testid", "macro-embed-external");
-    // #600: a block that cannot resolve here says WHAT it is and WHY, instead of an ellipsis. "…" was
-    // written for the moment before a host answered; on a surface with no host (the export, a hover
-    // card) that moment never ends, and the reader is left with three dots where a thing should be.
-    el.textContent = url ? i18n.t("macro.embedUnresolved", { url }) : i18n.t("macro.embedEmpty");
+    // #600: `…` said nothing — not even which macro was sitting there. A URL with no host to build the
+    // iframe is "this surface does not show it"; no URL at all is the empty state.
+    //
+    // The URL is deliberately NOT appended. It is one clause too many for a sentence every other
+    // placeholder shares, a native `title` is refused here (#530), and a tooltip is the thing this
+    // ticket declined to add. Nothing is lost: the URL is in the source a keystroke away, and the
+    // export path renders a real link rather than this placeholder.
+    el.textContent = macroPlaceholder(embedMacro, url ? "no-host" : "empty-url");
     return el;
   },
   htmlRender: embedHtmlRender, // server/static: a link (no iframe in exported HTML)

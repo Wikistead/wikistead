@@ -281,6 +281,10 @@ export interface FenceMacro {
   // is meaningless (mermaid) — the reviewer flagged the mermaid collapse button for removal.
   readonly foldable?: boolean;
   readonly slash?: MacroSlash; // appears in the `/` palette
+  // #600: the macro's name in a SENTENCE, for the placeholder a reader sees when the content cannot be
+  // shown. Only needed when the palette label is phrased as an action ("Embed a page"); otherwise the
+  // palette label is the name and this stays absent. Never a name invented for this purpose.
+  readonly nameKey?: string;
 }
 
 // A directive macro (:::name … :::). Unlike a fence macro, its body stays Markdown (parsed as
@@ -318,6 +322,8 @@ interface DirectiveMacroBase {
   // :::table); container directives without alternate representations omit it.
   readonly tier?: MacroTier;
   readonly slash?: MacroSlash; // appears in the `/` palette
+  // #600: see FenceMacro.nameKey — the name this macro goes by inside a placeholder sentence.
+  readonly nameKey?: string;
 }
 // CONTAINER (callout / details): a CSS box over its lines; the content stays Markdown (nested),
 // the ::: markers hide (reveal-on-cursor). No liveRender.

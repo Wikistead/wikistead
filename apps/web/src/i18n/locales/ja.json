@@ -1060,17 +1060,23 @@
     "backlinkWarning_other": "このページは {{count}} ページから参照されています。削除するとリンク切れになります。"
   },
   "macro": {
-    "excalidrawEmpty": "空の図：Ctrl+↵ で開く",
-    "embedEmpty": "空の埋め込み：Ctrl+↵ で URL を追加",
-    "pageEmbedEmpty": "空のページ埋め込み：Ctrl+↵ でページを追加",
-    "listEmpty": "該当ページはまだありません。",
-    "emptyEdit": "空の{{name}}：Ctrl+↵ で編集",
-    "emptyOpen": "空の{{name}}：Ctrl+↵ で開く",
-    "diagramRendering": "図を生成中…",
-    "diagramInvalid": "PlantUML の図が不正です",
-    "diagramUnavailable": "図のレンダラーに接続できませんでした",
-    "embedUnresolved": "外部の埋め込み（ここでは表示されません）：{{url}}",
-    "pageEmbedUnresolved": "ページの埋め込み（ここでは表示されません）"
+    "placeholder": "{{name}}：{{detail}}",
+    "placeholderEmpty": "空の{{name}}：{{detail}}",
+    "nextEdit": "Ctrl+↵ で編集",
+    "nextOpen": "Ctrl+↵ で開く",
+    "nextAddUrl": "Ctrl+↵ で URL を追加",
+    "nextAddPage": "Ctrl+↵ でページを追加",
+    "stateLoading": "読み込み中…",
+    "stateNoHost": "この面では表示されません",
+    "stateHidden": "表示できません",
+    "stateInvalid": "記述が不正です",
+    "stateUnreachable": "レンダラーに接続できませんでした",
+    "name": {
+      "embed": "埋め込み",
+      "pageEmbed": "ページ埋め込み",
+      "drawing": "図"
+    },
+    "listEmpty": "該当ページはまだありません。"
   },
   "templates": {
     "title": "テンプレート",

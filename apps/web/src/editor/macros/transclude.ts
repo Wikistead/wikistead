@@ -1,6 +1,6 @@
 import type { DirectiveMacro } from "./registry";
 import { transcludeHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
-import i18n from "../../i18n"; // #174 comment 911: empty-state text localized (en/ja)
+import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 
 // :::embed-page — embed another page's content by id (the body is the target page id). The MACRO
 // never fetches: its host-API is {theme} only (ADR-024 trust boundary). The host (live-preview
@@ -13,6 +13,9 @@ import i18n from "../../i18n"; // #174 comment 911: empty-state text localized (
 // namespaces future embed macros (`:::embed` external content, a later `:::embed-video`, …).
 export const transcludeMacro: DirectiveMacro = {
   kind: "directive",
+  // #600: the palette entry reads "Embed a page" (an action); the name in a sentence is "page embed",
+  // the wording the empty state has used since #174.
+  nameKey: "macro.name.pageEmbed",
   name: "embed-page",
   exportFidelity: "preserve", // ::: stays plain text → lossless round-trip
   revealOnCursor: true, // Ctrl+Enter reveals the raw block so the id is editable in place
@@ -24,10 +27,9 @@ export const transcludeMacro: DirectiveMacro = {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-embed-page";
     el.setAttribute("data-testid", "macro-embed-page");
-    // #600: same as the external embed — name the block rather than showing an ellipsis. The host swaps
-    // in the resolved page when there is one; where there is no host, this text is the final answer and
-    // has to read like one.
-    el.textContent = body.trim() ? i18n.t("macro.pageEmbedUnresolved") : i18n.t("macro.pageEmbedEmpty");
+    // #600: `…` named nothing. A body means an id is set and the host swaps the resolved content in
+    // over this node, so the honest word is "loading"; no body is the empty state.
+    el.textContent = macroPlaceholder(transcludeMacro, body.trim() ? "loading" : "empty-page");
     return el;
   },
   // SSR/export placeholder: the server render pipeline resolves the embed; this is the wrapper

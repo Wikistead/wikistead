@@ -1,5 +1,6 @@
 import type { DirectiveMacro } from "./registry";
 import { html } from "@wikistead/macro-render";
+import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 
 // :::children — an in-body, read-only DYNAMIC LIST of THIS page's direct child pages (#370 / ADR-145;
 // kept tag-independent from ADR-134's `:::query children` by user ruling). Empty body. Same host-mediated
@@ -26,6 +27,9 @@ export const childrenMacro: DirectiveMacro = {
     // No host slot on this surface (export, hover card, anonymous): the placeholder, exactly as before.
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-query-placeholder";
+    // #600: this branch rendered an EMPTY div, so a surface with no list host showed a block of zero
+    // height. Nothing to click, nothing to read, no way to tell a missing host from a missing macro.
+    el.textContent = macroPlaceholder(childrenMacro, "no-host");
     el.setAttribute("data-testid", "macro-children-placeholder");
     return el;
   },

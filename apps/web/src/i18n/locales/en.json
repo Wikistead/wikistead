@@ -1061,17 +1061,23 @@
     "backlinkWarning_other": "This page is referenced by {{count}} pages. Deleting it will leave broken links."
   },
   "macro": {
-    "excalidrawEmpty": "Empty drawing: Ctrl+↵ to open",
-    "embedEmpty": "Empty embed: Ctrl+↵ to add a URL",
-    "pageEmbedEmpty": "Empty page embed: Ctrl+↵ to add a page",
-    "listEmpty": "No pages yet.",
-    "emptyEdit": "Empty {{name}}: Ctrl+↵ to edit",
-    "emptyOpen": "Empty {{name}}: Ctrl+↵ to open",
-    "diagramRendering": "Rendering the diagram…",
-    "diagramInvalid": "Invalid PlantUML diagram",
-    "diagramUnavailable": "Could not reach the diagram renderer",
-    "embedUnresolved": "Embedded page (not shown here): {{url}}",
-    "pageEmbedUnresolved": "Embedded page (not shown here)"
+    "placeholder": "{{name}}: {{detail}}",
+    "placeholderEmpty": "Empty {{name}}: {{detail}}",
+    "nextEdit": "Ctrl+↵ to edit",
+    "nextOpen": "Ctrl+↵ to open",
+    "nextAddUrl": "Ctrl+↵ to add a URL",
+    "nextAddPage": "Ctrl+↵ to add a page",
+    "stateLoading": "loading…",
+    "stateNoHost": "not shown on this surface",
+    "stateHidden": "cannot be shown",
+    "stateInvalid": "the source is not valid",
+    "stateUnreachable": "could not reach the renderer",
+    "name": {
+      "embed": "embed",
+      "pageEmbed": "page embed",
+      "drawing": "drawing"
+    },
+    "listEmpty": "No pages yet."
   },
   "templates": {
     "title": "Templates",

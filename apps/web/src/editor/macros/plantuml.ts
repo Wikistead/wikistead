@@ -1,5 +1,5 @@
 import { asMacroSource, type FenceMacro } from "./registry";
-import i18n from "../../i18n";
+import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 import { diagramVerdict } from "../live-preview/decorations";
 import { plantumlHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 import { mountSourceEditor } from "./source-editor"; // #243 / ADR-111 C3: CM6 mini-editor source pane
@@ -21,6 +21,12 @@ export const plantumlMacro: FenceMacro = {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-plantuml";
     el.setAttribute("data-testid", "macro-plantuml");
+    // #600: an empty fence used to render an empty <pre> — an invisible block with nothing to read.
+    if (!body.trim()) {
+      el.classList.add("cm-lp-macro-empty");
+      el.textContent = macroPlaceholder(plantumlMacro, "empty-edit");
+      return el;
+    }
     const pre = document.createElement("pre");
     const code = document.createElement("code");
     code.textContent = body.trim(); // textContent (never innerHTML) — XSS-safe for user-authored text
@@ -77,7 +83,8 @@ export const plantumlMacro: FenceMacro = {
               const msg = document.createElement("div");
               msg.className = "cm-lp-macro-error-msg";
               msg.setAttribute("data-testid", "plantuml-edit-error");
-              msg.textContent = i18n.t(v.reason === "invalid" ? "macro.diagramInvalid" : "macro.diagramUnavailable");
+              // #600: both sentences now name the macro and share the shape every other placeholder has.
+              msg.textContent = macroPlaceholder(plantumlMacro, v.reason === "invalid" ? "invalid" : "unreachable");
               preview.prepend(msg);
             }
             return;

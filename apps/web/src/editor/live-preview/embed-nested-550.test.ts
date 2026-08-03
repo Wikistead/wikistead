@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { renderMarkdownToDom, withEmbedHost, dispatchMacroRender, type EmbedHostSeam } from "../macros/md-render";
 import { buildEmbedElement, embedMacro } from "../macros/embed";
+import en from "../../i18n/locales/en.json";
 import "../macros"; // register embed-external / tabs / details so the nested sink resolves them
 
 const ALLOW = ["youtube.com"];
@@ -28,17 +29,19 @@ const renderNested = (doc: string) => {
 };
 
 describe("#550 nested embed-external resolves through the host slot", () => {
-  it("inside :::tabs — the allowlisted URL becomes a sandboxed iframe, never the … placeholder", () => {
+  it("inside :::tabs — the allowlisted URL becomes a sandboxed iframe, never the placeholder", () => {
     const dom = renderNested(`::::tabs\n:::tab{title="A"}\n:::embed-external\n${ALLOWED}\n:::\n:::\n::::`);
     const frame = dom.querySelector("[data-testid=macro-embed-frame]") as HTMLIFrameElement;
     expect(frame, "the iframe rendered at depth").toBeTruthy();
     expect(frame.src).toBe(ALLOWED);
     expect(frame.getAttribute("sandbox"), "still sandboxed at depth").toContain("allow-scripts");
     // the ticket's measurement: no leaf sits at the raw placeholder
-    // #600: the placeholder names itself now, so it is spotted by its SENTENCE rather than by three dots
-    const unresolved = Array.from(dom.querySelectorAll("*"))
-      .filter((el) => el.children.length === 0 && /not shown here|表示されません/.test(el.textContent ?? ""));
-    expect(unresolved, "no unresolved placeholder survives where the host answered").toHaveLength(0);
+    // #600 re-aim: the placeholder used to be the literal "…" and is now a named sentence. What this
+    // pin is about is unchanged — nothing unresolved may survive next to a working iframe.
+    const stalled = Array.from(dom.querySelectorAll("*")).filter(
+      (el) => el.children.length === 0 && (el.textContent ?? "").includes(en.macro.name.embed),
+    );
+    expect(stalled, "no unresolved placeholder survives").toHaveLength(0);
   });
 
   it("inside :::details (folded container) — same lifecycle", () => {
@@ -59,7 +62,10 @@ describe("#550 nested embed-external resolves through the host slot", () => {
     const dom = document.createElement("div");
     dom.appendChild(renderMarkdownToDom(`::::tabs\n:::tab{title="A"}\n:::embed-external\n${ALLOWED}\n:::\n:::\n::::`));
     expect(dom.querySelector("[data-testid=macro-embed-frame]"), "nobody vouched for the URL → no frame").toBeNull();
-    expect(dom.querySelector("[data-testid=macro-embed-external]")?.textContent, "#600: the placeholder says what it is").toMatch(/not shown here|表示されません/);
+    // #600: it names itself now — a reader who meets this block on an export knows what it is.
+    const ph = dom.querySelector("[data-testid=macro-embed-external]")?.textContent ?? "";
+    expect(ph, "the placeholder says which macro it is").toContain(en.macro.name.embed);
+    expect(ph, "…and no longer says nothing at all").not.toBe("…");
   });
 
   it("top level goes through the SAME slot (one lifecycle, not two kept in step)", () => {
@@ -70,7 +76,7 @@ describe("#550 nested embed-external resolves through the host slot", () => {
     expect(el.querySelector("[data-testid=macro-embed-frame]"), "the dispatch answered the macro's ask").toBeTruthy();
     // and with no seam, the same dispatch yields the placeholder (surface decides, macro is constant)
     const bare = dispatchMacroRender(embedMacro as never, ALLOWED, { theme: {} as never })!;
-    expect(bare.textContent, "#600: the placeholder says what it is").toMatch(/not shown here|表示されません/);
+    expect(bare.textContent, "the placeholder, naming itself").toContain(en.macro.name.embed);
   });
 });
 
