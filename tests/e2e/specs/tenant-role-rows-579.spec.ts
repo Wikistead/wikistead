@@ -32,6 +32,11 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     // the old surface is gone — not hidden, GONE
     await expect(page.getByTestId("tenant-assign-form")).toHaveCount(0);
     await expect(page.getByTestId("tenant-assignment-list")).toHaveCount(0);
+    // What #579 ruled is that a PERSON's tenant role is given on their row and nowhere else. The add
+    // flow above the table is for GROUPS, which have no row until they hold something — so it must not
+    // offer a person (#578 bounce ④ put it there; this is the line that keeps the ruling).
+    await expect(page.getByTestId("tenant-grant-type"), "no grantee-kind control: groups only").toHaveCount(0);
+    await expect(page.getByTestId("tenant-grant-input"), "and no person search in the add flow").toHaveCount(0);
 
     // narrow to ONE member with the table filter, then work on that row — the fixture's display name
     // is not something this spec should hard-code (it differs between the dev and e2e seeds)
@@ -67,13 +72,14 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(reloaded.getByTestId("member-role-chip"), "no chips: there is no set to draw").toHaveCount(0);
     await expect(reloaded.getByTestId("member-tier-chip")).toHaveCount(0);
 
-    // the filter narrows the table — the search that used to live inside the assign form.
-    // RE-AIMED by #579 ①: "matches nothing" no longer means "no rows". A name that matches nothing is
-    // offered as a GROUP to give a role to (the capability the retired section had), so what is empty is
-    // the set of EXISTING rows, and the one row present is the offer.
+    // The filter narrows the table, and that is ALL it does.
+    // RE-AIMED AGAIN (#578 bounce, 2026-08-04): for one round an unmatched name was offered as a group
+    // to give a role to, and the review rejected it — the route was invisible (nothing on screen
+    // said typing here could create anything) and it had neither completion nor the confirmed/unconfirmed
+    // distinction. Adding is now the shared form above the table, so the filter is a filter again.
     await page.getByTestId("members-filter").fill("nobody-matches-this");
     await expect(page.getByTestId("member-row-group"), "no existing group matches").toHaveCount(0, { timeout: 8000 });
-    await expect(page.getByTestId("member-row-new-group"), "…and the unmatched name is offered as one").toHaveCount(1);
+    await expect(page.getByTestId("member-row-new-group"), "and the filter does not confer roles").toHaveCount(0);
     await page.getByTestId("members-filter").fill("dev");
     await expect(page.getByTestId("member-roles").first()).toBeVisible();
   } finally {
@@ -106,12 +112,14 @@ test("#579 ①: a group gets a tenant role from the MEMBER TABLE, by name", asyn
     await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("tenant-group-roles"), "the separate section is gone").toHaveCount(0);
 
+    // RE-AIMED AGAIN (#578 bounce ④): the act is the same — a group named by hand is given a tenant role
+    // and the screen shows its NAME — but it happens in the shared add form now, the same one the space
+    // screen uses, because the filter-field route was invisible on the device.
     const groupName = `e2e-579-group-${stamp}`;
-    await page.getByTestId("members-filter").fill(groupName);
-    const offered = page.getByTestId("member-row-new-group");
-    await expect(offered, "a name the directory has not produced is offered as a row").toBeVisible({ timeout: 8000 });
-    await offered.getByTestId("new-group-role-select").click();
+    await page.getByTestId("tenant-grant-group-name").fill(groupName);
+    await page.getByTestId("tenant-grant-role").click();
     await page.getByRole("option", { name: roleName }).click();
+    await page.getByTestId("tenant-grant-add").click();
 
     await page.getByTestId("members-filter").fill(groupName);
     const row = page.getByTestId("member-row-group").filter({ hasText: groupName });

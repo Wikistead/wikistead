@@ -74,22 +74,29 @@ export function GroupPicker({
             ))}
           </ul>
         )}
+        {typed !== "" && !isKnown && !suggesting && (
+          // The point of the free half: a name the directory has not returned must not look identical to
+          // one it has. The note says what happens next rather than implying the name is wrong — the
+          // grant applies the moment somebody carrying it signs in.
+          //
+          // NOT while suggestions are open: half-typed "wiki" would be called unconfirmed while the list
+          // is still offering "wiki Editors" to complete it. The note is about a name that is finished
+          // and unmatched, so it waits until there is nothing left to choose.
+          <span
+            className="absolute left-0 top-[calc(100%+2px)] z-10 w-max max-w-[22rem] text-[11px] text-fg-dim"
+            data-testid={`${testId}-unconfirmed`}
+          >
+            {t("spaceMembers.groupUnconfirmed")}
+          </span>
+        )}
       </span>
-      {typed !== "" && !isKnown && !suggesting && (
-        // The point of the free half: a name the directory has not returned must not look identical to
-        // one it has. The note says what happens next rather than implying the name is wrong — the
-        // grant applies the moment somebody carrying it signs in.
-        //
-        // NOT while suggestions are open: half-typed "wiki" would be called unconfirmed while the list
-        // is still offering "wiki Editors" to complete it. The note is about a name that is finished
-        // and unmatched, so it waits until there is nothing left to choose.
-        <span
-          className="absolute left-0 top-[calc(100%+2px)] z-10 w-max max-w-[22rem] text-[11px] text-fg-dim"
-          data-testid={`${testId}-unconfirmed`}
-        >
-          {t("spaceMembers.groupUnconfirmed")}
-        </span>
-      )}
+      {/* #578 (the correction to the correction): taking the note OUT of flow stopped it moving the row
+          and started it landing ON the list below — measured 6px into the first member row. Out of flow
+          is still right for WIDTH (the note is wider than the field, and in flow it grew the column), so
+          what it needs is ROOM: a zero-width spacer, always present, never only while the note shows —
+          a reservation that appeared with the note would move the row again, which is what it replaced.
+          The note hangs off the INPUT rather than the column, or this spacer would push it down too. */}
+      <span aria-hidden className="pointer-events-none block h-8 w-0" />
     </span>
   );
 }

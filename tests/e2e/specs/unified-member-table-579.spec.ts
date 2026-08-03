@@ -29,13 +29,16 @@ test("#579 ①③: people and groups are one table, and a new group is named fro
   // the retired section is gone
   await expect(page.getByTestId("tenant-group-roles"), "the group section folded into the table").toHaveCount(0);
 
-  // ③ the search names a group nobody carries: typing a name that matches no row offers it as one
+  // ③ a group nobody carries yet still gets a role here.
+  // RE-AIMED (#578 bounce ④, 2026-08-04): it used to be named in the FILTER field, and the review
+  // rejected that — an add route nothing on screen announces, with no completion and no way to tell a
+  // confirmed group from a typed one. The shared form does all three, and it is the same form the space
+  // screen shows, which is what the ruling asked for.
   const groupName = `Unified-${stamp}`;
-  await page.getByTestId("members-filter").fill(groupName);
-  const newRow = page.getByTestId("member-row-new-group");
-  await expect(newRow, "a name that matches nothing offers itself as a group row").toBeVisible({ timeout: 5000 });
-  await newRow.getByTestId("new-group-role-select").click();
+  await page.getByTestId("tenant-grant-group-name").fill(groupName);
+  await page.getByTestId("tenant-grant-role").click();
   await page.getByRole("option", { name: roleName }).click();
+  await page.getByTestId("tenant-grant-add").click();
 
   // ① it comes back as an ordinary row in the same table, marked as a group by an ICON
   await page.getByTestId("members-filter").fill(groupName);
