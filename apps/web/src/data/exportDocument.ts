@@ -62,6 +62,12 @@ function expandTabs(root: HTMLElement): void {
     if (!panels.length) continue;
     const out = document.createElement("div");
     out.className = "cm-lp-tabs wks-export-tabs";
+    // #598: carry the element's NAME across the rebuild. The parity gate asks each surface for its
+    // elements by name, and this transform replaced the tab strip with a fresh div — so the saved file
+    // held the tabs' content under no name at all, and the gate could see the text but not the element.
+    // Anything that rebuilds a macro's element on the way out has to bring its identity with it.
+    const name = tabs.getAttribute("data-wks-el");
+    if (name) out.setAttribute("data-wks-el", name);
     panels.forEach((panel, i) => {
       const section = document.createElement("section");
       section.className = "cm-lp-tabpanel cm-lp-tabpanel-active"; // the class the app styles a shown panel with

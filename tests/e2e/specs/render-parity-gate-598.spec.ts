@@ -39,13 +39,12 @@ const KNOWN_RED = {
   // #598 identity slice: elements the saved document does not carry under their own name. Recorded
   // rather than hidden, and the assertion is EQUALITY — fixing one fails the gate until the line goes.
   //
-  // `tabs` is the first thing this dimension found, and the follow-up measurement narrowed it: the
-  // CONTENT is in the saved file (its pane text is there), so the export does not drop it — it arrives
-  // ANONYMOUS. `columns`, the same kind of container, is named. The difference worth chasing is that the
-  // tabs widget REBUILDS itself (it keeps an active-tab index across re-renders), which would replace the
-  // element the stamp was put on. Not yet measured, so not yet asserted — recorded here so the gate is
-  // green and honest rather than green and quiet.
-  unidentified: ["tabs"] as string[],
+  // (empty) — `tabs` was the first thing this dimension found and it is fixed: the export FLATTENS a tab
+  // strip into titled sections (#85: paper has no "one at a time"), building a fresh element and leaving
+  // the name behind. The content was always there; the element had no identity. Fixed where the rebuild
+  // happens, which is the general rule this recorded — a transform that rebuilds a macro's element on the
+  // way out carries its name across.
+  unidentified: [] as string[],
 } as const;
 
 // Macros that legitimately render NOTHING with the fixture's data: a tag list with no tagged pages and
