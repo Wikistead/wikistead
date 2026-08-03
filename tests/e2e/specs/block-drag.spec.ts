@@ -40,7 +40,9 @@ test("#84: the drag grip is hidden until a block is hovered, then sits just left
   await page.mouse.move(pb.x + 40, pb.y + pb.height / 2);
   await sleep(200);
   const onPara = await gripState(page, pb.x);
-  expect(onPara.display).toBe("block");
+  // #599: the shown state is `flex` now — the grip is a 24×24 hit box centring a 13px glyph, so what is
+  // asserted is "it is shown", not the particular display value it happens to use.
+  expect(onPara.display, "the grip is shown over a block").not.toBe("none");
   expect(onPara.rightOfBlockLeft, "grip sits at/left of the block's left edge (not far away, not deep inside)").toBeLessThan(12);
   expect(onPara.rightOfBlockLeft).toBeGreaterThan(-60); // adjacent, not off in the far-left gutter
 
@@ -49,7 +51,7 @@ test("#84: the drag grip is hidden until a block is hovered, then sits just left
   const mb = (await mer.boundingBox())!;
   await page.mouse.move(mb.x + 60, mb.y + 30);
   await sleep(200);
-  expect((await gripState(page, mb.x)).display).toBe("block");
+  expect((await gripState(page, mb.x)).display, "shown over a widget block too").not.toBe("none");
 
   // leaving the editor hides it
   await page.mouse.move(4, 4);

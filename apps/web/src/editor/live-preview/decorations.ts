@@ -5780,6 +5780,9 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // Block drag-to-reorder (#84 comment 741): a HOVER-FOLLOWING drag handle (not a fixed gutter marker).
   // The plugin absolutely-positions it just outside the hovered block's left edge and toggles display; it
   // is only ever on-screen when hovering a block, so it reads as "this block's handle". Display-only.
+  // #599: the HIT AREA is 24×24 (the DS minimum a pointer is aimed at), while the icon stays 13px. The
+  // measured rect was 17×13 — small enough that hitting it was a knack rather than an action. The glyph
+  // is centred in the larger box, so nothing looks bigger; only the target a hand has to find does.
   ".cm-lp-block-grip": {
     position: "absolute",
     zIndex: "6",
@@ -5788,7 +5791,11 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     color: "var(--fg-dim, #888)",
     userSelect: "none",
     lineHeight: "1.2",
-    padding: "0 2px",
+    minWidth: "24px",
+    minHeight: "24px",
+    display: "none", // shown by the plugin as `flex` (see block-drag.ts) — a hidden grip is display:none
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: "4px",
     transition: "opacity 120ms ease, background 120ms ease, color 120ms ease",
   },
