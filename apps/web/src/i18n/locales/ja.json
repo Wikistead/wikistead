@@ -1301,7 +1301,9 @@
       "manage": "管理",
       "createSpaces": "スペース作成",
       "issueApiKeys": "API キー発行",
-      "manageConnections": "サインイン方法を管理"
+      "manageConnections": "サインイン方法を管理",
+      "manageRoles": "ロールを管理",
+      "viewAudit": "監査ログを閲覧"
     },
     "scopeResource": "スペース / ページ",
     "scopeTenant": "テナント",

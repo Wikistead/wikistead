@@ -61,6 +61,14 @@ type tenant
     # and a tenant with it seeded would be one toggle away from every member editing sign-in.
     # `or admin` keeps every existing admin exactly as capable as they are today.
     define manage_connections: [user, group#member] or admin
+    # #604 / ADR-208 (ruling B), same shape, one surface each: who may define and hand out ROLES and who
+    # may read the AUDIT ledger. `manage_public` is NOT here: its surface turned out to have no
+    # tenant-admin route of its own to gate, and a relation nothing reads is the shape #602 just
+    # retired — it comes with the screen that needs it. Each unions `or admin` so no
+    # existing admin loses anything; each exists so the power can be given without the tier. None takes
+    # a `tenant#member` arm — these are not all-member defaults.
+    define manage_roles: [user, group#member] or admin
+    define view_audit: [user, group#member] or admin
 
 type space
   relations

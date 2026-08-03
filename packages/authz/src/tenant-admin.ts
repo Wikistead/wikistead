@@ -67,3 +67,20 @@ export async function isConnectionManager(fga: OpenFgaClient, userId: string, te
 export async function requireConnectionManager(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
   if (!(await isConnectionManager(fga, userId, tenantId))) throw Object.assign(new Error('admin only'), { statusCode: 403 })
 }
+
+// #604 / ADR-208 (ruling B): the rest of the first carve-out, one helper per verb so a route names the
+// power it needs rather than the tier that happens to include it. Each relation unions `or admin`.
+const tenantVerb = (relation: string) => async (fga: OpenFgaClient, userId: string, tenantId: string): Promise<boolean> =>
+  !!(await fga.check({ user: `user:${userId}`, relation, object: `tenant:${tenantId}` })).allowed
+
+export const isRoleManager = tenantVerb('manage_roles')
+export const isAuditReader = tenantVerb('view_audit')
+
+const requireVerb = (can: (fga: OpenFgaClient, u: string, t: string) => Promise<boolean>) =>
+  async (fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> => {
+    // the same 403 the tier gate answered with: a caller learns they may not, never who may
+    if (!(await can(fga, userId, tenantId))) throw Object.assign(new Error('admin only'), { statusCode: 403 })
+  }
+
+export const requireRoleManager = requireVerb(isRoleManager)
+export const requireAuditReader = requireVerb(isAuditReader)
