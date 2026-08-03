@@ -71,6 +71,33 @@ afterAll(async () => {
   await pool.end()
 })
 
+// #608: the sync CONVERGES — a stale mirror must not be able to fail a login. Measured on the device:
+// a rebuilt FGA store left `members.groups` claiming a group whose tuple was gone, and the resulting
+// "cannot delete a tuple which does not exist" threw out of establishMemberSession — the admin bounced
+// to /login?error=access, and the e2e read it as "the console did not render".
+describe('#608 the group sync converges instead of failing on a stale mirror', () => {
+  // On a throwaway SUB, not on MEMBER: the #163 suite below depends on the beforeAll sync it received,
+  // and the first cut of this test tore that state down as "cleanup" — turning two unrelated tests red.
+  const GHOST = 'grant-grp-ghost-608'
+  it('a delete whose tuple is already gone is convergence, not failure', async () => {
+    // the stale shape: the mirror says the member carries Engineering; the store holds no such tuple
+    await expect(
+      syncMemberGroups(fgaClient, T, GHOST, ['Engineering'], []),
+    ).resolves.toBeUndefined()
+  })
+  it('a write whose tuple already exists is convergence too', async () => {
+    await syncMemberGroups(fgaClient, T, GHOST, [], ['Engineering']) // real write
+    await expect(
+      syncMemberGroups(fgaClient, T, GHOST, [], ['Engineering']), // mirror said [], store already has it
+    ).resolves.toBeUndefined()
+    // fga.check directly: checkRelation's ResourceRef is page|space by design, and this is a
+    // structural read of a group tuple, not an application authz question
+    const has = await fgaClient.check({ user: `user:${GHOST}`, relation: 'member', object: `group:${groupFgaId(T, GROUP)}` })
+    expect(Boolean(has.allowed), 'and the goal state actually holds').toBe(true)
+    await syncMemberGroups(fgaClient, T, GHOST, ['Engineering'], []) // real delete — leaves no residue
+  })
+})
+
 describe('#163 grant access to a group by name', () => {
   it('groupGrantee resolves name → the SAME id the #111 sync wrote', () => {
     expect(groupGrantee(T, GROUP)).toBe(`group:${groupFgaId(T, GROUP)}#member`)
