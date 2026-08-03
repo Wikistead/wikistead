@@ -991,7 +991,9 @@
     "pendingRow": "{{email}} · {{role}}",
     "inviteRoleOptional": "Custom role (optional)",
     "inviteRoleNone": "No custom role",
-    "inviteAlreadyMember": "That address already belongs to a member. Inviting them again would create a second account."
+    "inviteAlreadyMember": "That address already belongs to a member. Inviting them again would create a second account.",
+    "enablePassword": "Add a password entrance",
+    "enablePasswordDone": "Password link created"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",

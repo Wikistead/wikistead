@@ -187,6 +187,35 @@ export async function membersPlugin(app: FastifyInstance) {
     return { ok: true }
   })
 
+  // #606 / ADR-205 §2 (ruled option A): give an EXISTING member a password entrance.
+  //
+  // The defect this answers: a password INVITE mints a new identity, so sending one to somebody already
+  // here made a second person sharing their address. Refusing that (the other half of #606) left the
+  // admin with no way to do the thing they wanted — and for a SCIM or OIDC member there was no way at
+  // all, which is why #605's break-glass could not be built.
+  //
+  // Admin only (the ruling), gated by the tenant's password switch (the same door the invite uses), and
+  // available for IdP-derived subs on purpose: an SSO tenant is entirely IdP-derived, so refusing them
+  // would refuse the case the feature exists for. The consequence is real and belongs in the ledger: the
+  // IdP stops being the only authority for that account, so the act is audited with the admin as actor.
+  app.post<{ Params: { sub: string } }>('/members/:sub/password-setup', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    const [member] = await req.db.sql<[{ sub: string }?]>`SELECT sub FROM members WHERE sub = ${req.params.sub}`
+    if (!member) return reply.code(404).send({ error: 'member not found' })
+    const { mintPasswordSetup } = await import('../auth/password-reset.js')
+    const minted = await mintPasswordSetup(req.db, req.params.sub)
+    // One answer for every refusal a caller may not distinguish: password sign-in is off, they already
+    // have a password, they have no address, or the address belongs to somebody else's credential.
+    if (!minted) return reply.code(400).send({ error: 'this member cannot be given a password entrance', code: 'password_setup_unavailable' })
+    const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
+    const setupUrl = `${scheme}://${req.headers.host}/reset-password?token=${minted.token}`
+    await req.db.tx(async (tx) => auditIfEntitled(tx, req.tenant, {
+      actor: `user:${req.user.sub}`, action: 'member.password_enabled', target: `member:${req.params.sub}`,
+    })).catch((err: unknown) => req.log.warn({ err }, 'password-setup audit failed'))
+    emit({ type: 'member.password_enabled', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub })
+    return reply.code(201).send({ setupUrl, email: minted.email })
+  })
+
   // Remove a member. ADR-003 ordering; then revoke ALL their live sessions so the
   // removal is immediate (not at TTL). Cannot remove the last admin.
   app.delete<{ Params: { sub: string } }>('/members/:sub', async (req, reply) => {

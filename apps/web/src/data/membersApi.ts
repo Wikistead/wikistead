@@ -45,3 +45,12 @@ export async function eraseMemberAnalytics(token: string, sub: string): Promise<
 }
 
 export { ApiError };
+
+// #606 / ADR-205 §2 (ruled option A): give an existing member a password entrance. Returns the link the
+// admin passes on — the member sets the password themselves, and it binds to the sub they already have,
+// so nobody is duplicated (which is what sending them a password INVITE used to do).
+export async function enablePassword(token: string, sub: string): Promise<{ setupUrl: string; email: string }> {
+  const res = await apiFetch<{ setupUrl: string; email: string } | null>(`/members/${encodeURIComponent(sub)}/password-setup`, token, { method: "POST" });
+  if (!res) throw new Error("password setup returned nothing");
+  return res;
+}
