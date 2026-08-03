@@ -80,25 +80,50 @@ describe("#586 review ②: one closure, so one answer", () => {
 });
 
 describe("#586a surface that offers a role says what the role does", () => {
-  it("every role picker carries the capability hint — found by walking, not by a list", () => {
-    // Discovery: any Select whose options are built from `capNoun` is offering role names, so it must
-    // also offer what they confer. A new granting screen is caught by existing rather than by someone
-    // remembering to add it here (#544).
+  it("a role option is a NAME, and what it confers is revealed — found by walking, not by a list", () => {
+    // REVERSED by the 2026-08-03 ruling. The previous shape of this pin demanded a `hint:` on every role
+    // option, and the implementation obliged by printing the capabilities under all nine labels: the
+    // reader had to read the whole vocabulary to pick one name. "
+    // " — so the option carries the name, and `RoleTip` carries the meaning.
+    //
+    // Discovery, still: any Select whose options are built from `capNoun` is offering role names. A new
+    // granting screen is caught by existing rather than by someone remembering to add it here (#544)
+    // measured by dropping a file this test has never heard of into the tree and watching it go red.
     const offenders: string[] = [];
     let pickers = 0;
     for (const f of appFiles()) {
       const src = readFileSync(f, "utf8");
       if (!src.includes("capNoun(")) continue;
-      // The option object is nested (its hint is itself a call), so a balanced-brace regex is the wrong
-      // tool. Look at the text that FOLLOWS the label — an option's own properties are written together.
+      // The option object is nested, so a balanced-brace regex is the wrong tool. Look at the text that
+      // FOLLOWS the label — an option's own properties are written together.
       for (const m of src.matchAll(/label:\s*capNoun\(/g)) {
         pickers++;
         const window = src.slice(m.index!, m.index! + 260);
-        if (!/hint:/.test(window)) offenders.push(`${f.slice(web.length + 1)}: ${window.replace(/\s+/g, " ").slice(0, 90)}`);
+        const where = `${f.slice(web.length + 1)}: ${window.replace(/\s+/g, " ").slice(0, 90)}`;
+        if (/hint:/.test(window)) offenders.push(`${where} — prints the capabilities instead of revealing them`);
+        else if (!/wrap:[\s\S]{0,80}RoleTip/.test(window)) offenders.push(`${where} — a role name with no way to ask what it does`);
       }
     }
     expect(pickers, "the walk actually found role pickers").toBeGreaterThanOrEqual(2);
-    expect(offenders, "a role option without what it confers explains nothing before the choice").toEqual([]);
+    expect(offenders, "a role option is its name, and hovering it says what that name confers").toEqual([]);
+  });
+
+  it("nothing anywhere prints a capability list under an option", () => {
+    // The reject was about the SHAPE, not about one screen: a list under every label. Any file that
+    // hands the Select a `hint:` has grown it back, whether or not it uses capNoun to build the label
+    // which is how a custom-role option would slip past the walk above.
+    const offenders = appFiles()
+      .filter((f) => !f.endsWith("AnalyticsDashboard.tsx")) // its `hint` is a metric's description, a different prop on a different component
+      .filter((f) => /hint:\s*(effectiveCaps|closureOf|\[)/.test(readFileSync(f, "utf8")))
+      .map((f) => f.slice(web.length + 1));
+    expect(offenders, "capabilities are revealed on hover, not printed under every choice").toEqual([]);
+  });
+
+  it("the Select component no longer has a way to print one", () => {
+    // Belt and braces: as long as the prop exists, a screen can reach for it again and the walk above
+    // only catches the callers it can recognise.
+    expect(read("ui/Select.tsx"), "the `hint` prop went with the shape it drew").not.toMatch(/hint\?:/);
+    expect(read("ui/Select.tsx"), "and the wrapper that replaced it is there").toContain("wrap?:");
   });
 
   it("the capability vocabulary is complete, so nothing falls through as a raw wire value", () => {

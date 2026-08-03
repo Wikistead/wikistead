@@ -120,14 +120,48 @@ test("#586: a role badge lists what it lets someone do", async ({ page }) => {
     expect(tipText, "the edit grant lists edit").toContain("edit");
     expect(tipText, "and does NOT claim comment — the server pins that it confers none").not.toContain("comment");
 
-    // #586①: what a role confers is readable BEFORE it is chosen, not only after. Reading it must
-    // not need hover, which a coarse pointer does not have at all (ADR-159).
-    await page.getByTestId("grant-relation").click();
+    // #586 (review rejection, 2026-08-03): the option is the NAME, and what it confers is REVEALED. The
+    // previous shape printed the capability list under all nine labels, and the reader had to read the
+    // whole vocabulary before picking one of them.
+    // Opened from the KEYBOARD: the dialog is still settling and Playwright's click waits for the
+    // trigger to stop moving, which (measured, twice now) it never does. Focus and Enter is the same act.
+    await page.getByTestId("grant-relation").focus();
+    await page.keyboard.press("Enter");
     const option = page.getByTestId("grant-relation-builtin:manage");
     await expect(option, "the picker offers the built-in roles").toBeVisible({ timeout: 4000 });
-    const caps = (await option.innerText()).toLowerCase();
-    expect(caps, "the option says what choosing it would confer").toContain("share");
-    expect(caps.replace(/\s+/g, " ").length, "…which is more than its name alone").toBeGreaterThan("manager".length + 8);
+    // At rest the option is the NAME. The reject was a list of capabilities printed under all nine
+    // labels, which made the reader read the vocabulary before picking one of them.
+    const atRest = (await option.innerText()).trim().toLowerCase();
+    expect(atRest, "the option is the role's name and nothing else").toBe("manager");
+
+    // Pointing at it reveals what it confers…
+    // Two moves, not `hover`: a single placement leaves the page with no pointer MOVEMENT to react to
+    // (measured — `[role=option]:hover` matched nothing afterwards). The assertion then reads whichever
+    // option the pointer actually ended on, because the list settles after the box is measured and the
+    // row under the pointer is not always the row that was aimed at — an earlier version of this test
+    // measured one option and hovered another, and called the feature broken.
+    const box = (await option.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.move(box.x + box.width / 2 + 2, box.y + box.height / 2 + 1);
+    await sleep(400);
+    const hovered = await page.evaluate(() => {
+      const it = document.querySelector("[role=option]:hover") as HTMLElement | null;
+      return { name: it?.textContent?.trim() ?? "", shown: it?.innerText?.trim() ?? "" };
+    });
+    expect(hovered.name, "the pointer is on an option").not.toBe("");
+    expect(hovered.shown.toLowerCase().replace(/\s+/g, " "), `hovering ${hovered.name} says what it confers`).toMatch(/view|閲覧/);
+
+    // …and so does the arrow key, which is the case a hover-only reveal loses: Radix drives this list
+    // with `data-highlighted` rather than DOM focus, so anything bound to focus alone stays shut for a
+    // keyboard user.
+    await page.keyboard.press("ArrowDown");
+    await sleep(300);
+    const viaKeyboard = await page.evaluate(() => {
+      const item = document.querySelector("[role=option][data-highlighted]") as HTMLElement | null;
+      return { name: item?.textContent?.trim().toLowerCase() ?? "", shown: item?.innerText?.toLowerCase() ?? "" };
+    });
+    expect(viaKeyboard.name, "the highlight is on an option").not.toBe("");
+    expect(viaKeyboard.shown.replace(/\s+/g, " "), `the highlighted option (${viaKeyboard.name}) explains itself too`).toMatch(/view|閲覧/);
     await page.keyboard.press("Escape");
   } finally {
     await page.evaluate(async ({ api, pageId }) => {

@@ -41,10 +41,16 @@ function TooltipContent({
   className,
   sideOffset = 6,
   children,
+  portal = true,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: React.ComponentProps<typeof TooltipPrimitive.Content> & { portal?: boolean }) {
+  // #586: a tooltip on an option INSIDE an open Select must not be portalled to the body. A modal Radix
+  // layer marks everything outside itself `aria-hidden`, and a tooltip that lands there is invisible to
+  // the accessibility tree — measured: the content rendered and the a11y tree had no tooltip at all.
+  // Rendered in place, it lives inside that layer and is announced with the option it describes.
+  const Wrapper = portal ? TooltipPrimitive.Portal : React.Fragment
   return (
-    <TooltipPrimitive.Portal>
+    <Wrapper>
       <TooltipPrimitive.Content
         data-slot="tooltip-content"
         sideOffset={sideOffset}
@@ -60,7 +66,7 @@ function TooltipContent({
         {children}
         <TooltipPrimitive.Arrow className="fill-popover" />
       </TooltipPrimitive.Content>
-    </TooltipPrimitive.Portal>
+    </Wrapper>
   )
 }
 
@@ -72,18 +78,21 @@ export function Tooltip({
   children,
   side,
   align,
+  portal,
   ...props
 }: {
   content: React.ReactNode
   children: React.ReactNode
   side?: React.ComponentProps<typeof TooltipPrimitive.Content>["side"]
   align?: React.ComponentProps<typeof TooltipPrimitive.Content>["align"]
+  /** false inside another modal layer (an open Select) — see TooltipContent */
+  portal?: boolean
 } & Omit<React.ComponentProps<typeof TooltipPrimitive.Root>, "children">) {
   if (content == null || content === "") return <>{children}</>
   return (
     <TooltipRoot {...props}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side={side} align={align}>{content}</TooltipContent>
+      <TooltipContent side={side} align={align} portal={portal}>{content}</TooltipContent>
     </TooltipRoot>
   )
 }
