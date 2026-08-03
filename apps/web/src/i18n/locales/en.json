@@ -1069,7 +1069,9 @@
     "emptyOpen": "Empty {{name}}: Ctrl+↵ to open",
     "diagramRendering": "Rendering the diagram…",
     "diagramInvalid": "Invalid PlantUML diagram",
-    "diagramUnavailable": "Could not reach the diagram renderer"
+    "diagramUnavailable": "Could not reach the diagram renderer",
+    "embedUnresolved": "Embedded page (not shown here): {{url}}",
+    "pageEmbedUnresolved": "Embedded page (not shown here)"
   },
   "templates": {
     "title": "Templates",

@@ -23,7 +23,9 @@ describe("nested transclusion is structurally depth-1 (#376 condition 2)", () =>
     d.appendChild(renderMarkdownToDom(transcludedContent)); // poisoned fetch throws if anything fetches
     const embed = d.querySelector("[data-testid=macro-embed-page]");
     expect(embed, "the nested embed renders as the registry placeholder").not.toBeNull();
-    expect(embed!.textContent).toBe("…"); // the static marker — content is never resolved at depth ≥ 1
+    // #600 re-aim: the marker used to be a literal "…". The subject is that the block stays UNRESOLVED
+    // (no fetch at depth ≥ 1), not the three dots — which now name the block instead of showing nothing.
+    expect(embed!.textContent, "still the static placeholder, never resolved content").toMatch(/not shown here|表示されません/);
     expect(d.textContent).toContain("outer text");
     expect(d.textContent).toContain("tail");
   });
@@ -33,6 +35,6 @@ describe("nested transclusion is structurally depth-1 (#376 condition 2)", () =>
     const content = `:::embed-page\n${selfId}\n:::`;
     const d = document.createElement("div");
     d.appendChild(renderMarkdownToDom(content));
-    expect(d.querySelector("[data-testid=macro-embed-page]")?.textContent).toBe("…");
+    expect(d.querySelector("[data-testid=macro-embed-page]")?.textContent, "the same inert placeholder (#600: it names itself)").toMatch(/not shown here|表示されません/);
   });
 });
