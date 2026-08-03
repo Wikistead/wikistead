@@ -38,7 +38,7 @@ const insert = async (id: string, sort: number, secretEnc: string | null) => {
 const options = async () => {
   const res = await app.inject({ method: 'GET', url: '/auth/login-options', headers: { host: HOST } })
   expect(res.statusCode).toBe(200)
-  return res.json() as { social: string[]; methods: string[]; connections: { id: string; kind: string; label: string | null; brand: string | null }[] }
+  return res.json() as { social?: string[]; methods: string[]; connections: { id: string; kind: string; label: string | null; brand: string | null }[] }
 }
 
 beforeAll(async () => {
@@ -68,30 +68,34 @@ describe('#554 S3: the login-options connection list', () => {
     for (const c of o.connections) expect(Object.keys(c).sort()).toEqual(['brand', 'id', 'kind', 'label'])
     expect(o.connections.some((c) => c.id === tenantId), 'never the tenant id').toBe(false)
     expect(o.methods).toEqual(['oidc'])
-    expect(o.social).toEqual([])
+    // #602: the `social` FIELD is retired — a provider is a preset connection in the list above, so
+    // there is one thing for the screen to read. Asserting its absence is the point now.
+    expect(o.social, 'the social field went with the path it described').toBeUndefined()
   }, 60_000)
 
-  it('social rides the PLATFORM connection — present beside an own IdP now, and the SSO pref still removes both', async () => {
+  it('the PLATFORM connection appears beside an own IdP, and the SSO pref removes it', async () => {
+    // RE-AIMED by #602: this measured "social rides the platform connection". Social is gone; the
+    // connection it rode is what the screen offers now, so the subject narrows to the connection —
+    // including the half that matters most, that the SSO preference still takes it away.
     process.env.PLATFORM_OIDC_ISSUER = 'https://platform.example'
     process.env.PLATFORM_OIDC_CLIENT_ID = 'pc'
     process.env.PLATFORM_OIDC_REDIRECT_URI = `http://${HOST}/auth/callback`
-    process.env.PLATFORM_SOCIAL_PROVIDERS = 'google,github'
     try {
       const o = await options()
       expect(o.connections[o.connections.length - 1], 'platform last').toMatchObject({ id: 'platform', kind: 'platform' })
-      expect(o.social, 'the retired tenant-wins rule no longer hides social beside an own IdP').toEqual(['google', 'github'])
+      expect(o.connections.some((c) => c.kind === 'oidc'), 'the own IdP is offered too — the retired tenant-wins rule does not hide the platform beside it').toBe(true)
 
       await admin`INSERT INTO tenant_login_prefs (tenant_id, platform_login_disabled) VALUES (${tenantId}, true)
         ON CONFLICT (tenant_id) DO UPDATE SET platform_login_disabled = true`
       try {
         const enforced = await options()
         expect(enforced.connections.some((c) => c.kind === 'platform'), 'SSO enforcement drops the connection').toBe(false)
-        expect(enforced.social, 'and social with it').toEqual([])
+        expect(enforced.methods.includes('platform-oidc'), 'and the method with it').toBe(false)
       } finally {
         await admin`DELETE FROM tenant_login_prefs WHERE tenant_id = ${tenantId}`
       }
     } finally {
-      for (const k of ['PLATFORM_OIDC_ISSUER', 'PLATFORM_OIDC_CLIENT_ID', 'PLATFORM_OIDC_REDIRECT_URI', 'PLATFORM_SOCIAL_PROVIDERS']) delete process.env[k]
+      for (const k of ['PLATFORM_OIDC_ISSUER', 'PLATFORM_OIDC_CLIENT_ID', 'PLATFORM_OIDC_REDIRECT_URI']) delete process.env[k]
     }
   }, 60_000)
 })

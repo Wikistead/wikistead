@@ -119,16 +119,10 @@ export async function buildLogin(cfg: TenantOidcConfig, redirectUri: string, ext
 // (e.g. "google,github,microsoft") — empty/unset (and always on CE, which has no platform
 // issuer) means NO social buttons. The hint param name is deployment-configurable because
 // the broker (Authentik) decides what it consumes; the value is the provider slug.
-export interface SocialLoginConfig { providers: string[]; hintParam: string }
-const SOCIAL_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/
-export function loadSocialLogin(): SocialLoginConfig {
-  if (!process.env.PLATFORM_OIDC_ISSUER) return { providers: [], hintParam: 'source' } // CE: no platform IdP → no social
-  const providers = (process.env.PLATFORM_SOCIAL_PROVIDERS ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => SOCIAL_SLUG.test(s))
-  return { providers, hintParam: process.env.PLATFORM_SOCIAL_HINT_PARAM ?? 'source' }
-}
+// RETIRED by #602 / ADR-206 §3: `loadSocialLogin` read PLATFORM_SOCIAL_PROVIDERS to allowlist the
+// `?provider=` hint on the platform login path. That path is gone — a provider is a preset connection
+// now — so the env var and its allowlist have nothing left to gate. Removed rather than left dormant:
+// a reachable-looking config that nothing reads is how somebody sets it and waits for an effect.
 
 // #281 / ADR-121 §3.5: coerce the UNTRUSTED `email_verified` claim to a strict tri-state.
 // Only boolean true / string "true" count as verified (some IdPs stringify booleans);

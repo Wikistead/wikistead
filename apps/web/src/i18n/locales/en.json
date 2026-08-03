@@ -587,7 +587,6 @@
     "signInTitle": "Sign in to {{product}}",
     "signInBody": "Continue with your organization's identity provider.",
     "signIn": "Sign in",
-    "socialHint": "Or continue with",
     "continueWith": "Continue with {{provider}}",
     "errorAccess": "Sign-in couldn't be completed. Please try again or contact your workspace administrator.",
     "errorSeatFull": "This workspace has reached its member limit. Ask an administrator to free a seat or upgrade.",

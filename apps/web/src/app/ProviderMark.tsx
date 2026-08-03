@@ -1,4 +1,4 @@
-// #281 review: each social sign-in button needs its provider's brand mark (Google's guidelines make the
+// #281 review (via #602): each provider sign-in button needs its provider's brand mark (Google's guidelines make the
 // logo effectively required, and it aids recognition). The marks are INLINE SVG — no external fetch, so the
 // strict self-contained/CSP posture is unchanged. Google's G and Microsoft's tiles are fixed brand colours
 // (legible on both themes); GitHub's octocat is monochrome, so it uses currentColor to track the button's
@@ -6,8 +6,13 @@
 //
 // Kept in its own dependency-free module (no Button/UI imports) so it renders in isolation for a unit test —
 // importing it does not drag in the `@/`-aliased UI chain the node vitest config can't resolve.
-export function SocialIcon({ slug }: { slug: string }) {
-  switch (slug) {
+// #602 / ADR-206: the mark follows the connection's PRESET, not the route it came in by. `preset` is
+// already the field that says "this is that provider" — and already the reason a tenant may not rename
+// such a connection (a renamed brand is a phishing surface) — so the mark reads from the same fact.
+// A preset with no mark here renders as text, which is correct rather than missing: adding a brand's
+// asset is a per-brand decision, not a batch.
+export function ProviderMark({ preset }: { preset: string }) {
+  switch (preset) {
     case "google":
       return (
         <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true" className="flex-none">

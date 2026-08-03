@@ -32,19 +32,12 @@ describe("#554 S3 connectionStartUrl", () => {
   });
 });
 
-// #554 S3 review N4: the social start URL was the one fixed-in-S3 behavior with no pin — a bare
-// URL regression would launch the CORPORATE IdP from a "Continue with Google" button (the provider
-// hint is dropped on the tenant-IdP path) — plus the per-kind fixed wording (finding 4).
-import { socialStartUrl, connectionButtonText } from "./LoginScreen";
-
-describe("#554 S3 socialStartUrl", () => {
-  it("names the platform connection so the hint survives beside a tenant IdP", () => {
-    expect(socialStartUrl("platform", "google", "/")).toBe("/auth/login?connection=platform&provider=google&returnTo=%2F");
-  });
-  it("pre-S3 server (no platform id) keeps the bare legacy URL", () => {
-    expect(socialStartUrl("", "github", "/x")).toBe("/auth/login?provider=github&returnTo=%2Fx");
-  });
-});
+// RETIRED by #602 / ADR-206 §3 (user ruling): `socialStartUrl` and the whole social start path are
+// gone. What it guarded — "Continue with Google must not launch the corporate IdP" — cannot happen any
+// more, because there is no second mechanism reaching the broker with a `?provider=` hint: signing in
+// with Google is a preset CONNECTION, and a connection start URL names the connection by id. That
+// property is pinned by `connectionStartUrl` above, which is now the only way in.
+import { connectionButtonText } from "./LoginScreen";
 
 describe("#554 S3 connectionButtonText (ADR-197 §3 rev3 fixed branding)", () => {
   const t = (k: string) => k;
