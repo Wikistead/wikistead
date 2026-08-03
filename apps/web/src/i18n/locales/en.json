@@ -605,6 +605,7 @@
     "resetDone": "Your password is set. Sign in with it.",
     "forgotPassword": "Forgot your password?",
     "resetSent": "If that address has a password here, a reset link is on its way.",
+    "resetNeedsAddress": "Type your email address first.",
     "inviteTitle": "You've been invited",
     "inviteBody": "Sign in to accept your invitation and join the workspace.",
     "acceptInvite": "Accept invite",

@@ -26,6 +26,7 @@ const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
 const STAMP = Date.now().toString(36)
+const TEN = { id: TENANT, plan: 'business' }
 const PASSWORD = 'the-original-passphrase'
 const NEXT = 'the-replacement-passphrase'
 const H = { host: 'dev.localhost', 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
@@ -145,8 +146,8 @@ describe('#568 §6: completing a reset', () => {
     const { sub, identifier } = await makeLocalMember('multi')
     const first = (await mintPasswordReset(db, identifier))!
     const second = (await mintPasswordReset(db, identifier))!
-    expect(await completePasswordReset(db, first.token, NEXT), 'the first works').not.toBeNull()
-    expect(await completePasswordReset(db, second.token, 'a-third-passphrase-x'), 'the second is dead').toBeNull()
+    expect(await completePasswordReset(db, TEN, first.token, NEXT), 'the first works').not.toBeNull()
+    expect(await completePasswordReset(db, TEN, second.token, 'a-third-passphrase-x'), 'the second is dead').toBeNull()
     expect(await verifyPassword(NEXT, (await storedHash(sub))!)).toBe(true)
   }, 180_000)
 
@@ -181,7 +182,7 @@ describe('#568 §6: completing a reset', () => {
     const X = { ...H, 'sec-fetch-site': 'cross-site' }
     expect((await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: X, payload: { identifier } })).statusCode).toBe(403)
     expect((await app.inject({ method: 'POST', url: '/auth/local/reset', headers: X, payload: { token: minted.token, password: NEXT } })).statusCode).toBe(403)
-    expect(await completePasswordReset(db, minted.token, NEXT), 'and the link was not touched').not.toBeNull()
+    expect(await completePasswordReset(db, TEN, minted.token, NEXT), 'and the link was not touched').not.toBeNull()
   }, 180_000)
 })
 
@@ -242,5 +243,40 @@ describe('#568 review R1-R3: the reset surface itself', () => {
     const minted = (await mintPasswordReset(db, identifier))!
     await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: minted.token, password: NEXT } })
     expect(await count() - before, 'both the request and the completion are on the ledger').toBeGreaterThanOrEqual(2)
+  }, 180_000)
+})
+
+describe('#568 review F1/F2: the ledger says what happened, and does not say who', () => {
+  it('F1: a password change that COMMITS always leaves a ledger line (same transaction)', async () => {
+    // A separate transaction with a swallowed error can leave the password changed and the ledger
+    // silent, which is the one state an investigation cannot recover from.
+    const { drainAuditFor } = await import('./helpers/audit-drain.js')
+    const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('../auth/password-reset.ts', import.meta.url), 'utf8'))
+    expect(src, 'the completion audits inside its own tx').toContain('auditIfEntitled(tx, tenant')
+    const route = await import('node:fs').then((fs) => fs.readFileSync(new URL('../routes/auth-local.ts', import.meta.url), 'utf8'))
+    expect(route, 'the change route wraps the UPDATE and the audit together').toMatch(/await req\.db\.tx\(async \(tx\) => \{[\s\S]*UPDATE local_credentials[\s\S]*auditIfEntitled\(tx/)
+
+    // ...and the row really lands
+    const { identifier, sub } = await makeLocalMember('f1')
+    const minted = (await mintPasswordReset(db, identifier))!
+    await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: minted.token, password: NEXT } })
+    await drainAuditFor(adminPool, TENANT)
+    const rows = await adminPool<{ actor: string }[]>`
+      SELECT actor FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`member:${sub}`} AND action = 'member.password_reset_completed'`
+    expect(rows.length).toBeGreaterThan(0)
+  }, 180_000)
+
+  it('F2: the REQUEST is attributed to nobody — it is unauthenticated and anyone may type an address', async () => {
+    // Recording the member as the actor would tell a takeover investigation that the owner asked for
+    // this, which is the opposite of what the ledger knows.
+    const { drainAuditFor } = await import('./helpers/audit-drain.js')
+    const { identifier, sub } = await makeLocalMember('f2')
+    await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: H, payload: { identifier } })
+    await drainAuditFor(adminPool, TENANT)
+    const rows = await adminPool<{ actor: string }[]>`
+      SELECT actor FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`member:${sub}`} AND action = 'member.password_reset_requested'`
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every((r) => r.actor !== `user:${sub}`), 'never attributed to the member').toBe(true)
+    expect(rows[0]!.actor).toBe('anonymous')
   }, 180_000)
 })
