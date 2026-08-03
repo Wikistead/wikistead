@@ -994,7 +994,9 @@
     "inviteAlreadyMember": "That address already belongs to a member. Inviting them again would create a second account.",
     "enablePassword": "Add a password entrance",
     "enablePasswordDone": "Password link created",
-    "rowActions": "Actions for {{name}}"
+    "rowActions": "Actions for {{name}}",
+    "passwordLinkLabel": "Password setup link (hand it to the member):",
+    "passwordSetupUnavailable": "A password entrance cannot be added for this member."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
