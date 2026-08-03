@@ -984,13 +984,11 @@
     "revokeConfirm": "{{email}} への招待を取り消しますか？送信済みのリンクは使えなくなります。",
     "filterPlaceholder": "メンバーを絞り込む…",
     "filterLabel": "メンバーの絞り込み",
-    "addRole": "＋ ロール",
     "seatLimit": "座席数の上限に達しました。メンバーを増やすにはアップグレードしてください。",
     "inviteFailed": "招待を作成できませんでした。",
     "pendingRow": "{{email}} · {{role}}",
     "inviteRoleOptional": "カスタムロール（任意）",
-    "inviteRoleNone": "カスタムロールなし",
-    "roleChangeOrAdd": "ロールを変更・追加"
+    "inviteRoleNone": "カスタムロールなし"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

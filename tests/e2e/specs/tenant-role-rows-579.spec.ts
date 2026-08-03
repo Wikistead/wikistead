@@ -39,41 +39,33 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(page.getByTestId("member-roles").first()).toBeVisible({ timeout: 8000 });
     const rowRoles = page.getByTestId("member-roles").first();
 
-    // #579 (third ruling) put the two controls back into one: the list carries the tier the member is
-    // NOT on together with the roles they do not hold. So the tier IS expected here — what #591 read as
-    // "a tier hiding in an add list" is answered by the label and by the chips, not by a second control.
+    // RE-AIMED by #579 (2026-08-03 ruling): . This used to add roleA, then add
+    // roleB beside it, then remove one and check the other survived — the additive model. The server now
+    // converges a tenant principal to ONE role, so that sequence describes a state the mechanism does not
+    // produce. What replaces it is the property a person can see: the control SHOWS the role they have,
+    // and choosing another REPLACES it (across a reload, so it is the server's answer and not local
+    // state). The per-assignment removal it used to prove has moved to where stacking still happens
+    // the space composite's two arms, in builtin-grant-equivalence-514.
     await rowRoles.getByTestId("member-role-select").click();
-    await expect(page.getByRole("option").filter({ hasText: /^(member|admin)$/ }), "the other tier is in the same list").toHaveCount(1);
+    await expect(page.getByRole("option", { name: roleA }), "every tenant role is offered, held or not").toBeVisible();
     await page.getByRole("option", { name: roleA }).click();
-    await expect(rowRoles.getByTestId("member-role-chip").filter({ hasText: roleA })).toBeVisible({ timeout: 8000 });
+    await expect(rowRoles.getByTestId("member-role-select"), "the control now shows what they have").toHaveText(roleA, { timeout: 8000 });
 
-    // a SECOND one sits beside it — this is the asymmetry a single Select could not show
-    await rowRoles.getByTestId("member-role-select").click();
-    await page.getByRole("option", { name: roleB }).click();
-    await expect(rowRoles.getByTestId("member-role-chip").filter({ hasText: roleB })).toBeVisible({ timeout: 8000 });
-
-    // it survives a reload = the assignment really landed, it is not local state
     await page.reload();
     await page.getByTestId("members-filter").fill("dev");
     const after = page.getByTestId("member-roles").first();
-    await expect(after.getByTestId("member-role-chip").filter({ hasText: roleA })).toBeVisible({ timeout: 10_000 });
-    await expect(after.getByTestId("member-role-chip").filter({ hasText: roleB })).toBeVisible();
+    await expect(after.getByTestId("member-role-select"), "and it survives a reload — the server said so").toHaveText(roleA, { timeout: 10_000 });
 
-    // remove ONE: the other must stay. Per assignment, not per capability — both roles carry
-    // createSpaces here, so a removal keyed on the capability would take both.
-    await after.getByTestId("member-role-chip").filter({ hasText: roleA }).getByTestId("member-role-remove").click();
-    await expect(after.getByTestId("member-role-chip").filter({ hasText: roleA })).toHaveCount(0, { timeout: 8000 });
-    await expect(after.getByTestId("member-role-chip").filter({ hasText: roleB }), "the other role is untouched").toBeVisible();
-    await sleep(300);
+    // choosing another REPLACES: one role, and the previous one is not beside it
+    await after.getByTestId("member-role-select").click();
+    await page.getByRole("option", { name: roleB }).click();
+    await expect(after.getByTestId("member-role-select")).toHaveText(roleB, { timeout: 8000 });
     await page.reload();
     await page.getByTestId("members-filter").fill("dev");
     const reloaded = page.getByTestId("member-roles").first();
-    await expect(reloaded.getByTestId("member-role-chip").filter({ hasText: roleB })).toBeVisible({ timeout: 10_000 });
-    await expect(reloaded.getByTestId("member-role-chip").filter({ hasText: roleA })).toHaveCount(0);
-
-    // the tier is still exactly one value, and it is the dropdown — it shows what the member IS and
-    // changing it moves them rather than adding anything (#591). No × : you do not remove a tier.
-    await expect(reloaded.getByTestId("member-tier-chip"), "the tier is shown as a chip; the picker offers the other one").toHaveText(/^(member|admin)$/);
+    await expect(reloaded.getByTestId("member-role-select"), "the replacement stuck").toHaveText(roleB, { timeout: 10_000 });
+    await expect(reloaded.getByTestId("member-role-chip"), "no chips: there is no set to draw").toHaveCount(0);
+    await expect(reloaded.getByTestId("member-tier-chip")).toHaveCount(0);
 
     // the filter narrows the table — the search that used to live inside the assign form
     await page.getByTestId("members-filter").fill("nobody-matches-this");

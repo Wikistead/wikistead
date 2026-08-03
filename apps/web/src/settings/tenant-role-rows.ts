@@ -130,13 +130,24 @@ export function resolveRoleChoice(value: string, addable: readonly TenantRoleDef
   return { kind: "none" };
 }
 
-/** What the one picker offers on a row: the tier the member is NOT on, then the roles they lack. */
-export function pickerOptions(row: TenantRoleRow): { value: string; label: string }[] {
-  const otherTier = row.builtin === "admin" ? "member" : "admin";
+// #579 (2026-08-03 ruling): . The control shows what
+// the member IS and changing it replaces — the server converges at tenant scope now, so the UI cannot
+// keep pretending otherwise. That makes the option list the WHOLE vocabulary (every tier, every tenant
+// role), not "the ones they lack": a picker that hides the current value has nothing to display as its
+// value, which is exactly how chips grew here in the first place.
+export function roleOptions(allRoles: readonly TenantRoleDef[]): { value: string; label: string }[] {
   return [
-    { value: `tier:${otherTier}`, label: otherTier },
-    ...row.addable.map((r) => ({ value: `role:${r.id}`, label: r.name })),
+    ...BUILT_IN_TIERS.map((tier) => ({ value: `tier:${tier}`, label: tier })),
+    ...allRoles.filter((r) => r.scope === "tenant").map((r) => ({ value: `role:${r.id}`, label: r.name })),
   ];
+}
+
+/** What the row's control SHOWS: the custom role they hold, else their tier. One value, because there
+ *  is one role. A row holding more than one (data from before the convergence) shows the first, and
+ *  choosing anything folds the rest — the server sweeps on assign. */
+export function currentRoleValue(row: TenantRoleRow): string {
+  const held = row.custom[0];
+  return held ? `role:${held.roleId}` : `tier:${row.builtin}`;
 }
 
 // #591 tried the other shape here — a dropdown for the tier and a separate control for adding custom

@@ -17,7 +17,7 @@ import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
-import { buildTenantRoleRows, filterMembers, pickerOptions, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
+import { buildTenantRoleRows, filterMembers, roleOptions, currentRoleValue, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -107,7 +107,7 @@ export function MembersPage() {
       <h2 style={{ marginTop: 0 }}>{t("members.title")}</h2>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
-      {/* #514 / ADR-188 slice 4: a TENANT role is an attribute of a member, so it is granted here —
+      {/* #514 / ADR-188 slice 4: a TENANT role is an attribute of a member, so it is granted here
           beside the people — while a SPACE role is granted in that space's Members tab.
           #579: and it is granted ON THE PERSON'S ROW. There is no second place. */}
       <FormRow>
@@ -130,53 +130,43 @@ export function MembersPage() {
                   {m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}
                 </span>
               </td>
-              {/* #579 (user ruling, THIRD time): one dropdown, and everything is chosen from it.
-                  #591 read "just one dropdown" as "give the tier its own dropdown" and split the cell in
-                  two, which is the opposite of what was asked. Its OBSERVATION was right — an exclusive
-                  tier hidden behind a control labelled "add" reads as though changing a tier adds one —
-                  but the fix for that is the LABEL, not a second control. So: one picker that offers the
-                  tier the member is not on and the roles they do not hold, and chips that show what they
-                  hold now. The asymmetry is told by the chips: a tier chip has no × (you do not remove a
-                  tier, you pick the other one), a custom chip does (removal is per assignment — two roles
-                  can share a capability and the server's reference count decides what actually goes). */}
+              {/* #579 (user ruling, 2026-08-03): .
+                  One control, and its VALUE is the role this member has. Chips are gone with the concept
+                  they drew: a chip row exists to show a SET, and there is no set — the server converges a
+                  tenant principal to one role (a71d8100), so a screen showing two was describing a state
+                  the mechanism does not produce. Changing the control replaces; there is no "add". */}
               <td data-testid="member-roles">
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span className="rounded-full border border-border px-2 py-px text-[11px] text-fg-dim" data-testid="member-tier-chip">
-                    {roleRows.get(m.sub)?.builtin ?? m.role}
-                  </span>
-                  {(roleRows.get(m.sub)?.custom ?? []).map((c) => (
-                    <span key={c.assignmentId} className="inline-flex items-center gap-1 rounded-full border border-[var(--accent)] px-2 py-px text-[11px] text-[var(--accent)]" data-testid="member-role-chip">
-                      {c.roleName}
-                      {!c.managed && (
-                        <IconButton aria-label={t("adminRoles.unassign")} data-testid="member-role-remove" variant="danger"
-                          onClick={() => unassignRole.mutate(c.assignmentId, {
-                            // #596: a removal that leaves the capability covered by another role says so
-                            onSuccess: (data) => notifyRevokeOutcome(t, data),
-                            onError: (err) => notifyRevokeError(t, err),
-                          })}><X size={12} /></IconButton>
-                      )}
-                    </span>
-                  ))}
-                  <Select
-                    size="sm"
-                    value=""
-                    ariaLabel={t("members.roleFor", { sub: m.sub })}
-                    testId="member-role-select"
-                    options={[{ value: "", label: t("members.roleChangeOrAdd") },
-                      ...pickerOptions(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })]}
-                    onChange={(value) => {
-                      const choice = resolveRoleChoice(value, roleRows.get(m.sub)?.addable ?? []);
-                      if (choice.kind === "tier") {
-                        void guarded(() => changeRole(token, m.sub, choice.role))();
-                      } else if (choice.kind === "custom") {
-                        assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, principal: `user:${m.sub}` }, {
-                          onSuccess: () => notify.success(t("toast.saved")),
-                          onError: () => notify.error(t("toast.actionFailed")),
-                        });
-                      }
-                    }}
-                  />
-                </span>
+                <Select
+                  size="sm"
+                  value={currentRoleValue(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })}
+                  ariaLabel={t("members.roleFor", { sub: m.sub })}
+                  testId="member-role-select"
+                  options={roleOptions(roles.data?.custom ?? [])}
+                  onChange={(value) => {
+                    const row = roleRows.get(m.sub);
+                    const choice = resolveRoleChoice(value, (roles.data?.custom ?? []).filter((r) => r.scope === "tenant"));
+                    if (choice.kind === "tier") {
+                      // A tier IS the whole role once chosen: the custom role they held is not "also"
+                      // true any more, so it goes with the change rather than lingering invisibly behind
+                      // a control that now reads `member`.
+                      void guarded(async () => {
+                        // Drop the custom role FIRST, then set the tier: the tier is what the control
+                        // will show afterwards, and leaving the assignment behind would make it show the
+                        // role again on the next read — the value would snap back and look like the
+                        // change was refused. Errors are not swallowed; `guarded` reports them.
+                        for (const c of row?.custom ?? []) await unassignRole.mutateAsync(c.assignmentId);
+                        await changeRole(token, m.sub, choice.role);
+                      })();
+                    } else if (choice.kind === "custom") {
+                      // The server sweeps whatever else they held at tenant scope (#579): assign is a
+                      // replacement, and the new role is written before the old one goes.
+                      assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, principal: `user:${m.sub}` }, {
+                        onSuccess: () => notify.success(t("toast.saved")),
+                        onError: () => notify.error(t("toast.actionFailed")),
+                      });
+                    }
+                  }}
+                />
               </td>
               <td style={{ textAlign: "right" }}>
                 {/* #464 / ADR-175 §6 (DSAR): erase this member's page-analytics reading history on request

@@ -15,6 +15,9 @@ test("#579: a member row offers exactly one way to choose a role", async ({ page
   await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 15000 });
 
   const cells = page.getByTestId("member-roles");
+  // wait for the table, do not race it: `count` answers 0 while the member query is still in flight,
+  // which reads as "the screen has no rows" and is really "the screen has not answered yet"
+  await expect(cells.first()).toBeVisible({ timeout: 15000 });
   const n = await cells.count();
   expect(n, "the member table rendered at least one row").toBeGreaterThan(0);
   for (let i = 0; i < n; i++) {
@@ -25,18 +28,27 @@ test("#579: a member row offers exactly one way to choose a role", async ({ page
   }
 });
 
-test("#579: the merged picker changes a tier in place and adds a custom role as a chip", async ({ page }) => {
+// RE-AIMED by #579 (2026-08-03): the row no longer draws chips beside the control — the control IS the
+// role. So what is measured is that its VALUE is the member's role and that the list offers the whole
+// vocabulary, including the value already shown (a picker that hides what you have is what made chips
+// necessary).
+test("#579: the row's control shows the member's role and offers every role", async ({ page }) => {
   await page.goto("/admin/members");
   await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 15000 });
 
   const cell = page.getByTestId("member-roles").first();
-  const tierChip = cell.getByTestId("member-tier-chip");
-  const before = (await tierChip.innerText()).trim();
+  await expect(cell).toBeVisible({ timeout: 15000 });
+  await expect(cell.getByTestId("member-role-chip"), "chips went with the set they drew").toHaveCount(0);
+  await expect(cell.getByTestId("member-tier-chip")).toHaveCount(0);
+  const shown = (await cell.getByTestId("member-role-select").innerText()).trim();
+  expect(shown.length, "the control shows a value, not an empty prompt").toBeGreaterThan(0);
+
   await cell.getByTestId("member-role-select").click();
   const options = await page.getByRole("option").allInnerTexts();
-  expect(options.join("|"), "the other tier is IN the list, not in a second control").toMatch(/\b(member|admin)\b/);
-  expect(options.join("|"), "and the tier it already has is not offered").not.toContain(`\n${before}\n`);
   await page.keyboard.press("Escape");
+  expect(options.join("|"), "both tiers are in the same list").toMatch(/member/);
+  expect(options.join("|")).toMatch(/admin/);
+  expect(options.some((o) => o.trim() === shown), "including the one it is showing").toBe(true);
 });
 
 test("#579: the invite form chooses its role from one dropdown too", async ({ page }) => {
@@ -45,7 +57,13 @@ test("#579: the invite form chooses its role from one dropdown too", async ({ pa
 
   const form = page.locator("form, div").filter({ has: page.getByTestId("invite-role") }).last();
   await expect(form.locator(ROLE_CONTROLS), "one role control in the invite form").toHaveCount(1);
-  await page.getByTestId("invite-role").click();
+  // Opened from the KEYBOARD rather than by clicking: the invite row sits at the bottom of a table that
+  // is still settling, and Playwright's click waits for the element to stop moving — measured, it never
+  // did, and the test spent its whole minute waiting to press a button that was right there. Focus and
+  // Enter is the same act for this control (and the one a keyboard user performs).
+  await page.getByTestId("invite-role").scrollIntoViewIfNeeded();
+  await page.getByTestId("invite-role").focus();
+  await page.keyboard.press("Enter");
   const options = await page.getByRole("option").allInnerTexts();
   await page.keyboard.press("Escape");
   expect(options.join("|"), "tiers are in the same list").toMatch(/\b(member|admin)\b/);
