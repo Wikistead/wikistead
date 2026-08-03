@@ -56,7 +56,10 @@ afterAll(async () => {
 }, 180_000)
 
 /** Every page verb worth listing to a human, in the order the UI shows them. */
-const VERBS = ['view', 'comment', 'edit', 'moderate', 'publish', 'delete', 'share', 'manage'] as const
+// #586`settings` joined the list — the grid draws a settings column, and the measured tables
+// lacked the verb entirely, so a space manager (who settles pages via `page#settings: manage or …`)
+// showed settings unticked. A column the measurement does not cover is a lie waiting to be drawn.
+const VERBS = ['view', 'comment', 'edit', 'moderate', 'publish', 'delete', 'share', 'settings', 'manage'] as const
 
 /** A table the UI renders, read from the web source (one table, two readers — never two tables). */
 function uiTable(name = 'BUILTIN_EFFECTIVE_CAPS'): Record<string, string[]> {
@@ -65,7 +68,9 @@ function uiTable(name = 'BUILTIN_EFFECTIVE_CAPS'): Record<string, string[]> {
   expect(block, `the web table ${name} is where this test says it is`).toBeTruthy()
   const out: Record<string, string[]> = {}
   for (const m of block!.matchAll(/(\w+):\s*\[([^\]]*)\]/g)) {
-    out[m[1]!] = [...m[2]!.matchAll(/"([a-z]+)"/g)].map((c) => c[1]!)
+    // [a-zA-Z]: the tenant vocabulary is camelCase ("createSpaces"), and a lowercase-only pattern read
+    // that table as empty — an empty parse compares as "confers nothing", which is a silent lie
+    out[m[1]!] = [...m[2]!.matchAll(/"([a-zA-Z]+)"/g)].map((c) => c[1]!)
   }
   return out
 }
@@ -150,5 +155,40 @@ describe('#586: the built-in display table is the store\'s answer', () => {
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: sub, capability: 'edit', plan: 'business' })
     expect(await check(fgaClient, sub, 'edit', { type: 'page', id: pageId })).toBe(true)
     expect(await check(fgaClient, sub, 'comment', { type: 'page', id: pageId }), 'a bare edit grant grants exactly edit').toBe(false)
+  }, 180_000)
+})
+
+// #586①: the TENANT tiers.ruled "no tooltip without a measured table", and there was no
+// table because there was nothing to measure — the tiers had two independent leaves. #604 changed the
+// premise: three verbs were carved out of `admin` as `… or admin` unions, so what `admin` confers is a
+// CLOSURE again, and the roles list was still drawing the two-leaf declaration (admin with
+// manageConnections/manageRoles/viewAudit unticked while a real store answers true for all three).
+describe('#586the tenant tier table is the store\'s answer', () => {
+  const TENANT_VERBS: Record<string, string> = {
+    createSpaces: 'space_creator', issueApiKeys: 'api_key_issue',
+    manageConnections: 'manage_connections', manageRoles: 'manage_roles', viewAudit: 'view_audit',
+  }
+  const measure = async (tier: 'admin' | 'member') => {
+    const sub = `user:caps586-tier-${tier}-${STAMP}`
+    const { writeTuples, deleteTuples } = await import('@wikistead/authz')
+    await writeTuples(fgaClient, [{ user: sub, relation: tier, object: `tenant:${TENANT}` }])
+    const held: string[] = []
+    try {
+      for (const [cap, rel] of Object.entries(TENANT_VERBS)) {
+        const { allowed } = await fgaClient.check({ user: sub, relation: rel, object: `tenant:${TENANT}` })
+        if (allowed) held.push(cap)
+      }
+    } finally {
+      await deleteTuples(fgaClient, [{ user: sub, relation: tier, object: `tenant:${TENANT}` }]).catch(() => {})
+    }
+    return held
+  }
+  it('admin lists exactly what the store confers', async () => {
+    const held = await measure('admin')
+    expect(uiTable('TENANT_TIER_CAPS').admin, `the UI table for the admin tier is stale — the store says [${held.join(', ')}]`).toEqual(held)
+  }, 180_000)
+  it('member confers none of the tenant verbs by tier alone', async () => {
+    const held = await measure('member')
+    expect(uiTable('TENANT_TIER_CAPS').member, `the UI table for the member tier is stale — the store says [${held.join(', ')}]`).toEqual(held)
   }, 180_000)
 })

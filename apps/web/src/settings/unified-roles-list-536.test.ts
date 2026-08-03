@@ -95,9 +95,14 @@ describe("#536one roles list, one creation flow", () => {
   // noun, undecorated and untranslated — is #582's, and it is pinned where the names are actually
   // rendered (tenant-role-rows-579.test.ts and comment-panel-vocabulary-582.test.ts). Removed rather
   // than left asserting a key that no locale carries.
-  it("built-ins stay read-only in the same control custom roles edit with", () => {
-    // the four resource built-ins and admin render CapabilityPicker with `disabled`
-    expect(src).toMatch(/idPrefix=\{`builtin-\$\{r\.name\}`\} list=\{CAPABILITIES\} disabled/);
-    expect(src).toMatch(/idPrefix="builtin-admin" list=\{TENANT_CAPABILITIES\} disabled/);
+  it("a built-in cannot be edited, and at rest no role shows a grid at all", () => {
+    // RE-AIMED by #586②: the read-only grids left the list — a role at rest is its NAME, and the
+    // name's hover window says what it confers. What this keeps pinning is the half that must not move:
+    // nothing offers an EDITING grid for a built-in (the member row's control edits the tenant DEFAULTS,
+    // a different thing, and stays), and the custom rows' grid appears only behind its edit affordance.
+    expect(src, "no editable grid for the resource built-ins").not.toMatch(/idPrefix=\{`builtin-\$\{r\.name\}`\}/);
+    expect(src, "no grid at all for the admin tier").not.toMatch(/idPrefix="builtin-admin"/);
+    expect(src, "the custom grid is behind the edit affordance").toMatch(/capsOpenId === r\.id && \(/);
+    expect(src, "the member DEFAULTS control stays editable").toMatch(/idPrefix="builtin-member"/);
   });
 });

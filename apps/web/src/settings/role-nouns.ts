@@ -58,7 +58,9 @@ export const BUILTIN_EFFECTIVE_CAPS: Record<RoleNounKey, readonly string[]> = {
   comment: ["view", "comment"],
   edit: ["view", "comment", "edit", "publish"],
   moderate: ["view", "comment", "edit", "moderate", "publish"],
-  manage: ["view", "comment", "edit", "moderate", "publish", "delete", "share", "manage"],
+  // `settings` measured in (#586): the grid draws a settings column, and a manager settles pages
+  // (`page#settings: manage or …`) — a column the measurement did not cover was a lie waiting to be drawn.
+  manage: ["view", "comment", "edit", "moderate", "publish", "delete", "share", "settings", "manage"],
 };
 
 // #586 review ①: what a PAGE grant of a single relation confers — a different question, so a different
@@ -81,7 +83,21 @@ export const PAGE_GRANT_CAPS: Record<RoleNounKey, readonly string[]> = {
   moderate: ["view", "comment", "edit", "moderate", "publish"],
   // no `moderate` either, and that one is a surprise: the space MANAGER noun moderates (it arrives
   // through `space#moderator = … or manager`), but a page manage grant does not reach that leaf.
-  manage: ["view", "comment", "edit", "publish", "delete", "share", "manage"],
+  manage: ["view", "comment", "edit", "publish", "delete", "share", "settings", "manage"],
+};
+
+// #586what the TENANT TIERS confer.ruled "no table without a measurement", and back then
+// there was nothing to measure — two independent leaves. #604 changed the premise by carving verbs out of
+// `admin` as `… or admin` unions, so what `admin` confers is a closure again, and the roles list was
+// still drawing the two-leaf declaration. Measured like its siblings: role-capability-truth-586 grants
+// each tier in a real store and reads back every tenant verb.
+export const TENANT_TIER_CAPS: Record<"admin" | "member", readonly string[]> = {
+  admin: ["createSpaces", "issueApiKeys", "manageConnections", "manageRoles", "viewAudit"],
+  // Measured, with a precision that matters: this is NOT the tier's own structure. `space_creator`
+  // accepts a `tenant#member` TUPLE — a per-tenant policy switch, seeded on by default — so what the
+  // member tier confers depends on configuration, and this row records the default. The admin row above
+  // IS structural (`… or admin` in the model, true in every tenant).
+  member: ["createSpaces"],
 };
 
 /** Display order, so the same set reads the same wherever it appears. */

@@ -64,6 +64,8 @@ test("#581: the two scope groups are separate surfaces, bounded, without per-row
     // space/page section — the tenant section's roles carry the other vocabulary entirely)
     const row = resourceBox.getByTestId("custom-role-row").first();
     await expect(row.getByTestId("role-delete")).toBeVisible();
+    await row.scrollIntoViewIfNeeded();
+    await row.getByTestId("role-edit-caps").click(); // #586②: the grid opens behind the edit affordance
     await expect(row.getByTestId("custom-cap-view")).toBeChecked();
   } finally {
     for (const id of made) {
