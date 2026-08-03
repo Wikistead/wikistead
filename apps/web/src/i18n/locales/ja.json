@@ -989,7 +989,8 @@
     "inviteFailed": "招待を作成できませんでした。",
     "pendingRow": "{{email}} · {{role}}",
     "inviteRoleOptional": "カスタムロール（任意）",
-    "inviteRoleNone": "カスタムロールなし"
+    "inviteRoleNone": "カスタムロールなし",
+    "inviteAlreadyMember": "そのアドレスは既にメンバーのものです。もう一度招待すると、その人のアカウントがもう 1 つできてしまいます。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

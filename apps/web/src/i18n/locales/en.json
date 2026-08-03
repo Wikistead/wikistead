@@ -989,7 +989,8 @@
     "inviteFailed": "Could not create the invite.",
     "pendingRow": "{{email}} · {{role}}",
     "inviteRoleOptional": "Custom role (optional)",
-    "inviteRoleNone": "No custom role"
+    "inviteRoleNone": "No custom role",
+    "inviteAlreadyMember": "That address already belongs to a member. Inviting them again would create a second account."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
