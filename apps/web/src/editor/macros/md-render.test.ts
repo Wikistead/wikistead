@@ -371,6 +371,31 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
     expect(d.querySelector(".cm-lp-md-directive")).not.toBeNull(); // degraded safely, no exception
   });
 
+  // #598 (review): the identity a surface is compared by has to name WHO DREW the element.
+  // While it came from the source text, a registered macro that nothing renders on this surface came out
+  // of the generic box wearing its own name, and the parity gate — whose whole job is to notice an element
+  // that draws in the editor and not in the export — passed. Measured on a dummy macro and it was green.
+  //
+  // Both directions in one test on purpose: "the working macro is named" alone would still pass if
+  // everything were named, which is the bug.
+  it("#598: the name says who drew it — a macro that rendered is named, one that fell back is not", () => {
+    registerMacro({
+      kind: "directive", name: "wired598", exportFidelity: "degrade",
+      htmlRender: (b) => html`<div>${b}</div>`,
+      liveRender: () => { const d = document.createElement("div"); d.className = "wired598"; return d; },
+    });
+    registerMacro({
+      kind: "directive", name: "unwired598", exportFidelity: "degrade",
+      htmlRender: (b) => html`<div>${b}</div>`,
+      // registered, and draws nothing here — the shape of a macro wired to the editing surface only
+      liveRender: () => null as unknown as HTMLElement,
+    });
+    const d = root(":::wired598\nx\n:::\n\n:::unwired598\ny\n:::");
+    expect(d.querySelector('[data-wks-el="wired598"]'), "the macro that rendered carries its name").not.toBeNull();
+    expect(d.querySelector('[data-wks-el="unwired598"]'), "the macro that did NOT render must not claim the name").toBeNull();
+    expect(d.querySelector('[data-wks-el-fallback="unwired598"]'), "…it is named as a fallback instead, so the gate can say which one").not.toBeNull();
+  });
+
   // ADR-085 v1: the SAME dispatch for the FENCE macro shape (```lang), so a diagram fence nested in
   // transclude/columns renders as the real macro — not a raw <pre><code>. Completes client dispatch
   // for both macro shapes (directive above + fence here). Register a fence macro to exercise it.
