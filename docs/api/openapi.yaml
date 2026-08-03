@@ -570,5 +570,22 @@ paths:
     get: { operationId: listEntitlements, tags: [entitlements], summary: The tenant's resolved entitlements (plan limits/features), responses: { "200": { description: Entitlements }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /members:
     get: { operationId: listMembers, tags: [members], summary: List tenant members, responses: { "200": { description: Members }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
+  /members/{sub}/password-setup:
+    # #606 / ADR-205 §2 (ruled A): an admin gives an EXISTING member a password entrance. It mints a
+    # setup link; the member chooses the password. The credential binds to the sub they already have —
+    # membership, seat and tuples are untouched, which is what tells this apart from a password invite.
+    post:
+      operationId: enableMemberPassword
+      tags: [members]
+      summary: Give an existing member a password entrance (admin only)
+      parameters:
+        - { name: sub, in: path, required: true, schema: { type: string } }
+      responses:
+        "201": { description: "{ setupUrl, email }" }
+        "400": { description: "Password sign-in is off for this tenant, the member has no address, or already has a password" }
+        "401": { description: Missing or invalid credentials }
+        "403": { description: Permitted to see the resource but not to perform this action }
+        "404": { description: Not viewable or absent (uniform — existence hiding) }
+        default: { $ref: "#/components/responses/Error" }
   /embed/providers:
     get: { operationId: listEmbedProviders, tags: [embed], summary: The tenant's external-embed host allowlist, responses: { "200": { description: "{ providers }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
