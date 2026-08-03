@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { Select as SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 import { useControlScale } from "./FormRow";
 
@@ -33,12 +34,25 @@ export function Select({
 }) {
   // #535: no `size` inside a FormRow means the row's scale; outside one it is the `md` it always was.
   const scale = useControlScale(size, "md");
+  // #582: the open list is portalled to the body, and Radix keeps it inside the VIEWPORT — which says
+  // nothing about the dialog the control lives in. A long option grew the list rightwards and carried it
+  // out past the dialog's edge (measured 28px over, and outside it in the DOM), where a reader looking at
+  // the dialog cannot follow it. Handing Radix the dialog as the boundary makes it shift or flip within
+  // that box instead. Outside a dialog there is no boundary and the viewport rule applies, unchanged.
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [boundary, setBoundary] = useState<Element | null>(null);
   return (
-    <SelectRoot value={value === "" ? EMPTY_SENTINEL : value} onValueChange={(v) => { if (v != null) onChange(v === EMPTY_SENTINEL ? "" : v); }} disabled={disabled}>
-      <SelectTrigger size={scale === "sm" ? "sm" : "default"} aria-label={ariaLabel} data-testid={testId}>
+    <SelectRoot
+      value={value === "" ? EMPTY_SENTINEL : value}
+      onValueChange={(v) => { if (v != null) onChange(v === EMPTY_SENTINEL ? "" : v); }}
+      disabled={disabled}
+      // read on open, not on mount: the trigger may be mounted before the dialog around it exists
+      onOpenChange={(open) => { if (open) setBoundary(trigger.current?.closest("[role=dialog]") ?? null); }}
+    >
+      <SelectTrigger ref={trigger} size={scale === "sm" ? "sm" : "default"} aria-label={ariaLabel} data-testid={testId}>
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent collisionBoundary={boundary ?? undefined} collisionPadding={8}>
         {options.map((o) => (
           <SelectItem key={o.value} value={o.value === "" ? EMPTY_SENTINEL : o.value} data-testid={testId ? `${testId}-${o.value}` : undefined}>
             {o.hint?.length
