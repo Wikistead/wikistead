@@ -45,8 +45,9 @@ const KNOWN_RED = {
   // happens, which is the general rule this recorded — a transform that rebuilds a macro's element on the
   // way out carries its name across.
   unidentified: [] as string[],
-  // #598 computed slice: elements whose typeface differs between the app and the saved file.
-  faceDrift: [] as string[],
+  // #598 computed slice: elements whose TYPOGRAPHY (face, size, line height, weight, slant) differs
+  // between the app and the saved file. Layout is not compared — see the rule at the assertion.
+  typographyDrift: [] as string[],
 } as const;
 
 // Macros that legitimately render NOTHING with the fixture's data: a tag list with no tagged pages and
@@ -210,30 +211,51 @@ test("#598: every registered element survives the export, the file, and the page
     "If you FIXED one, delete it from KNOWN_RED — the list only shrinks",
   ).toEqual([...KNOWN_RED.unidentified].sort());
 
-  // ---- 1c. the type is the same type: font parity, element by element ----
+  // ---- 1c. the type is the same type: typography parity, element by element ----
   //
-  // The first computed-style dimension, and the one #85 kept failing on: a document that opens in a
-  // different typeface is not the document that was written, however complete its content is. Element by
-  // element, by the name stamped above — so this compares a table with a table, not "the fourth block"
-  // with "the fourth block".
+  // The first computed-style dimension, and the one #85 kept failing on: a document that opens looking
+  // like a different document is not the one that was written, however complete its content is. The
+  // identity stamped above is what makes this exact — a table is compared with a table rather than "the
+  // fourth block" with "the fourth block".
   //
-  // Only the family, deliberately. Sizes and margins legitimately differ between a screen surface with
-  // editor chrome and a printed page; the FACE is supposed to be the same thing in both, and starting
-  // with the claim that can be judged keeps this dimension honest rather than noisy.
-  const facesOf = (p: Page) => p.evaluate(() =>
-    Object.fromEntries([...document.querySelectorAll("[data-wks-el]")]
-      .map((el) => [el.getAttribute("data-wks-el") ?? "", getComputedStyle(el).fontFamily.split(",")[0]!.replace(/["']/g, "").trim()])));
-  const exportFaces = await facesOf(opened);
-  const readFaces = await facesOf(page); // the app, still open on the same document
-  const drift = Object.keys(exportFaces)
-    .filter((name) => readFaces[name] && readFaces[name] !== exportFaces[name])
-    .map((name) => `${name}: app ${readFaces[name]} vs file ${exportFaces[name]}`)
+  // THE RULE, written down before the properties were chosen, because a computed-style comparison with no
+  // rule is a noise generator
+  //
+  // COMPARED — what the DOCUMENT says: the typeface, the size, the line height, the weight and slant.
+  // These are the author's text. If they differ between the app and the saved file, the reader is
+  // holding a different document.
+  //
+  // NOT COMPARED — what the SURFACE says: margins, padding, widths, backgrounds. A screen with editor
+  // chrome and a printed page legitimately lay text out differently, and #207 (print margins) is a
+  // ticket about exactly that being a separate decision. Comparing them here would fail forever and
+  // teach everyone to ignore this gate.
+  //
+  // Colour is deliberately absent for now: the app follows the viewer's theme and the saved file bakes
+  // one, so equality is the wrong assertion and "legible against its own background" is the right one
+  // a different measurement, and its own slice.
+  const TYPOGRAPHY = ["fontFamily", "fontSize", "lineHeight", "fontWeight", "fontStyle"] as const;
+  const typographyOf = (p: Page) => p.evaluate((props: readonly string[]) =>
+    Object.fromEntries([...document.querySelectorAll("[data-wks-el]")].map((el) => {
+      const cs = getComputedStyle(el);
+      const read = (k: string) => {
+        const v = cs.getPropertyValue(k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())) || "";
+        // the family list is a fallback chain; the FIRST entry is the face the document asked for
+        return k === "fontFamily" ? v.split(",")[0]!.replace(/["']/g, "").trim() : v.trim();
+      };
+      return [el.getAttribute("data-wks-el") ?? "", props.map((k) => `${k}=${read(k)}`).join(" ")];
+    })), TYPOGRAPHY as unknown as string[]);
+  const exportType = await typographyOf(opened);
+  const readType = await typographyOf(page); // the app, still open on the same document
+  const shared = Object.keys(exportType).filter((name) => readType[name]);
+  expect(shared.length, "there are named elements on BOTH surfaces to compare (an empty intersection passes forever)").toBeGreaterThan(3);
+  const drift = shared
+    .filter((name) => readType[name] !== exportType[name])
+    .map((name) => `${name}: app [${readType[name]}] vs file [${exportType[name]}]`)
     .sort();
-  expect(Object.keys(exportFaces).length, "the saved file has named elements to compare").toBeGreaterThan(3);
   expect(
     drift,
-    "an element opens in a different typeface than the one it was written in. If you FIXED one, delete it from KNOWN_RED",
-  ).toEqual([...KNOWN_RED.faceDrift].sort());
+    "an element does not read the same in the saved file as in the app. If you FIXED one, delete it from KNOWN_RED",
+  ).toEqual([...KNOWN_RED.typographyDrift].sort());
 
   // ---- 1b. no element rendered as an ellipsis placeholder ----
   const placeholders = await opened.evaluate(() => Array.from(document.querySelectorAll("main.wks-export-doc *"))
