@@ -324,6 +324,11 @@
   "billing": {
     "title": "Billing",
     "selfHosted": "This is a self-hosted workspace. All features are included, with no plan limits or billing.",
+    "usageTitle": "This billing period",
+    "usedOf": "{{used}} of {{allowance}}",
+    "usedUnlimited": "{{used}} (no limit)",
+    "resource_ai.tokens": "AI tokens",
+    "resource_other": "{{resource}}",
     "currentPlan": "Current plan:",
     "plan_free": "Free",
     "plan_pro": "Pro",

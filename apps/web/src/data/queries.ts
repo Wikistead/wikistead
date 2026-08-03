@@ -1530,6 +1530,22 @@ export function useBillingStatus() {
   const { token } = useSession();
   return useQuery({ queryKey: ["billing-status"], queryFn: () => apiFetch<BillingStatus>("/billing/status", token), staleTime: 30_000 });
 }
+// #231: what has been METERED this period, beside the allowance the plan already carries. Read-only
+// and number-free on purpose — prices, cap constants and soft-cap enforcement are #127's rulings, and
+// a screen that guessed at them would have to be rebuilt when they land. `allowance: null` means
+// unlimited (JSON has no Infinity; a serialiser would otherwise turn it into a `null` that reads as
+// zero). tenant#admin server-side: a non-admin gets 403 and the section simply does not render.
+export interface UsageResource { resource: string; used: number; allowance: number | null }
+export interface UsageDTO { periodStart: string; plan: string; resources: UsageResource[] }
+export function useBillingUsage() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["billing-usage"],
+    queryFn: () => apiFetch<UsageDTO>("/billing/usage", token),
+    staleTime: 30_000,
+    retry: false, // a 403 is an answer, not a hiccup
+  });
+}
 export function useCheckout() {
   const { token } = useSession();
   return useMutation({ mutationFn: (plan: string) => apiFetch<{ url: string }>("/billing/checkout", token, { method: "POST", body: JSON.stringify({ plan }) }) });

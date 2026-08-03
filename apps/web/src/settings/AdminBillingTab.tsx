@@ -1,14 +1,43 @@
 import { useTranslation } from "react-i18next";
-import { useBillingStatus, useEntitlements, useCheckout, usePortal } from "../data/queries";
+import { useBillingStatus, useBillingUsage, useEntitlements, useCheckout, usePortal, type UsageResource } from "../data/queries";
 import { Button } from "../ui/Button";
 import { notify } from "../ui/toast";
 
 // Billing (Phase 5g, /admin/billing, tenant#admin). On self-host (billing disabled)
 // it shows the "all features included" state. On Cloud it shows the current plan +
 // Upgrade (Checkout) / Manage billing (Customer Portal). Team is contact-sales.
+// #231: the counters `recordUsage` has been writing since #383, with nothing reading them back. What
+// this deliberately does NOT do: warn, nag, or colour anything. What counts as "too much" is a
+// pricing ruling (#127), and a screen that decided it first would be deciding it.
+function UsageSection({ resources }: { resources: UsageResource[] }) {
+  const { t } = useTranslation();
+  if (resources.length === 0) return null;
+  const fmt = new Intl.NumberFormat();
+  return (
+    <div className="mt-4 border-t border-border pt-3" data-testid="billing-usage">
+      <p className="m-0 mb-2 text-xs font-medium text-fg-dim">{t("billing.usageTitle")}</p>
+      <div className="flex flex-col gap-1">
+        {resources.map((r) => (
+          <div key={r.resource} className="flex items-baseline justify-between text-sm" data-testid={`billing-usage-${r.resource}`}>
+            <span className="text-fg-dim">{t([`billing.resource_${r.resource}`, "billing.resource_other"], { resource: r.resource })}</span>
+            <span>
+              {/* `allowance: null` is UNLIMITED. Printing it as a number would say zero, which is the
+                  opposite — so the two cases are different sentences, not a formatting branch. */}
+              {r.allowance === null
+                ? t("billing.usedUnlimited", { used: fmt.format(r.used) })
+                : t("billing.usedOf", { used: fmt.format(r.used), allowance: fmt.format(r.allowance) })}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AdminBillingTab() {
   const { t } = useTranslation();
   const status = useBillingStatus();
+  const usage = useBillingUsage();
   const ent = useEntitlements();
   const checkout = useCheckout();
   const portal = usePortal();
@@ -33,6 +62,9 @@ export function AdminBillingTab() {
       <div className="max-w-[560px] p-6" data-testid="admin-billing">
         <h2 style={{ marginTop: 0 }}>{t("billing.title")}</h2>
         <p className="mt-0 text-sm text-fg-dim" data-testid="billing-selfhosted">{t("billing.selfHosted")}</p>
+        {/* Metering runs on self-host too, and "what has this deployment used" is a real question
+            even when nothing is billed for it. */}
+        <UsageSection resources={usage.data?.resources ?? []} />
       </div>
     );
   }
@@ -49,6 +81,7 @@ export function AdminBillingTab() {
         )}
         <Button variant="default" size="sm" disabled={portal.isPending} onClick={goPortal} data-testid="billing-manage">{t("billing.manage")}</Button>
       </div>
+      <UsageSection resources={usage.data?.resources ?? []} />
       <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 16 }}>{t("billing.teamNote")}</p>
     </div>
   );

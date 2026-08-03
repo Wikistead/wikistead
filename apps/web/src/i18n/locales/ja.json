@@ -324,6 +324,11 @@
   "billing": {
     "title": "課金",
     "selfHosted": "これはセルフホストのワークスペースです。すべての機能が使え、プラン制限も課金もありません。",
+    "usageTitle": "今期の使用量",
+    "usedOf": "{{used}} / {{allowance}}",
+    "usedUnlimited": "{{used}}（上限なし）",
+    "resource_ai.tokens": "AI トークン",
+    "resource_other": "{{resource}}",
     "currentPlan": "現在のプラン:",
     "plan_free": "Free",
     "plan_pro": "Pro",
