@@ -97,6 +97,38 @@ test("#586: a role badge lists what it lets someone do", async ({ page }) => {
     await expect(tip).toBeVisible({ timeout: 4000 });
     expect((await tip.innerText()).trim().length, "it lists capabilities rather than showing an empty box").toBeGreaterThan(0);
     expect(["role", "grant"], "and the badge says which kind of access it is").toContain(await badge.getAttribute("data-origin"));
+
+    // #586 review ①: a page grant is a single ARM. The tooltip used to look its badge up in the table of
+    // space NOUNS and so told a reader that a page `edit` grant could comment — which the store denies
+    // (`role-capability-truth-586`: "a bare edit grant is NOT the editor noun"). Measured on the rendered
+    // text, because the defect was invisible to every type along the way.
+    //
+    // The EDIT row by name, not the first one: the page's creator already holds a manage grant, and the
+    // first attempt at this assertion read that row instead and passed for the wrong reason.
+    const editRow = page.getByTestId("grant-item").filter({ has: page.getByText("editor", { exact: true }) }).first();
+    await expect(editRow, "the edit grant has a row").toBeVisible({ timeout: 8000 });
+    const editBadge = editRow.getByTestId("grant-origin");
+    await editBadge.focus();
+    // …and read the tooltip THIS badge points at. The manage row's tooltip is still open from the focus
+    // above, so `getByRole("tooltip").first` reads that one — which it did, and passed for the wrong
+    // reason until the rendered text was actually looked at.
+    const tipId = await editBadge.getAttribute("aria-describedby");
+    expect(tipId, "the badge names its own tooltip").toBeTruthy();
+    const editTip = page.locator(`#${tipId}`);
+    await expect(editTip).toBeVisible({ timeout: 4000 });
+    const tipText = (await editTip.innerText()).toLowerCase();
+    expect(tipText, "the edit grant lists edit").toContain("edit");
+    expect(tipText, "and does NOT claim comment — the server pins that it confers none").not.toContain("comment");
+
+    // #586①: what a role confers is readable BEFORE it is chosen, not only after. Reading it must
+    // not need hover, which a coarse pointer does not have at all (ADR-159).
+    await page.getByTestId("grant-relation").click();
+    const option = page.getByTestId("grant-relation-builtin:manage");
+    await expect(option, "the picker offers the built-in roles").toBeVisible({ timeout: 4000 });
+    const caps = (await option.innerText()).toLowerCase();
+    expect(caps, "the option says what choosing it would confer").toContain("share");
+    expect(caps.replace(/\s+/g, " ").length, "…which is more than its name alone").toBeGreaterThan("manager".length + 8);
+    await page.keyboard.press("Escape");
   } finally {
     await page.evaluate(async ({ api, pageId }) => {
       await fetch(`${api}/pages/${pageId}`, { method: "DELETE", headers: { Authorization: "Bearer dev-token" } }).catch(() => {});

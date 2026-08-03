@@ -82,7 +82,10 @@ describe("#586: the capability grid shows subsumption instead of explaining it",
   const tab = readFileSync(resolve(import.meta.dirname, "./AdminRolesTab.tsx"), "utf8");
 
   it("draws the carried capabilities as checked and not operable", () => {
-    expect(tab, "the implied set is computed").toMatch(/BUILTIN_EFFECTIVE_CAPS\[held as RoleNounKey\]/);
+    // #586 review ② re-aim: the subject is "the implied set comes from the ONE measured closure", not
+    // the expression that used to spell it out. The tooltips and this grid now call the same function,
+    // which is the property that stopped a `moderate`-only role reading two different ways.
+    expect(tab, "the implied set is computed through the shared closure").toMatch(/closureOf\(\[held\]\)/);
     expect(tab, "and a carried box cannot be toggled").toMatch(/itemDisabled = disabled \|\| itemLocked \|\| impliedBy !== undefined/);
     expect(tab, "it reads as checked").toMatch(/checked=\{value\.includes\(c\) \|\| impliedBy !== undefined\}/);
   });

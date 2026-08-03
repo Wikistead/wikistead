@@ -4,7 +4,7 @@ import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
   useTenantRoleDefaults, useSetTenantRoleDefaults,
 } from "../data/queries";
-import { BUILTIN_EFFECTIVE_CAPS, type RoleNounKey } from "./role-nouns";
+import { closureOf } from "./role-nouns";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a role is irreversible — confirm first
@@ -69,7 +69,9 @@ function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false, l
   const lastLocked = lockLast && value.length === 1;
   const implied = new Map<string, string>();
   for (const held of value) {
-    for (const c of BUILTIN_EFFECTIVE_CAPS[held as RoleNounKey] ?? []) {
+    // #586 review ②: through the shared closure, so this grid and the tooltips cannot answer the same
+    // question differently.
+    for (const c of closureOf([held])) {
       if (c !== held && !value.includes(c)) implied.set(c, held);
     }
   }

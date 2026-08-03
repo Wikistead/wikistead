@@ -1297,6 +1297,7 @@
       "share": "Share",
       "settings": "Settings",
       "moderate": "Moderate",
+      "manage": "Manage",
       "createSpaces": "create spaces",
       "issueApiKeys": "issue API keys"
     },
