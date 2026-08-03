@@ -45,6 +45,8 @@ const KNOWN_RED = {
   // happens, which is the general rule this recorded — a transform that rebuilds a macro's element on the
   // way out carries its name across.
   unidentified: [] as string[],
+  // #598 computed slice: elements whose typeface differs between the app and the saved file.
+  faceDrift: [] as string[],
 } as const;
 
 // Macros that legitimately render NOTHING with the fixture's data: a tag list with no tagged pages and
@@ -207,6 +209,31 @@ test("#598: every registered element survives the export, the file, and the page
     `an element is not in the exported document under its own name (present: ${identified.sort().join(", ")}). ` +
     "If you FIXED one, delete it from KNOWN_RED — the list only shrinks",
   ).toEqual([...KNOWN_RED.unidentified].sort());
+
+  // ---- 1c. the type is the same type: font parity, element by element ----
+  //
+  // The first computed-style dimension, and the one #85 kept failing on: a document that opens in a
+  // different typeface is not the document that was written, however complete its content is. Element by
+  // element, by the name stamped above — so this compares a table with a table, not "the fourth block"
+  // with "the fourth block".
+  //
+  // Only the family, deliberately. Sizes and margins legitimately differ between a screen surface with
+  // editor chrome and a printed page; the FACE is supposed to be the same thing in both, and starting
+  // with the claim that can be judged keeps this dimension honest rather than noisy.
+  const facesOf = (p: Page) => p.evaluate(() =>
+    Object.fromEntries([...document.querySelectorAll("[data-wks-el]")]
+      .map((el) => [el.getAttribute("data-wks-el") ?? "", getComputedStyle(el).fontFamily.split(",")[0]!.replace(/["']/g, "").trim()])));
+  const exportFaces = await facesOf(opened);
+  const readFaces = await facesOf(page); // the app, still open on the same document
+  const drift = Object.keys(exportFaces)
+    .filter((name) => readFaces[name] && readFaces[name] !== exportFaces[name])
+    .map((name) => `${name}: app ${readFaces[name]} vs file ${exportFaces[name]}`)
+    .sort();
+  expect(Object.keys(exportFaces).length, "the saved file has named elements to compare").toBeGreaterThan(3);
+  expect(
+    drift,
+    "an element opens in a different typeface than the one it was written in. If you FIXED one, delete it from KNOWN_RED",
+  ).toEqual([...KNOWN_RED.faceDrift].sort());
 
   // ---- 1b. no element rendered as an ellipsis placeholder ----
   const placeholders = await opened.evaluate(() => Array.from(document.querySelectorAll("main.wks-export-doc *"))
