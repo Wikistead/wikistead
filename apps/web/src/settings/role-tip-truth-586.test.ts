@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { BUILTIN_EFFECTIVE_CAPS, PAGE_GRANT_CAPS, closureOf, effectiveCaps } from "./role-nouns";
+import { BUILTIN_EFFECTIVE_CAPS, PAGE_GRANT_CAPS, CAP_NOUN, closureOf, effectiveCaps, builtinDisplayCaps, nounCapability } from "./role-nouns";
 import en from "../i18n/locales/en.json";
 import ja from "../i18n/locales/ja.json";
 
@@ -81,30 +81,35 @@ describe("#586 review ②: one closure, so one answer", () => {
 
 describe("#586a surface that offers a role says what the role does", () => {
   it("a role option is a NAME, and what it confers is revealed — found by walking, not by a list", () => {
-    // REVERSED by the 2026-08-03 ruling. The previous shape of this pin demanded a `hint:` on every role
-    // option, and the implementation obliged by printing the capabilities under all nine labels: the
-    // reader had to read the whole vocabulary to pick one name. "
-    // " — so the option carries the name, and `RoleTip` carries the meaning.
+    // REVERSED by the 2026-08-03 ruling. The previous shape demanded a `hint:` on every role option, and
+    // the implementation obliged by printing the capabilities under all nine labels: the reader had to
+    // read the whole vocabulary to pick one name. — so the
+    // option carries the name, and `RoleTip` carries the meaning.
     //
-    // Discovery, still: any Select whose options are built from `capNoun` is offering role names. A new
-    // granting screen is caught by existing rather than by someone remembering to add it here (#544)
-    // measured by dropping a file this test has never heard of into the tree and watching it go red.
+    // WIDENED after a miss: the walk used to key on `capNoun(`, so a picker offering ONLY custom roles
+    // (`label: r.name`) was invisible to it, and one shipped without any way to ask what its roles do.
+    // A role option is now recognised by the SHAPE OF ITS LABEL — a capability noun or a role's own
+    // `.name` — which is independent of how the list happens to be built.
     const offenders: string[] = [];
     let pickers = 0;
     for (const f of appFiles()) {
       const src = readFileSync(f, "utf8");
-      if (!src.includes("capNoun(")) continue;
-      // The option object is nested, so a balanced-brace regex is the wrong tool. Look at the text that
-      // FOLLOWS the label — an option's own properties are written together.
-      for (const m of src.matchAll(/label:\s*capNoun\(/g)) {
+      // Builder modules that only assemble options are checked where the Select actually is: they hand
+      // back `RoleChoice[]` and the screen decides. A file with no Select renders nothing to hover.
+      if (!/<Select|roleOptions=/.test(src)) continue;
+      for (const m of src.matchAll(/label:\s*(capNoun\(|[A-Za-z_$][\w$]*\.name\b)/g)) {
         pickers++;
-        const window = src.slice(m.index!, m.index! + 260);
-        const where = `${f.slice(web.length + 1)}: ${window.replace(/\s+/g, " ").slice(0, 90)}`;
-        if (/hint:/.test(window)) offenders.push(`${where} — prints the capabilities instead of revealing them`);
-        else if (!/wrap:[\s\S]{0,80}RoleTip/.test(window)) offenders.push(`${where} — a role name with no way to ask what it does`);
+        const before = src.slice(Math.max(0, m.index! - 220), m.index!);
+        const after = src.slice(m.index!, m.index! + 300);
+        const where = `${f.slice(web.length + 1)}: ${after.replace(/\s+/g, " ").slice(0, 90)}`;
+        if (/hint:/.test(after)) { offenders.push(`${where} — prints the capabilities instead of revealing them`); continue; }
+        // Two idioms are equally fine: the option was passed through `withRoleTips`, or it carries its
+        // own `wrap:`. Either way the name can be asked what it means.
+        const revealed = /withRoleTips\(/.test(before) || /wrap:[\s\S]{0,120}RoleTip/.test(after);
+        if (!revealed) offenders.push(`${where} — a role name with no way to ask what it does`);
       }
     }
-    expect(pickers, "the walk actually found role pickers").toBeGreaterThanOrEqual(2);
+    expect(pickers, "the walk actually found role pickers").toBeGreaterThanOrEqual(4);
     expect(offenders, "a role option is its name, and hovering it says what that name confers").toEqual([]);
   });
 
@@ -134,6 +139,46 @@ describe("#586a surface that offers a role says what the role does", () => {
     for (const loc of [en, ja] as unknown as Array<{ adminRoles: { cap: Record<string, string> } }>) {
       for (const c of named) expect(loc.adminRoles.cap[c], `adminRoles.cap.${c}`).toBeTruthy();
     }
+  });
+});
+
+describe("#586 review ①(bounce 3): the roles list ticks what the store confers", () => {
+  // The screen that EXISTS to say what a role can do was showing `manager` with Moderate unticked
+  // the exact error ADR-203 §4 named when this ticket was opened, still on screen three rounds later.
+  // Its source was the server's declared bundle (`BUILT_IN_ROLES`), which omits `manage`, so the UI's
+  // closure had no starting point to reach `moderate` from.
+  //
+  // No hand-written expectation here: that would copy the mistake into the test. The comparison is
+  // against the MEASURED table, which `role-capability-truth-586.test.ts` keeps equal to a real
+  // OpenFGA store.
+  const tab = read("settings/AdminRolesTab.tsx");
+  const columns = [...(/const CAPABILITIES = \[([^\]]*)\]/.exec(tab)?.[1] ?? "").matchAll(/"(\w+)"/g)].map((m) => m[1]!);
+
+  it("the grid's columns were found (a pin over an empty set proves nothing)", () => {
+    expect(columns.length).toBeGreaterThan(5);
+  });
+
+  it("every built-in role's ticks are the measured closure, filtered to the grid's columns", () => {
+    for (const [cap, noun] of Object.entries(CAP_NOUN)) {
+      const expected = BUILTIN_EFFECTIVE_CAPS[cap as keyof typeof BUILTIN_EFFECTIVE_CAPS].filter((c) => columns.includes(c));
+      expect(builtinDisplayCaps(noun, columns), `${noun}`).toEqual(expected);
+    }
+    // …and the case that was wrong on screen, named so a regression reads as itself
+    expect(builtinDisplayCaps("manager", columns), "a manager moderates — the store says so").toContain("moderate");
+  });
+
+  it("the list renders THAT, not the server's declared bundle", () => {
+    // The BUILT-IN row only. A custom role's own declaration is the right source for ITS grid — the
+    // closure is what the implied ticks add on top — so this must not be a blanket ban on reading
+    // `r.capabilities`, or the next person deletes the wrong one.
+    const builtinRow = tab.slice(tab.indexOf("idPrefix={`builtin-${r.name}`}") - 400, tab.indexOf("idPrefix={`builtin-${r.name}`}") + 80);
+    expect(builtinRow, "the built-in row asks the measured table").toContain("builtinDisplayCaps(");
+    expect(builtinRow, "…and not the server's declared bundle").not.toMatch(/value=\{r\.capabilities\}/);
+  });
+
+  it("a name the nouns do not know ticks nothing rather than guessing", () => {
+    expect(nounCapability("kakunin-582")).toBeUndefined();
+    expect(builtinDisplayCaps("kakunin-582", columns)).toEqual([]);
   });
 });
 

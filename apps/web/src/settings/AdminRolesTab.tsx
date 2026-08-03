@@ -4,7 +4,7 @@ import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
   useTenantRoleDefaults, useSetTenantRoleDefaults,
 } from "../data/queries";
-import { closureOf } from "./role-nouns";
+import { builtinDisplayCaps, closureOf } from "./role-nouns";
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a role is irreversible — confirm first
@@ -314,7 +314,12 @@ export function AdminRolesTab() {
                 <span className="text-sm font-medium">{r.name}</span>
                 <RoleBadges builtIn />
               </div>
-              <CapabilityPicker value={r.capabilities} idPrefix={`builtin-${r.name}`} list={CAPABILITIES} disabled />
+              {/* #586 review ①(bounce 3): the MEASURED closure, not the server's declared bundle. The
+                  bundle omits `manage` from `manager`, so the closure below had no starting point to
+                  reach `moderate` from and this screen showed a manager who cannot moderate — the very
+                  error ADR-203 §4 named when the ticket was opened. `manage` still has no column here,
+                  which is correct: the display vocabulary and the grantable one stay apart. */}
+              <CapabilityPicker value={builtinDisplayCaps(r.name, CAPABILITIES)} idPrefix={`builtin-${r.name}`} list={CAPABILITIES} disabled />
             </div>
           ))}
           {(roles.data?.custom ?? []).filter((r) => r.scope !== "tenant").map(renderCustomRole)}
