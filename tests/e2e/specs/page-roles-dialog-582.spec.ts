@@ -144,12 +144,22 @@ test("#586: a role badge lists what it lets someone do", async ({ page }) => {
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.move(box.x + box.width / 2 + 2, box.y + box.height / 2 + 1);
     await sleep(400);
+    // RE-AIMED by #582 (review rejection, 2026-08-04): what is revealed is a FLOATING PANEL beside the list,
+    // not text inside the option — . So the option is read for its
+    // name and the panel for the capabilities. A custom role can be highlighted here (the space specs
+    // leave some behind), and its panel lists what IT confers, so the assertion is that the panel is
+    // showing something rather than that it contains one particular word.
     const hovered = await page.evaluate(() => {
       const it = document.querySelector("[role=option]:hover") as HTMLElement | null;
-      return { name: it?.textContent?.trim() ?? "", shown: it?.innerText?.trim() ?? "" };
+      const panel = document.querySelector("[data-testid$='-hint'], [data-testid='select-hint']") as HTMLElement | null;
+      // measured while writing this: inside the dialog an option can be under the pointer with NOTHING
+      // carrying `data-highlighted` anywhere in the document, which is why the panel watches hover too
+      const hl = document.querySelector("[data-highlighted]") as HTMLElement | null;
+      return { name: it?.textContent?.trim() ?? "", inRow: it?.innerText?.trim() ?? "", shown: panel?.innerText?.trim() ?? "", highlighted: hl !== null };
     });
     expect(hovered.name, "the pointer is on an option").not.toBe("");
-    expect(hovered.shown.toLowerCase().replace(/\s+/g, " "), `hovering ${hovered.name} says what it confers`).toMatch(/view|閲覧/);
+    expect(hovered.inRow.toLowerCase(), "the option is still just its name").toBe(hovered.name.toLowerCase());
+    expect(hovered.shown.length, `hovering ${hovered.name} raised a panel :: ${hovered.shown}`).toBeGreaterThan(4);
 
     // …and so does the arrow key, which is the case a hover-only reveal loses: Radix drives this list
     // with `data-highlighted` rather than DOM focus, so anything bound to focus alone stays shut for a
@@ -158,10 +168,11 @@ test("#586: a role badge lists what it lets someone do", async ({ page }) => {
     await sleep(300);
     const viaKeyboard = await page.evaluate(() => {
       const item = document.querySelector("[role=option][data-highlighted]") as HTMLElement | null;
-      return { name: item?.textContent?.trim().toLowerCase() ?? "", shown: item?.innerText?.toLowerCase() ?? "" };
+      const panel = document.querySelector("[data-testid$='-hint'], [data-testid='select-hint']") as HTMLElement | null;
+      return { name: item?.textContent?.trim().toLowerCase() ?? "", shown: panel?.innerText?.trim() ?? "" };
     });
     expect(viaKeyboard.name, "the highlight is on an option").not.toBe("");
-    expect(viaKeyboard.shown.replace(/\s+/g, " "), `the highlighted option (${viaKeyboard.name}) explains itself too`).toMatch(/view|閲覧/);
+    expect(viaKeyboard.shown.length, `the highlighted option (${viaKeyboard.name}) raised a panel too :: ${viaKeyboard.shown}`).toBeGreaterThan(4);
     await page.keyboard.press("Escape");
   } finally {
     await page.evaluate(async ({ api, pageId }) => {
