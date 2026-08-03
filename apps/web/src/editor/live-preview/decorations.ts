@@ -26,6 +26,7 @@ const DIAGRAM_MACROS = new Set(["mermaid", "plantuml", "excalidraw"]);
 // clickable-whole-surface exception (the #273 download card) keeps its own `pointer`. Typed-body
 // macros (callout/table/todo/details/tagged/mermaid/plantuml/code) keep the caret affordances.
 const ATOM_CLASS_MACROS = new Set(["embed-page", "embed-external", "excalidraw", "columns", "tabs", "children"]);
+import { macroPlaceholder, deniedEmbedLabel } from "../macros/placeholder"; // #600: one template for every "cannot show it" state
 import { renderMarkdownToDom, renderCalloutPanel, appendMarkdownInto, buildFenceHeader, buildLinkList, withListHost, withTranscludeHost, withDiagramHost, withEmbedHost, dispatchMacroRender, ICON_CLOSE, ICON_DOWNLOAD, ICON_FOOTNOTE_BACK, ICON_EXPAND } from "../macros/md-render";
 import { setActiveTabIndex } from "../macros/layout-directives"; // #278 item 1: record the clicked tab before the island's commit rebuilds the tabs widget
 import { buildEmbedElement } from "../macros/embed";
@@ -2118,7 +2119,7 @@ function withNestedMacroHosts<T>(view: EditorView, theme: MacroTheme, fn: () => 
       () => withTranscludeHost(
         resolveNested === noopTranscludeResolver
           ? null
-          : { resolve: resolveNested, deniedLabel: "Cannot display this content" },
+          : { resolve: resolveNested, deniedLabel: deniedEmbedLabel() },
         () => withListHost(view.state.facet(listSource), fn),
       ),
     ),
@@ -2852,7 +2853,10 @@ class MacroWidget extends WidgetType {
       // while wiring nothing; the mousedown below routes through the same enterMacroAt as the
       // rendered branch / Ctrl+Enter). Display-only: readOnly surfaces no-op inside enterMacroAt.
       const opens = editModeOf(this.macro) === "modal";
-      ph.textContent = i18n.t(opens ? "macro.emptyOpen" : "macro.emptyEdit", { name: this.name });
+      // #600: the name here used to be `this.name` — the raw source id ("embed-external"), not the name
+      // the product calls it. It goes through the same template as every other placeholder now, so this
+      // one and the macro's own empty state cannot drift into two wordings.
+      ph.textContent = macroPlaceholder(this.name, opens ? "empty-open" : "empty-edit");
       // #455: no bespoke click wiring here — the SHARED entry affordances below (the ✎/Ctrl+↵
       // button row appended after this if/else, plus the keyboard Ctrl+Enter) already work on an
       // empty wrap (probe-verified: the button opens mermaid's editUI from the empty state). The
@@ -2988,7 +2992,8 @@ class MacroWidget extends WidgetType {
         const pending = document.createElement("div");
         pending.className = "cm-lp-macro-pending";
         pending.setAttribute("data-testid", `macro-${this.name}-pending`);
-        pending.textContent = i18n.t("macro.diagramRendering");
+        // #600: "Rendering the diagram…" named no macro. Now it says which one is loading.
+        pending.textContent = macroPlaceholder(this.name, "loading");
         rendered.appendChild(pending);
         void renderDiagram(this.name, this.body, this.theme).then((res) => {
           if (this.destroyed) return; // torn down mid-fetch
@@ -3002,7 +3007,7 @@ class MacroWidget extends WidgetType {
             const err = document.createElement("div");
             err.className = "cm-lp-macro-error-msg";
             err.setAttribute("data-testid", `macro-${this.name}-error`);
-            err.textContent = i18n.t(v.reason === "invalid" ? "macro.diagramInvalid" : "macro.diagramUnavailable");
+            err.textContent = macroPlaceholder(this.name, v.reason === "invalid" ? "invalid" : "unreachable");
             rendered.prepend(err); // the source stays below it — the author can still see and fix the text
             return;
           }
@@ -3030,7 +3035,9 @@ class MacroWidget extends WidgetType {
             const ph = document.createElement("div");
             ph.className = "cm-lp-embed-page-denied";
             ph.setAttribute("data-testid", "macro-embed-page-denied");
-            ph.textContent = "Cannot display this content"; // uniform — hides whether the page exists
+            // #600: names the MACRO (the reader wrote `:::embed-page` themselves) and nothing else.
+            // Still one string for denied / cycle / absent — the reason must stay unknowable.
+            ph.textContent = deniedEmbedLabel(); // uniform — hides whether the page exists
             rendered.appendChild(ph);
           } else {
             appendMarkdownInto(rendered, content); // sanitized DOM (no innerHTML); .wks-prose (#381)

@@ -4,6 +4,7 @@ import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableA
 import { renderCellInline } from "./table-cell-dom";
 import { tableInlineEditor } from "../live-preview/table-edit";
 import { unsafeHtml } from "./safe-html";
+import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 import { tableHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
 // ADR-025 step 3: the table's tier. pipe (GFM) is the lowest, most portable level;
@@ -73,6 +74,15 @@ export const tableMacro: DirectiveMacro = {
   liveRender: (body) => {
     const el = renderHtmlTable(body);
     el.setAttribute("data-testid", "macro-table");
+    // #600: a table with no rows is a <table> with nothing in it — invisible, and indistinguishable
+    // from a rendering failure. A caption keeps the element a TABLE (the inline editor mounts over it)
+    // while giving the reader the one thing the empty box could not: what this block is.
+    if (el.rows.length === 0) {
+      const caption = document.createElement("caption");
+      caption.className = "cm-lp-macro-empty";
+      caption.textContent = macroPlaceholder(tableMacro, "empty-edit");
+      el.appendChild(caption);
+    }
     return el;
   },
   // The body is already HTML → it round-trips as-is. unsafeHtml marks the ONE place a macro

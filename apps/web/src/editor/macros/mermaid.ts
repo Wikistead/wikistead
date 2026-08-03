@@ -2,6 +2,7 @@ import { asMacroSource, type FenceMacro, type MacroContext } from "./registry";
 import { mermaidHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 import { applyIntrinsicSvgSize } from "./svg-intrinsic-size"; // #465: percentage-width SVGs collapse to 300px inside the align flex
 import { mountSourceEditor } from "./source-editor"; // #243 / ADR-111 C3: CM6 mini-editor source pane
+import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 
 // The first macro: ```mermaid renders a diagram. It proves the registry pipeline
 // (register -> liveRender -> fold -> Markdown round-trip) on the code-fence path,
@@ -110,7 +111,9 @@ export const mermaidMacro: FenceMacro = {
     el.className = "cm-lp-macro cm-lp-mermaid";
     el.setAttribute("data-testid", "macro-mermaid");
     const code = body.trim();
-    if (!code) return el;
+    // #600: an empty diagram used to render an empty box — the one state a reader cannot interpret at
+    // all, because there is nothing on screen to interpret.
+    if (!code) { el.classList.add("cm-lp-macro-empty"); el.textContent = macroPlaceholder(mermaidMacro, "empty-edit"); return el; }
     // #174 point 1: render the SVG into a dedicated CHILD, not el.innerHTML. When this macro is nested in a
     // columns/tabs container, the WYSIWYG hover-✎ is appended to `el` (the tagged slot); setting
     // el.innerHTML async would WIPE that pencil (the info callout kept its pencil only because its render is
@@ -150,7 +153,8 @@ export const mermaidMacro: FenceMacro = {
           if (renderWidth > 0) svgCacheSet(cacheKey, svg); // #352: cache any real-width render for scroll re-entry
         } catch {
           el.classList.add("cm-lp-macro-error");
-          fig.textContent = "Invalid mermaid diagram"; // in-macro only (suppressErrorRendering stops the body bomb)
+          // #600: localized and named, through the one placeholder template (was hardcoded English).
+          fig.textContent = macroPlaceholder(mermaidMacro, "invalid"); // in-macro only (suppressErrorRendering stops the body bomb)
         } finally {
           painting = false; // #282: the sandbox (with mermaid's temp node) is disposed inside renderMermaidOffscreen
         }
@@ -196,7 +200,9 @@ export const mermaidMacro: FenceMacro = {
       let debounce: ReturnType<typeof setTimeout> | undefined;
       const applyRender = (code: string) => {
         const trimmed = code.trim();
-        if (!trimmed) { preview.style.minHeight = ""; preview.textContent = ""; return; }
+        // #600: an empty body used to clear the pane, so the editor showed a blank box that named
+        // nothing. Say what it is and what typing here would do.
+        if (!trimmed) { preview.style.minHeight = ""; preview.textContent = macroPlaceholder(mermaidMacro, "empty-edit"); return; }
         const myId = nextId();
         const mine = ++gen;
         // #282: while the async re-render is in flight, HOLD the pane's current height as min-height so it
@@ -210,7 +216,7 @@ export const mermaidMacro: FenceMacro = {
             const { svg } = await renderMermaidOffscreen(mermaid, myId, trimmed, preview.clientWidth);
             if (mine === gen) { preview.innerHTML = svg; applyIntrinsicSvgSize(preview); preview.style.minHeight = ""; } // #465 sizing; release once the new size is in
           } catch {
-            if (mine === gen) preview.textContent = "Invalid mermaid diagram"; // keep min-height → no collapse
+            if (mine === gen) preview.textContent = macroPlaceholder(mermaidMacro, "invalid"); // keep min-height → no collapse
           }
         }).catch(() => { /* mermaid failed to load (offline/test env) — the preview just stays empty */ });
       };
