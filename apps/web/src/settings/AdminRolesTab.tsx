@@ -25,7 +25,7 @@ const CAPABILITIES = ["view", "comment", "edit", "publish", "delete", "share", "
 // #604 / ADR-208 (ruling B): the tenant vocabulary opens. `manageConnections` is the first verb carved
 // out of `admin` — a tenant role can carry it, so running the sign-in methods stops meaning "be handed
 // the tenant". The list is the grant vocabulary; what each verb CONFERS is measured, never written here.
-const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys", "manageConnections"] as const;
+const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys", "manageConnections", "manageRoles", "viewAudit"] as const;
 
 // #536gave every row a scope badge because the sections it sat in were not readable as sections.
 // #581 fixes the sections instead and drops the badge here: where POSITION carries the information,

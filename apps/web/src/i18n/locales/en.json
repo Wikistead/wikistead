@@ -1302,7 +1302,9 @@
       "manage": "Manage",
       "createSpaces": "create spaces",
       "issueApiKeys": "issue API keys",
-      "manageConnections": "Manage sign-in methods"
+      "manageConnections": "Manage sign-in methods",
+      "manageRoles": "Manage roles",
+      "viewAudit": "Read the audit log"
     },
     "scopeResource": "Space / page",
     "scopeTenant": "Tenant",

@@ -15,7 +15,7 @@ import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { fgaClient, isConnectionManager } from '@wikistead/authz'
+import { fgaClient, isConnectionManager, isRoleManager, isAuditReader } from '@wikistead/authz'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -66,5 +66,15 @@ describe('#604: managing sign-in methods is a verb, not the tier', () => {
 
   it('an admin still can — the verb unions `or admin`, so nobody lost anything', async () => {
     expect(await isConnectionManager(fgaClient, 'dev-user', TENANT)).toBe(true)
+  }, 120_000)
+
+  it('the other carved-out verbs behave the same way, and are NOT conferred by this role', async () => {
+    // Each verb is its own power: holding one does not quietly bring the others. That is the whole
+    // point of carving them out of a tier that brought everything.
+    expect(await isRoleManager(fgaClient, HOLDER, TENANT), 'connections does not imply roles').toBe(false)
+    expect(await isAuditReader(fgaClient, HOLDER, TENANT), 'nor the audit ledger').toBe(false)
+    // …and an admin holds all of them, because each unions `or admin`
+    expect(await isRoleManager(fgaClient, 'dev-user', TENANT)).toBe(true)
+    expect(await isAuditReader(fgaClient, 'dev-user', TENANT)).toBe(true)
   }, 120_000)
 })

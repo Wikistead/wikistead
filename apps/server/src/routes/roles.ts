@@ -12,7 +12,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient, Tuple } from '@openfga/sdk'
 import { randomUUID } from 'node:crypto'
-import { requireTenantAdmin, isTenantAdmin, check, writeTuples, deleteTuples } from '@wikistead/authz'
+import { requireTenantAdmin, requireRoleManager, isTenantAdmin, check, writeTuples, deleteTuples } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { auditIfEntitled } from '../audit/outbox.js'
@@ -44,7 +44,7 @@ const ADMIN_CLASS_ROLE_CAPS = new Set<RoleCapability>(['delete', 'share', 'setti
 // #496 / ADR-181 adds `issueApiKeys` (→ the `api_key_issue` relation) as the SECOND tenant capability,
 // retiring #462's api_key_issue_policy enum: who may mint an API key is now a role capability like any
 // other, so authority lives in FGA alone.
-export const TENANT_ROLE_CAPABILITIES = ['createSpaces', 'issueApiKeys', 'manageConnections'] as const
+export const TENANT_ROLE_CAPABILITIES = ['createSpaces', 'issueApiKeys', 'manageConnections', 'manageRoles', 'viewAudit'] as const
 export type TenantRoleCapability = (typeof TENANT_ROLE_CAPABILITIES)[number]
 export type AnyRoleCapability = RoleCapability | TenantRoleCapability
 export type RoleScope = 'resource' | 'tenant'
@@ -108,6 +108,8 @@ const TENANT_CAP_RELATION: Record<TenantRoleCapability, string> = {
   // #604 / ADR-208 (ruling B): the first verb carved out of `admin`. A tenant role carrying it lets
   // somebody run the sign-in methods without being handed the tenant.
   manageConnections: 'manage_connections',
+  manageRoles: 'manage_roles',
+  viewAudit: 'view_audit',
 }
 
 // `allowSuperset` is set ONLY by the built-in grant path (#536 / ADR-188 §6 item 1). `manage` is the
@@ -604,7 +606,8 @@ function parseDefinition(body: { name?: unknown; capabilities?: unknown }, scope
 
 export async function rolesPlugin(app: FastifyInstance) {
   const adminGate = async (req: { user: { sub: string }; tenant: { id: string } }) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    // #604 (ruling B): defining and handing out roles is its own power now (`or admin` unchanged)
+    await requireRoleManager(app.fga, req.user.sub, req.tenant.id)
   }
   const writeGates = async (req: { user: { sub: string }; tenant: { id: string; plan: string } }) => {
     await adminGate(req)
