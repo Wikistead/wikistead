@@ -901,6 +901,32 @@ export async function rolesPlugin(app: FastifyInstance) {
           keep: { roleId: role.id }, keepCaps: caps as string[], plan: req.tenant.plan, replaceManage: req.body?.replace === true,
         })
       }
+      // #579 (user ruling, twice): ROLES DO NOT STACK — and until now that was only true at space scope.
+      //
+      // — the tenant screen had grown an additive
+      // model (chips, an "add role" control) on top of a mechanism that never promised it, and the same
+      // ruling was already recorded once at #536 ("1 principal = 1 role; the SERVER converges too, not
+      // just the UI"). Space scope implemented it; tenant scope did not, so a direct API call could give
+      // one principal two tenant roles and the screen then had to invent a way to show them.
+      //
+      // Convergence, not refusal: the new role is written first and the principal's OTHER tenant-scope
+      // assignments are unassigned after, so there is no instant where they hold nothing. Same order as
+      // the space sweep, for the same reason.
+      //
+      // EXISTING multi-holdings are NOT bulk-migrated, and that is a decision rather than an omission
+      // the space sweep set the precedent (#536 — "cleaned up on the next add for that principal; no
+      // bulk backfill"), a migration would silently pick a winner for people who are not looking, and
+      // this path folds them the moment anyone touches that principal again. Nothing is removed quietly
+      // every unassign here goes through the audited, ref-counted core.
+      if (resourceType === 'tenant') {
+        const others = await req.db.sql<{ id: string }[]>`
+          SELECT id FROM role_assignments
+          WHERE resource_type = 'tenant' AND resource_id = ${resourceId} AND principal = ${principal}
+            AND origin = 'manual' AND id <> ${id}`
+        for (const o of others) {
+          await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: o.id, actorSub: req.user.sub })
+        }
+      }
       // Re-read the row's owned_capabilities for the response (the helper computed them internally).
       const [saved] = await req.db.sql<{ owned_capabilities: string[] }[]>`SELECT owned_capabilities FROM role_assignments WHERE id = ${id}`
       return reply.code(201).send({ id, roleId: role.id, resourceType, resourceId, principal, ownedCapabilities: saved?.owned_capabilities ?? [] })
