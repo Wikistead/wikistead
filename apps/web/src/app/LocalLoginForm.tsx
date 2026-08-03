@@ -18,6 +18,7 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [sent, setSent] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +66,29 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
         {busy && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
         {t("auth.signIn")}
       </Button>
+      {/* review R3: without this, the reset endpoints were live and nobody could reach them — an
+          unauthenticated surface with no user. The confirmation is the same whatever happened,
+          because the server answers the same whatever happened. */}
+      {sent ? (
+        <p className="m-0 text-xs text-fg-dim" data-testid="login-local-reset-sent">{t("auth.resetSent")}</p>
+      ) : (
+        <button type="button" className="m-0 self-start bg-transparent p-0 text-xs text-fg-dim underline"
+          data-testid="login-local-forgot" disabled={busy}
+          onClick={async () => {
+            // A blank field asks for nothing; the person needs to type the address first.
+            if (!identifier.trim()) { setFailed(true); return; }
+            setBusy(true);
+            await fetch(assetUrl("/auth/local/reset-request"), {
+              method: "POST", credentials: "include",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ identifier }),
+            }).catch(() => {});
+            setBusy(false);
+            setSent(true);
+          }}>
+          {t("auth.forgotPassword")}
+        </button>
+      )}
     </form>
   );
 }

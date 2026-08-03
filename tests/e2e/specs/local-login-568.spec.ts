@@ -78,3 +78,25 @@ test("#568: with passwords switched off the form is not on the screen", async ({
   await expect(page.getByTestId("login-card")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("login-local"), "nothing to type into when the tenant does not offer it").toHaveCount(0);
 });
+
+test("#568 review R3: the login screen can ask for a reset link", async ({ page }) => {
+  // Without this the reset endpoints were live and nothing in the product reached them — an
+  // unauthenticated surface with no user, which is the same shape as the invite-link defect.
+  const on = await setLocalLogin(true);
+  expect(on.status).toBe(204);
+  try {
+    await page.goto(`${REAL}/login`);
+    await expect(page.getByTestId("login-local")).toBeVisible({ timeout: 10_000 });
+    // it needs the address first — asking for "a reset for nobody in particular" is not a thing
+    await page.getByTestId("login-local-forgot").click();
+    await expect(page.getByTestId("login-local-error"), "with an empty field it asks for one").toBeVisible();
+
+    await page.getByTestId("login-local-identifier").fill(`stranger-${STAMP}@e2e.test`);
+    await page.getByTestId("login-local-forgot").click();
+    // The confirmation is the same whatever happened, because the server answers the same — a
+    // screen that said "we sent it" only for real accounts would be the oracle by another route.
+    await expect(page.getByTestId("login-local-reset-sent")).toBeVisible();
+  } finally {
+    await setLocalLogin(false).catch(() => {});
+  }
+});

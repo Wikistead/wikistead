@@ -8,7 +8,7 @@
 // therefore CREATE a credential for an `identity_source='oidc'` member — a password door on a tenant
 // that had deliberately standardised on SSO. A reset restores access to a password account; it never
 // invents one.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
@@ -56,6 +56,14 @@ async function makeOidcMember(n: string): Promise<{ sub: string; email: string }
 }
 const storedHash = async (sub: string) =>
   (await db.sql<{ password_hash: string }[]>`SELECT password_hash FROM local_credentials WHERE member_sub = ${sub}`)[0]?.password_hash
+
+// The per-source limits are REAL (a reset mints a link and sends mail), and a suite that makes
+// dozens of requests from one address trips them — which is the limiter working, not a bug. Clear
+// this file's own counters between cases so each one measures what it is about.
+beforeEach(async () => {
+  const keys = await app.valkey.keys(`rl:local:reset*${TENANT}*`).catch(() => [] as string[])
+  if (keys.length) await app.valkey.del(...keys).catch(() => {})
+})
 
 beforeAll(async () => {
   app = await buildApp()
@@ -174,5 +182,65 @@ describe('#568 §6: completing a reset', () => {
     expect((await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: X, payload: { identifier } })).statusCode).toBe(403)
     expect((await app.inject({ method: 'POST', url: '/auth/local/reset', headers: X, payload: { token: minted.token, password: NEXT } })).statusCode).toBe(403)
     expect(await completePasswordReset(db, minted.token, NEXT), 'and the link was not touched').not.toBeNull()
+  }, 180_000)
+})
+
+describe('#568 review R1-R3: the reset surface itself', () => {
+  it('R1: asking about an existing address costs the same TIME as asking about a stranger', async () => {
+    // Measured on the first review: awaiting the SMTP send made this ~60ms for an address that
+    // exists and ~2ms for one that does not. The status was uniform; the clock was the oracle.
+    const { identifier } = await makeLocalMember('latency')
+    const ask = async (id: string) => {
+      const t = performance.now()
+      const res = await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: H, payload: { identifier: id } })
+      expect(res.statusCode).toBe(204)
+      return performance.now() - t
+    }
+    // warm both paths first so module loading is not mistaken for the difference
+    await ask(identifier); await ask(`warm-${STAMP}@e2e.test`)
+    const real = Math.min(await ask(identifier), await ask(identifier))
+    const ghost = Math.min(await ask(`ghost-lat-${STAMP}@e2e.test`), await ask(`ghost2-lat-${STAMP}@e2e.test`))
+    // A send that is awaited shows up as an order of magnitude. Allow a generous 4x for noise.
+    expect(real, `existing ${real.toFixed(1)}ms vs unknown ${ghost.toFixed(1)}ms`).toBeLessThan(Math.max(ghost * 4, ghost + 25))
+  }, 180_000)
+
+  it('R2: completing a reset clears only the OWNER lock, never one named in the body', async () => {
+    // The defect this closes, measured on review: the unlock key came from an undeclared body field,
+    // so any local member could complete their own reset while naming a victim and clear the
+    // victim's lockout. Five guesses, a reset, five more — the §5 lockout was off for insiders.
+    const victim = await makeLocalMember('r2-victim')
+    const attacker = await makeLocalMember('r2-attacker')
+    const lockKey = `lock:local:${TENANT}:${victim.identifier}`
+    await app.valkey.set(lockKey, '1', 'EX', 120)
+
+    const theirs = (await mintPasswordReset(db, attacker.identifier))!
+    const res = await app.inject({
+      method: 'POST', url: '/auth/local/reset', headers: H,
+      payload: { token: theirs.token, password: NEXT, identifier: victim.identifier },
+    })
+    expect(res.statusCode, 'their own reset succeeds').toBe(204)
+    expect(await app.valkey.get(lockKey), "and the victim's lock is untouched").not.toBeNull()
+
+    // ...while the owner's own reset DOES clear their own lock
+    const own = (await mintPasswordReset(db, victim.identifier))!
+    await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: own.token, password: NEXT } })
+    expect(await app.valkey.get(lockKey), 'the owner is let back in').toBeNull()
+  }, 180_000)
+
+  it('the reset events reach the EE ledger, not only the webhook stream (§6 C7)', async () => {
+    const { drainAuditFor } = await import('./helpers/audit-drain.js')
+    const { identifier, sub } = await makeLocalMember('audit')
+    const count = async () => {
+      await drainAuditFor(adminPool, TENANT)
+      const [r] = await adminPool<[{ n: string }]>`
+        SELECT count(*)::text AS n FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`member:${sub}`}
+          AND action IN ('member.password_reset_requested', 'member.password_reset_completed')`
+      return Number(r.n)
+    }
+    const before = await count()
+    await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: H, payload: { identifier } })
+    const minted = (await mintPasswordReset(db, identifier))!
+    await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: minted.token, password: NEXT } })
+    expect(await count() - before, 'both the request and the completion are on the ledger').toBeGreaterThanOrEqual(2)
   }, 180_000)
 })

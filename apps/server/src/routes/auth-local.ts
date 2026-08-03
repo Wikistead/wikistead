@@ -16,6 +16,7 @@
 import type { FastifyInstance } from 'fastify'
 import type IORedis from 'ioredis'
 import { emit } from '@wikistead/events'
+import { auditIfEntitled } from '../audit/outbox.js'
 import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
 import { localLoginEnabled } from '../auth/login-methods.js'
 import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/password-hash.js'
@@ -167,7 +168,8 @@ export async function authLocalPlugin(app: FastifyInstance) {
     }
     const identifier = (req.body?.identifier ?? '').trim().toLowerCase()
     const silence = () => reply.code(204).send()
-    if (!identifier) return silence()
+    // Bounded here too (review): this identifier also becomes a Valkey key.
+    if (!identifier || identifier.length > MAX_IDENTIFIER_LEN) return silence()
 
     const addrKey = `rl:local:reset:addr:${req.tenant.id}:${identifier}`
     const ipKey = `rl:local:reset:ip:${req.tenant.id}:${req.ip}`
@@ -186,7 +188,10 @@ export async function authLocalPlugin(app: FastifyInstance) {
     // delivery problem.
     const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
     const link = `${scheme}://${req.headers.host}/reset-password?token=${minted.token}`
-    try {
+    // review R1, measured: AWAITING the send made this endpoint answer in ~60ms for an address that
+    // exists and ~2ms for one that does not. The status was uniform and the CLOCK was not, which is
+    // the same oracle by a slower channel. The send is fired and not waited on; a failure is logged.
+    void (async () => {
       const { resolveTenantEmailDriver } = await import('@wikistead/hooks')
       await resolveTenantEmailDriver({ tenantId: req.tenant.id, plan: req.tenant.plan }, req.server.email).send({
         to: minted.email,
@@ -194,11 +199,14 @@ export async function authLocalPlugin(app: FastifyInstance) {
         text: `Someone asked to reset the password for this address. Open this link within the hour:\n\n${link}\n\nIf it was not you, you can ignore this — nothing has changed.`,
         html: `<p>Someone asked to reset the password for this address.</p><p><a href="${link}">Choose a new password</a> (the link works for one hour).</p><p>If it was not you, you can ignore this — nothing has changed.</p>`,
       })
-    } catch (err) {
-      req.log.warn({ err }, 'password reset email failed to send')
-    }
+    })().catch((err) => req.log.warn({ err }, 'password reset email failed to send'))
     // Audited by SUB, so the ledger records who a reset was requested for — the first thing an
     // account-takeover investigation asks. The webhook stream carries the same fact.
+    // ADR-198 §6 C7: the EE ledger, not only the webhook stream. "When was a reset asked for, and
+    // for whom" is the first question an account-takeover investigation has.
+    await req.db.tx((tx) => auditIfEntitled(tx, req.tenant, {
+      actor: `user:${minted.memberSub}`, action: 'member.password_reset_requested', target: `member:${minted.memberSub}`,
+    })).catch((err: unknown) => req.log.warn({ err }, 'reset-request audit failed'))
     emit({ type: 'member.password_reset_requested', tenantId: req.tenant.id, targetSub: minted.memberSub })
     return silence()
   })
@@ -229,9 +237,20 @@ export async function authLocalPlugin(app: FastifyInstance) {
     // goes, including any the attacker holds. Nothing is spared here — unlike a change, the person
     // completing this is not signed in.
     await destroyMemberSessions(app.valkey, req.tenant.id, done.memberSub)
-    // The lockout goes too: an account that was locked by the guessing that prompted the reset must
-    // not stay locked against its own owner, who has just proved control of the address.
-    await app.valkey.del(`lock:local:${req.tenant.id}:${(req.body as { identifier?: string })?.identifier ?? ''}`).catch(() => {})
+    // The lockout goes too — for THIS member. review R2, measured: this used to read the identifier
+    // from the request BODY, an undeclared field nobody sends, so any local member could complete
+    // their own reset while naming a victim and clear that victim's lock. Five guesses, a reset,
+    // five more: the §5 lockout was off for anyone with an account. The identifier now comes from
+    // the credential the reset just rewrote, which is the only one it can possibly be about.
+    const [cred] = await req.db.sql<{ identifier: string }[]>`
+      SELECT identifier FROM local_credentials WHERE member_sub = ${done.memberSub}`
+    if (cred) {
+      await app.valkey.del(`lock:local:${req.tenant.id}:${cred.identifier}`).catch(() => {})
+      await app.valkey.del(`rl:local:id:${req.tenant.id}:${cred.identifier}`).catch(() => {})
+    }
+    await req.db.tx((tx) => auditIfEntitled(tx, req.tenant, {
+      actor: `user:${done.memberSub}`, action: 'member.password_reset_completed', target: `member:${done.memberSub}`,
+    })).catch((err: unknown) => req.log.warn({ err }, 'reset audit failed'))
     emit({ type: 'member.password_reset_completed', tenantId: req.tenant.id, targetSub: done.memberSub })
     return reply.code(204).send()
   })
@@ -274,6 +293,9 @@ export async function authLocalPlugin(app: FastifyInstance) {
     // Every OTHER session goes: a password change is how someone evicts whoever they think is in
     // their account, and leaving the other sessions alive makes the change cosmetic.
     await destroyMemberSessions(app.valkey, req.tenant.id, req.user.sub, req.cookies?.[SESSION_COOKIE])
+    await req.db.tx((tx) => auditIfEntitled(tx, req.tenant, {
+      actor: `user:${req.user.sub}`, action: 'member.password_changed', target: `member:${req.user.sub}`,
+    })).catch((err: unknown) => req.log.warn({ err }, 'password-change audit failed'))
     emit({ type: 'member.password_changed', tenantId: req.tenant.id, targetSub: req.user.sub })
     return reply.code(204).send()
   })
@@ -368,9 +390,15 @@ export async function authLocalPlugin(app: FastifyInstance) {
         // operator sees no errors at all. Those rethrow and surface as a 500, which is what they are.
         const status = (err as { statusCode?: number }).statusCode
         if (status !== 403 && status !== 402) throw err
-        req.log.info({ err, method: 'local' }, 'local login refused after a valid credential')
-        await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
-        await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
+        // 402 is the seat cap — the tenant's billing, not this person's behaviour — so it is refused
+        // without counting toward a lockout. Only a 403 (not a member, deactivated) is a refusal
+        // about them, and only that is counted (review nit: counting everything meant a dependency
+        // failure could lock a member out for half an hour during an outage).
+        req.log.info({ err, method: 'local', status }, 'local login refused after a valid credential')
+        if (status === 403) {
+          await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+          await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
+        }
         emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'local', reason: 'invalid credentials' })
         return deny()
       }
