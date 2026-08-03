@@ -402,3 +402,22 @@ describe('#568 review: the remaining measured properties', () => {
     expect(src).toContain("v === 'local'")
   })
 })
+
+describe('#568: an outage is not a credential failure', () => {
+  it('an infrastructure error surfaces as a 500, not as "invalid credentials"', async () => {
+    // The B1 fix swallows establishMemberSession's refusals; it must not swallow a broken
+    // dependency too. Telling a member their password is wrong during an outage would have everyone
+    // retyping a correct one while the operator sees no errors at all.
+    const { identifier } = await makeLocalMember('outage')
+    await clearCounters(identifier)
+    const realCheck = fgaClient.check.bind(fgaClient)
+    ;(fgaClient as unknown as { check: unknown }).check = async () => { throw new Error('FGA unreachable') }
+    try {
+      const res = await login(identifier, PASSWORD)
+      expect(res.statusCode, 'a broken dependency is a 500').toBe(500)
+      expect(res.body, 'and never claims the credentials were wrong').not.toContain('invalid credentials')
+    } finally {
+      ;(fgaClient as unknown as { check: unknown }).check = realCheck
+    }
+  }, 120_000)
+})

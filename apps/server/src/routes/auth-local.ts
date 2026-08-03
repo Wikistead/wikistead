@@ -362,6 +362,12 @@ export async function authLocalPlugin(app: FastifyInstance) {
           { localIdentity: true },
         )
       } catch (err) {
+        // Only an AUTHORIZATION refusal becomes the uniform 401. A Valkey outage, an FGA timeout or
+        // a database error is not a fact about this person's credentials, and answering "invalid
+        // credentials" for one would have every member retyping a correct password while the
+        // operator sees no errors at all. Those rethrow and surface as a 500, which is what they are.
+        const status = (err as { statusCode?: number }).statusCode
+        if (status !== 403 && status !== 402) throw err
         req.log.info({ err, method: 'local' }, 'local login refused after a valid credential')
         await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
         await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
