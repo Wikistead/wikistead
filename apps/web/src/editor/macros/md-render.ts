@@ -522,6 +522,19 @@ class DomSink implements MdSink {
     if (role === "table") this.stack.pop(); // #406 the table opened its scroll box too
   }
 
+  // #598 (parity gate, identity slice): name the element that was just produced, so a surface can be
+  // asked whether it has THIS element rather than whether it has something. One place, right after the
+  // dispatch, because every branch of `directive` below ends by appending its result to the same parent
+  // stamping inside each of them is how two of them would come to disagree.
+  //
+  // Only if nothing claimed a name already: a macro that stamps its own (a nested embed placeholder, say)
+  // knows better than this does.
+  stamp(el: { kind: "fence" | "directive"; name: string | null }): void {
+    if (!el.name) return;
+    const last = (this.top() as Element).lastElementChild;
+    if (last && !last.hasAttribute("data-wks-el")) last.setAttribute("data-wks-el", el.name);
+  }
+
   text(s: string): void { this.top().appendChild(document.createTextNode(s)); }
 
   leaf(role: MdLeafRole, data?: MdRoleData): void {
