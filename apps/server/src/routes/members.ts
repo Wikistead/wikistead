@@ -200,6 +200,10 @@ export async function membersPlugin(app: FastifyInstance) {
       // credential than an API key. Written out so re-inviting the same address is never blocked by
       // UNIQUE (tenant_id, identifier), and no dormant hash outlives its member.
       await tx`DELETE FROM local_credentials WHERE member_sub = ${req.params.sub}`
+      // ...and any live reset links for them. The FK cascades in the logical-isolation schema, but a
+      // namespaced tenant does not replicate it, and a link that outlived its member would be a
+      // credential-setting capability pointing at nobody.
+      await tx`DELETE FROM password_resets WHERE member_sub = ${req.params.sub}`
       await tx`DELETE FROM page_view_roster WHERE member_sub = ${req.params.sub}`
       await tx`DELETE FROM analytics_outbox WHERE tenant_id = ${req.tenant.id} AND viewer_class = 'member' AND member_sub = ${req.params.sub}`
       // #474: the member's API keys go too. Removal already strips every other credential — sessions
