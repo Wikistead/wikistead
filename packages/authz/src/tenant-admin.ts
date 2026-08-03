@@ -54,3 +54,16 @@ export async function isApiKeyIssuer(fga: OpenFgaClient, userId: string, tenantI
   const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'api_key_issue', object: `tenant:${tenantId}` })
   return !!allowed
 }
+
+// #604 / ADR-208 (ruling B): may `userId` manage this tenant's SIGN-IN METHODS? Same shape as the two
+// above: one relation check on the tenant object, whose `or admin` arm means every current admin passes
+// unchanged. The point of the verb is the other direction — somebody who is NOT an admin can be given
+// exactly this, which `requireTenantAdmin` could never express.
+export async function isConnectionManager(fga: OpenFgaClient, userId: string, tenantId: string): Promise<boolean> {
+  const { allowed } = await fga.check({ user: `user:${userId}`, relation: 'manage_connections', object: `tenant:${tenantId}` })
+  return !!allowed
+}
+
+export async function requireConnectionManager(fga: OpenFgaClient, userId: string, tenantId: string): Promise<void> {
+  if (!(await isConnectionManager(fga, userId, tenantId))) throw Object.assign(new Error('admin only'), { statusCode: 403 })
+}

@@ -1301,7 +1301,8 @@
       "moderate": "Moderate",
       "manage": "Manage",
       "createSpaces": "create spaces",
-      "issueApiKeys": "issue API keys"
+      "issueApiKeys": "issue API keys",
+      "manageConnections": "Manage sign-in methods"
     },
     "scopeResource": "Space / page",
     "scopeTenant": "Tenant",

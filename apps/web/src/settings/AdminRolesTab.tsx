@@ -22,7 +22,10 @@ const CAPABILITIES = ["view", "comment", "edit", "publish", "delete", "share", "
 // #496 / ADR-181: `issueApiKeys` (the api_key_issue relation) joins the tenant vocabulary, so it shows
 // up BOTH in the built-in member toggle below and in the custom tenant-role editor — the ADR's "one
 // screen configures issuance". The old /admin/api two-choice policy selector is gone with the enum.
-const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys"] as const;
+// #604 / ADR-208 (ruling B): the tenant vocabulary opens. `manageConnections` is the first verb carved
+// out of `admin` — a tenant role can carry it, so running the sign-in methods stops meaning "be handed
+// the tenant". The list is the grant vocabulary; what each verb CONFERS is measured, never written here.
+const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys", "manageConnections"] as const;
 
 // #536gave every row a scope badge because the sections it sat in were not readable as sections.
 // #581 fixes the sections instead and drops the badge here: where POSITION carries the information,
