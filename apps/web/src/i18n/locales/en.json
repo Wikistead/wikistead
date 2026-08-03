@@ -406,7 +406,8 @@
     "method_off": "Off",
     "platformOwnIdpRequired": "Enable and verify OIDC or SAML before turning platform login off.",
     "method_unentitled": "Not on your plan",
-    "methodsSaveFailed": "Couldn't change the login methods."
+    "methodsSaveFailed": "Couldn't change the login methods.",
+    "samlNotConfigured": "Not configured yet"
   },
   "adminEnroll": {
     "title": "Auto-enrolment",

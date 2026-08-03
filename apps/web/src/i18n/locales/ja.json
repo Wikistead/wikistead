@@ -406,7 +406,8 @@
     "method_off": "オフ",
     "platformOwnIdpRequired": "プラットフォームログインをオフにする前に、OIDC または SAML を有効化・検証してください。",
     "method_unentitled": "現在のプランに含まれていません",
-    "methodsSaveFailed": "ログイン方式を変更できませんでした。"
+    "methodsSaveFailed": "ログイン方式を変更できませんでした。",
+    "samlNotConfigured": "未設定"
   },
   "adminEnroll": {
     "title": "自動メンバー登録",
