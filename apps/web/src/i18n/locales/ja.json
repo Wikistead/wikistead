@@ -1068,7 +1068,9 @@
     "emptyOpen": "空の{{name}}：Ctrl+↵ で開く",
     "diagramRendering": "図を生成中…",
     "diagramInvalid": "PlantUML の図が不正です",
-    "diagramUnavailable": "図のレンダラーに接続できませんでした"
+    "diagramUnavailable": "図のレンダラーに接続できませんでした",
+    "embedUnresolved": "外部の埋め込み（ここでは表示されません）：{{url}}",
+    "pageEmbedUnresolved": "ページの埋め込み（ここでは表示されません）"
   },
   "templates": {
     "title": "テンプレート",

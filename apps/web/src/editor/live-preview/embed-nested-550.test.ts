@@ -35,8 +35,10 @@ describe("#550 nested embed-external resolves through the host slot", () => {
     expect(frame.src).toBe(ALLOWED);
     expect(frame.getAttribute("sandbox"), "still sandboxed at depth").toContain("allow-scripts");
     // the ticket's measurement: no leaf sits at the raw placeholder
-    const dots = Array.from(dom.querySelectorAll("*")).filter((el) => el.textContent === "…" && el.children.length === 0);
-    expect(dots, "no … placeholder survives").toHaveLength(0);
+    // #600: the placeholder names itself now, so it is spotted by its SENTENCE rather than by three dots
+    const unresolved = Array.from(dom.querySelectorAll("*"))
+      .filter((el) => el.children.length === 0 && /not shown here|表示されません/.test(el.textContent ?? ""));
+    expect(unresolved, "no unresolved placeholder survives where the host answered").toHaveLength(0);
   });
 
   it("inside :::details (folded container) — same lifecycle", () => {
@@ -57,7 +59,7 @@ describe("#550 nested embed-external resolves through the host slot", () => {
     const dom = document.createElement("div");
     dom.appendChild(renderMarkdownToDom(`::::tabs\n:::tab{title="A"}\n:::embed-external\n${ALLOWED}\n:::\n:::\n::::`));
     expect(dom.querySelector("[data-testid=macro-embed-frame]"), "nobody vouched for the URL → no frame").toBeNull();
-    expect(dom.querySelector("[data-testid=macro-embed-external]")?.textContent).toBe("…");
+    expect(dom.querySelector("[data-testid=macro-embed-external]")?.textContent, "#600: the placeholder says what it is").toMatch(/not shown here|表示されません/);
   });
 
   it("top level goes through the SAME slot (one lifecycle, not two kept in step)", () => {
@@ -68,7 +70,7 @@ describe("#550 nested embed-external resolves through the host slot", () => {
     expect(el.querySelector("[data-testid=macro-embed-frame]"), "the dispatch answered the macro's ask").toBeTruthy();
     // and with no seam, the same dispatch yields the placeholder (surface decides, macro is constant)
     const bare = dispatchMacroRender(embedMacro as never, ALLOWED, { theme: {} as never })!;
-    expect(bare.textContent).toBe("…");
+    expect(bare.textContent, "#600: the placeholder says what it is").toMatch(/not shown here|表示されません/);
   });
 });
 

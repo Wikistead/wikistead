@@ -29,10 +29,10 @@ import { openScratch, enterEdit, sleep, API } from "../helpers";
 // with a message telling you to delete the line. Nothing gets grandfathered by accident, and the list
 // can only shrink.
 const KNOWN_RED = {
-  // #85 ⑤ / ADR-194 addendum (ruling pending): an external embed has no host seam on a static surface,
-  // so it renders as "…" — a box that tells the reader nothing. The ADR asks whether to write a
-  // verified iframe or degrade to a named link.
-  placeholders: ["cm-lp-macro cm-lp-embed-external"],
+  // (empty) — #600 fixed the one that was here: an embed with no host seam used to render "…", and the
+  // gate demanded its removal from this list the moment the placeholder started naming itself. That is
+  // the list working: it shrinks, and it says so.
+  placeholders: [] as string[],
   // #85 ③ / ADR-194 addendum (ruling pending): the copied CSS carries @font-face rules whose url is
   // root-absolute, so opening the file asks the filesystem root for fonts that are not there.
   failedRequests: [/wikistead-mono|udevgothic|\.woff2$/],

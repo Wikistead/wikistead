@@ -24,7 +24,10 @@ export const transcludeMacro: DirectiveMacro = {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-embed-page";
     el.setAttribute("data-testid", "macro-embed-page");
-    el.textContent = body.trim() ? "…" : i18n.t("macro.pageEmbedEmpty"); // host swaps in resolved content
+    // #600: same as the external embed — name the block rather than showing an ellipsis. The host swaps
+    // in the resolved page when there is one; where there is no host, this text is the final answer and
+    // has to read like one.
+    el.textContent = body.trim() ? i18n.t("macro.pageEmbedUnresolved") : i18n.t("macro.pageEmbedEmpty");
     return el;
   },
   // SSR/export placeholder: the server render pipeline resolves the embed; this is the wrapper

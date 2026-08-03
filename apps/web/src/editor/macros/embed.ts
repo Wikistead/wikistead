@@ -36,7 +36,10 @@ export const embedMacro: DirectiveMacro = {
     const el = document.createElement("div");
     el.className = "cm-lp-macro cm-lp-embed-external";
     el.setAttribute("data-testid", "macro-embed-external");
-    el.textContent = url ? "…" : i18n.t("macro.embedEmpty");
+    // #600: a block that cannot resolve here says WHAT it is and WHY, instead of an ellipsis. "…" was
+    // written for the moment before a host answered; on a surface with no host (the export, a hover
+    // card) that moment never ends, and the reader is left with three dots where a thing should be.
+    el.textContent = url ? i18n.t("macro.embedUnresolved", { url }) : i18n.t("macro.embedEmpty");
     return el;
   },
   htmlRender: embedHtmlRender, // server/static: a link (no iframe in exported HTML)
