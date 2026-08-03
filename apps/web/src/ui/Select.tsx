@@ -57,7 +57,11 @@ export function Select({
       onOpenChange={(open) => { if (open) setBoundary(trigger.current?.closest("[role=dialog]") ?? null); }}
     >
       <SelectTrigger ref={trigger} size={scale === "sm" ? "sm" : "default"} aria-label={ariaLabel} data-testid={testId}>
-        <SelectValue />
+        {/* The trigger shows the LABEL, not the option's rendered children. Radix's default clones the
+            selected item, which since #586 carries a hidden capability line — so the closed control held
+            text nobody could see, reserved width for it, and handed it to anything reading the element.
+            The label is what "the value" means here; the reveal belongs to the open list. */}
+        <SelectValue>{options.find((o) => o.value === value)?.label ?? undefined}</SelectValue>
       </SelectTrigger>
       <SelectContent collisionBoundary={boundary ?? undefined} collisionPadding={8}>
         {options.map((o) => (

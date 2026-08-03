@@ -40,7 +40,8 @@
     "no": "No",
     "edit": "Edit",
     "confirm": "Confirm",
-    "memberSearch": "Search members…"
+    "memberSearch": "Search members…",
+    "granteeSearch": "Search members or groups…"
   },
   "embedPicker": {
     "title": "Embed a page",
@@ -575,7 +576,7 @@
     "replaceConfirm": "Replace {{who}}'s current role ({{current}}) with {{next}}?",
     "managerReplaceConfirm": "{{who}} is a MANAGER of this space. Replace their manager role with {{next}}? They lose every management capability here; a tenant admin can restore it.",
     "replaceAction": "Replace",
-    "groupNamePlaceholder": "or type a group name",
+    "groupNamePlaceholder": "Search or type a group name",
     "groupUnconfirmed": "No member carries this group yet. The grant applies as soon as one signs in."
   },
   "auth": {
