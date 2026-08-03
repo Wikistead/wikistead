@@ -1,6 +1,6 @@
 import type { DirectiveMacro } from "./registry";
 import { embedHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender shared (degrades to a link)
-import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
+import { macroPlaceholder, showPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 import { safeHref } from "./md-render"; // #319 one shared scheme check for the degrade href (no js:/data:)
 
 // :::embed-external — embed an external resource by URL (the body is the URL). #108 / ADR-071 (551)
@@ -46,7 +46,7 @@ export const embedMacro: DirectiveMacro = {
     // placeholder shares, a native `title` is refused here (#530), and a tooltip is the thing this
     // ticket declined to add. Nothing is lost: the URL is in the source a keystroke away, and the
     // export path renders a real link rather than this placeholder.
-    el.textContent = macroPlaceholder(embedMacro, url ? "no-host" : "empty-url");
+    showPlaceholder(el, embedMacro, url ? "no-host" : "empty-url");
     return el;
   },
   htmlRender: embedHtmlRender, // server/static: a link (no iframe in exported HTML)

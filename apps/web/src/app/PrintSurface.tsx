@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import type { DiagramHostSeam } from "../editor/macros/md-render";
 
 // #505 a print-only STATIC surface. Every reading surface (member / guest / public) renders its
 // body with CodeMirror (mountLivePreview / mountPublishedView), which VIRTUALISES its viewport — only the
@@ -19,7 +20,20 @@ import { createPortal } from "react-dom";
 //
 // Display-only: it READS the published Markdown the route already holds and never touches the Y.Text /
 // collab session.
-export function PrintSurface({ md, title }: { md: string | null; title: string }) {
+// #207 (review rejection, measured again here): this portal drew its macros with NO host seams, so the
+// one print path the app cannot intercept produced a page where `plantuml` was its own source and an
+// external embed was the sentence "not shown on this surface". The app's own Print does not have that
+// problem — it hands the export the same seams the editor has — which is precisely why the drift went
+// unnoticed: the road people use was right, and the road the browser takes was not.
+//
+// So the seams come in as props. A surface that has no renderer for something passes nothing and the macro
+// degrades exactly as it does anywhere else (an embed with no allowlist becomes a link, which is the honest
+// thing to put on paper).
+export function PrintSurface({ md, title, diagram }: {
+  md: string | null;
+  title: string;
+  diagram?: DiagramHostSeam | null;
+}) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,16 +44,25 @@ export function PrintSurface({ md, title }: { md: string | null; title: string }
     if (md == null || md.trim() === "") return;
     // Lazy-import the renderer (it lives in the CM6 editor bundle; the reading route already pulls that in,
     // so this adds ~nothing eager).
-    void import("../editor/macros/md-render").then(({ renderMarkdownToDom }) => {
+    void import("../editor/macros/md-render").then(async ({ renderMarkdownToDom, withDiagramHost, withEmbedHost }) => {
       if (cancelled || !bodyRef.current) return;
+      const { buildEmbedElement } = await import("../editor/macros/embed");
+      if (cancelled || !bodyRef.current) return;
+      // An external embed on PAPER is a link, always: a printed iframe is a blank rectangle, and the
+      // ruling for anything that cannot round-trip is to degrade rather than to show a hole
+      // (`exportFidelity: "degrade"`). Passing an empty allowlist is how that is said — the same builder
+      // the screen uses, taking its own degrade branch, rather than a second way to draw an embed.
+      const embed = { build: (url: string) => buildEmbedElement(url, []) };
       // LIVE macros (#85): the static mode renders a diagram as a compact chip, which is the "export shows
       // source, screen shows a figure" gap on the one path that still comes through here. These renders are
       // asynchronous and fill themselves in — the portal is built when the body changes, long before anyone
       // reaches for File → Print, so by then they have drawn.
-      bodyRef.current.replaceChildren(renderMarkdownToDom(md));
+      withDiagramHost(diagram ?? null, () => withEmbedHost(embed, () => {
+        bodyRef.current!.replaceChildren(renderMarkdownToDom(md));
+      }));
     });
     return () => { cancelled = true; };
-  }, [md]);
+  }, [md, diagram]);
 
   return createPortal(
     // data-print-root: print.css shows ONLY this subtree in normal flow (everything else display:none).

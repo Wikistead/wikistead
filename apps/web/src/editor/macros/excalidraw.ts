@@ -3,7 +3,7 @@ import { applyIntrinsicSvgSize } from "./svg-intrinsic-size"; // #465
 import { asMacroSource } from "./registry";
 import { writeLocalElements, readSceneElements, allElements, reconcile, elementsMap } from "./excalidraw-collab";
 import { excalidrawHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
-import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
+import { macroPlaceholder, showPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 
 // ```excalidraw — body is an Excalidraw scene JSON. The PREVIEW (liveRender) uses
 // Excalidraw's NON-React exportToSvg, so no React enters CodeMirror (ADR-013). The
@@ -70,7 +70,7 @@ export const excalidrawMacro: FenceMacro = {
     const scene = parseScene(body);
     if (!scene.elements.length) {
       el.classList.add("cm-lp-macro-empty");
-      el.textContent = macroPlaceholder(excalidrawMacro, "empty-open");
+      showPlaceholder(el, excalidrawMacro, "empty-open");
       return el;
     }
     const dark = ctx.theme === "dark";
@@ -95,7 +95,7 @@ export const excalidrawMacro: FenceMacro = {
         el.classList.add("cm-lp-macro-error");
         // #600: was a hardcoded English sentence in a localized product, and it did not match the
         // shape of any other placeholder.
-        el.textContent = macroPlaceholder(excalidrawMacro, "invalid");
+        showPlaceholder(el, excalidrawMacro, "invalid");
       }
     });
     return el;

@@ -97,4 +97,24 @@
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+
+  /* #207 ① (measured on the portal, then again after the fix): a tab strip carries "one at a time",
+     and on paper that means the panels nobody selected are simply GONE — the content-loss defect this
+     ticket was opened for, arriving again through a change that was only meant to fix how tabs LOOK.
+     Paper has no selection, so every panel is shown and each is headed by its own label. The heading
+     borrows the accent underline the active tab wears on screen, so the printed page reads as the same
+     document rather than as a stack of unlabelled prose. */
+  [data-print-root] .cm-lp-tabbar { display: none !important; } /* the labels are on the panels now */
+  [data-print-root] .cm-lp-tabpanel {
+    display: block !important;
+    margin-bottom: 1.2em;
+  }
+  [data-print-root] .cm-lp-tabpanel::before {
+    content: attr(data-tab-label);
+    display: block;
+    font-weight: 700;
+    border-bottom: 2px solid var(--accent, #3a7d44);
+    padding-bottom: 0.2em;
+    margin-bottom: 0.6em;
+  }
 }
