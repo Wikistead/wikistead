@@ -49,10 +49,22 @@ export async function sweepMemberDirectGrants(
   driver: SearchDriver,
   args: { tenantId: string; sub: string },
 ): Promise<void> {
+  // #603 review: the ROW side of the same leak. A tenant-scope assignment outlives the member it was
+  // made for, so the next person to hold that sub — or the same person rejoining — inherits it. The
+  // tuples are swept below; the rows that own them go here, in the caller's tenant scope (RLS).
+  await db.sql`DELETE FROM role_assignments
+    WHERE resource_type = 'tenant' AND resource_id = ${args.tenantId} AND principal = ${`user:${args.sub}`}`
+    .catch((err) => console.error('[members:sweep] tenant assignment rows remain', { sub: args.sub, err }))
   const user = `user:${args.sub}`
-  const [spaceTuples, pageTuples] = await Promise.all([
+  const [spaceTuples, pageTuples, tenantTuples] = await Promise.all([
     readUserTuplesByType(fga, user, 'space:'),
     readUserTuplesByType(fga, user, 'page:'),
+    // #603 review: this swept `space:` and `page:` and stopped there, so a removed member kept every
+    // TENANT-scope grant they held — `space_creator`, `api_key_issue`, and since #604 the verbs carved
+    // out of admin. Rejoining (an invite, a domain self-enrol) woke them all up silently, which is the
+    // authz leak the rest of this function exists to close. The membership tuple itself is already gone
+    // by the time this runs; what is left are the grants somebody made TO them.
+    readUserTuplesByType(fga, user, 'tenant:'),
   ])
   const id = (object: string) => object.slice(object.indexOf(':') + 1)
   // Tenant-ownership filter: req.db is RLS-scoped, so these SELECTs return ONLY this tenant's ids.
@@ -67,6 +79,10 @@ export async function sweepMemberDirectGrants(
   const doomed = [
     ...spaceTuples.filter((t) => ownedSpaces.has(id(t.object))),
     ...pageTuples.filter((t) => ownedPages.has(id(t.object)) && t.relation !== 'restricted'),
+    // only THIS tenant's object, and never `member`/`admin` themselves: those are the membership the
+    // removal already handled, and re-deleting them here would make this sweep responsible for a
+    // decision it does not own.
+    ...tenantTuples.filter((t) => id(t.object) === args.tenantId && t.relation !== 'member' && t.relation !== 'admin'),
   ]
   for (const t of doomed) {
     await deleteTuples(fga, [t]).catch((err) => {
