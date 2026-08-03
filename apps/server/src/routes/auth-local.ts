@@ -204,8 +204,12 @@ export async function authLocalPlugin(app: FastifyInstance) {
     // account-takeover investigation asks. The webhook stream carries the same fact.
     // ADR-198 §6 C7: the EE ledger, not only the webhook stream. "When was a reset asked for, and
     // for whom" is the first question an account-takeover investigation has.
+    // review F2: the ACTOR is not the member. This endpoint is unauthenticated and anyone may type
+    // anyone's address into it, so recording `user:<them>` would tell an account-takeover
+    // investigation that the owner asked for this — the opposite of what the ledger knows. The
+    // request came from nobody we can name; the member is the TARGET.
     await req.db.tx((tx) => auditIfEntitled(tx, req.tenant, {
-      actor: `user:${minted.memberSub}`, action: 'member.password_reset_requested', target: `member:${minted.memberSub}`,
+      actor: 'anonymous', action: 'member.password_reset_requested', target: `member:${minted.memberSub}`,
     })).catch((err: unknown) => req.log.warn({ err }, 'reset-request audit failed'))
     emit({ type: 'member.password_reset_requested', tenantId: req.tenant.id, targetSub: minted.memberSub })
     return silence()
@@ -230,7 +234,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
     await countFailure(app.valkey, `rl:local:reset:use:${req.tenant.id}:${req.ip}`, LOCAL_LOGIN_WINDOW_S)
 
     const { completePasswordReset } = await import('../auth/password-reset.js')
-    const done = await completePasswordReset(req.db, token, password)
+    const done = await completePasswordReset(req.db, req.tenant, token, password)
     if (!done) return reply.code(404).send({ error: 'link not available' })
 
     // A reset is what someone does when they think another person is in their account: EVERY session
@@ -248,9 +252,6 @@ export async function authLocalPlugin(app: FastifyInstance) {
       await app.valkey.del(`lock:local:${req.tenant.id}:${cred.identifier}`).catch(() => {})
       await app.valkey.del(`rl:local:id:${req.tenant.id}:${cred.identifier}`).catch(() => {})
     }
-    await req.db.tx((tx) => auditIfEntitled(tx, req.tenant, {
-      actor: `user:${done.memberSub}`, action: 'member.password_reset_completed', target: `member:${done.memberSub}`,
-    })).catch((err: unknown) => req.log.warn({ err }, 'reset audit failed'))
     emit({ type: 'member.password_reset_completed', tenantId: req.tenant.id, targetSub: done.memberSub })
     return reply.code(204).send()
   })
@@ -289,13 +290,20 @@ export async function authLocalPlugin(app: FastifyInstance) {
     const hash = await hashPassword(next)
     // UPDATE, never INSERT: the row must already exist (checked above). An upsert here is how a
     // password gets grown on an account that never had one.
-    await req.db.sql`UPDATE local_credentials SET password_hash = ${hash}, updated_at = now() WHERE member_sub = ${req.user.sub}`
+    //
+    // review F1: the audit rides the SAME transaction as the update. auditIfEntitled queues through
+    // the outbox precisely so a ledger line exists exactly when the change it describes committed;
+    // a separate transaction with a swallowed error can leave the password changed and the ledger
+    // silent, which is the state an investigation cannot recover from.
+    await req.db.tx(async (tx) => {
+      await tx`UPDATE local_credentials SET password_hash = ${hash}, updated_at = now() WHERE member_sub = ${req.user.sub}`
+      await auditIfEntitled(tx, req.tenant, {
+        actor: `user:${req.user.sub}`, action: 'member.password_changed', target: `member:${req.user.sub}`,
+      })
+    })
     // Every OTHER session goes: a password change is how someone evicts whoever they think is in
     // their account, and leaving the other sessions alive makes the change cosmetic.
     await destroyMemberSessions(app.valkey, req.tenant.id, req.user.sub, req.cookies?.[SESSION_COOKIE])
-    await req.db.tx((tx) => auditIfEntitled(tx, req.tenant, {
-      actor: `user:${req.user.sub}`, action: 'member.password_changed', target: `member:${req.user.sub}`,
-    })).catch((err: unknown) => req.log.warn({ err }, 'password-change audit failed'))
     emit({ type: 'member.password_changed', tenantId: req.tenant.id, targetSub: req.user.sub })
     return reply.code(204).send()
   })
@@ -389,7 +397,16 @@ export async function authLocalPlugin(app: FastifyInstance) {
         // credentials" for one would have every member retyping a correct password while the
         // operator sees no errors at all. Those rethrow and surface as a 500, which is what they are.
         const status = (err as { statusCode?: number }).statusCode
-        if (status !== 403 && status !== 402) throw err
+        if (status !== 403 && status !== 402) {
+          // review F3: a dependency failure is an ERROR, not an authentication event — and it is
+          // logged as one so an outage is visible to whoever is on call. The trade recorded here:
+          // rethrowing means that DURING an outage a correct password 500s while a wrong one still
+          // 401s (the wrong one never reaches this line), which is a narrow oracle available only
+          // while the product is down and not one an attacker can induce. The alternative — a 401
+          // for everything — hides the outage from every member and from the logs' shape.
+          req.log.error({ err, method: 'local' }, 'local login could not complete — dependency failure')
+          throw err
+        }
         // 402 is the seat cap — the tenant's billing, not this person's behaviour — so it is refused
         // without counting toward a lockout. Only a 403 (not a member, deactivated) is a refusal
         // about them, and only that is counted (review nit: counting everything meant a dependency

@@ -50,13 +50,20 @@ describe("#568: the password form is not a button", () => {
     expect(s).toContain('credentials: "include"');
   });
 
-  it("every failure reads the same — the screen must not become the enumeration oracle", () => {
+  it("every SERVER failure reads the same — the screen must not become the enumeration oracle", () => {
     const s = src("./LocalLoginForm.tsx");
-    // one message key, chosen without looking at the status
-    expect(s).toContain('t("auth.localFailed")');
+    // One message for whatever the server answered, chosen without reading the status: 401, 403 and
+    // 429 are one sentence. (A second message exists for "you have not typed an address yet", which
+    // the form knows on its own and never asks the server about — review F4. That one cannot leak
+    // anything, because no request was made.)
+    expect(s).toContain('setFailed("credentials")');
     expect(s).not.toMatch(/status === 401|status === 404|res\.status ===/);
+    // the only other state is client-side and named as such
+    expect(s).toContain('setFailed("needsAddress")');
     for (const loc of [en, ja] as Array<{ auth: Record<string, string> }>) {
-      for (const k of ["localIdentifier", "localPassword", "localFailed"]) expect(loc.auth[k], k).toBeTruthy();
+      for (const k of ["localIdentifier", "localPassword", "localFailed", "resetNeedsAddress", "forgotPassword", "resetSent"]) {
+        expect(loc.auth[k], k).toBeTruthy();
+      }
     }
   });
 });

@@ -17,14 +17,14 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<"credentials" | "needsAddress" | null>(null);
   const [sent, setSent] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy || !identifier.trim() || !password) return;
     setBusy(true);
-    setFailed(false);
+    setFailed(null);
     try {
       const res = await fetch(assetUrl("/auth/local/login"), {
         method: "POST",
@@ -32,13 +32,13 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ identifier, password, returnTo }),
       });
-      if (!res.ok) { setFailed(true); setBusy(false); return; }
+      if (!res.ok) { setFailed("credentials"); setBusy(false); return; }
       const body = (await res.json().catch(() => null)) as { returnTo?: string } | null;
       // A full navigation, not a router push: the session cookie is new, and every query in the app
       // was made by whoever was here before.
       window.location.href = body?.returnTo || returnTo || "/";
     } catch {
-      setFailed(true);
+      setFailed("credentials");
       setBusy(false);
     }
   };
@@ -48,7 +48,7 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
       {failed && (
         <div className="rounded-md border border-border border-l-[3px] border-l-[var(--danger)] bg-panel-2 px-3 py-2 text-sm"
           data-testid="login-local-error" role="alert">
-          {t("auth.localFailed")}
+          {t(failed === "needsAddress" ? "auth.resetNeedsAddress" : "auth.localFailed")}
         </div>
       )}
       <Input
@@ -76,7 +76,7 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
           data-testid="login-local-forgot" disabled={busy}
           onClick={async () => {
             // A blank field asks for nothing; the person needs to type the address first.
-            if (!identifier.trim()) { setFailed(true); return; }
+            if (!identifier.trim()) { setFailed("needsAddress"); return; }
             setBusy(true);
             await fetch(assetUrl("/auth/local/reset-request"), {
               method: "POST", credentials: "include",

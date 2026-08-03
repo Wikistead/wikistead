@@ -20,6 +20,7 @@ import type { TenantDb } from '../db/index.js'
 import { hashPassword } from './password-hash.js'
 import { validatePasswordPolicy } from './password-policy.js'
 import { localLoginEnabled } from './login-methods.js'
+import { auditIfEntitled } from '../audit/outbox.js'
 
 // Short: a reset link is a bearer credential for an account, and the person asked for it seconds ago.
 export const RESET_TTL_MS = 60 * 60 * 1000
@@ -49,7 +50,10 @@ export async function mintPasswordReset(db: TenantDb, identifier: string): Promi
 // unknown, expired, consumed token and a tenant that has switched password sign-in off are one
 // answer, for the same reason the invite acceptance path gives one.
 export async function completePasswordReset(
-  db: TenantDb, token: string, newPassword: string,
+  // review F1: the tenant travels so the audit line can be written INSIDE the transaction that
+  // changes the password. auditIfEntitled queues through the outbox exactly so a ledger entry
+  // exists when — and only when — the change it describes committed.
+  db: TenantDb, tenant: { id: string; plan: string }, token: string, newPassword: string,
 ): Promise<{ memberSub: string } | null> {
   if (!(await localLoginEnabled(db))) return null
   if (!validatePasswordPolicy(newPassword)) {
@@ -76,6 +80,11 @@ export async function completePasswordReset(
     // Every OTHER live reset for this member dies with the one that was used: someone who requested
     // three links and had one stolen should not be leaving two more live.
     await tx`UPDATE password_resets SET used_at = now() WHERE member_sub = ${memberSub} AND used_at IS NULL`
+    // The person completing a reset is not signed in, so the actor is the member the reset was for
+    // — which is what the link proved control of.
+    await auditIfEntitled(tx, tenant, {
+      actor: `user:${memberSub}`, action: 'member.password_reset_completed', target: `member:${memberSub}`,
+    })
     return { memberSub }
   })
 }
