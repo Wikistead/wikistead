@@ -100,6 +100,7 @@ class HoverGrip implements PluginValue {
   private dragging = false
   private onMove: (e: MouseEvent) => void
   private onLeave: () => void
+  private onScroll: () => void
   constructor(private view: EditorView) {
     const grip = document.createElement("div")
     grip.className = "cm-lp-block-grip"
@@ -119,11 +120,22 @@ class HoverGrip implements PluginValue {
     view.dom.appendChild(grip)
     this.onMove = (e) => this.position(e)
     this.onLeave = () => { if (!this.dragging) this.hide() }
+    // #599: the grip is positioned in .cm-editor coordinates and was recomputed ONLY on mousemove, so a
+    // wheel scroll left it hanging beside whatever block had scrolled into that spot — and it still
+    // carried `this.from` from the block it was originally resolved on. Grabbing it then moved a block
+    // the reader was not looking at: a wrong-document edit, not a cosmetic drift. It hides on scroll,
+    // which is the rule #530 already applies to floating UI whose anchor moves; the next mousemove
+    // resolves it against what is under the pointer now.
+    this.onScroll = () => { if (!this.dragging) this.hide() }
     // CAPTURE phase on the whole editor: a block WIDGET (mermaid/table/excalidraw) can stopPropagation on
     // its own DOM, so a bubbling listener never fires over it and the grip never appeared on widget atoms.
     // Capturing fires on the way down, before any child can swallow it.
     view.dom.addEventListener("mousemove", this.onMove, true)
     view.dom.addEventListener("mouseleave", this.onLeave)
+    // capture: the scroller is a descendant, and a scroll event does not bubble
+    view.dom.addEventListener("scroll", this.onScroll, true)
+    // …and the page itself can be the scroller (the reading column scrolls the document, not cm-scroller)
+    window.addEventListener("scroll", this.onScroll, true)
   }
   private hide() { this.grip.style.display = "none"; this.from = -1 }
   // #333: entering a read-only state (the Reading display mode) DETACHES the grip entirely — a grip
@@ -166,7 +178,7 @@ class HoverGrip implements PluginValue {
     if (pos == null) return this.hide()
     const block = blockRangeAt(this.view.state, pos)
     if (!block) return this.hide()
-    if (block.from === this.from && this.grip.style.display === "block") return // same block, already shown
+    if (block.from === this.from && this.grip.style.display !== "none") return // same block, already shown
     const anchor = this.blockEl(block.from) ?? el
     if (!anchor) return this.hide()
     const b = anchor.getBoundingClientRect()
@@ -175,7 +187,7 @@ class HoverGrip implements PluginValue {
     // #333: appended lazily on show (and removed on hide), so a Reading/read-only surface has no
     // grip element at all. Append BEFORE measuring offsetWidth (0 while detached).
     if (!this.grip.isConnected) this.view.dom.appendChild(this.grip)
-    this.grip.style.display = "block"
+    this.grip.style.display = "flex" // the 24×24 hit box centres the 13px glyph (#599)
     this.grip.style.top = `${Math.round(b.top - dom.top)}px`
     this.grip.style.left = `${Math.round(Math.max(0, b.left - dom.left - this.grip.offsetWidth - GRIP_GAP))}px`
     this.from = block.from
@@ -183,6 +195,8 @@ class HoverGrip implements PluginValue {
   destroy() {
     this.view.dom.removeEventListener("mousemove", this.onMove, true)
     this.view.dom.removeEventListener("mouseleave", this.onLeave)
+    this.view.dom.removeEventListener("scroll", this.onScroll, true)
+    window.removeEventListener("scroll", this.onScroll, true)
     this.grip.remove()
   }
 }
