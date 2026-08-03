@@ -67,9 +67,13 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(reloaded.getByTestId("member-role-chip"), "no chips: there is no set to draw").toHaveCount(0);
     await expect(reloaded.getByTestId("member-tier-chip")).toHaveCount(0);
 
-    // the filter narrows the table — the search that used to live inside the assign form
+    // the filter narrows the table — the search that used to live inside the assign form.
+    // RE-AIMED by #579 ①: "matches nothing" no longer means "no rows". A name that matches nothing is
+    // offered as a GROUP to give a role to (the capability the retired section had), so what is empty is
+    // the set of EXISTING rows, and the one row present is the offer.
     await page.getByTestId("members-filter").fill("nobody-matches-this");
-    await expect(page.getByTestId("member-roles")).toHaveCount(0, { timeout: 8000 });
+    await expect(page.getByTestId("member-row-group"), "no existing group matches").toHaveCount(0, { timeout: 8000 });
+    await expect(page.getByTestId("member-row-new-group"), "…and the unmatched name is offered as one").toHaveCount(1);
     await page.getByTestId("members-filter").fill("dev");
     await expect(page.getByTestId("member-roles").first()).toBeVisible();
   } finally {
@@ -82,7 +86,12 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
 // Groups are not people: they have no row in the member table, so their tenant roles live in their own
 // section — the same split the space screen makes. This also exercises GET /admin/groups, the
 // tenant-scope name source #579 added (the existing one was space-scoped and needed a space id).
-test("#579: a group gets a tenant role from its own section, by NAME", async ({ page, request }) => {
+test("#579 ①: a group gets a tenant role from the MEMBER TABLE, by name", async ({ page, request }) => {
+  // RE-AIMED, not deleted. The subject was "a group is given a tenant role by NAME, and the screen shows
+  // the name rather than the hash" — that still holds; what changed is where it happens. The ruling
+  // folded the group section into the member table ("
+  // "), so the same act is now: type the name in the table's search,
+  // and the row it offers takes a role.
   const stamp = Date.now();
   const roleName = `e2e-579g-${stamp}`;
   const res = await request.post("/api/admin/roles", {
@@ -94,27 +103,26 @@ test("#579: a group gets a tenant role from its own section, by NAME", async ({ 
 
   try {
     await page.goto("/admin/members");
-    const section = page.getByTestId("tenant-group-roles");
-    await expect(section).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("tenant-group-roles"), "the separate section is gone").toHaveCount(0);
 
-    // #578 bounce ②: ONE input with completion, not a Select stacked on an Input. The e2e tenant has no
-    // IdP groups, so this drives the half that used to be impossible here — a name nobody carries yet,
-    // which the screen must keep (bounce ①) and mark rather than turning into "unknown group".
     const groupName = `e2e-579-group-${stamp}`;
-    await section.getByTestId("tenant-group-assign-group-name").fill(groupName);
-    await expect(
-      section.getByTestId("tenant-group-assign-group-unconfirmed"),
-      "a name the directory has not produced says so",
-    ).toBeVisible();
-    await section.getByTestId("tenant-group-assign-role").click();
+    await page.getByTestId("members-filter").fill(groupName);
+    const offered = page.getByTestId("member-row-new-group");
+    await expect(offered, "a name the directory has not produced is offered as a row").toBeVisible({ timeout: 8000 });
+    await offered.getByTestId("new-group-role-select").click();
     await page.getByRole("option", { name: roleName }).click();
-    await section.getByTestId("tenant-group-assign-add").click();
 
-    const row = section.getByTestId("tenant-group-role-row").filter({ hasText: groupName });
+    await page.getByTestId("members-filter").fill(groupName);
+    const row = page.getByTestId("member-row-group").filter({ hasText: groupName });
     await expect(row, "the group appears with its NAME, never a hash").toBeVisible({ timeout: 8000 });
     await expect(row).not.toContainText(/[0-9a-f]{24}/);
-    await row.getByTestId("tenant-group-role-remove").first().click();
-    await expect(section.getByTestId("tenant-group-role-row").filter({ hasText: groupName })).toHaveCount(0, { timeout: 8000 });
+
+    // and the role comes off from the same control that put it on — there is no second affordance
+    await row.getByTestId("member-role-select").click();
+    await page.getByRole("option").first().click();
+    await expect(page.getByTestId("member-row-group").filter({ hasText: groupName }), "removing the role removes the row")
+      .toHaveCount(0, { timeout: 8000 });
   } finally {
     await request.delete(`/api/admin/roles/${roleId}`, { headers: { authorization: "Bearer dev-token" } }).catch(() => {});
   }

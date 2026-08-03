@@ -157,3 +157,49 @@ export function currentRoleValue(row: TenantRoleRow): string {
 // one picker with a label that does not say "add", not two controls. `tierOptions` and
 // `addableRoleOptions` went with it; `pickerOptions` above is what the row uses, and it is the only
 // list-builder there is, so a second control cannot quietly grow its own list again.
+
+/**
+ *
+ * One list. A person and a group are both principals holding a tenant role, and the screen said so with
+ * two sections, two shapes and two vocabularies — which is what made the group half look like a
+ * different kind of thing with different rules.
+ *
+ * Pure, so the merge is pinned without a DOM: the ordering, the kind each row carries (what the icon
+ * draws), and the fact that a group with no name still gets a row rather than disappearing.
+ */
+export interface UnifiedRow {
+  key: string;
+  kind: "user" | "group";
+  label: string;
+  /** users only — the row's Select needs the member's sub to change their tier */
+  sub?: string;
+  /** groups only — its assignments (a group never holds a tier, see ADR-201) */
+  group?: GroupRoleRow;
+  /** the group's name as typed, if the directory has not produced it yet */
+  unconfirmed?: boolean;
+}
+
+export function buildUnifiedRows(
+  members: readonly RowMember[],
+  groups: readonly GroupRoleRow[],
+  unconfirmedPrincipals: ReadonlySet<string> = new Set(),
+): UnifiedRow[] {
+  const rows: UnifiedRow[] = [
+    ...members.map((m) => ({
+      key: `user:${m.sub}`,
+      kind: "user" as const,
+      label: m.display_name || m.email || m.sub,
+      sub: m.sub,
+    })),
+    ...groups.map((g) => ({
+      key: g.principal,
+      kind: "group" as const,
+      label: g.label,
+      group: g,
+      unconfirmed: unconfirmedPrincipals.has(g.principal),
+    })),
+  ];
+  // One order for both kinds. Sorting groups to the bottom would rebuild the two sections the ruling
+  // removed, only without the headings.
+  return rows.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+}

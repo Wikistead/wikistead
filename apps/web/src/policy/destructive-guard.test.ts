@@ -69,13 +69,15 @@ describe("destructive-operation policy guard (#510)", () => {
     // The tenant role un-assignment is a sanctioned red-only exception; without its entry it must
     // violate. (#514 slice 4 moved this surface out of AdminRolesTab and beside the members; #579
     // then folded the member half into the table row and left the GROUP half here.)
-    const f = join(SRC, "settings/TenantGroupRoles.tsx");
+    // #579 ①: the group section folded into the member table, so the destructive call it guarded lives
+    // in MembersPage now. Same call, same guard — the file it sits in is not the subject.
+    const f = join(SRC, "settings/MembersPage.tsx");
     const src = readFileSync(f, "utf8");
     const without = { ...ALLOWLIST };
-    delete without["TenantGroupRoles.tsx:unassign"];
-    const v = analyzeDestructive("TenantGroupRoles.tsx", src, without);
-    expect(v.map((x) => x.identifier), "unassign is only green because it is allowlisted").toContain("unassign");
+    delete without["MembersPage.tsx:unassignRole"];
+    const v = analyzeDestructive("MembersPage.tsx", src, without);
+    expect(v.map((x) => x.identifier), "unassign is only green because it is allowlisted").toContain("unassignRole");
     // …and with the shipped allowlist it is green
-    expect(analyzeDestructive("TenantGroupRoles.tsx", src).map((x) => x.identifier)).not.toContain("unassign");
+    expect(analyzeDestructive("MembersPage.tsx", src).map((x) => x.identifier)).not.toContain("unassignRole");
   });
 });
