@@ -113,11 +113,10 @@ export function mountSourceEditor(opts: SourceEditorOptions): SourceEditorHandle
         // one place — none of them had it, and CodeMirror's built-in LIGHT selection (#d7d4f0) was what
         // showed instead, on dark surfaces too.
         cmSelectionTheme,
-        // ...and this is what makes CodeMirror agree the surface is dark. The `cm-dark` class it carried
-        // before was read by nobody (not by CodeMirror, which uses its own generated class, and not by
-        // any app CSS), so the built-in theme kept choosing its light branch.
+        // ...and this is what makes CodeMirror agree the surface is dark: it reads a FACET and picks its
+        // own generated base class from it. A `cm-dark` class used to be set here instead, which nothing
+        // reads — not CodeMirror, not the app's CSS — so the built-in theme kept choosing its light branch.
         EditorView.darkTheme.of(!!opts.dark),
-        EditorView.editorAttributes.of({ class: opts.dark ? "cm-dark" : "" }),
         EditorView.updateListener.of((u) => { if (u.docChanged) opts.onInput(u.state.doc.toString()); }),
         // Commit-on-blur → the single offset-invariant Y.Text write (never per-keystroke; see header).
         // #278focus moving INTO this editor's own subtree is not a leave. A slot island can host a

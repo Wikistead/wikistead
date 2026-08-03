@@ -190,9 +190,10 @@ test("#601: a nested editor is told which theme it is in, not just handed a clas
   const islandClasses = async () => {
     await page.locator("[data-pane=preview] .cm-lp-column").first().click();
     await sleep(400);
-    // `cm-dark` is EXCLUDED on purpose: it is the class the editor set by hand, the one nothing reads.
-    // Leaving it in made this comparison pass with the facet removed — it was measuring the very thing
-    // the ticket says does nothing. What must differ is the class CodeMirror itself picks.
+    // `cm-dark` stays EXCLUDED even though the class is gone now: while it was still being set, leaving
+    // it in this comparison made the check pass with the facet REMOVED — it was measuring the very thing
+    // the ticket says does nothing. Keeping the filter means re-adding that class cannot re-hide a
+    // missing facet. What must differ is the class CodeMirror itself picks.
     const cls = await page.getByTestId("slot-edit-src").evaluate((el) =>
       el.closest(".cm-editor")!.className.split(/\s+/).filter((c) => c && c !== "cm-dark").sort().join(" "));
     await page.getByText("below", { exact: true }).click(); // blur → the island commits and closes
