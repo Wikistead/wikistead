@@ -811,8 +811,10 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               canEdit={canEdit}
             />
             <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
-            {/* #505the paginating print surface (the live CM body is virtualised → prints one screenful). */}
-            <PrintSurface md={published?.publishedMd ?? null} title={page?.title ?? ""} />
+            {/* #505the paginating print surface (the live CM body is virtualised → prints one screenful).
+                #207: the SAME diagram seam the export gets — without it the browser's own File → Print drew
+                a plantuml block as its source while every other road drew the picture. */}
+            <PrintSurface md={published?.publishedMd ?? null} title={page?.title ?? ""} diagram={exportHosts?.diagram} />
             {/* #464 / ADR-175 rework slice 2/4: the who-viewed analytics moved OUT of this bottom-of-editor
                 spot (the user couldn't find it) into a right panel (analyticsOpen, below) — opened from the
                 ⋯ menu, manager-only. The static bottom render is retired. */}
@@ -1297,8 +1299,14 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
               canEdit={canEdit}
             />
             <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
-            {/* #505the paginating print surface (guest CM body is virtualised too). */}
-            <PrintSurface md={publishedMd} title={pageTitle} />
+            {/* #505the paginating print surface (guest CM body is virtualised too).
+                #207: a guest holds a share token, which the diagram route accepts, so the picture prints
+                here as well. (The public route below has no token and passes none — its plantuml degrades
+                to its source, the same as it does on that page's screen.) */}
+            <PrintSurface md={publishedMd} title={pageTitle} diagram={pageId ? {
+              handles: (lang: string) => lang === "plantuml",
+              render: (lang: string, source: string) => makeDiagramRenderer(token, pageId)(lang, source, currentMacroTheme()),
+            } : null} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
                 panel when open (shared right zone — no pointer overlap). */}

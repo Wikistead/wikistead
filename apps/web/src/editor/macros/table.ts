@@ -4,7 +4,7 @@ import { parseHtml, styleToCss, parseTableSource, toHtml, toPipe, representableA
 import { renderCellInline } from "./table-cell-dom";
 import { tableInlineEditor } from "../live-preview/table-edit";
 import { unsafeHtml } from "./safe-html";
-import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
+import { macroPlaceholder, showPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 import { tableHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 
 // ADR-025 step 3: the table's tier. pipe (GFM) is the lowest, most portable level;
@@ -84,7 +84,7 @@ export const tableMacro: DirectiveMacro = {
     if (el.rows.length === 0) {
       const caption = document.createElement("caption");
       caption.className = "cm-lp-macro-empty";
-      caption.textContent = macroPlaceholder(tableMacro, "empty-edit");
+      showPlaceholder(caption, tableMacro, "empty-edit");
       el.appendChild(caption);
     }
     return el;

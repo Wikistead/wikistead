@@ -7,7 +7,7 @@ import { renderMarkdownToDom, appendMarkdownInto, instanceKeyFor } from "./md-re
 // truth in @wikistead/macro-render, shared with the server export renderer. This file adds only the
 // DOM liveRender + editor metadata on top.
 import { parseLayoutItems, columnsHtmlRender, tabsHtmlRender, detailsHtmlRender } from "@wikistead/macro-render";
-import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
+import { macroPlaceholder, showPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 
 export { parseLayoutItems }; // re-export: existing editor imports (tabs/columns liveRender + tests) unchanged
 
@@ -46,7 +46,7 @@ export function columnsLiveRender(body: string, ctx?: MacroContext): HTMLElement
   // hover affordance below.)
   if (cols.length === 0) {
     row.classList.add("cm-lp-macro-empty");
-    row.textContent = macroPlaceholder(columnsMacro, "empty-edit");
+    showPlaceholder(row, columnsMacro, "empty-edit");
     return row;
   }
   for (const c of cols) {
@@ -240,7 +240,7 @@ export function tabsLiveRender(body: string, ctx?: MacroContext): HTMLElement {
   // #600: see columnsLiveRender — no tabs at all renders an invisible block.
   if (items.length === 0) {
     wrap.classList.add("cm-lp-macro-empty");
-    wrap.textContent = macroPlaceholder(tabsMacro, "empty-edit");
+    showPlaceholder(wrap, tabsMacro, "empty-edit");
     return wrap;
   }
   const bar = document.createElement("div");
@@ -254,6 +254,10 @@ export function tabsLiveRender(body: string, ctx?: MacroContext): HTMLElement {
     btn.textContent = t.label || `Tab ${i + 1}`;
     const panel = document.createElement("div");
     panel.className = "cm-lp-tabpanel";
+    // #207①: paper has no "one at a time", so print.css shows EVERY panel and heads each with its
+    // own label. The label lives on the panel because the tab bar is gone by then — a heading generated
+    // from an attribute is the only way a stylesheet can say which panel it is looking at.
+    panel.setAttribute("data-tab-label", t.label || `Tab ${i + 1}`);
     if (!t.content.trim()) panel.classList.add("cm-lp-tabpanel-empty"); // #278H: hover affordance for an empty tab
     if (ctx?.renderMarkdown) { panel.classList.add("wks-prose"); panel.appendChild(ctx.renderMarkdown(t.content, t.contentOffset)); }
     else appendMarkdownInto(panel, t.content); // no host render (static/preview sinks): plain, untagged

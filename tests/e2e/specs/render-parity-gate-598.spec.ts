@@ -82,6 +82,17 @@ const KNOWN_RED = {
   flatOnPaper: [] as string[],
   // #598 public slice: elements the SERVER-rendered public page does not carry under their own name.
   missingPublicly: [] as string[],
+  // #207the fifth surface — the print PORTAL, which is what the BROWSER's own File → Print takes.
+  // Three of that review's findings were measured here first and are FIXED: a tab strip hid the
+  // panels nobody had selected, plantuml printed as its own source, and an external embed printed the
+  // sentence "not shown on this surface".
+  //
+  // The fourth is this dimension's own discovery, recorded rather than hidden (#207): a page embed prints
+  // "loading" forever. Nothing installs the transclude seam outside the editor's own widget, so on this
+  // surface the placeholder has nobody to swap it out — the same shape as the two above, and the reason
+  // it needs its own slice is that resolving an embed means an authenticated fetch per reference, which
+  // the portal has no way to make today.
+  onPaper: ["embed-page: printed a placeholder (loading)"] as string[],
 } as const;
 
 // Macros that legitimately render NOTHING with the fixture's data: a tag list with no tagged pages and
@@ -128,7 +139,10 @@ function bodyFor(name: string): string {
     case "mermaid": return "graph TD; A-->B;";
     case "plantuml": return "@startuml\nA -> B\n@enduml";
     case "excalidraw": return EXCALIDRAW;
-    case "table": return "| H |\n| --- |\n| c |";
+    // `:::table`'s body is HTML by design (pipe syntax is the ordinary GFM table, a different element).
+    // It was pipe syntax here, which renders zero rows — so the fixture was handing the macro something it
+    // cannot draw and then the gate measured the FIXTURE's emptiness. Found by the placeholder dimension.
+    case "table": return "<table><tr><th>H</th></tr><tr><td>c</td></tr></table>";
     case "columns": return ":::column\nleft column text\n:::\n:::column\nright column text\n:::";
     case "tabs": return ":::tab[Alpha]\nalpha pane text\n:::\n:::tab[Beta]\nbeta pane text\n:::";
     case "embed": return "https://example.com/thing";
@@ -182,8 +196,11 @@ async function authorAndPublish(page: Page, md: string): Promise<string> {
 
 test("#598: every registered element survives the export, the file, and the page", async ({ page, browser }) => {
   test.setTimeout(300_000);
-  const elements = discoverMacros();
-  expect(elements.length, "the registry scan found macros (an empty scan proves nothing)").toBeGreaterThan(8);
+  // Discovery happens twice on purpose: once to know WHAT exists (so the transclude target can be created
+  // before any body is built), then again once TRANSCLUDE_TARGET.ref is filled in. Building the bodies
+  // first left `:::embed-page` with an empty body, and an empty body is a legitimate placeholder — so the
+  // gate was measuring its own fixture. (Found by the placeholder dimension, which is what it is for.)
+  expect(discoverMacros().length, "the registry scan found macros (an empty scan proves nothing)").toBeGreaterThan(8);
 
   await page.route("**/plantuml/render", (route) =>
     route.fulfill({ status: 200, contentType: "image/png", body: PLANTUML_PNG }));
@@ -196,6 +213,7 @@ test("#598: every registered element survives the export, the file, and the page
   }, { api: API, pageId: target });
   TRANSCLUDE_TARGET.ref = target;
 
+  const elements = discoverMacros(); // now every body can name what it needs
   const fixturePageId = await authorAndPublish(page, fixture(elements));
 
   await page.click("[data-testid=page-overflow-trigger]");
@@ -413,6 +431,53 @@ test("#598: every registered element survives the export, the file, and the page
     "If you FIXED one, delete it from KNOWN_RED",
   ).toEqual([...KNOWN_RED.missingPublicly].sort());
   await anon.close();
+
+  // ---- 1f. THE OTHER PAPER: the print portal ----
+  //
+  // The app's own Print builds the export document — the file measured above — so every dimension so far
+  // has been about the road the app controls. There is a second road it cannot: the BROWSER's File →
+  // Print, which fires with no chance to build anything first, and which takes the portal (`PrintSurface`)
+  // instead. That surface had no host seams at all, and #207's review found exactly what that
+  // produces: a tab strip that hides the panels nobody selected (content, gone, on paper only), a plantuml
+  // block printed as its own source, and an embed printed as the sentence that says it cannot be shown.
+  //
+  // Measured here rather than described, because a second renderer path is precisely what this gate exists
+  // to keep honest — and none of the four surfaces above could see it.
+  await page.emulateMedia({ media: "print" }); // the portal only becomes the document under print media
+  await sleep(400);
+  const portal = await page.evaluate(() => {
+    const root = document.querySelector("[data-print-root]");
+    if (!root) return { missing: true, bad: [] as string[] };
+    const bad: string[] = [];
+    for (const el of root.querySelectorAll("[data-wks-el]")) {
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const name = el.getAttribute("data-wks-el") ?? "?";
+      if (cs.display === "none" || cs.visibility === "hidden") bad.push(`${name}: hidden on paper`);
+      else if (r.width < 1 || r.height < 1) bad.push(`${name}: occupies nothing on paper`);
+    }
+    // content that is INSIDE a macro and hidden — the tab-panel shape, which the loop above cannot see
+    // because a panel is not itself a named element
+    for (const el of root.querySelectorAll(".cm-lp-tabpanel")) {
+      if (getComputedStyle(el).display === "none") bad.push(`a tab panel is hidden on paper: ${(el.textContent ?? "").trim().slice(0, 24)}`);
+    }
+    // nobody printed a "this surface cannot show it" sentence
+    for (const el of root.querySelectorAll("[data-wks-placeholder]")) {
+      bad.push(`${el.closest("[data-wks-el]")?.getAttribute("data-wks-el") ?? "?"}: printed a placeholder (${el.getAttribute("data-wks-placeholder")})`);
+    }
+    // a diagram is a picture here too
+    for (const name of ["mermaid", "plantuml", "excalidraw"]) {
+      const host = root.querySelector(`.cm-lp-${name}, [data-testid="macro-${name}"]`);
+      if (host && !host.querySelector("svg, img")) bad.push(`${name}: printed its source, not a figure`);
+    }
+    return { missing: false, bad: [...new Set(bad)].sort() };
+  });
+  expect(portal.missing, "the print portal is on the page (an absent portal would pass this forever)").toBe(false);
+  expect(
+    portal.bad,
+    "the browser's own File → Print would lose or mangle this. If you FIXED one, delete it from KNOWN_RED",
+  ).toEqual([...KNOWN_RED.onPaper].sort());
+  await page.emulateMedia({ media: "screen" });
 
   // ---- 2. nothing is invisible on paper ----
   await opened.emulateMedia({ media: "print" });

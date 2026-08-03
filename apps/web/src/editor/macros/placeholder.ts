@@ -87,3 +87,20 @@ function withDetail(macro: Macro | string, detail: string, empty: boolean): stri
   const name = m ? macroDisplayName(m) : (typeof macro === "string" ? macro : "");
   return i18n.t(empty ? "macro.placeholderEmpty" : "macro.placeholder", { name, detail });
 }
+
+/**
+ * #207 (via #598's gate): the attribute that says "what is standing here is a placeholder, not content".
+ *
+ * The sentence alone cannot be measured. Before #600 these states rendered `…`, and the parity gate found
+ * them by looking for that character; #600 replaced it with a sentence that names the macro — better for a
+ * reader, invisible to the gate, and that blind spot is how an external embed reached PAPER as "not shown
+ * on this surface" without any test noticing. A marker makes the state a fact a surface can be asked about,
+ * in every language, without matching prose.
+ */
+export const PLACEHOLDER_ATTR = "data-wks-placeholder";
+
+/** Put the placeholder sentence into `el` AND record which state it is. The only way to show one. */
+export function showPlaceholder(el: Element, macro: Macro | string, state: MacroPlaceholderState): void {
+  el.textContent = macroPlaceholder(macro, state);
+  el.setAttribute(PLACEHOLDER_ATTR, state);
+}

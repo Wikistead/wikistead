@@ -3,7 +3,7 @@ import katex from "katex"; // #505: the print portal / preview draw math too —
 import { parseDirectiveOpen } from "./directive-parser";
 import { findDirectiveMacro, findFenceMacro, type MacroContext, type MacroSource, type MacroTheme } from "./registry";
 import { currentMacroTheme } from "./theme";
-import { macroPlaceholderWithDetail } from "./placeholder"; // #600: one template for every "cannot show it" state
+import { macroPlaceholderWithDetail, PLACEHOLDER_ATTR } from "./placeholder"; // #600: one template for every "cannot show it" state
 import { createMacroSdk, declaredCapabilities, effectiveOf, withCallerCapabilities, currentCallerCapabilities } from "./macro-sdk"; // #450 slice 5a: one place decides what a macro is handed
 import { highlightInto } from "./code-highlight"; // #505: the read surface colours code like the editor
 import { parseFrontmatterRange, parseFmTags, type FmTag } from "../live-preview/frontmatter";
@@ -400,6 +400,7 @@ export function mountHostList(source: "tagged" | "children", query: string, env:
       // #600: the host still chooses the words; the template adds the shape and the name, so an
       // empty tagged list no longer reads as an anonymous "No pages yet."
       ph.textContent = macroPlaceholderWithDetail(source, env.list.emptyLabel);
+      ph.setAttribute(PLACEHOLDER_ATTR, "empty-edit"); // #207: a placeholder says so, in a way a surface can be asked
       holder.appendChild(ph);
     } else {
       holder.style.display = "none"; // read surface: render nothing (collapse to zero height)
@@ -762,6 +763,7 @@ class DomSink implements MdSink {
           ph.className = "cm-lp-embed-page-denied";
           ph.setAttribute("data-testid", "macro-embed-page-denied");
           ph.textContent = host.deniedLabel; // uniform — denied / cycle / absent are indistinguishable
+          ph.setAttribute(PLACEHOLDER_ATTR, "hidden"); // #207: measurable as a placeholder; the STATE stays uniform
           holder.appendChild(ph);
         } else {
           appendMarkdownInto(holder, content); // sanitized DOM (no innerHTML), same as the top-level path

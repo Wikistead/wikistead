@@ -19,7 +19,12 @@ export interface ExportHosts {
 }
 
 async function renderBody(md: string, hosts?: ExportHosts): Promise<HTMLElement> {
-  const { renderMarkdownToDom, withDiagramHost } = await import("../editor/macros/md-render");
+  const { renderMarkdownToDom, withDiagramHost, withEmbedHost } = await import("../editor/macros/md-render");
+  // #207③: with no embed seam the macro fell to its "this surface cannot show it" sentence, and a
+  // saved file carried that sentence where the screen has content. A FILE cannot host a live iframe either
+  // (that is what `exportFidelity: "degrade"` says), so the honest output is the link — produced by the
+  // same builder the screen uses, taking its degrade branch on an empty allowlist.
+  const { buildEmbedElement } = await import("../editor/macros/embed");
   const host = document.createElement("div");
   host.className = "wks-prose";
   host.setAttribute("data-export-staging", "");
@@ -37,7 +42,9 @@ async function renderBody(md: string, hosts?: ExportHosts): Promise<HTMLElement>
     ? { handles: (l: string) => hosts.diagram!.handles(l),
         render: (l: string, src: string) => { const p = hosts.diagram!.render(l, src); pending.push(p.catch(() => null)); return p } }
     : null;
-  withDiagramHost(tracked, () => host.appendChild(renderMarkdownToDom(md)));
+  withDiagramHost(tracked, () => withEmbedHost({ build: (url: string) => buildEmbedElement(url, []) }, () => {
+    host.appendChild(renderMarkdownToDom(md));
+  }));
   // The cap is generous because the alternative is a file that quietly lost a figure, and it only binds
   // when a renderer is genuinely slow — a normal render resolves long before it.
   await Promise.race([

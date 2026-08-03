@@ -1,6 +1,6 @@
 import type { DirectiveMacro } from "./registry";
 import { transcludeHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
-import { macroPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
+import { macroPlaceholder, showPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 
 // :::embed-page — embed another page's content by id (the body is the target page id). The MACRO
 // never fetches: its host-API is {theme} only (ADR-024 trust boundary). The host (live-preview
@@ -29,7 +29,7 @@ export const transcludeMacro: DirectiveMacro = {
     el.setAttribute("data-testid", "macro-embed-page");
     // #600: `…` named nothing. A body means an id is set and the host swaps the resolved content in
     // over this node, so the honest word is "loading"; no body is the empty state.
-    el.textContent = macroPlaceholder(transcludeMacro, body.trim() ? "loading" : "empty-page");
+    showPlaceholder(el, transcludeMacro, body.trim() ? "loading" : "empty-page");
     return el;
   },
   // SSR/export placeholder: the server render pipeline resolves the embed; this is the wrapper
