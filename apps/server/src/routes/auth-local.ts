@@ -21,6 +21,7 @@ import { localLoginEnabled } from '../auth/login-methods.js'
 import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/password-hash.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { validatePasswordPolicy, PASSWORD_MIN_LENGTH } from '../auth/password-policy.js'
+import { productName } from '../product-name.js'
 
 // ADR-198 §5, ruled on #568: an identifier is locked after 5 failures in 15 minutes, an IP after 30,
 // and a lock lasts 30 minutes. Env-overridable because the e2e and server suites hammer this path
@@ -35,6 +36,10 @@ export const LOCAL_LOGIN_ID_MAX = num(process.env.LOCAL_LOGIN_ID_MAX, 5)
 export const LOCAL_LOGIN_IP_MAX = num(process.env.LOCAL_LOGIN_IP_MAX, 30)
 export const LOCAL_LOGIN_WINDOW_S = num(process.env.LOCAL_LOGIN_WINDOW_S, 15 * 60)
 export const LOCAL_LOGIN_LOCK_S = num(process.env.LOCAL_LOGIN_LOCK_S, 30 * 60)
+// A reset asks the product to send mail to an address the caller named, so the per-ADDRESS limit is
+// tighter than a login's: it bounds how often anyone can be mailed, not how often a password is
+// guessed.
+export const RESET_REQ_ADDR_MAX = num(process.env.LOCAL_RESET_ADDR_MAX, 3)
 
 // READ a counter without incrementing (C2: the lock must be consulted before the password is even
 // looked at). A Valkey failure here FAILS CLOSED — a limiter that disappears under load is not a
@@ -124,6 +129,90 @@ export async function authLocalPlugin(app: FastifyInstance) {
       return reply.code(201).send({ ok: true })
     },
   )
+
+  // #568 / ADR-198 §6: ASK for a reset link. Unauthenticated, and its entire job is to say nothing.
+  //
+  // The answer is 204 whatever happened: the address belongs to a password account and mail went
+  // out, it belongs to an OIDC member, it belongs to nobody, or the tenant does not offer passwords
+  // at all. Anything else turns this into the account-enumeration endpoint that every other surface
+  // here is careful not to be — and it is unauthenticated, so it is the cheapest one to ask.
+  //
+  // Rate-limited on BOTH sides: per address, so nobody can be mail-bombed by repeating one, and per
+  // source, so a list of addresses cannot be walked. Both refusals are the same 204.
+  app.post<{ Body: { identifier?: string } }>('/auth/local/reset-request', { config: { public: true } }, async (req, reply) => {
+    if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
+      return reply.code(403).send({ error: 'forbidden' })
+    }
+    const identifier = (req.body?.identifier ?? '').trim().toLowerCase()
+    const silence = () => reply.code(204).send()
+    if (!identifier) return silence()
+
+    const addrKey = `rl:local:reset:addr:${req.tenant.id}:${identifier}`
+    const ipKey = `rl:local:reset:ip:${req.tenant.id}:${req.ip}`
+    if (await overLimit(app.valkey, addrKey, RESET_REQ_ADDR_MAX)) return silence()
+    if (await overLimit(app.valkey, ipKey, LOCAL_LOGIN_IP_MAX)) return silence()
+    await countFailure(app.valkey, addrKey, LOCAL_LOGIN_WINDOW_S)
+    await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
+
+    const { mintPasswordReset } = await import('../auth/password-reset.js')
+    const minted = await mintPasswordReset(req.db, identifier)
+    if (!minted) return silence()
+
+    // Sent DIRECTLY, not through the notification outbox: that outbox stores a pointer rather than a
+    // body, so a link could not be reconstructed from a queued row (ADR-198 §6 rev3). A send failure
+    // is logged and still answers 204 — the caller must not learn that an address exists from a
+    // delivery problem.
+    const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
+    const link = `${scheme}://${req.headers.host}/reset-password?token=${minted.token}`
+    try {
+      const { resolveTenantEmailDriver } = await import('@wikistead/hooks')
+      await resolveTenantEmailDriver({ tenantId: req.tenant.id, plan: req.tenant.plan }, req.server.email).send({
+        to: minted.email,
+        subject: `Reset your ${productName()} password`,
+        text: `Someone asked to reset the password for this address. Open this link within the hour:\n\n${link}\n\nIf it was not you, you can ignore this — nothing has changed.`,
+        html: `<p>Someone asked to reset the password for this address.</p><p><a href="${link}">Choose a new password</a> (the link works for one hour).</p><p>If it was not you, you can ignore this — nothing has changed.</p>`,
+      })
+    } catch (err) {
+      req.log.warn({ err }, 'password reset email failed to send')
+    }
+    // Audited by SUB, so the ledger records who a reset was requested for — the first thing an
+    // account-takeover investigation asks. The webhook stream carries the same fact.
+    emit({ type: 'member.password_reset_requested', tenantId: req.tenant.id, targetSub: minted.memberSub })
+    return silence()
+  })
+
+  // #568 / ADR-198 §6: COMPLETE a reset. Unauthenticated and token-addressed; a dead link and a
+  // tenant that switched passwords off answer identically, and only the policy failure is its own
+  // answer (the person is choosing a password right now).
+  app.post<{ Body: { token?: string; password?: string } }>('/auth/local/reset', { config: { public: true } }, async (req, reply) => {
+    if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
+      return reply.code(403).send({ error: 'forbidden' })
+    }
+    const token = (req.body?.token ?? '').trim()
+    const password = req.body?.password ?? ''
+    if (!token) return reply.code(404).send({ error: 'link not available' })
+    if (!validatePasswordPolicy(password)) {
+      return reply.code(400).send({ error: `password must be at least ${PASSWORD_MIN_LENGTH} characters`, code: 'weak_password' })
+    }
+    if (await overLimit(app.valkey, `rl:local:reset:use:${req.tenant.id}:${req.ip}`, LOCAL_LOGIN_IP_MAX)) {
+      return reply.code(404).send({ error: 'link not available' })
+    }
+    await countFailure(app.valkey, `rl:local:reset:use:${req.tenant.id}:${req.ip}`, LOCAL_LOGIN_WINDOW_S)
+
+    const { completePasswordReset } = await import('../auth/password-reset.js')
+    const done = await completePasswordReset(req.db, token, password)
+    if (!done) return reply.code(404).send({ error: 'link not available' })
+
+    // A reset is what someone does when they think another person is in their account: EVERY session
+    // goes, including any the attacker holds. Nothing is spared here — unlike a change, the person
+    // completing this is not signed in.
+    await destroyMemberSessions(app.valkey, req.tenant.id, done.memberSub)
+    // The lockout goes too: an account that was locked by the guessing that prompted the reset must
+    // not stay locked against its own owner, who has just proved control of the address.
+    await app.valkey.del(`lock:local:${req.tenant.id}:${(req.body as { identifier?: string })?.identifier ?? ''}`).catch(() => {})
+    emit({ type: 'member.password_reset_completed', tenantId: req.tenant.id, targetSub: done.memberSub })
+    return reply.code(204).send()
+  })
 
   // #568 / ADR-198 §6: change your own password. Authenticated, and it asks for the CURRENT one —
   // a live session is not proof that the person at the keyboard is the account's owner (a borrowed

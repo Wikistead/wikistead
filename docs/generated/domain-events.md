@@ -73,6 +73,8 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `member.removed` | A member was removed from the tenant. |
 | `member.locked` | Password sign-in was locked for an identifier after repeated failures (it expires on its own). |
 | `member.password_changed` | A member changed their own password (their other sessions were signed out). |
+| `member.password_reset_requested` | A password reset link was requested for a member. |
+| `member.password_reset_completed` | A member completed a password reset (all their sessions were signed out). |
 | `invite.created` | A member invite was created. |
 | `invite.revoked` | A member invite was revoked. |
 | `comment.created` | A comment was created on a page. |
