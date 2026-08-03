@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "../components/ui/tooltip";
 import { effectiveCaps } from "../settings/role-nouns";
@@ -48,6 +48,18 @@ export function RoleTip({
   const anchor = useRef<HTMLSpanElement>(null);
   const option = as === "option";
   const [hovered, setHovered] = useState(false);
+  // #586 review (bounce 3, minor): once the list is being driven from the keyboard, the row the pointer
+  // happens to rest on stops being the row the reader is looking at — and two open rows at once reads as
+  // a glitch. Arrowing folds the hover one. Only armed while something IS hovered, so the common case
+  // adds no listener.
+  useEffect(() => {
+    if (!hovered) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") setHovered(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hovered]);
   const caps = effectiveCaps({ builtinCapability, roleCapabilities, scope });
   const label = t("roleTip.label", { caps: caps.map((c) => t(`adminRoles.cap.${c}`, c)).join(", ") });
   const capsList = caps.map((c) => t(`adminRoles.cap.${c}`, c)).join(", ");

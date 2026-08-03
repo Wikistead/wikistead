@@ -192,7 +192,11 @@ export function MembersPage() {
                   testId="member-role-select"
                   options={[
                     { value: "", label: t("adminRoles.rolePlaceholder") },
-                    ...tenantCustom.map((r) => ({ value: `role:${r.name}`, label: r.name })),
+                    // #586 review ②: through the same wrapper the row above it uses. This picker offers
+                    // ONLY custom roles, so its labels never touch `capNoun` — which is exactly why the
+                    // walk that keyed on `capNoun` could not see it, and why the same roles explained
+                    // themselves one row up and said nothing here.
+                    ...withRoleTips(tenantCustom.map((r) => ({ value: `role:${r.name}`, label: r.name, roleCapabilities: r.capabilities })), "tenant"),
                   ]}
                   onChange={(value) => {
                     const role = tenantCustom.find((r) => `role:${r.name}` === value);

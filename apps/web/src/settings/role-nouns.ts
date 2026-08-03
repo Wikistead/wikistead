@@ -24,6 +24,14 @@ export const CAP_NOUN: Record<RoleNounKey, string> = {
   manage: "manager",
 };
 
+/**
+ * The capability a built-in ROLE NAME stands for — the inverse of `CAP_NOUN`, derived from it so the two
+ * cannot drift. A surface that has a built-in's NAME (the roles list gets `manager`, not `manage`) needs
+ * this to reach the measured tables below.
+ */
+const NOUN_CAP = Object.fromEntries(Object.entries(CAP_NOUN).map(([cap, noun]) => [noun, cap])) as Record<string, RoleNounKey>;
+export const nounCapability = (roleName: string): RoleNounKey | undefined => NOUN_CAP[roleName];
+
 /** The noun for a wire capability; unknown values pass through unchanged (a role name is already one). */
 export const capNoun = (c: string): string => CAP_NOUN[c as RoleNounKey] ?? c;
 
@@ -118,3 +126,18 @@ export const effectiveCaps = (args: {
   if (!args.builtinCapability) return [];
   return table[args.builtinCapability as RoleNounKey] ?? [args.builtinCapability];
 };
+
+/**
+ * What the roles list should TICK for a built-in role, given the columns that screen draws.
+ *
+ * The screen used to render the server's declared bundle, and that bundle is the very thing ADR-203 §4
+ * called a lie: `manager` is declared without `manage`, so nothing carried it to `moderate` and the grid
+ * showed a manager who cannot moderate. The store says otherwise, and the store is what this reads —
+ * through the measured table, filtered to the columns the grid actually has (`manage` has no column, by
+ * the ruling that keeps the display vocabulary apart from the grantable one).
+ */
+export function builtinDisplayCaps(roleName: string, columns: readonly string[]): string[] {
+  const key = nounCapability(roleName);
+  if (!key) return [];
+  return BUILTIN_EFFECTIVE_CAPS[key].filter((c) => columns.includes(c));
+}
