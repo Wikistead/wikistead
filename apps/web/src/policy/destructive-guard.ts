@@ -31,7 +31,6 @@ export const ALLOWLIST: Record<string, string> = {
   // #579 folded that form into the member table, so the same sanctioned exception now lives on the
   // row (MembersPage) and in the group section — one surface became two, the reason is unchanged.
   "MembersPage.tsx:unassignRole": "un-assignment is re-assignable in one step (#504 exception)",
-  "TenantGroupRoles.tsx:unassign": "un-assignment is re-assignable in one step (#504 exception)",
   "AccountPage.tsx:removeAvatar": "re-uploading restores the avatar (#504 exception)",
   "WatchListPage.tsx:unwatch": "re-watching is one click on the page (#504 exception)",
   // #596 re-judgment: the exception's premise ("wrong click is reversible in one step") was broken

@@ -218,10 +218,14 @@ describe("#579 ②: the group section says why it holds no tiers", () => {
     }
   });
 
-  it("the section renders it", async () => {
+  it("the member table renders it", async () => {
+    // RE-AIMED by #579 ①: the group SECTION is gone — groups are rows in the member table now — so the
+    // sentence that explains why a group cannot hold a tier moved with them. Its subject is unchanged
+    // this copy is shown somewhere, not merely defined, because an unexplained absence in the picker is
+    // what made the previous shape look arbitrary.
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
-    const src = readFileSync(resolve(import.meta.dirname, "./TenantGroupRoles.tsx"), "utf8");
+    const src = readFileSync(resolve(import.meta.dirname, "./MembersPage.tsx"), "utf8");
     expect(src, "the copy is shown, not merely defined").toContain("adminRoles.groupTiersNote");
   });
 

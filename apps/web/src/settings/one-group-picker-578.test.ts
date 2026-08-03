@@ -15,7 +15,12 @@ const read = (rel: string) => readFileSync(resolve(import.meta.dirname, rel), "u
 describe("#578: the group name control has one implementation", () => {
   const picker = read("./GroupPicker.tsx");
   const space = read("./SpaceMembersTab.tsx");
-  const tenant = read("./TenantGroupRoles.tsx");
+  // RE-AIMED by #579 ① (2026-08-03): the tenant screen no longer has a group SECTION — groups are rows
+  // in the member table, and a group nobody carries yet is named from the table's own search, which is
+  // "). So the tenant half of every assertion below points at the member table now. The
+  // subject is unchanged: there is ONE implementation of "name a group", and neither screen grows a
+  // second one.
+  const tenant = read("./MembersPage.tsx");
 
   it("both screens reach the shared component", () => {
     // bounce ③ moved the picker one level down: both screens now render the shared ADD FORM, and the
@@ -24,7 +29,10 @@ describe("#578: the group name control has one implementation", () => {
     const form = read("./GranteeRoleForm.tsx");
     expect(form, "the shared form owns the group control").toMatch(/<GroupPicker\b/);
     expect(space, "space Members tab").toMatch(/<GranteeRoleForm\b/);
-    expect(tenant, "tenant Roles tab").toMatch(/<GranteeRoleForm\b/);
+    // the tenant screen names a group through its search instead of a form: a typed name that matches
+    // no existing row offers itself as one, which is the same capability reached from the same box a
+    // reader is already typing in
+    expect(tenant, "tenant member table").toMatch(/member-row-new-group/);
   });
 
   it("neither screen keeps a hand-rolled group Select beside it", () => {
@@ -69,11 +77,19 @@ describe("#578: the group name control has one implementation", () => {
 describe("#578 ③: both screens run the same add-flow", () => {
   const form = read("./GranteeRoleForm.tsx");
   const space = read("./SpaceMembersTab.tsx");
-  const tenant = read("./TenantGroupRoles.tsx");
+  // RE-AIMED by #579 ① (2026-08-03): the tenant screen no longer has a group SECTION — groups are rows
+  // in the member table, and a group nobody carries yet is named from the table's own search, which is
+  // "). So the tenant half of every assertion below points at the member table now. The
+  // subject is unchanged: there is ONE implementation of "name a group", and neither screen grows a
+  // second one.
+  const tenant = read("./MembersPage.tsx");
 
-  it("each screen renders the shared form", () => {
+  it("the space screen renders the shared form, and the tenant screen names a group from its search", () => {
+    // Two shapes on purpose now, and the ruling is why: the tenant screen has no add-flow at all
+    // people get their role on their row and a group that is not yet a row is named in the search box.
+    // Pinning "both render the form" would now be pinning a form the ruling removed.
     expect(space).toMatch(/<GranteeRoleForm\b/);
-    expect(tenant).toMatch(/<GranteeRoleForm\b/);
+    expect(tenant).toMatch(/member-row-new-group/);
   });
 
   it("neither screen keeps its own copy of the row", () => {
@@ -85,7 +101,9 @@ describe("#578 ③: both screens run the same add-flow", () => {
   it("the form takes the grantee kinds as an argument, and hides the control when there is one", () => {
     expect(form).toMatch(/types\.length > 1/);
     expect(space, "the space screen offers both").toMatch(/types=\{\["user", "group"\]\}/);
-    expect(tenant, "the tenant screen offers groups only (people use their row — #579)").toMatch(/types=\{\["group"\]\}/);
+    // the tenant screen no longer offers a KIND at all: its table already holds both, and a group is
+    // named by typing it (#579 ①). Nothing there should be constructing a grantee-type control.
+    expect(tenant, "the tenant screen has no grantee-type control left").not.toMatch(/types=\{/);
   });
 
   it("it owns no state and knows no endpoint — the caller decides what add means", () => {

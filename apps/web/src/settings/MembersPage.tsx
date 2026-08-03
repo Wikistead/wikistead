@@ -11,14 +11,14 @@ import {
   listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
-import { TenantGroupRoles } from "./TenantGroupRoles";
+import { User, Users } from "lucide-react"; // #579 ①: the row says which KIND of principal it is
 import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
-import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole } from "../data/queries";
+import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole, useTenantGroupNames } from "../data/queries";
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
-import { buildTenantRoleRows, filterMembers, roleOptions, currentRoleValue, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
+import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -105,6 +105,18 @@ export function MembersPage() {
     buildTenantRoleRows(members, assignments.data ?? [], roles.data?.custom ?? []).map((r) => [r.sub, r]),
   );
   const shownMembers = filterMembers(members, filter);
+  // #579 ① (user ruling): people and groups are one list. A group holding a tenant role is a principal
+  // with a role, exactly like a person, and giving it its own section with its own shape is what made
+  // it read as a different kind of thing under different rules.
+  const groupRows = buildGroupRoleRows(assignments.data ?? [], t("spaceMembers.unknownGroup"), t("spaceMembers.group"), t("spaceMembers.groupNotSeen"));
+  const shownGroups = filter.trim() ? groupRows.filter((g) => g.label.toLowerCase().includes(filter.trim().toLowerCase())) : groupRows;
+  const unified = buildUnifiedRows(shownMembers, shownGroups);
+  // #579 ③: the search is where a group nobody carries yet gets its role. The retired section had a
+  // free-text field for that (#578 OQ4); folding the section in without folding that in would have
+  // taken the capability away, so a name that matches nothing offers itself as a row.
+  const typed = filter.trim();
+  const offerNewGroup = typed.length > 1 && !unified.some((r) => r.label.toLowerCase().includes(typed.toLowerCase()));
+  const tenantCustom = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
 
   if (forbidden) {
     return <div style={{ padding: 24, maxWidth: 560 }}><h2>{t("members.title")}</h2><p style={{ color: "var(--fg-dim)" }}>{t("members.adminOnly")}</p></div>;
@@ -130,7 +142,80 @@ export function MembersPage() {
           </tr>
         </thead>
         <tbody>
-          {shownMembers.map((m) => (
+          {offerNewGroup && (
+            /* the typed name matches nothing here: offer it as a group nobody carries yet, which is the
+               one thing the retired section could do that a table of existing rows cannot */
+            <tr style={{ borderBottom: "1px solid var(--border, #222)" }} data-testid="member-row-new-group">
+              <td style={{ padding: "8px 4px" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <Users size={16} aria-hidden />
+                  {typed} <span className="text-xs text-fg-dim">({t("spaceMembers.group")}, {t("spaceMembers.groupNotSeen")})</span>
+                </span>
+              </td>
+              <td data-testid="member-roles">
+                <Select
+                  size="sm"
+                  value=""
+                  ariaLabel={t("members.roleFor", { sub: typed })}
+                  testId="new-group-role-select"
+                  options={[{ value: "", label: t("adminRoles.rolePlaceholder") }, ...withRoleTips(tenantCustom.map((r) => ({ value: r.id, label: r.name, roleCapabilities: r.capabilities })), "tenant")]}
+                  onChange={(roleId) => {
+                    if (!roleId) return;
+                    assignRole.mutate({ roleId, resourceType: "tenant", resourceId: tenantId, groupName: typed }, {
+                      onSuccess: () => { notify.success(t("toast.saved")); setFilter(""); },
+                      onError: () => notify.error(t("toast.actionFailed")),
+                    });
+                  }}
+                />
+              </td>
+              <td />
+            </tr>
+          )}
+          {unified.map((row) => row.kind === "group" ? (
+            <tr key={row.key} style={{ borderBottom: "1px solid var(--border, #222)" }} data-testid="member-row-group">
+              <td style={{ padding: "8px 4px" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  {/* the kind is an ICON, not a suffix: "(group)" made the label read as part of the name */}
+                  <Users size={16} aria-hidden data-testid="row-kind-group" />
+                  {row.label}
+                </span>
+              </td>
+              <td data-testid="member-roles">
+                {/* A group holds a tenant CUSTOM role and never a tier — ADR-201 retired group-conferred
+                    admin so a tenant can always read off WHO holds it, and `member` is universal. The
+                    control is the same control; its vocabulary is what differs, and the note under the
+                    table says why rather than leaving the absence to be inferred. */}
+                <Select
+                  size="sm"
+                  value={row.group?.held[0]?.assignmentId ? `role:${row.group.held[0].roleName}` : ""}
+                  ariaLabel={t("members.roleFor", { sub: row.label })}
+                  testId="member-role-select"
+                  options={[
+                    { value: "", label: t("adminRoles.rolePlaceholder") },
+                    ...tenantCustom.map((r) => ({ value: `role:${r.name}`, label: r.name })),
+                  ]}
+                  onChange={(value) => {
+                    const role = tenantCustom.find((r) => `role:${r.name}` === value);
+                    const held = row.group?.held ?? [];
+                    if (!role) {
+                      for (const h of held) if (!h.managed) unassignRole.mutate(h.assignmentId, { onSuccess: (data) => notifyRevokeOutcome(t, data), onError: (err) => notifyRevokeError(t, err) });
+                      return;
+                    }
+                    // assign converges on the server (a71d8100): the new role is written and the others
+                    // swept, so this is a replacement here exactly as it is on a person's row
+                    assignRole.mutate({ roleId: role.id, resourceType: "tenant", resourceId: tenantId, principal: row.key }, {
+                      onSuccess: () => notify.success(t("toast.saved")),
+                      onError: () => notify.error(t("toast.actionFailed")),
+                    });
+                  }}
+                />
+              </td>
+              <td />
+            </tr>
+          ) : (
+            (() => {
+              const m = members.find((x) => x.sub === row.sub)!;
+              return (
             <tr key={m.sub} style={{ borderBottom: "1px solid var(--border, #222)" }}>
               <td style={{ padding: "8px 4px" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -186,12 +271,16 @@ export function MembersPage() {
                   onClick={() => setConfirming({ message: t("members.removeConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => removeMember(token, m.sub))() })}>{t("members.remove")}</Button>
               </td>
             </tr>
+              );
+            })()
           ))}
         </tbody>
       </table>
 
-      {/* groups are not people and have no row above — their tenant roles live in their own section */}
-      <TenantGroupRoles />
+      {/* #579 ①: the section that used to be here is gone — groups are rows above. The sentence that
+          explained why a group cannot hold a tier stays, because that difference is real (ADR-201) and
+          an unexplained absence is what made the previous shape look arbitrary. */}
+      <p className="mt-0 mb-6 text-xs text-fg-dim" data-testid="tenant-group-tiers-note">{t("adminRoles.groupTiersNote")}</p>
 
       <h3>{t("members.inviteTitle")}</h3>
       <FormRow>
