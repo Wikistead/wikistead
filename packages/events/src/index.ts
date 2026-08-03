@@ -118,6 +118,11 @@ export type DomainEvent =
   // this one is about a known member, and an account-takeover investigation starts by asking when
   // the password last moved.
   | { type: 'member.password_changed'; tenantId: string; targetSub: string }
+  // #568 / ADR-198 §6 (OQ7): a reset was ASKED FOR, and later COMPLETED. Both are named by sub and
+  // both matter to an account-takeover investigation — the request says when someone started, the
+  // completion says whether they finished, and the gap between them is where a stolen link lives.
+  | { type: 'member.password_reset_requested'; tenantId: string; targetSub: string }
+  | { type: 'member.password_reset_completed'; tenantId: string; targetSub: string }
   | { type: 'invite.created';      tenantId: string; actorId: string; role: string }
   | { type: 'invite.revoked';      tenantId: string; actorId: string }
   // ── Comments (P4) ─────────────────────────────────────────────────────
