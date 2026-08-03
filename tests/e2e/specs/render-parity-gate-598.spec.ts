@@ -48,6 +48,8 @@ const KNOWN_RED = {
   // #598 computed slice: elements whose TYPOGRAPHY (face, size, line height, weight, slant) differs
   // between the app and the saved file. Layout is not compared — see the rule at the assertion.
   typographyDrift: [] as string[],
+  // #598 colour slice: text in the saved file that fails the 3:1 floor against its own background.
+  illegible: [] as string[],
 } as const;
 
 // Macros that legitimately render NOTHING with the fixture's data: a tag list with no tagged pages and
@@ -256,6 +258,49 @@ test("#598: every registered element survives the export, the file, and the page
     drift,
     "an element does not read the same in the saved file as in the app. If you FIXED one, delete it from KNOWN_RED",
   ).toEqual([...KNOWN_RED.typographyDrift].sort());
+
+  // ---- 1d. the text is legible against the paper it landed on ----
+  //
+  // The colour question, asked the way it can be answered. Equality is the wrong assertion — the app
+  // follows the viewer's theme and the saved file bakes one, so the same paragraph is legitimately a
+  // different colour in each. What must hold is that whatever colour it ended up, it can be READ against
+  // whatever background it ended up on. The failure this catches is the one that has actually happened
+  // (a dark-theme colour token baked into a light document, #601's family): text that is present,
+  // complete, correctly named, and invisible.
+  //
+  // WCAG's contrast ratio, at the LARGE-text threshold (3:1) rather than 4.5:1 — this is a floor for
+  // "somebody wrote a colour that cannot be seen", not an accessibility audit of the theme, and a floor
+  // that fails on borderline body text would be argued with instead of fixed.
+  const illegible = await opened.evaluate(() => {
+    const lum = (c: string): number => {
+      const [r, g, b] = (c.match(/[\d.]+/g) ?? ["0", "0", "0"]).slice(0, 3).map(Number) as [number, number, number];
+      const ch = [r, g, b].map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * ch[0]! + 0.7152 * ch[1]! + 0.0722 * ch[2]!;
+    };
+    const opaqueBg = (el: Element): string => {
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        const bg = getComputedStyle(n).backgroundColor;
+        const a = Number((bg.match(/[\d.]+/g) ?? [])[3] ?? "1");
+        if (a > 0.5 && bg !== "transparent") return bg;
+      }
+      return "rgb(255, 255, 255)"; // the page's own paper
+    };
+    const bad: string[] = [];
+    for (const el of document.querySelectorAll("main.wks-export-doc [data-wks-el], main.wks-export-doc [data-wks-el] *")) {
+      const text = [...el.childNodes].some((n) => n.nodeType === 3 && (n.textContent ?? "").trim().length > 0);
+      if (!text) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === "hidden" || cs.display === "none") continue;
+      const l1 = lum(cs.color), l2 = lum(opaqueBg(el));
+      const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      if (ratio < 3) bad.push(`${el.closest("[data-wks-el]")?.getAttribute("data-wks-el") ?? "?"}: ${cs.color} on ${opaqueBg(el)} = ${ratio.toFixed(2)}:1`);
+    }
+    return [...new Set(bad)].sort();
+  });
+  expect(
+    illegible,
+    "text in the saved file cannot be read against its own background. If you FIXED one, delete it from KNOWN_RED",
+  ).toEqual([...KNOWN_RED.illegible].sort());
 
   // ---- 1b. no element rendered as an ellipsis placeholder ----
   const placeholders = await opened.evaluate(() => Array.from(document.querySelectorAll("main.wks-export-doc *"))
