@@ -82,6 +82,14 @@ const KNOWN_RED = {
   flatOnPaper: [] as string[],
   // #598 public slice: elements the SERVER-rendered public page does not carry under their own name.
   missingPublicly: [] as string[],
+  // #598 (review, 2026-08-04): elements whose STRUCTURE differs between the app and the saved
+  // file — present, complete, correctly named, and a different KIND of thing. The reject that opened
+  // this dimension: :::table draws a bordered grid on screen and borderless plain text in the file,
+  // because .cm-lp-table's decoration lives in the CodeMirror theme (.cm-editor scope) and never
+  // reaches a surface outside the editor. None of the other dimensions can see it: the box has area
+  // (flatOnPaper passes), the text is right (typography passes), the name is right (identity passes).
+  // #207 owns the product fix; this line comes out with it.
+  structureDrift: ["table: draws internal borders in the app and none in the saved file"] as string[],
   // #207the fifth surface — the print PORTAL, which is what the BROWSER's own File → Print takes.
   // Three of that review's findings were measured here first and are FIXED: a tab strip hid the
   // panels nobody had selected, plantuml printed as its own source, and an external embed printed the
@@ -110,10 +118,14 @@ function discoverMacros(): Element[] {
   const found = new Map<string, Element>();
   for (const file of readdirSync(MACRO_DIR).filter((f) => f.endsWith(".ts") && !f.includes(".test."))) {
     const src = readFileSync(join(MACRO_DIR, file), "utf8");
-    for (const m of src.matchAll(/kind:\s*"fence"[\s\S]{0,200}?lang:\s*"([a-z0-9-]+)"/g)) {
+    // #609 found the gap this window closes: a 200-char window between `kind:` and the name silently
+    // dropped `embed-external` — a few comment lines between the two fields pushed the name out of reach.
+    // A discovery walk that quietly loses an element is the exact failure this gate forbids, so the
+    // window is generous and the caller asserts a name it knows must be present.
+    for (const m of src.matchAll(/kind:\s*"fence"[\s\S]{0,800}?\blang:\s*"([a-z0-9-]+)"/g)) {
       found.set(`fence:${m[1]}`, { kind: "fence", name: m[1]!, body: bodyFor(m[1]!) });
     }
-    for (const m of src.matchAll(/kind:\s*"directive"[\s\S]{0,200}?name:\s*"([a-z0-9-]+)"/g)) {
+    for (const m of src.matchAll(/kind:\s*"directive"[\s\S]{0,800}?\bname:\s*"([a-z0-9-]+)"/g)) {
       found.set(`directive:${m[1]}`, { kind: "directive", name: m[1]!, body: bodyFor(m[1]!) });
     }
   }
@@ -201,6 +213,7 @@ test("#598: every registered element survives the export, the file, and the page
   // first left `:::embed-page` with an empty body, and an empty body is a legitimate placeholder — so the
   // gate was measuring its own fixture. (Found by the placeholder dimension, which is what it is for.)
   expect(discoverMacros().length, "the registry scan found macros (an empty scan proves nothing)").toBeGreaterThan(8);
+  expect(discoverMacros().map((m) => m.name), "the walk sees the element the 200-char window used to drop").toContain("embed-external");
 
   await page.route("**/plantuml/render", (route) =>
     route.fulfill({ status: 200, contentType: "image/png", body: PLANTUML_PNG }));
@@ -333,6 +346,50 @@ test("#598: every registered element survives the export, the file, and the page
     drift,
     "an element does not read the same in the saved file as in the app. If you FIXED one, delete it from KNOWN_RED",
   ).toEqual([...KNOWN_RED.typographyDrift].sort());
+
+  // ---- 1c2. an element is still the same KIND of thing ----
+  //
+  // Typography compares the author's text; this compares the element's own SKELETON. A table that loses
+  // its cell borders is not a table with different styling — it reads as plain lines, a different kind
+  // of thing — and no other dimension can see that happen: the box still has area, the text is intact,
+  // the name is right. (The reject that opened this: :::table's grid decoration lives in the CodeMirror
+  // theme, scoped to .cm-editor, so every surface outside the editor drew it bare.)
+  //
+  // The rule stays NARROW on purpose, like the typography rule above it: no equality on widths or
+  // margins — the assertion is only that a structural signal is not PRESENT on one surface and ABSENT
+  // on the other. One signal, computed the same way for every named element (no per-element table)
+  // does anything inside the element draw an internal border?
+  const structureOf = (p: Page, scope: string) => p.evaluate((sel: string) => {
+    const out: Record<string, boolean> = {};
+    for (const el of document.querySelectorAll(sel)) {
+      const name = el.getAttribute("data-wks-el") ?? "";
+      let bordered = false;
+      for (const node of [el, ...el.querySelectorAll("*")]) {
+        const cs = getComputedStyle(node);
+        if ([cs.borderTopWidth, cs.borderBottomWidth, cs.borderLeftWidth, cs.borderRightWidth].some((w) => parseFloat(w) > 0)) { bordered = true; break; }
+      }
+      // several elements of one name (tabs' panels): bordered if ANY is — the OR is stable across the
+      // legitimate transforms (a flattened tab strip keeps its headed sections' rules)
+      out[name] = (out[name] ?? false) || bordered;
+    }
+    return out;
+  }, scope);
+  // The app side is the EDITOR's widgets (`.cm-editor [data-wks-el]`) — the surface a reader actually
+  // looks at, and the one whose look is the ruling's reference. The first cut read `[data-wks-el]`
+  // anywhere on the page, which resolved to the print PORTAL: a static render just like the file, so
+  // the comparison was the file against a copy of itself and the table's missing grid stayed invisible.
+  const exportStructure = await structureOf(opened, "main.wks-export-doc [data-wks-el]");
+  const appStructure = await structureOf(page, ".cm-editor [data-wks-el]");
+  const structureShared = Object.keys(exportStructure).filter((name) => name in appStructure);
+  expect(structureShared.length, "named elements exist on BOTH surfaces to compare (an empty intersection passes forever)").toBeGreaterThan(3);
+  const structureDrift = structureShared
+    .filter((name) => appStructure[name] !== exportStructure[name])
+    .map((name) => `${name}: draws internal borders in the ${appStructure[name] ? "app" : "saved file"} and none in the ${appStructure[name] ? "saved file" : "app"}`)
+    .sort();
+  expect(
+    structureDrift,
+    "an element is a different kind of thing in the saved file. If you FIXED one, delete it from KNOWN_RED",
+  ).toEqual([...KNOWN_RED.structureDrift].sort());
 
   // ---- 1d. the text is legible against the paper it landed on ----
   //

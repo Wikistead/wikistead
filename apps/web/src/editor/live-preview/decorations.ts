@@ -2847,6 +2847,11 @@ class MacroWidget extends WidgetType {
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = `cm-lp-macro-wrap ${ATOM_BOX_CLASS}`;
+    // #598: the EDITOR surface names its elements too. The parity gate keys every cross-surface question
+    // on `data-wks-el`, and without this the "app" side of those questions silently resolved to the print
+    // portal — which renders through the static sink, not through this widget — so the gate compared the
+    // file with a copy of itself and called the editor's actual look covered. Display-only.
+    wrap.setAttribute("data-wks-el", this.name);
     // #395 / ADR-156 rule 2: an atom-class body never shows the text I-beam (cursor: default via CSS).
     if (ATOM_CLASS_MACROS.has(this.name)) wrap.classList.add("cm-lp-atom-body");
     // #255 / #393 / #455 — one decision, made in alignClassFor and nowhere else. It used to be two
