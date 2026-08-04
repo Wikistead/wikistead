@@ -69,23 +69,30 @@ export function AdminSignInMethodsSection() {
   const remove = useDeleteConnection();
   const reorder = useReorderConnections();
   const methods = useLoginMethods();
+  // #604-B: the READ of this screen opened to `manage_connections`; the stance / platform /
+  // password selections and the SSO exemptions stayed on the admin tier. The server names that line
+  // (`canManageStance`) so the screen shows a connection manager the state of every method — which is
+  // what makes their own connections legible — without offering switches that would 403, and without
+  // firing the admin-tier reads at all. A server that does not send the field (older build) answers
+  // as before. Undefined-safe on purpose: `!== false`, not `?? true` on a possibly-missing query.
+  const canManageStance = methods.data?.canManageStance !== false;
   const platform = useUpdatePlatformLogin();
   const localLogin = useUpdateLocalLogin();
-  const saml = useTenantSaml();
+  const saml = useTenantSaml(canManageStance);
   const updateSaml = useUpdateTenantSaml();
   const test = useTestTenantOidc();
 
   const ssoRequired = useUpdateSsoRequired();
-  const exemptions = useSsoExemptions();
+  const exemptions = useSsoExemptions(canManageStance);
   const grantExemption = useGrantSsoExemption();
   const revokeExemption = useRevokeSsoExemption();
   const [exemptQuery, setExemptQuery] = useState("");
-  const exemptCandidates = useTenantMemberCandidates(exemptQuery);
+  const exemptCandidates = useTenantMemberCandidates(exemptQuery, canManageStance);
   // #617 ②(a): a sub is a 70-character hex string, not a name. The exemption rows and the revoke
   // confirmation both showed it raw — #523 / ADR-190 canonicalised display names precisely so that
   // people surfaces stop doing this. One resolver, used by both, falling back to the sub only when the
   // member genuinely has no name yet (the same rule MemberSearchInput's rows follow).
-  const memberNames = useTenantMemberNames();
+  const memberNames = useTenantMemberNames(canManageStance);
   const nameOf = (sub: string): string => memberNames.get(sub) || sub;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -376,7 +383,7 @@ export function AdminSignInMethodsSection() {
             not advertise it. An unentitled EE plan keeps its row, carrying the upgrade notice. */}
         {/* review F5: `samlSectionState` reads a NOT-YET-ANSWERED query as "form", so drawing on it
             flashed a SAML row on CE — the one build that must never show one. Wait for the answer. */}
-        {!saml.isPending && samlState.kind !== "hidden" && (
+        {canManageStance && !saml.isPending && samlState.kind !== "hidden" && (
           <div className={METHOD_ROW} data-method-row data-testid="sign-in-method-saml">
             <div className={METHOD_ROW_HEAD}>
               <IconButton aria-label={t("signInMethods.edit")} data-testid="sign-in-method-saml-edit" onClick={() => setExpanded(expanded === "saml" ? null : "saml")}>
@@ -439,6 +446,7 @@ export function AdminSignInMethodsSection() {
             {stateBadges(m.local.selected, m.local, m.local.effective,
               m.local.blockedByStance ? { label: t("adminAuth.blockedByStance"), testId: "blocked-by-stance" } : undefined)}
             <Switch checked={m.local.selected} testId="local-login-toggle" ariaLabel={t("adminAuth.methodLocal")}
+              disabled={!canManageStance}
               onChange={(on: boolean) => localLogin.mutate(on, {
                 onSuccess: () => notify.success(t("toast.saved")),
                 onError: (e) => {
@@ -460,7 +468,7 @@ export function AdminSignInMethodsSection() {
                 m["platform-oidc"].blockedByStance ? { label: t("adminAuth.blockedByStance"), testId: "blocked-by-stance" } : undefined)}
               {m["platform-oidc"].inCeiling && (
                 <Switch checked={m["platform-oidc"].selected} onChange={onTogglePlatform} testId="platform-login-toggle"
-                  ariaLabel={t("adminAuth.methodPlatformOidc")} />
+                  disabled={!canManageStance} ariaLabel={t("adminAuth.methodPlatformOidc")} />
               )}
             </div>
           </div>
@@ -482,6 +490,7 @@ export function AdminSignInMethodsSection() {
                 <span className="rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-[var(--warning,#b45309)]" data-testid="sso-required-lapsed" data-tip={t("adminAuth.ssoRequiredLapsedTip")}>{t("adminAuth.ssoRequiredLapsed")}</span>
               )}
               <Switch checked={!!methods.data?.ssoRequired?.selected} testId="sso-required-toggle" ariaLabel={t("adminAuth.ssoRequired")}
+                disabled={!canManageStance}
                 onChange={(on: boolean) => ssoRequired.mutate(on, {
                   onSuccess: () => notify.success(t("toast.saved")),
                   onError: (e) => {
@@ -494,6 +503,7 @@ export function AdminSignInMethodsSection() {
                   },
                 })} />
             </div>
+            {canManageStance && (
             <div className="flex flex-col gap-1 border-t border-border pt-1.5" data-testid="sso-exemptions">
               <div className="text-xs text-fg-dim">{t("adminAuth.ssoExemptionsLead")}</div>
               {(exemptions.data ?? []).map((x) => (
@@ -538,6 +548,7 @@ export function AdminSignInMethodsSection() {
                 />
               </div>
             </div>
+            )}
           </div>
         )}
 

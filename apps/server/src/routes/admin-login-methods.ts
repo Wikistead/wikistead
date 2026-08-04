@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { requireTenantAdmin } from '@wikistead/authz'
+import { requireTenantAdmin, requireConnectionManager, isTenantAdmin } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { loginMethodCeiling, setPlatformLoginDisabled } from '../auth/login-methods.js'
@@ -39,11 +39,26 @@ export interface LoginMethodsView {
   // closing doors right now (selected && a federated way in is real); selected && !biting is the
   // LAPSE, which the screen must show as such (ADR-195 §1: never silently off, never silently open).
   ssoRequired: { selected: boolean; biting: boolean }
+  // #604-B: may the CALLER change the stance / platform / password selections and manage the
+  // SSO exemptions? Those writes stayed on the admin tier while the read opened to
+  // `manage_connections`, so the screen has to be told which of its controls belong to it.
+  canManageStance: boolean
 }
 
 export async function adminLoginMethodsPlugin(app: FastifyInstance) {
   app.get('/admin/login-methods', async (req): Promise<LoginMethodsView> => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    // #604-B (item 3): the READ opens to `manage_connections`. This is the minimum the sign-in
+    // methods screen needs to stand up — without it a connection manager could edit connections
+    // through the API and still be shown a broken page, which is what the review found.
+    //
+    // The WRITE line is deliberately UNCHANGED (still tier): the PATCH below carries the stance and
+    // the platform/password selections, i.e. WHO CAN GET IN AT ALL and the break-glass exemptions
+    // (#605). Handing "manage the sign-in methods" should not hand "close every other door and
+    // decide who is exempt" — that is a lockout decision, and #573 is what it costs when it is
+    // wrong. So the verb reads the screen and edits the CONNECTIONS (admin-connections, already
+    // verb-gated); the tier keeps the stance. `canManageStance` below is that same line, answered
+    // by the server so the client does not have to infer it.
+    await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
     const ceiling = loginMethodCeiling()
     const available = await resolveLogin(req.db, req.tenant)
     const [oidcRow] = await req.db.sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc ORDER BY sort, id LIMIT 1`
@@ -53,6 +68,9 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     const [pref] = await req.db.sql<{ platform_login_disabled: boolean; local_login_enabled: boolean; sso_required: boolean }[]>`SELECT platform_login_disabled, local_login_enabled, sso_required FROM tenant_login_prefs LIMIT 1`
     const stance = await resolveSsoStance(req.db, req.tenant)
     return {
+      // The stance/selection writes are tier-gated (see the note on the gate above). The screen asks
+      // the server rather than guessing from a tier flag it happens to hold.
+      canManageStance: await isTenantAdmin(app.fga, req.user.sub, req.tenant.id),
       ssoRequired: { selected: !!pref?.sso_required, biting: stance.biting },
       methods: {
         'tenant-oidc': {
