@@ -70,8 +70,8 @@ describe('search:sync CLI drain (runSearchSync)', () => {
     expect(pending).toBe(PAGES.length)
 
     // Run the CLI's real drain loop.
-    const total = await runSearchSync(app.searchDriver)
-    expect(total).toBeGreaterThanOrEqual(PAGES.length) // drained at least our N rows
+    const { processed } = await runSearchSync(app.searchDriver)
+    expect(processed).toBeGreaterThanOrEqual(PAGES.length) // drained at least our N rows
 
     // After: every body token is now searchable (Meili was actually updated)…
     for (const p of PAGES) expect(await search(p.token)).toContain(p.id)
@@ -81,6 +81,9 @@ describe('search:sync CLI drain (runSearchSync)', () => {
   })
 
   it('is a no-op on a clean queue (the original smoke case still holds)', async () => {
-    expect(await runSearchSync(app.searchDriver)).toBe(0)
+    // #618: the loop reports what it left behind as well as what it indexed — a clean queue is
+    // all three at zero, which is a different fact from "indexed nothing" (the case that used to
+    // end the run early).
+    expect(await runSearchSync(app.searchDriver)).toEqual({ processed: 0, failed: 0, dropped: 0 })
   })
 })

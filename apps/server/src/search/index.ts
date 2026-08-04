@@ -1,5 +1,5 @@
 export { LogicalSearchDriver } from './driver.js'
 export type { SearchDriver, SearchHit } from './driver.js'
-export { enqueueOutbox, processOutboxAsync, drainOutbox, startOutboxWorker } from './outbox.js'
+export { enqueueOutbox, processOutboxAsync, drainOutbox, lastDrainOutcome, startOutboxWorker } from './outbox.js'
 export type { OutboxEntry } from './outbox.js'
 export { buildSearchDoc } from './doc-builder.js'
