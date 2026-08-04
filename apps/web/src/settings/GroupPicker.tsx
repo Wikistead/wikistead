@@ -42,8 +42,10 @@ export function GroupPicker({
   // the field it belongs to. A hint must not move the control it is hinting about.
   const suggesting = open && matches.length > 0;
   return (
-    <span className="relative flex min-w-0 flex-col">
-      <span className="relative block">
+    // `flex-1`, like MemberSearchInput's wrapper: the two halves of "who gets this" swap in the same
+    // slot, and a field that changed width when the type Select flipped made the row jump (#578,
+    // 2026-08-04 — the tenant screen wrapped its form onto three lines for the same reason).
+    <span className="relative block min-w-0 flex-1">
         <Input
           inputSize="sm"
           value={value}
@@ -89,14 +91,6 @@ export function GroupPicker({
             {t("spaceMembers.groupUnconfirmed")}
           </span>
         )}
-      </span>
-      {/* #578 (the correction to the correction): taking the note OUT of flow stopped it moving the row
-          and started it landing ON the list below — measured 6px into the first member row. Out of flow
-          is still right for WIDTH (the note is wider than the field, and in flow it grew the column), so
-          what it needs is ROOM: a zero-width spacer, always present, never only while the note shows —
-          a reservation that appeared with the note would move the row again, which is what it replaced.
-          The note hangs off the INPUT rather than the column, or this spacer would push it down too. */}
-      <span aria-hidden className="pointer-events-none block h-8 w-0" />
     </span>
   );
 }

@@ -51,7 +51,8 @@ export function GranteeRoleForm(p: GranteeRoleFormProps) {
   const ready = p.type === "group" ? p.groupName.trim() !== "" : p.picked !== null;
   const searchCopy = p.types.length > 1 ? "common.memberSearch" : "common.granteeSearch";
   return (
-    <FormRow className="mb-6">
+    <div className="mb-6">
+      <FormRow>
       {p.types.length > 1 && (
         <Select
           value={p.type}
@@ -103,6 +104,15 @@ export function GranteeRoleForm(p: GranteeRoleFormProps) {
       <Button variant="primary" disabled={!ready || p.pending} onClick={p.onAdd} data-testid={`${p.testId}-add`}>
         {t("spaceMembers.add")}
       </Button>
-    </FormRow>
+      </FormRow>
+      {/* #578 (the third round of the same geometry): room for the group picker's out-of-flow
+          "unconfirmed" note. It lived INSIDE the picker's column first, which made the FormRow's
+          vertical centring push the role Select and the add button 16px down whenever the group half
+          was showing — the reservation itself moved the row it was protecting. Below the row it is
+          outside that centring: every control keeps one top edge, the note (input bottom + 2px, ~2
+          lines) lands in reserved ground, and nothing under the form is covered. Always present —
+          appearing with the note would move the list below, which is the defect this replaced. */}
+      <span aria-hidden className="pointer-events-none block h-8" />
+    </div>
   );
 }

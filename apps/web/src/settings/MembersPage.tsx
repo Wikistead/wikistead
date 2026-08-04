@@ -32,10 +32,14 @@ export function MembersPage() {
   const { t } = useTranslation();
   const { token, sub: me, tenantId } = useSession();
   const [members, setMembers] = useState<Member[]>([]);
-  // #578 bounce ④: the tenant screen's own half of the shared add-flow. Groups only — a person's tenant
-  // role is given on their row (#579) and their arrival is the invite above; a group has neither, and
-  // before this the only way to give one a role was to type a name that matched nothing in the FILTER
-  // field and notice that a row appeared. Nothing on the screen said so.
+  // #578 bounce ④, then the 2026-08-04 ruling ("
+  // "): the tenant screen runs the WHOLE shared add-flow — user or group, then who, then which
+  // role — the same shape the space screen has. The groups-only round pinned "a person's tenant role is
+  // given on their row" (#579); the ruling overrides that pin for the ADD FORM: the row keeps working,
+  // and the form is a second door to the same converged state (1 principal = 1 role), not a second state.
+  const [granteeType, setGranteeType] = useState<"user" | "group">("user");
+  const [userQuery, setUserQuery] = useState("");
+  const [pickedUser, setPickedUser] = useState<{ grantee: string; label: string } | null>(null);
   const [groupName, setGroupName] = useState("");
   const [groupRole, setGroupRole] = useState("");
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -144,6 +148,36 @@ export function MembersPage() {
   // above is the one route and the filter went back to filtering.
   const tenantCustom = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
   const knownGroups = groupNames.data ?? [];
+  // The user half of the add form searches the list this screen already holds — the space side asks the
+  // server because it cannot see the tenant roster; here the roster IS the page.
+  const userCandidates = userQuery.trim() && !pickedUser
+    ? filterMembers(members, userQuery).slice(0, 8).map((m) => ({ sub: m.sub, displayName: m.display_name || m.email }))
+    : [];
+
+  // #578 (2026-08-04 ruling): the row's Select and the add form are two doors to the SAME change, so the
+  // change is one function — the convergence rules (a tier drops the custom roles first; a custom role
+  // is swept onto by the server) cannot fork between them.
+  const applyUserRole = (sub: string, value: string) => {
+    const row = roleRows.get(sub);
+    const choice = resolveRoleChoice(value, tenantCustom);
+    if (choice.kind === "tier") {
+      // A tier IS the whole role once chosen: the custom role they held is not "also" true any more, so
+      // it goes with the change rather than lingering invisibly behind a control that now reads
+      // `member`. Drop it FIRST — leaving it behind would make the control snap back on the next read.
+      // Errors are not swallowed; `guarded` reports them (incl. the last-admin 409's reason).
+      void guarded(async () => {
+        for (const c of row?.custom ?? []) await unassignRole.mutateAsync(c.assignmentId);
+        await changeRole(token, sub, choice.role);
+      })();
+    } else if (choice.kind === "custom") {
+      // The server sweeps whatever else they held at tenant scope (#579): assign is a replacement, and
+      // the new role is written before the old one goes.
+      assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, principal: `user:${sub}` }, {
+        onSuccess: () => notify.success(t("toast.saved")),
+        onError: () => notify.error(t("toast.actionFailed")),
+      });
+    }
+  };
 
   if (forbidden) {
     return <div style={{ padding: 24, maxWidth: 560 }}><h2>{t("members.title")}</h2><p style={{ color: "var(--fg-dim)" }}>{t("members.adminOnly")}</p></div>;
@@ -162,43 +196,51 @@ export function MembersPage() {
           placeholder={t("members.filterPlaceholder")} aria-label={t("members.filterLabel")} data-testid="members-filter" />
       </FormRow>
 
-      {/* #578 bounce ④ (user ruling: " UI "): the SAME form the
-          space screen uses — find the grantee, choose the role, add. Only `types` differs: a space offers
-          people and groups, and here a person's tenant role lives on their own row (#579) while their
-          arrival is the invite below, so groups are what is left to add. Using the shared component is
-          also what gives this screen completion and the confirmed/unconfirmed distinction the space side
-          has had since #578 slice 6 — both were missing here because the flow was a filter-field
-          side effect rather than a form. */}
+      {/* #578 bounce ④ (user ruling: " UI "), then the
+          2026-08-04 ruling: the SAME form the space screen uses, with the SAME type toggle — user or
+          group, find them, choose the role, add. The groups-only round pinned "a person's tenant role is
+          given on their row" (#579); that pin is overridden for the add form by the user's direct
+          converge on the same state — the server keeps 1 principal = 1 role — so this is a second way to
+          say the same thing, not a second thing. */}
       <GranteeRoleForm
         testId="tenant-grant"
-        types={["group"]}
-        type="group"
-        onTypeChange={() => {}}
-        query=""
-        onQueryChange={() => {}}
-        picked={null}
-        onPick={() => {}}
-        candidates={[]}
+        types={["user", "group"]}
+        type={granteeType}
+        onTypeChange={setGranteeType}
+        query={userQuery}
+        onQueryChange={setUserQuery}
+        picked={pickedUser}
+        onPick={(c) => { setPickedUser(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null); if (c) setUserQuery(""); }}
+        candidates={userCandidates}
         groupName={groupName}
         onGroupNameChange={setGroupName}
         knownGroups={knownGroups}
-        // #603 / ADR-207 (overturns ADR-201 §1): the tiers are in the list. The group picker was the
-        // one picker in the product that hid half its vocabulary, and the note that explained the
-        // absence went with the absence. Same list-builder as the rows, so the vocabulary
-        // cannot fork.
-        roleOptions={withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant")}
+        // #603 / ADR-207 (overturns ADR-201 §1): the tiers are in the list. Same list-builder as the
+        // rows, so the vocabulary cannot fork. The empty first entry is the placeholder — a Select with
+        // no matching option rendered as a bare chevron with no width (the 2026-08-04 screenshot).
+        roleOptions={[
+          { value: "", label: t("adminRoles.rolePlaceholder") },
+          ...withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant"),
+        ]}
         role={groupRole}
         onRoleChange={setGroupRole}
         pending={assignRole.isPending || assignTier.isPending}
         onAdd={() => {
-          if (!groupName.trim() || !groupRole) return;
           const choice = resolveRoleChoice(groupRole, tenantCustom);
+          if (choice.kind === "none") return;
+          if (granteeType === "user") {
+            if (!pickedUser) return;
+            applyUserRole(pickedUser.grantee.slice("user:".length), groupRole);
+            setPickedUser(null); setUserQuery(""); setGroupRole("");
+            return;
+          }
+          if (!groupName.trim()) return;
           const done = {
             onSuccess: () => { notify.success(t("toast.saved")); setGroupName(""); setGroupRole(""); },
             onError: () => notify.error(t("toast.actionFailed")),
           };
           if (choice.kind === "tier") assignTier.mutate({ capability: choice.role, groupName: groupName.trim() }, done);
-          else if (choice.kind === "custom") assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, groupName: groupName.trim() }, done);
+          else assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, groupName: groupName.trim() }, done);
         }}
       />
 
@@ -298,30 +340,7 @@ export function MembersPage() {
                   ariaLabel={t("members.roleFor", { sub: m.display_name || m.email || m.sub })}
                   testId="member-role-select"
                   options={withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant")}
-                  onChange={(value) => {
-                    const row = roleRows.get(m.sub);
-                    const choice = resolveRoleChoice(value, (roles.data?.custom ?? []).filter((r) => r.scope === "tenant"));
-                    if (choice.kind === "tier") {
-                      // A tier IS the whole role once chosen: the custom role they held is not "also"
-                      // true any more, so it goes with the change rather than lingering invisibly behind
-                      // a control that now reads `member`.
-                      void guarded(async () => {
-                        // Drop the custom role FIRST, then set the tier: the tier is what the control
-                        // will show afterwards, and leaving the assignment behind would make it show the
-                        // role again on the next read — the value would snap back and look like the
-                        // change was refused. Errors are not swallowed; `guarded` reports them.
-                        for (const c of row?.custom ?? []) await unassignRole.mutateAsync(c.assignmentId);
-                        await changeRole(token, m.sub, choice.role);
-                      })();
-                    } else if (choice.kind === "custom") {
-                      // The server sweeps whatever else they held at tenant scope (#579): assign is a
-                      // replacement, and the new role is written before the old one goes.
-                      assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, principal: `user:${m.sub}` }, {
-                        onSuccess: () => notify.success(t("toast.saved")),
-                        onError: () => notify.error(t("toast.actionFailed")),
-                      });
-                    }
-                  }}
+                  onChange={(value) => applyUserRole(m.sub, value)}
                 />
               </td>
               <td style={{ textAlign: "right" }}>

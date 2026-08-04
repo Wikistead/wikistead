@@ -1319,7 +1319,14 @@ export function useGrantSpaceAccess(spaceId: string) {
             : { grantee: args.grantee, groupName: args.groupName, relation: args.capability, replace: args.replace },
         ),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["space-access", spaceId] }),
+    // #578 (review rejection, 2026-08-04): a grant REPLACES whatever role the principal held, including a
+    // custom-role assignment (the server sweeps it) — so the assignment listing is stale the moment this
+    // succeeds. Invalidating only our own side left the old row standing next to the new one: the screen
+    // showed "1 person, 2 roles" while the store held one. Both queries move, both are told.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["space-access", spaceId] });
+      qc.invalidateQueries({ queryKey: ["role-assignments", "space", spaceId] });
+    },
   });
 }
 export function useRevokeSpaceAccess(spaceId: string) {
@@ -1700,7 +1707,13 @@ export function useAssignRole() {
     // that sends a hand-built `group:<name>#member` principal writes a tuple nobody holds.
     mutationFn: ({ roleId, ...body }: { roleId: string; resourceType: string; resourceId: string; principal?: string; groupName?: string; replace?: boolean }) =>
       apiFetch<RoleAssignment>(`/admin/roles/${encodeURIComponent(roleId)}/assignments`, token, { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
+    // #578 (review rejection, 2026-08-04): assigning over a built-in SPACE grant sweeps that grant
+    // (1 principal = 1 role converges server-side), so the grant listing is stale too — without this
+    // the swept row stayed on screen beside the new one until a reload.
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["role-assignments"] });
+      if (vars.resourceType === "space") qc.invalidateQueries({ queryKey: ["space-access", vars.resourceId] });
+    },
   });
 }
 // ADR-207 §R4-3 (#603): the tenant TIER grant — a capability (admin | member), never a role id, and

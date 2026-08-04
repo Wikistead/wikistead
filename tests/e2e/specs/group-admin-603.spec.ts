@@ -27,6 +27,9 @@ test("#603: a group is offered the tiers, granted admin, shown holding it — an
   await expect(page.getByTestId("tenant-group-tiers-note"), "the absence-explaining note is gone").toHaveCount(0);
 
   // the add-form's role list carries the WHOLE vocabulary: both tiers and the custom role
+  // (the form opens on the user half — 2026-08-04: both kinds are offered — so flip it to groups)
+  await page.getByTestId("tenant-grant-type").click();
+  await page.getByRole("option", { name: /group/i }).click();
   await page.getByTestId("tenant-grant-group-name").fill(`Adm603-${stamp}`);
   await page.getByTestId("tenant-grant-role").click();
   for (const name of ["member", "admin", roleName]) {
