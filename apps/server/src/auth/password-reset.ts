@@ -29,7 +29,7 @@ const hashToken = (plaintext: string) => createHash('sha256').update(plaintext).
 
 // Mint a reset for `identifier`, or DON'T — and answer the same either way. The caller emails the
 // token when it gets one and says nothing when it does not.
-export async function mintPasswordReset(db: TenantDb, identifier: string): Promise<{ token: string; email: string; memberSub: string } | null> {
+export async function mintPasswordReset(db: TenantDb, tenant: { plan: string }, identifier: string): Promise<{ token: string; email: string; memberSub: string } | null> {
   if (!(await localLoginEnabled(db))) return null
   const id = identifier.trim().toLowerCase()
   if (!id) return null
@@ -38,6 +38,10 @@ export async function mintPasswordReset(db: TenantDb, identifier: string): Promi
   const [cred] = await db.sql<{ member_sub: string }[]>`
     SELECT member_sub FROM local_credentials WHERE identifier = ${id}`
   if (!cred) return null
+  // #605 / ADR-210 §4 row 4: while the stance bites, only an EXEMPT member may be handed a reset link.
+  // The route's uniform 204 already says nothing either way, so the refusal is indistinguishable.
+  const { stanceBlocksLocalFor } = await import('./sso-stance.js')
+  if (await stanceBlocksLocalFor(db, tenant, cred.member_sub)) return null
   const token = `pwr_${randomBytes(32).toString('base64url')}`
   await db.sql`
     INSERT INTO password_resets (tenant_id, member_sub, token_hash, expires_at)
@@ -95,6 +99,17 @@ export async function completePasswordReset(
   // Hash OUTSIDE the transaction — 60ms of CPU is not a reason to hold a database connection.
   const hash = await hashPassword(newPassword)
   return db.tx(async (tx: Sql) => {
+    // #605 / ADR-210 §4 row 5: the stance gate needs the MEMBER, who is unknown until the row is read —
+    // so PEEK first (no write), ask about that member, and only then run the unchanged consume-once
+    // UPDATE. A refusal must NOT consume the link: an admin who grants the exemption after the member
+    // clicked must find the link still alive, in the middle of the outage this exists for. Peeking
+    // discloses nothing — holding the token IS the capability (the /auth/invite-kind reasoning).
+    const [peek] = await tx<{ member_sub: string }[]>`
+      SELECT member_sub FROM password_resets
+       WHERE token_hash = ${hashToken(token)} AND used_at IS NULL AND expires_at > now()`
+    if (!peek) return null
+    const { stanceBlocksLocalFor } = await import('./sso-stance.js')
+    if (await stanceBlocksLocalFor(db, tenant, peek.member_sub)) return null
     // Consume-once: one UPDATE decides it, so two simultaneous uses of the same link cannot both win.
     const claimed = await tx<{ member_sub: string }[]>`
       UPDATE password_resets SET used_at = now()

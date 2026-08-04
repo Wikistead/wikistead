@@ -134,6 +134,15 @@ export async function resolveAvailableLogin(
   const ownIdpEffective = methods.size > 0
   let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
   if (platform && ownIdpEffective && (await platformLoginDisabled(db))) platform = null
+  // #605 / ADR-210 §1: while the STANCE bites, the effective set is intersected with the federated
+  // pair — every other row keeps its selection (nothing stored changes; the admin surface says why).
+  // The stance is decided by its own predicate (sso-stance.ts, §R5-2) and SUPERSEDES the platform
+  // preference while on: one door, one stored reason.
+  const { resolveSsoStance } = await import('./sso-stance.js')
+  if ((await resolveSsoStance(db, tenant, env)).biting) {
+    methods.delete('local')
+    platform = null
+  }
   if (platform) methods.add('platform-oidc')
 
   const oidc = tenantCfg
@@ -204,6 +213,14 @@ export async function resolveLoginConnections(
   const ownIdpEffective = out.length > 0
   let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
   if (platform && ownIdpEffective && (await platformLoginDisabled(db))) platform = null
+  // #605 / ADR-210 §1: the stance filters this list the same way (one decision point, sso-stance.ts).
+  const { resolveSsoStance } = await import('./sso-stance.js')
+  if ((await resolveSsoStance(db, tenant, env)).biting) {
+    const keep = out.filter((c) => c.kind === 'oidc' || c.kind === 'saml')
+    out.length = 0
+    out.push(...keep)
+    platform = null
+  }
   if (platform) out.push({ id: 'platform', kind: 'platform', label: null, brand: null, bootstrapEligible: false, trustGroups: true, subjectPrefix: null })
   return out
 }
@@ -223,7 +240,23 @@ export async function assertNotLastWayIn(
 ): Promise<void> {
   const effective = await resolveLoginConnections(db, tenant, env)
   if (!effective.some((c) => c.id === exceptId)) return // not effective now — the guard steps aside
-  if (effective.filter((c) => c.id !== exceptId).length > 0) return
+  // #605 / ADR-210 §R5-1: the guard evaluates the COUNTERFACTUAL — the world AFTER this write — not
+  // the present. With the stance on, one SSO connection and local selected on, the stance-filtered
+  // list is [that connection]; asking "is anything else effective NOW" would refuse the very write
+  // that lapses the stance and re-opens the password door (a brand-new 409 this feature would have
+  // invented). So the remainder is re-derived with the row already dropped: if the stance would no
+  // longer bite, the doors it was masking come back into the count.
+  const { resolveSsoStance } = await import('./sso-stance.js')
+  const stanceAfter = await resolveSsoStance(db, tenant, env, { exceptConnectionId: exceptId })
+  let remaining = effective.filter((c) => c.id !== exceptId)
+  if (!stanceAfter.biting) {
+    // the stance lapses after this write — count the doors it was hiding (local; platform is handled
+    // by the ruling-4 lapse below, exactly as today)
+    if (loginMethodCeiling(env).has('local') && (await localLoginEnabled(db)) && !remaining.some((c) => c.kind === 'local')) {
+      remaining = [...remaining, { id: 'local', kind: 'local', label: null, brand: null, bootstrapEligible: false, trustGroups: false, subjectPrefix: null }]
+    }
+  }
+  if (remaining.length > 0) return
   if (loginMethodCeiling(env).has('platform-oidc') && loadPlatformOidc()) return // the lapse (ruling 4)
   throw Object.assign(
     new Error('this is the last effective way to sign in. Enable another connection first, or have an operator run `pnpm tenant:login-methods`.'),

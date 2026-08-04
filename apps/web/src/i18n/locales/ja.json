@@ -407,7 +407,19 @@
     "platformOwnIdpRequired": "プラットフォームログインをオフにする前に、OIDC または SAML を有効化・検証してください。",
     "method_unentitled": "現在のプランに含まれていません",
     "methodsSaveFailed": "ログイン方式を変更できませんでした。",
-    "samlNotConfigured": "未設定"
+    "samlNotConfigured": "未設定",
+    "blockedByStance": "SSO 必須のため無効",
+    "ssoRequired": "SSO を必須にする",
+    "ssoRequiredBody": "サインインに自前の IdP（OIDC / SAML）を必須にします。これはサインインの話だけです。API キー・共有リンク・SCIM は止まりません。",
+    "ssoRequiredLapsed": "失効中",
+    "ssoRequiredLapsedTip": "有効な連携サインイン方法が今ひとつも無いため、この必須設定はどの扉も閉じていません。接続が戻ると再び効きます。",
+    "ssoNeedsIdp": "先に動作する OIDC / SAML 接続を有効にしてください。",
+    "ssoNeedsExemption": "先にパスワードを持つ例外メンバーを 1 人以上指名してください。IdP 障害時の戻り道になります。",
+    "ssoExemptionsLead": "例外メンバーは SSO 必須の間もパスワードでサインインできます。",
+    "ssoExemptionNoCredential": "パスワード未設定",
+    "ssoExemptionRevoke": "例外を取り消す",
+    "ssoExemptionSearch": "例外メンバーを追加…",
+    "ssoExemptionRevokeConfirm": "{{sub}} の例外を取り消しますか？SSO 必須の間、この人はパスワードでサインインできなくなります。"
   },
   "adminEnroll": {
     "title": "自動メンバー登録",
@@ -620,7 +632,10 @@
     "signInSaml": "SSO (SAML) でサインイン",
     "signInPlatform": "プラットフォームアカウントでサインイン",
     "moreWays": "別の方法でサインイン",
-    "noMethods": "現在サインインできません。管理者に連絡してください。"
+    "noMethods": "現在サインインできません。管理者に連絡してください。",
+    "recoveryLink": "別の方法でサインインする",
+    "recoveryTitle": "復旧用サインイン",
+    "recoveryBody": "SSO 必須の間、例外に指名されたメンバー用の入り口です。メールアドレスとパスワードでサインインしてください。"
   },
   "share": {
     "opening": "共有ページを開いています…",

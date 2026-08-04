@@ -32,7 +32,7 @@ function LazyFallback() {
   return <div style={{ padding: 24, color: "var(--fg-dim)" }}>{t("common.loading")}</div>;
 }
 import { AppShell } from "./AppShell";
-import { LoginScreen } from "./LoginScreen";
+import { LoginScreen, RecoveryScreen } from "./LoginScreen";
 import { SetPasswordForm } from "./SetPasswordForm";
 
 
@@ -1887,6 +1887,8 @@ export function AppRoutes() {
           sign-in screen so the error query survives (the catch-all below would rewrite it to /p/demo and
           drop it). */}
       <Route path="/login" element={<LoginScreen />} />
+      {/* #605 §3 (iii): the recovery door — reachable by address, never linked from /login */}
+      <Route path="/login/recovery" element={<RecoveryScreen />} />
       {/* Dev default: the seeded demo page. Real landing/space routing is a
           next-stage screen. */}
       <Route path="*" element={<Navigate to="/p/demo" replace />} />

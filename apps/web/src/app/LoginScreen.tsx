@@ -82,6 +82,23 @@ export function connectionButtonText(conn: LoginConnection, t: (k: string, o?: R
 // with Google is a preset CONNECTION now — one path, one place the mark comes from — instead of a
 // second mechanism that reached the same broker with a `?provider=` hint.
 
+// #605 / ADR-210 §3 (iii): the break-glass door. Its own path, NOT linked from the login screen —
+// findable from the idp_unavailable error and by whoever was told the address. It reuses the ordinary
+// password form and the ordinary endpoint: the exemption is enforced server-side, and a non-exempt
+// attempt fails exactly like a wrong password (no oracle here either).
+export function RecoveryScreen() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-panel p-6" data-testid="login-recovery">
+        <h1 className="mb-1 text-xl font-semibold">{t("auth.recoveryTitle")}</h1>
+        <p className="mb-5 text-sm text-fg-dim">{t("auth.recoveryBody")}</p>
+        <LocalLoginForm returnTo="/" />
+      </div>
+    </div>
+  );
+}
+
 function useAuthError(): string | null {
   const { t } = useTranslation();
   const kind = new URLSearchParams(window.location.search).get("error");
@@ -147,6 +164,15 @@ export function LoginScreen() {
               role="alert"
             >
               {error}
+              {/* #605 / ADR-210 §3 (iii): the recovery door surfaces ONLY on the failure that means it
+                  is needed — never on the ordinary login screen (everyone would see a door that works
+                  for two people). The copy does not claim to know WHICH death happened (outage vs a
+                  config fault): both land on this error. */}
+              {new URLSearchParams(window.location.search).get("error") === "idp_unavailable" && (
+                <div className="mt-1">
+                  <a href="/login/recovery" className="text-xs underline" data-testid="login-recovery-link">{t("auth.recoveryLink")}</a>
+                </div>
+              )}
             </div>
           )}
           {hasLocal && localLeads && <LocalLoginForm returnTo={returnTo} disabled={navigating !== null} />}
