@@ -562,6 +562,44 @@ test("#598: every registered element survives the export, the file, and the page
   ).toEqual([...KNOWN_RED.onPaper].sort());
   await page.emulateMedia({ media: "screen" });
 
+  // ---- 1g. paper diagrams are LIGHT, even when the screen is dark ----
+  //
+  // #207(user review): a diagram BAKES the theme into its pixels at render time, so pinning
+  // `data-theme="light"` on the paper document was never enough — the portal built while the app was dark
+  // carried a dark mermaid onto white paper. The readability dimension cannot see this (a figure is not
+  // text, so no contrast floor fires), which is exactly why it gets its own check. The pin: reload the
+  // SAME page with the screen DARK, let the portal rebuild, and assert the mermaid node fill is not the
+  // dark bake (measured values from the reject: light fill = rgb(236,236,255), dark bake = rgb(31,32,32)).
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+  await page.reload();
+  await page.waitForSelector("[data-print-root]", { state: "attached", timeout: 20_000 });
+  await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+  await sleep(2500); // the portal's diagrams fill in asynchronously
+  const darkPaper = await page.evaluate(() => {
+    const root = document.querySelector("[data-print-root]");
+    const svg = root?.querySelector(".cm-lp-mermaid svg, [data-wks-el='mermaid'] svg");
+    if (!svg) return { missing: true, fills: [] as string[] };
+    const fills = new Set<string>();
+    for (const el of svg.querySelectorAll("rect, polygon, path, circle")) {
+      const f = getComputedStyle(el).fill;
+      if (f && f !== "none") fills.add(f);
+    }
+    return { missing: false, fills: [...fills] };
+  });
+  expect(darkPaper.missing, "the portal's mermaid rendered (an absent figure would pass this forever)").toBe(false);
+  // the ruled acceptance values, verbatim: light node fill = rgb(236,236,255); the dark bake's
+  // node fill = rgb(31,32,32). Text/edge fills are dark in BOTH themes (black ink on white paper is
+  // correct), so a generic darkness filter misfires — the node fill is the discriminator.
+  expect(darkPaper.fills, "the light node fill is present — the paper render pinned light").toContain("rgb(236, 236, 255)");
+  expect(darkPaper.fills, "the dark bake's node fill must not reach paper").not.toContain("rgb(31, 32, 32)");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.evaluate(() => { delete document.documentElement.dataset.theme; });
+  await page.reload();
+  await page.waitForSelector("[data-print-root]", { state: "attached", timeout: 20_000 });
+  await sleep(400);
+  await page.emulateMedia({ media: "screen" });
+
   // ---- 2. nothing is invisible on paper ----
   await opened.emulateMedia({ media: "print" });
   await sleep(300);

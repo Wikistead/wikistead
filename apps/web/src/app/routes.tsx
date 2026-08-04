@@ -600,7 +600,10 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // the picture. Same renderer the editing surface is given.
   const exportHosts = useMemo(() => (pageId ? { diagram: {
     handles: (lang: string) => lang === "plantuml",
-    render: (lang: string, source: string) => makeDiagramRenderer(token, pageId)(lang, source, currentMacroTheme()),
+    // #207PAPER hosts render LIGHT, always — the server injects a dark `!theme` into the
+    // plantuml source when asked (#342), and a dark-baked figure on a light page is the defect.
+    // The SCREEN's renderer (Editor's own wiring) keeps following the theme.
+    render: (lang: string, source: string) => makeDiagramRenderer(token, pageId)(lang, source, "light"),
   } } : undefined), [pageId, token]);
   const exportSource = useCallback((): string => {
     const pub = published?.publishedMd ?? "";
@@ -1305,7 +1308,8 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
                 to its source, the same as it does on that page's screen.) */}
             <PrintSurface md={publishedMd} title={pageTitle} diagram={pageId ? {
               handles: (lang: string) => lang === "plantuml",
-              render: (lang: string, source: string) => makeDiagramRenderer(token, pageId)(lang, source, currentMacroTheme()),
+              // #207paper renders light (same pin as the member surface above)
+              render: (lang: string, source: string) => makeDiagramRenderer(token, pageId)(lang, source, "light"),
             } : null} />
             {isDesktop ? (<><PageVim {...controls} /><PageActions {...controls} /></>) : <PageControlsMobile {...controls} />}
             {/* #227the shared TocChrome (rail on wide / overlay on narrow); yields to the comments
