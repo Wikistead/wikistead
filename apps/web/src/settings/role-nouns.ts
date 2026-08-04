@@ -63,9 +63,12 @@ export const BUILTIN_EFFECTIVE_CAPS: Record<RoleNounKey, readonly string[]> = {
   // `settings` measured in (#586): the grid draws a settings column, and a manager settles pages
   // (`page#settings: manage or …`) — a column the measurement did not cover was a lie waiting to be drawn.
   manage: ["view", "comment", "edit", "moderate", "publish", "delete", "share", "settings", "manage"],
-  // ADR-209 (#607): measured — on a PAGE the verb confers only view (through the space viewer arm);
-  // its own grain (roster on the SPACE) is the space-axis row of the truth test.
-  manageAccess: ["view"],
+  // ADR-209 (#607, bounce): view is the page-axis answer (the space viewer arm); manageAccess is
+  // the verb ITSELF, measured on the space axis where the grant lives. Every row here is reflexive
+  // `manage` lists manage — and this one drew as view-only because the page loop cannot see a
+  // space-only verb: the role that exists to hand out membership looked identical to `viewer` in the
+  // very picker that hands it out.
+  manageAccess: ["view", "manageAccess"],
 };
 
 // #586 review ①: what a PAGE grant of a single relation confers — a different question, so a different
