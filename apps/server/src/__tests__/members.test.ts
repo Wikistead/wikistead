@@ -356,3 +356,39 @@ describe('member ops → audit log (#177)', () => {
     await deleteTuples(fgaClient, [{ user: 'user:mem-shared', relation: 'member', object: `tenant:${otherId}` }]).catch(() => {})
   }, 60_000)
 })
+
+// ── #614: the list carries each row's status — password entrance / origin / suspended ────────────
+// Real rows, read back through the route (no hardcoded expectation table): a credential row IS
+// has_password, migration 083's column IS the origin, migration 037's timestamp IS suspended.
+describe('member status columns (#614)', () => {
+  it('reports has_password / identity_source / deactivated_at from real rows', async () => {
+    await admin`SELECT set_config('app.tenant_id', ${tenantId}, false)`
+    // a password-born local user (the CHECK demands the reserved wlocal_ prefix) + a suspended member
+    await admin`INSERT INTO members (tenant_id, sub, role, identity_source) VALUES
+      (${tenantId}, 'wlocal_614', 'member', 'local') ON CONFLICT (tenant_id, sub) DO NOTHING`
+    await admin`INSERT INTO members (tenant_id, sub, role, deactivated_at) VALUES
+      (${tenantId}, 'mem-suspended-614', 'member', now()) ON CONFLICT (tenant_id, sub) DO NOTHING`
+    await admin`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
+      VALUES (${tenantId}, 'wlocal_614', 'p614@x.test', 'scrypt$unusable-fixture-hash')
+      ON CONFLICT (tenant_id, member_sub) DO NOTHING`
+
+    const res = await app.inject({ method: 'GET', url: '/members', headers: { host, cookie: cookie(adminSid) } })
+    expect(res.statusCode).toBe(200)
+    const members = res.json().members as { sub: string; identity_source: string; has_password: boolean; deactivated_at: string | null }[]
+
+    const local = members.find((m) => m.sub === 'wlocal_614')
+    expect(local, 'the local user is listed').toBeTruthy()
+    expect(local!.identity_source).toBe('local')
+    expect(local!.has_password, 'a credential row reads back as has_password').toBe(true)
+    expect(local!.deactivated_at).toBeNull()
+
+    const suspended = members.find((m) => m.sub === 'mem-suspended-614')!
+    expect(suspended.identity_source, "083's default: every pre-local member is IdP-born").toBe('oidc')
+    expect(suspended.has_password).toBe(false)
+    expect(suspended.deactivated_at, 'a frozen member says so instead of looking alive').not.toBeNull()
+
+    // the join is a LEFT join: members without a credential still list, as false rather than absent
+    const adminRow = members.find((m) => m.sub === 'mem-admin')!
+    expect(adminRow.has_password).toBe(false)
+  })
+})
