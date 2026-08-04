@@ -105,7 +105,15 @@ export const FGA_WRITE_CHUNK = 100
 export async function deleteObjectTuples(fga: OpenFgaClient, object: string): Promise<void> {
   const keys: TupleKeyWithoutCondition[] = await readObjectTuples(fga, object)
   for (let i = 0; i < keys.length; i += FGA_WRITE_CHUNK) {
-    await fga.write({ deletes: keys.slice(i, i + FGA_WRITE_CHUNK) })
+    // #619: this write was the one that skipped the boundary above — a sweep races anything else
+    // deleting the same object, and the loser used to answer with FGA's own sentence (relation names
+    // and object ids). Same translation as its two siblings; the convergence flag rides along, so a
+    // caller that considers "already gone" a success can still say so.
+    try {
+      await fga.write({ deletes: keys.slice(i, i + FGA_WRITE_CHUNK) })
+    } catch (err) {
+      throw asDomainError(err, 'delete')
+    }
   }
 }
 

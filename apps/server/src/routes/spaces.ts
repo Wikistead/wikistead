@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
+import { check, filterAuthorized, writeTuples, deleteTuples, isAlreadyConverged, deleteObjectTuples, readObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -996,7 +996,14 @@ export async function revokeSpaceAccess(
       if (args.plan !== undefined) {
         await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
       }
+      // #619: taking away a grant that is already gone is the state the caller asked for, not a
+      // failure. It happens on the ordinary path — a built-in capability is exclusive, so promoting a
+      // viewer to editor already removed the viewer leaf, and revoking the view row afterwards asked
+      // the store to delete something absent. That answered with FGA's validation text (before #578)
+      // and with a 500 (after it) for a button whose job was done. Convergence is success; anything
+      // else still throws.
       await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
+        .catch((err) => { if (!isAlreadyConverged(err)) throw err })
     })
     await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
   }

@@ -123,6 +123,33 @@ export async function buildApp(): Promise<FastifyInstance> {
   // per-IP rate limit on the public share-link exchange (#107). In dev (no proxy) there is
   // no XFF, so req.ip stays the socket address. Always deploy behind the trusted proxy.
   const app = Fastify({ logger: true, trustProxy: true })
+
+  // #619: the LAST line before a response body leaves the process. #578 translated the two tuple
+  // helpers, which covers what the product writes on purpose — but an FGA failure can also arrive
+  // from a check / read / batchCheck, or from a route somebody adds next month, and Fastify puts a
+  // thrown error's `message` straight into the body. The store's prose names its own relations and
+  // object ids (`relation: 'viewer', object: 'space:demo_space'`), which is our schema, not the
+  // caller's request — and telling an API client which internal relation is missing is both noise
+  // and a description of the model.
+  //
+  // So the boundary is enforced here as well as at the source: any message still carrying the
+  // store's signature is replaced by a stable code. The original is LOGGED in full (Fastify's error
+  // logger already ran by the time this returns), so nothing is lost for debugging. A route that
+  // translates its own failure — every deliberate refusal in the tree — is untouched, because none
+  // of them speak in FGA's words.
+  app.setErrorHandler((err, req, reply) => {
+    const status = (err as { statusCode?: number }).statusCode ?? 500
+    const speaksFga = /FGA API|openfga|tuple to be written|cannot delete a tuple|relation '[^']*' not found/i.test(String((err as Error | undefined)?.message ?? ''))
+    if (!speaksFga) return reply.code(status).send(err)
+    req.log.error({ err }, 'the permission store refused a call; its text was withheld from the response')
+    return reply.code(status >= 500 ? status : 500).send({
+      statusCode: status >= 500 ? status : 500,
+      error: 'Internal Server Error',
+      code: 'authz_store_error',
+      message: 'the permission store refused this call',
+    })
+  })
+
   await app.register(cors, { origin: true })
   await app.register(cookie)
   await app.register(formbody) // SAML ACS uses the form-urlencoded POST binding (#135)
