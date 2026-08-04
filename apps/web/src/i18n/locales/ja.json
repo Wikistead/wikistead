@@ -989,7 +989,6 @@
     "inviteEmail": "招待メール",
     "inviteRole": "招待ロール",
     "roleFor": "{{sub}} のロール",
-    "tierFor": "{{sub}} のティア",
     "sendInvite": "招待を送信",
     "inviteLinkLabel": "招待リンク（メールが無効な場合は共有）:",
     "emailed": "受信者に送信しました。",

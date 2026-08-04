@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   useAdminConnections, useCreateConnection, useUpdateConnection, useDeleteConnection, useReorderConnections,
   useLoginMethods, useUpdatePlatformLogin, useUpdateLocalLogin, useTenantSaml, useUpdateTenantSaml, useTestTenantOidc,
-  useUpdateSsoRequired, useSsoExemptions, useGrantSsoExemption, useRevokeSsoExemption, useTenantMemberCandidates,
+  useUpdateSsoRequired, useSsoExemptions, useGrantSsoExemption, useRevokeSsoExemption, useTenantMemberCandidates, useTenantMemberNames,
   type AdminConnectionDTO, type LoginMethodState,
 } from "../data/queries";
 import { ApiError } from "../data/apiClient";
@@ -14,6 +14,7 @@ import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
+import { MemberSearchInput } from "../ui/MemberSearchInput"; // #617 ①: the one pick-a-member surface (#416 / ADR-161)
 import { AdminSamlSection, samlSectionState } from "./AdminSamlSection";
 import { methodBadge } from "./login-method-badge";
 
@@ -80,6 +81,12 @@ export function AdminSignInMethodsSection() {
   const revokeExemption = useRevokeSsoExemption();
   const [exemptQuery, setExemptQuery] = useState("");
   const exemptCandidates = useTenantMemberCandidates(exemptQuery);
+  // #617 ②(a): a sub is a 70-character hex string, not a name. The exemption rows and the revoke
+  // confirmation both showed it raw — #523 / ADR-190 canonicalised display names precisely so that
+  // people surfaces stop doing this. One resolver, used by both, falling back to the sub only when the
+  // member genuinely has no name yet (the same rule MemberSearchInput's rows follow).
+  const memberNames = useTenantMemberNames();
+  const nameOf = (sub: string): string => memberNames.get(sub) || sub;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; error: string | null } | null>(null);
@@ -472,7 +479,7 @@ export function AdminSignInMethodsSection() {
               <div className="text-xs text-fg-dim">{t("adminAuth.ssoExemptionsLead")}</div>
               {(exemptions.data ?? []).map((x) => (
                 <div key={x.memberSub} className="flex items-center gap-2 text-xs" data-testid="sso-exemption-row">
-                  <span className="min-w-0 flex-1 truncate">{x.memberSub}</span>
+                  <span className="min-w-0 flex-1 truncate" data-testid="sso-exemption-name">{nameOf(x.memberSub)}</span>
                   {!x.hasCredential && (
                     /* §5: the credential row is the only honest witness that a key exists — an
                        exemption without one cannot actually sign in yet, and the screen says so */
@@ -482,16 +489,34 @@ export function AdminSignInMethodsSection() {
                     onClick={() => setRevokingExemption(x.memberSub)}><X size={12} /></IconButton>
                 </div>
               ))}
-              <div className="flex items-center gap-2">
-                <Input className="max-w-[220px]" value={exemptQuery} onChange={(e) => setExemptQuery(e.target.value)}
-                  placeholder={t("adminAuth.ssoExemptionSearch")} aria-label={t("adminAuth.ssoExemptionSearch")} data-testid="sso-exemption-input" />
-                {exemptCandidates.candidates.filter((c) => !(exemptions.data ?? []).some((x) => x.memberSub === c.sub)).slice(0, 5).map((c) => (
-                  <Button key={c.sub} size="sm" variant="default" data-testid="sso-exemption-add"
-                    onClick={() => grantExemption.mutate(c.sub, {
+              {/* #617 ①: the shared member typeahead (#416 / ADR-161 — "one implementation for every
+                  pick-a-member surface"). This screen had grown its own: candidates as up-to-5 buttons
+                  along the right of the field, a shape nothing else in the product uses. Picking IS the
+                  grant here (there is no second "add" step), so onPick fires the mutation. */}
+              <div className="flex max-w-[320px] items-center gap-2">
+                <MemberSearchInput
+                  query={exemptQuery}
+                  onQueryChange={setExemptQuery}
+                  picked={null}
+                  onPick={(c) => {
+                    if (!c) return;
+                    grantExemption.mutate(c.sub, {
                       onSuccess: () => { notify.success(t("toast.saved")); setExemptQuery(""); },
                       onError: () => notify.error(t("toast.actionFailed")),
-                    })}>{c.displayName || c.sub}</Button>
-                ))}
+                    });
+                  }}
+                  candidates={exemptCandidates.candidates.filter((c) => !(exemptions.data ?? []).some((x) => x.memberSub === c.sub))}
+                  // #582's rule (pinned): a member-search field shows the SHARED sentence — a screen
+                  // that writes its own is how one of the copies ends up wrong in the screen nobody
+                  // opened. The exemption-specific wording stays where it is not duplicated copy: the
+                  // accessible name, which says what THIS field does.
+                  placeholder={t("common.memberSearch")}
+                  ariaLabel={t("adminAuth.ssoExemptionSearch")}
+                  inputTestId="sso-exemption-input"
+                  listTestId="sso-exemption-list"
+                  itemTestId="sso-exemption-add"
+                  inputSize="sm"
+                />
               </div>
             </div>
           </div>
@@ -562,7 +587,7 @@ export function AdminSignInMethodsSection() {
 
       <ConfirmDialog
         open={revokingExemption !== null}
-        message={revokingExemption ? t("adminAuth.ssoExemptionRevokeConfirm", { sub: revokingExemption }) : ""}
+        message={revokingExemption ? t("adminAuth.ssoExemptionRevokeConfirm", { sub: nameOf(revokingExemption) }) : ""}
         confirmTestId="sso-exemption-revoke-confirm"
         confirmLabel={t("common.confirm")}
         onClose={() => setRevokingExemption(null)}
