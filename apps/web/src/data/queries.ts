@@ -1676,7 +1676,9 @@ export function useDeleteRole() {
 // back to the raw sub. A group principal is a HASH (groupFgaId is one-way) — the server resolves it
 // back to the human name (`groupName`, #536); absent means the group no longer exists at the IdP
 // (the UI shows its explicit orphan label, never the hash).
-export interface RoleAssignment { id: string; roleId: string; roleName: string; principal: string; displayName?: string | null; groupName?: string; groupUnconfirmed?: boolean; managed?: boolean }
+// #603 / ADR-207: `roleId` is null and `builtin` names the tier when the row is a BUILT-IN grant — the
+// mechanism, not the name, is what tells it apart from a custom role that took the same name.
+export interface RoleAssignment { id: string; roleId: string | null; roleName: string; builtin?: string; principal: string; displayName?: string | null; groupName?: string; groupUnconfirmed?: boolean; managed?: boolean }
 export function useRoleAssignments(resourceType: string, resourceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
@@ -1693,6 +1695,19 @@ export function useAssignRole() {
     // that sends a hand-built `group:<name>#member` principal writes a tuple nobody holds.
     mutationFn: ({ roleId, ...body }: { roleId: string; resourceType: string; resourceId: string; principal?: string; groupName?: string; replace?: boolean }) =>
       apiFetch<RoleAssignment>(`/admin/roles/${encodeURIComponent(roleId)}/assignments`, token, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
+  });
+}
+// ADR-207 §R4-3 (#603): the tenant TIER grant — a capability (admin | member), never a role id, and
+// groups only (a person's tier is their member row). The server derives the group's FGA id from the
+// name (#536 the client never hashes); a principal straight from the assignments listing is
+// also accepted.
+export function useAssignTenantTier() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { capability: "admin" | "member"; groupName?: string; principal?: string }) =>
+      apiFetch<RoleAssignment>(`/admin/roles/tenant-tier-assignments`, token, { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["role-assignments"] }),
   });
 }

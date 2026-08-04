@@ -386,7 +386,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             <div key={a.id} className="flex items-center gap-2" data-testid="grant-role-item">
               {/* no `uppercase`: shouting a tenant's role name back at them is changing it (kakunin-582
                   rendered as KAKUNIN-582). A role name is a proper noun on every surface. */}
-              <RoleTip roleCapabilities={roleCapsById.get(a.roleId)} origin="role" scope="page" testId="grant-origin">
+              <RoleTip roleCapabilities={a.roleId ? roleCapsById.get(a.roleId) : undefined} origin="role" scope="page" testId="grant-origin">
                 <span className="whitespace-nowrap rounded border border-[var(--accent)] px-1 text-[10px] tracking-wide text-[var(--accent)]" data-testid="grant-role-badge">{a.roleName}</span>
               </RoleTip>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{a.groupName ? `${a.groupName} (${t("spaceMembers.group")})` : (a.displayName ?? a.principal.replace(/^user:/, ""))}</span>

@@ -996,7 +996,10 @@
     "enablePasswordDone": "Password link created",
     "rowActions": "Actions for {{name}}",
     "passwordLinkLabel": "Password setup link (hand it to the member):",
-    "passwordSetupUnavailable": "A password entrance cannot be added for this member."
+    "passwordSetupUnavailable": "A password entrance cannot be added for this member.",
+    "lastAdmin": "Cannot change the last admin.",
+    "lastDirectAdmin": "A group holds admin, but group-granted admins can be lost by an IdP-side change. At least one directly granted admin must remain.",
+    "viaGroup": "via {{group}}"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
@@ -1322,7 +1325,6 @@
     "sectionResource": "Space / Page",
     "groupAssignTitle": "Group roles",
     "groupAssignBody": "Give a tenant role to an IdP group. Everyone in the group gets it, and loses it when they leave the group.",
-    "groupTiersNote": "A group can be given a custom role above. member and admin are set on a person's own row, so the record shows who holds admin.",
     "groupAssignEmpty": "No group holds a tenant role.",
     "groupLabel": "Group",
     "groupPlaceholder": "Select a group…",

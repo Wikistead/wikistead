@@ -168,7 +168,10 @@ describe('role assignment expansion (#420 increment 3)', () => {
     registerEntitlementsResolver(() => ({ ...UNLIMITED, customRoles: false }))
     try {
       expect((await assign(roleId, 'page', pageId, 'user:cra420-eve')).statusCode).toBe(403)
-      expect((await unassign('any-id')).statusCode).toBe(403)
+      // RE-AIMED by #603 / ADR-207 §R4-3: the entitlement gate applies to GRANTING, never to revoking
+      // — a plan gate that blocks removal strands the power when a tenant downgrades (fail-open). With
+      // no gate in the way, an unknown assignment id is the uniform 404.
+      expect((await unassign('any-id')).statusCode).toBe(404)
     } finally {
       resetEntitlementsResolver()
     }
