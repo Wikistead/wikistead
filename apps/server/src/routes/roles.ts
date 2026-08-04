@@ -19,7 +19,7 @@ import { auditIfEntitled } from '../audit/outbox.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { reindexPublishedPages } from './spaces.js'
-import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
+import { spaceGrantTuplesFor, ADMIN_CLASS_ROLE_CAPS } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table (+ the ONE admin-class set)
 import { groupGrantee, groupNameByFgaId, knownGroupNames, confirmedGroupNames, resolveGroupName } from '../auth/group-sync.js' // #497: mappings assign the group principal; #536names for display
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: name user principals on the gated list
 import type { TenantDb } from '../db/index.js'
@@ -39,7 +39,9 @@ export type RoleCapability = (typeof ROLE_CAPABILITIES)[number]
 // role capability (it is the built-in superset), so the role-side set is that page set minus `manage`.
 // A role assignment at PAGE scope requires the assigner's page `manage` iff the role bundles ANY of
 // these — otherwise a `share`-only holder could assign a role that escalates a principal to admin class.
-const ADMIN_CLASS_ROLE_CAPS = new Set<RoleCapability>(['delete', 'share', 'settings', 'publish', 'moderate'])
+// (definition moved to space-grant-expansion.ts — ADR-209 needed it in spaces.ts too, and the two
+// route modules only reach each other dynamically)
+export { ADMIN_CLASS_ROLE_CAPS } from '../space-grant-expansion.js'
 
 // #496 / ADR-181 adds `issueApiKeys` (→ the `api_key_issue` relation) as the SECOND tenant capability,
 // retiring #462's api_key_issue_policy enum: who may mint an API key is now a role capability like any
@@ -61,6 +63,10 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
   { name: 'editor', capabilities: ['view', 'comment', 'edit', 'publish'] },
   { name: 'moderator', capabilities: ['moderate'] },
   { name: 'manager', capabilities: ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings'] },
+  // ADR-209 (#607): the membership verb — runs the roster of readers and editors, cannot appoint or
+  // remove a moderator, a manager, or another holder of itself (the spaces.ts ceiling). The declared
+  // list is minimal like moderator's; what it CONFERS is measured (role-capability-truth-586).
+  { name: 'access-manager', capabilities: ['manageAccess'] },
 ]
 // #552: RESERVED_NAMES derives from BUILT_IN_ROLES, so dropping `commenter` above deliberately
 // FREES the name for custom roles — reserving a name no built-in carries would be a claim with no
@@ -68,8 +74,8 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
 // #497 (088): the built-ins a group mapping may confer, and the noun each renders as (the same
 // vocabulary the Members picker uses). `comment` is deliberately absent — theruling removed
 // the commenter noun from every grant surface; comment-only stays a custom-role composition.
-const BUILTIN_MAPPABLE = new Set(['view', 'edit', 'moderate', 'manage'])
-const BUILTIN_NOUN: Record<string, string> = { view: 'viewer', edit: 'editor', moderate: 'moderator', manage: 'manager' }
+const BUILTIN_MAPPABLE = new Set(['view', 'edit', 'moderate', 'manage', 'manageAccess'])
+const BUILTIN_NOUN: Record<string, string> = { view: 'viewer', edit: 'editor', moderate: 'moderator', manage: 'manager', manageAccess: 'access-manager' }
 // #497 re-review N1 / ADR-199 §2 rev5: the NOUN is the unit a human picks, and `editor` means
 // edit + comment (severing edit ⇒ comment left the bare capability unable to comment). The Members
 // picker already grants the bundle; a GROUP MAPPING offering the same word has to mean the same
@@ -554,13 +560,20 @@ export async function unassignRoleTxCore(
 
 export async function requireAssignmentAuthority(
   fga: OpenFgaClient,
-  args: { sub: string; tenantId: string; resourceType: 'page' | 'space' | 'tenant'; resourceId: string; capabilities: AnyRoleCapability[] },
+  args: { sub: string; tenantId: string; resourceType: 'page' | 'space' | 'tenant'; resourceId: string; capabilities: AnyRoleCapability[]; replace?: boolean },
 ): Promise<void> {
   const { sub, tenantId, resourceType, resourceId, capabilities } = args
   if (resourceType === 'tenant') { await requireTenantAdmin(fga, sub, tenantId); return }
   if (await isTenantAdmin(fga, sub, tenantId)) return // global admin keeps assigning anywhere (non-regression)
   if (resourceType === 'space') {
-    if (!(await check(fga, `user:${sub}`, 'manage', { type: 'space', id: resourceId }))) throw forbidden()
+    // ADR-209 (#607): the roles door takes the SAME two-question gate as the built-in door. The old
+    // comment here said no per-capability ceiling is needed because "a manager already holds every
+    // space capability" — a sentence that stopped being true the moment a weaker principal
+    // (access_manager) could hold this gate. A role whose capabilities intersect the admin-class set,
+    // or an assignment made with `replace`, still requires `manage`; roster roles need only the verb.
+    const movesAdminClass = args.replace === true || capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as RoleCapability) || c === ('manage' as AnyRoleCapability) || c === ('manageAccess' as AnyRoleCapability))
+    const rel = movesAdminClass ? 'manage' : 'manageAccess'
+    if (!(await check(fga, `user:${sub}`, rel, { type: 'space', id: resourceId }))) throw forbidden()
     return
   }
   // page scope — the grant ceiling over the whole bundle
@@ -581,7 +594,11 @@ export async function requireListAuthority(
   const { sub, tenantId, resourceType, resourceId } = args
   if (resourceType === 'tenant') { await requireTenantAdmin(fga, sub, tenantId); return }
   if (await isTenantAdmin(fga, sub, tenantId)) return
-  if (!(await check(fga, `user:${sub}`, 'manage', { type: resourceType, id: resourceId }))) throw forbidden()
+  // ADR-209 (#607): at SPACE scope the roster verb may read who holds what and which roles are
+  // assignable — without the two reads the verb can grant but not see (rev0 finding 4). Pages stay
+  // on `manage`.
+  const rel = resourceType === 'space' ? 'manageAccess' : 'manage'
+  if (!(await check(fga, `user:${sub}`, rel, { type: resourceType, id: resourceId }))) throw forbidden()
 }
 
 // #603: the typed name a group's EXISTING rows carry, for a re-assign that arrives by principal.
@@ -918,7 +935,7 @@ export async function rolesPlugin(app: FastifyInstance) {
       // #485 / ADR-171 Addendum 2: gate on the TARGET resource's authority (space manager / page
       // grant-ceiling / tenant admin), AFTER the existence-bind (so a cross-tenant/unknown id is a
       // uniform 404, never a 403 that confirms it exists). Entitlement was already checked up front.
-      await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps })
+      await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps, replace: req.body?.replace === true })
       // #536item 2 (space scope): ONE principal = ONE role. A machine-owned (mapping/default) row
       // refuses the manual add up front (ADR-183 §1 ownership — 409 before any write); after the new row
       // lands, the principal's OTHER manual roles (grant rows, other assignments, legacy rowless tuples)

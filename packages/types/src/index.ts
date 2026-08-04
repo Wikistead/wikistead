@@ -6,7 +6,9 @@
 // guest token can never claim it.
 // #420 / ADR-164 increment 1: the split verbs — delete/share/settings (admin-class; manage stays the
 // superset) and publish (edit-class superset feeder) — join the user-facing capability vocabulary.
-export type Capability = "view" | "comment" | "edit" | "manage" | "moderate" | "delete" | "share" | "settings" | "publish";
+// ADR-209 (#607): `manageAccess` is SPACE-only — the membership verb (space#access_manager). It has no
+// page meaning on purpose; the check table refuses it for pages.
+export type Capability = "view" | "comment" | "edit" | "manage" | "moderate" | "delete" | "share" | "settings" | "publish" | "manageAccess";
 
 /**
  * Branding accent presets (Phase 5c/5d). Branding stores a KEY, not a raw colour,

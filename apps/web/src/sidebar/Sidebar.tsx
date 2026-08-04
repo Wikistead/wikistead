@@ -143,6 +143,7 @@ function SidebarImpl() {
   const canEdit = currentSpace?.capability === "edit" || currentSpace?.capability === "manage";
   const canManage = currentSpace?.capability === "manage";
   const canModerate = currentSpace?.canModerate === true; // #326: a moderator reaches settings for the moderation tab only
+  const canManageAccess = currentSpace?.canManageAccess === true; // #607: an access-manager reaches settings for the Members tab
 
   const createSpace = useCreateSpace();
   const myCaps = useMyCapabilities(); // #445hide the create-space entry point when refused
@@ -304,7 +305,7 @@ function SidebarImpl() {
           onTogglePin={(spaceId) => togglePin("space", spaceId)}
           onMovePin={(spaceId, dir) => { const pin = spacePins.find((p) => p.resourceId === spaceId); if (pin) movePin("space", pin.id, dir); }}
         />
-        {current && (canEdit || canManage || canModerate) && (
+        {current && (canEdit || canManage || canModerate || canManageAccess) && (
           <div className="flex flex-none gap-0.5">
             {/* #250: split — the button creates a blank page immediately; the adjacent ▾ opens the
                 template picker (blank stays the fast default, templates are one extra click). */}

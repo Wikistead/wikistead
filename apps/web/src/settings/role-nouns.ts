@@ -14,7 +14,7 @@
 // case-shifted — not the built-ins, not a tenant's own role. A CAPABILITY (what a role may do) IS
 // translated, and that vocabulary belongs on the surface that EDITS a role definition, not on one that
 // says who holds which role.
-export type RoleNounKey = "view" | "comment" | "edit" | "moderate" | "manage";
+export type RoleNounKey = "view" | "comment" | "edit" | "moderate" | "manage" | "manageAccess";
 
 export const CAP_NOUN: Record<RoleNounKey, string> = {
   view: "viewer",
@@ -22,6 +22,8 @@ export const CAP_NOUN: Record<RoleNounKey, string> = {
   edit: "editor",
   moderate: "moderator",
   manage: "manager",
+  // ADR-209 (#607): the membership verb (user ruling: noun `access-manager`, wire `manageAccess`)
+  manageAccess: "access-manager",
 };
 
 /**
@@ -61,6 +63,9 @@ export const BUILTIN_EFFECTIVE_CAPS: Record<RoleNounKey, readonly string[]> = {
   // `settings` measured in (#586): the grid draws a settings column, and a manager settles pages
   // (`page#settings: manage or …`) — a column the measurement did not cover was a lie waiting to be drawn.
   manage: ["view", "comment", "edit", "moderate", "publish", "delete", "share", "settings", "manage"],
+  // ADR-209 (#607): measured — on a PAGE the verb confers only view (through the space viewer arm);
+  // its own grain (roster on the SPACE) is the space-axis row of the truth test.
+  manageAccess: ["view"],
 };
 
 // #586 review ①: what a PAGE grant of a single relation confers — a different question, so a different
@@ -84,6 +89,9 @@ export const PAGE_GRANT_CAPS: Record<RoleNounKey, readonly string[]> = {
   // no `moderate` either, and that one is a surprise: the space MANAGER noun moderates (it arrives
   // through `space#moderator = … or manager`), but a page manage grant does not reach that leaf.
   manage: ["view", "comment", "edit", "publish", "delete", "share", "settings", "manage"],
+  // #607: a PAGE has no manageAccess grant — the verb is space-only. The row exists because the type is
+  // total; a page surface can never draw it (grantPageAccess refuses the relation).
+  manageAccess: [],
 };
 
 // #586what the TENANT TIERS confer.ruled "no table without a measurement", and back then

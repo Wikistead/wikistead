@@ -18,6 +18,12 @@
 import type { SpaceCapability } from './routes/spaces.js'
 import type { RoleCapability } from './routes/roles.js'
 
+// ADR-164 / ADR-209: THE admin-class capability set — one definition, shared by the page-scope role
+// ceiling (roles.ts), the space membership ceiling (spaces.ts, ADR-209 §2) and nothing else. It lives
+// here because both route modules import this file already (they reach each other only dynamically),
+// and a third hand-written copy is the drift this module exists to prevent.
+export const ADMIN_CLASS_ROLE_CAPS = new Set<RoleCapability>(['delete', 'share', 'settings', 'publish', 'moderate'])
+
 // The Record constraint below is load-bearing, not decoration: it is the COMPILE-TIME guard the two old
 // tables had. Adding a capability to `SpaceCapability` (spaces.ts) or `RoleCapability` (roles.ts) without a
 // row here must fail the build — otherwise the expansion silently returns NO tuples, and a revoke would
@@ -33,6 +39,7 @@ export const SPACE_GRANT_RELATIONS = {
   settings: ['settings_editor'],
   publish: ['publisher'],
   manage: ['manager'], // superset leaf — see the note above; never expanded into the bundle
+  manageAccess: ['access_manager'], // ADR-209 (#607): the membership verb — built-in only, admin-class
 } as const satisfies Record<SpaceCapability | RoleCapability, readonly string[]>
 
 export type SpaceGrantCapability = keyof typeof SPACE_GRANT_RELATIONS

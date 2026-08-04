@@ -6,7 +6,7 @@ import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples,
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
-import { spaceGrantTuplesFor } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table
+import { spaceGrantTuplesFor, ADMIN_CLASS_ROLE_CAPS } from '../space-grant-expansion.js' // #514 §6: the ONE table (+ the ONE admin-class set, ADR-209)
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, knownGroupNames, confirmedGroupNames, resolveGroupName } from '../auth/group-sync.js'
@@ -20,7 +20,7 @@ import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
 interface SpaceRow { id: string; tenant_id: string; name: string; created_at: Date }
-export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; canModerate?: boolean; accentKey?: string | null; iconImageUrl?: string | null; homePageId?: string | null; deleteMode?: 'trash_only' | 'both' | 'direct_only' }
+export interface Space { id: string; tenantId: string; name: string; createdAt: Date; capability?: 'view' | 'edit' | 'manage'; canModerate?: boolean; canManageAccess?: boolean; accentKey?: string | null; iconImageUrl?: string | null; homePageId?: string | null; deleteMode?: 'trash_only' | 'both' | 'direct_only' }
 function toSpace(r: SpaceRow): Space {
   return { id: r.id, tenantId: r.tenant_id, name: r.name, createdAt: r.created_at }
 }
@@ -178,16 +178,21 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
   // #326: `moderate` is reported ALONGSIDE the capability rather than folded into it. A space moderator is
   // not a manager (model.fga: `moderator … or manager`), and collapsing the two would hand every moderator
   // the rename/delete affordances. The UI needs both to offer the moderation queue without space settings.
-  const [viewSet, editSet, manageSet, moderateSet] = await Promise.all([
+  // ADR-209 (#607): a FIFTH batch for the membership verb — the ADR calls this cost out rather than
+  // adding it silently. The batches run in parallel, so wall-clock stays the slowest single pass;
+  // the extra pass is the price of `canManageAccess` riding the listing like `canModerate` does
+  // (#326's precedent: alongside the ladder, never widening it).
+  const [viewSet, editSet, manageSet, moderateSet, accessSet] = await Promise.all([
     filterAuthorized(fga, user, 'view', spaceIds, undefined, 'space'),
     filterAuthorized(fga, user, 'edit', spaceIds, undefined, 'space'),
     filterAuthorized(fga, user, 'manage', spaceIds, undefined, 'space'),
     filterAuthorized(fga, user, 'moderate', spaceIds, undefined, 'space'),
+    filterAuthorized(fga, user, 'manageAccess', spaceIds, undefined, 'space'),
   ])
   const capById = new Map(rows.map((r) => {
     const capability: Space['capability'] | null =
       manageSet.has(r.id) ? 'manage' : editSet.has(r.id) ? 'edit' : viewSet.has(r.id) ? 'view' : null
-    return [r.id, { capability, canModerate: moderateSet.has(r.id) }] as const
+    return [r.id, { capability, canModerate: moderateSet.has(r.id), canManageAccess: accessSet.has(r.id) }] as const
   }))
   // iconImageUrl is a relative API path (the client prefixes it with the API base for
   // the <img> src). Public bytes are served by GET /spaces/:id/icon-image.
@@ -202,7 +207,7 @@ export async function listSpaces(db: TenantDb, fga: OpenFgaClient, userId: strin
   const homeOk = await filterAuthorized(fga, user, 'view', homePageIds) // type defaults to 'page'
   const homeVisible = new Map(rows.map((r) => [r.id, r.home_page_id != null && homeOk.has(r.home_page_id)] as const))
   return rows.filter((r) => capById.get(r.id)?.capability != null).map((r) => ({
-    ...toSpace(r), capability: capById.get(r.id)!.capability!, canModerate: capById.get(r.id)!.canModerate, accentKey: r.accent_key,
+    ...toSpace(r), capability: capById.get(r.id)!.capability!, canModerate: capById.get(r.id)!.canModerate, canManageAccess: capById.get(r.id)!.canManageAccess, accentKey: r.accent_key,
     iconImageUrl: r.icon_image_key ? `/spaces/${r.id}/icon-image` : null,
     homePageId: homeVisible.get(r.id) ? r.home_page_id : null,
     deleteMode: (r.delete_mode ?? r.tenant_delete_mode ?? 'trash_only') as 'trash_only' | 'both' | 'direct_only',
@@ -373,8 +378,11 @@ export async function updateSpace(
 // by — someone without authority. Grantees are members (user:<sub>) or groups
 // (group:<id>#member); share_link / wildcard are not hand-grantable.
 // #330 / ADR-141 adds `moderate` → space#moderator (revert/freeze/patrol + page edit via the bypass; NOT manage).
-export type SpaceCapability = 'view' | 'comment' | 'edit' | 'moderate' | 'manage'
-const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'manage']
+// ADR-209 (#607): `manageAccess` — the membership verb (space#access_manager). Built-in only, like
+// `manage`: absent from ROLE_CAPABILITIES so no custom role can bundle it, reachable through the
+// built-in door alone, and ADMIN-CLASS for the ceiling below (a holder cannot appoint another).
+export type SpaceCapability = 'view' | 'comment' | 'edit' | 'moderate' | 'manage' | 'manageAccess'
+const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'manage', 'manageAccess']
 // Capability vocabulary (shared with page access) → the space's FGA relations.
 // #274 / ADR-135: a member EDIT grant writes `editor_member` (the member-only leaf viewer_member /
 // template#view reference); `editor` itself now carries only space edit SHARE-LINKS. The reverse map
@@ -385,7 +393,7 @@ const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'm
 // #514 / ADR-188 §6: the built-in grant no longer keeps its own capability→relation table. Both this path
 // and the custom-role assignment expand through space-grant-expansion.ts, so the two cannot drift (the gap
 // between them is where the #485 bug lived).
-export const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', commenter: 'comment', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage' }
+export const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', commenter: 'comment', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage', access_manager: 'manageAccess' }
 
 // #258 / ADR-110: a member VIEW grant writes BOTH `viewer` (unchanged — pages inherit view via
 // view_base_from_space = viewer from space, and existing readers of `viewer` are untouched) AND
@@ -416,7 +424,7 @@ function requireGroupGrantEntitlement(grantee: string, plan: string | undefined)
 
 function validateSpaceGrant(grantee: string, capability: string): asserts capability is SpaceCapability {
   if (!SPACE_CAPS.includes(capability as SpaceCapability)) {
-    throw Object.assign(new Error('relation must be view, comment, edit, moderate, or manage'), { statusCode: 400 })
+    throw Object.assign(new Error('relation must be view, comment, edit, moderate, manage, or manageAccess'), { statusCode: 400 })
   }
   if (!/^user:[^*\s]+$/.test(grantee) && !/^group:[^\s]+#member$/.test(grantee)) {
     throw Object.assign(new Error('grantee must be user:<sub> or group:<id>#member'), { statusCode: 400 })
@@ -426,6 +434,31 @@ function validateSpaceGrant(grantee: string, capability: string): asserts capabi
 async function requireSpaceManage(fga: OpenFgaClient, userId: string, spaceId: string): Promise<void> {
   const canManage = await check(fga, `user:${userId}`, 'manage', { type: 'space', id: spaceId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+}
+
+// ADR-209 (#607) §2: the MEMBERSHIP gate, with its ceiling. The ten roster sites ask this instead of
+// requireSpaceManage; a manager passes through the model's `or manager`.
+//
+// The ceiling's rule is "does this call MOVE an admin-class relation" — not "is the requested
+// capability admin-class", which is the one-boolean hole rev1 shipped: `replace: true` sweeps whatever
+// the principal held, INCLUDING the manager row and the rowless owner mark, so a call that names only
+// `view` can demote the space's owner. Admin-class = the set the code already has
+// (ADMIN_CLASS_ROLE_CAPS: delete/share/settings/publish/moderate) plus `manage` and — deliberately
+// `manageAccess` itself: without that, a holder could appoint further holders with no manager involved
+// and no record of who delegated to whom (thepage-scope answer to the same question).
+// In one sentence: this verb runs the roster of READERS and EDITORS; it cannot appoint or remove a
+// moderator, a manager, or another holder of itself.
+export function spaceCallMovesAdminClass(capabilities: readonly string[], replace?: boolean): boolean {
+  return replace === true
+    || capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as never) || c === 'manage' || c === 'manageAccess')
+}
+async function requireSpaceAccessAuthority(
+  fga: OpenFgaClient, userId: string, spaceId: string,
+  opts: { capabilities: readonly string[]; replace?: boolean },
+): Promise<void> {
+  if (spaceCallMovesAdminClass(opts.capabilities, opts.replace)) return requireSpaceManage(fga, userId, spaceId)
+  const ok = await check(fga, `user:${userId}`, 'manageAccess', { type: 'space', id: spaceId })
+  if (!ok) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 }
 
 // Tenant-wide spaces overview for the admin console (Phase 5 #4). tenant#admin
@@ -690,7 +723,9 @@ export async function grantSpaceAccess(
 ): Promise<void> {
   validateSpaceGrant(args.grantee, args.capability)
   requireGroupGrantEntitlement(args.grantee, args.plan)
-  await requireSpaceManage(fga, args.userId, args.spaceId)
+  // ADR-209 (#607): the roster gate. Admin-class capabilities and replace-mode calls still require
+  // `manage` (the ceiling); everything else is the membership verb's job.
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [args.capability], replace: args.replace })
   // #536 / ADR-188 §6 item 1: a built-in grant IS a role assignment now. It goes through the same helper a
   // custom role does, differing only in which column of the row identifies what was granted -- so a
   // built-in grant finally participates in the reference count that decides whether a shared leaf may be
@@ -763,7 +798,7 @@ export async function grantSpaceAccessComposite(
   if (!allowed.some((b) => sameCapSet(b, args.capabilities))) {
     throw Object.assign(new Error('unknown composite grant'), { statusCode: 400 })
   }
-  await requireSpaceManage(fga, args.userId, args.spaceId)
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: args.capabilities, replace: args.replace })
   // machine-row refusal across BOTH arms (the same 409 the single grant gives)
   const held = await db.sql<{ origin: string; builtin_capability: string | null }[]>`
     SELECT origin, builtin_capability FROM role_assignments
@@ -812,7 +847,7 @@ export async function revokeSpaceAccessComposite(
   if (!allowed.some((b) => sameCapSet(b, args.capabilities))) {
     throw Object.assign(new Error('unknown composite revoke'), { statusCode: 400 })
   }
-  await requireSpaceManage(fga, args.userId, args.spaceId)
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: args.capabilities })
   const rows = await db.sql<{ id: string; origin: string; builtin_capability: string }[]>`
     SELECT id, origin, builtin_capability FROM role_assignments
     WHERE resource_type = 'space' AND resource_id = ${args.spaceId} AND principal = ${args.grantee}
@@ -906,7 +941,9 @@ export async function revokeSpaceAccess(
   args: { spaceId: string; tenantId: string; userId: string; grantee: string; capability: string; plan?: string; replace?: boolean; groupName?: string },
 ): Promise<{ stillCovered: { capability: string; via?: string }[] }> {
   validateSpaceGrant(args.grantee, args.capability)
-  await requireSpaceManage(fga, args.userId, args.spaceId)
+  // ADR-209 (#607): revoking an admin-class capability (a manager, a moderator, another
+  // access-manager) still requires `manage`; `replace` is a revoke-in-disguise and takes the same door.
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [args.capability], replace: args.replace })
   // #536 / ADR-188 §6 item 1: revoke the ROW when there is one, so the reference count decides which
   // leaves may go. A principal holding both a `view` grant and a role bundling `view` keeps viewing after
   // either one is taken away — which is what "still granted" has always meant everywhere else.
@@ -974,8 +1011,10 @@ export async function listSpaceAccess(
   fga: OpenFgaClient,
   db: TenantDb,
   args: { spaceId: string; tenantId: string; userId: string },
-): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean }[]> {
-  await requireSpaceManage(fga, args.userId, args.spaceId)
+): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean }[]> {
+  // ADR-209 (#607): reading the roster is the verb's whole point. The per-row `revocable` signal below
+  // tells the CLIENT which rows this caller may take away (the server refuses anyway; two layers).
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [] })
   // #553 re-review N1: paginated — a bare read answers ONE page (50) and the comment arm falling off
   // it would draw an unfolded editor row whose revoke strips edit but leaves comment behind.
   const tuples = await readObjectTuples(fga, `space:${args.spaceId}`)
@@ -1005,7 +1044,11 @@ export async function listSpaceAccess(
     WHERE a.resource_type = 'space' AND a.resource_id = ${args.spaceId}`) {
     for (const c of r.caps ?? []) (r.builtin_capability != null ? builtinOwned : customOwned).add(`${r.principal} ${c}`)
   }
-  const out: { grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean }[] = []
+  // ADR-209 (#607): which rows may THIS caller take away. An access_manager sees the manager /
+  // moderator / access-manager rows but may not revoke them (the ceiling); a bare × on those rows is
+  // a button that answers 403, so the payload says per row what the server will do.
+  const callerIsManager = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
+  const out: { grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean }[] = []
   for (const key of tuples) {
     if (!(key.relation in RELATION_TO_CAP)) continue
     // Direct member/group grants only — never expose share_link, user:* (public)
@@ -1019,6 +1062,7 @@ export async function listSpaceAccess(
       ...(groupName ? { groupName } : {}),
       ...(groupName && !confirmed.has(groupName) ? { groupUnconfirmed: true } : {}),
       ...(managed.has(`${key.user} ${cap}`) ? { managed: true } : {}),
+      revocable: callerIsManager || !spaceCallMovesAdminClass([cap]),
     })
   }
   // #523 / ADR-190: FULL name resolution (override ?? OIDC display_name) for the USER grantees. This is a
@@ -1201,7 +1245,10 @@ export async function listTenantGroups(
   fga: OpenFgaClient,
   args: { spaceId: string; userId: string },
 ): Promise<string[]> {
-  await requireSpaceManage(fga, args.userId, args.spaceId)
+  // ADR-209 (#607) §4: a deliberate WIDENING, called out in the ADR — the tenant's group names open to
+  // a space-scoped verb, because a roster you cannot complete a grantee into is not operable. What is
+  // exposed does not change, only which verb opens it.
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [] })
   const rows = await db.sql<{ g: string }[]>`
     SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL ORDER BY g
   `
@@ -1217,7 +1264,8 @@ export async function listMemberCandidates(
   fga: OpenFgaClient,
   args: { spaceId: string; userId: string; q: string },
 ): Promise<{ sub: string; displayName: string | null }[]> {
-  await requireSpaceManage(fga, args.userId, args.spaceId)
+  // ADR-209 (#607) §4: same deliberate widening as listTenantGroups, same reasoning.
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [] })
   return searchMemberCandidates(db, args.q)
 }
 

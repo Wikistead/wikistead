@@ -158,7 +158,10 @@ export async function buildSearchDoc(
       // for published, non-private pages; moderator has no share_link/wildcard types).
       // #420 / ADR-164 (Rider 3): the space-scoped capability relations confer page view (viewable
       // union) on the space's published, non-private pages — same private-cut context as this block.
-      if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator', 'deleter', 'sharer', 'settings_editor', 'publisher', 'commenter'].includes(key.relation)) continue
+      // ADR-209 (#607): 'access_manager' — the verb reaches page view via viewer (space view is the
+      // root of page-view inheritance), and a relation missing here is an UNDER-inclusion (FGA says
+      // view while stage-1 hides the page), the failure search-model-drift-387 forbids.
+      if (!key || !['manager', 'editor', 'editor_member', 'viewer', 'moderator', 'access_manager', 'deleter', 'sharer', 'settings_editor', 'publisher', 'commenter'].includes(key.relation)) continue
       categorize(key.user, viewerUsers, viewerGroups, setPublic)
     }
     // ONLY the admin tuples. The tenant object holds one `member` tuple per member and the loop threw

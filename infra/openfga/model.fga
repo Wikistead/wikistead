@@ -95,6 +95,12 @@ type space
     # NOT inherit space#editor (no viewer_member / template#view; not in the search denorm — a ruled v1
     # under-permission, ADR-141). Guests can never be moderators (no share_link type).
     define moderator: [user, group#member] or manager
+    # ADR-209 (#607): the MEMBERSHIP verb — "run this space's roster of readers and editors, without
+    # holding the space". Additive: `manager` is not redefined (`or manager` keeps every manager
+    # passing), and the application-level CEILING (ADR-209 §2) is what stops a holder appointing
+    # managers, moderators, or further access_managers. Exclusive like the other built-ins (the sweep
+    # exempts only `manage`).
+    define access_manager: [user, group#member] or manager
     # #258 / ADR-110: viewer_member = space members who can view (NO public wildcard, NO share_link). It is
     # the MEMBER-ONLY subset of viewer, used by template#view so a public/shared space never exposes its
     # space-scoped templates to guests/anon. Kept as a DIRECT-assignable relation (its own tuples) so the
@@ -125,7 +131,13 @@ type space
     # view access to every page in S. Revoke = delete that tuple (1 op).
     # Permanent links omit condition; time-bounded links use non_expired.
     # (Issuance API implemented in #104 / ADR-038.)
-    define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or viewer_member or commenter
+    # ADR-209 (#607): `or access_manager` — the holder must SEE the space (listSpaces reads space view)
+    # or the settings screen the verb exists for is unreachable. On `viewer`, NOT `viewer_member`, for
+    # the reason #529already paid for: viewer_member's only consumer is template#view, and a
+    # roster verb must not quietly reach the space's shared templates. Consequence (stated, not
+    # discovered): the holder reads the space's published, non-private pages — space view is the root
+    # of page-view inheritance and a roster its holder cannot see is not a feature.
+    define viewer: [user, group#member, user:*, share_link, share_link with non_expired] or viewer_member or commenter or access_manager
     define admin: admin from tenant
     # Comment AUDIENCE switch at the space level (#100 / ADR-029 Option B). Toggling comments on a
     # space writes/deletes these wildcard tuples (is_public-style; FGA stays the source of truth):

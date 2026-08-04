@@ -40,7 +40,8 @@ describe("#586: the list a badge shows", () => {
   });
 
   it("the nouns and the table cover the same built-ins (neither grows without the other)", () => {
-    expect(Object.keys(BUILTIN_EFFECTIVE_CAPS).sort()).toEqual(["comment", "edit", "manage", "moderate", "view"]);
+    // #607 / ADR-209: manageAccess joined both (noun `access-manager`; measured row in the truth test)
+    expect(Object.keys(BUILTIN_EFFECTIVE_CAPS).sort()).toEqual(["comment", "edit", "manage", "manageAccess", "moderate", "view"]);
     for (const key of Object.keys(BUILTIN_EFFECTIVE_CAPS)) expect(capNoun(key)).not.toBe(key);
   });
 });
