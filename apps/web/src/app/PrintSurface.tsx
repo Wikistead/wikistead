@@ -45,6 +45,7 @@ export function PrintSurface({ md, title, diagram }: {
     // Lazy-import the renderer (it lives in the CM6 editor bundle; the reading route already pulls that in,
     // so this adds ~nothing eager).
     void import("../editor/macros/md-render").then(async ({ renderMarkdownToDom, withDiagramHost, withEmbedHost }) => {
+      const { withMacroTheme } = await import("../editor/macros/theme");
       if (cancelled || !bodyRef.current) return;
       const { buildEmbedElement } = await import("../editor/macros/embed");
       if (cancelled || !bodyRef.current) return;
@@ -57,9 +58,12 @@ export function PrintSurface({ md, title, diagram }: {
       // source, screen shows a figure" gap on the one path that still comes through here. These renders are
       // asynchronous and fill themselves in — the portal is built when the body changes, long before anyone
       // reaches for File → Print, so by then they have drawn.
-      withDiagramHost(diagram ?? null, () => withEmbedHost(embed, () => {
+      // #207 PAPER is light (the ruling), and a diagram bakes its theme into its pixels —
+      // so the RENDER runs under the light override, not just the stylesheet. The screen stays
+      // theme-following; only this portal (and the export document, same treatment) pins.
+      withMacroTheme("light", () => withDiagramHost(diagram ?? null, () => withEmbedHost(embed, () => {
         bodyRef.current!.replaceChildren(renderMarkdownToDom(md));
-      }));
+      })));
       // #207 (review rejection, 2026-08-04): paper has no "click to open". The export document already opens
       // every disclosure on the way out; the portal — the one path the app cannot intercept — printed a
       // closed <details> as its summary line and nothing else, which is the content-loss class this

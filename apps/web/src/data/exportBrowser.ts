@@ -42,9 +42,12 @@ async function renderBody(md: string, hosts?: ExportHosts): Promise<HTMLElement>
     ? { handles: (l: string) => hosts.diagram!.handles(l),
         render: (l: string, src: string) => { const p = hosts.diagram!.render(l, src); pending.push(p.catch(() => null)); return p } }
     : null;
-  withDiagramHost(tracked, () => withEmbedHost({ build: (url: string) => buildEmbedElement(url, []) }, () => {
+  // #207 same light pin as the print portal — the export document is `data-theme="light"`
+  //, and a dark-baked SVG on that light page is the defect being fixed.
+  const { withMacroTheme } = await import("../editor/macros/theme");
+  withMacroTheme("light", () => withDiagramHost(tracked, () => withEmbedHost({ build: (url: string) => buildEmbedElement(url, []) }, () => {
     host.appendChild(renderMarkdownToDom(md));
-  }));
+  })));
   // The cap is generous because the alternative is a file that quietly lost a figure, and it only binds
   // when a renderer is genuinely slow — a normal render resolves long before it.
   await Promise.race([
