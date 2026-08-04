@@ -1,6 +1,8 @@
 import { EditorSelection, type ChangeSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
+import { linkAt, linkLabel, linkUrl } from "./link-at"; // #611: THE structural link judge (ADR-211 §1)
+import { displayMode, linkPrompt, linkHref } from "./decorations";
 
 // SyntaxNode derived from syntaxTree's return type — @lezer/common is a transitive dep we don't
 // declare (pnpm strict node_modules), and @codemirror/language doesn't re-export the type.
@@ -168,6 +170,24 @@ export const INLINE_FORMATS: InlineFormat[] = [
   { id: "link", symbol: "Link", labelKey: "lpToolbar.link", mnemonic: "l", run: insertLink },
 ];
 
+// #611 / ADR-211 §4: unlink — replace the FULL Link node with its label, one offset-invariant
+// dispatch. The node, not the selection, is what is replaced, so a partial selection cannot leave
+// `](url)` shrapnel. Judged by the same linkAt as everything else; a range touching no Link (or an
+// Autolink / bare URL / Image — different node names, ADR §5) does nothing.
+export function unlink(view: EditorView): void {
+  const { state } = view;
+  const sel = state.selection.main;
+  const hit = linkAt(state, sel.from, sel.to);
+  if (!hit) return;
+  const label = linkLabel(state, hit);
+  view.dispatch({
+    changes: { from: hit.from, to: hit.to, insert: label },
+    selection: EditorSelection.cursor(hit.from + label.length),
+    scrollIntoView: true,
+  });
+  view.focus();
+}
+
 // Uploads a chosen image file and returns the reference + alt to insert (or null
 // to cancel/fail). Provided by the host (it knows the page + auth); omitted = no
 // image entry (e.g. guests, or surfaces without an uploader). Lives here with
@@ -192,8 +212,64 @@ export function insertAttachment(view: EditorView, name: string, ref: string): v
 }
 
 // over. With a selection, the selected text becomes the link label.
+//
+// #611 / ADR-211 §2: the FORK lives HERE, not in the callers — this command has FIVE doors (toolbar,
+// the `\` decorate palette, its mnemonic `l`, the right-click menu, `/link`), and a caller-side fork
+// would leave three of them splicing raw markup into a mode that hides it. In WYSIWYG (where the
+// splice is an INVISIBLE insertion — the url placeholder is marker-hidden, so nothing appears and an
+// empty-selection insert vanishes entirely) the command opens the LINK DIALOG instead; nothing is
+// written until confirm, and cancel leaves the doc byte-identical. In every mode, a range touching an
+// existing link upgrades to EDIT of that link — the nesting guard is mode-independent.
 export function insertLink(view: EditorView): void {
   const { state } = view;
+  const sel = state.selection.main;
+  const hit = linkAt(state, sel.from, sel.to);
+  const prompt = state.facet(linkPrompt);
+  if (state.facet(displayMode) === "wysiwyg" && prompt) {
+    const init = hit && hit.hasUrl
+      ? { text: linkLabel(state, hit), url: linkUrl(state, hit), existing: true }
+      : hit
+        ? null // a reference link `[a][ref]`: dialog-editing would silently rewrite it to inline (ADR §5) — fall through to plain text handling below
+        : { text: state.doc.sliceString(sel.from, sel.to), url: "", existing: false };
+    if (init) {
+      prompt(init, (r) => {
+        if (r.action === "cancel") { view.focus(); return; }
+        // re-resolve at CONFIRM time: the doc may have moved under the modal (collab); the judge, not
+        // a captured offset, decides what is replaced (offset-invariant per-op commit)
+        const now = view.state;
+        const nowSel = now.selection.main;
+        const nowHit = linkAt(now, nowSel.from, nowSel.to);
+        if (r.action === "unlink") {
+          if (nowHit) view.dispatch({ changes: { from: nowHit.from, to: nowHit.to, insert: linkLabel(now, nowHit) } });
+          view.focus();
+          return;
+        }
+        // confirm — refused upstream by the dialog unless linkHref resolves (an empty URL renders RAW
+        // in WYSIWYG via the bare-shortcut rule); the belt here keeps a misbehaving host honest
+        if (!linkHref(`[x](${r.url})`)) { view.focus(); return; }
+        const md = `[${r.text}](${r.url})`;
+        const target = nowHit ?? { from: nowSel.from, to: nowSel.to };
+        view.dispatch({
+          changes: { from: target.from, to: target.to, insert: md },
+          selection: EditorSelection.cursor(target.from + md.length),
+          scrollIntoView: true,
+        });
+        view.focus();
+      });
+      return;
+    }
+  }
+  // Live/Source (and WYSIWYG with no seam): inside a link the command is EDIT-in-place, expressed
+  // natively — select the URL range (never nest a second link). A reference link has no URL child;
+  // selecting its whole node is the honest "here it is" answer.
+  if (hit) {
+    view.dispatch({
+      selection: hit.hasUrl ? EditorSelection.range(hit.urlFrom, hit.urlTo) : EditorSelection.range(hit.from, hit.to),
+      scrollIntoView: true,
+    });
+    view.focus();
+    return;
+  }
   const tr = state.changeByRange((range) => {
     const before = "[";
     const mid = "](";

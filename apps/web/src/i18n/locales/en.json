@@ -943,7 +943,8 @@
     "highlight": "Highlight",
     "tagged": "Tagged pages (dynamic list)",
     "children": "Child pages (dynamic list)",
-    "pageTags": "Page tags (frontmatter)"
+    "pageTags": "Page tags (frontmatter)",
+    "unlink": "Remove link"
   },
   "calloutEdit": {
     "title": "Edit callout",
@@ -1393,5 +1394,13 @@
     "role": "This role can:",
     "individual": "Granted individually. This person can:",
     "label": "Can: {{caps}}"
+  },
+  "linkDialog": {
+    "insertTitle": "Insert link",
+    "editTitle": "Edit link",
+    "textLabel": "Text",
+    "urlLabel": "URL",
+    "invalidUrl": "Enter an http(s) or mailto URL, or a relative path.",
+    "removeLink": "Remove link"
   }
 }

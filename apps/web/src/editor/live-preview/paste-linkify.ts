@@ -3,6 +3,7 @@ import type { Extension, EditorState } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import { getCM } from "@replit/codemirror-vim";
 import { safeHref } from "../macros/md-render";
+import { linkAt, linksTouching } from "./link-at"; // #611: THE structural link judge (ADR-211 §1)
 import { completeBlockChunk, blockPasteInsert } from "./block-paste";
 import { innermostMacroAt } from "./decorations";
 
@@ -81,13 +82,13 @@ export function linkCopyRange(
   selFrom: number,
   selTo: number,
 ): { from: number; to: number; plain: string; html?: string } | null {
-  const tree = syntaxTree(state);
-  let from = selFrom, to = selTo, links = 0;
-  let only: { from: number; to: number } | null = null;
-  tree.iterate({ from: selFrom, to: selTo, enter: (n) => {
-    if (n.name === "Link") { from = Math.min(from, n.from); to = Math.max(to, n.to); links++; only = { from: n.from, to: n.to }; }
-  } });
-  if (links === 0) return null;
+  // #611 / ADR-211 §1: this used to be the second hand-rolled tree walk — it now reads the ONE judge.
+  const hits = linksTouching(state, selFrom, selTo);
+  if (hits.length === 0) return null;
+  const from = Math.min(selFrom, hits[0]!.from);
+  const to = Math.max(selTo, hits[hits.length - 1]!.to);
+  const links = hits.length;
+  const only: { from: number; to: number } | null = links === 1 ? { from: hits[0]!.from, to: hits[0]!.to } : null;
   const plain = state.sliceDoc(from, to);
   let html: string | undefined;
   if (links === 1 && only && (only as { from: number; to: number }).from === from && (only as { from: number; to: number }).to === to) {
@@ -174,6 +175,24 @@ export function pasteLinkify(): Extension {
       if (md == null) { dbg.result = "no-linkify:default-paste"; return; } // not a linkify case → CM pastes
       e.preventDefault();
       e.stopImmediatePropagation(); // capture phase → keep CM's own paste from also running
+      // #611 / ADR-211 §3: pasting a URL over a selection INSIDE an existing link used to wrap a second
+      // link around part of the first — `[a[b](u2)](u1)` — and this is the most reachable nesting path
+      // (Ctrl+V a URL in WYSIWYG). The shared judge decides: inside a link, the paste becomes "replace
+      // THAT link's URL" — an edit, not a wrap. The plain-text linkify fast-path is unchanged.
+      const hit = linkAt(view.state, sel.from, sel.to);
+      if (hit && hit.hasUrl) {
+        const pastedUrl = /\]\(([^)]*)\)$/.exec(md)?.[1];
+        if (pastedUrl) {
+          view.dispatch({
+            changes: { from: hit.urlFrom, to: hit.urlTo, insert: pastedUrl },
+            selection: { anchor: hit.urlFrom + pastedUrl.length },
+            userEvent: "input.paste",
+            scrollIntoView: true,
+          });
+          dbg.result = "linkified:retargeted-existing-link";
+          return;
+        }
+      }
       view.dispatch(view.state.replaceSelection(md), { scrollIntoView: true });
       dbg.result = "linkified:inserted";
     };

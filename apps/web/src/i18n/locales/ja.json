@@ -943,7 +943,8 @@
     "highlight": "マーカー",
     "tagged": "タグのページ一覧（動的）",
     "children": "子ページ一覧（動的）",
-    "pageTags": "ページのタグ（frontmatter）"
+    "pageTags": "ページのタグ（frontmatter）",
+    "unlink": "リンクを解除"
   },
   "calloutEdit": {
     "title": "コールアウトを編集",
@@ -1392,5 +1393,13 @@
     "role": "このロールでできること:",
     "individual": "個別に付与された権限です。できること:",
     "label": "できること: {{caps}}"
+  },
+  "linkDialog": {
+    "insertTitle": "リンクを挿入",
+    "editTitle": "リンクを編集",
+    "textLabel": "テキスト",
+    "urlLabel": "URL",
+    "invalidUrl": "http(s) / mailto の URL か相対パスを入力してください。",
+    "removeLink": "リンクを解除"
   }
 }

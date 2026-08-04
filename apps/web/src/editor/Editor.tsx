@@ -17,10 +17,11 @@ import { makeResolverSet } from "./resolver-set"; // #381 / ADR-163: the surface
 import { makeLinkStatusResolver } from "./link-status";
 import { PageEmbedPicker } from "./PageEmbedPicker";
 import { EmbedUrlModal } from "./EmbedUrlModal";
+import { LinkPromptModal } from "./LinkPromptModal"; // #611: the WYSIWYG link dialog
 import { TagPickerModal } from "./TagPickerModal";
 import { TemplatePickerDialog } from "../sidebar/TemplatePickerDialog";
 import type { PageEmbedPicker as PageEmbedPickerFn, TemplateInsertPicker as TemplateInsertPickerFn } from "./live-preview/palette";
-import type { EmbedUrlPrompt as EmbedUrlPromptFn } from "./live-preview/decorations";
+import type { EmbedUrlPrompt as EmbedUrlPromptFn, LinkPromptResult as LinkPromptResultFn } from "./live-preview/decorations";
 import { useEmbedProviders, useTitleDictionary } from "../data/queries";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -234,6 +235,19 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   // resolve pattern as the page picker; the modal is seeded with the current URL and warns on a
   // non-allowlisted host (the render still degrades — this is UI only).
   const [embedUrlState, setEmbedUrlState] = useState<{ open: boolean; current: string }>({ open: false, current: "" });
+  // #611 / ADR-211 §6: the link dialog — same stash/open/resolve pattern as the two prompts above.
+  const [linkPromptState, setLinkPromptState] = useState<{ open: boolean; init: { text: string; url: string; existing: boolean } }>({ open: false, init: { text: "", url: "", existing: false } });
+  const linkPromptResolve = useRef<((r: LinkPromptResultFn) => void) | null>(null);
+  const openLinkPrompt = useCallback((init: { text: string; url: string; existing: boolean }, onDone: (r: LinkPromptResultFn) => void) => {
+    linkPromptResolve.current = onDone;
+    setLinkPromptState({ open: true, init });
+  }, []);
+  const handleLinkPrompt = useCallback((r: LinkPromptResultFn) => {
+    setLinkPromptState((s2) => ({ ...s2, open: false }));
+    const resolve = linkPromptResolve.current;
+    linkPromptResolve.current = null;
+    resolve?.(r);
+  }, []);
   const embedUrlResolve = useRef<((url: string | null) => void) | null>(null);
   const openEmbedUrlPrompt = useCallback<EmbedUrlPromptFn>((current, onSubmit) => {
     embedUrlResolve.current = onSubmit;
@@ -470,6 +484,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       embedProviders,
       openPageEmbedPicker,
       openEmbedUrlPrompt,
+      openLinkPrompt, // #611
       tagSuggest, // #413
       openTagPrompt, // #413
       openTemplateInsertPicker,
@@ -550,7 +565,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openTemplateInsertPicker, onUploadImage, titleLinks, tagSuggest, openTagPrompt]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openLinkPrompt, openTemplateInsertPicker, onUploadImage, titleLinks, tagSuggest, openTagPrompt]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.
@@ -641,6 +656,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       {/* #205 part 2: the :::embed-page title-search picker (opened from the slash command). */}
       <PageEmbedPicker open={embedPickerOpen} onPick={handleEmbedPick} />
       <EmbedUrlModal open={embedUrlState.open} current={embedUrlState.current} onSubmit={handleEmbedUrl} />
+      <LinkPromptModal open={linkPromptState.open} init={linkPromptState.init} onDone={handleLinkPrompt} />
       <TagPickerModal open={tagPromptOpen} onSubmit={handleTagPick} />
       {/* #251: "/"-palette Insert template picker. spaceId is null here (the page's space isn't threaded
           into the editor), so the "This space" group shows all space-scope templates the user can view. */}

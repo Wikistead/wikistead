@@ -7,7 +7,7 @@ import { markdownExtension } from "./markdown-config";
 import { yCollab } from "y-codemirror.next";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { livePreview, selectionTouched, reAnchorAfterReveal, atomClipboard, atomSelectionTint, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, coEditHost, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type CoEditHost, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt } from "./live-preview/decorations";
+import { livePreview, selectionTouched, reAnchorAfterReveal, atomClipboard, atomSelectionTint, livePreviewTheme, linkClicks, blockEntry, wysiwygInlineSkip, motionKeyTracker, vimEnabled, displayMode, imageResolver, attachmentResolver, diagramRenderer, transcludeResolver, listSource, linkStatusResolver, embedAllowlist, embedUrlPrompt, linkPrompt, tagSuggestSource, tagPrompt, checkboxControl, enterMacroCommand, nestedDeleteChange, ephemeralCollab, macroPresence, coEditHost, nestedLivePreviewConfig, type ImageResolver, type AttachmentResolver, type DiagramRenderer, type TranscludeResolver, type ListSource, type LinkStatusResolver, type DisplayMode, type EphemeralCollabFactory, type MacroPresence, type CoEditHost, type EmbedUrlPrompt, type TagSuggestSource, type TagPrompt, type LinkPrompt } from "./live-preview/decorations";
 import { deadLinks } from "./live-preview/dead-links"; // #276 / ADR-117: dead-internal-link strikethrough overlay
 import { blockAnchors } from "./live-preview/block-anchor"; // #325 / ADR-137 slice 2: hide trailing ` ^id` markers
 import { commentHighlights, commentHighlightTheme } from "./live-preview/comment-highlights";
@@ -117,6 +117,9 @@ export interface LivePreviewSharedOpts {
   embedProviders?: readonly string[];
   openPageEmbedPicker?: PageEmbedPicker;
   openEmbedUrlPrompt?: EmbedUrlPrompt;
+  // #611 / ADR-211 §6: the LINK DIALOG seam (insert/edit/unlink in WYSIWYG). Same closure reaches the
+  // nested islands via this shared opts object, so the dialog works inside columns/callouts unwired.
+  openLinkPrompt?: LinkPrompt;
   tagSuggest?: TagSuggestSource; // #413: view-filtered tag suggestions (member surfaces)
   openTagPrompt?: TagPrompt; // #413: the :::tagged tag picker
   openTemplateInsertPicker?: TemplateInsertPicker;
@@ -259,6 +262,7 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     ...(opts.embedProviders ? [embedAllowlist.of(opts.embedProviders)] : []),
     // #210 bounce: host seam for the in-app :::embed-external URL modal (retarget button → modal, not window.prompt).
     ...(opts.openEmbedUrlPrompt ? [embedUrlPrompt.of(opts.openEmbedUrlPrompt)] : []),
+    ...(opts.openLinkPrompt ? [linkPrompt.of(opts.openLinkPrompt)] : []), // #611: the link dialog
     ...(opts.tagSuggest ? [tagSuggestSource.of(opts.tagSuggest)] : []), // #413
     ...(opts.openTagPrompt ? [tagPrompt.of(opts.openTagPrompt)] : []), // #413
     search({ top: true }), // #402: find/replace panel config (opened by the non-vim keymap above)
