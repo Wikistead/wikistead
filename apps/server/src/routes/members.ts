@@ -113,9 +113,27 @@ export async function membersPlugin(app: FastifyInstance) {
     // ADR-207 rev3 (#603): `groups` joins a person to what a group confers on them (the admin-via-group
     // marker). This surface is admin-gated and the group rows themselves are already listed here, so
     // nothing new is disclosed — the screen just stops guessing.
+    //
+    // #614: three status columns the screen was blind to, none a new disclosure on an admin-gated list:
+    //   has_password — a credential row exists (existence only; the hash never rides this SELECT, which
+    //     is the reason local_credentials is its own table). The UI uses it to stop offering "add a
+    //     password entrance" to somebody who already has one — a button that could only fail (#606).
+    //   identity_source — who minted the identity (IdP vs this product), migration 083.
+    //   deactivated_at — a SCIM-suspended member looked identical to a live one here. Rows stay listed:
+    //     deactivation is a freeze, not a removal (migration 037), and hiding them would make the seat
+    //     they still occupy invisible. Role changes while suspended are MEANINGFUL: reactivation
+    //     re-derives FGA from members.role (ee-server provision.ts), so the change takes effect then.
     const rows = await req.db.sql<
-      { sub: string; email: string | null; display_name: string | null; picture_url: string | null; role: string; groups: string[] | null; created_at: Date }[]
-    >`SELECT sub, email, display_name, picture_url, role, groups, created_at FROM members ORDER BY created_at`
+      {
+        sub: string; email: string | null; display_name: string | null; picture_url: string | null
+        role: string; groups: string[] | null; created_at: Date
+        identity_source: string; deactivated_at: Date | null; has_password: boolean
+      }[]
+    >`SELECT m.sub, m.email, m.display_name, m.picture_url, m.role, m.groups, m.created_at,
+             m.identity_source, m.deactivated_at, (lc.member_sub IS NOT NULL) AS has_password
+      FROM members m
+      LEFT JOIN local_credentials lc ON lc.tenant_id = m.tenant_id AND lc.member_sub = m.sub
+      ORDER BY m.created_at`
     return { members: rows }
   })
 
