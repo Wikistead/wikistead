@@ -18,7 +18,7 @@ import type IORedis from 'ioredis'
 import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
-import { localLoginEnabled } from '../auth/login-methods.js'
+import { localLoginEnabled, loginMethodCeiling } from '../auth/login-methods.js'
 import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/password-hash.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { validatePasswordPolicy, PASSWORD_MIN_LENGTH } from '../auth/password-policy.js'
@@ -112,6 +112,12 @@ export async function authLocalPlugin(app: FastifyInstance) {
   // holder of a dead link learns "this link does not work", never anything about the tenant.
   app.post<{ Body: { token?: string; password?: string } }>(
     '/auth/local/accept', { config: { public: true } }, async (req, reply) => {
+      // #613 / ADR-198 §3 M8: the deployment CEILING gates the endpoint, not just the screen. Same
+      // uniform not-found as the OIDC/SAML surfaces (ADR-195 §7) — a deployment that excludes `local`
+      // has no password attack surface, and no probe learns the method exists. A DIFFERENT predicate
+      // from the #605 stance on purpose: the stance is tenant policy and lets exemptions through; the
+      // ceiling is deployment policy and admits no exceptions.
+      if (!loginMethodCeiling().has('local')) return reply.code(404).send({ error: 'not found' })
       if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
         return reply.code(403).send({ error: 'forbidden' })
       }
@@ -163,6 +169,13 @@ export async function authLocalPlugin(app: FastifyInstance) {
   // Rate-limited on BOTH sides: per address, so nobody can be mail-bombed by repeating one, and per
   // source, so a list of addresses cannot be walked. Both refusals are the same 204.
   app.post<{ Body: { identifier?: string } }>('/auth/local/reset-request', { config: { public: true } }, async (req, reply) => {
+      // #613 / ADR-198 §3 M8: the deployment CEILING gates the endpoint, not just the screen. Same
+      // uniform not-found as the OIDC/SAML surfaces (ADR-195 §7) — a deployment that excludes `local`
+      // has no password attack surface, and no probe learns the method exists. A DIFFERENT predicate
+      // from the #605 stance on purpose: the stance is tenant policy and lets exemptions through; the
+      // ceiling is deployment policy and admits no exceptions.
+      if (!loginMethodCeiling().has('local')) return reply.code(404).send({ error: 'not found' })
+
     if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
       return reply.code(403).send({ error: 'forbidden' })
     }
@@ -219,6 +232,13 @@ export async function authLocalPlugin(app: FastifyInstance) {
   // tenant that switched passwords off answer identically, and only the policy failure is its own
   // answer (the person is choosing a password right now).
   app.post<{ Body: { token?: string; password?: string } }>('/auth/local/reset', { config: { public: true } }, async (req, reply) => {
+      // #613 / ADR-198 §3 M8: the deployment CEILING gates the endpoint, not just the screen. Same
+      // uniform not-found as the OIDC/SAML surfaces (ADR-195 §7) — a deployment that excludes `local`
+      // has no password attack surface, and no probe learns the method exists. A DIFFERENT predicate
+      // from the #605 stance on purpose: the stance is tenant policy and lets exemptions through; the
+      // ceiling is deployment policy and admits no exceptions.
+      if (!loginMethodCeiling().has('local')) return reply.code(404).send({ error: 'not found' })
+
     if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
       return reply.code(403).send({ error: 'forbidden' })
     }
@@ -265,6 +285,13 @@ export async function authLocalPlugin(app: FastifyInstance) {
   // member has no credential row, and creating one here would grow them a password the tenant's SSO
   // policy never authorised (the defect the ADR's rev2 shipped and the review caught).
   app.post<{ Body: { currentPassword?: string; newPassword?: string } }>('/auth/local/password', async (req, reply) => {
+      // #613 / ADR-198 §3 M8: the deployment CEILING gates the endpoint, not just the screen. Same
+      // uniform not-found as the OIDC/SAML surfaces (ADR-195 §7) — a deployment that excludes `local`
+      // has no password attack surface, and no probe learns the method exists. A DIFFERENT predicate
+      // from the #605 stance on purpose: the stance is tenant policy and lets exemptions through; the
+      // ceiling is deployment policy and admits no exceptions.
+      if (!loginMethodCeiling().has('local')) return reply.code(404).send({ error: 'not found' })
+
     const [row] = await req.db.sql<{ password_hash: string }[]>`
       SELECT password_hash FROM local_credentials WHERE member_sub = ${req.user.sub}`
     // No credential = not a local member. 404, not 403: whether this member signs in with a password
@@ -311,6 +338,12 @@ export async function authLocalPlugin(app: FastifyInstance) {
   // Host-resolved tenant, no session required — this is where a session comes from.
   app.post<{ Body: { identifier?: string; password?: string; returnTo?: string } }>(
     '/auth/local/login', { config: { public: true } }, async (req, reply) => {
+      // #613 / ADR-198 §3 M8: the deployment CEILING gates the endpoint, not just the screen. Same
+      // uniform not-found as the OIDC/SAML surfaces (ADR-195 §7) — a deployment that excludes `local`
+      // has no password attack surface, and no probe learns the method exists. A DIFFERENT predicate
+      // from the #605 stance on purpose: the stance is tenant policy and lets exemptions through; the
+      // ceiling is deployment policy and admits no exceptions.
+      if (!loginMethodCeiling().has('local')) return reply.code(404).send({ error: 'not found' })
       const deny = () => reply.code(401).send({ error: 'invalid credentials' })
       if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
         // Not a credential failure: nothing was checked, so nothing is counted and no event fires.
