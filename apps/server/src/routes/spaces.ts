@@ -381,8 +381,13 @@ export async function updateSpace(
 // ADR-209 (#607): `manageAccess` — the membership verb (space#access_manager). Built-in only, like
 // `manage`: absent from ROLE_CAPABILITIES so no custom role can bundle it, reachable through the
 // built-in door alone, and ADMIN-CLASS for the ceiling below (a holder cannot appoint another).
-export type SpaceCapability = 'view' | 'comment' | 'edit' | 'moderate' | 'manage' | 'manageAccess'
-const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'manage', 'manageAccess']
+export type SpaceCapability = 'view' | 'comment' | 'edit' | 'moderate' | 'manage' | 'manageAccess' | 'delete' | 'share' | 'settings'
+// #604 C (user ruling (a),/): the three admin-class leaves join the DIRECT-grant vocabulary
+// under the model's own leaf names (deleter / sharer / settings-editor — nothing invented). They were
+// grantable through custom roles all along; the built-in door refusing them was the "in the model but
+// not directly grantable" contradiction C exists to remove. All three are admin-class, so the ADR-209
+// ceiling below already answers WHO may hand them out: a manager, never an access-manager.
+const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'manage', 'manageAccess', 'delete', 'share', 'settings']
 // Capability vocabulary (shared with page access) → the space's FGA relations.
 // #274 / ADR-135: a member EDIT grant writes `editor_member` (the member-only leaf viewer_member /
 // template#view reference); `editor` itself now carries only space edit SHARE-LINKS. The reverse map
@@ -393,7 +398,7 @@ const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'm
 // #514 / ADR-188 §6: the built-in grant no longer keeps its own capability→relation table. Both this path
 // and the custom-role assignment expand through space-grant-expansion.ts, so the two cannot drift (the gap
 // between them is where the #485 bug lived).
-export const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', commenter: 'comment', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage', access_manager: 'manageAccess' }
+export const RELATION_TO_CAP: Record<string, SpaceCapability> = { viewer: 'view', commenter: 'comment', editor: 'edit', editor_member: 'edit', moderator: 'moderate', manager: 'manage', access_manager: 'manageAccess', deleter: 'delete', sharer: 'share', settings_editor: 'settings' }
 
 // #258 / ADR-110: a member VIEW grant writes BOTH `viewer` (unchanged — pages inherit view via
 // view_base_from_space = viewer from space, and existing readers of `viewer` are untouched) AND

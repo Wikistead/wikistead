@@ -67,6 +67,13 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
   // remove a moderator, a manager, or another holder of itself (the spaces.ts ceiling). The declared
   // list is minimal like moderator's; what it CONFERS is measured (role-capability-truth-586).
   { name: 'access-manager', capabilities: ['manageAccess'] },
+  // #604 C (user ruling (a)): the three admin-class leaves, under the model's own names — they were
+  // grantable via custom roles all along, and the built-in door now says so too. Declarations are
+  // minimal like moderator's; what each CONFERS is measured (role-capability-truth-586). All three sit
+  // inside the ADR-209 ceiling: a manager hands them out, an access-manager cannot.
+  { name: 'deleter', capabilities: ['delete'] },
+  { name: 'sharer', capabilities: ['share'] },
+  { name: 'settings-editor', capabilities: ['settings'] },
 ]
 // #552: RESERVED_NAMES derives from BUILT_IN_ROLES, so dropping `commenter` above deliberately
 // FREES the name for custom roles — reserving a name no built-in carries would be a claim with no

@@ -41,8 +41,11 @@ export const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
 // roster of readers and editors — the admin-class nouns (moderator, manager, access-manager itself)
 // are not theirs to hand out, and an option the server answers 403 to is not an option. A manager
 // additionally sees the new access-manager noun (it is theirs to delegate).
-export const GRANTABLE_FOR = (callerManages: boolean): (PageRelation | "manageAccess")[] =>
-  callerManages ? [...GRANTABLE, "manageAccess"] : ["view", "edit"];
+// #604 C (user ruling (a)): the three admin-class leaves join the manager's list under the model's own
+// nouns (deleter / sharer / settings-editor) — direct grants of what custom roles could always carry.
+// Admin-class, so only the manager branch: for anyone weaker the server answers 403.
+export const GRANTABLE_FOR = (callerManages: boolean): (PageRelation | "manageAccess" | "delete" | "share" | "settings")[] =>
+  callerManages ? [...GRANTABLE, "manageAccess", "delete", "share", "settings"] : ["view", "edit"];
 // #445 the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.

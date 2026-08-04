@@ -8,10 +8,11 @@ import { CAP_NOUN, capNoun, BUILTIN_EFFECTIVE_CAPS } from "./role-nouns";
 
 describe("#607: the picker's offer depends on the caller", () => {
   it("a manager sees everything plus the new noun; an access-manager only the roster verbs", () => {
-    expect(GRANTABLE_FOR(true)).toEqual([...GRANTABLE, "manageAccess"]);
+    // #604 C: the manager's list grew the three admin-class leaves (user ruling (a))
+    expect(GRANTABLE_FOR(true)).toEqual([...GRANTABLE, "manageAccess", "delete", "share", "settings"]);
     expect(GRANTABLE_FOR(false), "no admin-class noun is offered to a non-manager").toEqual(["view", "edit"]);
     for (const c of GRANTABLE_FOR(false)) {
-      expect(["moderate", "manage", "manageAccess"], `403-bound option ${c} must not be offered`).not.toContain(c);
+      expect(["moderate", "manage", "manageAccess", "delete", "share", "settings"], `403-bound option ${c} must not be offered`).not.toContain(c);
     }
   });
 

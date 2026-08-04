@@ -33,15 +33,19 @@ describe("#586: the list a badge shows", () => {
   });
 
   it("an unknown capability lists itself rather than nothing", () => {
-    // a row can hold a capability the table has no noun for (publish, settings). Showing the raw verb
-    // is honest; showing an empty tooltip would read as "this grants nothing".
-    expect(effectiveCaps({ builtinCapability: "settings" })).toEqual(["settings"]);
+    // a row can hold a capability the table has no noun for. Showing the raw verb is honest; showing an
+    // empty tooltip would read as "this grants nothing".
+    // #604 C re-aim: `settings` was this example until it became a named built-in with a MEASURED row
+    // (it now resolves to ["view","settings"], which is the closure, not a fallback). `publish` is the
+    // surviving unnamed one — it is edit-class and reaches rows through bundles, never as a noun.
+    expect(effectiveCaps({ builtinCapability: "publish" })).toEqual(["publish"]);
     expect(effectiveCaps({})).toEqual([]);
   });
 
   it("the nouns and the table cover the same built-ins (neither grows without the other)", () => {
     // #607 / ADR-209: manageAccess joined both (noun `access-manager`; measured row in the truth test)
-    expect(Object.keys(BUILTIN_EFFECTIVE_CAPS).sort()).toEqual(["comment", "edit", "manage", "manageAccess", "moderate", "view"]);
+    // #604 C: delete / share / settings joined both (nouns are the model's leaf names)
+    expect(Object.keys(BUILTIN_EFFECTIVE_CAPS).sort()).toEqual(["comment", "delete", "edit", "manage", "manageAccess", "moderate", "settings", "share", "view"].sort());
     for (const key of Object.keys(BUILTIN_EFFECTIVE_CAPS)) expect(capNoun(key)).not.toBe(key);
   });
 });

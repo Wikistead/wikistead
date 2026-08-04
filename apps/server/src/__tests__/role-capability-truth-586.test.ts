@@ -76,7 +76,7 @@ function uiTable(name = 'BUILTIN_EFFECTIVE_CAPS'): Record<string, string[]> {
 }
 
 /** What a principal holding `noun` really resolves to on a page of that space. */
-async function measured(noun: 'view' | 'comment' | 'edit' | 'moderate' | 'manage' | 'manageAccess'): Promise<string[]> {
+async function measured(noun: 'view' | 'comment' | 'edit' | 'moderate' | 'manage' | 'manageAccess' | 'delete' | 'share' | 'settings'): Promise<string[]> {
   const sub = `user:caps586-${noun}-${STAMP}`
   if (noun === 'edit') {
     // the editor NOUN is the composite (#553 severed the edit ⇒ comment implication, so the bundle is
@@ -137,7 +137,10 @@ describe('#586 review ①: a page grant is a single arm, and says only what that
 })
 
 describe('#586: the built-in display table is the store\'s answer', () => {
-  it.each(['view', 'comment', 'edit', 'moderate', 'manage', 'manageAccess'] as const)(
+  // #604 C: delete / share / settings joined the direct-grant vocabulary (user ruling (a)); their rows
+  // are measured like every other — the numbers, now pinned: delete → [view, delete],
+  // share → [view, share], settings → [view] on pages plus its own space-axis verb (the reflexive term).
+  it.each(['view', 'comment', 'edit', 'moderate', 'manage', 'manageAccess', 'delete', 'share', 'settings'] as const)(
     '%s lists exactly what it confers', async (noun) => {
       const held = await measured(noun)
       expect(uiTable()[noun], `the UI table for ${noun} is stale — the store says [${held.join(', ')}]`).toEqual(held)

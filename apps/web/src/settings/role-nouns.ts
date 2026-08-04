@@ -14,7 +14,7 @@
 // case-shifted — not the built-ins, not a tenant's own role. A CAPABILITY (what a role may do) IS
 // translated, and that vocabulary belongs on the surface that EDITS a role definition, not on one that
 // says who holds which role.
-export type RoleNounKey = "view" | "comment" | "edit" | "moderate" | "manage" | "manageAccess";
+export type RoleNounKey = "view" | "comment" | "edit" | "moderate" | "manage" | "manageAccess" | "delete" | "share" | "settings";
 
 export const CAP_NOUN: Record<RoleNounKey, string> = {
   view: "viewer",
@@ -24,6 +24,11 @@ export const CAP_NOUN: Record<RoleNounKey, string> = {
   manage: "manager",
   // ADR-209 (#607): the membership verb (user ruling: noun `access-manager`, wire `manageAccess`)
   manageAccess: "access-manager",
+  // #604 C (user ruling (a)): the model's own leaf names, mechanical and untranslated — the
+  // CAP_NOUN rule extended, nothing invented.
+  delete: "deleter",
+  share: "sharer",
+  settings: "settings-editor",
 };
 
 /**
@@ -69,6 +74,12 @@ export const BUILTIN_EFFECTIVE_CAPS: Record<RoleNounKey, readonly string[]> = {
   // space-only verb: the role that exists to hand out membership looked identical to `viewer` in the
   // very picker that hands it out.
   manageAccess: ["view", "manageAccess"],
+  // #604 C: measured (+ the reflexive space-axis read the #607 bounce added). `delete` and `share`
+  // reach the page through their leaves; `settings` is a SPACE power with no page verb, so without the
+  // reflexive term its role read as "can: view" — a do-nothing role in the very picker that grants it.
+  delete: ["view", "delete"],
+  share: ["view", "share"],
+  settings: ["view", "settings"],
 };
 
 // #586 review ①: what a PAGE grant of a single relation confers — a different question, so a different
@@ -95,6 +106,11 @@ export const PAGE_GRANT_CAPS: Record<RoleNounKey, readonly string[]> = {
   // #607: a PAGE has no manageAccess grant — the verb is space-only. The row exists because the type is
   // total; a page surface can never draw it (grantPageAccess refuses the relation).
   manageAccess: [],
+  // #604 C: same — the page dialog does not offer these relations (space-side vocabulary); rows exist
+  // for type totality only.
+  delete: [],
+  share: [],
+  settings: [],
 };
 
 // #586 what the TENANT TIERS confer. ruled "no table without a measurement", and back then
