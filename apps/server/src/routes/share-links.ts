@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples, deleteTuples } from '@wikistead/authz'
+import { check, writeTuples, deleteTuples, isAlreadyConverged } from '@wikistead/authz'
 import { mintGuestToken } from '@wikistead/auth'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
@@ -244,7 +244,7 @@ export async function revokeShareLink(
       },
     ])
   } catch (err) {
-    if (!String((err as Error)?.message ?? '').includes('did not exist')) throw err
+    if (!isAlreadyConverged(err)) throw err
   }
   await db.sql`UPDATE share_links SET revoked_at = now() WHERE id = ${args.id}`
   emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: row.id, pageId: row.resource_id, actorId: args.userId })
@@ -292,7 +292,7 @@ export async function revokeResourceShareLinks(
       // "did not exist" = already cleared (idempotent) → treat as cleared; any other FGA error → leave the
       // link active (revoked_at stays NULL), record it so the "private but link alive on FGA" window is
       // detectable and a re-run picks it up. Do NOT abort the other links or the private-ization.
-      if (String((err as Error)?.message ?? '').includes('did not exist')) cleared.push(row)
+      if (isAlreadyConverged(err)) cleared.push(row)
       else { failed.push(row.id); console.error('[share-link:revoke-fga-failed]', { linkId: row.id, resource, err: String(err) }) }
     }
   }
@@ -352,7 +352,7 @@ export async function sweepShareLinkRevokeFailures(fga: OpenFgaClient): Promise<
         } catch (err) {
           // "did not exist" = already gone → complete the revoke below; any other error → still failing,
           // leave the marker and retry on the next sweep.
-          if (!String((err as Error)?.message ?? '').includes('did not exist')) continue
+          if (!isAlreadyConverged(err)) continue
         }
         // FGA tuple is gone (deleted now, or already absent): finish the revoke durably and clear the marker.
         await withTenantTx(tenantId, async (tx) => {

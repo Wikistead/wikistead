@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, requireTenantAdmin } from '@wikistead/authz'
+import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, requireTenantAdmin, isAlreadyConverged } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration, beginTitleDictFill, endTitleDictFill } from '../title-dict-cache.js' // #534
 import { getTreeConfirm, setTreeConfirm, getCachedBadge, setCachedBadge, invalidatePageBadge } from '../tree-confirm-cache.js' // #541
@@ -1328,9 +1328,13 @@ export async function setPagePrivate(
     try {
       await writeTuples(fga, PRIVATE_MARKERS(args.pageId))
     } catch (e) {
-      if (!String(e).includes('already exists')) throw e
+      // #578: asked by CODE. The store's sentence is replaced at the tuple-helper boundary now (an admin
+      // must not read FGA's internals), and matching prose somebody else owns is a check that fails
+      // silently the day it changes — here, by turning an idempotent re-privatise back into the
+      // "reported as a permission skip" lie #511 removed.
+      if (!isAlreadyConverged(e)) throw e
       for (const m of PRIVATE_MARKERS(args.pageId)) {
-        await writeTuples(fga, [m]).catch((e2) => { if (!String(e2).includes('already exists')) throw e2 })
+        await writeTuples(fga, [m]).catch((e2) => { if (!isAlreadyConverged(e2)) throw e2 })
       }
     }
     return os

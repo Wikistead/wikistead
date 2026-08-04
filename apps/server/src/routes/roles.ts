@@ -527,7 +527,18 @@ export async function unassignRoleTxCore(
       FOR UPDATE OF a`
     const stillCovered = new Set(others.flatMap((o) => o.capabilities))
     const ownedCaps = asg.owned_capabilities as AnyRoleCapability[]
-    const toDelete = ownedCaps.filter((c) => !stillCovered.has(c)).flatMap((c) => expansionTuples(asg.resource_type, asg.resource_id, asg.principal, c, asg.role_id === null))
+    // #578 (review rejection 2026-08-05): restricted to the tuples that ARE THERE. FGA fails a whole write
+    // if any delete names a tuple that does not exist, and a grant can legitimately hold only half of an
+    // expansion pair — a legacy row, a seeded fixture, or the debris of an earlier partial write. When
+    // this ran as the revoke half of a REPLACEMENT the failure was worst: the new role's tuples had
+    // already landed in a separate call, so the rollback left the principal holding BOTH, and every
+    // retry hit the same missing tuple — `1 principal = 1 role` broken in the data, permanently.
+    // `sweepOtherSpaceRoles` has filtered its rowless pass this way since #536 for exactly this reason;
+    // the row pass had not. Deleting only what exists is also what makes the operation idempotent.
+    const wanted = ownedCaps.filter((c) => !stillCovered.has(c)).flatMap((c) => expansionTuples(asg.resource_type, asg.resource_id, asg.principal, c, asg.role_id === null))
+    // `heldRelations` is absent for callers that did not pre-read; then this filters nothing and the
+    // behaviour is exactly what it was, rather than silently deleting none of them.
+    const toDelete = args.heldRelations ? wanted.filter((t) => args.heldRelations!.has(t.relation)) : wanted
     for (const c of ownedCaps.filter((x) => stillCovered.has(x))) {
       const heir = others.find((o) => o.capabilities.includes(c))!
       await tx`UPDATE role_assignments SET owned_capabilities = array_append(owned_capabilities, ${c}) WHERE id = ${heir.id} AND NOT (${c} = ANY(owned_capabilities))`
