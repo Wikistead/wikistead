@@ -59,9 +59,17 @@ export function Select({
   // Radix Tooltip raised from in here does not appear at all — the select is a modal layer and a tooltip
   // portalled out of it lands in the part of the document that layer has hidden — but a plain positioned
   // element above that layer does, which is what this is.
-  const [hint, setHint] = useState<{ node: React.ReactNode; top: number; left: number } | null>(null);
+  // Only WHICH option is described lives in React state. Its POSITION is written straight onto the
+  // portalled element below, because re-rendering on every move re-renders the option list with it
+  // and Radix resets the keyboard highlight when its items re-render, so a held-down ArrowDown walked
+  // one step and snapped back (measured: a 40-step walk never reached its target). Tracking the row was
+  // the point of the #582 fix; doing it through state made the list unusable from the keyboard.
+  const [hint, setHint] = useState<{ node: React.ReactNode } | null>(null);
   // the rendered panel, so its placement can use its real height instead of a constant that was a guess
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // where the panel goes, remembered across the render that mounts it (the element does not exist yet
+  // when its position is computed, and a panel that paints once at 0,0 reads as a flicker)
+  const pending = useRef<{ top: number; left: number } | null>(null);
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) { setHint(null); return; }
@@ -99,10 +107,15 @@ export function Select({
       // number, so a taller panel corrects itself rather than being guessed at forever.
       const panelH = panelRef.current?.offsetHeight ?? row.height;
       const top = Math.max(8, Math.min(row.top, window.innerHeight - 8 - panelH));
-      const next = `${o.value}:${Math.round(top)}:${Math.round(left)}`;
-      if (next === key) return;
-      key = next;
-      setHint({ node: o.hint, top, left });
+      // position first, so the element is already in the right place when it is (or stays) mounted
+      pending.current = { top, left };
+      if (panelRef.current) {
+        panelRef.current.style.top = `${top}px`;
+        panelRef.current.style.left = `${left}px`;
+      }
+      if (o.value === key) return; // same option — the move above is all that was needed
+      key = o.value;
+      setHint({ node: o.hint });
     };
     read();
     // the list is portalled and mounts after the open, so give it a frame before giving up on it
@@ -147,8 +160,12 @@ export function Select({
           role="tooltip"
           data-testid={testId ? `${testId}-hint` : "select-hint"}
           className="pointer-events-none fixed z-[60] w-[220px] rounded-md border border-border bg-panel px-2 py-1.5 shadow-md"
-          ref={panelRef}
-          style={{ top: hint.top, left: hint.left }}
+          ref={(el) => {
+            panelRef.current = el;
+            // a freshly mounted panel has no position yet: place it on the option that raised it before
+            // the browser paints, or it flashes at the top-left corner
+            if (el && pending.current) { el.style.top = `${pending.current.top}px`; el.style.left = `${pending.current.left}px`; }
+          }}
         >
           {hint.node}
         </div>,
