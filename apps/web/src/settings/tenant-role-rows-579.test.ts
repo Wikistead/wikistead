@@ -194,47 +194,39 @@ describe("#582: built-in role names are proper nouns", () => {
   });
 });
 
-// #579 bounce ②, ruled by ADR-201: "why does the GROUP list have custom roles only?" The answer is a
-// decision, not an oversight, and the screen has to carry it — an absence explains nothing.
-//
-// - `member` is universal. Everyone already holds it, so conferring it on a group is a no-op.
-// - `admin` is granted per person on purpose. ADR-201 retired group-conferred admin (option (c) from
-// ADR-183) so the tenant can read off WHO holds admin and revoke it without going to the IdP; the
-// FGA model backs that up, `tenant#admin` taking `[user]` and no userset.
-//
-// The space screen DOES offer built-ins to a group (a space relation accepts `group#member`), so the
-// difference between the two screens is real and needs a sentence rather than silence.
-describe("#579 ②: the group section says why it holds no tiers", () => {
-  it("both locales carry the note", async () => {
+// ADR-207 (#603, overturns ADR-201 §1): a group may hold the tenant tier now, so the sentence that
+// explained the tiers' absence lost its subject — the absence itself is gone. The note, its locale
+// keys and the pins that guarded them go together (; leaving the keys behind is the #582
+// orphan-key mistake).
+describe("#603: the group picker offers the tiers, and the note that explained their absence is gone", () => {
+  it("no locale carries the note key", async () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     for (const loc of ["en", "ja"]) {
       const j = JSON.parse(readFileSync(resolve(import.meta.dirname, `../i18n/locales/${loc}.json`), "utf8"));
-      const note = j.adminRoles.groupTiersNote as string | undefined;
-      expect(note, `${loc}: the note exists`).toBeTruthy();
-      for (const tier of BUILT_IN_TIERS) {
-        expect(note, `${loc}: it names ${tier} so the reader knows which roles it means`).toContain(tier);
-      }
+      expect(j.adminRoles.groupTiersNote, `${loc}: the orphan key is gone`).toBeUndefined();
     }
   });
 
-  it("the member table renders it", async () => {
-    // RE-AIMED by #579 ①: the group SECTION is gone — groups are rows in the member table now — so the
-    // sentence that explains why a group cannot hold a tier moved with them. Its subject is unchanged
-    // this copy is shown somewhere, not merely defined, because an unexplained absence in the picker is
-    // what made the previous shape look arbitrary.
+  it("the member table no longer renders it, and the group surfaces read the row vocabulary", async () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     const src = readFileSync(resolve(import.meta.dirname, "./MembersPage.tsx"), "utf8");
-    expect(src, "the copy is shown, not merely defined").toContain("adminRoles.groupTiersNote");
+    expect(src, "the note testid is gone").not.toContain("tenant-group-tiers-note");
+    expect(src, "the note key is not referenced").not.toContain("adminRoles.groupTiersNote");
+    // the group row and the add-form both build their options from the shared list-builder — the same
+    // tiers-and-custom vocabulary a person's row reads
+    const uses = src.split("roleOptions(roles.data?.custom ?? [])").length - 1;
+    expect(uses, "member row + group row + add form + invite all share the one list-builder").toBeGreaterThanOrEqual(4);
   });
 
-  it("and the picker still offers tenant-scope CUSTOM roles only", () => {
-    // the note would be a lie if a tier ever appeared in this list; the filter is the same one the
-    // component applies, kept here as the statement of what belongs in a group picker
-    const assignable = ROLES.filter((r) => r.scope === "tenant").map((r) => r.name);
-    expect(assignable).toEqual(["Space creators", "Key issuers"]);
-    for (const tier of BUILT_IN_TIERS) expect(assignable).not.toContain(tier);
+  it("a tier pick and a custom pick keep their mechanisms apart on a group", () => {
+    // the value prefix carries the mechanism (the same guard the person row pins above): a custom role
+    // NAMED admin resolves to an assignment, the tier to the tier grant
+    const opts = roleOptions([{ id: "r9", name: "admin", scope: "tenant" }]);
+    expect(opts.filter((o: { label: string }) => o.label === "admin").map((o: { value: string }) => o.value).sort()).toEqual(["role:r9", "tier:admin"]);
+    expect(resolveRoleChoice("tier:admin", [])).toEqual({ kind: "tier", role: "admin" });
+    expect(resolveRoleChoice("role:r9", [{ id: "r9", name: "admin", scope: "tenant" }])).toEqual({ kind: "custom", roleId: "r9" });
   });
 });
 

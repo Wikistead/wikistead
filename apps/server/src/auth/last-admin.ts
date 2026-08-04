@@ -28,3 +28,24 @@ export async function isLastAdmin(sql: Sql, sub: string): Promise<boolean> {
     SELECT count(*)::int AS n FROM members WHERE role = 'admin' AND sub <> ${sub} AND deactivated_at IS NULL`
   return (row?.n ?? 0) === 0
 }
+
+// ADR-207 (#603, user condition on the floor ruling): the 409 must SAY WHY. A group may now hold
+// `admin`, so "cannot change the last admin" read next to an admin-holding group looks like a bug —
+// and a refusal that looks like a bug is one the next person removes in good faith. Two codes, two
+// sentences, because the two refusals have different reasons:
+//   `last_admin`        — nobody else holds admin at all (the pre-#603 case, wording unchanged);
+//   `last_direct_admin` — a group holds admin, but group-conferred admins can be lost by an IdP-side
+//                         edit this product cannot guard, so at least one DIRECTLY granted admin must
+//                         remain (the floor, ADR-207 rev2).
+// The client maps the code to its locale; the English here is the API's own voice.
+export async function lastAdminRefusal(sql: Sql): Promise<{ error: string; code: string }> {
+  const [g] = await sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM role_assignments
+    WHERE resource_type = 'tenant' AND builtin_capability = 'admin' AND principal LIKE ${'group:%'}`
+  return (g?.n ?? 0) > 0
+    ? {
+        error: 'a group holds admin, but group-conferred admins can be lost at the IdP — at least one directly granted admin must remain',
+        code: 'last_direct_admin',
+      }
+    : { error: 'cannot change the last admin', code: 'last_admin' }
+}

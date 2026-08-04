@@ -35,7 +35,12 @@ type group
 
 type tenant
   relations
-    define admin: [user]
+    # ADR-207 (#603, overturns ADR-201 §1 / ADR-183): a GROUP may hold the tenant tier. The grant is a
+    # role_assignments row this product writes (revocable here, audited here — what changed since
+    # ADR-183 is #578: grants are rows, not IdP-synced mappings). The last-admin FLOOR is unchanged and
+    # deliberately does NOT count these: a tenant always keeps >=1 members-row admin, so no IdP-side
+    # group edit can empty a tenant (ADR-207 rev2).
+    define admin: [user, group#member]
     define member: [user, group#member]
     # ADR-171 (#445): who may CREATE shared spaces in this tenant. `tenant#member` is the "all
     # members may create" default (seeded at provisioning; the member default-role toggle adds and

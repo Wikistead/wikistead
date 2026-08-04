@@ -11,7 +11,7 @@ import type { SearchDriver } from '../search/index.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/outbox.js'
 import { reindexPublishedPages } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
-import { isLastAdmin } from '../auth/last-admin.js' // #573: ONE last-admin predicate
+import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { auditIfEntitled } from '../audit/outbox.js'
@@ -110,9 +110,12 @@ export async function membersPlugin(app: FastifyInstance) {
   // ── Members ────────────────────────────────────────────────────────────────
   app.get('/members', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
+    // ADR-207 rev3 (#603): `groups` joins a person to what a group confers on them (the admin-via-group
+    // marker). This surface is admin-gated and the group rows themselves are already listed here, so
+    // nothing new is disclosed — the screen just stops guessing.
     const rows = await req.db.sql<
-      { sub: string; email: string | null; display_name: string | null; picture_url: string | null; role: string; created_at: Date }[]
-    >`SELECT sub, email, display_name, picture_url, role, created_at FROM members ORDER BY created_at`
+      { sub: string; email: string | null; display_name: string | null; picture_url: string | null; role: string; groups: string[] | null; created_at: Date }[]
+    >`SELECT sub, email, display_name, picture_url, role, groups, created_at FROM members ORDER BY created_at`
     return { members: rows }
   })
 
@@ -168,7 +171,7 @@ export async function membersPlugin(app: FastifyInstance) {
     if (existing.role === role) return { ok: true } // no-op
 
     if (existing.role === 'admin' && role === 'member' && (await isLastAdmin(req.db.sql, req.params.sub))) {
-      return reply.code(409).send({ error: 'cannot demote the last admin' })
+      return reply.code(409).send(await lastAdminRefusal(req.db.sql))
     }
 
     await req.db.tx(async (tx) => {
@@ -224,7 +227,7 @@ export async function membersPlugin(app: FastifyInstance) {
       SELECT role, groups FROM members WHERE sub = ${req.params.sub}`
     if (!existing) return reply.code(404).send({ error: 'member not found' })
     if (existing.role === 'admin' && (await isLastAdmin(req.db.sql, req.params.sub))) {
-      return reply.code(409).send({ error: 'cannot remove the last admin' })
+      return reply.code(409).send(await lastAdminRefusal(req.db.sql))
     }
 
     let revokedKeyIds: string[] = []

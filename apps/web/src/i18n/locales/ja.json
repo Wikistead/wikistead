@@ -996,7 +996,10 @@
     "enablePasswordDone": "パスワード設定リンクを作成しました",
     "rowActions": "{{name}} の操作",
     "passwordLinkLabel": "パスワード設定リンク（本人に渡してください）:",
-    "passwordSetupUnavailable": "このメンバーにはパスワードの入口を追加できません。"
+    "passwordSetupUnavailable": "このメンバーにはパスワードの入口を追加できません。",
+    "lastAdmin": "最後の管理者は変更できません。",
+    "lastDirectAdmin": "グループが admin を持っていますが、グループ経由の管理者は IdP 側の変更で失われ得るため、直接付与の管理者を最低 1 人残す必要があります。",
+    "viaGroup": "（{{group}} 経由）"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",
@@ -1321,7 +1324,6 @@
     "sectionResource": "スペース / ページ",
     "groupAssignTitle": "グループのロール",
     "groupAssignBody": "IdP のグループにテナントロールを付与します。グループのメンバー全員に効き、グループを抜けると外れます。",
-    "groupTiersNote": "上のフォームでグループに渡せるのはカスタムロールです。member と admin は各メンバーの行で設定します（誰が admin を持つかを記録に残すため）。",
     "groupAssignEmpty": "テナントロールを持つグループはありません。",
     "groupLabel": "グループ",
     "groupPlaceholder": "グループを選択…",

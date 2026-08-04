@@ -119,6 +119,15 @@ const TENANT_CAP_RELATION: Record<TenantRoleCapability, string> = {
 // that path, which is why it is a parameter rather than a row added to the vocabulary.
 export function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resourceId: string, principal: string, cap: AnyRoleCapability, allowSuperset = false): { user: string; relation: string; object: string }[] {
   if (resourceType === 'tenant') {
+    // ADR-207 §R4-2 (#603): the tenant TIERS are the tenant superset. They are deliberately absent from
+    // TENANT_CAP_RELATION — the vocabulary a custom role may bundle — because a `manageRoles` holder who
+    // could define a role carrying `admin` would be a confused deputy (#536 kept `manage` out of the
+    // space vocabulary for the same reason). Only the BUILT-IN grant path (allowSuperset) writes these
+    // leaves; this is the second layer, matching the page/space branches below.
+    if ((cap as string) === 'admin' || (cap as string) === 'member') {
+      if (!allowSuperset) throw Object.assign(new Error(`capability "${cap}" is not assignable at tenant scope`), { statusCode: 400 })
+      return [{ user: principal, relation: cap, object: `tenant:${resourceId}` }]
+    }
     const rel = TENANT_CAP_RELATION[cap as TenantRoleCapability]
     if (!rel) throw Object.assign(new Error(`capability "${cap}" is not assignable at tenant scope`), { statusCode: 400 })
     return [{ user: principal, relation: rel, object: `tenant:${resourceId}` }]
@@ -484,6 +493,15 @@ export async function unassignRoleTxCore(
              COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS capabilities
       FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id WHERE a.id = ${args.assignmentId} FOR UPDATE OF a`
     if (!asg) return null
+    // ADR-207 §R4-5 (#603): SECOND line under the last-admin FLOOR. In production this never fires
+    // the members routes keep at least one row admin (the floor), so a group's `admin` grant is never
+    // the last path and revoking it is never refused. It exists so a future change that breaks the
+    // floor cannot ALSO silently delete the final admin power; it is deliberately not pinned by a test,
+    // because reaching it means hand-writing a members table no route can produce (§R4-5).
+    if (asg.resource_type === 'tenant' && asg.role_id === null && (asg.capabilities ?? []).includes('admin')) {
+      const [adm] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM members WHERE role = 'admin' AND deactivated_at IS NULL`
+      if ((adm?.n ?? 0) === 0) throw Object.assign(new Error('cannot remove the last admin'), { statusCode: 409 })
+    }
     // Same LEFT join for the refcount: the capabilities a principal still holds through OTHER assignments
     // now include built-in grants. With the inner join, revoking a custom role that overlapped a built-in
     // grant deleted the shared leaves outright -- the grant was still there, and the access was not.
@@ -564,6 +582,17 @@ export async function requireListAuthority(
   if (resourceType === 'tenant') { await requireTenantAdmin(fga, sub, tenantId); return }
   if (await isTenantAdmin(fga, sub, tenantId)) return
   if (!(await check(fga, `user:${sub}`, 'manage', { type: resourceType, id: resourceId }))) throw forbidden()
+}
+
+// #603: the typed name a group's EXISTING rows carry, for a re-assign that arrives by principal.
+// The row being replaced is the only thing that knows what was typed (#578 bounce ① — the id is a
+// one-way hash), so the replacement inherits it rather than demoting the group to "unknown group".
+async function carriedGroupName(sql: Sql, principal: string): Promise<string | undefined> {
+  if (!principal.startsWith('group:')) return undefined
+  const [row] = await sql<{ group_name: string }[]>`
+    SELECT group_name FROM role_assignments
+    WHERE principal = ${principal} AND group_name IS NOT NULL LIMIT 1`
+  return row?.group_name ?? undefined
 }
 
 // The validateGrant principal rule (pages.ts): a member or a group member-set — never share_link /
@@ -760,9 +789,18 @@ export async function rolesPlugin(app: FastifyInstance) {
     await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId })
     // #497 re-review N2: `managed` mirrors listSpaceAccess — a mapping-owned assignment is drawn
     // read-only-with-a-link (ADR-183 §1), so the list must SAY which rows the machine owns.
-    const rows = await req.db.sql<{ id: string; role_id: string; name: string; principal: string; origin: string }[]>`
-      SELECT a.id, a.role_id, r.name, a.principal, a.origin FROM role_assignments a JOIN roles r ON r.id = a.role_id
-      WHERE a.resource_type = ${resourceType} AND a.resource_id = ${resourceId} ORDER BY r.name, a.principal`
+    // ADR-207 §R4-3 (#603): LEFT join, for TENANT scope. A BUILT-IN grant is a row with `role_id IS
+    // NULL`, and the inner join silently dropped every one of them — the tenant tier a group holds
+    // never came back, so the screen computed provenance over an empty set. The row carries the
+    // built-in capability as its name. Space/page scope deliberately keeps the old projection
+    // (role rows only): their built-in grants are already listed by the ACCESS listing, and returning
+    // them here too would draw every grant twice on those surfaces.
+    const rows = await req.db.sql<{ id: string; role_id: string | null; name: string; builtin: string | null; principal: string; origin: string }[]>`
+      SELECT a.id, a.role_id, COALESCE(r.name, a.builtin_capability) AS name, a.builtin_capability AS builtin, a.principal, a.origin
+      FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
+      WHERE a.resource_type = ${resourceType} AND a.resource_id = ${resourceId}
+        AND (a.role_id IS NOT NULL OR ${resourceType === 'tenant'})
+      ORDER BY name, a.principal`
     // #523 / ADR-190 (slice E): name the USER principals. This list is already authorization-bounded and
     // server-set (requireListAuthority above, one resourceId, no cross-resource enumeration), so resolving
     // `override ?? OIDC display_name` over it is the SAME precedent as the manage-gated grant list in slice
@@ -784,6 +822,9 @@ export async function rolesPlugin(app: FastifyInstance) {
       const groupName = resolveGroupName(r.principal, byId)
       return {
         id: r.id, roleId: r.role_id, roleName: r.name, principal: r.principal,
+        // ADR-207: the client tells a built-in tier apart from a custom role that took its name by
+        // MECHANISM, never by string comparison (the same guard the row picker's value prefix gives).
+        ...(r.builtin ? { builtin: r.builtin } : {}),
         ...(r.principal.startsWith('user:') ? { displayName: names.get(r.principal.slice(5))?.displayName ?? null } : {}),
         ...(groupName ? { groupName } : {}),
         ...(groupName && !confirmed.has(groupName) ? { groupUnconfirmed: true } : {}),
@@ -898,7 +939,10 @@ export async function rolesPlugin(app: FastifyInstance) {
         // #578 bounce ①: the name travels with the grant. Without it a role given to a group nobody
         // carries yet comes back as "unknown group" — the id is a one-way hash and this row is the
         // only thing that knows what was typed.
-        groupName: typeof groupName === 'string' ? groupName.trim() : undefined,
+        // #603: and it travels ACROSS a replacement. A row's Select re-assigns by PRINCIPAL (the id it
+        // got from the listing), so a typed name would die with the folded row and the group would
+        // come back as "unknown group" one pick later — measured in the #603 e2e before this lookup.
+        groupName: (typeof groupName === 'string' && groupName.trim()) || await carriedGroupName(req.db.sql, principal),
       })
       if (resourceType === 'space') {
         const { sweepOtherSpaceRoles } = await import('./spaces.js')
@@ -944,9 +988,14 @@ export async function rolesPlugin(app: FastifyInstance) {
     // resource + role bundle on the RLS handle (a cross-tenant / unknown id is a uniform 404), then gate.
     // The mutating tx below re-reads FOR UPDATE for the ref-count discipline; the assignment's
     // resource/role are immutable, so gating on the pre-read is safe.
-    requireEntitlement(req)
+    // ADR-207 §R4-3 (#603): NO entitlement gate on removal. A downgraded tenant must still be able to
+    // take `admin` off a group — a plan gate that blocks REVOKING is a fail-open shape (the power stays
+    // because the tenant stopped paying). The gate stays on granting, where refusing is the safe answer.
+    // Same LEFT join as the unassign core: a built-in grant has `role_id IS NULL` and the inner join
+    // 404'd exactly the rows this ticket creates.
     const [pre] = await req.db.sql<{ resource_type: 'page' | 'space' | 'tenant'; resource_id: string; capabilities: AnyRoleCapability[]; origin: string }[]>`
-      SELECT a.resource_type, a.resource_id, r.capabilities, a.origin FROM role_assignments a JOIN roles r ON r.id = a.role_id WHERE a.id = ${req.params.assignmentId}`
+      SELECT a.resource_type, a.resource_id, COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS capabilities, a.origin
+      FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id WHERE a.id = ${req.params.assignmentId}`
     if (!pre) throw Object.assign(new Error('not found'), { statusCode: 404 })
     // #497 re-review N2: the SAME §1 ownership the builtin branch enforces (D1) — a mapping-owned
     // assignment dies with its MAPPING, never through this route (deleting it here left the mapping
@@ -968,6 +1017,53 @@ export async function rolesPlugin(app: FastifyInstance) {
       || await check(app.fga, `user:${req.user.sub}`, 'manage', { type: 'page', id: pre.resource_id })
     return reply.code(200).send({ removed: true, stillCovered: redactCoverage(gone.stillCovered, mayName) })
   })
+
+  // ADR-207 §R4-3 (#603): grant a TENANT TIER (admin | member) to a GROUP. This is the path that did
+  // not exist — the assignment POST above takes a role id, and a tier has none. It is the BUILT-IN
+  // grant mechanism (#536: built-ins ARE assignments), so
+  // - the capability, not a role id, names what is granted (row: role_id NULL + builtin_capability);
+  // - NO entitlement gate — tiers are core product, not the customRoles plan feature;
+  // - groups only. A person's tier is their members row (PATCH /members/:sub); a second mechanism
+  // for the same fact would fork the truth the last-admin floor counts.
+  // Authority is the tenant branch of requireAssignmentAuthority = TENANT ADMIN. Deliberately NOT the
+  // #604 `manageRoles` gate: a manage_roles holder who could hand `admin` to their own group would be
+  // the confused deputy §R4-2 exists to prevent, one door over.
+  app.post<{ Body: { capability?: string; groupName?: string; principal?: string } }>(
+    '/admin/roles/tenant-tier-assignments', async (req, reply) => {
+      const cap = req.body?.capability
+      if (cap !== 'admin' && cap !== 'member') {
+        throw Object.assign(new Error('capability (admin|member) required'), { statusCode: 400 })
+      }
+      // #536a group is NAMED, never addressed — the server owns the tenant-salted hash. A
+      // principal from the assignment listing (already an id) is also accepted; a hand-built one that
+      // matches no membership grants nobody, which is why the name form is preferred.
+      const principal = typeof req.body?.groupName === 'string' && req.body.groupName.trim()
+        ? groupGrantee(req.tenant.id, req.body.groupName.trim())
+        : req.body?.principal
+      if (!principal) throw Object.assign(new Error('groupName or principal required'), { statusCode: 400 })
+      validatePrincipal(principal)
+      if (!principal.startsWith('group:')) {
+        throw Object.assign(new Error("a person's tier lives on their member row — this path grants tiers to groups"), { statusCode: 400 })
+      }
+      await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: 'tenant', resourceId: req.tenant.id, capabilities: [cap as AnyRoleCapability] })
+      const id = await assignRoleInTx(req.db, app.fga, app.searchDriver, {
+        tenant: req.tenant, roleId: null, builtinCapability: cap, capabilities: [cap as AnyRoleCapability],
+        resourceType: 'tenant', resourceId: req.tenant.id, principal, actorSub: req.user.sub, origin: 'manual',
+        groupName: (typeof req.body?.groupName === 'string' && req.body.groupName.trim()) || await carriedGroupName(req.db.sql, principal),
+        onDuplicate: 'ignore',
+      })
+      // #579: ONE role per tenant principal — the same convergence the custom-role POST runs. The new
+      // grant is written first, then the principal's other manual tenant assignments fold, so there is
+      // no instant where the group holds nothing.
+      const others = await req.db.sql<{ id: string }[]>`
+        SELECT id FROM role_assignments
+        WHERE resource_type = 'tenant' AND resource_id = ${req.tenant.id} AND principal = ${principal}
+          AND origin = 'manual' AND id <> ${id}`
+      for (const o of others) {
+        await unassignRoleInTx(req.db, app.fga, app.searchDriver, { tenant: req.tenant, assignmentId: o.id, actorSub: req.user.sub })
+      }
+      return reply.code(201).send({ id, builtin: cap, resourceType: 'tenant', resourceId: req.tenant.id, principal })
+    })
 
   app.delete<{ Params: { roleId: string } }>('/admin/roles/:roleId', async (req, reply) => {
     await writeGates(req)

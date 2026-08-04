@@ -15,10 +15,12 @@ import { User, Users, KeyRound, Eraser, UserMinus } from "lucide-react"; // #579
 import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
-import { useRoles, useRoleAssignments, useAssignRole, useUnassignRole, useTenantGroupNames } from "../data/queries";
+import { useRoles, useRoleAssignments, useAssignRole, useAssignTenantTier, useUnassignRole, useTenantGroupNames } from "../data/queries";
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
-import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
+import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, adminGroupNames, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
+import { RoleTip } from "../ui/RoleTip"; // #603: the conferred-admin marker explains itself like every role name (#586)
+import { TENANT_TIER_CAPS } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
 
@@ -59,6 +61,8 @@ export function MembersPage() {
   const roles = useRoles();
   const assignments = useRoleAssignments("tenant", tenantId);
   const assignRole = useAssignRole();
+  // #603 / ADR-207: the tier grant is its own path — a capability, not a role id, and groups only
+  const assignTier = useAssignTenantTier();
   const unassignRole = useUnassignRole();
   // the search #557 put inside the assign form belongs to the TABLE now — it filters the people, which
   // is useful for every column, not just for finding someone to give a role to
@@ -108,7 +112,17 @@ export function MembersPage() {
   const guarded = (fn: () => Promise<void>) => async () => {
     setError(null);
     try { await fn(); await refresh(); }
-    catch (e) { setError(e instanceof ApiError && e.status === 409 ? "Cannot change the last admin." : "Action failed"); }
+    catch (e) {
+      // #603 (user condition on the floor ruling): the 409 says WHY. With a group holding admin, the
+      // plain "cannot change the last admin" reads as a bug — the reason (group-conferred admins can
+      // be lost at the IdP, one DIRECT admin must remain) is the sentence that stops the next person
+      // from removing the guard in good faith. The server picks the code; this maps it to the locale.
+      setError(
+        e instanceof ApiError && e.status === 409 && e.code === "last_direct_admin" ? t("members.lastDirectAdmin")
+        : e instanceof ApiError && e.status === 409 ? t("members.lastAdmin")
+        : t("toast.actionFailed"),
+      );
+    }
   };
 
   // pure, so the asymmetry and the "already held" exclusion are pinned without a DOM
@@ -122,7 +136,7 @@ export function MembersPage() {
   // it read as a different kind of thing under different rules.
   const groupRows = buildGroupRoleRows(assignments.data ?? [], t("spaceMembers.unknownGroup"), t("spaceMembers.group"), t("spaceMembers.groupNotSeen"));
   const shownGroups = filter.trim() ? groupRows.filter((g) => g.label.toLowerCase().includes(filter.trim().toLowerCase())) : groupRows;
-  const unified = buildUnifiedRows(shownMembers, shownGroups);
+  const unified = buildUnifiedRows(shownMembers, shownGroups, new Set(), adminGroupNames(assignments.data ?? []));
   // #578 bounce ④: the filter field no longer doubles as a way to CREATE a grant. It was the only route
   // a group had, and it was invisible — a reader had to type a name that matched nothing and notice a
   // row appear. Two routes to the same result is what this ticket exists to remove, so the add-flow
@@ -167,26 +181,25 @@ export function MembersPage() {
         groupName={groupName}
         onGroupNameChange={setGroupName}
         knownGroups={knownGroups}
-        // ADR-201: a group holds a tenant CUSTOM role and never a tier, which is why this list is not
-        // the row's list. The rule is stated where the options are built rather than filtered in later.
-        roleOptions={withRoleTips(tenantCustom.map((r) => ({ value: r.id, label: r.name, roleCapabilities: r.capabilities })), "tenant")}
+        // #603 / ADR-207 (overturns ADR-201 §1): the tiers are in the list. The group picker was the
+        // one picker in the product that hid half its vocabulary, and the note that explained the
+        // absence went with the absence. Same list-builder as the rows, so the vocabulary
+        // cannot fork.
+        roleOptions={withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant")}
         role={groupRole}
         onRoleChange={setGroupRole}
-        pending={assignRole.isPending}
+        pending={assignRole.isPending || assignTier.isPending}
         onAdd={() => {
           if (!groupName.trim() || !groupRole) return;
-          assignRole.mutate({ roleId: groupRole, resourceType: "tenant", resourceId: tenantId, groupName: groupName.trim() }, {
+          const choice = resolveRoleChoice(groupRole, tenantCustom);
+          const done = {
             onSuccess: () => { notify.success(t("toast.saved")); setGroupName(""); setGroupRole(""); },
             onError: () => notify.error(t("toast.actionFailed")),
-          });
+          };
+          if (choice.kind === "tier") assignTier.mutate({ capability: choice.role, groupName: groupName.trim() }, done);
+          else if (choice.kind === "custom") assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, groupName: groupName.trim() }, done);
         }}
       />
-      {/* #579 (review rejection, 2026-08-04): this sentence used to sit under the table, where the section it
-          described no longer existed and nobody could tell what "these" meant. It belongs to the form
-          above it — the one place that offers a group a role — and says why that list has no tiers in it.
-          The difference is real (ADR-201: a tier is held by a person so the record shows who), and an
-          unexplained absence is what made the earlier shape look arbitrary. */}
-      <p className="mt-0 mb-6 text-xs text-fg-dim" data-testid="tenant-group-tiers-note">{t("adminRoles.groupTiersNote")}</p>
 
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 32 }}>
         <thead>
@@ -205,36 +218,34 @@ export function MembersPage() {
                 </span>
               </td>
               <td data-testid="member-roles">
-                {/* A group holds a tenant CUSTOM role and never a tier — ADR-201 retired group-conferred
-                    admin so a tenant can always read off WHO holds it, and `member` is universal. The
-                    control is the same control; its vocabulary is what differs, and the note under the
-                    table says why rather than leaving the absence to be inferred. */}
+                {/* #603 / ADR-207 (overturns ADR-201 §1): the group's control reads the SAME vocabulary a
+                    person's does — tiers and tenant custom roles, one list-builder, mechanism-prefixed
+                    values. The picker that hid half its vocabulary is the thing this ticket removes. */}
                 <Select
                   size="sm"
-                  value={row.group?.held[0]?.assignmentId ? `role:${row.group.held[0].roleName}` : ""}
+                  value={groupRoleValue(row.group)}
                   ariaLabel={t("members.roleFor", { sub: row.label })}
                   testId="member-role-select"
                   options={[
                     { value: "", label: t("adminRoles.rolePlaceholder") },
-                    // #586 review ②: through the same wrapper the row above it uses. This picker offers
-                    // ONLY custom roles, so its labels never touch `capNoun` — which is exactly why the
-                    // walk that keyed on `capNoun` could not see it, and why the same roles explained
-                    // themselves one row up and said nothing here.
-                    ...withRoleTips(tenantCustom.map((r) => ({ value: `role:${r.name}`, label: r.name, roleCapabilities: r.capabilities })), "tenant"),
+                    ...withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant"),
                   ]}
                   onChange={(value) => {
-                    const role = tenantCustom.find((r) => `role:${r.name}` === value);
+                    const choice = resolveRoleChoice(value, tenantCustom);
                     const held = row.group?.held ?? [];
-                    if (!role) {
+                    const saved = { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("toast.actionFailed")) };
+                    if (choice.kind === "none") {
+                      // choosing the placeholder is the revocation (#579: the group row's third cell is
+                      // empty — this Select is where a grant is taken away). Built-in rows revoke through
+                      // the same reference-counted core as custom ones (#603: the DELETE route reads
+                      // built-in rows now, and revoking is never entitlement-gated).
                       for (const h of held) if (!h.managed) unassignRole.mutate(h.assignmentId, { onSuccess: (data) => notifyRevokeOutcome(t, data), onError: (err) => notifyRevokeError(t, err) });
                       return;
                     }
-                    // assign converges on the server (a71d8100): the new role is written and the others
-                    // swept, so this is a replacement here exactly as it is on a person's row
-                    assignRole.mutate({ roleId: role.id, resourceType: "tenant", resourceId: tenantId, principal: row.key }, {
-                      onSuccess: () => notify.success(t("toast.saved")),
-                      onError: () => notify.error(t("toast.actionFailed")),
-                    });
+                    // both paths converge on the server (#579 / a71d8100): the new grant is written and
+                    // the principal's other manual tenant assignments fold — a replacement, not a stack
+                    if (choice.kind === "tier") assignTier.mutate({ capability: choice.role, principal: row.key }, saved);
+                    else assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, principal: row.key }, saved);
                   }}
                 />
               </td>
@@ -257,6 +268,19 @@ export function MembersPage() {
                   tenant principal to one role (a71d8100), so a screen showing two was describing a state
                   the mechanism does not produce. Changing the control replaces; there is no "add". */}
               <td data-testid="member-roles">
+                {/* ADR-207 rev3 (#603): what a GROUP confers is shown BESIDE the control, never inside
+                    it — the Select keeps meaning the row's OWN tier, because a control that appeared to
+                    demote somebody while the group kept conferring admin would be the "successful action
+                    that changes nothing" this repo has fixed twice (#596, #536). The marker names its
+                    source, wears tokens only, and explains itself on hover like every role name (#586). */}
+                {row.adminVia && row.adminVia.length > 0 && (
+                  <RoleTip origin="role" scope="tenant" roleCapabilities={TENANT_TIER_CAPS.admin} testId={`admin-via-${m.sub}`}>
+                    <span data-testid="admin-via-group" className="mr-2 inline-flex items-center gap-1 rounded border border-[var(--accent)] px-1 text-[11px] text-[var(--accent)]">
+                      admin
+                      <span className="text-fg-dim">{t("members.viaGroup", { group: row.adminVia.join(", ") })}</span>
+                    </span>
+                  </RoleTip>
+                )}
                 <Select
                   size="sm"
                   value={currentRoleValue(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })}

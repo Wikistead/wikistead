@@ -9,6 +9,9 @@ export interface Member {
   display_name: string | null;
   picture_url: string | null;
   role: "admin" | "member";
+  /** ADR-207 rev3 (#603): the group names this member carries — what joins a person to the tier a
+   *  group confers on them (the admin-via-group marker). */
+  groups?: string[] | null;
   created_at: string;
 }
 export interface Invite {

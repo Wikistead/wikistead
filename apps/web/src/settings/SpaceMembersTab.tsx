@@ -327,11 +327,14 @@ export function SpaceMembersTab() {
       label: label(g), managed: g.managed, grantee: g.grantee, groupName: g.groupName, capability: g.capability,
       ...(foldedGrantees.has(g.grantee) && g.capability === "edit" ? { foldedCaps: ["edit", "comment"] as PageRelation[] } : {}),
     })),
-    ...(roleAssignments.data ?? []).map((a) => ({
+    // #603: `roleId` is nullable now (a tenant TIER row) — this space listing never returns those
+    // (the server keeps built-ins out of space/page assignment lists), so the filter is a type guard,
+    // not a behavior.
+    ...(roleAssignments.data ?? []).filter((a) => a.roleId !== null).map((a) => ({
       kind: "assignment" as const, key: `a:${a.id}`, badge: a.roleName, custom: true as const,
       // #497 re-review N2: a mapping-owned assignment is read-only here too (ADR-183 §1) — the
       // badge below replaces its revoke exactly as it does for the builtin grant rows.
-      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal, groupName: a.groupName, roleId: a.roleId, managed: a.managed,
+      label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal, groupName: a.groupName, roleId: a.roleId!, managed: a.managed,
     })),
   ].sort((x, y) => x.label.localeCompare(y.label) || x.badge.localeCompare(y.badge));
 
