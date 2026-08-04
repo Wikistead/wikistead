@@ -2,7 +2,7 @@ import { EditorView, ViewPlugin, showTooltip, keymap, type Tooltip, type Tooltip
 import { StateField, StateEffect, EditorSelection, Facet, Prec, type EditorState, type Extension } from "@codemirror/state";
 import { Vim, getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
-import { INLINE_FORMATS, insertImage, insertLink, type InlineFormat, type ImageUploader } from "./commands";
+import { INLINE_FORMATS, insertImage, insertLink, unlink, type InlineFormat, type ImageUploader } from "./commands";
 import { orderByRecency, recordUse } from "./palette-recency";
 import { contextHintTooltip } from "./hint";
 import { registeredMacros } from "../macros";
@@ -82,6 +82,9 @@ const COMMANDS: PaletteCommand[] = [
   // an empty selection inserts "[](url)" with "url" selected (URL insert); with a selection
   // it link-ifies it — reached via the bubble / `\` / `/`-on-selection / right-click.
   { id: "link", label: () => i18n.t("palette.link"), alias: "link", keywords: "url href anchor hyperlink", insert: "", caret: 0, action: (view) => insertLink(view) },
+  // #611 / ADR-211 §4: unlink — the palette door for every mode (the dialog's Remove-link button is
+  // the WYSIWYG one). Judged by the same linkAt; away from a link it does nothing.
+  { id: "unlink", label: () => i18n.t("palette.unlink"), alias: "unlink", keywords: "remove link unlink href", insert: "", caret: 0, action: (view) => unlink(view) },
 ];
 
 // #370 / ADR-145: "Page tags" — jump to / create this page's frontmatter `tags:` block. Frontmatter is

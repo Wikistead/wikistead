@@ -1,8 +1,10 @@
 import { EditorView, showTooltip, type Tooltip, type TooltipView } from "@codemirror/view";
 import { StateField, StateEffect, EditorSelection, Facet, Prec, type EditorState, type Extension } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
+import { linkAt as sharedLinkAt } from "./link-at";
+import { displayMode, linkPrompt } from "./decorations";
 import i18n from "../../i18n";
-import { INLINE_FORMATS } from "./commands";
+import { INLINE_FORMATS, insertLink } from "./commands";
 import { linkifyPaste, linkCopyRange } from "./paste-linkify";
 import { diagramFenceAt, setDiagramAlign, imageAlignAt, setImageAlign, tableDirectiveAt, setTableAlign, innermostMacroAt, resolveNestedAnchor } from "./decorations"; // #255: right-click diagram/image alignment; #393: table block alignment; #549: block copy
 import { tableBlockAt } from "../macros/fence";
@@ -54,22 +56,12 @@ const menuField = StateField.define<MenuState | null>({
     }),
 });
 
-// Find the markdown Link node enclosing `pos` (and its URL child), or null. Used to offer
-// "Edit link" and to decide whether a no-selection right-click overrides the native menu.
+// #611 / ADR-211 §1: the local judge is GONE — this menu asks the ONE shared judge (link-at.ts),
+// the same one the insert/edit door, unlink and the paste path consult. The LinkRange shape this
+// menu's state carries is the adapter over the shared hit.
 function linkAt(state: EditorState, pos: number): LinkRange | null {
-  const tree = syntaxTree(state);
-  let node: ReturnType<typeof tree.resolveInner> | null = tree.resolveInner(pos, 0);
-  while (node && node.name !== "Link") node = node.parent;
-  if (!node) return null;
-  let urlFrom = node.from;
-  let urlTo = node.to;
-  const cur = node.cursor();
-  if (cur.firstChild()) {
-    do {
-      if (cur.name === "URL") { urlFrom = cur.from; urlTo = cur.to; }
-    } while (cur.nextSibling());
-  }
-  return { from: node.from, to: node.to, urlFrom, urlTo };
+  const hit = sharedLinkAt(state, pos);
+  return hit ? { from: hit.from, to: hit.to, urlFrom: hit.urlFrom, urlTo: hit.urlTo } : null;
 }
 
 // #549: did this event rise out of a DIFFERENT (nested) editor than the one handling it?
@@ -159,10 +151,18 @@ function doClearFormat(view: EditorView): void {
 }
 // Edit link: select the URL inside (...) so the user types the replacement. Selecting puts
 // the caret on the link line, revealing the raw `[text](url)` for editing (live-preview).
+// #611 / ADR-211 §3: in WYSIWYG that URL range is marker-HIDDEN — selecting it is the invisible-edit
+// defect this ticket removes — so the menu routes through insertLink, whose in-command fork opens the
+// link dialog there (and keeps this native behaviour in Live/Source).
 function doEditLink(view: EditorView, link: LinkRange): void {
+  view.dispatch({ effects: closeMenu.of(null) });
+  if (view.state.facet(displayMode) === "wysiwyg" && view.state.facet(linkPrompt)) {
+    view.dispatch({ selection: EditorSelection.cursor(link.from), scrollIntoView: true });
+    insertLink(view);
+    return;
+  }
   view.dispatch({ selection: EditorSelection.range(link.urlFrom, link.urlTo), scrollIntoView: true });
   view.focus();
-  view.dispatch({ effects: closeMenu.of(null) });
 }
 // "Insert…": open the `/` insert palette by typing a `/` at the caret (the palette detects
 // it). Works at a line start / after whitespace — the usual no-selection right-click spot.

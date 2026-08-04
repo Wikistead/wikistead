@@ -993,6 +993,20 @@ export const embedUrlPrompt = Facet.define<EmbedUrlPrompt | null, EmbedUrlPrompt
   combine: (vals) => vals.find((v) => v != null) ?? null,
 });
 
+// #611 / ADR-211 §6: the LINK DIALOG seam — the WYSIWYG door for insert/edit/unlink. Three outcomes,
+// because EmbedUrlPrompt's `url | null` cannot carry unlink. Provided by the host beside
+// embedUrlPrompt; the nested-island editors receive the same opts closure, so the dialog works inside
+// islands with no extra wiring. Absent seam (guest / modal-less host) ⇒ the command falls back to the
+// Live-mode behaviour rather than doing nothing.
+export type LinkPromptResult =
+  | { action: "confirm"; text: string; url: string }
+  | { action: "unlink" }
+  | { action: "cancel" };
+export type LinkPrompt = (init: { text: string; url: string; existing: boolean }, onDone: (r: LinkPromptResult) => void) => void;
+export const linkPrompt = Facet.define<LinkPrompt | null, LinkPrompt | null>({
+  combine: (vals) => vals.find((v) => v != null) ?? null,
+});
+
 // #413 / ADR-145 §5: viewer-scoped tag suggestions for the frontmatter chip editor. The host binds a
 // member-only fetch to GET /tags/suggest (the server offers a tag only when the caller can view ≥1 page
 // carrying it — a tag name is content). Absent on guest/template surfaces → no suggestions, input still works.

@@ -49,6 +49,8 @@ const DRAW = svg('<path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2
 const FILE_INPUT = svg('<path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/><path d="M14.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/>'); // embed-page: content flowing into a page (transclude)
 const GLOBE = svg('<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'); // embed-external: the web
 
+const UNLINK = svg('<path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71"/><path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71"/><line x1="8" x2="8" y1="2" y2="5"/><line x1="2" x2="5" y1="8" y2="8"/><line x1="16" x2="16" y1="19" y2="22"/><line x1="19" x2="22" y1="16" y2="16"/>'); // lucide Unlink
+
 const FALLBACK = svg('<rect width="16" height="16" x="4" y="4" rx="2"/>'); // future/unmapped ids ONLY (see the coverage test)
 
 const ICONS: Record<string, string> = {
@@ -58,6 +60,8 @@ const ICONS: Record<string, string> = {
   todo: CHECK_SQUARE, "todo-ring": CIRCLE_CHECK,
   quote: QUOTE, code: CODE, table: TABLE, divider: DIVIDER,
   link: LINK, image: IMAGE, "page-link": FILE_SYMLINK, "insert-template": FILE_STACK,
+  // #611: unlink — the lucide chain with the cut (Unlink), so the pair reads as do/undo
+  unlink: UNLINK,
   "page-tags": TAG,
   // callout types (macro:<type>) — the panel's own glyphs
   "macro:note": CALLOUT_NOTE, "macro:info": CALLOUT_INFO, "macro:tip": CALLOUT_TIP,
