@@ -60,6 +60,8 @@ export function Select({
   // portalled out of it lands in the part of the document that layer has hidden — but a plain positioned
   // element above that layer does, which is what this is.
   const [hint, setHint] = useState<{ node: React.ReactNode; top: number; left: number } | null>(null);
+  // the rendered panel, so its placement can use its real height instead of a constant that was a guess
+  const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) { setHint(null); return; }
@@ -86,7 +88,17 @@ export function Select({
       // the same as no panel
       const right = list.right + 8;
       const left = right + width > window.innerWidth ? Math.max(8, list.left - width - 8) : right;
-      const top = Math.min(row.top, window.innerHeight - 120);
+      // #582 (review rejection): the panel belongs BESIDE the option it describes, and it used to clamp to
+      // a fixed `innerHeight - 120` — so every option below that line got a panel parked on the line
+      // instead of next to itself (measured: 61px adrift at a 450px viewport, and invisible on short
+      // screens because the constant was a guess at the panel's height, not its height).
+      //
+      // Now: start at the option, and move only if the panel would not fit, only as far as it must. The
+      // height is MEASURED from the rendered panel — the first pass uses the option's own height as a
+      // floor, and every later pass (this runs on pointermove and on highlight changes) has the real
+      // number, so a taller panel corrects itself rather than being guessed at forever.
+      const panelH = panelRef.current?.offsetHeight ?? row.height;
+      const top = Math.max(8, Math.min(row.top, window.innerHeight - 8 - panelH));
       const next = `${o.value}:${Math.round(top)}:${Math.round(left)}`;
       if (next === key) return;
       key = next;
@@ -135,6 +147,7 @@ export function Select({
           role="tooltip"
           data-testid={testId ? `${testId}-hint` : "select-hint"}
           className="pointer-events-none fixed z-[60] w-[220px] rounded-md border border-border bg-panel px-2 py-1.5 shadow-md"
+          ref={panelRef}
           style={{ top: hint.top, left: hint.left }}
         >
           {hint.node}

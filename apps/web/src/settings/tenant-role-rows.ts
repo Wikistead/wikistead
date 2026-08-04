@@ -140,11 +140,26 @@ export function resolveRoleChoice(value: string, addable: readonly TenantRoleDef
 // keep pretending otherwise. That makes the option list the WHOLE vocabulary (every tier, every tenant
 // role), not "the ones they lack": a picker that hides the current value has nothing to display as its
 // value, which is exactly how chips grew here in the first place.
-export function roleOptions(allRoles: readonly TenantRoleDef[]): { value: string; label: string; roleCapabilities?: readonly string[] }[] {
+/**
+ * #582 (review rejection ①): a TIER may now say what it confers, because there is finally something honest
+ * to say. `admin` is structural (`… or admin` in the model, true in every tenant) and measured in
+ * TENANT_TIER_CAPS. `member` is NOT: `createSpaces` / `issueApiKeys` ride a `tenant#member` tuple that
+ * each tenant switches on or off, so a static list would state, in a tenant that turned the switch off,
+ * that members can create spaces. That is precisely the "confident falsehood" ADR-203 §4 forbids.
+ *
+ * So `member`'s list is passed IN by the caller, from the tenant's live defaults. A caller that does not
+ * have them passes nothing and the member tier stays bare — absence of a source is what makes the panel
+ * absent, rather than a list of exceptions kept somewhere.
+ */
+export function roleOptions(
+  allRoles: readonly TenantRoleDef[],
+  tierCaps?: { member?: readonly string[]; admin?: readonly string[] },
+): { value: string; label: string; roleCapabilities?: readonly string[] }[] {
   return [
-    // #586: a tier carries no capability list — see role-option-tips.tsx for why it stays bare rather
-    // than being handed a hand-written one.
-    ...BUILT_IN_TIERS.map((tier) => ({ value: `tier:${tier}`, label: tier })),
+    ...BUILT_IN_TIERS.map((tier) => {
+      const caps = tierCaps?.[tier as "member" | "admin"];
+      return caps ? { value: `tier:${tier}`, label: tier, roleCapabilities: caps } : { value: `tier:${tier}`, label: tier };
+    }),
     ...allRoles.filter((r) => r.scope === "tenant").map((r) => ({ value: `role:${r.id}`, label: r.name, roleCapabilities: r.capabilities })),
   ];
 }

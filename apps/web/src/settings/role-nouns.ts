@@ -127,6 +127,28 @@ export const TENANT_TIER_CAPS: Record<"admin" | "member", readonly string[]> = {
   member: ["createSpaces"],
 };
 
+/**
+ * #582 ①: what the two tiers confer IN THIS TENANT.
+ *
+ * `admin` is structural and comes straight from the measured table. `member` is configuration: both of
+ * its capabilities ride a `tenant#member` tuple the tenant switches, so the honest answer needs the
+ * live defaults. Callers that have them get a truthful member list; callers that do not pass
+ * `undefined` and the member tier says nothing, rather than repeating a default that may be false here.
+ *
+ * `undefined` is returned for member — not an empty array — because "nothing to say" and "confers
+ * nothing" are different claims, and the picker renders a panel for the second.
+ */
+export function tenantTierCaps(
+  defaults: { createSpaces: boolean; issueApiKeys: boolean } | undefined,
+): { member?: readonly string[]; admin: readonly string[] } {
+  if (!defaults) return { admin: TENANT_TIER_CAPS.admin };
+  const member = [
+    ...(defaults.createSpaces ? ["createSpaces"] : []),
+    ...(defaults.issueApiKeys ? ["issueApiKeys"] : []),
+  ];
+  return { member, admin: TENANT_TIER_CAPS.admin };
+}
+
 /** Display order, so the same set reads the same wherever it appears. */
 const CAP_ORDER = ["view", "comment", "edit", "moderate", "publish", "delete", "share", "settings", "manage"];
 
