@@ -1347,6 +1347,8 @@
     "mixedScopeHint": "A role is either a space/page role or a tenant role. Uncheck one side to save.",
     "sectionTenant": "Tenant",
     "sectionResource": "Space / Page",
+    "memberDefaultsTitle": "Member defaults",
+    "memberDefaultsBody": "What every member of this tenant can do, whatever role they hold.",
     "groupAssignTitle": "Group roles",
     "groupAssignBody": "Give a tenant role to an IdP group. Everyone in the group gets it, and loses it when they leave the group.",
     "groupAssignEmpty": "No group holds a tenant role.",

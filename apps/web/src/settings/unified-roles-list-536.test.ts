@@ -97,12 +97,17 @@ describe("#536one roles list, one creation flow", () => {
   // than left asserting a key that no locale carries.
   it("a built-in cannot be edited, and at rest no role shows a grid at all", () => {
     // RE-AIMED by #586②: the read-only grids left the list — a role at rest is its NAME, and the
-    // name's hover window says what it confers. What this keeps pinning is the half that must not move:
+    // name's hover window says what it confers. What this keeps pinning is the half that must not move
     // nothing offers an EDITING grid for a built-in (the member row's control edits the tenant DEFAULTS,
     // a different thing, and stays), and the custom rows' grid appears only behind its edit affordance.
+    // RE-AIMED AGAIN by the 2026-08-04 ruling: " member UI
+    // ". The member row's control edited the tenant
+    // DEFAULTS — a different thing, which is why it was allowed to stay — but a policy wearing a role
+    // row's clothes still reads as "this built-in is editable". It moved to its own section; NO built-in
+    // row carries a grid now, and the defaults keep theirs where they are what they are.
     expect(src, "no editable grid for the resource built-ins").not.toMatch(/idPrefix=\{`builtin-\$\{r\.name\}`\}/);
-    expect(src, "no grid at all for the admin tier").not.toMatch(/idPrefix="builtin-admin"/);
+    expect(src, "no grid for a tier row").not.toMatch(/idPrefix="builtin-(admin|member)"/);
     expect(src, "the custom grid is behind the edit affordance").toMatch(/capsOpenId === r\.id && \(/);
-    expect(src, "the member DEFAULTS control stays editable").toMatch(/idPrefix="builtin-member"/);
+    expect(src, "the tenant DEFAULTS control stays editable, in its own section").toMatch(/idPrefix="member-defaults"/);
   });
 });
