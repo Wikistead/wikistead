@@ -179,7 +179,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
     await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
 
     const { mintPasswordReset } = await import('../auth/password-reset.js')
-    const minted = await mintPasswordReset(req.db, identifier)
+    const minted = await mintPasswordReset(req.db, req.tenant, identifier)
     if (!minted) return silence()
 
     // Sent DIRECTLY, not through the notification outbox: that outbox stores a pointer rather than a
@@ -343,15 +343,29 @@ export async function authLocalPlugin(app: FastifyInstance) {
       // The credential row is read even when locked, because the refusal must cost the same either
       // way (a "locked" branch that skips the KDF is the timing oracle C1 closes).
       const enabled = await localLoginEnabled(req.db)
+      // #605 / ADR-210 §4 row 3: while the stance bites, only an exempt member passes — and the
+      // exemption is read in the SAME query as the credential (§3: a second query that only runs when
+      // the row exists is a timing oracle for "is this address an account here"). The stance itself is
+      // a per-TENANT fact, computed once regardless of the identifier.
+      const { resolveSsoStance } = await import('../auth/sso-stance.js')
+      const stance = await resolveSsoStance(req.db, req.tenant)
       const [row] = enabled
-        ? await req.db.sql<{ member_sub: string; password_hash: string }[]>`
-            SELECT member_sub, password_hash FROM local_credentials WHERE identifier = ${identifier}`
+        ? stance.biting
+          ? await req.db.sql<{ member_sub: string; password_hash: string; exempt: boolean }[]>`
+              SELECT lc.member_sub, lc.password_hash, (se.member_sub IS NOT NULL) AS exempt
+              FROM local_credentials lc LEFT JOIN sso_exemptions se ON se.member_sub = lc.member_sub
+              WHERE lc.identifier = ${identifier}`
+          : await req.db.sql<{ member_sub: string; password_hash: string; exempt?: boolean }[]>`
+              SELECT member_sub, password_hash FROM local_credentials WHERE identifier = ${identifier}`
         : []
       // An unknown identifier (or local login switched off) verifies against a real hash nobody holds.
       const stored = row?.password_hash ?? (await dummyHash())
       const ok = await verifyPassword(password, stored)
+      // folded into the ONE failure branch below — never "you are not exempt" (§3: that would tell a
+      // stranger who the exempt people are), and the KDF above has already run either way
+      const stanceBlocked = stance.biting && row?.exempt !== true
 
-      if (locked || !enabled || !row || !ok) {
+      if (locked || !enabled || !row || !ok || stanceBlocked) {
         // A correct password during a lockout clears NOTHING (C2) — it is still a failure here.
         await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
         await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)

@@ -407,7 +407,19 @@
     "platformOwnIdpRequired": "Enable and verify OIDC or SAML before turning platform login off.",
     "method_unentitled": "Not on your plan",
     "methodsSaveFailed": "Couldn't change the login methods.",
-    "samlNotConfigured": "Not configured yet"
+    "samlNotConfigured": "Not configured yet",
+    "blockedByStance": "Blocked: SSO is required",
+    "ssoRequired": "Require SSO",
+    "ssoRequiredBody": "Signing in requires your own IdP (OIDC or SAML). This is about signing in only: API keys, share links and SCIM keep working.",
+    "ssoRequiredLapsed": "Lapsed",
+    "ssoRequiredLapsedTip": "No federated sign-in method is working right now, so the requirement is not closing any door. It resumes when a connection is back.",
+    "ssoNeedsIdp": "Enable a working OIDC or SAML connection before requiring SSO.",
+    "ssoNeedsExemption": "Name at least one exempt member who holds a password first. They are the way back in when the IdP is down.",
+    "ssoExemptionsLead": "Exempt members may still sign in with a password while SSO is required.",
+    "ssoExemptionNoCredential": "no password yet",
+    "ssoExemptionRevoke": "Revoke exemption",
+    "ssoExemptionSearch": "Add an exempt member…",
+    "ssoExemptionRevokeConfirm": "Revoke the exemption for {{sub}}? While SSO is required they will no longer be able to sign in with a password."
   },
   "adminEnroll": {
     "title": "Auto-enrolment",
@@ -620,7 +632,10 @@
     "signInSaml": "Sign in with SSO (SAML)",
     "signInPlatform": "Sign in with your platform account",
     "moreWays": "Sign in another way",
-    "noMethods": "Sign-in is not available right now. Contact your administrator."
+    "noMethods": "Sign-in is not available right now. Contact your administrator.",
+    "recoveryLink": "Sign in another way",
+    "recoveryTitle": "Recovery sign-in",
+    "recoveryBody": "For members named as exceptions while SSO is required. Sign in with your email address and password."
   },
   "share": {
     "opening": "Opening shared page…",

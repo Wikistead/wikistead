@@ -87,9 +87,9 @@ describe('#568 §6: asking for a reset tells you nothing', () => {
   it('a local account, an OIDC member and a stranger all mint NOTHING visible to the caller', async () => {
     const local = await makeLocalMember('ask-local')
     const oidc = await makeOidcMember('ask-oidc')
-    expect(await mintPasswordReset(db, local.identifier), 'a password account gets a token').not.toBeNull()
-    expect(await mintPasswordReset(db, oidc.email), 'an OIDC member has no credential to reset').toBeNull()
-    expect(await mintPasswordReset(db, `nobody-${STAMP}@e2e.test`), 'a stranger, likewise').toBeNull()
+    expect(await mintPasswordReset(db, { plan: 'free' }, local.identifier), 'a password account gets a token').not.toBeNull()
+    expect(await mintPasswordReset(db, { plan: 'free' }, oidc.email), 'an OIDC member has no credential to reset').toBeNull()
+    expect(await mintPasswordReset(db, { plan: 'free' }, `nobody-${STAMP}@e2e.test`), 'a stranger, likewise').toBeNull()
     // ...and the HTTP surface answers 204 to all three, which is the part that matters
     for (const id of [local.identifier, oidc.email, `nobody-${STAMP}@e2e.test`, '']) {
       const res = await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: H, payload: { identifier: id } })
@@ -110,7 +110,7 @@ describe('#568 §6: asking for a reset tells you nothing', () => {
   it('with password sign-in switched off, nothing is minted at all', async () => {
     const local = await makeLocalMember('ask-while-off')
     await setLocalLogin(false)
-    expect(await mintPasswordReset(db, local.identifier)).toBeNull()
+    expect(await mintPasswordReset(db, { plan: 'free' }, local.identifier)).toBeNull()
     await setLocalLogin(true)
   }, 120_000)
 })
@@ -120,7 +120,7 @@ describe('#568 §6: completing a reset', () => {
     const { sub, identifier } = await makeLocalMember('complete')
     const before = await storedHash(sub)
     const live = await createSession(app.valkey, { tenantId: TENANT, sub, email: identifier, role: 'member', groups: [] })
-    const minted = (await mintPasswordReset(db, identifier))!
+    const minted = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
 
     const events: string[] = []
     const off = onDomainEvent((e) => { if (e.type.startsWith('member.password_reset')) events.push(e.type) })
@@ -144,8 +144,8 @@ describe('#568 §6: completing a reset', () => {
   it('using one link invalidates the member OTHER live links', async () => {
     // Someone who asked three times and had one intercepted should not be leaving two more live.
     const { sub, identifier } = await makeLocalMember('multi')
-    const first = (await mintPasswordReset(db, identifier))!
-    const second = (await mintPasswordReset(db, identifier))!
+    const first = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
+    const second = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
     expect(await completePasswordReset(db, TEN, first.token, NEXT), 'the first works').not.toBeNull()
     expect(await completePasswordReset(db, TEN, second.token, 'a-third-passphrase-x'), 'the second is dead').toBeNull()
     expect(await verifyPassword(NEXT, (await storedHash(sub))!)).toBe(true)
@@ -153,7 +153,7 @@ describe('#568 §6: completing a reset', () => {
 
   it('an expired link is dead, and answers exactly like an unknown one', async () => {
     const { identifier } = await makeLocalMember('expired')
-    const minted = (await mintPasswordReset(db, identifier))!
+    const minted = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
     await adminPool`UPDATE password_resets SET expires_at = now() - interval '1 minute' WHERE token_hash = encode(digest(${minted.token}, 'sha256'), 'hex')`
       .catch(async () => {
         // pgcrypto may not be installed; expire EVERY live row for this member instead — same state
@@ -168,7 +168,7 @@ describe('#568 §6: completing a reset', () => {
 
   it('a password below the policy is refused, and the link SURVIVES', async () => {
     const { identifier } = await makeLocalMember('weak-reset')
-    const minted = (await mintPasswordReset(db, identifier))!
+    const minted = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
     const weak = await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: minted.token, password: 'short' } })
     expect(weak.statusCode).toBe(400)
     expect(weak.json()).toMatchObject({ code: 'weak_password' })
@@ -178,7 +178,7 @@ describe('#568 §6: completing a reset', () => {
 
   it('a cross-site POST can neither ask for nor complete a reset', async () => {
     const { identifier } = await makeLocalMember('csrf-reset')
-    const minted = (await mintPasswordReset(db, identifier))!
+    const minted = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
     const X = { ...H, 'sec-fetch-site': 'cross-site' }
     expect((await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: X, payload: { identifier } })).statusCode).toBe(403)
     expect((await app.inject({ method: 'POST', url: '/auth/local/reset', headers: X, payload: { token: minted.token, password: NEXT } })).statusCode).toBe(403)
@@ -214,7 +214,7 @@ describe('#568 review R1-R3: the reset surface itself', () => {
     const lockKey = `lock:local:${TENANT}:${victim.identifier}`
     await app.valkey.set(lockKey, '1', 'EX', 120)
 
-    const theirs = (await mintPasswordReset(db, attacker.identifier))!
+    const theirs = (await mintPasswordReset(db, { plan: 'free' }, attacker.identifier))!
     const res = await app.inject({
       method: 'POST', url: '/auth/local/reset', headers: H,
       payload: { token: theirs.token, password: NEXT, identifier: victim.identifier },
@@ -223,7 +223,7 @@ describe('#568 review R1-R3: the reset surface itself', () => {
     expect(await app.valkey.get(lockKey), "and the victim's lock is untouched").not.toBeNull()
 
     // ...while the owner's own reset DOES clear their own lock
-    const own = (await mintPasswordReset(db, victim.identifier))!
+    const own = (await mintPasswordReset(db, { plan: 'free' }, victim.identifier))!
     await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: own.token, password: NEXT } })
     expect(await app.valkey.get(lockKey), 'the owner is let back in').toBeNull()
   }, 180_000)
@@ -240,7 +240,7 @@ describe('#568 review R1-R3: the reset surface itself', () => {
     }
     const before = await count()
     await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: H, payload: { identifier } })
-    const minted = (await mintPasswordReset(db, identifier))!
+    const minted = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
     await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: minted.token, password: NEXT } })
     expect(await count() - before, 'both the request and the completion are on the ledger').toBeGreaterThanOrEqual(2)
   }, 180_000)
@@ -258,7 +258,7 @@ describe('#568 review F1/F2: the ledger says what happened, and does not say who
 
     // ...and the row really lands
     const { identifier, sub } = await makeLocalMember('f1')
-    const minted = (await mintPasswordReset(db, identifier))!
+    const minted = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
     await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: minted.token, password: NEXT } })
     await drainAuditFor(adminPool, TENANT)
     const rows = await adminPool<{ actor: string }[]>`

@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   useAdminConnections, useCreateConnection, useUpdateConnection, useDeleteConnection, useReorderConnections,
   useLoginMethods, useUpdatePlatformLogin, useUpdateLocalLogin, useTenantSaml, useUpdateTenantSaml, useTestTenantOidc,
+  useUpdateSsoRequired, useSsoExemptions, useGrantSsoExemption, useRevokeSsoExemption, useTenantMemberCandidates,
   type AdminConnectionDTO, type LoginMethodState,
 } from "../data/queries";
 import { ApiError } from "../data/apiClient";
@@ -73,6 +74,12 @@ export function AdminSignInMethodsSection() {
   const updateSaml = useUpdateTenantSaml();
   const test = useTestTenantOidc();
 
+  const ssoRequired = useUpdateSsoRequired();
+  const exemptions = useSsoExemptions();
+  const grantExemption = useGrantSsoExemption();
+  const revokeExemption = useRevokeSsoExemption();
+  const [exemptQuery, setExemptQuery] = useState("");
+  const exemptCandidates = useTenantMemberCandidates(exemptQuery);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; error: string | null } | null>(null);
@@ -81,6 +88,8 @@ export function AdminSignInMethodsSection() {
   const [form, setForm] = useState({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "" });
   const [flags, setFlags] = useState({ bootstrapEligible: false, trustGroups: false });
   const [deleting, setDeleting] = useState<AdminConnectionDTO | null>(null);
+  // #504: revoking an exemption removes somebody's break-glass — confirm first, like every removal here
+  const [revokingExemption, setRevokingExemption] = useState<string | null>(null);
 
   const rows = connections.data ?? [];
   const m = methods.data?.methods;
@@ -396,6 +405,10 @@ export function AdminSignInMethodsSection() {
               <div className="font-medium">{t("adminAuth.methodLocal")}</div>
               <div className="truncate text-xs text-fg-dim">{t("adminAuth.localBody")}</div>
             </div>
+            {m.local.blockedByStance && (
+              /* ADR-195 §1: the selection is preserved and the row SAYS why it is off */
+              <span className="rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="blocked-by-stance">{t("adminAuth.blockedByStance")}</span>
+            )}
             {stateBadges(m.local.selected, m.local, m.local.effective)}
             <Switch checked={m.local.selected} testId="local-login-toggle" ariaLabel={t("adminAuth.methodLocal")}
               onChange={(on: boolean) => localLogin.mutate(on, {
@@ -415,11 +428,71 @@ export function AdminSignInMethodsSection() {
           <div className={METHOD_ROW} data-method-row data-testid="sign-in-method-platform">
             <div className={METHOD_ROW_HEAD}>
               <div className="min-w-0 flex-1 font-medium">{t("adminAuth.methodPlatformOidc")}</div>
+              {m["platform-oidc"].blockedByStance && (
+                <span className="rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="blocked-by-stance">{t("adminAuth.blockedByStance")}</span>
+              )}
               {stateBadges(m["platform-oidc"].selected, m["platform-oidc"], m["platform-oidc"].effective)}
               {m["platform-oidc"].inCeiling && (
                 <Switch checked={m["platform-oidc"].selected} onChange={onTogglePlatform} testId="platform-login-toggle"
                   ariaLabel={t("adminAuth.methodPlatformOidc")} />
               )}
+            </div>
+          </div>
+        )}
+
+        {/* #605 / ADR-210: the STANCE — one switch about ALL the other doors. Its copy says "this is
+            about signing in" (§7: API keys, share links and SCIM are untouched, and a tenant who turns
+            this on may well believe otherwise). selected-but-not-biting is the LAPSE and is shown
+            (ADR-195 §1); the exemptions live inside the row because naming one is a PRECONDITION of
+            turning the switch on (§R5-4). */}
+        {m && (
+          <div className={METHOD_ROW} data-method-row data-testid="sign-in-method-sso-required">
+            <div className={METHOD_ROW_HEAD}>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">{t("adminAuth.ssoRequired")}</div>
+                <div className="text-xs text-fg-dim">{t("adminAuth.ssoRequiredBody")}</div>
+              </div>
+              {methods.data?.ssoRequired?.selected && !methods.data.ssoRequired.biting && (
+                <span className="rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-[var(--warning,#b45309)]" data-testid="sso-required-lapsed" data-tip={t("adminAuth.ssoRequiredLapsedTip")}>{t("adminAuth.ssoRequiredLapsed")}</span>
+              )}
+              <Switch checked={!!methods.data?.ssoRequired?.selected} testId="sso-required-toggle" ariaLabel={t("adminAuth.ssoRequired")}
+                onChange={(on: boolean) => ssoRequired.mutate(on, {
+                  onSuccess: () => notify.success(t("toast.saved")),
+                  onError: (e) => {
+                    const code = e instanceof ApiError ? e.code : undefined;
+                    notify.error(
+                      code === "own_idp_required" ? t("adminAuth.ssoNeedsIdp")
+                      : code === "sso_exemption_required" ? t("adminAuth.ssoNeedsExemption")
+                      : t("adminAuth.methodsSaveFailed"),
+                    );
+                  },
+                })} />
+            </div>
+            <div className="flex flex-col gap-1 border-t border-border pt-1.5" data-testid="sso-exemptions">
+              <div className="text-xs text-fg-dim">{t("adminAuth.ssoExemptionsLead")}</div>
+              {(exemptions.data ?? []).map((x) => (
+                <div key={x.memberSub} className="flex items-center gap-2 text-xs" data-testid="sso-exemption-row">
+                  <span className="min-w-0 flex-1 truncate">{x.memberSub}</span>
+                  {!x.hasCredential && (
+                    /* §5: the credential row is the only honest witness that a key exists — an
+                       exemption without one cannot actually sign in yet, and the screen says so */
+                    <span className="rounded bg-panel-2 px-1.5 py-px text-[10px] text-fg-dim" data-testid="sso-exemption-no-credential">{t("adminAuth.ssoExemptionNoCredential")}</span>
+                  )}
+                  <IconButton aria-label={t("adminAuth.ssoExemptionRevoke")} data-testid="sso-exemption-revoke" variant="danger"
+                    onClick={() => setRevokingExemption(x.memberSub)}><X size={12} /></IconButton>
+                </div>
+              ))}
+              <div className="flex items-center gap-2">
+                <Input className="max-w-[220px]" value={exemptQuery} onChange={(e) => setExemptQuery(e.target.value)}
+                  placeholder={t("adminAuth.ssoExemptionSearch")} aria-label={t("adminAuth.ssoExemptionSearch")} data-testid="sso-exemption-input" />
+                {exemptCandidates.candidates.filter((c) => !(exemptions.data ?? []).some((x) => x.memberSub === c.sub)).slice(0, 5).map((c) => (
+                  <Button key={c.sub} size="sm" variant="default" data-testid="sso-exemption-add"
+                    onClick={() => grantExemption.mutate(c.sub, {
+                      onSuccess: () => { notify.success(t("toast.saved")); setExemptQuery(""); },
+                      onError: () => notify.error(t("toast.actionFailed")),
+                    })}>{c.displayName || c.sub}</Button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -487,6 +560,20 @@ export function AdminSignInMethodsSection() {
         </Button>
       )}
 
+      <ConfirmDialog
+        open={revokingExemption !== null}
+        message={revokingExemption ? t("adminAuth.ssoExemptionRevokeConfirm", { sub: revokingExemption }) : ""}
+        confirmTestId="sso-exemption-revoke-confirm"
+        confirmLabel={t("common.confirm")}
+        onClose={() => setRevokingExemption(null)}
+        onConfirm={() => {
+          if (revokingExemption) revokeExemption.mutate(revokingExemption, {
+            onSuccess: () => notify.success(t("toast.saved")),
+            onError: (e) => notify.error(e instanceof ApiError && e.code === "sso_exemption_required" ? t("adminAuth.ssoNeedsExemption") : t("toast.actionFailed")),
+          });
+          setRevokingExemption(null);
+        }}
+      />
       <ConfirmDialog
         open={deleting !== null}
         title={t("adminConnections.deleteTitle")}

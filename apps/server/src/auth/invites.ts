@@ -136,6 +136,13 @@ export async function createInvite(
     if (!(await localLoginEnabled(db))) {
       throw Object.assign(new Error('password sign-in is off for this tenant — turn it on before inviting with a password'), { statusCode: 400, code: 'local_login_disabled' })
     }
+    // #605 / ADR-210 §4 row 8: a password invite mints a NEW person, and while SSO is required a new
+    // person cannot arrive by password. ADMIN surface → an explicit refusal with the reason (ADR-195
+    // §9), never the uniform not-found a stranger gets.
+    const { resolveSsoStance } = await import('./sso-stance.js')
+    if ((await resolveSsoStance(db, { plan: args.plan })).biting) {
+      throw Object.assign(new Error('SSO is required for this tenant — a new member cannot be invited with a password while it is on'), { statusCode: 400, code: 'sso_required' })
+    }
     // #606: a password invite MINTS a new identity (`acceptLocalInvite` always allocates a fresh
     // `wlocal_` sub), so sending one to somebody who is already in this tenant does not give them a
     // password — it makes a second person who happens to share their address, holding a second seat and
@@ -250,6 +257,10 @@ export async function acceptLocalInvite(
 ): Promise<{ ok: true; sub: string } | { ok: false }> {
   const { localLoginEnabled } = await import('./login-methods.js')
   if (!(await localLoginEnabled(deps.db))) return { ok: false }
+  // #605 / ADR-210 §4 row 9: the sub does not exist until acceptance mints it, so there is nobody to
+  // exempt — while the stance bites, a local invite link answers as the uniform dead link.
+  const { resolveSsoStance } = await import('./sso-stance.js')
+  if ((await resolveSsoStance(deps.db, tenant)).biting) return { ok: false }
   const { hashPassword } = await import('./password-hash.js')
   const { validatePasswordPolicy } = await import('./password-policy.js')
   if (!validatePasswordPolicy(password)) {

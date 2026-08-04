@@ -30,13 +30,15 @@ export interface MethodPicture {
   configured: boolean
   selected: boolean
   effective: boolean
-  blocker: 'ceiling' | 'config' | 'selection' | 'entitlement' | null
+  blocker: 'ceiling' | 'config' | 'selection' | 'entitlement' | 'stance' | null
 }
 export interface LoginMethodsPicture {
   tenantId: string
   slug: string
   plan: string
   ceiling: LoginMethod[]
+  // #605: the stance, printed so the operator sees WHY local/platform are blocked (never a lie of omission)
+  ssoRequired: { selected: boolean; biting: boolean }
   methods: Record<LoginMethod, MethodPicture>
   effectiveSet: LoginMethod[]
 }
@@ -52,7 +54,7 @@ export async function inspectLoginMethods(sql: postgres.Sql, args: { slug: strin
   // writes below flip ALL of the tenant's oidc connections — TODO(#554 S4): per-connection --connection.
   const [oidc] = await sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_oidc WHERE tenant_id = ${tenant.id} ORDER BY sort, id LIMIT 1`
   const [saml] = await sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml WHERE tenant_id = ${tenant.id}`.catch(() => [] as { enabled: boolean }[])
-  const [pref] = await sql<{ platform_login_disabled: boolean; local_login_enabled: boolean }[]>`SELECT platform_login_disabled, local_login_enabled FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`
+  const [pref] = await sql<{ platform_login_disabled: boolean; local_login_enabled: boolean; sso_required: boolean }[]>`SELECT platform_login_disabled, local_login_enabled, sso_required FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`
   const platformCfg = !!loadPlatformOidc()
   const entitledSaml = resolveEntitlements(tenant.plan).samlSso
 
@@ -90,17 +92,26 @@ export async function inspectLoginMethods(sql: postgres.Sql, args: { slug: strin
     configured: platformCfg,
     selected: platformSelected || !ownIdpEffective, // lapsed pref = effectively selected
   })
+  // #605 / ADR-210: the STANCE, folded into the effective set the operator trusts at 3am — before
+  // this, the CLI would print a stance-blocked `local` as EFFECTIVE (thecost of option (c)).
+  // Same enabled-level caveat as everything here: this cannot see an undecryptable secret, so a
+  // stance the runtime has lapsed (broken cfg) may still print as biting — stated, not pretended away.
+  const ssoSelected = !!pref?.sso_required
+  const ssoBiting = ssoSelected && (tenantOidc.effective || samlPic.effective)
   const methods: Record<LoginMethod, MethodPicture> = {
     'tenant-oidc': tenantOidc,
-    'platform-oidc': { ...platform, selected: platformSelected }, // report the STORED intent, effect includes the lapse
+    'platform-oidc': ssoBiting
+      ? { ...platform, selected: platformSelected, effective: false, blocker: 'stance' }
+      : { ...platform, selected: platformSelected }, // report the STORED intent, effect includes the lapse
     saml: samlPic,
-    local: localPic,
+    local: ssoBiting ? { ...localPic, effective: false, blocker: 'stance' } : localPic,
   }
   return {
     tenantId: tenant.id,
     slug: args.slug,
     plan: tenant.plan,
     ceiling: [...ceiling],
+    ssoRequired: { selected: ssoSelected, biting: ssoBiting },
     methods,
     effectiveSet: (Object.keys(methods) as LoginMethod[]).filter((k) => methods[k].effective),
   }
@@ -112,6 +123,9 @@ export interface RecoverArgs {
   enable?: LoginMethod
   disable?: LoginMethod
   platformLogin?: 'on' | 'off'
+  // #605: the operator can unlock (or set) the stance — the tenant-side preconditions are deliberately
+  // bypassed here, like every other guard this tool overrides; the ledger records it.
+  ssoRequired?: 'on' | 'off'
   // #554 S4 / ADR-197 §2: per-connection break-glass — flips ONE tenant_oidc row by its minted id
   // instead of the whole kind. Composable with --enable/--disable being absent.
   connection?: { id: string; on: boolean }
@@ -134,6 +148,20 @@ export async function recoverLoginMethods(sql: postgres.Sql, args: RecoverArgs):
 
   let changed = false
   await sql.begin(async (tx) => {
+    // #605: the stance write — same ledger discipline as everything here
+    if (args.ssoRequired && before.ssoRequired.selected !== (args.ssoRequired === 'on')) {
+      const on = args.ssoRequired === 'on'
+      await tx`INSERT INTO tenant_login_prefs (tenant_id, sso_required) VALUES (${before.tenantId}, ${on})
+               ON CONFLICT (tenant_id) DO UPDATE SET sso_required = ${on}, updated_at = now()`
+      changed = true
+      await appendOperatorEntry(tx, {
+        actor: `operator:${args.operator}`,
+        action: on ? 'tenant.sso_required_on' : 'tenant.sso_required_off',
+        target: `tenant:${before.tenantId}`,
+        at,
+        reason: 'recovery',
+      })
+    }
     if (args.connection) {
       const [row] = await tx<{ id: string; enabled: boolean }[]>`
         SELECT id, enabled FROM tenant_oidc WHERE id = ${args.connection.id} AND tenant_id = ${before.tenantId}`
@@ -213,6 +241,9 @@ export function renderPicture(p: LoginMethodsPicture): string {
   const lines: string[] = []
   lines.push(`tenant ${p.slug} (${p.tenantId}, plan=${p.plan})`)
   lines.push(`ceiling (LOGIN_METHODS): ${p.ceiling.join(', ') || '(empty!)'}`)
+  if (p.ssoRequired.selected) {
+    lines.push(`sso-required: ${p.ssoRequired.biting ? 'ON (biting)' : 'ON but LAPSED (no federated method effective — password/platform doors are open)'} — unlock: --sso-required=off`)
+  }
   for (const [name, m] of Object.entries(p.methods)) {
     const state = m.effective ? 'EFFECTIVE' : `off (blocker: ${m.blocker})`
     lines.push(`  ${name.padEnd(14)} ${state}  [ceiling=${m.inCeiling} configured=${m.configured} selected=${m.selected}]`)
@@ -237,7 +268,7 @@ export function renderPicture(p: LoginMethodsPicture): string {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const slug = process.argv[2]
   if (!slug || slug.startsWith('--')) {
-    console.error('usage: pnpm tenant:login-methods <tenantSlug> [--enable=<m>] [--disable=<m>] [--connection=<id>:on|off] [--platform-login=on|off] [--by=<operator>]')
+    console.error('usage: pnpm tenant:login-methods <tenantSlug> [--enable=<m>] [--disable=<m>] [--connection=<id>:on|off] [--platform-login=on|off] [--sso-required=on|off] [--by=<operator>]')
     process.exit(2)
   }
   const opt = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -254,6 +285,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error('--platform-login takes on|off')
     process.exit(2)
   }
+  const ssoRequired = opt('sso-required')
+  if (ssoRequired !== undefined && ssoRequired !== 'on' && ssoRequired !== 'off') {
+    console.error('--sso-required takes on|off')
+    process.exit(2)
+  }
   const operator = opt('by') || process.env.WIKISTEAD_OPERATOR || os.userInfo().username || 'unknown'
   const adminPool = postgres(process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL!)
   try {
@@ -266,10 +302,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       if (!m) { console.error('--connection takes <id>:on|off'); process.exit(2) }
       connection = { id: m[1]!, on: m[2] === 'on' }
     }
-    if (!enable && !disable && !platformLogin && !connection) {
+    if (!enable && !disable && !platformLogin && !connection && !ssoRequired) {
       console.log(renderPicture(await inspectLoginMethods(adminPool, { slug })))
     } else {
-      const r = await recoverLoginMethods(adminPool, { slug, operator, enable, disable, platformLogin: platformLogin as 'on' | 'off' | undefined, connection })
+      const r = await recoverLoginMethods(adminPool, { slug, operator, enable, disable, platformLogin: platformLogin as 'on' | 'off' | undefined, connection, ssoRequired: ssoRequired as 'on' | 'off' | undefined })
       console.log(r.changed ? 'changed.' : 'no-op (already in the requested state).')
       console.log(renderPicture(r.picture))
     }

@@ -1937,7 +1937,7 @@ export function useTenantSaml() {
   });
 }
 // #537 Slice 3: the admin's login-methods view + the platform-login toggle (ruling 4).
-export interface LoginMethodState { inCeiling: boolean; configured: boolean; selected: boolean; effective: boolean }
+export interface LoginMethodState { inCeiling: boolean; configured: boolean; selected: boolean; effective: boolean; blockedByStance?: boolean }
 export interface LoginMethodsDTO {
   // #568: `local` is password sign-in. It has nothing to configure, so `configured` is always true
   // and the tenant's switch is the whole story.
@@ -1945,6 +1945,8 @@ export interface LoginMethodsDTO {
     "tenant-oidc": LoginMethodState; "platform-oidc": LoginMethodState
     saml: LoginMethodState & { entitled: boolean }; local: LoginMethodState
   }
+  // #605 / ADR-210: the SSO-required stance. selected && !biting is the LAPSE — shown, never silent.
+  ssoRequired: { selected: boolean; biting: boolean }
 }
 export function useLoginMethods() {
   const { token } = useSession();
@@ -1967,6 +1969,40 @@ export function useUpdatePlatformLogin() {
 
 // #568 / ADR-198 §3: the local switch. Its own hook rather than a parameter on the platform one —
 // they are different decisions, and the server refuses to close the last door in either case.
+// #605 / ADR-210: the stance switch and its exemptions.
+export interface SsoExemptionDTO { memberSub: string; createdAt: string; hasCredential: boolean }
+export function useUpdateSsoRequired() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ssoRequired: boolean) =>
+      apiFetch<null>("/admin/login-methods", token, { method: "PATCH", body: JSON.stringify({ ssoRequired }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
+  });
+}
+export function useSsoExemptions() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["sso-exemptions"],
+    queryFn: () => apiFetch<SsoExemptionDTO[]>("/admin/sso-exemptions", token).then((r) => r ?? []),
+  });
+}
+export function useGrantSsoExemption() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sub: string) => apiFetch<null>(`/admin/sso-exemptions/${encodeURIComponent(sub)}`, token, { method: "PUT" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sso-exemptions"] }),
+  });
+}
+export function useRevokeSsoExemption() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sub: string) => apiFetch<null>(`/admin/sso-exemptions/${encodeURIComponent(sub)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sso-exemptions"] }),
+  });
+}
 export function useUpdateLocalLogin() {
   const { token } = useSession();
   const qc = useQueryClient();
