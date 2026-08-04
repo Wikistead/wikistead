@@ -989,7 +989,6 @@
     "inviteEmail": "invite email",
     "inviteRole": "invite role",
     "roleFor": "role for {{sub}}",
-    "tierFor": "tier for {{sub}}",
     "sendInvite": "Send invite",
     "inviteLinkLabel": "Invite link (share if email is off):",
     "emailed": "Emailed to recipient.",

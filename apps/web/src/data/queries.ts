@@ -2104,6 +2104,22 @@ export function useTenantMemberCandidates(q: string) {
   return { candidates: matches, isError: all.isError };
 }
 
+// #617 ②(a): sub → display name, for the admin surfaces that must NAME a member they already hold the
+// sub for (an exemption row, a revoke confirmation). Same query key as the typeahead above, so this
+// costs no extra request — it reads the list that is already in cache and shapes it as a lookup.
+export function useTenantMemberNames(): Map<string, string> {
+  const { token } = useSession();
+  const all = useQuery({
+    queryKey: ["tenant-members"],
+    queryFn: () => apiFetch<{ members: { sub: string; display_name: string | null; email: string | null }[] }>("/members", token).then((r) => r?.members ?? []),
+    staleTime: 30_000,
+    retry: false,
+  });
+  // email is the second-best name: a member invited but never signed in has no display_name yet, and
+  // their address is still a human-readable handle where the sub is not.
+  return new Map((all.data ?? []).map((m) => [m.sub, m.display_name || m.email || ""]).filter(([, n]) => n !== "") as [string, string][]);
+}
+
 export function useMemberCandidates(spaceId: string, q: string) {
   const { token } = useSession();
   return useQuery({

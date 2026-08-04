@@ -113,7 +113,12 @@ export function ConfirmDialog({
         overlayClassName={stacked ? "z-[60]" : undefined}>
         <DialogHeader>
           <DialogTitle>{title ?? t("dialogs.confirmTitle")}</DialogTitle>
-          <DialogDescription>{message}</DialogDescription>
+          {/* #617: the message is composed by 18 different callers, and any of them may interpolate a
+              string with no break opportunity — a sub, a token, a URL, a title typed without spaces.
+              Without this the text simply does not wrap and walks out through the right edge of the
+              dialog (measured: 115px past it). Fixed in the CONTAINER so every caller is covered at
+              once; `anywhere` rather than `break-all` so ordinary prose still breaks at spaces. */}
+          <DialogDescription data-testid="confirm-message" className="[overflow-wrap:anywhere]">{message}</DialogDescription>
         </DialogHeader>
         {warning}
         {typedConfirmText != null && (

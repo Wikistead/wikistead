@@ -293,7 +293,9 @@ export function MembersPage() {
                 <Select
                   size="sm"
                   value={currentRoleValue(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })}
-                  ariaLabel={t("members.roleFor", { sub: m.sub })}
+                  // #617 ⑤: the label is READ ALOUD. A 70-character hex sub is not a name — the row already
+                  // renders one, and this is the same string.
+                  ariaLabel={t("members.roleFor", { sub: m.display_name || m.email || m.sub })}
                   testId="member-role-select"
                   options={withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant")}
                   onChange={(value) => {
