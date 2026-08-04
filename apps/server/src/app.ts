@@ -57,6 +57,7 @@ import { abuseConfigPlugin } from './routes/abuse-config.js' // #491
 import { tenantOidcPlugin } from './routes/tenant-oidc.js'
 import { adminLoginMethodsPlugin } from './routes/admin-login-methods.js' // #537 Slice 3
 import { adminConnectionsPlugin } from './routes/admin-connections.js' // #554 S4
+import { adminSurfacesPlugin } from './routes/admin-surfaces.js' // #604-B which admin surfaces the caller may enter
 import { orphanDraftsPlugin } from './routes/orphan-drafts.js'
 import { customDomainsPlugin } from './routes/custom-domains.js'
 import { mcpOAuthMetadataPlugin } from './routes/mcp-oauth-metadata.js'
@@ -461,6 +462,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(tenantOidcPlugin)
   await app.register(adminLoginMethodsPlugin) // #537: the login-methods view + platform-login toggle
   await app.register(adminConnectionsPlugin) // #554 S4: N-connection management
+  await app.register(adminSurfacesPlugin) // #604-B: the console's entry/nav answer (registry-driven)
   await app.register(orphanDraftsPlugin)
   await app.register(webhooksPlugin)
   await app.register(customDomainsPlugin)

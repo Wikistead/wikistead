@@ -115,7 +115,7 @@ const PAGE_CAP_RELATION: Record<RoleCapability, string> = {
 // #445 / ADR-171: tenant capability → the single tenant-relation leaf its assignment expands to.
 // `space_creator` confers no page view (not in `viewable`, never in the doc-builder), so tenant
 // assignments are a search-reindex NO-OP by design — the write paths must not wire one.
-const TENANT_CAP_RELATION: Record<TenantRoleCapability, string> = {
+export const TENANT_CAP_RELATION: Record<TenantRoleCapability, string> = {
   createSpaces: 'space_creator',
   issueApiKeys: 'api_key_issue', // #496 / ADR-181 — camelCase token → snake_case relation, same as above
   // #604 / ADR-208 (ruling B): the first verb carved out of `admin`. A tenant role carrying it lets

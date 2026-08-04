@@ -1940,15 +1940,34 @@ export interface TenantSamlInput {
   spEntityId: string; acsUrl: string
   attrEmail?: string | null; attrName?: string | null; attrGroups?: string | null; enabled: boolean
 }
-export function useTenantSaml() {
+// `enabled` lets a caller that KNOWS it may not read this (the server said so) skip the request
+// rather than fire a 403 it would have to swallow — #604-B: the sign-in screen now also
+// opens to a connection manager, for whom these admin-tier reads are refusals by design.
+export function useTenantSaml(enabled = true) {
   const { token } = useSession();
   return useQuery({
+    enabled,
     queryKey: ["tenant-saml"],
     queryFn: () => apiFetch<TenantSamlDTO | null>("/admin/saml", token),
     staleTime: 30_000,
     retry: false, // 403/404 are stable answers, not transient failures
   });
 }
+// #604 / ADR-208 (ruling B): which admin surfaces THIS member may enter. The server walks its
+// surface→relation registry and answers; the client never infers a surface from a tier flag or a
+// hand-kept verb list, so a verb added server-side reaches the menu and the tabs with no client edit.
+// Any member may ask (it describes only your own powers); an empty list means no console at all.
+export function useAdminSurfaces() {
+  const { token, status } = useSession();
+  return useQuery({
+    queryKey: ["admin-surfaces"],
+    queryFn: () => apiFetch<{ surfaces: string[] }>("/admin/surfaces", token).then((r) => r?.surfaces ?? []),
+    enabled: status === "authed",
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
 // #537 Slice 3: the admin's login-methods view + the platform-login toggle (ruling 4).
 export interface LoginMethodState { inCeiling: boolean; configured: boolean; selected: boolean; effective: boolean; blockedByStance?: boolean }
 export interface LoginMethodsDTO {
@@ -1960,6 +1979,10 @@ export interface LoginMethodsDTO {
   }
   // #605 / ADR-210: the SSO-required stance. selected && !biting is the LAPSE — shown, never silent.
   ssoRequired: { selected: boolean; biting: boolean }
+  // #604-B: whether the CALLER may write the stance / platform / password selections and the
+  // SSO exemptions. The read opened to `manage_connections`; those writes stayed on the admin tier,
+  // so the server names the line instead of the screen inferring it from a tier flag.
+  canManageStance?: boolean
 }
 export function useLoginMethods() {
   const { token } = useSession();
@@ -1993,9 +2016,10 @@ export function useUpdateSsoRequired() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
   });
 }
-export function useSsoExemptions() {
+export function useSsoExemptions(enabled = true) {
   const { token } = useSession();
   return useQuery({
+    enabled,
     queryKey: ["sso-exemptions"],
     queryFn: () => apiFetch<SsoExemptionDTO[]>("/admin/sso-exemptions", token).then((r) => r ?? []),
   });
@@ -2101,9 +2125,10 @@ export function useAdminSpaces(enabled = true) {
 // #420 the tenant-wide member typeahead for the admin roles console. Reuses the existing
 // admin-only /members listing (same tenant-admin gate as the console itself — no new surface) and
 // filters client-side, so assigning a role means picking a person by name instead of pasting a sub.
-export function useTenantMemberCandidates(q: string) {
+export function useTenantMemberCandidates(q: string, enabled = true) {
   const { token } = useSession();
   const all = useQuery({
+    enabled,
     queryKey: ["tenant-members"],
     queryFn: () => apiFetch<{ members: { sub: string; display_name: string | null; email: string | null }[] }>("/members", token).then((r) => r?.members ?? []),
     staleTime: 30_000,
@@ -2120,9 +2145,10 @@ export function useTenantMemberCandidates(q: string) {
 // #617 ②(a): sub → display name, for the admin surfaces that must NAME a member they already hold the
 // sub for (an exemption row, a revoke confirmation). Same query key as the typeahead above, so this
 // costs no extra request — it reads the list that is already in cache and shapes it as a lookup.
-export function useTenantMemberNames(): Map<string, string> {
+export function useTenantMemberNames(enabled = true): Map<string, string> {
   const { token } = useSession();
   const all = useQuery({
+    enabled,
     queryKey: ["tenant-members"],
     queryFn: () => apiFetch<{ members: { sub: string; display_name: string | null; email: string | null }[] }>("/members", token).then((r) => r?.members ?? []),
     staleTime: 30_000,

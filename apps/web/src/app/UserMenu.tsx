@@ -2,20 +2,27 @@ import { useNavigate } from "react-router-dom";
 import { Shield, LogOut, Settings, FileStack, Sun, Moon, Monitor, Languages } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
+import { useAdminSurfaces } from "../data/queries";
 import { useTheme, type Theme } from "./ThemeProvider";
 import { LANGS, setLang } from "../i18n";
 import { Avatar } from "../ui/Avatar";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
 
 // Header user menu (member chrome only — rendered when onLogout is provided).
-// Hosts the tenant-admin entry (shown only when isAdmin — UI convenience; the
-// server re-checks tenant#admin on every admin action) and Sign out.
+// Hosts the tenant-admin entry and Sign out.
+//
+// #604-B: the entry used to be `isAdmin`, which meant the carve-out verbs were unreachable
+// somebody handed `manage_connections` had the power on every route and no door to walk through. The
+// condition is now "the server says at least one admin surface is open to you", so an admin (who
+// answers true to every relation) is unchanged, and a new verb reaches this menu with no edit here.
 const THEME_ICON = { light: Sun, dark: Moon, system: Monitor } as const;
 const THEME_ORDER: Theme[] = ["light", "dark", "system"];
 
 export function UserMenu({ onLogout }: { onLogout: () => void }) {
   const { t, i18n } = useTranslation();
-  const { isAdmin, displayName, picture, sub, user, devMode } = useSession();
+  const { displayName, picture, sub, user, devMode } = useSession();
+  const surfaces = useAdminSurfaces();
+  const canEnterAdmin = (surfaces.data?.length ?? 0) > 0;
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const name = displayName ?? sub ?? t("userMenu.label");
@@ -54,7 +61,7 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
         <DropdownMenuItem onSelect={() => navigate("/templates")} data-testid="user-menu-templates">
           <FileStack size={14} /> {t("templates.title")}
         </DropdownMenuItem>
-        {isAdmin && (
+        {canEnterAdmin && (
           <DropdownMenuItem onSelect={() => navigate("/admin")} data-testid="user-menu-admin">
             <Shield size={14} /> {t("userMenu.tenantAdmin")}
           </DropdownMenuItem>

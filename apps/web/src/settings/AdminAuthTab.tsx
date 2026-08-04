@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { AdminEnrollmentSection } from "./AdminEnrollmentSection";
 import { AdminSignInMethodsSection } from "./AdminSignInMethodsSection";
+import { useLoginMethods } from "../data/queries";
 
 // The tenant's ways in (tenant#admin). #589 / ADR-195 addendum reduced this tab to two questions:
 // HOW someone signs in (one list of sign-in methods, each row edited in place) and WHO becomes a
@@ -11,6 +12,11 @@ import { AdminSignInMethodsSection } from "./AdminSignInMethodsSection";
 // be edited at all, and editing the first never said which one it was writing.
 export function AdminAuthTab() {
   const { t } = useTranslation();
+  // #604-B: this tab opens to `manage_connections` as well as to the tier. Enrolment answers
+  // a DIFFERENT question — who becomes a member when they sign in — and its routes stayed
+  // admin-gated, so a connection manager gets the sign-in list (their power) and not a section whose
+  // every read would 403. The server names the line; the screen does not infer it.
+  const canManageStance = useLoginMethods().data?.canManageStance !== false;
   return (
     <div className="max-w-[560px] p-6" data-testid="admin-auth">
       <h2 className="mt-0">{t("adminAuth.title")}</h2>
@@ -28,7 +34,7 @@ export function AdminAuthTab() {
 
       {/* #101 / ADR-034: auto-enrolment policy for successful logins — a different question (who
           becomes a member), so it stays its own section below the list. */}
-      <AdminEnrollmentSection />
+      {canManageStance && <AdminEnrollmentSection />}
     </div>
   );
 }
