@@ -27,11 +27,12 @@ const GRANTEE = `builtin-mgr-${Date.now().toString(36)}`
 // One grantee per built-in capability: grants accumulate on a principal, so sharing one would let an
 // earlier grant answer a later assertion and every case after the first would pass for free.
 const STAMP = Date.now().toString(36)
-const BY_CAP: Record<'view' | 'comment' | 'edit' | 'moderate', string> = {
+const BY_CAP: Record<'view' | 'comment' | 'edit' | 'moderate' | 'manageAccess', string> = {
   view: `builtin-view-${STAMP}`,
   comment: `builtin-comment-${STAMP}`,
   edit: `builtin-edit-${STAMP}`,
   moderate: `builtin-moderate-${STAMP}`,
+  manageAccess: `builtin-mgacc-${STAMP}`, // ADR-209 (#607): the verb IS a built-in grant, so it is measured here
 }
 
 let tenant: Tenant
@@ -120,7 +121,7 @@ describe('#514 §6 — sharing the table does not let a custom role ask for `man
 // what a built-in grant RESOLVES TO today — including the verbs the model confers WITHOUT listing them —
 // so folding the built-in path into the role mechanism has a target to be check-equivalent to.
 describe('#536 §6 — what every other built-in grant confers today', () => {
-  const grant = async (capability: 'view' | 'comment' | 'edit' | 'moderate') =>
+  const grant = async (capability: 'view' | 'comment' | 'edit' | 'moderate' | 'manageAccess') =>
     grantSpaceAccess(db, fgaClient, driver, {
       spaceId, tenantId: tenant.id, userId: OWNER, grantee: `user:${BY_CAP[capability]}`, capability, plan: tenant.plan,
     })
@@ -136,6 +137,19 @@ describe('#536 §6 — what every other built-in grant confers today', () => {
       expect(await check(fgaClient, sub, verb, { type: 'page', id: pageId }), `viewer does NOT get page ${verb}`).toBe(false)
     }
     expect(await check(fgaClient, sub, 'moderate', { type: 'space', id: spaceId }), 'nor moderation').toBe(false)
+  }, 120_000)
+
+  it('access-manager: sees the space, runs no verb but its own (ADR-209)', async () => {
+    const sub = `user:${BY_CAP.manageAccess}`
+    expect(await check(fgaClient, sub, 'manageAccess', { type: 'space', id: spaceId }), 'nothing before').toBe(false)
+    await grant('manageAccess')
+    expect(await check(fgaClient, sub, 'manageAccess', { type: 'space', id: spaceId })).toBe(true)
+    expect(await check(fgaClient, sub, 'view', { type: 'space', id: spaceId }), 'the viewer arm — the roster is visible').toBe(true)
+    expect(await check(fgaClient, sub, 'view', { type: 'page', id: pageId }), 'and so are the published pages').toBe(true)
+    for (const verb of ['edit', 'publish', 'delete', 'share', 'settings', 'manage'] as const) {
+      expect(await check(fgaClient, sub, verb, { type: 'page', id: pageId }), `access-manager does NOT get page ${verb}`).toBe(false)
+    }
+    expect(await check(fgaClient, sub, 'manage', { type: 'space', id: spaceId }), 'and never the space').toBe(false)
   }, 120_000)
 
   it('commenter: comments on the space pages without gaining edit (#529)', async () => {

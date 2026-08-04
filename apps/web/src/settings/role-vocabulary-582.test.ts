@@ -31,7 +31,8 @@ describe("#582: one role vocabulary, shared by both surfaces", () => {
   });
 
   it("every capability has a noun, and unknown values pass through", () => {
-    expect(Object.keys(CAP_NOUN).sort()).toEqual(["comment", "edit", "manage", "moderate", "view"]);
+    // #607 / ADR-209: `manageAccess` → `access-manager` (user ruling on the noun, 2026-08-04)
+    expect(Object.keys(CAP_NOUN).sort()).toEqual(["comment", "edit", "manage", "manageAccess", "moderate", "view"]);
     expect(capNoun("manage")).toBe("manager");
     expect(capNoun("kakunin-582"), "a role name is already a name").toBe("kakunin-582");
   });

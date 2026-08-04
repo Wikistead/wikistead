@@ -1311,7 +1311,8 @@
       "issueApiKeys": "API キー発行",
       "manageConnections": "サインイン方法を管理",
       "manageRoles": "ロールを管理",
-      "viewAudit": "監査ログを閲覧"
+      "viewAudit": "監査ログを閲覧",
+      "manageAccess": "アクセス管理"
     },
     "scopeResource": "スペース / ページ",
     "scopeTenant": "テナント",

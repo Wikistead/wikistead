@@ -76,7 +76,7 @@ function uiTable(name = 'BUILTIN_EFFECTIVE_CAPS'): Record<string, string[]> {
 }
 
 /** What a principal holding `noun` really resolves to on a page of that space. */
-async function measured(noun: 'view' | 'comment' | 'edit' | 'moderate' | 'manage'): Promise<string[]> {
+async function measured(noun: 'view' | 'comment' | 'edit' | 'moderate' | 'manage' | 'manageAccess'): Promise<string[]> {
   const sub = `user:caps586-${noun}-${STAMP}`
   if (noun === 'edit') {
     // the editor NOUN is the composite (#553 severed the edit ⇒ comment implication, so the bundle is
@@ -131,7 +131,7 @@ describe('#586 review ①: a page grant is a single arm, and says only what that
 })
 
 describe('#586: the built-in display table is the store\'s answer', () => {
-  it.each(['view', 'comment', 'edit', 'moderate', 'manage'] as const)(
+  it.each(['view', 'comment', 'edit', 'moderate', 'manage', 'manageAccess'] as const)(
     '%s lists exactly what it confers', async (noun) => {
       const held = await measured(noun)
       expect(uiTable()[noun], `the UI table for ${noun} is stale — the store says [${held.join(', ')}]`).toEqual(held)
@@ -146,6 +146,20 @@ describe('#586: the built-in display table is the store\'s answer', () => {
     expect(table.moderate, 'and edits a page through the moderation bypass').toContain('edit')
     expect(table.edit, 'the editor NOUN comments; the bare capability does not (#553)').toContain('comment')
   }, 60_000)
+
+  // ADR-209 (#607): the SPACE-verb axis for the membership verb — the page-verb rows above cannot see
+  // a space gate at all, so the verb's own grain is measured against {type:'space'} directly.
+  it('access-manager runs the roster and nothing else (space axis)', async () => {
+    const sub = `user:caps586-am-${STAMP}`
+    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: sub, capability: 'manageAccess', plan: 'business' })
+    expect(await check(fgaClient, sub, 'manageAccess', { type: 'space', id: spaceId }), 'holds the verb').toBe(true)
+    expect(await check(fgaClient, sub, 'view', { type: 'space', id: spaceId }), 'sees the space (the viewer arm)').toBe(true)
+    expect(await check(fgaClient, sub, 'manage', { type: 'space', id: spaceId }), 'does NOT hold the space').toBe(false)
+    expect(await check(fgaClient, sub, 'edit', { type: 'space', id: spaceId }), 'does not edit').toBe(false)
+    expect(await check(fgaClient, sub, 'moderate', { type: 'space', id: spaceId }), 'does not moderate').toBe(false)
+    // …and a MANAGER holds the verb through `or manager` — additive, nobody lost an answer
+    expect(await check(fgaClient, `user:${OWNER}`, 'manageAccess', { type: 'space', id: spaceId }), 'a manager passes the new gate').toBe(true)
+  }, 180_000)
 
   it('a bare edit grant is NOT the editor noun — the row must not claim comment for it', async () => {
     // The legacy single-arm case: pre-#553 grants that wear the `editor` badge with no comment arm.

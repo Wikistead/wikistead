@@ -41,6 +41,9 @@ const RELATION: Record<ResourceRef['type'], Partial<Record<Capability, string>>>
     // #529 / ADR-193: comment IS a space capability now (space#commenter), inherited by pages via
     // comment_from_space (private-guarded).
     comment:  'commenter',
+    // ADR-209 (#607): the membership verb — runs the roster, never the space (the ceiling is
+    // application-level; `or manager` means every manager passes this check too).
+    manageAccess: 'access_manager',
   },
 }
 

@@ -16,6 +16,9 @@ export interface Space {
   // #326: whether the caller may MODERATE this space. Reported separately from `capability` because a
   // moderator is not a manager — folding it in would hand every moderator rename and delete.
   canModerate?: boolean;
+  // #607 / ADR-209: whether the caller runs this space's ROSTER (space#access_manager). Alongside the
+  // ladder like canModerate — never widening it (#326's precedent).
+  canManageAccess?: boolean;
   // Space branding accent preset key (Phase 5c), or null to inherit. Joined into
   // GET /spaces so the accent cascade applies without a per-space fetch.
   accentKey?: string | null;
@@ -1285,7 +1288,9 @@ export function usePage(pageId: string) {
 // departed / cross-tenant sub (client keeps the sub); absent for group grantees.
 // #578 bounce ①: `groupUnconfirmed` = the name was typed for a group the directory has not produced
 // yet. It is a real name and is shown as one; the flag only changes what the row says beside it.
-export interface SpaceGrant { grantee: string; capability: PageRelation; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean }
+// #607 / ADR-209: `revocable` — whether THIS caller may take the row away (an access-manager sees the
+// manager/moderator rows but cannot revoke them; a bare × would be a button that answers 403).
+export interface SpaceGrant { grantee: string; capability: PageRelation | "manageAccess"; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean }
 export interface MemberCandidate { sub: string; displayName: string | null }
 
 export function useSpaceAccess(spaceId: string, enabled = true) {

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
-  useCommentOpen, useSetCommentOpen,
+  useCommentOpen, useSetCommentOpen, useSpaces,
   useAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole,
   type PageRelation,
 } from "../data/queries";
@@ -37,6 +37,12 @@ interface SpaceCtx { spaceId: string; name: string }
 // exported for the copy pin (#553): a paragraph that tells the reader how to grant something must
 // be checked against the list this picker actually offers, not against a second copy of it.
 export const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
+// #607 / ADR-209 §2: what the picker offers DEPENDS ON THE CALLER now. An access-manager runs the
+// roster of readers and editors — the admin-class nouns (moderator, manager, access-manager itself)
+// are not theirs to hand out, and an option the server answers 403 to is not an option. A manager
+// additionally sees the new access-manager noun (it is theirs to delegate).
+export const GRANTABLE_FOR = (callerManages: boolean): (PageRelation | "manageAccess")[] =>
+  callerManages ? [...GRANTABLE, "manageAccess"] : ["view", "edit"];
 // #445 the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.
@@ -87,6 +93,10 @@ export function SpaceMembersTab() {
   // #536 ②: 1 principal = 1 role — adding over an existing (different) role REPLACES it. The
   // server converges regardless (the fortress); this confirm is the "no accidental double-grant" UI layer.
   const [pendingAdd, setPendingAdd] = useState<{ run: () => void; who: string; current: string; next: string; manager?: boolean } | null>(null);
+  // #607 / ADR-209: the caller's authority shapes the OFFER (the server is still the gate). An
+  // access-manager reaches this screen without holding the space, and the admin-class nouns are not
+  // theirs to hand out.
+  const callerManages = (useSpaces().data ?? []).find((sp) => sp.id === spaceId)?.capability === "manage";
   const candidates = useMemberCandidates(spaceId, picked ? "" : query);
   const groups = useTenantGroups(spaceId, mode === "group");
 
@@ -201,14 +211,15 @@ export function SpaceMembersTab() {
   // against both the standing ruling ("built-in and custom are the same picker, row and look") and #591
   // ("an exclusive role is changed in a dropdown"). The value carries which mechanism answers, exactly
   // as the add form's does, so the row and the form speak one vocabulary.
-  const rowValue = (r: { custom: boolean; capability?: PageRelation; roleId?: string }): string =>
+  const rowValue = (r: { custom: boolean; capability?: PageRelation | "manageAccess"; roleId?: string }): string =>
     r.custom ? `role:${r.roleId}` : `builtin:${r.capability}`;
   const rowRoleOptions = (current: string): SelectOption[] => {
     const currentCap = current.startsWith("builtin:") ? (current.slice(8) as PageRelation) : null;
     // The row's CURRENT capability is always present even when new grants are not offered it (`comment`
     // left the picker in #552 but rows still hold it — a control that cannot show the value it has is
     // worse than no control).
-    const caps = currentCap && !GRANTABLE.includes(currentCap) ? [currentCap, ...GRANTABLE] : GRANTABLE;
+    const offered = GRANTABLE_FOR(callerManages);
+    const caps = currentCap && !offered.includes(currentCap) ? [currentCap, ...offered] : offered;
     return [
       ...caps.map((c) => ({
         value: `builtin:${c}`,
@@ -310,8 +321,8 @@ export function SpaceMembersTab() {
   // two mechanisms stay underneath (each row's revoke goes to its own machinery); that is an
   // implementation fact, not a reason to split the screen. One sort rule: principal name, then badge.
   type MergedRow =
-    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; grantee: string; groupName?: string; capability: PageRelation; foldedCaps?: PageRelation[]; principal?: undefined; roleId?: undefined }
-    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; assignmentId: string; principal: string; groupName?: string; roleId: string; grantee?: undefined; capability?: undefined };
+    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; locked?: boolean; grantee: string; groupName?: string; capability: PageRelation | "manageAccess"; foldedCaps?: PageRelation[]; principal?: undefined; roleId?: undefined }
+    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; locked?: boolean; assignmentId: string; principal: string; groupName?: string; roleId: string; grantee?: undefined; capability?: undefined };
   // #553 / ADR-199 §2 (rev5 ruling): a principal holding BOTH the edit and comment built-in grants is
   // ONE editor — the pair folds into a single "editor" row whose revoke removes both arms. The word
   // "commenter" appears on no GRANT surface (#552 — the picker); a lone comment grant (an unfolded
@@ -324,7 +335,7 @@ export function SpaceMembersTab() {
   const mergedRows: MergedRow[] = [
     ...visibleGrants.map((g) => ({
       kind: "grant" as const, key: `g:${g.grantee}:${g.capability}`, badge: capNoun(g.capability), custom: false as const,
-      label: label(g), managed: g.managed, grantee: g.grantee, groupName: g.groupName, capability: g.capability,
+      label: label(g), managed: g.managed, locked: g.revocable === false, grantee: g.grantee, groupName: g.groupName, capability: g.capability,
       ...(foldedGrantees.has(g.grantee) && g.capability === "edit" ? { foldedCaps: ["edit", "comment"] as PageRelation[] } : {}),
     })),
     // #603: `roleId` is nullable now (a tenant TIER row) — this space listing never returns those
@@ -362,7 +373,7 @@ export function SpaceMembersTab() {
         // #586 ①: the add picker explains each role too. This is the one place where the reader
         // has made no decision yet, so it is the place where "what does this do" is actually asked.
         roleOptions={[
-          ...GRANTABLE.map((c) => ({
+          ...GRANTABLE_FOR(callerManages).map((c) => ({
             value: `builtin:${c}`,
             label: capNoun(c),
             hint: <RoleCaps origin="role" scope="space" builtinCapability={c} />,
@@ -397,10 +408,11 @@ export function SpaceMembersTab() {
                 separate built-in grant. (#579's "roles do not stack" was ruled for the tenant scope, where
                 the server now converges; the space sweep already keeps one role per principal here.)
                 #582: no `uppercase` — a role name is a proper noun on every surface. */}
-            {r.managed ? (
-              /* Machine-managed (ADR-183 §1): read-only here, so it stays a badge — there is nothing to
-                 choose, and offering a control the server 409s would be a lie about who is in charge. */
-              <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability}>{r.badge}</span>
+            {r.managed || r.locked ? (
+              /* Machine-managed (ADR-183 §1) — or, #607: a row THIS caller may not move (the server's
+                 per-row `revocable` signal: an access-manager sees the manager/moderator rows but a
+                 control the server 403s would be a lie about who is in charge). Read-only badge. */
+              <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability} {...(r.locked ? { "data-testid": "space-grant-locked" } : {})}>{r.badge}</span>
             ) : (
               /* #586 §1: the ORIGIN is the axis — role-derived wears the accent, an individually granted
                  capability the neutral one — and it now reads off the control instead of a badge beside
@@ -430,6 +442,9 @@ export function SpaceMembersTab() {
                 longer exists. It goes when the vestige sweep lands with the group_role_mappings DROP. */}
             {r.managed ? (
               <span className="flex-none rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="space-grant-managed" data-tip={t("spaceMembers.managedByMapping")}>{t("spaceMembers.managedBadge")}</span>
+            ) : r.locked ? (
+              /* #607: no revoke affordance on a row the server would 403 — the × goes, not just greys */
+              null
             ) : r.kind === "grant" ? (
               /* #504: red at rest; no confirm — a grant is re-grantable in one step (exception candidate) */
               <IconButton aria-label={t("spaceMembers.revoke")} data-testid="space-grant-revoke" variant="danger"

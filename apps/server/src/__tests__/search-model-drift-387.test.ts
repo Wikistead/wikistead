@@ -30,10 +30,15 @@ const OWNER = 'dev-user'
 // The principal matrix. GM is granted via a GROUP; everyone else directly. OUT has nothing.
 const V = 'drift-viewer', E = 'drift-editor', M = 'drift-manager', GM = 'drift-group-member'
 const PD = 'drift-page-direct', AL = 'drift-allowlisted', RS = 'drift-restricted', OUT = 'drift-outsider'
+// ADR-209 (#607): the membership verb reaches page view through `viewer`, so a holder MUST appear in
+// the denorm — this principal exists so the fixed matrix cannot stay green when doc-builder forgets
+// the access_manager relation (the enumerated-matrix blind spot the ADR names).
+const AM = 'drift-access-manager'
 const GROUP = 'group:drift-g'
 const MEMBERS: { sub: string; groups: string[] }[] = [
   { sub: V, groups: [] }, { sub: E, groups: [] }, { sub: M, groups: [] }, { sub: GM, groups: ['drift-g'] },
   { sub: PD, groups: [] }, { sub: AL, groups: [] }, { sub: RS, groups: [] }, { sub: OUT, groups: [] },
+  { sub: AM, groups: [] },
 ]
 
 let db: TenantDb
@@ -71,6 +76,7 @@ beforeAll(async () => {
   await grantSpaceAccess(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: OWNER, grantee: `${GROUP}#member`, capability: 'view' })
   const groupTuple = { user: `user:${GM}`, relation: 'member', object: GROUP }
   await writeTuples(fgaClient, [groupTuple]); cleanupTuples.push(groupTuple)
+  await grantSpaceAccess(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: OWNER, grantee: `user:${AM}`, capability: 'manageAccess' })
   // RS is a space viewer whose view is then subtracted per-page (the documented over-inclusion case).
   await grantSpaceAccess(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: OWNER, grantee: `user:${RS}`, capability: 'view' })
 
