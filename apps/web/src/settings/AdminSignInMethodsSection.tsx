@@ -186,19 +186,32 @@ export function AdminSignInMethodsSection() {
   //
   // `method` is the aggregate state for the METHOD; for a row it can only be trusted about
   // method-wide facts (policy, entitlement). Whether THIS row is off is the row's own `enabled`.
-  const stateBadges = (enabled: boolean, method?: LoginMethodState & { entitled?: boolean }, working?: boolean) => {
+  // #605 (review rejection, 2026-08-05): ONE reason, not three. The stance badge was rendered by the row
+  // itself, so this function could not know a reason was already on screen and added its own: a
+  // blocked local row said "SSO " and and side by side
+  // the same fact three times, in the width the description needed. ADR-195 §1 asks for two facts (the
+  // selection is preserved; here is why it does not bite), so the reason comes in here and the row
+  // renders nothing beside it. #589 removed this exact doubling once; the stance brought it back.
+  const stateBadges = (
+    enabled: boolean,
+    method?: LoginMethodState & { entitled?: boolean },
+    working?: boolean,
+    /** a reason the ROW knows and this function cannot derive (today: the SSO stance) */
+    rowReason?: { label: string; testId: string },
+  ) => {
     const badge = method ? methodBadge(method) : undefined;
     const blocked = enabled && badge && (badge === "byPolicy" || badge === "unentitled") ? badge : null;
+    const reason = rowReason ?? (blocked ? { label: t(`adminAuth.method_${blocked}`), testId: "sign-in-method-blocked" } : null);
     // "selected but nothing is working" — only claimable when the method-wide answer is knowable
-    // and no more specific reason applies.
-    const notWorking = enabled && !blocked && working === false;
+    // and NO more specific reason applies (a reason already says this, better).
+    const notWorking = enabled && !reason && working === false;
     return (
-      <span className="flex items-center gap-2">
-        <span className={enabled && working !== false && !blocked ? "text-xs text-[#2da44e]" : "text-xs text-fg-dim"} data-testid="sign-in-method-state">
+      <span className="flex flex-none items-center gap-2">
+        <span className={enabled && working !== false && !reason ? "text-xs text-[#2da44e]" : "text-xs text-fg-dim"} data-testid="sign-in-method-state">
           {t(enabled ? "signInMethods.selectionOn" : "signInMethods.selectionOff")}
         </span>
-        {blocked && (
-          <span className="text-xs text-fg-dim" data-testid="sign-in-method-blocked">{t(`adminAuth.method_${blocked}`)}</span>
+        {reason && (
+          <span className="text-xs text-fg-dim" data-testid={reason.testId}>{reason.label}</span>
         )}
         {notWorking && (
           <span className="text-xs text-fg-dim" data-testid="sign-in-method-blocked">{t("signInMethods.notWorking")}</span>
@@ -230,7 +243,11 @@ export function AdminSignInMethodsSection() {
                   full value is in the editor a click away. */}
               <div className="flex min-w-0 flex-1 items-baseline gap-2">
                 <span className="flex-none font-medium">{connectionName(c)}</span>
-                <span className="min-w-0 truncate text-xs text-fg-dim" data-testid={`admin-connection-issuer-${c.id}`}>
+                {/* #605: `data-clip` marks a deliberate one-liner. A VALUE (an issuer URL) may be
+                    clipped — the whole of it is in the editor a click away — and the pin that walks
+                    these rows for cut-off text uses this mark to tell that apart from a sentence
+                    somebody let run out of room. */}
+                <span className="min-w-0 truncate text-xs text-fg-dim" data-clip="value" data-testid={`admin-connection-issuer-${c.id}`}>
                   {c.preset ? t("adminConnections.presetBadge", { preset: c.preset }) : c.issuer}
                 </span>
               </div>
@@ -370,7 +387,7 @@ export function AdminSignInMethodsSection() {
                   not tell a configured SAML from an untouched one without opening it. */}
               <div className="flex min-w-0 flex-1 items-baseline gap-2">
                 <span className="flex-none font-medium">{t("adminAuth.methodSaml")}</span>
-                <span className="min-w-0 truncate text-xs text-fg-dim" data-testid="sign-in-method-saml-detail">
+                <span className="min-w-0 truncate text-xs text-fg-dim" data-clip="value" data-testid="sign-in-method-saml-detail">
                   {samlState.kind === "form" && samlState.data?.ssoUrl ? samlState.data.ssoUrl : t("adminAuth.samlNotConfigured")}
                 </span>
               </div>
@@ -410,13 +427,17 @@ export function AdminSignInMethodsSection() {
             <div className={METHOD_ROW_HEAD}>
             <div className="min-w-0 flex-1">
               <div className="font-medium">{t("adminAuth.methodLocal")}</div>
-              <div className="truncate text-xs text-fg-dim">{t("adminAuth.localBody")}</div>
+              {/* #605 (review rejection): NOT truncated. This is the only row carrying a description, and
+                  a single line for it inside a 512px row meant the sentence was cut at "…"
+                  even with nothing else on the row — before the stance badges took a third of the
+                  width away. A row may be two lines tall; a sentence that stops mid-word is not a
+                  sentence. */}
+              <div className="text-xs text-fg-dim">{t("adminAuth.localBody")}</div>
             </div>
-            {m.local.blockedByStance && (
-              /* ADR-195 §1: the selection is preserved and the row SAYS why it is off */
-              <span className="rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="blocked-by-stance">{t("adminAuth.blockedByStance")}</span>
-            )}
-            {stateBadges(m.local.selected, m.local, m.local.effective)}
+            {/* ADR-195 §1: the selection is preserved and the row SAYS why it is off — through the
+                shared badges, so the reason cannot be doubled by a second one rendered here. */}
+            {stateBadges(m.local.selected, m.local, m.local.effective,
+              m.local.blockedByStance ? { label: t("adminAuth.blockedByStance"), testId: "blocked-by-stance" } : undefined)}
             <Switch checked={m.local.selected} testId="local-login-toggle" ariaLabel={t("adminAuth.methodLocal")}
               onChange={(on: boolean) => localLogin.mutate(on, {
                 onSuccess: () => notify.success(t("toast.saved")),
@@ -435,10 +456,8 @@ export function AdminSignInMethodsSection() {
           <div className={METHOD_ROW} data-method-row data-testid="sign-in-method-platform">
             <div className={METHOD_ROW_HEAD}>
               <div className="min-w-0 flex-1 font-medium">{t("adminAuth.methodPlatformOidc")}</div>
-              {m["platform-oidc"].blockedByStance && (
-                <span className="rounded bg-panel-2 px-1.5 py-px text-[10px] uppercase tracking-wide text-fg-dim" data-testid="blocked-by-stance">{t("adminAuth.blockedByStance")}</span>
-              )}
-              {stateBadges(m["platform-oidc"].selected, m["platform-oidc"], m["platform-oidc"].effective)}
+              {stateBadges(m["platform-oidc"].selected, m["platform-oidc"], m["platform-oidc"].effective,
+                m["platform-oidc"].blockedByStance ? { label: t("adminAuth.blockedByStance"), testId: "blocked-by-stance" } : undefined)}
               {m["platform-oidc"].inCeiling && (
                 <Switch checked={m["platform-oidc"].selected} onChange={onTogglePlatform} testId="platform-login-toggle"
                   ariaLabel={t("adminAuth.methodPlatformOidc")} />
@@ -479,7 +498,7 @@ export function AdminSignInMethodsSection() {
               <div className="text-xs text-fg-dim">{t("adminAuth.ssoExemptionsLead")}</div>
               {(exemptions.data ?? []).map((x) => (
                 <div key={x.memberSub} className="flex items-center gap-2 text-xs" data-testid="sso-exemption-row">
-                  <span className="min-w-0 flex-1 truncate" data-testid="sso-exemption-name">{nameOf(x.memberSub)}</span>
+                  <span className="min-w-0 flex-1 truncate" data-clip="value" data-testid="sso-exemption-name">{nameOf(x.memberSub)}</span>
                   {!x.hasCredential && (
                     /* §5: the credential row is the only honest witness that a key exists — an
                        exemption without one cannot actually sign in yet, and the screen says so */

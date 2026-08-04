@@ -47,3 +47,94 @@ test("#589: every sign-in method is the same kind of row", async ({ page }) => {
   expect(withForm.some((r) => r.id === "admin-connection-form"), "the add form is a row IN the list").toBe(true);
   expect([...new Set(withForm.map((r) => r.pad))], `the add row disagrees on padding: ${JSON.stringify(withForm)}`).toHaveLength(1);
 });
+
+// #605 (review rejection, 2026-08-05): "
+// ..." — and, once the stance was on, three separate strings said the row was
+// off ("SSO " / / ) while the sentence they crowded out
+// was the one explaining what the method IS.
+//
+// Walked, not named (the rule this file already follows): every row is asked whether any text inside it
+// is cut off. A VALUE may be — an issuer URL is deliberately one line, with the whole of it a click
+// away in the editor — and those carry `data-clip="value"`. Anything else that overflows is prose
+// somebody let run out of room, and this fails naming it.
+test("#605: nothing in a sign-in row is cut off, and one reason is enough", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto("/admin/auth");
+  await expect(page.getByTestId("sign-in-methods")).toBeVisible({ timeout: 15_000 });
+
+  const clipped = await page.evaluate(() => {
+    const list = document.querySelector("[data-testid=sign-in-methods-list]")!;
+    const out: string[] = [];
+    for (const row of list.querySelectorAll<HTMLElement>("[data-method-row]")) {
+      for (const el of row.querySelectorAll<HTMLElement>("*")) {
+        if (el.children.length > 0) continue; // leaves carry the text
+        if (el.closest("[data-clip=value]")) continue; // a deliberate one-liner
+        if (el.scrollWidth > el.clientWidth + 1) {
+          out.push(`${row.getAttribute("data-testid")}: "${(el.textContent ?? "").trim().slice(0, 40)}"`);
+        }
+      }
+    }
+    return out;
+  });
+  expect(clipped, "text cut off inside a sign-in row").toEqual([]);
+
+  // …and no row states its condition twice. The selection badge is one fact; a reason is the other.
+  // Two reasons on one row is the doubling #589 removed and the stance brought back.
+  const doubled = await page.evaluate(() => {
+    const list = document.querySelector("[data-testid=sign-in-methods-list]")!;
+    return [...list.querySelectorAll<HTMLElement>("[data-method-row]")]
+      .map((row) => ({
+        id: row.getAttribute("data-testid") ?? "?",
+        reasons: row.querySelectorAll("[data-testid=sign-in-method-blocked], [data-testid=blocked-by-stance]").length,
+      }))
+      .filter((r) => r.reasons > 1)
+      .map((r) => `${r.id}: ${r.reasons} reasons`);
+  });
+  expect(doubled, "a row saying the same thing twice").toEqual([]);
+});
+
+// …and the same two claims with the STANCE BITING, which is the state the reject was looking at.
+// Turning it on for real needs an exempt member who holds a password, and a password needs a person to
+// set one — so the READ is stubbed and nothing else is: this measures rendering, which is what the
+// reject was about. (The stance's own writes are measured server-side in sso-required-605.)
+test("#605: a blocked row says why once, and still fits its sentence", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.route("**/api/admin/login-methods", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const res = await route.fetch();
+    const body = await res.json();
+    if (body?.methods?.local) {
+      body.methods.local.selected = true;
+      body.methods.local.effective = false;
+      body.methods.local.blockedByStance = true;
+    }
+    if (body?.methods?.["platform-oidc"]) body.methods["platform-oidc"].blockedByStance = true;
+    body.ssoRequired = { selected: true, biting: true };
+    await route.fulfill({ response: res, body: JSON.stringify(body) });
+  });
+
+  try {
+    await page.goto("/admin/auth");
+    await expect(page.getByTestId("sign-in-methods")).toBeVisible({ timeout: 15_000 });
+    const row = page.getByTestId("sign-in-method-local");
+    await expect(row, "the stubbed state reached the screen").toBeVisible();
+    await expect(row.getByTestId("blocked-by-stance"), "the row says why it is off").toHaveCount(1);
+
+    const shot = await page.evaluate(() => {
+      const row = document.querySelector("[data-testid=sign-in-method-local]") as HTMLElement;
+      const clipped: string[] = [];
+      for (const el of row.querySelectorAll<HTMLElement>("*")) {
+        if (el.children.length > 0 || el.closest("[data-clip=value]")) continue;
+        if (el.scrollWidth > el.clientWidth + 1) clipped.push((el.textContent ?? "").trim().slice(0, 40));
+      }
+      return {
+        clipped,
+        reasons: row.querySelectorAll("[data-testid=sign-in-method-blocked], [data-testid=blocked-by-stance]").length,
+      };
+    });
+    expect(shot.clipped, "the description survives the badges").toEqual([]);
+    expect(shot.reasons, "one reason, not two — the selection badge carries the other fact").toBe(1);
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
+});
