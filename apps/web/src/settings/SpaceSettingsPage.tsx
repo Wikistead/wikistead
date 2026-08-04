@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Navigate, Outlet, Route, useNavigate, useOutletContext, useParams, Routes } from "react-router-dom";
+import { Navigate, Outlet, Route, useLocation, useNavigate, useOutletContext, useParams, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
@@ -15,6 +15,7 @@ import { Select } from "../ui/Select";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
+import { reachableSpaceTabs, landingSpaceTab, type SpaceTabKey } from "./space-tabs";
 import { SpaceMembersTab } from "./SpaceMembersTab";
 import { SpacePagesTab } from "./SpacePagesTab";
 import { SpaceTrashTab } from "./SpaceTrashTab";
@@ -39,12 +40,14 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
   ];
 }
 
-// #326: a manager lands on general; a moderator (who cannot open general) lands on their one tab.
+// #326: a manager lands on general; anyone else lands on the first tab their verb opens.
+// #607: through the shared resolver, so a new verb cannot land somebody on a tab they cannot see.
 function SpaceSettingsIndex() {
   const { spaceId } = useParams<{ spaceId: string }>();
   const space = (useSpaces().data ?? []).find((s) => s.id === spaceId);
-  const toManager = space == null || space.capability === "manage";
-  return <Navigate to={toManager ? "general" : "moderation"} replace />;
+  // `space == null` means the list has not answered yet; general is where a manager goes and the
+  // layout denies anyone else before this renders.
+  return <Navigate to={space == null ? "general" : landingSpaceTab(space) ?? "general"} replace />;
 }
 
 function SpaceSettingsLayout() {
@@ -54,6 +57,7 @@ function SpaceSettingsLayout() {
   const { setActiveSpaceId } = useActiveSpace();
   const spacesQ = useSpaces();
   const allTabs = useSpaceTabs(spaceId ?? "");
+  const location = useLocation();
 
   // Opening a space's settings makes it the active space, so the accent cascade
   // (BrandingApplier) previews this space's accent live as it's edited on the Theme tab.
@@ -72,13 +76,25 @@ function SpaceSettingsLayout() {
   // #326: a space MODERATOR is not a manager, but the moderation queue is theirs. They may enter
   // settings to reach that one tab; every other tab stays manager-only, and each of those surfaces
   // re-checks server-side anyway.
-  const canModerate = space.canModerate === true;
-  if (space.capability !== "manage" && !canModerate) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
+  // #607 (review rejection): the same is true of an ACCESS-MANAGER and the roster — and this condition
+  // did not know it, so the roster routes said 204 to a principal who could not open the screen that
+  // calls them. Which tabs a caller reaches is one function now, walked by a pin over the payload's
+  // own signals, rather than a list of exceptions each new verb has to be remembered into.
+  const open = reachableSpaceTabs(space);
+  if (open.length === 0) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
+
+  // Hiding a tab is not closing it: the strip stopped offering `general` to a moderator, and typing the
+  // URL still rendered the rename field and the delete button. The server refused every action behind
+  // them (measured), so this was a surface with nothing working on it rather than a leak — but showing
+  // somebody controls that answer 403 is the same lie #607 came to remove. The tab the URL asks for is
+  // checked against the same list the strip is built from.
+  const asked = allTabs.find((tb) => location.pathname.endsWith(`/${tb.key}`))?.key as SpaceTabKey | undefined;
+  if (asked && !open.includes(asked)) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
 
   const ctx: SpaceCtx = { spaceId: space.id, name: space.name, accentKey: space.accentKey ?? null, iconImageUrl: space.iconImageUrl ?? null };
   return (
     <AppShell onLogout={logout}>
-      <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={space.capability === "manage" ? allTabs : allTabs.filter((tb) => tb.key === "moderation")}>
+      <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={allTabs.filter((tb) => open.includes(tb.key as SpaceTabKey))}>
         <Outlet context={ctx} />
       </SettingsShell>
     </AppShell>

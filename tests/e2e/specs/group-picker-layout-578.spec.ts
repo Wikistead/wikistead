@@ -167,26 +167,30 @@ test("#578: changing a row's role replaces the row in place — no ghost beside 
     // Retried whole: a query refetch landing while the listbox is open re-renders the options and
     // resets the highlight to the selected value, which can eat most of a single walk. Escape, let it
     // settle, walk again — and never commit anything but the target (one run committed "manager").
+    // TYPEAHEAD, not an arrow walk. The walk worked until #604-C put three more nouns in this picker:
+    // the list outgrew its viewport, so a click retries forever under Radix's sticky scroll button, and
+    // arrows race a query refetch that resets the highlight to the selected value. Radix's own
+    // typeahead jumps straight to the name and does not care how long the list is.
     let committed = false;
     for (let attempt = 0; attempt < 3 && !committed; attempt++) {
       await trigger.focus();
       await page.keyboard.press("Enter");
       await page.waitForSelector("[role=option]", { timeout: 5000 });
-      // the options exist before keyboard focus lands in the listbox; arrows pressed in that window
-      // fall through to the page (same race the #582 sweep hits) — wait for the focus, not the DOM
+      // the options exist before keyboard focus lands in the listbox; keys pressed in that window fall
+      // through to the page (the same race the #582 sweep hits) — wait for the focus, not the DOM
       await page.waitForFunction(() => document.activeElement?.closest("[role=listbox]") !== null
         || document.activeElement?.getAttribute("role") === "option", undefined, { timeout: 5000 }).catch(() => {});
-      for (let i = 0; i < 40 && (await highlightedName()) !== roleName; i++) {
-        await page.keyboard.press("ArrowDown");
-      }
+      await page.keyboard.type(roleName, { delay: 20 });
+      await page.waitForTimeout(150);
       if ((await highlightedName()) === roleName) {
         await page.keyboard.press("Enter");
         committed = true;
       } else {
         await page.keyboard.press("Escape");
+        await page.waitForTimeout(300);
       }
     }
-    expect(committed, "walked to the custom role and committed it").toBe(true);
+    expect(committed, "typed to the custom role and committed it").toBe(true);
     await expect(rowsFor.first().getByTestId("space-member-role-select")).toContainText(roleName, { timeout: 8000 });
     await expect(rowsFor, "still one row after the return trip").toHaveCount(1);
   } finally {
