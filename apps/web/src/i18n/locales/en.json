@@ -15,6 +15,7 @@
     "moveDown": "Move down",
     "preset": "Provider",
     "trustGroups": "Trust this connection’s group claims (group sync, role mappings)",
+    "trustGroupsHint": "When on, this connection's group claim is synced at sign-in.",
     "bootstrapEligible": "May bootstrap the first admin of an empty tenant",
     "presetNone": "Custom (any OIDC provider)",
     "issuerPlaceholder": "Issuer URL (https://idp.example.com)",
@@ -23,6 +24,7 @@
     "clientIdPlaceholder": "Client ID",
     "secretPlaceholder": "Client secret (leave empty for a public client)",
     "redirectPlaceholder": "Redirect URI",
+    "groupsClaimPlaceholder": "Groups claim (blank: groups)",
     "mcpEnabled": "AI tool access (MCP)",
     "mcpUnavailable": "(not available for this connection)"
   },
