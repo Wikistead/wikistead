@@ -1013,6 +1013,12 @@
     "rowActions": "{{name}} の操作",
     "passwordLinkLabel": "パスワード設定リンク（本人に渡してください）:",
     "passwordSetupUnavailable": "このメンバーにはパスワードの入口を追加できません。",
+    "status": {
+      "idp": "IdP でサインインします",
+      "password": "パスワードの入口があります",
+      "local": "ローカルユーザー（パスワードでサインイン）",
+      "deactivated": "停止中（サインインできません）"
+    },
     "lastAdmin": "最後の管理者は変更できません。",
     "lastDirectAdmin": "グループが admin を持っていますが、グループ経由の管理者は IdP 側の変更で失われ得るため、直接付与の管理者を最低 1 人残す必要があります。",
     "viaGroup": "（{{group}} 経由）"

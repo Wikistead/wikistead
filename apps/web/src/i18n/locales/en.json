@@ -1013,6 +1013,12 @@
     "rowActions": "Actions for {{name}}",
     "passwordLinkLabel": "Password setup link (hand it to the member):",
     "passwordSetupUnavailable": "A password entrance cannot be added for this member.",
+    "status": {
+      "idp": "Signs in through the identity provider",
+      "password": "Has a password entrance",
+      "local": "Local user, signs in with a password",
+      "deactivated": "Suspended, cannot sign in"
+    },
     "lastAdmin": "Cannot change the last admin.",
     "lastDirectAdmin": "A group holds admin, but group-granted admins can be lost by an IdP-side change. At least one directly granted admin must remain.",
     "viaGroup": "via {{group}}"

@@ -13,6 +13,12 @@ export interface Member {
    *  group confers on them (the admin-via-group marker). */
   groups?: string[] | null;
   created_at: string;
+  /** #614: who minted the identity — an external IdP or this product (a password-born local user). */
+  identity_source?: "oidc" | "local";
+  /** #614: a password entrance exists (existence only — the credential itself never leaves the server). */
+  has_password?: boolean;
+  /** #614: SCIM/downgrade freeze timestamp; null/absent = active. The row stays listed either way. */
+  deactivated_at?: string | null;
 }
 export interface Invite {
   id: string;
