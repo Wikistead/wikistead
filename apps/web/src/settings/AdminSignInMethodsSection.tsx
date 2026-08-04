@@ -99,7 +99,7 @@ export function AdminSignInMethodsSection() {
   const [testResult, setTestResult] = useState<{ ok: boolean; error: string | null } | null>(null);
   const [adding, setAdding] = useState(false);
   const [preset, setPreset] = useState("");
-  const [form, setForm] = useState({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "" });
+  const [form, setForm] = useState({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "", groupsClaim: "" });
   const [flags, setFlags] = useState({ bootstrapEligible: false, trustGroups: false });
   const [deleting, setDeleting] = useState<AdminConnectionDTO | null>(null);
   // #504: revoking an exemption removes somebody's break-glass — confirm first, like every removal here
@@ -169,8 +169,10 @@ export function AdminSignInMethodsSection() {
       : { issuer: form.issuer, clientId: form.clientId, clientSecret: form.clientSecret || undefined, redirectUri: form.redirectUri, label: form.label || undefined };
     // ADR-197 §2 rev2 / §6: the two TRUST flags are explicit and default off. They are editable on the
     // row now (#589), but a connection still starts without either.
-    create.mutate({ ...base, bootstrapEligible: flags.bootstrapEligible, trustGroups: flags.trustGroups }, {
-      onSuccess: () => { setAdding(false); setForm({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "" }); notify.success(t("adminConnections.created")); },
+    // #615: the claim name travels with the flags — blank stays null so the server's default (`groups`)
+    // keeps deciding, exactly as it did when this could only be set after the fact.
+    create.mutate({ ...base, bootstrapEligible: flags.bootstrapEligible, trustGroups: flags.trustGroups, groupsClaim: form.groupsClaim.trim() || null }, {
+      onSuccess: () => { setAdding(false); setForm({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "", groupsClaim: "" }); notify.success(t("adminConnections.created")); },
       onError,
     });
   };
@@ -585,10 +587,23 @@ export function AdminSignInMethodsSection() {
               onChange={(e) => setForm({ ...form, clientSecret: e.target.value })} />
             <Input inputSize="sm" placeholder={t("adminConnections.redirectPlaceholder")} value={form.redirectUri} aria-label="redirect uri"
               onChange={(e) => setForm({ ...form, redirectUri: e.target.value })} data-testid="admin-connection-redirect" />
-            <label className="flex items-center gap-2 text-xs text-fg-dim">
+            {/* #615: the groups CLAIM belongs with the trust switch beside it. Configuring the trust and
+                then having to reopen the row to say WHICH claim carries the groups is the two-step this
+                ticket removes — and the pair is what decides whether group sync works at all. Blank
+                means `groups` (the placeholder says so); the default is unchanged. */}
+            <Input inputSize="sm" placeholder={t("adminConnections.groupsClaimPlaceholder")} value={form.groupsClaim}
+              aria-label={t("adminAuth.groupsClaim")} data-testid="admin-connection-groups-claim"
+              onChange={(e) => setForm({ ...form, groupsClaim: e.target.value })} />
+            <label className="flex items-start gap-2 text-xs text-fg-dim">
               <Switch checked={flags.trustGroups} ariaLabel={t("adminConnections.trustGroups")} testId="admin-connection-trust-groups"
                 onChange={(on: boolean) => setFlags({ ...flags, trustGroups: on })} />
-              {t("adminConnections.trustGroups")}
+              <span>
+                {t("adminConnections.trustGroups")}
+                {/* what the switch DOES, in one line. Off by default stays the ADR-197 judgement — an
+                    external IdP's group claim is not believed until somebody says so — and a switch
+                    whose effect is invisible is why a connection sat there not syncing. */}
+                <span className="block">{t("adminConnections.trustGroupsHint")}</span>
+              </span>
             </label>
             <label className="flex items-center gap-2 text-xs text-fg-dim">
               <Switch checked={flags.bootstrapEligible} ariaLabel={t("adminConnections.bootstrapEligible")} testId="admin-connection-bootstrap"

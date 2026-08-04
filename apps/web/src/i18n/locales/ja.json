@@ -15,6 +15,7 @@
     "moveDown": "下へ",
     "preset": "プロバイダ",
     "trustGroups": "この接続の groups claim を信頼する（グループ同期・ロールマッピング）",
+    "trustGroupsHint": "ON にすると、この接続のグループ claim をサインイン時に同期します。",
     "bootstrapEligible": "空テナントの first admin をこの接続から bootstrap 可能にする",
     "presetNone": "カスタム（任意の OIDC プロバイダ）",
     "issuerPlaceholder": "Issuer URL（https://idp.example.com）",
@@ -23,6 +24,7 @@
     "clientIdPlaceholder": "クライアント ID",
     "secretPlaceholder": "クライアントシークレット（public client は空欄）",
     "redirectPlaceholder": "リダイレクト URI",
+    "groupsClaimPlaceholder": "groups クレーム名（空欄なら groups）",
     "mcpEnabled": "AI ツール接続（MCP）",
     "mcpUnavailable": "（この接続では設定できません）"
   },
