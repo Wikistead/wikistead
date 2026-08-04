@@ -12,7 +12,9 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { BUILTIN_EFFECTIVE_CAPS, PAGE_GRANT_CAPS, CAP_NOUN, closureOf, effectiveCaps, builtinDisplayCaps, nounCapability } from "./role-nouns";
+import { BUILTIN_EFFECTIVE_CAPS, PAGE_GRANT_CAPS, CAP_NOUN, TENANT_TIER_CAPS, tenantTierCaps, closureOf, effectiveCaps, builtinDisplayCaps, nounCapability } from "./role-nouns";
+import { roleOptions } from "./tenant-role-rows";
+import { withRoleTips } from "./role-option-tips";
 import en from "../i18n/locales/en.json";
 import ja from "../i18n/locales/ja.json";
 
@@ -114,6 +116,34 @@ describe("#586a surface that offers a role says what the role does", () => {
     }
     expect(pickers, "the walk actually found role pickers").toBeGreaterThanOrEqual(4);
     expect(offenders, "a role option is its name, and hovering it says what that name confers").toEqual([]);
+  });
+
+  it("#579 (2026-08-04): EVERY option the tenant vocabulary offers can be asked what it confers", () => {
+    // The lexical walk above recognises a role option by its label shape (`capNoun(…)` or `x.name`), and
+    // a TIER's label is neither — it is the bare tier string. So the tiers slipped through it and shipped
+    // silent: hovering `bbb` explained itself, hovering `admin` said nothing. "
+    //
+    // Run the real builder instead of reading the file: given what the SCREEN has (the tenant's live
+    // tier defaults — #582 ① takes `member` from those rather than from a constant, because that
+    // capability rides a per-tenant switch), every entry it offers must carry a capability source. A
+    // tier added later, or a third mechanism, is covered without touching this test — and nothing here
+    // names `member` or `admin`.
+    const custom = [
+      { id: "r1", name: "bbb", scope: "tenant", capabilities: ["issueApiKeys"] },
+      { id: "r2", name: "space-only", scope: "resource", capabilities: ["view"] },
+    ];
+    const options = roleOptions(custom, tenantTierCaps({ createSpaces: true, issueApiKeys: false }));
+    expect(options.length, "the builder offered a vocabulary to check").toBeGreaterThan(2);
+    // presence of the SOURCE, not of entries in it: a tenant that switched every member capability off
+    // leaves an honest empty list, and a panel that says so is not the defect (silence was).
+    const bare = options.filter((o) => o.roleCapabilities === undefined).map((o) => o.label);
+    expect(bare, "a role name with no way to ask what it does").toEqual([]);
+    // …and the wrapper turns each of them into the SAME floating panel the badges raise
+    const withoutHint = withRoleTips(options, "tenant").filter((o) => !o.hint).map((o) => o.label);
+    expect(withoutHint, "every offered name reveals through one component").toEqual([]);
+    // the admin row is the MEASURED table, not a copy: change the table and the option follows
+    const adminOption = options.find((o) => o.label === "admin")!;
+    expect(adminOption.roleCapabilities).toEqual(TENANT_TIER_CAPS.admin);
   });
 
   it("nothing anywhere prints a capability list under an option", () => {

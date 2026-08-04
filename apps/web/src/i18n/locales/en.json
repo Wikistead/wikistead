@@ -978,6 +978,8 @@
   },
   "members": {
     "title": "Members",
+    "grantTitle": "Give a role",
+    "listTitle": "Members and groups",
     "adminOnly": "Admin only.",
     "member": "Member",
     "role": "Role",

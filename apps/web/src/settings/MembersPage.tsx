@@ -193,13 +193,11 @@ export function MembersPage() {
       <h2 style={{ marginTop: 0 }}>{t("members.title")}</h2>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
-      {/* #514 / ADR-188 slice 4: a TENANT role is an attribute of a member, so it is granted here
-          beside the people — while a SPACE role is granted in that space's Members tab.
-          #579: and it is granted ON THE PERSON'S ROW. There is no second place. */}
-      <FormRow>
-        <Input className="max-w-xs" value={filter} onChange={(e) => setFilter(e.target.value)}
-          placeholder={t("members.filterPlaceholder")} aria-label={t("members.filterLabel")} data-testid="members-filter" />
-      </FormRow>
+      {/* #579 (review rejection ②, 2026-08-04): .
+          They were two rows with nothing between them, so the screen read as one four-control mess.
+          Each operation gets a heading — the idiom this page already uses for its invite section, not a
+          new one — and the filter now sits with the table it filters rather than above the form. */}
+      <h3 className="mb-2 mt-6 text-sm font-medium">{t("members.grantTitle")}</h3>
 
       {/* #578 bounce ④ (user ruling: " UI "), then the
           2026-08-04 ruling: the SAME form the space screen uses, with the SAME type toggle — user or
@@ -248,6 +246,14 @@ export function MembersPage() {
           else assignRole.mutate({ roleId: choice.roleId, resourceType: "tenant", resourceId: tenantId, groupName: groupName.trim() }, done);
         }}
       />
+
+      {/* the filter belongs to the TABLE — it narrows what is listed and does nothing else (#578 took
+          the granting away from it). Under its own heading, beside the thing it acts on. */}
+      <h3 className="mb-2 mt-8 border-t border-border pt-6 text-sm font-medium">{t("members.listTitle")}</h3>
+      <FormRow className="mb-2">
+        <Input className="max-w-xs" value={filter} onChange={(e) => setFilter(e.target.value)}
+          placeholder={t("members.filterPlaceholder")} aria-label={t("members.filterLabel")} data-testid="members-filter" />
+      </FormRow>
 
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 32 }}>
         <thead>
