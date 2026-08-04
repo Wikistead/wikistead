@@ -438,6 +438,20 @@ body {
 .lp-toolbar-btn:hover {
   background: var(--panel-3);
 }
+/* #612: the format buttons PREVIEW their effect — the bold button is bold, the italic one slants, the
+   marker one wears the SAME tint the body's ==highlight== renders with (.cm-lp-highlight / mark:
+   color-mix accent 22% — one recipe, tokens only, so the button and the text it produces cannot
+   diverge). Shared by the selection bubble and the table-cell bar (both use formatButtonContent). */
+.lp-btn-preview-bold { font-weight: 700; }
+.lp-btn-preview-italic { font-style: italic; }
+.lp-btn-preview-strike { text-decoration: line-through; }
+.lp-btn-preview-highlight {
+  background: color-mix(in srgb, var(--accent, #4ea1ff) 22%, transparent);
+  border-radius: 2px;
+  padding: 0 0.15em;
+}
+.lp-btn-icon { display: inline-flex; align-items: center; vertical-align: middle; }
+.lp-btn-icon svg { display: block; }
 
 /* #89 (rescoped): the inline-decoration toolbar for a table cell being edited. Fixed-positioned in
    document.body (the cell is a contenteditable island inside a CM widget, so a CM tooltip can't host it);
