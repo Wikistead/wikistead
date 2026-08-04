@@ -23,7 +23,10 @@ describe("#605: the switch speaks, the rows say why, the lapse is shown", () => 
     expect(src).toContain('code === "own_idp_required"');
     expect(src).toContain('code === "sso_exemption_required"');
     expect(src).toContain('data-testid="sso-required-lapsed"');
-    expect(src, "the preserved-selection reason on the local row").toContain('data-testid="blocked-by-stance"');
+    // #605 (review rejection, 2026-08-05): the reason moved INTO the shared badges — the row rendered its
+    // own beside them, so a blocked row said the same thing three ways and squeezed out the sentence
+    // explaining the method. Same subject, one owner: the reason is passed, not drawn here.
+    expect(src, "the preserved-selection reason on the local row").toContain('testId: "blocked-by-stance"');
     expect(src, "an exemption without a key is marked (§5: the credential is the witness)").toContain("sso-exemption-no-credential");
   });
 });
