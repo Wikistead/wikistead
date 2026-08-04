@@ -169,6 +169,17 @@ function RoleEditor({ onSave, onCancel, pending }: {
   );
 }
 
+// #586 (review rejection): . Measured
+// built-in rows were 17px and custom rows 32px, because only the custom ones carry IconButtons and the
+// row had no box of its own — so nearly-double-height rows alternated down one list. The standing
+// ruling is that built-in and custom are ONE kind of thing wearing the same row (#536 / #582); a
+// difference in AFFORDANCES is fine, a difference in the CONTAINER is not.
+//
+// One class, used by every row header. A new kind of row (a group row, say) is regular by using it,
+// rather than by somebody remembering to match a number. No filler icons on the built-in side — the
+// box is what is shared, not the contents.
+const ROLE_ROW_HEAD = "flex min-h-8 items-center gap-2";
+
 export function AdminRolesTab() {
   const { t } = useTranslation();
   const roles = useRoles();
@@ -213,7 +224,7 @@ export function AdminRolesTab() {
     };
     return (
       <div key={r.id} className="flex flex-col gap-1" data-testid="custom-role-row">
-        <div className="flex items-center gap-2 text-sm">
+        <div className={`${ROLE_ROW_HEAD} text-sm`}>
           {renamingId === r.id ? (
             <Input inputSize="sm" className="max-w-xs" value={renameValue} autoFocus
               aria-label={t("adminRoles.nameLabel")} data-testid="role-rename-input"
@@ -289,7 +300,7 @@ export function AdminRolesTab() {
               tenant's roles and this is the fourth list to hit that. The page keeps its own scroll. */}
           <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-tenant">
           <div className="flex flex-col gap-1" data-testid="builtin-role-member">
-            <div className="flex items-center gap-2">
+            <div className={ROLE_ROW_HEAD}>
               <span className="text-sm font-medium">member</span>
               <RoleBadges builtIn />
             </div>
@@ -309,7 +320,7 @@ export function AdminRolesTab() {
             />
           </div>
           <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
-            <div className="flex items-center gap-2">
+            <div className={ROLE_ROW_HEAD}>
               {/* #586 ①: this row hard-coded two capabilities while the store answers true for
                   five — #604 carved verbs out of `admin` as `… or admin`, and a hand-written value
                   missed every one of them. The measured tier table is the display source now, shown the
@@ -328,7 +339,7 @@ export function AdminRolesTab() {
           <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-resource">
           {(roles.data?.builtIn ?? []).map((r) => (
             <div key={r.name} className="flex flex-col gap-1" data-testid={`builtin-role-${r.name}`}>
-              <div className="flex items-center gap-2">
+              <div className={ROLE_ROW_HEAD}>
                 {/* #586 ②: at rest a role is its NAME, and hovering it raises the measured "what
                     it can do" window — the same component every other surface uses. The read-only grid
                     that stood here drew the measured closure correctly since the last bounce, but a
