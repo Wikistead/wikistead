@@ -978,6 +978,8 @@
   },
   "members": {
     "title": "メンバー",
+    "grantTitle": "ロールを渡す",
+    "listTitle": "メンバーとグループ",
     "adminOnly": "管理者のみ。",
     "member": "メンバー",
     "role": "ロール",

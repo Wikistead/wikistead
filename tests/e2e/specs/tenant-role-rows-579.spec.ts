@@ -40,13 +40,19 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     // the role picker never renders as an empty chevron — before a pick it shows its placeholder
     await expect(page.getByTestId("tenant-grant-role"), "the role picker names itself at rest").not.toHaveText("");
     // …and the form is ONE row of its own (the 2026-08-04 screenshot had it wrapped under the filter,
-    // with the role Select collapsed): every control shares a top edge, below the filter's line
+    // with the role Select collapsed): every control shares a top edge
     const topOf = async (id: string) => Math.round((await page.getByTestId(id).boundingBox())!.y);
     const inputY = await topOf("tenant-grant-input");
     expect(await topOf("tenant-grant-type"), "kind toggle on the form's line").toBe(inputY);
     expect(await topOf("tenant-grant-role"), "role picker on the form's line").toBe(inputY);
     expect(await topOf("tenant-grant-add"), "add button on the form's line").toBe(inputY);
-    expect(inputY, "and the form is its own row, not folded into the filter's").toBeGreaterThan(await topOf("members-filter"));
+    // …and it is VISIBLY a different operation from the filter (the second half of the same reject
+    // ). Separated, not merely on two lines
+    // the two rows nearly touching is what read as one four-control mess.
+    const filterY = await topOf("members-filter");
+    expect(Math.abs(filterY - inputY), "the filter is not on the form's line").toBeGreaterThan(24);
+    const headings = await page.locator("h3").allInnerTexts();
+    expect(headings.length, "each operation says what it is").toBeGreaterThanOrEqual(2);
 
     // narrow to ONE member with the table filter, then work on that row — the fixture's display name
     // is not something this spec should hard-code (it differs between the dev and e2e seeds)

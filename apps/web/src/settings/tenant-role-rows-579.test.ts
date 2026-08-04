@@ -122,12 +122,19 @@ describe("#579: one control, showing the role the member has", () => {
   it("offers every tier and every tenant role — including the one they hold", () => {
     // a control whose value is the current role must be able to SHOW it; hiding held roles is what
     // forced the chips
-    expect(roleOptions(ROLES)).toEqual([
-      { value: "tier:member", label: "member" },
-      { value: "tier:admin", label: "admin" },
-      { value: "role:r1", label: "Space creators" },
-      { value: "role:r2", label: "Key issuers" },
+    expect(roleOptions(ROLES).map((o) => [o.value, o.label])).toEqual([
+      ["tier:member", "member"],
+      ["tier:admin", "admin"],
+      ["role:r1", "Space creators"],
+      ["role:r2", "Key issuers"],
     ]);
+    // #579 (2026-08-04): the TIERS carry what they confer now — they used to arrive bare and shipped
+    // silent on hover while the custom roles explained themselves. A custom role brings its own list
+    // (the server sends it), so the tiers are what this file has to keep honest; that the source is the
+    // MEASURED table, and that every offered name ends up with a panel, is pinned in role-tip-truth-586.
+    const tiers = roleOptions(ROLES).filter((o) => o.value.startsWith("tier:"));
+    expect(tiers.length, "there are tiers to check").toBeGreaterThan(0);
+    expect(tiers.filter((o) => !o.roleCapabilities?.length), "a tier offered with nothing to reveal").toEqual([]);
   });
 
   it("shows the custom role when they hold one, and their tier when they do not", () => {

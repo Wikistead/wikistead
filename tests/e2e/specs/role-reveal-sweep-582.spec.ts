@@ -66,6 +66,26 @@ test("#582: a role picker offers names, and points at what they confer", async (
   expect(withPanel.revealed.length, `the panel carries a heading and the capabilities :: ${withPanel.revealed}`).toBeGreaterThan(4);
 });
 
+// " — measured on the device as member and
+// admin staying silent while the custom roles explained themselves.
+//
+// The tenant picker gets the same walk as the space one, and the assertion is over EVERY option it
+// offers rather than over the two that were silent that day: a picker that grows a third mechanism
+// without a capability source fails here.
+test("#579: every option in the TENANT picker reveals what it confers", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto("/admin/members");
+  await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 15_000 });
+  const options = await optionsOf(page, "member-role-select");
+  expect(options.length, `the picker offered roles to walk :: ${JSON.stringify(options)}`).toBeGreaterThan(1);
+  const silent = options.filter((o) => o.revealed.length === 0).map((o) => o.name);
+  expect(silent, "a name offered with no way to ask what it does").toEqual([]);
+  for (const o of options) {
+    expect(o.insideRow ?? false, `"${o.name}" draws its capabilities inside the option`).toBe(false);
+    expect(o.name.split(/\s+/).length, `"${o.name}" reads as a name, not a list`).toBeLessThan(4);
+  }
+});
+
 // #582 (review rejection ②, 2026-08-04): the list was 305–361px wide because the hidden capability text
 // reserved room for itself. With the panel floating, the list only needs the names — measured here so
 // the width cannot creep back the next time something is put inside an option.

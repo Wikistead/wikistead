@@ -156,6 +156,10 @@ export function roleOptions(
   tierCaps?: { member?: readonly string[]; admin?: readonly string[] },
 ): { value: string; label: string; roleCapabilities?: readonly string[] }[] {
   return [
+    // #579's round of this landed as #582's (the same reject was filed on both tickets, and that one
+    // shipped first). Its shape is kept whole because it is the more careful of the two: `member`'s
+    // list comes from the tenant's LIVE defaults rather than the measured constant, so a tenant that
+    // switched space creation off does not read "members can create spaces".
     ...BUILT_IN_TIERS.map((tier) => {
       const caps = tierCaps?.[tier as "member" | "admin"];
       return caps ? { value: `tier:${tier}`, label: tier, roleCapabilities: caps } : { value: `tier:${tier}`, label: tier };
