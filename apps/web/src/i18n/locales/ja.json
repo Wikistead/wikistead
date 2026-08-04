@@ -1346,6 +1346,8 @@
     "mixedScopeHint": "ロールはスペース/ページ用かテナント用のどちらかです。片方のチェックを外すと保存できます。",
     "sectionTenant": "テナント",
     "sectionResource": "スペース / ページ",
+    "memberDefaultsTitle": "メンバー既定",
+    "memberDefaultsBody": "このテナントのメンバー全員ができること（どのロールを持っていても）。",
     "groupAssignTitle": "グループのロール",
     "groupAssignBody": "IdP のグループにテナントロールを付与します。グループのメンバー全員に効き、グループを抜けると外れます。",
     "groupAssignEmpty": "テナントロールを持つグループはありません。",

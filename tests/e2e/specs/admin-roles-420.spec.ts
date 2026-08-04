@@ -129,10 +129,11 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   await page.goto("/admin/roles");
   await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
 
-  // #469 / #445 the preset lives inside the TENANT role list as a CapabilityPicker cell; the old
-  // standalone admin control is gone (admin is now a uniform read-only picker, asserted in roles-ia-469).
+  // #469 / #445 the preset is configured on this screen; the old standalone admin control is gone.
+  // #586 (2026-08-04): it moved OUT of the member role row into its own section — a built-in role carries
+  // no editing surface, and those boxes were the tenant policy wearing a role row's clothes.
   await expect(page.getByTestId("default-admin-create-spaces")).toHaveCount(0);
-  const member = page.getByTestId("builtin-role-member").getByTestId("builtin-member-cap-createSpaces");
+  const member = page.getByTestId("member-defaults").getByTestId("member-defaults-cap-createSpaces");
   await expect(member).toBeEnabled({ timeout: 8000 });
   const initial = await member.isChecked();
   await member.click();

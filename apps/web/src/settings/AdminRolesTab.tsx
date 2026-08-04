@@ -4,7 +4,7 @@ import {
   useRoles, useCreateRole, useUpdateRole, useDeleteRole,
   useTenantRoleDefaults, useSetTenantRoleDefaults,
 } from "../data/queries";
-import { closureOf, nounCapability, TENANT_TIER_CAPS } from "./role-nouns";
+import { closureOf, nounCapability, tenantTierCaps, TENANT_TIER_CAPS } from "./role-nouns";
 import { RoleTip } from "../ui/RoleTip"; // #586 the role NAME raises the "what it can do" window
 import { useSession } from "../session/SessionProvider";
 import { Button, IconButton } from "../ui/Button";
@@ -198,6 +198,16 @@ export function AdminRolesTab() {
   const { tenantId } = useSession();
   const defaults = useTenantRoleDefaults();
   const setDefaults = useSetTenantRoleDefaults();
+  // #586 (2026-08-04): the member tier's row is a NAME now, and what it confers is this tenant's live
+  // policy rather than a constant — the same source #582 ① gave the pickers, so the row and the picker
+  // cannot disagree about what a member can do here.
+  const memberTierCaps = tenantTierCaps(defaults.data?.member).member;
+  // #586 (same reject): the tenant defaults are a POLICY, and every switch shown for them has to reach
+  // the endpoint. The vocabulary a custom tenant role may carry is longer than what this policy stores,
+  // and rendering the long one here is what let three boxes be clicked into a success toast that saved
+  // nothing. One list, derived from the payload's own keys, so a new default cannot be drawn before it
+  // can be written.
+  const MEMBER_DEFAULT_CAPS = ["createSpaces", "issueApiKeys"] as const;
 
   // #497 / ADR-183 §3: the tenant default role — a tenant-scope custom role conferred on any member
   // no mapping matches (applied at their next login). Only tenant-scope roles are eligible.
@@ -301,23 +311,16 @@ export function AdminRolesTab() {
           <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-tenant">
           <div className="flex flex-col gap-1" data-testid="builtin-role-member">
             <div className={ROLE_ROW_HEAD}>
-              <span className="text-sm font-medium">member</span>
+              {/* #586 (review rejection, 2026-08-04): " member UI ".
+                  This row kept an editable grid because its boxes were really the TENANT DEFAULTS wearing
+                  a role row's clothes — and that made the one thing a tenant cannot redefine look like
+                  the one thing it can. A built-in role carries no editing surface anywhere; the defaults
+                  moved to their own section below, where they are what they are. */}
+              <RoleTip origin="role" scope="tenant" roleCapabilities={memberTierCaps} testId="role-tip-member">
+                <span className="text-sm font-medium">member</span>
+              </RoleTip>
               <RoleBadges builtIn />
             </div>
-            <CapabilityPicker
-              value={[
-                ...((defaults.data?.member.createSpaces ?? true) ? ["createSpaces"] : []),
-                // #496: default OFF — provisioning seeds no member tuple, so issuance starts admin-only.
-                ...((defaults.data?.member.issueApiKeys ?? false) ? ["issueApiKeys"] : []),
-              ]}
-              idPrefix="builtin-member"
-              list={TENANT_CAPABILITIES}
-              disabled={!defaults.data || setDefaults.isPending}
-              onChange={(caps) => setDefaults.mutate({ memberCreateSpaces: caps.includes("createSpaces"), memberIssueApiKeys: caps.includes("issueApiKeys") }, {
-                onSuccess: () => notify.success(t("toast.saved")),
-                onError,
-              })}
-            />
           </div>
           <div className="flex flex-col gap-1" data-testid="builtin-role-admin">
             <div className={ROLE_ROW_HEAD}>
@@ -366,6 +369,33 @@ export function AdminRolesTab() {
       ) : (
         <Button variant="default" size="sm" data-testid="role-create" onClick={() => setCreating(true)}>{t("adminRoles.create")}</Button>
       )}
+
+      {/* #586 (review rejection, 2026-08-04): the tenant defaults, as themselves. They used to be the
+          `member` row's checkboxes, which said two untrue things at once — that a built-in role can be
+          edited (it cannot; that is what a custom role is for), and that the row's vocabulary was the
+          policy's (it was longer, and the extra boxes were clickable and saved nothing). Here they are
+          a POLICY about every member, in their own section, showing only what this endpoint stores. */}
+      <section className="mt-8 rounded-md border border-border bg-panel" data-testid="member-defaults">
+        <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim">{t("adminRoles.memberDefaultsTitle")}</h3>
+        <div className="p-3">
+          <p className="mt-0 mb-2 text-sm text-fg-dim">{t("adminRoles.memberDefaultsBody")}</p>
+          <CapabilityPicker
+            value={[
+              ...((defaults.data?.member.createSpaces ?? true) ? ["createSpaces"] : []),
+              // #496: default OFF — provisioning seeds no member tuple, so issuance starts admin-only.
+              ...((defaults.data?.member.issueApiKeys ?? false) ? ["issueApiKeys"] : []),
+            ]}
+            idPrefix="member-defaults"
+            list={MEMBER_DEFAULT_CAPS}
+            // an authz control must not guess its state: disabled until the defaults have ARRIVED
+            disabled={!defaults.data || setDefaults.isPending}
+            onChange={(caps) => setDefaults.mutate({ memberCreateSpaces: caps.includes("createSpaces"), memberIssueApiKeys: caps.includes("issueApiKeys") }, {
+              onSuccess: () => notify.success(t("toast.saved")),
+              onError,
+            })}
+          />
+        </div>
+      </section>
 
       {/* #514 / ADR-188 slice 4: this tab DEFINES roles; it no longer grants them. A resource role is
           assigned where the resource is (a space's Members tab, #485) and a tenant role where the

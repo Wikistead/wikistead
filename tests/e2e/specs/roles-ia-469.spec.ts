@@ -1,33 +1,38 @@
 import { test, expect } from "@playwright/test";
 import { sleep, API } from "../helpers";
 
-// #469 / #445 one place answers "what can this role do", and every built-in role reads the SAME
-// way — a bold name + a CapabilityPicker. createSpaces is a capability inside the built-in TENANT list.
-// admin's picker is read-only with createSpaces CHECKED (overturns #469's earlier "admin as plain text"
-// choice — now that every built-in is a uniform read-only picker, a disabled admin cell reads as consistent,
-// not broken). UI only: the member toggle still drives the very same tenant#space_creator wildcard through
-// the unchanged endpoint.
-test("#469: the roles tab lists built-ins by scope; the space-creation preset is a capability in that list", async ({ page }) => {
+// #469 / #445 one place answers "what can this role do", and the tenant's member policy is
+// configured on that same screen.
+//
+// RE-AIMED TWICE, both by reviews on #586, and the subject survived both. First: every built-in
+// stopped drawing a read-only capability grid — a nine-column lattice per row is the shape
+// the ruling rejected, so a role at rest is its NAME and hovering it raises the measured window. Then
+// the `member` row kept an editable grid, because its boxes were really the TENANT DEFAULTS in a role
+// ". The defaults are their own section now. What this still pins: one screen, the
+// built-ins listed by scope, and the member preset driving the very same tenant#space_creator wildcard
+// through the unchanged endpoint.
+test("#469: the roles tab lists built-ins by scope; the member preset is configured on it", async ({ page }) => {
   await page.goto("/admin/roles");
   await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
 
-  // 1. the old standalone preset section is gone (both the container and the dead admin control)
-  await expect(page.getByTestId("tenant-defaults")).toHaveCount(0);
+  // 1. the old standalone preset section is gone (the dead admin control with it)
   await expect(page.getByTestId("default-admin-create-spaces")).toHaveCount(0);
 
-  // 2. #536 ONE roles list — scope is a row badge, not a section split. admin stays a uniform
-  // read-only picker with createSpaces checked+disabled.
+  // 2. #536 ONE roles list — scope is a section, not a per-row badge. Every built-in row is a
+  // name; none of them carries an editing surface (the 2026-08-04 ruling: a built-in has no freedom).
   const tenantList = page.getByTestId("roles-list");
   await expect(tenantList).toBeVisible();
   await expect(page.getByTestId("builtin-tenant-roles")).toHaveCount(0); // the section split stays gone
   await expect(page.getByTestId("builtin-roles")).toHaveCount(0);
-  const adminCap = page.getByTestId("builtin-admin-cap-createSpaces");
-  await expect(adminCap).toBeVisible();
-  await expect(adminCap).toBeChecked();
-  await expect(adminCap).toBeDisabled();
+  await expect(page.getByTestId("role-tip-admin"), "admin says what it confers by name").toBeVisible();
+  await expect(page.getByTestId("role-tip-member"), "and so does member — same shape").toBeVisible();
+  for (const row of ["admin", "member"]) {
+    const boxes = page.getByTestId(`builtin-role-${row}`).locator("input[type=checkbox]");
+    expect(await boxes.count(), `the ${row} row offers no editing surface`).toBe(0);
+  }
 
-  // 3. the member capability lives in that list and actually drives the server preset
-  const member = tenantList.getByTestId("builtin-member-cap-createSpaces");
+  // 3. the member preset lives in its own section and actually drives the server preset
+  const member = page.getByTestId("member-defaults").getByTestId("member-defaults-cap-createSpaces");
   await expect(member).toBeEnabled({ timeout: 8000 });
   const read = () =>
     page.evaluate(async (api) => {

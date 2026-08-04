@@ -61,8 +61,10 @@ test("#496: the Roles tab is where issuance is granted, and the member surface f
   // The control lives with every other capability now — not in /admin/api.
   await page.goto("/admin/roles");
   await expect(page.getByTestId("admin-roles")).toBeVisible();
-  const memberIssue = page.getByTestId("builtin-member-cap-issueApiKeys");
-  await expect(memberIssue, "the built-in member role carries the capability checkbox").toBeVisible();
+  // #586 (2026-08-04): the toggle lives in the tenant's "member defaults" section now — a built-in role
+  // row has no editing surface, and this switch was never the role's anyway (it is a tenant policy).
+  const memberIssue = page.getByTestId("member-defaults-cap-issueApiKeys");
+  await expect(memberIssue, "the tenant's member policy carries the capability checkbox").toBeVisible();
   await expect(memberIssue).not.toBeChecked();
   // click(), not check(): the box is CONTROLLED by the server's answer, so it flips only after the PUT
   // and the refetch land. check() asserts the state changed synchronously and would fail on the round-trip.
@@ -71,7 +73,7 @@ test("#496: the Roles tab is where issuance is granted, and the member surface f
 
   // it persisted — this is the server's answer (an FGA tuple), not a local toggle
   await page.reload();
-  await expect(page.getByTestId("builtin-member-cap-issueApiKeys")).toBeChecked();
+  await expect(page.getByTestId("member-defaults-cap-issueApiKeys")).toBeChecked();
 
   // …and the old two-choice selector is gone from the API console (one authority, one screen).
   await page.goto("/admin/api");
