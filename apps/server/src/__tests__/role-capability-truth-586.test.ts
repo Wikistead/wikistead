@@ -89,6 +89,12 @@ async function measured(noun: 'view' | 'comment' | 'edit' | 'moderate' | 'manage
   }
   const held: string[] = []
   for (const v of VERBS) if (await check(fgaClient, sub, v, { type: 'page', id: pageId })) held.push(v)
+  // #607 bounce: the row is REFLEXIVE — the noun's own verb, measured on the SPACE axis where
+  // the grant lives. The page loop cannot see a space-only verb, which is how the role that exists to
+  // hand out membership (`manageAccess`) drew as view-only, indistinguishable from `viewer` in the very
+  // picker that hands it out. Read back from the store, not assumed: a noun whose grant does not answer
+  // its own check would be a modelling bug this line surfaces.
+  if (!held.includes(noun) && (await check(fgaClient, sub, noun, { type: 'space', id: spaceId }))) held.push(noun)
   return held
 }
 
@@ -160,6 +166,17 @@ describe('#586: the built-in display table is the store\'s answer', () => {
     // …and a MANAGER holds the verb through `or manager` — additive, nobody lost an answer
     expect(await check(fgaClient, `user:${OWNER}`, 'manageAccess', { type: 'space', id: spaceId }), 'a manager passes the new gate').toBe(true)
   }, 180_000)
+
+  //the asymmetry the reviewer caught — `manage` reflexive, `manageAccess` not — sat inside the
+  // table while every pin stayed green, because no scan asked the question. This one does, over the
+  // WHOLE vocabulary rather than the row that happened to be wrong; the store's agreement is enforced
+  // by the it.each above (the row equals the measured closure, which now carries the reflexive verb).
+  it('every closure row contains its own capability (reflexivity,)', () => {
+    const table = uiTable()
+    for (const [noun, caps] of Object.entries(table)) {
+      expect(caps, `${noun}: a role's window must say what the role IS, not only what rides along`).toContain(noun)
+    }
+  })
 
   it('a bare edit grant is NOT the editor noun — the row must not claim comment for it', async () => {
     // The legacy single-arm case: pre-#553 grants that wear the `editor` badge with no comment arm.
