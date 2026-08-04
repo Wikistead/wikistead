@@ -17,12 +17,12 @@ export interface RoleChoice extends SelectOption {
 /**
  * Wraps each option's label so hovering, focusing or arrowing onto it reveals the capability list.
  *
- * TENANT TIERS (`member` / `admin`) are deliberately left bare. What a tier confers is not in either
- * measured table — those cover space and page scope — and ADR-203 §4's whole point is that a static
- * bundle written by hand is how a screen ends up stating a confident falsehood. The ruling on this
- * bounce allowed exactly this choice (" tier tooltip "), so a tier shows its
- * name and nothing else until the truth test grows a tenant-scope measurement. It is the absence of a
- * capability source that makes a tooltip absent — not a list of exceptions kept somewhere.
+ * TENANT TIERS now explain themselves too (#582 ①), but only where the answer is honest. `admin` is
+ * structural and measured; `member` rides a per-tenant switch, so its list is passed in from the live
+ * defaults by the caller (see `tenantTierCaps`) and is simply ABSENT where those are unknown. The rule
+ * here is unchanged and is the reason this works: a panel appears when the option carries a capability
+ * source, and never because a screen wrote one by hand. ADR-203 §4's confident falsehood is avoided by
+ * having no source rather than by keeping a list of exceptions.
  */
 export function withRoleTips(options: readonly RoleChoice[], scope: "space" | "page" | "tenant"): SelectOption[] {
   return options.map((o) => {

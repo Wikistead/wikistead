@@ -15,12 +15,12 @@ import { User, Users, KeyRound, Eraser, UserMinus } from "lucide-react"; // #579
 import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
-import { useRoles, useRoleAssignments, useAssignRole, useAssignTenantTier, useUnassignRole, useTenantGroupNames } from "../data/queries";
+import { useRoles, useRoleAssignments, useAssignRole, useAssignTenantTier, useUnassignRole, useTenantGroupNames, useTenantRoleDefaults } from "../data/queries";
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, adminGroupNames, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 import { RoleTip } from "../ui/RoleTip"; // #603: the conferred-admin marker explains itself like every role name (#586)
-import { TENANT_TIER_CAPS } from "./role-nouns";
+import { TENANT_TIER_CAPS, tenantTierCaps } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
 import { MemberStatusIcons, memberMenuValues } from "./member-status"; // #614: origin / password / suspended, beside the name
@@ -72,6 +72,11 @@ export function MembersPage() {
   // the search #557 put inside the assign form belongs to the TABLE now — it filters the people, which
   // is useful for every column, not just for finding someone to give a role to
   const [filter, setFilter] = useState("");
+  // #582 ①: the tiers explain themselves like every other role — but `member`'s answer is this tenant's
+  // live switch, not a constant (see tenantTierCaps). Until the defaults arrive the member tier stays
+  // bare rather than repeating a default that may be false here.
+  const tierDefaults = useTenantRoleDefaults();
+  const tierCaps = tenantTierCaps(tierDefaults.data?.member);
 
   const refresh = useCallback(async () => {
     try {
@@ -220,7 +225,7 @@ export function MembersPage() {
         // no matching option rendered as a bare chevron with no width (the 2026-08-04 screenshot).
         roleOptions={[
           { value: "", label: t("adminRoles.rolePlaceholder") },
-          ...withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant"),
+          ...withRoleTips(roleOptions(roles.data?.custom ?? [], tierCaps), "tenant"),
         ]}
         role={groupRole}
         onRoleChange={setGroupRole}
@@ -271,7 +276,7 @@ export function MembersPage() {
                   testId="member-role-select"
                   options={[
                     { value: "", label: t("adminRoles.rolePlaceholder") },
-                    ...withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant"),
+                    ...withRoleTips(roleOptions(roles.data?.custom ?? [], tierCaps), "tenant"),
                   ]}
                   onChange={(value) => {
                     const choice = resolveRoleChoice(value, tenantCustom);
@@ -339,7 +344,7 @@ export function MembersPage() {
                   // renders one, and this is the same string.
                   ariaLabel={t("members.roleFor", { sub: m.display_name || m.email || m.sub })}
                   testId="member-role-select"
-                  options={withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant")}
+                  options={withRoleTips(roleOptions(roles.data?.custom ?? [], tierCaps), "tenant")}
                   onChange={(value) => applyUserRole(m.sub, value)}
                 />
               </td>
@@ -412,7 +417,7 @@ export function MembersPage() {
           // #582 (user ruling): a built-in role NAME is a proper noun — the same string on every screen,
           // in every locale. #586: the same list-builder the rows use, so the invite form cannot drift
           // into explaining roles differently from the table above it.
-          options={withRoleTips(roleOptions(roles.data?.custom ?? []), "tenant")}
+          options={withRoleTips(roleOptions(roles.data?.custom ?? [], tierCaps), "tenant")}
         />
         <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>{t("members.sendInvite")}</Button>
       </FormRow>

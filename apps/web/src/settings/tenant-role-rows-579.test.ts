@@ -216,7 +216,10 @@ describe("#603: the group picker offers the tiers, and the note that explained t
     expect(src, "the note key is not referenced").not.toContain("adminRoles.groupTiersNote");
     // the group row and the add-form both build their options from the shared list-builder — the same
     // tiers-and-custom vocabulary a person's row reads
-    const uses = src.split("roleOptions(roles.data?.custom ?? [])").length - 1;
+    // #582 ①: the call now carries the tenant's live tier capabilities as a second argument, so the pin
+    // counts the BUILDER rather than one exact spelling of the call — the subject is "every picker on
+    // this screen goes through it", which an argument list must not be able to break.
+    const uses = src.split("roleOptions(roles.data?.custom ?? []").length - 1;
     expect(uses, "member row + group row + add form + invite all share the one list-builder").toBeGreaterThanOrEqual(4);
   });
 
