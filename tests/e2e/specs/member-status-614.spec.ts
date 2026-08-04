@@ -48,10 +48,10 @@ test("#614: status marks, the dim, and the menu split reach the screen", async (
   await expect(page.getByText("Has a password entrance")).toBeVisible({ timeout: 3_000 });
 
   // the ⋯ menu withholds the entrance from somebody who has one, and still offers it otherwise
-  await row("IdP Only").getByTestId("member-actions").click();
+  await row("IdP Only").getByTestId("member-actions-trigger").click();
   await expect(page.getByTestId("member-enable-password")).toBeVisible();
   await page.keyboard.press("Escape");
-  await row("IdP Plus Password").getByTestId("member-actions").click();
+  await row("IdP Plus Password").getByTestId("member-actions-trigger").click();
   await expect(page.getByTestId("member-erase-analytics")).toBeVisible();
   await expect(page.getByTestId("member-enable-password")).toHaveCount(0);
 });
