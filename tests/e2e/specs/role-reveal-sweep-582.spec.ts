@@ -13,6 +13,11 @@ async function optionsOf(page: Page, trigger: string): Promise<{ name: string; r
   await control.focus();
   await page.keyboard.press("Enter");
   await page.waitForSelector("[role=option]", { timeout: 5000 });
+  // #578 (2026-08-04, flake hunt): the options EXIST before keyboard focus has moved into the listbox,
+  // and arrows pressed in that window fall through — the walk then collects only the selected option
+  // and the sweep reads as "one role offered". Wait for the focus, not just the DOM.
+  await page.waitForFunction(() => document.activeElement?.closest("[role=listbox]") !== null
+    || document.activeElement?.getAttribute("role") === "option", undefined, { timeout: 5000 }).catch(() => {});
   const out: { name: string; revealed: string; insideRow?: boolean }[] = [];
   // walk with the arrow keys: that is the highlight the reveal follows, and it is the path a keyboard
   // user takes — a mouse-only measurement would miss a reveal bound to focus alone

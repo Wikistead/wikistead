@@ -27,6 +27,9 @@ describe("#557: members are found by search, never enumerated into a control", (
   });
 
   it("what gets sent is unchanged: the row assigns to a user:<sub> principal", () => {
-    expect(src).toMatch(/principal: `user:\$\{m\.sub\}`/);
+    // #578 (2026-08-04): the assignment moved into applyUserRole — the ONE function both the row Select
+    // and the add form call — so the principal shape is pinned where it is built now. Same subject: the
+    // client sends a user:<sub> principal, never a hand-built group id or an enumerated pick.
+    expect(src).toMatch(/principal: `user:\$\{sub\}`/);
   });
 });

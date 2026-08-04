@@ -32,11 +32,21 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     // the old surface is gone — not hidden, GONE
     await expect(page.getByTestId("tenant-assign-form")).toHaveCount(0);
     await expect(page.getByTestId("tenant-assignment-list")).toHaveCount(0);
-    // What #579 ruled is that a PERSON's tenant role is given on their row and nowhere else. The add
-    // flow above the table is for GROUPS, which have no row until they hold something — so it must not
-    // offer a person (#578 bounce ④ put it there; this is the line that keeps the ruling).
-    await expect(page.getByTestId("tenant-grant-type"), "no grantee-kind control: groups only").toHaveCount(0);
-    await expect(page.getByTestId("tenant-grant-input"), "and no person search in the add flow").toHaveCount(0);
+    // OVERRIDDEN (user ruling, 2026-08-04): this used to pin the add flow to groups only ("a person's
+    // tenant role is given on their row and nowhere else"), and the review overturned it
+    // user/group toggle the space screen has; the ROW still works (below, unchanged), and both doors
+    // converge on the server's one-role-per-principal state, so this is a second door, not a second state.
+    await expect(page.getByTestId("tenant-grant-type"), "the grantee-kind toggle exists").toHaveCount(1);
+    // the role picker never renders as an empty chevron — before a pick it shows its placeholder
+    await expect(page.getByTestId("tenant-grant-role"), "the role picker names itself at rest").not.toHaveText("");
+    // …and the form is ONE row of its own (the 2026-08-04 screenshot had it wrapped under the filter,
+    // with the role Select collapsed): every control shares a top edge, below the filter's line
+    const topOf = async (id: string) => Math.round((await page.getByTestId(id).boundingBox())!.y);
+    const inputY = await topOf("tenant-grant-input");
+    expect(await topOf("tenant-grant-type"), "kind toggle on the form's line").toBe(inputY);
+    expect(await topOf("tenant-grant-role"), "role picker on the form's line").toBe(inputY);
+    expect(await topOf("tenant-grant-add"), "add button on the form's line").toBe(inputY);
+    expect(inputY, "and the form is its own row, not folded into the filter's").toBeGreaterThan(await topOf("members-filter"));
 
     // narrow to ONE member with the table filter, then work on that row — the fixture's display name
     // is not something this spec should hard-code (it differs between the dev and e2e seeds)
@@ -82,6 +92,17 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(page.getByTestId("member-row-new-group"), "and the filter does not confer roles").toHaveCount(0);
     await page.getByTestId("members-filter").fill("dev");
     await expect(page.getByTestId("member-roles").first()).toBeVisible();
+
+    // The ADD FORM is the second door to the same state (2026-08-04 ruling): pick the person, pick a
+    // role, add — and the person's ROW control changes, because both doors write the same converged
+    // fact. If the form stacked instead of replacing, the row would still read roleB here.
+    await page.getByTestId("tenant-grant-input").fill("dev");
+    await page.getByTestId("tenant-grant-candidate").first().click();
+    await page.getByTestId("tenant-grant-role").click();
+    await page.getByRole("option", { name: roleA }).click();
+    await page.getByTestId("tenant-grant-add").click();
+    await expect(page.getByTestId("member-roles").first().getByTestId("member-role-select"), "the form's grant lands on the row")
+      .toHaveText(roleA, { timeout: 8000 });
   } finally {
     for (const id of [idA, idB]) {
       await request.delete(`/api/admin/roles/${id}`, { headers: { authorization: "Bearer dev-token" } }).catch(() => {});
@@ -116,6 +137,9 @@ test("#579 ①: a group gets a tenant role from the MEMBER TABLE, by name", asyn
     // and the screen shows its NAME — but it happens in the shared add form now, the same one the space
     // screen uses, because the filter-field route was invisible on the device.
     const groupName = `e2e-579-group-${stamp}`;
+    // the form opens on the user half (2026-08-04: both kinds are offered) — flip it to groups
+    await page.getByTestId("tenant-grant-type").click();
+    await page.getByRole("option", { name: /group/i }).click();
     await page.getByTestId("tenant-grant-group-name").fill(groupName);
     await page.getByTestId("tenant-grant-role").click();
     await page.getByRole("option", { name: roleName }).click();

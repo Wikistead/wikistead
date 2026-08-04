@@ -35,6 +35,9 @@ test("#579 ①③: people and groups are one table, and a new group is named fro
   // confirmed group from a typed one. The shared form does all three, and it is the same form the space
   // screen shows, which is what the ruling asked for.
   const groupName = `Unified-${stamp}`;
+  // the form opens on the user half (2026-08-04: both kinds are offered) — flip it to groups
+  await page.getByTestId("tenant-grant-type").click();
+  await page.getByRole("option", { name: /group/i }).click();
   await page.getByTestId("tenant-grant-group-name").fill(groupName);
   await page.getByTestId("tenant-grant-role").click();
   await page.getByRole("option", { name: roleName }).click();

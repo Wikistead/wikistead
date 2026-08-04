@@ -100,13 +100,14 @@ describe("#578 ③: both screens run the same add-flow", () => {
     expect(tenant, "tenant still builds the add row itself").not.toMatch(/data-testid="tenant-group-assign-add"/);
   });
 
-  it("the form takes the grantee kinds as an argument, and hides the control when there is one", () => {
+  it("the form takes the grantee kinds as an argument, and both screens offer both", () => {
     expect(form).toMatch(/types\.length > 1/);
     expect(space, "the space screen offers both").toMatch(/types=\{\["user", "group"\]\}/);
-    // The tenant screen offers GROUPS only, and that is the ruling rather than an oversight: a person's
-    // tenant role is given on their own row (#579) and their arrival is the invite. One entry in `types`
-    // is also what makes the form hide the kind control, so the screen has no choice to explain.
-    expect(tenant, "the tenant screen offers groups only").toMatch(/types=\{\["group"\]\}/);
+    // OVERRIDDEN (user ruling, 2026-08-04): the tenant screen offered groups only, deferring people to
+    // their row (#579) — and the review asked "
+    // ". So both screens run the full toggle now; the row keeps working, and both doors
+    // converge on the server's 1-principal-1-role state.
+    expect(tenant, "the tenant screen offers both too").toMatch(/types=\{\["user", "group"\]\}/);
   });
 
   it("it owns no state and knows no endpoint — the caller decides what add means", () => {
