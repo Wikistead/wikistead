@@ -12,6 +12,38 @@ export interface TupleInput {
   }
 }
 
+// #578 (review rejection 2026-08-05): FGA's own validation text reached the admin's screen verbatim —
+// "FGA API Validation Error: post write : Error cannot delete a tuple which does not exist: user:
+// 'user:89e7…', relation: 'viewer', object: 'space:demo_space'". That is internal implementation, it
+// names the model's relations rather than anything the reader chose, and Fastify forwards a thrown
+// error's `statusCode` and `message` as the response. Every tuple write in the product goes through the
+// two helpers below, so the boundary is here: the cause is still LOGGED in full (the original is kept
+// as `cause`), and what leaves the process is a code a surface can translate.
+//
+// This is the shape #606 used for `already_member`: the server names the refusal, the client picks the
+// sentence. Nothing in the tree branches on FGA's message text (checked), so nothing loses information.
+function asDomainError(err: unknown, op: 'write' | 'delete'): unknown {
+  const status = (err as { statusCode?: number })?.statusCode
+  if (status !== 400) return err // not a validation refusal — a transport or auth failure stays itself
+  const raw = String((err as Error)?.message ?? '')
+  return Object.assign(new Error(`the permission store refused this ${op}`), {
+    statusCode: 500, // the CALLER sent nothing invalid: a rejected tuple set is our bug, not their request
+    code: 'authz_write_refused',
+    // Several callers legitimately treat "delete a tuple that is gone" / "write one that is there" as
+    // CONVERGENCE rather than failure (the share-link revoke sweep, the group-sync mirror). They used to
+    // read FGA's sentence to tell that case apart; replacing the sentence would have broken them
+    // silently, so the fact moves onto the error as a FLAG. `alreadyConverged` is the question they were
+    // really asking, asked once here instead of by four substring matches.
+    alreadyConverged: /did not exist|already exist/i.test(raw),
+    cause: err,
+  })
+}
+
+/** Did a tuple write fail only because the store was already in the requested state? (#578) */
+export function isAlreadyConverged(err: unknown): boolean {
+  return (err as { alreadyConverged?: boolean })?.alreadyConverged === true
+}
+
 export async function writeTuples(fga: OpenFgaClient, tuples: TupleInput[]): Promise<void> {
   const writes: TupleKey[] = tuples.map((t) => ({
     user: t.user,
@@ -19,7 +51,11 @@ export async function writeTuples(fga: OpenFgaClient, tuples: TupleInput[]): Pro
     object: t.object,
     ...(t.condition ? { condition: t.condition } : {}),
   }))
-  await fga.write({ writes })
+  try {
+    await fga.write({ writes })
+  } catch (err) {
+    throw asDomainError(err, 'write')
+  }
 }
 
 export async function deleteTuples(
@@ -31,7 +67,11 @@ export async function deleteTuples(
     relation: t.relation,
     object: t.object,
   }))
-  await fga.write({ deletes })
+  try {
+    await fga.write({ deletes })
+  } catch (err) {
+    throw asDomainError(err, 'delete')
+  }
 }
 
 // Enumerate EVERY tuple on one object, paginated to completion. OpenFGA's Read answers one page
