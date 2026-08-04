@@ -3,6 +3,7 @@ import { StateField } from "@codemirror/state";
 import i18n from "../../i18n";
 import { vimVisualField } from "./palette";
 import { INLINE_FORMATS } from "./commands";
+import { formatButtonContent } from "./format-preview";
 
 // The selection bubble is the layer-A decoration entry for mouse/any-selection users.
 // Its buttons come from the SHARED INLINE_FORMATS (ADR-018 #3) so they never drift from
@@ -10,11 +11,13 @@ import { INLINE_FORMATS } from "./commands";
 // constructs (heading, list, table, …) and inserts (image, P) are NOT here — they live
 // in the `/` insert palette. This makes the on-selection menu identical across vim (`\`
 // palette) and non-vim (this bubble): decoration only. Chrome only.
-function mkButton(label: string, title: string, run: () => void): HTMLButtonElement {
+function mkButton(content: string | HTMLElement, title: string, run: () => void): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "lp-toolbar-btn";
-  button.textContent = label;
+  // #612: a button may carry a styled PREVIEW element now, not only a text glyph
+  if (typeof content === "string") button.textContent = content;
+  else button.appendChild(content);
   button.dataset.tip = title; // #530
   // mousedown + preventDefault keeps the editor selection/focus intact so the command
   // applies to the user's current selection (and the selection bubble stays up).
@@ -43,7 +46,7 @@ export function floatingToolbar() {
         const dom = document.createElement("div");
         dom.className = "lp-toolbar";
         dom.setAttribute("data-testid", "format-bubble");
-        for (const fmt of INLINE_FORMATS) dom.appendChild(mkButton(fmt.symbol, i18n.t(fmt.labelKey), () => fmt.run(view)));
+        for (const fmt of INLINE_FORMATS) dom.appendChild(mkButton(formatButtonContent(fmt), i18n.t(fmt.labelKey), () => fmt.run(view)));
         return { dom };
       },
     };

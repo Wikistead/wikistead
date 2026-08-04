@@ -1,4 +1,5 @@
 import { safeHref } from "../macros/md-render"; // #89 comment 886 (②): the ONLY scheme judge for a cell link
+import { formatButtonContent } from "./format-preview";
 
 // #89 (rescoped, then comment 830): the inline-decoration toolbar for a table cell being edited. A cell is
 // a contenteditable ISLAND with its OWN DOM selection (not CodeMirror's), and it is a WYSIWYG surface —
@@ -289,7 +290,11 @@ export function mountCellFormatToolbar(cellEl: HTMLElement): { destroy(): void }
     const b = document.createElement("button");
     b.type = "button";
     b.className = "cm-lp-cell-format-btn";
-    b.textContent = mark.label;
+    // #612: the cell bar is the same toolbar one surface over — its buttons preview their effect too
+    // (one helper, so the two faces cannot drift; the ticket's rule is "never fix one surface alone")
+    const content = formatButtonContent({ id: mark.id, symbol: mark.label });
+    if (typeof content === "string") b.textContent = content;
+    else b.appendChild(content);
     b.setAttribute("data-testid", `cell-format-${mark.id}`);
     b.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); applyCellMark(cellEl, mark); position(); });
     bar.appendChild(b);
@@ -301,7 +306,12 @@ export function mountCellFormatToolbar(cellEl: HTMLElement): { destroy(): void }
   const linkBtn = document.createElement("button");
   linkBtn.type = "button";
   linkBtn.className = "cm-lp-cell-format-btn";
-  linkBtn.textContent = "Link";
+  {
+    // #612: the link button is an icon here too (#544 — never the word), same trusted SVG as the bubble
+    const icon = formatButtonContent({ id: "link", symbol: "Link" });
+    if (typeof icon === "string") linkBtn.textContent = icon;
+    else linkBtn.appendChild(icon);
+  }
   linkBtn.setAttribute("data-testid", "cell-format-link");
   let savedRange: Range | null = null;
   let popover: HTMLElement | null = null;
