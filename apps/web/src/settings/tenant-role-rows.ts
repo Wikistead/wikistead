@@ -184,14 +184,44 @@ export function groupRoleValue(row: GroupRoleRow | undefined): string {
   return held.builtin ? `tier:${held.builtin}` : `role:${held.roleId}`;
 }
 
-/** ADR-207 rev3 (#603): the names of the groups that hold `admin` — what the member rows join against
- *  to say "admin (via <group>)". Mechanism, not name: `builtin === "admin"`, never a label match. */
-export function adminGroupNames(assignments: readonly TenantAssignment[]): Set<string> {
-  const names = new Set<string>();
+/**
+ * #603 (review rejection 2026-08-05): what each GROUP confers, by name — the member rows join against this
+ * to say "<role> (via <group>)".
+ *
+ * It used to collect only the groups holding `admin`, so a member whose group gave them a custom tenant
+ * role held the capability with nothing on screen saying where it came from. Once groups can carry any
+ * tenant role, singling out `admin` is the same "one framework, two treatments" this family of rulings
+ * keeps removing.
+ *
+ * Mechanism, not label: a built-in is read from `builtin` (so a custom role NAMED "admin" cannot pass
+ * as the tier) and a custom one from its own name.
+ */
+export interface GroupConferredRole {
+  /** what the member gets — a tier name or a custom role's name */
+  role: string;
+  /** the group that confers it */
+  group: string;
+  /** the tier, when this is a built-in; absent for a custom role (drives the capability panel) */
+  builtin?: string;
+  /** the custom role's capabilities, when this is one */
+  capabilities?: readonly string[];
+}
+
+export function groupConferredRoles(
+  assignments: readonly TenantAssignment[],
+  // the custom roles' definitions, so a badge can raise the same capability panel a picker option does.
+  // Absent is fine: the badge still names the role, it just has nothing extra to reveal.
+  roles: readonly TenantRoleDef[] = [],
+): GroupConferredRole[] {
+  const byId = new Map(roles.map((r) => [r.id, r]));
+  const out: GroupConferredRole[] = [];
   for (const a of assignments) {
-    if (a.principal.startsWith("group:") && a.builtin === "admin" && a.groupName) names.add(a.groupName);
+    if (!a.principal.startsWith("group:") || !a.groupName) continue;
+    if (a.builtin) { out.push({ role: a.builtin, group: a.groupName, builtin: a.builtin }); continue; }
+    const caps = a.roleId ? byId.get(a.roleId)?.capabilities : undefined;
+    out.push({ role: a.roleName, group: a.groupName, ...(caps ? { capabilities: caps } : {}) });
   }
-  return names;
+  return out;
 }
 
 // #591 tried the other shape here — a dropdown for the tier and a separate control for adding custom
@@ -218,7 +248,9 @@ export interface UnifiedRow {
   /** ADR-207 rev3 (#603): the admin-holding groups this person carries. The Select keeps meaning the
    *  row's OWN tier; what a group confers is a marker BESIDE it, named — never a value the control
    *  claims to own (a demotion that changed nothing would be the #596/#536 lie). */
-  adminVia?: string[];
+  /** #603: every role a group confers on this member — one badge each, so two groups giving two roles
+   *  read as two facts rather than one badge with a comma in it. */
+  groupRoles?: GroupConferredRole[];
   /** groups only — its assignments, tiers included (#603 / ADR-207 overturned ADR-201 §1) */
   group?: GroupRoleRow;
   /** the group's name as typed, if the directory has not produced it yet */
@@ -229,17 +261,20 @@ export function buildUnifiedRows(
   members: readonly RowMember[],
   groups: readonly GroupRoleRow[],
   unconfirmedPrincipals: ReadonlySet<string> = new Set(),
-  adminGroups: ReadonlySet<string> = new Set(),
+  conferred: readonly GroupConferredRole[] = [],
 ): UnifiedRow[] {
   const rows: UnifiedRow[] = [
     ...members.map((m) => {
-      const via = (m.groups ?? []).filter((g) => adminGroups.has(g));
+      const carried = new Set(m.groups ?? []);
+      // one badge per (role, group) pair the member's groups confer — not one badge listing groups,
+      // which had nowhere to put a second ROLE
+      const groupRoles = conferred.filter((c) => carried.has(c.group));
       return {
         key: `user:${m.sub}`,
         kind: "user" as const,
         label: m.display_name || m.email || m.sub,
         sub: m.sub,
-        ...(via.length ? { adminVia: via } : {}),
+        ...(groupRoles.length ? { groupRoles } : {}),
       };
     }),
     ...groups.map((g) => ({

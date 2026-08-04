@@ -1,18 +1,21 @@
 // #603 / ADR-207: a group may hold the tenant tier, and the member table says what that means.
 //
-// Three claims, pinned pure (no DOM — the components execute what these functions decide, #536):
-//   1. the admin-via-group marker walks the ROWS: any member carrying an admin-holding group gets
-//      `adminVia`, and nobody gets it without one (rev3's acceptance, verbatim);
-//   2. the mechanism, not the name, decides what counts: a CUSTOM role named "admin" on a group never
-//      produces a marker;
-//   3. the floor's 409 reaches the reader as a REASON — both locales carry the group-aware sentence,
-//      and it differs from the ordinary last-admin sentence (the user's condition: a refusal that
-//      reads as a bug is one the next person removes in good faith).
+// Three claims, pinned pure (no DOM — the components execute what these functions decide, #536)
+// 1. the via-group marker walks the ROWS: any member carrying a role-holding group gets a badge, and
+// nobody gets one without. RE-AIMED (review rejection 2026-08-05): it used to say "admin-holding",
+// because only admin produced a marker — a group conferring a CUSTOM tenant role left its members
+// holding the capability with nothing on screen saying where it came from. The subject is now every
+// role a group confers, which is what "roles are one framework" has meant everywhere else;
+// 2. the mechanism, not the name, decides what a BUILT-IN is: a CUSTOM role named "admin" on a group
+// is reported as the custom role it is, never as the tier;
+// 3. the floor's 409 reaches the reader as a REASON — both locales carry the group-aware sentence,
+// and it differs from the ordinary last-admin sentence (the user's condition: a refusal that
+// reads as a bug is one the next person removes in good faith).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  adminGroupNames, buildUnifiedRows, groupRoleValue,
+  groupConferredRoles, buildUnifiedRows, groupRoleValue,
   type TenantAssignment, type RowMember, type GroupRoleRow,
 } from "./tenant-role-rows";
 
@@ -20,31 +23,47 @@ const asg = (over: Partial<TenantAssignment>): TenantAssignment => ({
   id: "a1", roleId: null, roleName: "admin", principal: "group:abc#member", ...over,
 });
 
-describe("#603: the admin-via-group marker is mechanism-driven", () => {
-  it("a custom role NAMED admin confers no marker; the built-in tier does", () => {
+describe("#603: what a group confers is reported by mechanism, for every role", () => {
+  it("a custom role NAMED admin is reported as that custom role; the built-in tier as the tier", () => {
     const custom = asg({ id: "c1", roleId: "r9", roleName: "admin", groupName: "Pretenders" });
     const tier = asg({ id: "t1", builtin: "admin", groupName: "Ops" });
-    expect([...adminGroupNames([custom])]).toEqual([]);
-    expect([...adminGroupNames([custom, tier])]).toEqual(["Ops"]);
+    expect(groupConferredRoles([custom])).toEqual([{ role: "admin", group: "Pretenders" }]);
+    expect(groupConferredRoles([custom, tier])[1]).toEqual({ role: "admin", group: "Ops", builtin: "admin" });
+  });
+
+  it("a CUSTOM tenant role on a group is reported too — the case the reject found", () => {
+    const custom = asg({ id: "c2", roleId: "r-bbb", roleName: "bbb", groupName: "Writers" });
+    expect(groupConferredRoles([custom]), "not only admin").toEqual([{ role: "bbb", group: "Writers" }]);
+    // with the definitions to hand, the badge can raise the same capability panel a picker option does
+    expect(groupConferredRoles([custom], [{ id: "r-bbb", name: "bbb", scope: "tenant", capabilities: ["createSpaces"] }]))
+      .toEqual([{ role: "bbb", group: "Writers", capabilities: ["createSpaces"] }]);
   });
 
   it("a user principal holding the marker's shape is not a group and does not count", () => {
-    expect([...adminGroupNames([asg({ principal: "user:someone", builtin: "admin", groupName: "Ops" })])]).toEqual([]);
+    expect(groupConferredRoles([asg({ principal: "user:someone", builtin: "admin", groupName: "Ops" })])).toEqual([]);
   });
 
-  it("walks the rows: every member carrying an admin group is marked, and nobody else (rev3 acceptance)", () => {
+  it("walks the rows: one badge per (role, group) a member's groups confer, and none otherwise", () => {
     const members: RowMember[] = [
       { sub: "in-ops", display_name: "In Ops", email: null, role: "member", groups: ["Ops", "Docs"] },
-      { sub: "row-admin", display_name: "Row Admin", email: null, role: "admin", groups: ["Docs"] },
+      { sub: "row-admin", display_name: "Row Admin", email: null, role: "admin", groups: [] },
       { sub: "both", display_name: "Both", email: null, role: "admin", groups: ["Ops"] },
       { sub: "outside", display_name: "Outside", email: null, role: "member", groups: null },
     ];
-    const rows = buildUnifiedRows(members, [], new Set(), new Set(["Ops"]));
-    const via = Object.fromEntries(rows.filter((r) => r.kind === "user").map((r) => [r.sub, r.adminVia]));
-    expect(via["in-ops"], "carries Ops → marked, and the marker names the group").toEqual(["Ops"]);
-    expect(via["both"], "their own row tier does not suppress what the group confers").toEqual(["Ops"]);
-    expect(via["row-admin"], "admin by their own row, nothing conferred → no marker").toBeUndefined();
-    expect(via["outside"], "no groups → no marker").toBeUndefined();
+    const conferred = groupConferredRoles([
+      asg({ id: "t1", builtin: "admin", groupName: "Ops" }),
+      asg({ id: "c3", roleId: "r-doc", roleName: "docs-writer", groupName: "Docs" }),
+    ]);
+    const rows = buildUnifiedRows(members, [], new Set(), conferred);
+    const via = Object.fromEntries(rows.filter((r) => r.kind === "user").map((r) => [r.sub, r.groupRoles]));
+    expect(via["in-ops"], "two groups, two roles → two badges, not one with a comma").toEqual([
+      { role: "admin", group: "Ops", builtin: "admin" },
+      { role: "docs-writer", group: "Docs" },
+    ]);
+    expect(via["both"], "their own row tier does not suppress what the group confers")
+      .toEqual([{ role: "admin", group: "Ops", builtin: "admin" }]);
+    expect(via["row-admin"], "admin by their own row, nothing conferred → no badge").toBeUndefined();
+    expect(via["outside"], "no groups → no badge").toBeUndefined();
   });
 });
 
@@ -76,5 +95,27 @@ describe("#603: the floor's 409 carries its reason to the reader", () => {
     expect(src, "the code decides the sentence").toContain('e.code === "last_direct_admin"');
     expect(src, "the ordinary 409 keeps its own words").toContain('t("members.lastAdmin")');
     expect(src, "no hard-coded English refusal survives").not.toContain('"Cannot change the last admin."');
+  });
+});
+
+// Discovery-shaped, per the reject's last condition ("`adminVia` admin "): the
+// screen must not grow a second, tier-specific path back. A name that singles out one role is how the
+// gap was built in the first place — the badge only ever looked at admin because the data it read was
+// called `adminVia` and computed by `adminGroupNames`.
+describe("#603: no admin-only path grows back", () => {
+  const files = ["tenant-role-rows.ts", "MembersPage.tsx"];
+  for (const f of files) {
+    it(`${f} carries no admin-specific via vocabulary`, () => {
+      const src = readFileSync(resolve(import.meta.dirname, f), "utf8");
+      for (const banned of ["adminVia", "adminGroupNames", "admin-via-group"]) {
+        expect(src, `${f}: ${banned} names one role where the rule is about all of them`).not.toContain(banned);
+      }
+    });
+  }
+
+  it("the row renders one badge per conferred role, from the general field", () => {
+    const src = readFileSync(resolve(import.meta.dirname, "MembersPage.tsx"), "utf8");
+    expect(src, "iterated, not indexed at [0] or joined").toMatch(/\(row\.groupRoles \?\? \[\]\)\.map\(/);
+    expect(src, "and the group name is one badge's own, not a comma-joined list").not.toMatch(/groupRoles[\s\S]{0,80}\.join\(/);
   });
 });

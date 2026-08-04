@@ -18,7 +18,7 @@ import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useRoles, useRoleAssignments, useAssignRole, useAssignTenantTier, useUnassignRole, useTenantGroupNames, useTenantRoleDefaults } from "../data/queries";
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
-import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, adminGroupNames, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
+import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, groupConferredRoles, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 import { RoleTip } from "../ui/RoleTip"; // #603: the conferred-admin marker explains itself like every role name (#586)
 import { TENANT_TIER_CAPS, tenantTierCaps } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
@@ -146,12 +146,13 @@ export function MembersPage() {
   // it read as a different kind of thing under different rules.
   const groupRows = buildGroupRoleRows(assignments.data ?? [], t("spaceMembers.unknownGroup"), t("spaceMembers.group"), t("spaceMembers.groupNotSeen"));
   const shownGroups = filter.trim() ? groupRows.filter((g) => g.label.toLowerCase().includes(filter.trim().toLowerCase())) : groupRows;
-  const unified = buildUnifiedRows(shownMembers, shownGroups, new Set(), adminGroupNames(assignments.data ?? []));
+  const tenantCustomRoles = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
+  const unified = buildUnifiedRows(shownMembers, shownGroups, new Set(), groupConferredRoles(assignments.data ?? [], tenantCustomRoles));
   // #578 bounce ④: the filter field no longer doubles as a way to CREATE a grant. It was the only route
   // a group had, and it was invisible — a reader had to type a name that matched nothing and notice a
   // row appear. Two routes to the same result is what this ticket exists to remove, so the add-flow
   // above is the one route and the filter went back to filtering.
-  const tenantCustom = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
+  const tenantCustom = tenantCustomRoles;
   const knownGroups = groupNames.data ?? [];
   // The user half of the add form searches the list this screen already holds — the space side asks the
   // server because it cannot see the tenant roster; here the roster IS the page.
@@ -335,14 +336,25 @@ export function MembersPage() {
                     demote somebody while the group kept conferring admin would be the "successful action
                     that changes nothing" this repo has fixed twice (#596, #536). The marker names its
                     source, wears tokens only, and explains itself on hover like every role name (#586). */}
-                {row.adminVia && row.adminVia.length > 0 && (
-                  <RoleTip origin="role" scope="tenant" roleCapabilities={TENANT_TIER_CAPS.admin} testId={`admin-via-${m.sub}`}>
-                    <span data-testid="admin-via-group" className="mr-2 inline-flex items-center gap-1 rounded border border-[var(--accent)] px-1 text-[11px] text-[var(--accent)]">
-                      admin
-                      <span className="text-fg-dim">{t("members.viaGroup", { group: row.adminVia.join(", ") })}</span>
+                {/* #603 (review rejection 2026-08-05): ONE BADGE PER ROLE, and for every role a group
+                    confers — not only `admin`. Two groups giving two roles are two facts; the old shape
+                    (one badge, group names joined by a comma) had nowhere to put the second role. */}
+                {(row.groupRoles ?? []).map((g) => (
+                  <RoleTip
+                    key={`${g.role}@${g.group}`}
+                    origin="role"
+                    scope="tenant"
+                    {...(g.builtin
+                      ? { roleCapabilities: g.builtin === "admin" ? TENANT_TIER_CAPS.admin : tierCaps.member }
+                      : { roleCapabilities: g.capabilities ?? null })}
+                    testId={`role-via-${m.sub}-${g.role}`}
+                  >
+                    <span data-testid="role-via-group" className="mr-2 inline-flex items-center gap-1 rounded border border-[var(--accent)] px-1 text-[11px] text-[var(--accent)]">
+                      {g.role}
+                      <span className="text-fg-dim">{t("members.viaGroup", { group: g.group })}</span>
                     </span>
                   </RoleTip>
-                )}
+                ))}
                 <Select
                   size="sm"
                   value={currentRoleValue(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })}
