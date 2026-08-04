@@ -7,6 +7,7 @@ import type { NodeApi } from "react-arborist";
 import { ChevronDown, ChevronUp, FileText, Home, PinOff, Settings } from "lucide-react";
 import { PageTree, type PageTreeNode } from "./PageTree";
 import { SpaceSwitcher } from "./SpaceSwitcher";
+import { landingSpaceTab } from "../settings/space-tabs"; // #607: one answer to "which settings tab can this caller reach"
 import { SpaceIcon } from "../ui/SpaceIcon"; // #284show a page pin's owning space
 import { SidebarTreeSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #492: loading vs empty vs error
 import {
@@ -144,6 +145,13 @@ function SidebarImpl() {
   const canManage = currentSpace?.capability === "manage";
   const canModerate = currentSpace?.canModerate === true; // #326: a moderator reaches settings for the moderation tab only
   const canManageAccess = currentSpace?.canManageAccess === true; // #607: an access-manager reaches settings for the Members tab
+  // #607: where the settings button goes, decided by the shared resolver rather than by repeating the
+  // verb list here — and it is absent when the caller can open no tab at all.
+  const settingsTab = landingSpaceTab(currentSpace);
+  const settingsTip = settingsTab === "general" ? t("sidebar.spaceSettings")
+    : settingsTab === "members" ? t("spaceSettings.members")
+    : settingsTab === "moderation" ? t("moderation.title")
+    : t("sidebar.spaceSettings");
 
   const createSpace = useCreateSpace();
   const myCaps = useMyCapabilities(); // #445hide the create-space entry point when refused
@@ -311,7 +319,11 @@ function SidebarImpl() {
                 template picker (blank stays the fast default, templates are one extra click). */}
             {canEdit && <NewPageButton onClick={() => newPage(null)} />}
             {canEdit && <button type="button" className={headerBtn} data-tip={t("templatePicker.title")} aria-label={t("templatePicker.title")} data-testid="new-page-from-template" onClick={() => setPickingTemplate(true)}><ChevronDown size={13} /></button>}
-            {(canManage || canModerate) && <button type="button" className={headerBtn} data-tip={canManage ? t("sidebar.spaceSettings") : t("moderation.title")} aria-label={canManage ? t("sidebar.spaceSettings") : t("moderation.title")} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings/${canManage ? "general" : "moderation"}`)}><Settings size={15} /></button>}
+            {/* #607 (review rejection): this condition listed the verbs by hand and had not been told
+                about the roster one, so an access-manager had no way IN to the screen their verb
+                exists for. It asks the shared resolver now — the same one the settings layout uses —
+                and names the destination after the tab it actually opens. */}
+            {settingsTab && <button type="button" className={headerBtn} data-tip={settingsTip} aria-label={settingsTip} data-testid="space-settings-open" onClick={() => current && navigate(`/spaces/${current}/settings/${settingsTab}`)}><Settings size={15} /></button>}
           </div>
         )}
       </div>
