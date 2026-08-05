@@ -865,6 +865,11 @@ export async function rolesPlugin(app: FastifyInstance) {
 
   // ---- increment 3: ASSIGNMENTS (expand a role to fixed-relation tuples; provenance rows) ----
 
+  // How many assignments one answer carries. Not a page size the client walks: four screens read this
+  // route and none of them paginates, so this is the ceiling that keeps a busy resource from becoming an
+  // unbounded response and an unbounded number of FGA questions.
+  const ASSIGNMENTS_PAGE_LIMIT = 500
+
   app.get<{ Querystring: { resourceType?: string; resourceId?: string } }>('/admin/roles/assignments', async (req) => {
     const { resourceType, resourceId } = req.query
     if ((resourceType !== 'page' && resourceType !== 'space' && resourceType !== 'tenant') || !resourceId) {
@@ -890,7 +895,11 @@ export async function rolesPlugin(app: FastifyInstance) {
       FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id
       WHERE a.resource_type = ${resourceType} AND a.resource_id = ${resourceId}
         AND (a.role_id IS NOT NULL OR ${resourceType === 'tenant'})
-      ORDER BY name, a.principal`
+      -- #623 (ruling): assignments grow as principal x resource, the fastest of every list in the
+      -- ticket, and four screens read this one route. The bound also caps the AUTHORIZATION work below:
+      -- every row resolves a name and asks whether it is revocable and changeable.
+      ORDER BY name, a.principal, a.id
+      LIMIT ${ASSIGNMENTS_PAGE_LIMIT}`
     // #523 / ADR-190 (slice E): name the USER principals. This list is already authorization-bounded and
     // server-set (requireListAuthority above, one resourceId, no cross-resource enumeration), so resolving
     // `override ?? OIDC display_name` over it is the SAME precedent as the manage-gated grant list in slice
