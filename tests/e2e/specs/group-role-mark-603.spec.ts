@@ -76,3 +76,63 @@ test("#603: a group-conferred role is one mark, and the row keeps its height", a
   // the row's own control still shows the member's own role — the mark never speaks for it
   await expect(page.locator("tr", { hasText: "Three Groups" }).getByTestId("member-role-select")).toBeVisible();
 });
+
+// #603 (user ruling, 2026-08-05): "2
+//
+// Both panels, both axes. The reject measured L2 escaping to the right at a 1000px viewport and L1
+// escaping downward at a 420px one — the same root in both: neither asked whether the side it opens on
+// has room. So the assertion is not about a panel, it is about EVERY panel that ends up on screen
+// collect the live `[role=tooltip]` nodes and require each to be inside the viewport. A third tier added
+// later is covered the day it lands, without this file naming it.
+async function panelsOnScreen(page: import("@playwright/test").Page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('[role=tooltip]')]
+      .map((el) => ({ id: (el as HTMLElement).dataset.testid ?? el.className, ...(el.getBoundingClientRect().toJSON() as DOMRect) }))
+      .filter((r) => r.width > 0 && r.height > 0));
+}
+
+for (const [w, h] of [[1000, 700], [900, 700], [1280, 420]] as const) {
+  test(`#603: neither panel leaves a ${w}×${h} viewport, and the second never covers the first`, async ({ page }) => {
+    await page.setViewportSize({ width: w, height: h });
+    await stub(page);
+    await openDemo(page);
+    await page.goto("/admin/members");
+    await expect(page.getByText("Three Groups")).toBeVisible({ timeout: 10_000 });
+    await sleep(500);
+
+    const mark = page.locator("tr", { hasText: "Three Groups" }).getByTestId("group-roles-mark");
+    await mark.hover();
+    const list = page.getByTestId("group-roles-list");
+    await expect(list).toBeVisible({ timeout: 3_000 });
+    await list.getByTestId("group-role-name").first().hover();
+    await expect(page.getByTestId("group-role-caps")).toBeVisible({ timeout: 3_000 });
+
+    for (const p of await panelsOnScreen(page)) {
+      expect(p.left, `${p.id} left edge at ${w}×${h}`).toBeGreaterThanOrEqual(0);
+      expect(p.top, `${p.id} top edge at ${w}×${h}`).toBeGreaterThanOrEqual(0);
+      expect(p.right, `${p.id} right edge at ${w}×${h}`).toBeLessThanOrEqual(w);
+      expect(p.bottom, `${p.id} bottom edge at ${w}×${h}`).toBeLessThanOrEqual(h);
+    }
+
+    // and the one you opened must not hide the one you opened it from
+    const l1 = (await list.boundingBox())!;
+    const l2 = (await page.getByTestId("group-role-caps").boundingBox())!;
+    const overlaps = l2.x < l1.x + l1.width && l2.x + l2.width > l1.x && l2.y < l1.y + l1.height && l2.y + l2.height > l1.y;
+    expect(overlaps, `the capability panel sits on top of the list it came from (${w}×${h})`).toBe(false);
+  });
+}
+
+test("#603: the list says its role names open further (the nested hover is discoverable)", async ({ page }) => {
+  // The ruling's fourth point: the second tier was unreadable because nothing said it was there. An
+  // affordance the reader can see BEFORE pointing at it — checked as a rendered mark inside the name,
+  // not as a class name, so a refactor that keeps the class and drops the mark still fails.
+  await stub(page);
+  await openDemo(page);
+  await page.goto("/admin/members");
+  await expect(page.getByText("Three Groups")).toBeVisible({ timeout: 10_000 });
+  await sleep(500);
+  await page.locator("tr", { hasText: "Three Groups" }).getByTestId("group-roles-mark").hover();
+  const name = page.getByTestId("group-roles-list").getByTestId("group-role-name").first();
+  await expect(name).toBeVisible();
+  await expect(name.locator("svg"), "a visible cue that this name opens something").toHaveCount(1);
+});

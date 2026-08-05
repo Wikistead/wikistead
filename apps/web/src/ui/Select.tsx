@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Select as SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 import { useControlScale } from "./FormRow";
+import { placeBeside } from "./panel-placement";
 
 export interface SelectOption {
   value: string;
@@ -79,21 +80,17 @@ export function Select({
   const anchors = useRef<{ beside: DOMRect; align: DOMRect } | null>(null);
   const place = (beside: DOMRect, align: DOMRect) => {
     anchors.current = { beside, align };
-    const width = 220;
-    // beside it, and on the other side when there is no room — a panel off the screen edge is the same as
-    // no panel
-    const right = beside.right + 8;
-    const left = right + width > window.innerWidth ? Math.max(8, beside.left - width - 8) : right;
     // #582 (review rejection): the panel belongs BESIDE the thing it describes, and it used to clamp to a
     // fixed `innerHeight - 120` — so every option below that line got a panel parked on the line instead
     // of next to itself (measured: 61px adrift at a 450px viewport, and invisible on short screens because
     // the constant was a guess at the panel's height, not its height).
     //
-    // Now: start at the row, and move only if the panel would not fit, only as far as it must. The height
-    // is MEASURED from the rendered panel — the first pass uses the row's own height as a floor, and every
-    // later pass has the real number, so a taller panel corrects itself rather than being guessed forever.
-    const panelH = panelRef.current?.offsetHeight ?? align.height;
-    const top = Math.max(8, Math.min(align.top, window.innerHeight - 8 - panelH));
+    // The rule now lives in `panel-placement` (#603) because the group-roles panels needed the same
+    // one and grew their own instead. The height is still MEASURED from the rendered panel — the first
+    // pass uses the row's own height as a floor, and every later pass has the real number, so a taller
+    // panel corrects itself rather than being guessed forever.
+    const panel = { width: 220, height: panelRef.current?.offsetHeight ?? align.height };
+    const { top, left } = placeBeside(beside, align, panel);
     pending.current = { top, left };
     if (panelRef.current) {
       panelRef.current.style.top = `${top}px`;

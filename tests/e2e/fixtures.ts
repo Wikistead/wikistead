@@ -174,6 +174,16 @@ export async function seedFixtures() {
     // grant, so dev-user can neither view nor edit them.
     await sql`INSERT INTO spaces (id, tenant_id, name) VALUES (${LOCKED_SPACE_ID}, ${E2E.tenant}, ${LOCKED_SPACE_NAME})`;
     await sql`INSERT INTO pages (id, tenant_id, space_id, title) VALUES (${LOCKED_PAGE_ID}, ${E2E.tenant}, ${LOCKED_SPACE_ID}, 'locked page')`;
+
+    // #603 / #621: dev-user CARRIES a group, and this is the third time it had to be restored by hand.
+    // The dev seed (`infra/db/seed.ts`) says why it matters — the completion list, the hash→name reverse
+    // lookup and the group-conferred roles all read `members.groups`, so an empty directory makes those
+    // specs measure the empty case and report nothing. But that seed only runs against the DEV database;
+    // nothing re-established it here, and a real OIDC sign-in overwrites the column from its claims (the
+    // drift observed on 2026-08-04 and twice since). Seeding it per run makes the fixture self-healing
+    // like the FGA one beside it, instead of a state somebody has to notice has gone missing.
+    await sql`UPDATE members SET groups = ARRAY['wiki Editors']
+              WHERE tenant_id = ${E2E.tenant} AND sub = 'dev-user'`;
   } finally {
     await sql.end();
   }
