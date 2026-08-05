@@ -46,7 +46,11 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     title: 'Member seats',
     summary: 'Billable members (seats). The primary paid lever.',
     unit: 'count',
-    enforcedAt: 'POST /members (invite)',
+    // Where the seat cap actually REFUSES, which is not where an invite is created. Creating one only
+    // warns (`invites.ts:129` returns `seatWarning`); the cap is enforced when the invitee ACCEPTS
+    // (`invites.ts:387` — 402 `seat_limit`), under the per-tenant lock, because that is the moment a
+    // seat is taken. Naming the create route sends the next reader to the branch that lets it through.
+    enforcedAt: 'invite acceptance (creating an invite only warns)',
     downgrade: 'over-cap blocks new invites; never removes existing members (#131 freeze deactivates newest-first, reversible)',
   },
   maxSpaces: {
