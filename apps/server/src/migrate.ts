@@ -5,12 +5,23 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
-// #621: the same split-brain the seed can fall into — migrating another session's stack is worse.
-import { assertStackTarget } from '../../../scripts/assert-stack-target.mjs'
 
 const url = process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL
 if (!url) { console.error('DATABASE_ADMIN_URL or DATABASE_URL required'); process.exit(1) }
-assertStackTarget(url, 'migrate')
+
+// #621: the same split-brain the seed can fall into — migrating another session's stack is worse.
+//
+// #621 re-review: the first version STATICALLY imported the guard from the repo's `scripts/`, and this
+// runner ships. apps/server/Dockerfile's COPY list is deliberately narrow (CE-only, see its header), so
+// `scripts/` is not in the image and the build broke on TS2307 — a dev-only helper made a build
+// dependency of the product. The offset is a development concept and the env var is never set in a
+// deployed image, so the guard is loaded ONLY when someone asked for isolation, through a specifier tsc
+// does not resolve: the image neither compiles against the file nor needs it at runtime.
+if (process.env.WKS_STACK_OFFSET) {
+  const href = new URL('../../../scripts/assert-stack-target.mjs', import.meta.url).href
+  const mod = await import(/* @vite-ignore */ href) as { assertStackTarget(url: string, what: string): void }
+  mod.assertStackTarget(url, 'migrate')
+}
 
 const sql = postgres(url, { max: 1, onnotice: () => {} })
 
