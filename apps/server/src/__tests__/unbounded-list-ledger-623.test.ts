@@ -150,6 +150,10 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     { file: 'routes/spaces.ts', fn: 'listAdminSpaces' },
     { file: 'routes/pages.ts', fn: 'listSpaceTrash' },
     { file: 'routes/attachments.ts', fn: 'listAttachments' },    // slice 5
+    // Already bounded before this ticket touched it — the A/B classification in was made from the
+    // presence of a LIMIT in the ROUTE body, and this one lives in the helper. Listed so it stays that
+    // way rather than because it was changed.
+    { file: 'routes/pages.ts', fn: 'getRelatedPages' },
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {
