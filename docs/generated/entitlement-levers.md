@@ -15,7 +15,7 @@ separately. This page is generated from the code (`LEVER_CATALOG`).
 | Lever | What it gates | Self-host (Community) | Enforced at | Downgrade |
 |---|---|---|---|---|
 | **Guest access** (`guestAccess`) | Issuance of anonymous share links (the real-time collaboration hook). Free on every plan; the flag stays so a future restricted tier can disable issuance in one place. | Enabled | share-link issuance (collab onAuthenticate does NOT check it — existing links survive a downgrade) | issuance gated; previously issued links keep working |
-| **Member seats** (`maxSeats`) | Billable members (seats). The primary paid lever. | Unlimited | POST /members (invite) | over-cap blocks new invites; never removes existing members (#131 freeze deactivates newest-first, reversible) |
+| **Member seats** (`maxSeats`) | Billable members (seats). The primary paid lever. | Unlimited | invite acceptance (creating an invite only warns) | over-cap blocks new invites; never removes existing members (#131 freeze deactivates newest-first, reversible) |
 | **Spaces** (`maxSpaces`) | Number of spaces. Generous on purpose — spaces do not gate the viral hook (not a paid lever). | Unlimited | POST /spaces (inert while unlimited) | over-cap blocks new spaces; existing spaces are kept |
 | **Page templates** (`maxTemplates`) | Reusable page templates a tenant may hold. A knowledge-first primitive, not a paid lever — unlimited on all plans. | Unlimited | POST /templates (inert while unlimited) | over-cap blocks new templates; existing templates are kept |
 | **Outbound webhooks** (`webhooks`) | Event-notification webhooks. Self-host on (Community First); Cloud is Personal and up. | Enabled | POST /webhooks (creation) | creation blocked; already-created hooks keep delivering |
