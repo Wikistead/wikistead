@@ -27,14 +27,24 @@ const BOUNDED_LISTS: { file: string; testid: string; ticket: string }[] = [
 ];
 
 // The element's own class list — read back from the tag that carries the testid.
+//
+// #639 moved these boxes onto a shared `ListBox`, and a scan that only reads the tag's own className
+// would call that a lost bound: the classes are real, they are just declared once instead of five times.
+// So a tag rendered through the component resolves to what the component writes — which keeps this pin
+// asking "is this list bounded" rather than "does this line contain the string".
+const SHARED = resolve(import.meta.dirname, "../ui/list-rows.tsx");
 function classesOf(file: string, testid: string): string {
   const src = readFileSync(resolve(import.meta.dirname, `./${file}`), "utf8");
   const at = src.indexOf(`data-testid="${testid}"`);
   expect(at, `${file}: the ${testid} list still exists (renamed? re-aim this row)`).toBeGreaterThan(-1);
   const open = src.lastIndexOf("<", at);
   const tag = src.slice(open, src.indexOf(">", at) + 1);
-  const m = /className=\{?"([^"]*)"/.exec(tag);
-  return m?.[1] ?? "";
+  const own = /className=\{?"([^"]*)"/.exec(tag)?.[1] ?? "";
+  if (!/^<ListBox\b/.test(tag.trim())) return own;
+  const shared = readFileSync(SHARED, "utf8");
+  const cap = /LIST_SCROLL_MAX = "([^"]*)"/.exec(shared)?.[1] ?? "";
+  const wrapper = /<div className=\{`([^`]*)`\}/.exec(shared.slice(shared.indexOf("function ListBox")))?.[1] ?? "";
+  return `${own} ${cap} ${wrapper.replace("${LIST_SCROLL_MAX}", cap)}`;
 }
 
 describe("#539: growing settings lists scroll inside a bounded box", () => {

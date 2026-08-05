@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { useEmbedProviders, useUpdateEmbedProviders } from "../data/queries";
@@ -68,19 +69,19 @@ export function AdminEmbedsTab() {
         <Button variant="default" disabled={!draft.trim()} onClick={add} data-testid="embed-host-add">{t("adminEmbeds.add")}</Button>
       </FormRow>
 
-      <div className="mt-5 flex flex-col gap-1" data-testid="embed-host-list">
+      <ListBox className="mt-5" data-testid="embed-host-list">
         {hosts.map((h) => (
-          <div key={h} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="embed-host-item">
+          <ListRow key={h} data-testid="embed-host-item">
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{h}</span>
             {/* #504: red at rest; no confirm — the removal is STAGED (nothing changes until Save),
                 so it is undoable in place (exception candidate). */}
             <IconButton aria-label={t("adminEmbeds.remove")} data-testid="embed-host-remove" variant="danger" onClick={() => remove(h)}>
               <Trash2 size={14} />
             </IconButton>
-          </div>
+          </ListRow>
         ))}
         {hosts.length === 0 && <p className="text-xs text-fg-dim">{t("adminEmbeds.empty")}</p>}
-      </div>
+      </ListBox>
 
       <div className="mt-5 flex gap-2">
         <Button variant="primary" size="sm" disabled={!dirty || update.isPending} onClick={save} data-testid="embed-save">{t("common.save")}</Button>

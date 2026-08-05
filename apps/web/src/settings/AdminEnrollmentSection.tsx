@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { useEnrollment, useSetEnrollPolicy, useAddEnrollDomain, useVerifyEnrollDomain, useRemoveEnrollDomain } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
@@ -96,9 +97,9 @@ export function AdminEnrollmentSection() {
             <Input className="flex-1" value={newDomain} onChange={(e) => setNewDomain(e.target.value)} placeholder="corp.example.com" data-testid="enroll-domain-input" />
             <Button variant="default" size="sm" disabled={addDomain.isPending} onClick={onAddDomain} data-testid="enroll-domain-add">{t("adminEnroll.addDomain")}</Button>
           </div>
-          <div className="mt-2 flex flex-col gap-2" data-testid="enroll-domain-list">
+          <ListBox className="mt-2 text-sm" data-testid="enroll-domain-list">
             {(data?.domains ?? []).map((d) => (
-              <div key={d.domain} className="rounded-md border border-border p-2 text-sm" data-testid="enroll-domain-item">
+              <ListRow key={d.domain} className="flex-col !items-stretch" data-testid="enroll-domain-item">
                 <div className="flex items-center gap-2">
                   <span className="min-w-0 flex-1 truncate">{d.domain}</span>
                   <span className={d.verified ? "text-[0.8em] text-[#2da44e]" : "text-[0.8em] text-fg-dim"}>{d.verified ? t("adminEnroll.verifiedBadge") : t("adminEnroll.pendingBadge")}</span>
@@ -108,9 +109,9 @@ export function AdminEnrollmentSection() {
                 {!d.verified && (
                   <p className="m-0 mt-1 break-all text-xs text-fg-dim">{t("adminEnroll.dnsHint")} <code>{d.challengeRecord}</code> = <code>{d.challengeValue}</code></p>
                 )}
-              </div>
+              </ListRow>
             ))}
-          </div>
+          </ListBox>
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ListRow, ListBox } from "../ui/list-rows";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
@@ -434,9 +435,9 @@ export function SpaceMembersTab() {
           #536 ①: built-in grant rows and custom-role assignment rows are ONE list (the old
           space-grant-list / space-role-assign-list pair is gone). Row badges: a built-in wears the
           capability noun, a custom role its name (accent); each row's revoke reaches its own mechanism. */}
-      <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-member-list">
+      <ListBox className="flex flex-col gap-0" data-testid="space-member-list">
         {mergedRows.map((r) => (
-          <div key={r.key} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-member-item" data-kind={r.kind} data-principal={r.kind === "grant" ? r.grantee : r.principal}>
+          <ListRow key={r.key} data-testid="space-member-item" data-kind={r.kind} data-principal={r.kind === "grant" ? r.grantee : r.principal}>
             {/* #591 (user ruling): the EXCLUSIVE role is a dropdown, changed in place. A built-in grant is
                 exclusive here — the server's sweep leaves one role per principal (#536) — so demanding
                 × then re-add was asking for two operations and dropping the person's access in between.
@@ -510,10 +511,10 @@ export function SpaceMembersTab() {
                 <X size={14} />
               </IconButton>
             )}
-          </div>
+          </ListRow>
         ))}
         {mergedRows.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
-      </div>
+      </ListBox>
 
       {/* #536 ②: the replacement confirm — adding over a different existing role swaps it. */}
       {/* #553 review: this asked "replace their role?" over a RED button labelled Delete, because
