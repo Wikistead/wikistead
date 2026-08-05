@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
 import { useWebhooks, useCreateWebhook, useDeleteWebhook, type WebhookCreated } from "../data/queries";
@@ -54,9 +55,9 @@ export function AdminWebhooksTab() {
         </div>
       )}
 
-      <div className="mt-5 flex flex-col gap-1" data-testid="webhook-list">
+      <ListBox className="mt-5" data-testid="webhook-list">
         {(hooks.data ?? []).map((h) => (
-          <div key={h.id} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="webhook-item">
+          <ListRow key={h.id} data-testid="webhook-item">
             {!h.active && <span className="flex-none rounded-full border border-[var(--danger)] px-2 py-px text-[11px] uppercase tracking-[0.03em] text-[var(--danger)]" data-testid="webhook-disabled">{t("adminWebhooks.disabled")}</span>}
             <span className="min-w-0 flex-1 truncate font-mono text-xs">{h.url}</span>
             {/* #504: red at rest + confirm (the secret cannot be re-shown; a re-add is a new endpoint). */}
@@ -64,10 +65,10 @@ export function AdminWebhooksTab() {
               onClick={() => setDeleting({ id: h.id, url: h.url })}>
               <Trash2 size={14} />
             </IconButton>
-          </div>
+          </ListRow>
         ))}
         {(hooks.data?.length ?? 0) === 0 && <p className="text-xs text-fg-dim">{t("adminWebhooks.empty")}</p>}
-      </div>
+      </ListBox>
       {/* #504: the endpoint-delete confirm — names the URL. */}
       <ConfirmDialog
         open={deleting !== null}

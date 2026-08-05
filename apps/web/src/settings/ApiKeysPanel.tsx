@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ListRow, ListBox } from "../ui/list-rows";
 import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
@@ -116,9 +117,9 @@ export function ApiKeysPanel({
         </div>
       )}
 
-      <div className="mt-5 flex flex-col gap-1" data-testid="api-key-list">
+      <ListBox className="mt-5" data-testid="api-key-list">
         {keys.map((k) => (
-          <div key={k.id} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="api-key-item">
+          <ListRow key={k.id} data-testid="api-key-item">
             <span className="min-w-[48px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] uppercase tracking-[0.03em] text-fg-dim data-[scope=write]:border-[var(--accent)] data-[scope=write]:text-[var(--accent)]" data-scope={k.scope}>{t(`adminApi.scope_${k.scope}`)}</span>
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{k.name}</span>
             {/* #495: the admin view names WHO owns the key (name, or the sub when the name is null) */}
@@ -130,10 +131,10 @@ export function ApiKeysPanel({
               onClick={() => setRevoking({ id: k.id, name: k.name })}>
               <Trash2 size={14} />
             </IconButton>
-          </div>
+          </ListRow>
         ))}
         {keys.length === 0 && <p className="text-xs text-fg-dim">{emptyText ?? t("adminApi.empty")}</p>}
-      </div>
+      </ListBox>
       {/* #504: the revoke confirm — names the key, danger tone. */}
       <ConfirmDialog
         open={revoking !== null}

@@ -304,7 +304,7 @@ export function AdminRolesTab() {
         {/* #581: the two groups are SURFACES, not a pair of small grey labels above a continuous run of
             rows. A card each — border, panel background, its own heading bar — so the boundary is
             visible before you read anything, which is what lets the per-row scope badge go away. */}
-        <section className="rounded-md border border-border bg-panel">
+        <section className="rounded-md border border-border bg-panel">  {/* list-box-ok: a SECTION frame, not a row — #581 made each scope its own surface deliberately */}
           <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-tenant">{t("adminRoles.sectionTenant")}</h3>
           {/* #539 / #521 / #503: the same 26rem box + inner scroll, because this list grows with the
               tenant's roles and this is the fourth list to hit that. The page keeps its own scroll. */}
@@ -337,7 +337,7 @@ export function AdminRolesTab() {
           {(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map(renderCustomRole)}
           </div>
         </section>
-        <section className="rounded-md border border-border bg-panel">
+        <section className="rounded-md border border-border bg-panel">  {/* list-box-ok: a SECTION frame, not a row — the resource-scope surface, same as above */}
           <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-resource">{t("adminRoles.sectionResource")}</h3>
           <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-resource">
           {(roles.data?.builtIn ?? []).map((r) => (
