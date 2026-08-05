@@ -54,12 +54,6 @@ export async function sweepMemberDirectGrants(
   driver: SearchDriver,
   args: { tenantId: string; sub: string },
 ): Promise<void> {
-  // #603 review: the ROW side of the same leak. A tenant-scope assignment outlives the member it was
-  // made for, so the next person to hold that sub — or the same person rejoining — inherits it. The
-  // tuples are swept below; the rows that own them go here, in the caller's tenant scope (RLS).
-  await db.sql`DELETE FROM role_assignments
-    WHERE resource_type = 'tenant' AND resource_id = ${args.tenantId} AND principal = ${`user:${args.sub}`}`
-    .catch((err) => console.error('[members:sweep] tenant assignment rows remain', { sub: args.sub, err }))
   const user = `user:${args.sub}`
   const [spaceTuples, pageTuples, tenantTuples] = await Promise.all([
     readUserTuplesByType(fga, user, 'space:'),
@@ -89,6 +83,34 @@ export async function sweepMemberDirectGrants(
     // decision it does not own.
     ...tenantTuples.filter((t) => id(t.object) === args.tenantId && t.relation !== 'member' && t.relation !== 'admin'),
   ]
+  // #634: the ROW side, with the SAME reach as the tuple side above.
+  //
+  // #603's review added the tenant scope here and stopped, so a removed member's space and page
+  // assignment ROWS outlived them while their tuples went — a row that appears in every roster and
+  // confers nothing. That is the ledger-versus-world split #596 exists to forbid, and it is where the
+  // "unknown member" rows #578 had to render came from: the display was handled, the source was not.
+  //
+  // Deleted by the SAME set the tuples are filtered by (`ownedSpaces` / `ownedPages`), not by a second
+  // ownership rule written beside it — one line, two consumers. RLS already scopes this connection to
+  // the tenant, so the id filter is about which OBJECTS, not which tenant.
+  //
+  // `origin` is deliberately NOT consulted. ADR-183 §1 says a machine-owned row is removed where the
+  // machine is, and that holds while the principal exists — a mapping re-materialises what it owns. This
+  // member does not exist any more: nothing will ever re-evaluate a row keyed to their sub, so leaving
+  // one because a machine made it keeps a row nobody can act on and no machine will revisit. The tuples
+  // are already gone regardless of origin (the sweep below never asked either), so keeping the row would
+  // preserve exactly the mismatch this fixes.
+  // Every scope, not a list of three: the row side is scoped by the PRINCIPAL, and this connection is
+  // RLS-bound to the tenant (072_custom_roles.sql: FORCE ROW LEVEL SECURITY on tenant_id). So "this
+  // member's rows, in this tenant" is the whole statement — no per-type clause to forget when a fourth
+  // resource type arrives, and no second ownership rule beside the tuple filter above.
+  //
+  // Deliberately NOT derived from the tuples: a row whose tuple already went is exactly the orphan this
+  // ticket is about, and deriving the set from `ownedSpaces` / `ownedPages` would step over it. The
+  // asymmetry is real and worth naming — FGA has no tenant, so the tuple side must ask the database
+  // which objects are ours; the database knows already.
+  await db.sql`DELETE FROM role_assignments WHERE principal = ${user}`
+    .catch((err) => console.error('[members:sweep] assignment rows remain', { sub: args.sub, err }))
   for (const t of doomed) {
     await deleteTuples(fga, [t]).catch((err) => {
       // Never silent (an undeleted grant is the leak this exists to close) — but never blocking either.
