@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronRight, Users } from "lucide-react"; // #544: an icon component, never a text glyph
 import { RoleCaps } from "../ui/RoleTip";
 import { placeBelow, placeBeside, type At } from "../ui/panel-placement";
-import { HINT_PANEL, HINT_PANEL_W } from "../ui/hint-panel"; // #582⑤: the shared box (width stays content-led here)
+import { HINT_PANEL, HINT_PANEL_W, HINT_PANEL_ANIM, HINT_OPEN_DELAY_MS, HINT_CLOSE_GRACE_MS } from "../ui/hint-panel";
 import { TENANT_TIER_CAPS } from "./role-nouns";
 import type { GroupConferredRole } from "./tenant-role-rows";
 
@@ -36,36 +36,75 @@ const capsOf = (g: GroupConferredRole, tierCaps: TierCaps): readonly string[] | 
 // panel off the right at a 1000px-wide one, because each wrote `top`/`left` from its anchor and never
 // asked about the viewport. The size a panel needs is only known once it is rendered, so each measures
 // itself in a layout effect and places again — a guessed constant is what put the old panel 61px adrift.
+
+/** Placement state that settles, and says whether it has been measured yet.
+ *
+ *  A panel cannot be measured until it is rendered, so the first pass necessarily places it from a
+ *  height of zero — and traced on the device, that first answer put the capability panel's bottom at
+ *  437 in a 420px window before the second pass moved it to 412. Correct within a frame, and visibly
+ *  wrong for that frame. So the panel is rendered TRANSPARENT until a pass that had something to
+ *  measure: it takes up space (which is how it gets measured) and shows nothing until it is where it
+ *  belongs. Writing the same answer twice is a no-op, so measuring from a ref callback converges. */
+function useSettledAt(): [At | null, boolean, (next: At, measured: boolean) => void] {
+  const [at, setAt] = useState<At | null>(null);
+  const [measured, setMeasured] = useState(false);
+  const put = (next: At, didMeasure: boolean) => {
+    setAt((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
+    if (didMeasure) setMeasured(true);
+  };
+  return [at, measured, put];
+}
+
 export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConferredRole[]; tierCaps: TierCaps }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<At | null>(null);
+  const [at, measured, setAt] = useSettledAt();
   const anchor = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   // one timer for the whole chain: leaving the mark for the list (or the list for a role name) crosses a
   // gap of a few pixels, and closing on that gap is what makes a nested hover impossible to use
   const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #630: the same delay every other floating explanation waits — a panel that appears the instant the
+  // pointer crosses it fires on the way past whatever the reader was actually going to. Cancelled if the
+  // pointer leaves first, and skipped when the panel is already open (re-entering from the list must not
+  // re-queue it). Declared here, above the early return below, because it is a hook.
+  const opening = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   if (roles.length === 0) return null;
 
   const show = () => {
     if (closing.current) { clearTimeout(closing.current); closing.current = null; }
-    place();
-    setOpen(true);
+    if (open) { place(); return; }
+    if (opening.current) return;
+    opening.current = setTimeout(() => {
+      opening.current = null;
+      place();
+      setOpen(true);
+    }, HINT_OPEN_DELAY_MS);
   };
-  /** Measured when the panel exists, estimated from the anchor for the frame before it does. */
+  const cancelOpen = () => {
+    if (opening.current) { clearTimeout(opening.current); opening.current = null; }
+  };
+  /** Measured when the panel exists, estimated from the anchor for the frame before it does.
+   *
+   *  `offsetWidth`/`offsetHeight`, NOT `getBoundingClientRect()` — #630 gave these panels an entrance
+   *  that scales from 95%, and a client rect is the box AFTER transform. Measured during the animation
+   *  it reports 95% of the real height, the placement clamps against a panel smaller than the one that
+   *  lands, and the second tier hung off the bottom at a 700px viewport (the #603 pin caught it). The
+   *  layout box is what the panel will occupy once it has finished arriving. */
   const place = () => {
     const r = anchor.current?.getBoundingClientRect();
     if (!r) return;
-    const box = panel.current?.getBoundingClientRect();
-    setAt(placeBelow(r, { width: box?.width ?? 0, height: box?.height ?? 0 }));
+    const box = panel.current;
+    setAt(placeBelow(r, { width: box?.offsetWidth ?? 0, height: box?.offsetHeight ?? 0 }), !!box);
   };
   // The first pass had no panel to measure; this one does, so a list that would have hung off the bottom
   // flips above on the frame it appears rather than after the reader has already seen it clipped.
-  useLayoutEffect(() => { if (open) place(); }, [open, roles.length]);
+  useLayoutEffect(() => { if (open) place(); }, [open, at, roles.length]);
   const hide = () => {
+    cancelOpen();
     if (closing.current) clearTimeout(closing.current);
-    closing.current = setTimeout(() => setOpen(false), 160);
+    closing.current = setTimeout(() => setOpen(false), HINT_CLOSE_GRACE_MS);
   };
 
   return (
@@ -80,19 +119,21 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
         onPointerLeave={hide}
         onFocus={show}
         onBlur={hide}
-        // touch has no hover (ADR-159): a tap toggles, like every other mark in this family
-        onClick={() => (open ? setOpen(false) : show())}
+        // touch has no hover (ADR-159): a tap toggles, like every other mark in this family — and it
+        // opens AT ONCE rather than after the hover delay, since waiting 180ms after a deliberate tap
+        // reads as an unresponsive control.
+        onClick={() => { cancelOpen(); place(); setOpen((o) => !o); }}
       >
         <Users size={12} aria-hidden />
         {roles.length}
       </span>
       {open && at && createPortal(
         <div
-          ref={panel}
+          ref={(el) => { panel.current = el; if (el) place(); }}
           role="tooltip"
           data-role-panel
           data-testid="group-roles-list"
-          className={`fixed z-[60] w-max max-w-[320px] ${HINT_PANEL}`}
+          className={`fixed z-[60] w-max max-w-[320px] ${HINT_PANEL} ${measured ? HINT_PANEL_ANIM : "opacity-0"}`}
           style={{ top: at.top, left: at.left }}
           onPointerEnter={show}
           onPointerLeave={hide}
@@ -130,17 +171,18 @@ function RoleNameWithCaps({ role, caps, list }: {
   list: React.RefObject<HTMLDivElement | null>;
 }) {
   const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<At | null>(null);
+  const [at, measured, setAt] = useSettledAt();
   const ref = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const place = () => {
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
-    const box = panel.current?.getBoundingClientRect();
-    setAt(placeBeside(list.current?.getBoundingClientRect() ?? r, r, { width: 220, height: box?.height ?? 0 }));
+    // the layout box again, for the reason `place` above spells out
+    const box = panel.current;
+    setAt(placeBeside(list.current?.getBoundingClientRect() ?? r, r, { width: 220, height: box?.offsetHeight ?? 0 }), !!box);
     setOpen(true);
   };
-  useLayoutEffect(() => { if (open) place(); }, [open]);
+  useLayoutEffect(() => { if (open) place(); }, [open, at]);
   return (
     <>
       <span
@@ -158,10 +200,10 @@ function RoleNameWithCaps({ role, caps, list }: {
       </span>
       {open && at && createPortal(
         <div
-          ref={panel}
+          ref={(el) => { panel.current = el; if (el) place(); }}
           role="tooltip"
           data-testid="group-role-caps"
-          className={`pointer-events-none fixed z-[70] ${HINT_PANEL_W} ${HINT_PANEL}`}
+          className={`pointer-events-none fixed z-[70] ${HINT_PANEL_W} ${HINT_PANEL} ${measured ? HINT_PANEL_ANIM : "opacity-0"}`}
           style={{ top: at.top, left: at.left }}
         >
           <RoleCaps origin="role" scope="tenant" roleCapabilities={caps} />

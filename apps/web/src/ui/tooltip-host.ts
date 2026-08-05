@@ -1,4 +1,5 @@
 import { TOOLTIP_DELAY_MS } from "../components/ui/tooltip";
+import { HINT_CLOSE_GRACE_MS } from "./hint-panel";
 
 // #530: the DELEGATED tooltip for DOM built outside React — CodeMirror widgets, macro chrome, and the
 // other ~34 `setAttribute("title", …)` sites. Those cannot be wrapped in <Tooltip>, but they must not
@@ -24,6 +25,7 @@ import { TOOLTIP_DELAY_MS } from "../components/ui/tooltip";
 
 let bubble: HTMLDivElement | null = null;
 let showTimer: number | null = null;
+let hideTimer: number | null = null;
 let current: HTMLElement | null = null;
 let installed = false;
 
@@ -54,8 +56,21 @@ function place(target: HTMLElement, tip: HTMLDivElement): void {
 
 function hide(): void {
   if (showTimer != null) { window.clearTimeout(showTimer); showTimer = null; }
+  if (hideTimer != null) { window.clearTimeout(hideTimer); hideTimer = null; }
   current = null;
   if (bubble) { bubble.hidden = true; bubble.textContent = ""; }
+}
+
+// #630: the shared close grace. Leaving a target used to hide the bubble on the same tick, while the
+// group-roles panels waited 160ms — and that wait is what lets a pointer cross the few pixels between an
+// anchor and the thing it opened. Handing the same grace to this host makes the two behave alike, and
+// gives a delegated tooltip the same forgiveness for a pointer that clips a boundary on its way.
+// Anything that INVALIDATES the bubble rather than merely leaving it (scroll, resize, Escape, a pointer
+// press) still calls `hide()` directly — those are not "the pointer wandered off", they are "what this
+// was pointing at has moved".
+function hideAfterGrace(): void {
+  if (hideTimer != null) window.clearTimeout(hideTimer);
+  hideTimer = window.setTimeout(() => { hideTimer = null; hide(); }, HINT_CLOSE_GRACE_MS);
 }
 
 // `scrollWidth` exceeds `clientWidth` exactly when the content does not fit — i.e. when the ellipsis is
@@ -82,6 +97,7 @@ function textFor(target: HTMLElement): string | undefined {
 }
 
 function scheduleFor(target: HTMLElement): void {
+  if (hideTimer != null) { window.clearTimeout(hideTimer); hideTimer = null; }
   // Only a cheap presence check here — whether a CONDITIONAL tooltip actually applies is decided when the
   // delay elapses, because the layout it depends on changes as a result of this very hover.
   if (!target.dataset.tip && !target.dataset.tipIfTruncated) return;
@@ -115,14 +131,14 @@ export function installTooltipHost(): void {
   }, true);
   document.addEventListener("pointerout", (e) => {
     const t = tipTargetFrom(e.target);
-    if (t && t === current) hide();
+    if (t && t === current) hideAfterGrace();
   }, true);
   // Keyboard parity — the native title never did this.
   document.addEventListener("focusin", (e) => {
     const t = tipTargetFrom(e.target);
     if (t) scheduleFor(t);
   }, true);
-  document.addEventListener("focusout", () => hide(), true);
+  document.addEventListener("focusout", () => hideAfterGrace(), true);
   // Anything that moves the anchor invalidates the placement; hiding is the honest cheap answer.
   document.addEventListener("scroll", () => hide(), true);
   window.addEventListener("resize", () => hide());

@@ -87,8 +87,16 @@ test("#603: a group-conferred role is one mark, and the row keeps its height", a
 async function panelsOnScreen(page: import("@playwright/test").Page) {
   return page.evaluate(() =>
     [...document.querySelectorAll('[role=tooltip]')]
-      .map((el) => ({ id: (el as HTMLElement).dataset.testid ?? el.className, ...(el.getBoundingClientRect().toJSON() as DOMRect) }))
-      .filter((r) => r.width > 0 && r.height > 0));
+      .map((el) => ({
+        id: (el as HTMLElement).dataset.testid ?? el.className,
+        opacity: Number(getComputedStyle(el).opacity),
+        ...(el.getBoundingClientRect().toJSON() as DOMRect),
+      }))
+      // A panel at opacity 0 is being MEASURED, not shown: it cannot be placed until it has been
+      // rendered, so the first pass necessarily runs without its height. Traced on the device, that
+      // pass put the second tier's bottom at 437 in a 420px window before the next one moved it to
+      // 412 — correct within a frame, invisible for that frame, and not something a reader can see.
+      .filter((r) => r.width > 0 && r.height > 0 && r.opacity > 0));
 }
 
 for (const [w, h] of [[1000, 700], [900, 700], [1280, 420]] as const) {

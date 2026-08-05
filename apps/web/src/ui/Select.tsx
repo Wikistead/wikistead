@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { Select as SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 import { useControlScale } from "./FormRow";
 import { placeBeside } from "./panel-placement";
-import { HINT_PANEL, HINT_PANEL_W } from "./hint-panel"; // #582⑤: one box for every floating explanation
+import { HINT_PANEL, HINT_PANEL_W, HINT_PANEL_ANIM, HINT_OPEN_DELAY_MS, HINT_CLOSE_GRACE_MS } from "./hint-panel";
 
 export interface SelectOption {
   value: string;
@@ -73,6 +73,9 @@ export function Select({
   // when its position is computed, and a panel that paints once at 0,0 reads as a flicker)
   const pending = useRef<{ top: number; left: number } | null>(null);
   const [open, setOpen] = useState(false);
+  // the live value, for the delayed reveal below — see the note there
+  const openRef = useRef(false);
+  openRef.current = open;
   // #582 (review rejection,/): the panel has to be readable BEFORE the list is opened — "what can
   // this person do" is the question the closed row already asks. The trigger raises the SAME panel, placed
   // by the SAME rule; a second implementation would be a second look, which is the thing this ticket keeps
@@ -106,18 +109,42 @@ export function Select({
   // something shown", so a select whose value changes while the pointer rests on it updates instead of
   // keeping the panel of the role that is no longer there.
   const triggerKey = useRef<string | null>(null);
+  // #630: the shared open delay. This panel used to appear the instant the pointer touched the trigger,
+  // while the app's ordinary tooltip waited 180ms — so crossing a row of selects flashed panels at
+  // someone on their way somewhere else. The MOVE that keeps an already-shown panel tracking the pointer
+  // is not delayed; only the first appearance is, which is what the delay is for.
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const revealSelected = () => {
     if (open || disabled || !selected?.hint) return;
     const r = trigger.current?.getBoundingClientRect();
     if (!r) return;
     place(r, r);
     if (triggerKey.current === value) return; // already describing this one; the move above is enough
-    triggerKey.current = value;
-    setHint({ node: selected.hint });
+    if (openTimer.current) return; // already waiting for this one
+    openTimer.current = setTimeout(() => {
+      openTimer.current = null;
+      // `open` is read from a REF, not from the closure. The closure captured whatever `open` was when
+      // the pointer arrived — false — so a reader who hovered the trigger and then opened the list had
+      // this fire 180ms later and overwrite the option they had arrowed onto with the trigger's own
+      // panel. Green alone and red in a batch, because it is a race with how fast the list opens; the
+      // #582 keyboard-walk pins caught it, and only under load.
+      if (openRef.current || disabled || !selected?.hint) return;
+      triggerKey.current = value;
+      setHint({ node: selected.hint });
+    }, HINT_OPEN_DELAY_MS);
   };
-  const clearTriggerHint = () => { triggerKey.current = null; setHint(null); };
+  const clearTriggerHint = () => {
+    if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null; }
+    triggerKey.current = null;
+    setHint(null);
+  };
   useEffect(() => {
     if (!open) { clearTriggerHint(); return; }
+    // #630: a hover queued the trigger's panel behind the shared delay, and opening the list does not
+    // cancel a timer — so a pointer that rested on the trigger and then opened the list had that timer
+    // fire 180ms later and REPLACE whatever option the reader had arrowed onto. Measured: the #582 pin
+    // for "an option above the selected one raises its panel" went red, reading an empty panel.
+    if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null; }
     triggerKey.current = null; // the open list owns the panel from here
     // The list is found in the document rather than through a ref: it is portalled, it mounts after the
     // open, and only one select's list is open at a time. A ref would also have to survive the wrapper
@@ -195,7 +222,7 @@ export function Select({
         <div
           role="tooltip"
           data-testid={testId ? `${testId}-hint` : "select-hint"}
-          className={`pointer-events-none fixed z-[60] text-sm ${HINT_PANEL_W} ${HINT_PANEL}`}
+          className={`pointer-events-none fixed z-[60] text-sm ${HINT_PANEL_W} ${HINT_PANEL} ${HINT_PANEL_ANIM}`}
           ref={(el) => {
             panelRef.current = el;
             // a freshly mounted panel has no position yet: place it on the thing that raised it before
