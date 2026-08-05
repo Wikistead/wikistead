@@ -23,7 +23,7 @@ import { RoleTip } from "../ui/RoleTip"; // #603: the conferred-admin marker exp
 import { TENANT_TIER_CAPS, tenantTierCaps } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
-import { MemberStatusIcons, memberMenuValues } from "./member-status"; // #614: origin / password / suspended, beside the name
+import { MemberStatusIcons, memberMenuValues, passwordAction } from "./member-status"; // #614: origin / password / suspended, beside the name
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -310,16 +310,22 @@ export function MembersPage() {
             (() => {
               const m = members.find((x) => x.sub === row.sub)!;
               // #614: a suspended member stays listed (the seat they hold must stay visible) but the
-              // whole row reads as dormant — the dim is the row's, the Ban mark and its hover words are
-              // the icon group's. Controls stay live: a role change while suspended is meaningful
-              // (reactivation re-derives FGA from members.role, so it takes effect then).
+              // whole row reads as dormant. #614 (review rejection, measured): the dim used to be on the
+              // <tr>, which put it on the status marks too — their contrast fell to 2.22:1 in light, under
+              // the 3:1 a non-text UI element needs, and the name to 3.65:1, under 4.5:1. The dim is on
+              // the NAME now; the marks (which are how you learn the row is suspended) and the actions
+              // keep full opacity. Dormant is said by the Ban mark and the muted name, not by making the
+              // evidence hard to see.
+              const dimmed = m.deactivated_at != null;
               return (
-            <tr key={m.sub} data-testid={m.deactivated_at != null ? "member-row-deactivated" : undefined}
-              style={{ borderBottom: "1px solid var(--border, #222)", opacity: m.deactivated_at != null ? 0.55 : undefined }}>
+            <tr key={m.sub} data-testid={dimmed ? "member-row-deactivated" : undefined}
+              style={{ borderBottom: "1px solid var(--border, #222)" }}>
               <td style={{ padding: "8px 4px" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                   <Avatar name={m.display_name || m.email || m.sub} src={m.picture_url} seed={m.sub} size={24} />
-                  {m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}
+                  <span data-testid="member-name" style={{ opacity: dimmed ? 0.7 : undefined }}>
+                    {m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}
+                  </span>
                   {/* #614: the status marks — origin (IdP / password-born), an added password entrance,
                       suspended. Hover explains each (the #586 school); nothing is spelled beside the name. */}
                   <MemberStatusIcons member={m} />
@@ -382,7 +388,15 @@ export function MembersPage() {
                   // could only ever fail (#606's always-failing button). The server's uniform 400 stays
                   // as the fortress; memberMenuValues is the convenience layer's half, pinned pure.
                   items={[
-                    { value: "password", label: t("members.enablePassword"), icon: <KeyRound size={14} />, testId: "member-enable-password" },
+                    {
+                      value: "password",
+                      // #614 (review rejection): the same door, two errands. Somebody with no password gets
+                      // one; somebody who has one gets a fresh link — which is how an admin helps a person
+                      // who cannot read the email the self-service reset sends.
+                      label: passwordAction(m) === "reissue" ? t("members.reissuePassword") : t("members.enablePassword"),
+                      icon: <KeyRound size={14} />,
+                      testId: passwordAction(m) === "reissue" ? "member-reissue-password" : "member-enable-password",
+                    },
                     { value: "erase", label: t("members.eraseAnalytics"), icon: <Eraser size={14} />, testId: "member-erase-analytics", danger: true },
                     { value: "remove", label: t("members.remove"), icon: <UserMinus size={14} />, testId: "member-remove", danger: true },
                   ].filter((i) => memberMenuValues(m).includes(i.value as "password" | "erase" | "remove"))}
@@ -396,7 +410,7 @@ export function MembersPage() {
                         try {
                           const res = await enablePassword(token, m.sub);
                           setLastLink({ url: res.setupUrl, emailed: false, kind: "password" });
-                          notify.success(t("members.enablePasswordDone"));
+                          notify.success(t(passwordAction(m) === "reissue" ? "members.reissuePasswordDone" : "members.enablePasswordDone"));
                         } catch (e) {
                           notify.error(e instanceof ApiError && e.status === 400
                             ? t("members.passwordSetupUnavailable")

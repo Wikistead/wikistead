@@ -392,3 +392,50 @@ describe('member status columns (#614)', () => {
     expect(adminRow.has_password).toBe(false)
   })
 })
+
+// ── #614 (review rejection): an admin can hand a reset link to somebody who ALREADY has a password ──────
+// The refusal that used to live here left the reset with exactly one delivery route — email — while the
+// invite has always had a copy-link fallback. Under `sso_required` the exempt member's password IS the
+// way back in (#605), so "they already have one" was refusing the case the feature exists for.
+describe('password entrance: grant and re-issue (#614)', () => {
+  it('mints for a member with no credential, and AGAIN for one who has it', async () => {
+    const { mintPasswordSetup } = await import('../auth/password-reset.js')
+    const db = await acquireTenantDb({ id: tenantId, slug, plan: 'business', isolation: 'logical' } as never)
+    try {
+      await admin`SELECT set_config('app.tenant_id', ${tenantId}, false)`
+      // password sign-in is the same door the invite uses; this tenant has no prefs row yet
+      await admin`INSERT INTO tenant_login_prefs (tenant_id, local_login_enabled) VALUES (${tenantId}, true)
+                  ON CONFLICT (tenant_id) DO UPDATE SET local_login_enabled = true`
+      const sub = `wlocal_reissue614-${Date.now().toString(36)}`
+      await admin`INSERT INTO members (tenant_id, sub, role, email, identity_source)
+                  VALUES (${tenantId}, ${sub}, 'member', ${`${sub}@x.test`}, 'local')`
+
+      const first = await mintPasswordSetup(db, sub)
+      expect(first, 'a member with no credential gets one').toBeTruthy()
+      expect(first!.reissue, 'and it is reported as a grant').toBe(false)
+
+      // now they actually hold one
+      await admin`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
+                  VALUES (${tenantId}, ${sub}, ${`${sub}@x.test`}, 'scrypt$unusable-fixture')`
+
+      const second = await mintPasswordSetup(db, sub)
+      expect(second, 'the admin can still hand them a link — this is the break-glass path').toBeTruthy()
+      expect(second!.reissue, 'and it says which errand it was').toBe(true)
+      expect(second!.token, 'the same pwr_ token family, not a second mechanism').toMatch(/^pwr_/)
+      expect(second!.token).not.toBe(first!.token)
+
+      // …but somebody ELSE's address is still a collision, which is a real impossibility
+      const other = `wlocal_other614-${Date.now().toString(36)}`
+      await admin`INSERT INTO members (tenant_id, sub, role, email, identity_source)
+                  VALUES (${tenantId}, ${other}, 'member', ${`${sub}@x.test`}, 'local')`
+      expect(await mintPasswordSetup(db, other), "another member's sign-in name is still refused").toBeNull()
+
+      await admin`DELETE FROM password_resets WHERE member_sub IN (${sub}, ${other})`
+      await admin`DELETE FROM local_credentials WHERE member_sub = ${sub}`
+      await admin`DELETE FROM members WHERE sub IN (${sub}, ${other})`
+      await admin`DELETE FROM tenant_login_prefs WHERE tenant_id = ${tenantId}`
+    } finally {
+      await db.release()
+    }
+  }, 60_000)
+})
