@@ -46,7 +46,7 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
   return (
     <form className="flex flex-col gap-2" onSubmit={submit} data-testid="login-local">
       {failed && (
-        <div className="rounded-r-md border border-border border-l-[3px] border-l-[var(--danger)] bg-panel-2 px-3 py-2 text-sm"
+        <div className="wks-left-bar rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
           data-testid="login-local-error" role="alert">
           {t(failed === "needsAddress" ? "auth.resetNeedsAddress" : "auth.localFailed")}
         </div>

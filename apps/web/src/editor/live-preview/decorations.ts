@@ -5816,7 +5816,12 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   ".cm-lp-callout": {
     // #199: the DEFAULT bar/tint is the neutral note hue, NOT the tenant --accent (a callout's colour
     // is semantic; accent-driven info/note lost their meaning). Every type overrides below.
-    borderLeft: "3px solid var(--callout-note, #6e7781)",
+    // #632 (user ruling): the bar is a STRIP, not a border. A border follows the box's corner
+    // radius, and the todo container rounds its first and last lines (callout-icons.css) — so the bar
+    // curved inward at both ends, which is the the ruling names. The frame keeps its radius;
+    // the strip is a rectangle that ignores it. `--cb-color` is what every type already overrides, so
+    // the per-type rules below keep working by setting that variable rather than a border colour.
+    "--cb-bar": "var(--callout-note, #6e7781)",
     background: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)",
     // #170 panel layout: a left gutter (position:relative anchors the absolutely-positioned icon into
     // it) so the icon reads as a large panel column and the body text aligns to its right, not crammed
@@ -5827,14 +5832,26 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     position: "relative",
     paddingLeft: "2.8em",
   },
+  // The strip itself. Absolutely positioned, so the rounded first/last lines do not bend it. Drawn on
+  // every line of the container, which reads as one continuous rule down the left edge.
+  ".cm-lp-callout::before": {
+    content: '""',
+    position: "absolute",
+    left: "0",
+    top: "0",
+    bottom: "0",
+    width: "3px",
+    background: "var(--cb-bar, var(--callout-note, #6e7781))",
+    pointerEvents: "none",
+  },
   // Per-type accents (#150 → #158-C5 tokens; #199). Every type rides its FIXED semantic --callout-*
   // token (tokens.css, light/dark only) — never the tenant --accent, so a callout's colour keeps its
   // meaning (info=blue, note=grey, tip=green, warning=yellow, danger=red).
-  ".cm-lp-callout-note": { borderLeftColor: "var(--callout-note, #6e7781)", background: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)" },
-  ".cm-lp-callout-info": { borderLeftColor: "var(--callout-info, #0969da)", background: "color-mix(in srgb, var(--callout-info, #0969da) 10%, transparent)" },
-  ".cm-lp-callout-tip": { borderLeftColor: "var(--callout-tip, #2ea043)", background: "color-mix(in srgb, var(--callout-tip, #2ea043) 10%, transparent)" },
-  ".cm-lp-callout-warning": { borderLeftColor: "var(--callout-warning, #d29922)", background: "color-mix(in srgb, var(--callout-warning, #d29922) 13%, transparent)" },
-  ".cm-lp-callout-danger": { borderLeftColor: "var(--callout-danger, #cf222e)", background: "color-mix(in srgb, var(--callout-danger, #cf222e) 10%, transparent)" },
+  ".cm-lp-callout-note": { "--cb-bar": "var(--callout-note, #6e7781)", background: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)" },
+  ".cm-lp-callout-info": { "--cb-bar": "var(--callout-info, #0969da)", background: "color-mix(in srgb, var(--callout-info, #0969da) 10%, transparent)" },
+  ".cm-lp-callout-tip": { "--cb-bar": "var(--callout-tip, #2ea043)", background: "color-mix(in srgb, var(--callout-tip, #2ea043) 10%, transparent)" },
+  ".cm-lp-callout-warning": { "--cb-bar": "var(--callout-warning, #d29922)", background: "color-mix(in srgb, var(--callout-warning, #d29922) 13%, transparent)" },
+  ".cm-lp-callout-danger": { "--cb-bar": "var(--callout-danger, #cf222e)", background: "color-mix(in srgb, var(--callout-danger, #cf222e) 10%, transparent)" },
   // Header (#94 label + #158-C4 icon): the masked Lucide icon (::before) + the label text
   // (::after) live in callout-icons.css (long mask-image data URIs + per-type colour tokens),
   // global CSS so the data URIs stay out of this baseTheme. Display-only; reveal-on-cursor edits

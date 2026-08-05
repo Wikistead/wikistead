@@ -17,17 +17,23 @@
    static let the absolute button anchor to a far ancestor and fly outside the panel (the
    "warning hint invisible" bug). The old absolute-icon gutter this static once neutralized is gone
    (this rule's own flex+padding replaced it), so relative is inert for layout. */
-.cm-lp-callout.cm-lp-callout-panel{display:flex;align-items:center;gap:0.75em;padding:0.6em 0.8em;position:relative}
+/* #632: the left padding carries the 3px the border used to occupy (the bar is a ::before strip now
+   see below), so the icon does not move. Written HERE rather than on the single-class rule because this
+   two-class selector wins the cascade and its shorthand would put it back. */
+.cm-lp-callout.cm-lp-callout-panel{display:flex;align-items:center;gap:0.75em;padding:0.6em 0.8em 0.6em calc(0.8em + 3px);position:relative}
 /* #267: the callout PANEL box — background tint + semantic left bar — for renderCalloutPanel output shown
    OUTSIDE the editor (the template preview .cm-lp-md-preview and the public reader). Editor callouts get
    the tint/bar from the .cm-lp-callout-<type> CM baseTheme (decorations.ts), but baseTheme is .cm-editor-
    scoped (memory cm-basetheme-editor-scoped), so a preview/public panel rendered flat as text ("no box").
    --cb-color is already global (set per type above); the per-type tint % mirrors the baseTheme so the
    preview matches the editor exactly. Inside .cm-editor the higher-specificity baseTheme still wins. */
-/* #632: the radius is on the RIGHT corners only. A 3px coloured bar against a rounded left edge curves
-   inward at both ends — the shape the ruling calls out. The bar stays (colour is how a callout says
-   which kind it is, #199) and the tint, the icon and the width are untouched. */
-.cm-lp-callout-panel{border-left:3px solid var(--cb-color,var(--callout-note,#6e7781));border-radius:0 4px 4px 0;background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 10%,transparent)}
+/* #632 (user ruling): the BAR is drawn as an absolutely-positioned strip, not as `border-left`.
+   A border follows the box's corner radius, so against a rounded left edge it curves inward at both
+   ends — the shape the ruling calls . The first attempt squared off the left corners, which
+   The frame stays round; the strip is a rectangle that ignores it.
+   `padding-left` carries the 3px the border used to occupy, so nothing inside moves. */
+.cm-lp-callout-panel{border-radius:4px;background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 10%,transparent)}
+.cm-lp-callout-panel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--cb-color,var(--callout-note,#6e7781));pointer-events:none}
 .cm-lp-callout-panel.cm-lp-callout-note{background:color-mix(in srgb,var(--callout-note,#57606a) 8%,transparent)}
 .cm-lp-callout-panel.cm-lp-callout-warning{background:color-mix(in srgb,var(--callout-warning,#d29922) 13%,transparent)}
 /* #267: the diagram/media alignment classes (#255) also live only in the .cm-editor baseTheme, so a
@@ -266,3 +272,12 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
   :root[data-theme="system"] :is(.cm-lp-fence-settings, .cm-lp-macro-settings,
     .cm-lp-macro-setting select, .cm-lp-macro-setting input) { color-scheme: dark; }
 }
+
+/* #632 (user ruling): the notice/error strip — same rule as the callout bar, for the boxes that
+   are not callouts (upgrade notice, the auth error bands). `border-left` follows the frame's radius and
+   bends at both ends; this is a rectangle that does not. The frame keeps its own rounding, and the
+   left padding carries the 3px the border used to occupy so nothing inside shifts.
+   A class rather than five copies of the same utilities: the fifth box written next month gets it by
+   asking for it, not by somebody remembering the trick. */
+.wks-left-bar{position:relative;padding-left:calc(var(--wks-left-bar-pad,0.875rem) + 3px)}
+.wks-left-bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--wks-left-bar-color,var(--accent));pointer-events:none}
