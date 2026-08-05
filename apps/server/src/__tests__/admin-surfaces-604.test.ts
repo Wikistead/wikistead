@@ -9,7 +9,7 @@
 // DISCOVERY, not a table. The cases are generated from ADMIN_SURFACES × TENANT_CAP_RELATION, so a
 // verb added later is measured by existing rather than by somebody remembering to add a row here —
 // which is exactly the failure this ticket is about (a power that nothing led to).
-import { seatMembers } from './helpers/seat-members.js'
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -78,6 +78,12 @@ afterAll(async () => {
   await deleteTuples(fgaClient, memberTuples(TENANT, [...holders.values(), PLAIN])).catch(() => {})
   for (const sub of holders.values()) await admin`DELETE FROM role_assignments WHERE principal = ${`user:${sub}`}`.catch(() => {})
   for (const id of roleIds) await admin`DELETE FROM roles WHERE id = ${id}`.catch(() => {})
+  // and the SEATS. Leaving them behind does not fail this file — it fails whatever measures the tenant's
+  // size next: three subs a run pushed `tenant_dev` past the seat cap, so an invite refused with "seat
+  // limit reached" (invite-role-582) and a downgrade froze members the fixture expected to survive
+  // (plan-freeze). Both were handed on twice as "red on clean master too", which is true and is how a
+  // leak keeps its distance from the file that made it.
+  await unseatMembers(admin, TENANT, [...holders.values(), PLAIN])
   await app.close(); await admin.end(); await valkey.quit(); await pool.end()
 }, 120_000)
 
