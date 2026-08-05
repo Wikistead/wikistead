@@ -25,7 +25,8 @@ import { methodBadge } from "./login-method-badge";
 // - a "Login methods" status card that repeated the state each row already carries,
 // - a legacy single-OIDC form that always wrote `ORDER BY sort, id LIMIT 1`, so the SECOND
 // connection could not be edited at all and the FIRST was edited without saying so,
-// - three flags (groups claim, group trust, bootstrap eligibility) that only creation could set.
+// - flags (groups claim, group trust — and bootstrap eligibility, until #616 retired the
+// mechanism it gated) that only creation could set.
 //
 // In-row expansion rather than a side panel, deliberately: this list exists because editing lived in
 // two places, and a panel would be the third. `enabled` (what the tenant chose) and `effective` (what
@@ -353,10 +354,12 @@ export function AdminSignInMethodsSection() {
                   <Input inputSize="sm" value={draft.groupsClaim} placeholder="groups" data-testid="oidc-groups-claim"
                     onChange={(e) => setDraft({ ...draft, groupsClaim: e.target.value })} />
                 </label>
-                {/* ADR-197 §6 / #554 S6: these two decide whether the connection's groups are trusted
-                    and whether its first member may bootstrap an admin. Creation-only until now, which
-                    left a connection permanently unable to sync groups — the flags an admin most needs
-                    to change are the ones they could not. */}
+                {/* ADR-197 §6 / #554 S6: whether the connection's groups are trusted. Creation-only
+                    until now, which left a connection permanently unable to sync groups — the flag an
+                    admin most needs to change was the one they could not.
+                    #616: this said "these two" and named a bootstrap flag as the second. That
+                    mechanism is retired and its switch is gone; a comment that still counts it makes
+                    the next reader look for a control that is not there. */}
                 <label className="flex w-fit items-center gap-2 text-xs text-fg-dim">
                   <Switch checked={draft.trustGroups} ariaLabel={t("adminConnections.trustGroups")} testId={`admin-connection-trust-groups-${c.id}`}
                     onChange={(on: boolean) => setDraft({ ...draft, trustGroups: on })} />

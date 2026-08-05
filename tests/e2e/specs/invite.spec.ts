@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { WEB_REAL_PORT } from "../helpers";
+import { WEB_REAL_PORT, MAILPIT_API } from "../helpers";
 
 // Invite → accept in a REAL browser (P1.4), on the real-mode web (5181, no
 // dev-token). Proves the whole seat-lever loop end-to-end through the same-origin
@@ -11,7 +11,8 @@ import { WEB_REAL_PORT } from "../helpers";
 // invitee's browser context — the test OP issues that subject (a real OP would use
 // its own login session), so the invitee is genuinely not yet a member.
 const WEB = `http://dev.localhost:${WEB_REAL_PORT}`;
-const MAILPIT = "http://localhost:8026/api/v1";
+// #484: derived from WKS_STACK_OFFSET like every other port — see helpers.ts.
+const MAILPIT = MAILPIT_API;
 
 async function mailpitReceived(api: APIRequestContext, to: string): Promise<boolean> {
   for (let i = 0; i < 15; i++) {
@@ -33,7 +34,9 @@ test("admin invites a member; a fresh identity accepts in the browser and is sea
   await admin.waitForURL((u) => !u.pathname.startsWith("/auth/"), { timeout: 15_000 });
 
   await admin.goto(`${WEB}/settings/members`);
-  await expect(admin.getByRole("heading", { name: "Members" })).toBeVisible();
+  // #579 gave this page a second heading ("Members and groups"), so the un-anchored name matched
+  // two elements and the spec failed in strict mode — the page was fine, the locator was not.
+  await expect(admin.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
   await expect(admin.getByText("dev-user")).toBeVisible(); // the admin is listed
 
   const inviteEmail = `invitee${Date.now()}@e2e.test`;
