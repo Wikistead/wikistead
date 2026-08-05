@@ -33,9 +33,23 @@ describe("memberMenuValues (#614)", () => {
   // first answer, and it cost the admin the only way to hand somebody a reset link without email — the
   // person #605's break-glass exists for. The item stays for everyone; what changes is what it MEANS.
   it("the password item is offered whatever state the member is in", () => {
+    // The #614 ruling, unchanged: `password` is present in every row. #626 adds a SECOND item beside it
+    // for a member who has one — an addition, never the replacement this test was written to forbid.
+    for (const m of [{ has_password: false }, { has_password: true }, {}]) {
+      expect(memberMenuValues(m), JSON.stringify(m)).toContain("password");
+    }
+  });
+
+  it("#626: taking the entrance back is an EXTRA item, and only where the server would allow it", () => {
+    // no password → nothing to remove
     expect(memberMenuValues({ has_password: false })).toEqual(["password", "erase", "remove"]);
-    expect(memberMenuValues({ has_password: true })).toEqual(["password", "erase", "remove"]);
-    expect(memberMenuValues({})).toEqual(["password", "erase", "remove"]);
+    // a federated member with a password → both errands
+    expect(memberMenuValues({ has_password: true, identity_source: "oidc" }))
+      .toEqual(["password", "passwordRemove", "erase", "remove"]);
+    // …but a password-born member has no other way in, and the server refuses with `last_way_in`. An
+    // action that cannot succeed is the defect #596/#606 are about, so it is not offered.
+    expect(memberMenuValues({ has_password: true, identity_source: "local" }))
+      .toEqual(["password", "erase", "remove"]);
   });
 
   it("and it is a DIFFERENT errand depending on the state", () => {

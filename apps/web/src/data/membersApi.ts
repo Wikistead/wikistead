@@ -58,6 +58,12 @@ export { ApiError };
 // #606 / ADR-205 §2 (ruled option A): give an existing member a password entrance. Returns the link the
 // admin passes on — the member sets the password themselves, and it binds to the sub they already have,
 // so nobody is duplicated (which is what sending them a password INVITE used to do).
+/** #626 / ADR-214: take the password entrance back. Refusals carry a code the caller can read
+ *  (`last_way_in`, `sso_exemption_required`) — they are two different reasons and neither is a failure. */
+export async function removePassword(token: string, sub: string): Promise<void> {
+  await apiFetch<{ removed: boolean } | null>(`/members/${encodeURIComponent(sub)}/password-setup`, token, { method: "DELETE" });
+}
+
 export async function enablePassword(token: string, sub: string): Promise<{ setupUrl: string; email: string }> {
   const res = await apiFetch<{ setupUrl: string; email: string } | null>(`/members/${encodeURIComponent(sub)}/password-setup`, token, { method: "POST" });
   if (!res) throw new Error("password setup returned nothing");

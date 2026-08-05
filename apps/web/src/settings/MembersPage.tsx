@@ -8,7 +8,7 @@ import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import {
-  listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword,
+  listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword, removePassword,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
 import { User, Users, KeyRound, Eraser, UserMinus } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
@@ -24,7 +24,7 @@ import { RowLead, ROW_LEAD_PX } from "../ui/RowLead"; // #625: one box, so both 
 import { tenantTierCaps } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
-import { MemberStatusIcons, memberMenuValues, passwordAction } from "./member-status"; // #614: origin / password / suspended, beside the name
+import { MemberStatusIcons, memberMenuValues, passwordAction, type MemberMenuValue } from "./member-status"; // #614: origin / password / suspended, beside the name
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -393,9 +393,11 @@ export function MembersPage() {
                       icon: <KeyRound size={14} />,
                       testId: passwordAction(m) === "reissue" ? "member-reissue-password" : "member-enable-password",
                     },
+                    // #626: only offered when the server would accept it — see memberMenuValues.
+                    { value: "passwordRemove", label: t("members.removePassword"), icon: <KeyRound size={14} />, testId: "member-remove-password", danger: true },
                     { value: "erase", label: t("members.eraseAnalytics"), icon: <Eraser size={14} />, testId: "member-erase-analytics", danger: true },
                     { value: "remove", label: t("members.remove"), icon: <UserMinus size={14} />, testId: "member-remove", danger: true },
-                  ].filter((i) => memberMenuValues(m).includes(i.value as "password" | "erase" | "remove"))}
+                  ].filter((i) => memberMenuValues(m).includes(i.value as MemberMenuValue))}
                   onSelect={(v) => {
                     if (v === "password") {
                       // NOT through `guarded`: its catch-all is a hard-coded English "Action failed",
@@ -413,6 +415,27 @@ export function MembersPage() {
                             : t("toast.actionFailed"));
                         }
                       })();
+                      return;
+                    }
+                    if (v === "passwordRemove") {
+                      // #626: the entrance is coming off — a confirmation, like every other destructive
+                      // item here (#504), and the two refusals are named rather than folded into
+                      // "Action failed" (#596/#606: a reason nobody can read is a failure twice).
+                      setConfirming({
+                        message: t("members.removePasswordConfirm", { name: m.display_name || m.email || m.sub }),
+                        run: () => void (async () => {
+                          try {
+                            await removePassword(token, m.sub);
+                            await refresh();
+                            notify.success(t("members.removePasswordDone"));
+                          } catch (e) {
+                            const code = e instanceof ApiError ? e.code : undefined;
+                            notify.error(code === "last_way_in" ? t("members.removePasswordLastWayIn")
+                              : code === "sso_exemption_required" ? t("members.removePasswordSsoFloor")
+                              : t("toast.actionFailed"));
+                          }
+                        })(),
+                      });
                       return;
                     }
                     if (v === "erase") {

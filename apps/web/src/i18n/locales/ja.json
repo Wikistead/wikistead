@@ -1036,7 +1036,12 @@
     "lastAdmin": "最後の管理者は変更できません。",
     "lastDirectAdmin": "グループが admin を持っていますが、グループ経由の管理者は IdP 側の変更で失われ得るため、直接付与の管理者を最低 1 人残す必要があります。",
     "groupRolesMark_other": "グループ由来のロール {{count}} 件",
-    "groupRolesTitle": "グループ由来"
+    "groupRolesTitle": "グループ由来",
+    "removePassword": "パスワードの入口を外す",
+    "removePasswordConfirm": "{{name}} のパスワードの入口を外しますか？セッションも終了し、以後は ID プロバイダ経由でのサインインになります。",
+    "removePasswordDone": "パスワードの入口を外しました",
+    "removePasswordLastWayIn": "このメンバーはこれ以外でサインインできません。外すのではなく停止してください。",
+    "removePasswordSsoFloor": "このテナントは SSO 必須で、パスワードを持つ例外はこの人が最後です。先に別の例外を指名してください。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

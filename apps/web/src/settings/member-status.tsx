@@ -32,9 +32,18 @@ export function memberStatusKeys(m: Pick<Member, "identity_source" | "has_passwo
 // So the item stays for everyone and its MEANING changes: give an entrance to somebody with none, or
 // re-issue a link for somebody who has one. Same server route, same `pwr_` token; the page picks the
 // words from `passwordAction` so the two are never one sentence.
-export function memberMenuValues(m: Pick<Member, "has_password">): ("password" | "erase" | "remove")[] {
-  return ["password", "erase", "remove"];
+export function memberMenuValues(m: Pick<Member, "has_password" | "identity_source">): MemberMenuValue[] {
+  // #626 / ADR-214: removing the entrance is an ADDITIONAL item, never a replacement for the one above it.
+  // #614 settled that "they already have a password" must not take the grant/reissue item away — the reset
+  // link is the only route left for a tenant with no working mail, which is exactly #605's break-glass
+  // member. So a member with a password sees both.
+  //
+  // Somebody whose ONLY way in is that password does not see it at all: the server refuses with
+  // `last_way_in`, and offering an action that cannot succeed is the defect #596 and #606 are about.
+  const removable = m.has_password && m.identity_source !== "local";
+  return ["password", ...(removable ? (["passwordRemove"] as const) : []), "erase", "remove"];
 }
+export type MemberMenuValue = "password" | "passwordRemove" | "erase" | "remove";
 
 /** Which of the two the password item is for this member — the label, the toast and the audit differ. */
 export function passwordAction(m: Pick<Member, "has_password">): "grant" | "reissue" {

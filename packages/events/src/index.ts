@@ -121,6 +121,8 @@ export type DomainEvent =
   // #606 / ADR-205 §2: an admin gave an existing member a password entrance. Distinct from a change:
   // the account had no password before, and the IdP that minted the sub stops being its only authority.
   | { type: 'member.password_enabled'; tenantId: string; actorId: string; targetSub: string }
+  // #626 / ADR-214: the pair to the one above — an admin took the password entrance back.
+  | { type: 'member.password_removed'; tenantId: string; actorId: string; targetSub: string }
   // #568 / ADR-198 §6 (OQ7): a reset was ASKED FOR, and later COMPLETED. Both are named by sub and
   // both matter to an account-takeover investigation — the request says when someone started, the
   // completion says whether they finished, and the gap between them is where a stolen link lives.

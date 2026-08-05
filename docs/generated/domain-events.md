@@ -74,6 +74,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `member.locked` | Password sign-in was locked for an identifier after repeated failures (it expires on its own). |
 | `member.password_changed` | A member changed their own password (their other sessions were signed out). |
 | `member.password_enabled` | An admin gave an existing member a password entrance (the account had none before). |
+| `member.password_removed` | An admin removed a member's password entrance; their sessions were ended with it. |
 | `member.password_reset_requested` | A password reset link was requested for a member. |
 | `member.password_reset_completed` | A member completed a password reset (all their sessions were signed out). |
 | `invite.created` | A member invite was created. |
