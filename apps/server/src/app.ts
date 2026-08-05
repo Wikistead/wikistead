@@ -377,6 +377,12 @@ export async function buildApp(): Promise<FastifyInstance> {
         // which the tenant fixes by upgrading rather than by rotating credentials. Answered like the
         // login path (403 `member_deactivated`) so the integration's owner learns what actually happened;
         // it is only ever shown to someone already holding a valid key for this tenant.
+        // #628 / ADR-215 §5: the same 401 an unknown key gets, with a log line that says which it was.
+        if ('expired' in apiUser) {
+          emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'expired' })
+          await reply.code(401).send({ error: 'invalid or revoked API key' })
+          return
+        }
         if (apiUser.deactivated) {
           emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'owner deactivated' })
           await reply.code(403).send({ error: 'account deactivated by a plan change', code: 'member_deactivated' })

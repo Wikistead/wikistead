@@ -3,19 +3,29 @@
 // Security invariants maintained here:
 //   1. revoked_at IS NULL MUST appear in every DB lookup — soft-delete rows must
 //      never authenticate. The partial index on api_keys enforces this efficiently.
+//      #628 / ADR-215: an EXPIRED key is refused in the same clause, deliberately. A second gate
+//      somewhere else could drift out of step with this one, and the two answer the same question —
+//      "may this credential still speak" — so they are one condition, not two.
 //   2. Constant-time comparison (timingSafeEqual) prevents timing oracle attacks.
 //   3. Last-used update is fire-and-forget so the hot path is never blocked.
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { withTenantTx } from './db/index.js' // #382
 
-interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null; deactivated_at: Date | null }
+interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null; expires_at: Date | null; deactivated_at: Date | null }
 
 // #476 / ADR-178: the two ways a valid key can be answered. `deactivated` is the owner being frozen —
 // a state the tenant can undo by upgrading — so the caller says so rather than returning the generic
 // "invalid key" that would send a paying customer hunting for a credential problem they do not have.
 export type ApiKeyPrincipal = { sub: string; scope: 'read' | 'write'; keyId: string; deactivated: false }
 export type ApiKeyDeactivated = { deactivated: true }
-export type ApiKeyResult = ApiKeyPrincipal | ApiKeyDeactivated
+// #628 / ADR-215 §5: an EXPIRED key answers the caller exactly as an unknown one does — the same 401,
+// because telling somebody "that key existed and ran out" is telling them a key existed. What differs is
+// the LOG line. "The key stopped working" is the question somebody brings to the audit log, and a
+// refusal that leaves no trace sends them to rotate a credential that was fine.
+// `deactivated: false` rides along so existing readers (#476's pin reads `result?.deactivated`) keep
+// working: an expired key is not a frozen owner, and saying so costs one field.
+export type ApiKeyExpired = { expired: true; deactivated: false }
+export type ApiKeyResult = ApiKeyPrincipal | ApiKeyDeactivated | ApiKeyExpired
 
 // Verify an API key and return the owner's user ID + scope, or null if invalid/
 // revoked. Called from onRequest ONLY when token starts with 'wks_' — no OIDC
@@ -40,7 +50,7 @@ export async function verifyApiKey(
   // and the deactivation would be indistinguishable from an unknown key.
   const row = await (withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<ApiKeyRow[]>`
-      SELECT k.id, k.owner_user_id, k.key_hash, k.scope, m.deactivated_at
+      SELECT k.id, k.owner_user_id, k.key_hash, k.scope, k.expires_at, m.deactivated_at
       FROM api_keys k
       LEFT JOIN members m ON m.sub = k.owner_user_id
       WHERE k.key_prefix    = ${keyPrefix}
@@ -55,6 +65,12 @@ export async function verifyApiKey(
   const incoming = createHash('sha256').update(token).digest()
   const stored   = Buffer.from(row.key_hash, 'hex')
   if (incoming.length !== stored.length || !timingSafeEqual(incoming, stored)) return null
+
+  // #628: expiry is decided HERE, after the comparison, for the same reason the deactivation branch
+  // below is: answering it earlier would tell somebody who does NOT hold the secret whether a key with
+  // this 12-character prefix has expired. The row was still fetched by the revocation clause, so a
+  // revoked key never reaches this line — the two remain one gate in effect, read one after the other.
+  if (row.expires_at && row.expires_at.getTime() <= Date.now()) return { expired: true, deactivated: false }
 
   // #476 / ADR-178: the deactivation branch runs HERE, after the comparison — never before it.
   // Deciding earlier would answer "is the owner of this 12-character prefix deactivated?" to someone
