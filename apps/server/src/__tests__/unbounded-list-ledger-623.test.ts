@@ -149,6 +149,7 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     { file: 'routes/orphan-drafts.ts', fn: 'listOrphanDrafts' },
     { file: 'routes/spaces.ts', fn: 'listAdminSpaces' },
     { file: 'routes/pages.ts', fn: 'listSpaceTrash' },
+    { file: 'routes/attachments.ts', fn: 'listAttachments' },    // slice 5
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {
@@ -167,6 +168,18 @@ describe('#623: the lists bounded so far still carry their bound', () => {
       if (/\bOFFSET\b/i.test(body)) missing.push(`${file}:${fn} paginates by OFFSET (rows shift under a reader)`)
     }
     expect(missing, missing.join('; ')).toEqual([])
+  })
+
+  it('the assignments list is bounded too (a route body, and the fastest-growing list in the ticket)', () => {
+    const src = readFileSync(resolve(import.meta.dirname, '..', 'routes/roles.ts'), 'utf8')
+    const at = src.indexOf("'/admin/roles/assignments'")
+    expect(at, 'the assignments route moved').toBeGreaterThan(-1)
+    const raw = src.slice(at, at + 6000)
+    const next = raw.indexOf('\n  app.', 10)
+    const body = raw.slice(0, next > 0 ? next : raw.length)
+      .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/--.*$/, '')).join('\n')
+    expect(body, 'the assignments query still limits').toMatch(/\bLIMIT\b/)
+    expect(body, 'without an OFFSET').not.toMatch(/\bOFFSET\b/)
   })
 
   it('the members list is bounded too (it is a route body, not a named function)', () => {

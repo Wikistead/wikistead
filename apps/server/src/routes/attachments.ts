@@ -254,6 +254,8 @@ export async function inlineAttachment(
 
 // List confirmed attachments for a page. pending and deleted are excluded.
 // FGA check: view on page.
+export const ATTACHMENTS_PAGE_LIMIT = 200
+
 export async function listAttachments(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -265,7 +267,10 @@ export async function listAttachments(
     SELECT id, filename, content_type, size_bytes, created_at
     FROM attachments
     WHERE page_id = ${args.pageId} AND status = 'confirmed'
-    ORDER BY created_at
+    -- #623: one row per attachment, and a long-lived page collects them. The tiebreaker matters here
+    -- because a multi-file upload stamps them together.
+    ORDER BY created_at, id
+    LIMIT ${ATTACHMENTS_PAGE_LIMIT}
   `
   return rows.map(r => ({ id: r.id, filename: r.filename, contentType: r.content_type, sizeBytes: r.size_bytes, createdAt: r.created_at }))
 }
