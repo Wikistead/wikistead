@@ -77,9 +77,15 @@ describe("#586: role-derived and individually granted are told apart, without be
     expect(dialog).toMatch(/options=\{\[[\s\S]*capNoun\(c\)[\s\S]*assignable\.data\?\.custom/);
   });
 
-  it("the space screen tips its role badges from the same component", () => {
-    expect(spaceTab).toContain("<RoleTip");
-    expect(spaceTab, "and no second tooltip implementation grew beside it").not.toMatch(/title=\{t\(/);
+  // RE-AIMED by #582 (ruling 2026-08-05), not deleted: the subject moved, the property did not. The space
+  // row used to wrap its Select in <RoleTip> so the row and the badges shared one component — and that is
+  // exactly what produced TWO panels on one hover, because the Select raises its own. The wrapper is gone;
+  // what has to stay true is that the row still explains its role from the SHARED content component, and
+  // that nothing has grown a second explanation beside it.
+  it("the space screen explains its roles from the shared component, and only from it", () => {
+    expect(spaceTab, "the row's options carry the shared panel content").toContain("<RoleCaps");
+    expect(spaceTab, "and the wrapper that produced a second panel is gone").not.toContain("<RoleTip");
+    expect(spaceTab, "and no hand-rolled tooltip grew beside it").not.toMatch(/title=\{t\(/);
   });
 });
 

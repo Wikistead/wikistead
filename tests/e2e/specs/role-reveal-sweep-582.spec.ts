@@ -114,14 +114,34 @@ for (const [where, url, ready, trigger] of [
     const closed = await panelOnHover(page, trigger);
     expect(closed.text, `hovering the closed control raised nothing :: ${JSON.stringify(closed)}`).not.toBe("");
 
+    // Counted WHILE the pointer is on the control — that is when the reader is looking. The old count ran
+    // after the list had been opened and closed again, when nothing is showing, so it could only ever have
+    // passed. (Measured on this master before the fix: hovering one row raised THREE panels — the select's
+    // own, and RoleTip's twice.)
+    const whileHovering = await visibleDisclosures(page);
+    expect(whileHovering, `one hover, one panel — saw ${JSON.stringify(whileHovering)}`).toHaveLength(1);
+
     // …and opening it still works, from the same element, with the same panel (not a second one that
     // happens to look similar)
     const open = await optionsOf(page, trigger);
     expect(open.some((o) => o.revealed.length > 0), `the open list stopped revealing: ${JSON.stringify(open)}`).toBe(true);
-    const panels = await page.evaluate(() =>
-      document.querySelectorAll("[data-testid$='-hint'], [data-testid=select-hint]").length);
-    expect(panels, "a second panel implementation appeared").toBeLessThanOrEqual(1);
   });
+}
+
+// What the READER sees, not what one implementation calls itself.
+//
+// The count above used to look for `-hint` alone — the panel `ui/Select` raises — so the SECOND panel it
+// exists to forbid (RoleTip's Radix tooltip, `-content`) was never counted, and one hover showing two
+// windows passed green. That was found on the device, not here. Both families are counted now, and
+// "visible" is measured as geometry: a tooltip that has closed stays in the DOM.
+async function visibleDisclosures(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-testid$='-hint'], [data-testid=select-hint], [data-testid$='-content']"))
+      .filter((el) => {
+        const r = (el as HTMLElement).getBoundingClientRect()
+        return r.width > 0 && r.height > 0 && getComputedStyle(el as HTMLElement).visibility !== "hidden"
+      })
+      .map((el) => el.getAttribute("data-testid") ?? "?"))
 }
 
 // " — measured on the device as member and

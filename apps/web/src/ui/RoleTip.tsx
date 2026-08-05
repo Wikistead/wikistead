@@ -65,6 +65,12 @@ export function RoleTip({
     <Tooltip
       open={open}
       onOpenChange={setOpen}
+      // #582 (ruling 2026-08-05): ONE kind of panel, and it is the one that comes out at the SIDE. The
+      // badges used to raise this at the top-left while `ui/Select` raised its own to the right, so the
+      // same information arrived in two places depending on what the pointer happened to be over. Same
+      // side, same width (RoleCaps below), so the reader learns one shape.
+      side="right"
+      align="start"
       content={<RoleCaps origin={origin} scope={scope} builtinCapability={builtinCapability} roleCapabilities={roleCapabilities} testId={testId} />}
     >
       {/* a span, not a button: these badges sit in rows that already carry actions, and a nested button
@@ -116,7 +122,10 @@ export function RoleCaps({
   const { t } = useTranslation();
   const caps = effectiveCaps({ builtinCapability, roleCapabilities, scope });
   return (
-    <div data-testid={testId ? `${testId}-content` : undefined}>
+    // #582 (ruling 2026-08-05): the same 220px box the select raises, and text that follows the settings
+    // body rather than the browser default — the panel inherited 16px from <body> (a missing size, not a
+    // choice), which read as larger than everything around it.
+    <div className="w-[220px] text-sm" data-testid={testId ? `${testId}-content` : undefined}>
       <span className="block text-[11px] font-medium">
         {origin === "grant" ? t("roleTip.individual") : t("roleTip.role")}
       </span>

@@ -224,10 +224,13 @@ export function SpaceMembersTab() {
     const offered = GRANTABLE_FOR(callerManages);
     const caps = currentCap && !offered.includes(currentCap) ? [currentCap, ...offered] : offered;
     return [
+      // #582 (ruling 2026-08-05): a built-in capability chosen here IS a direct grant, and this hint used
+      // to say "role" for every option — the distinction the wrapper below carried per row. With the
+      // wrapper gone the option has to be right on its own, and it can be: the value says which it is.
       ...caps.map((c) => ({
         value: `builtin:${c}`,
         label: capNoun(c),
-        hint: <RoleCaps origin="role" scope="space" builtinCapability={c} />,
+        hint: <RoleCaps origin="grant" scope="space" builtinCapability={c} />,
       })),
       ...customRoles.map((r) => ({
         value: `role:${r.id}`,
@@ -420,13 +423,13 @@ export function SpaceMembersTab() {
               /* #586 §1: the ORIGIN is the axis — role-derived wears the accent, an individually granted
                  capability the neutral one — and it now reads off the control instead of a badge beside
                  it. #578 bounce ③: a custom role was the one thing this screen could not change. */
-              <RoleTip
-                as="control"
-                origin={r.custom ? "role" : "grant"}
-                scope="space"
-                {...(r.custom ? { roleCapabilities: roleCapsById.get(r.roleId ?? "") } : { builtinCapability: r.capability })}
-                testId="space-role-origin"
-              >
+              /* #582 (ruling 2026-08-05): ONE panel. This wrapper raised a second one — a Radix tooltip at
+                 the top-left — beside the side panel `ui/Select` already shows for the value it is holding,
+                 so a single hover produced two windows saying the same thing in two designs. Measured on
+                 the device, and the sweep missed it because it counted only the select's own testid. The
+                 select's panel stays; the options carry the same RoleCaps content, now with the origin the
+                 value implies. */
+              <>
                 <Select
                   size="sm"
                   value={rowValue(r)}
@@ -435,7 +438,7 @@ export function SpaceMembersTab() {
                   options={rowRoleOptions(rowValue(r))}
                   onChange={(next) => changeRowRole(r, next)}
                 />
-              </RoleTip>
+              </>
             )}
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{r.label}</span>
             {/* #497 (088): a mapping-conferred row is machine-managed (ADR-183 §1) — no revoke affordance
