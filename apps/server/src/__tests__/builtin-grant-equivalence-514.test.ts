@@ -11,6 +11,7 @@
 // has something to be equivalent TO: if the folded path ever stops conferring one of these, this goes red
 // rather than the loss being discovered by a user who can no longer manage their own space.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
@@ -19,6 +20,7 @@ import { fgaClient, check, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess } from '../routes/spaces.js'
 import { createPage, deletePage, publishPage } from '../routes/pages.js'
+import { assignRoleInTx } from '../routes/roles.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -121,10 +123,23 @@ describe('#514 §6 — sharing the table does not let a custom role ask for `man
 // what a built-in grant RESOLVES TO today — including the verbs the model confers WITHOUT listing them —
 // so folding the built-in path into the role mechanism has a target to be check-equivalent to.
 describe('#536 §6 — what every other built-in grant confers today', () => {
-  const grant = async (capability: 'view' | 'comment' | 'edit' | 'moderate' | 'manageAccess') =>
+  const grant = async (capability: 'view' | 'comment' | 'edit' | 'moderate') =>
     grantSpaceAccess(db, fgaClient, driver, {
       spaceId, tenantId: tenant.id, userId: OWNER, grantee: `user:${BY_CAP[capability]}`, capability, plan: tenant.plan,
     })
+
+  /** The other door — a capability the built-in vocabulary no longer names reaches its principal through
+   *  a custom role. Both doors expand through space-grant-expansion, which is what makes the comparison
+   *  in this file meaningful at all. */
+  const grantByRole = async (capability: 'manageAccess') => {
+    const roleId = randomUUID()
+    await db.sql`INSERT INTO roles (id, tenant_id, name, capabilities, scope)
+                 VALUES (${roleId}, ${tenant.id}, ${`bge514-${capability}-${STAMP}`}, ARRAY[${capability}]::text[], 'resource')`
+    await assignRoleInTx(db, fgaClient, driver, {
+      tenant: { id: tenant.id, plan: tenant.plan }, roleId, capabilities: [capability],
+      resourceType: 'space', resourceId: spaceId, principal: `user:${BY_CAP[capability]}`, actorSub: OWNER,
+    })
+  }
 
   it('viewer: reads the space and its published pages, and nothing more', async () => {
     const sub = `user:${BY_CAP.view}`
@@ -139,15 +154,18 @@ describe('#536 §6 — what every other built-in grant confers today', () => {
     expect(await check(fgaClient, sub, 'moderate', { type: 'space', id: spaceId }), 'nor moderation').toBe(false)
   }, 120_000)
 
-  it('access-manager: sees the space, runs no verb but its own (ADR-209)', async () => {
+  // RE-AIMED (ruling 2026-08-05): the verb is composed as a CUSTOM ROLE now, not handed out by the
+  // built-in door. What it CONFERS is the same question, and worth asking of the surviving path — the
+  // two doors share one expansion table, so a divergence would show up right here.
+  it('the roster verb: sees the space, runs no verb but its own (ADR-209)', async () => {
     const sub = `user:${BY_CAP.manageAccess}`
     expect(await check(fgaClient, sub, 'manageAccess', { type: 'space', id: spaceId }), 'nothing before').toBe(false)
-    await grant('manageAccess')
+    await grantByRole('manageAccess')
     expect(await check(fgaClient, sub, 'manageAccess', { type: 'space', id: spaceId })).toBe(true)
     expect(await check(fgaClient, sub, 'view', { type: 'space', id: spaceId }), 'the viewer arm — the roster is visible').toBe(true)
     expect(await check(fgaClient, sub, 'view', { type: 'page', id: pageId }), 'and so are the published pages').toBe(true)
     for (const verb of ['edit', 'publish', 'delete', 'share', 'settings', 'manage'] as const) {
-      expect(await check(fgaClient, sub, verb, { type: 'page', id: pageId }), `access-manager does NOT get page ${verb}`).toBe(false)
+      expect(await check(fgaClient, sub, verb, { type: 'page', id: pageId }), `the roster verb does NOT get page ${verb}`).toBe(false)
     }
     expect(await check(fgaClient, sub, 'manage', { type: 'space', id: spaceId }), 'and never the space').toBe(false)
   }, 120_000)
