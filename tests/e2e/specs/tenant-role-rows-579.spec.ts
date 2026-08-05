@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext } from "@playwright/test";
 import { sleep } from "../helpers";
 
 // #579: /admin/members has ONE place where a tenant role is given or taken — the member's own row.
@@ -10,6 +10,37 @@ import { sleep } from "../helpers";
 // chip appears beside it (custom roles are a SET), removing one leaves the other (removal is per
 // assignment — reference counting, not per capability), and the built-in Select still does what
 // it always did (it is EXACTLY ONE — a column on the member).
+const H = { authorization: "Bearer dev-token", "content-type": "application/json" };
+// A bodyless DELETE must NOT announce a JSON body: Fastify answers 400 FST_ERR_CTP_EMPTY_JSON_BODY, which
+// is not the 409 this cleanup is about and which the old `.catch` also swallowed.
+const H_NO_BODY = { authorization: "Bearer dev-token" };
+
+/**
+ * Remove a fixture role — assignments first.
+ *
+ * `DELETE /admin/roles/:id` answers 409 while the role is still assigned ("unassign first", roles.ts), and
+ * Playwright's `request.delete` RESOLVES on 409, so a `.catch()` never fires and the refusal is dropped on
+ * the floor. Measured: this file left one role behind per run — 22 of them had collected in the shared
+ * tenant, which is what made #582's picker walks order-dependent. The status is asserted now, so the next
+ * time cleanup stops working this test says so instead of quietly growing the tenant.
+ */
+async function removeRole(request: APIRequestContext, ids: string[]): Promise<void> {
+  const me = await request.get("/api/auth/me", { headers: H_NO_BODY });
+  const tid = me.ok() ? ((await me.json()) as { tenantId?: string }).tenantId ?? "tenant_dev" : "tenant_dev";
+  const list = await request.get(`/api/admin/roles/assignments?resourceType=tenant&resourceId=${tid}`, { headers: H_NO_BODY });
+  if (list.ok()) {
+    const body = (await list.json()) as { assignments?: { id: string; roleId: string | null }[] } | { id: string; roleId: string | null }[];
+    const all = Array.isArray(body) ? body : (body.assignments ?? []);
+    for (const a of all.filter((x) => x.roleId != null && ids.includes(x.roleId))) {
+      await request.delete(`/api/admin/roles/assignments/${a.id}`, { headers: H_NO_BODY });
+    }
+  }
+  for (const id of ids) {
+    const res = await request.delete(`/api/admin/roles/${id}`, { headers: H_NO_BODY });
+    expect(res.status(), `the fixture role was removed (a 409 here means an assignment outlived it)`).toBeLessThan(300);
+  }
+}
+
 test("#579: tenant roles live on the member row, and only there", async ({ page, request }) => {
   const stamp = Date.now();
   const roleA = `e2e-579a-${stamp}`;
@@ -110,9 +141,7 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(page.getByTestId("member-roles").first().getByTestId("member-role-select"), "the form's grant lands on the row")
       .toHaveText(roleA, { timeout: 8000 });
   } finally {
-    for (const id of [idA, idB]) {
-      await request.delete(`/api/admin/roles/${id}`, { headers: { authorization: "Bearer dev-token" } }).catch(() => {});
-    }
+    await removeRole(request, [idA, idB]);
   }
 });
 
@@ -162,6 +191,6 @@ test("#579 ①: a group gets a tenant role from the MEMBER TABLE, by name", asyn
     await expect(page.getByTestId("member-row-group").filter({ hasText: groupName }), "removing the role removes the row")
       .toHaveCount(0, { timeout: 8000 });
   } finally {
-    await request.delete(`/api/admin/roles/${roleId}`, { headers: { authorization: "Bearer dev-token" } }).catch(() => {});
+    await removeRole(request, [roleId]);
   }
 });
