@@ -21,7 +21,14 @@ export interface TupleInput {
 // as `cause`), and what leaves the process is a code a surface can translate.
 //
 // This is the shape #606 used for `already_member`: the server names the refusal, the client picks the
-// sentence. Nothing in the tree branches on FGA's message text (checked), so nothing loses information.
+// sentence.
+//
+// CORRECTION (#622 review): the first version of this comment said "nothing in the tree branches on FGA's
+// message text (checked)". That was wrong — SEVEN places did, and a shallow grep missed the ones that
+// built the phrase in a variable. Four were converted with #578; three more (`syncPageParentTuple`,
+// `trashPage`, `restorePage`) survived as UNREACHABLE branches, silently breaking the idempotent retries
+// their comments promise. They read `isAlreadyConverged` now. Anything added later must do the same:
+// replacing the prose here makes every substring match dead code, not a compile error.
 function asDomainError(err: unknown, op: 'write' | 'delete'): unknown {
   const status = (err as { statusCode?: number })?.statusCode
   if (status !== 400) return err // not a validation refusal — a transport or auth failure stays itself
@@ -34,7 +41,11 @@ function asDomainError(err: unknown, op: 'write' | 'delete'): unknown {
     // read FGA's sentence to tell that case apart; replacing the sentence would have broken them
     // silently, so the fact moves onto the error as a FLAG. `alreadyConverged` is the question they were
     // really asking, asked once here instead of by four substring matches.
-    alreadyConverged: /did not exist|already exist/i.test(raw),
+    // Both wordings, deliberately. FGA's current message happens to end with "...already existed or the
+    // tuple to be deleted did not exist", which is what this matched; its OPENING clause says "cannot
+    // delete a tuple which does not exist". Matching only the trailing form would flip every idempotent
+    // revoke and unset-public to a 500 on the day that clause changes — silent here, loud three layers up.
+    alreadyConverged: /do(es)? not exist|did not exist|already exist/i.test(raw),
     cause: err,
   })
 }
