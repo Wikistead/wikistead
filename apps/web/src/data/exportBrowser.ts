@@ -16,10 +16,17 @@ export interface ExportHosts {
   // its source. On screen it is a figure. Passing the same seam the editor uses is what makes the file
   // agree with the page; anything the host cannot render still degrades to its source, as it does live.
   readonly diagram?: { render(lang: string, source: string): Promise<Blob | { ok: true; blob: Blob } | { ok: false; reason?: string } | null>; handles(lang: string): boolean };
+  // #85 (review rejection): `:::embed-page` reached the file saying "loading" — forever, because the
+  // export gave it nobody to ask. Its siblings are honest about this (`children` / `tagged` declare
+  // `exportFidelity: "degrade"` and say "this surface cannot show it"), but transclude declares
+  // **preserve**: it claims the content survives the file. So the file has to carry the content, which
+  // means the export needs the same resolver the editing surface is given — and has to WAIT for it, the
+  // way it already waits for diagrams.
+  readonly transclude?: { resolve(refId: string): Promise<string | null>; deniedLabel: string };
 }
 
 async function renderBody(md: string, hosts?: ExportHosts): Promise<HTMLElement> {
-  const { renderMarkdownToDom, withDiagramHost, withEmbedHost } = await import("../editor/macros/md-render");
+  const { renderMarkdownToDom, withDiagramHost, withEmbedHost, withTranscludeHost } = await import("../editor/macros/md-render");
   // #207 ③: with no embed seam the macro fell to its "this surface cannot show it" sentence, and a
   // saved file carried that sentence where the screen has content. A FILE cannot host a live iframe either
   // (that is what `exportFidelity: "degrade"` says), so the honest output is the link — produced by the
@@ -44,10 +51,16 @@ async function renderBody(md: string, hosts?: ExportHosts): Promise<HTMLElement>
     : null;
   // #207 same light pin as the print portal — the export document is `data-theme="light"`
   //, and a dark-baked SVG on that light page is the defect being fixed.
+  // The embed resolves asynchronously too, and for the same reason it is TRACKED rather than raced: a
+  // resolver that answers after the settle window baked "loading" into a file that promises `preserve`.
+  const tracedTransclude = hosts?.transclude
+    ? { deniedLabel: hosts.transclude.deniedLabel,
+        resolve: (refId: string) => { const p = hosts.transclude!.resolve(refId); pending.push(p.catch(() => null)); return p } }
+    : null;
   const { withMacroTheme } = await import("../editor/macros/theme");
-  withMacroTheme("light", () => withDiagramHost(tracked, () => withEmbedHost({ build: (url: string) => buildEmbedElement(url, []) }, () => {
+  withMacroTheme("light", () => withDiagramHost(tracked, () => withTranscludeHost(tracedTransclude, () => withEmbedHost({ build: (url: string) => buildEmbedElement(url, []) }, () => {
     host.appendChild(renderMarkdownToDom(md));
-  })));
+  }))));
   // The cap is generous because the alternative is a file that quietly lost a figure, and it only binds
   // when a renderer is genuinely slow — a normal render resolves long before it.
   await Promise.race([
