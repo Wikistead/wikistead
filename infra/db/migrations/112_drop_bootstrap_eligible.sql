@@ -1,0 +1,15 @@
+-- #616 / ADR-212 slice 3: the column goes, now that nothing reads or writes it.
+--
+-- Its own migration, deliberately AFTER slice 2 shipped (#499's lesson): a DROP racing a writer left
+-- behind takes the writer down with it, and the writers were not only the routes — the fixtures, the
+-- seed, and the e2e global-setup all stamped this column too. Slice 2 removed every one of them, which
+-- is what makes this safe to run.
+--
+-- What it carried: `bootstrap_eligible` marked a connection as allowed to turn the first person who
+-- logged in through it into the tenant's administrator (ADR-197 §2). The user ruling of 2026-08-05
+-- retired that entrance — the first admin is made deliberately, through signup or
+-- `pnpm tenant:local-admin`. The flag has nothing left to gate.
+--
+-- Irreversible by design, and safe to be: the value it held said which connections COULD have
+-- bootstrapped an admin, and no code can act on that any more. There is nothing to restore it for.
+ALTER TABLE tenant_oidc DROP COLUMN bootstrap_eligible;
