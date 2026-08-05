@@ -136,6 +136,13 @@
    connection / presence is never rebuilt — ADR-013). */
 :root,
 :root[data-theme="light"] {
+  /* #641: what the BROWSER draws is told which theme it is drawing into. The date picker's popup, a
+     number field's spinner, the file-chooser button, scrollbars, the autofill yellow and the caret are
+     all chrome the browser paints, and with `color-scheme` left at `normal` it paints them light however
+     dark the app is — measured, the analytics date picker opened as a white sheet with an icon too dark
+     to see against the field it sat in. Declared beside the tokens, in each of the three places a theme
+     is decided, so a theme cannot be chosen without also answering this. */
+  color-scheme: light;
   --bg: #ffffff;
   --fg: #1f2328;
   --fg-dim: #656d76;
@@ -190,6 +197,7 @@
 
 /* Explicit dark, and system-dark (only when the OS prefers dark). */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #1e1e1e;
   --fg: #dddddd;
   --fg-dim: #9a9a9a;
@@ -232,6 +240,9 @@
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
+    /* the DEFAULT setting: a fix that only handled the explicit `data-theme="dark"` would leave every
+       reader who never touched the switcher with the white popup. */
+    color-scheme: dark;
     --bg: #1e1e1e;
     --fg: #dddddd;
     --fg-dim: #9a9a9a;
