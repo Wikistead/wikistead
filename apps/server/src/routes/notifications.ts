@@ -498,9 +498,14 @@ export async function listNotifications(
 // untitled/inert (title null) — never a title oracle; unwatch stays possible. member_sub predicate =
 // the isolation boundary.
 export interface ResolvedWatch { id: string; resourceType: WatchResourceType; resourceId: string; eventMask: string[]; muted: boolean; title: string | null }
+// #623: a subscription list grows with how much somebody follows, and this one then reads the titles of
+// everything in it — an unbounded list here is an unbounded second query.
+export const WATCHES_PAGE_LIMIT = 200
+
 export async function listWatchesResolved(db: TenantDb, fga: OpenFgaClient, args: { memberSub: string }): Promise<ResolvedWatch[]> {
   const rows = await db.sql<{ id: string; resource_type: WatchResourceType; resource_id: string; event_mask: string[]; muted: boolean }[]>`
-    SELECT id, resource_type, resource_id, event_mask, muted FROM watches WHERE member_sub = ${args.memberSub} ORDER BY created_at DESC`
+    SELECT id, resource_type, resource_id, event_mask, muted FROM watches
+    WHERE member_sub = ${args.memberSub} ORDER BY created_at DESC, id DESC LIMIT ${WATCHES_PAGE_LIMIT}`
   const pageIds = [...new Set(rows.filter((r) => r.resource_type !== 'space').map((r) => r.resource_id))]
   const spaceIds = [...new Set(rows.filter((r) => r.resource_type === 'space').map((r) => r.resource_id))]
   const pageTitles = new Map<string, string>()

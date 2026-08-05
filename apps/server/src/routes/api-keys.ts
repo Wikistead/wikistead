@@ -151,19 +151,24 @@ export async function createApiKey(
 // call it — so any member could read the name, prefix, scope and last-use time of every integration
 // in the tenant. Those are not secrets in the credential sense (the hash is never exposed), but they
 // map out who automates what, which is nobody's business but the owner's and the admin's.
-export async function listApiKeys(db: TenantDb, args: { ownerUserId?: string } = {}): Promise<ApiKeySummary[]> {
+// #623 (ruling): one row per key, and integrations accumulate. Ordered with a tiebreaker so the
+// bound is stable; no OFFSET anywhere in this ticket's work.
+export const API_KEYS_PAGE_LIMIT = 100
+
+export async function listApiKeys(db: TenantDb, args: { ownerUserId?: string; limit?: number } = {}): Promise<ApiKeySummary[]> {
   const owner = args.ownerUserId
+  const limit = Math.min(500, Math.max(1, args.limit ?? API_KEYS_PAGE_LIMIT))
   // #495: the ADMIN view (no owner filter) also selects owner_user_id so it can disclose ownership;
   // the self view keeps its minimal columns. Both stay RLS-tenant-bound.
   const rows = owner
     ? await db.sql<ApiKeyRow[]>`
         SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at
         FROM api_keys WHERE revoked_at IS NULL AND owner_user_id = ${owner}
-        ORDER BY created_at DESC`
+        ORDER BY created_at DESC, id DESC LIMIT ${limit}`
     : await db.sql<ApiKeyRow[]>`
         SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at
         FROM api_keys WHERE revoked_at IS NULL
-        ORDER BY created_at DESC`
+        ORDER BY created_at DESC, id DESC LIMIT ${limit}`
   // #495 / ADR-182 (Q1): resolve owner names on the ADMIN view only — the canonical #486 helper on the
   // RLS handle (no bare pool), so null-name → null (no email fallback). The self view never discloses.
   const names = owner ? new Map<string, { displayName: string | null }>()

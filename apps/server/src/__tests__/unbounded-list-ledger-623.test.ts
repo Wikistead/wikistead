@@ -144,6 +144,11 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     { file: 'routes/pages.ts', fn: 'listSpacePagesOverview' },   // slice 1
     { file: 'routes/webhooks.ts', fn: 'listWebhooks' },          // slice 3
     { file: 'routes/templates.ts', fn: 'listTemplates' },        // slice 3
+    { file: 'routes/api-keys.ts', fn: 'listApiKeys' },           // slice 4
+    { file: 'routes/notifications.ts', fn: 'listWatchesResolved' },
+    { file: 'routes/orphan-drafts.ts', fn: 'listOrphanDrafts' },
+    { file: 'routes/spaces.ts', fn: 'listAdminSpaces' },
+    { file: 'routes/pages.ts', fn: 'listSpaceTrash' },
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {
