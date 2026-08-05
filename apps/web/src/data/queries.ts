@@ -1856,7 +1856,13 @@ export function useSetPageCreationPolicy(spaceId: string) {
 
 export function useWebhooks() {
   const { token } = useSession();
-  return useQuery({ queryKey: ["webhooks"], queryFn: () => apiFetch<WebhookSummary[]>("/webhooks", token).then((r) => r ?? []) });
+  // #623: the route answers a bounded page now. The screen still shows a list, so the page is unwrapped
+  // here rather than every caller learning about the envelope.
+  return useQuery({
+    queryKey: ["webhooks"],
+    queryFn: () => apiFetch<{ webhooks: WebhookSummary[]; nextCursor: string | null }>("/webhooks", token)
+      .then((r) => r?.webhooks ?? []),
+  });
 }
 export function useCreateWebhook() {
   const { token } = useSession();

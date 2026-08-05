@@ -131,3 +131,54 @@ describe('#623: no list route grows without saying so', () => {
     expect(Object.keys(LEDGER).length, 'some routes bound their lists without a ledger line').toBeLessThan(all)
   })
 })
+
+// #623 slices 1-3: the routes that have been bounded so far must STAY bounded. The ledger is keyed by
+// file and cannot lose a line until every list in that file is done (reported on the ticket), so this is
+// how the finished work is held: the specific queries, by name, with the shape that bounds them.
+//
+// Not a substitute for the ledger — that one catches a NEW unbounded list. This one catches a bounded
+// list quietly losing its bound, which is the other direction and is what a refactor does.
+describe('#623: the lists bounded so far still carry their bound', () => {
+  const SRC_DIR = resolve(import.meta.dirname, '..')
+  const DONE: { file: string; fn: string }[] = [
+    { file: 'routes/pages.ts', fn: 'listSpacePagesOverview' },   // slice 1
+    { file: 'routes/webhooks.ts', fn: 'listWebhooks' },          // slice 3
+    { file: 'routes/templates.ts', fn: 'listTemplates' },        // slice 3
+  ]
+
+  it('each one still limits, and none of them paginates by OFFSET', () => {
+    const missing: string[] = []
+    for (const { file, fn } of DONE) {
+      const src = readFileSync(resolve(SRC_DIR, file), 'utf8')
+      const at = src.indexOf(`export async function ${fn}`)
+      expect(at, `${fn} is gone from ${file} — if it was renamed, rename it here too`).toBeGreaterThan(-1)
+      // the function body, approximated to the next top-level export
+      const rest = src.slice(at)
+      const end = rest.indexOf('\nexport ', 1)
+      const body = end > 0 ? rest.slice(0, end) : rest
+      // case-SENSITIVE: a `const limit = …` satisfies a case-insensitive search while the query it was
+      // meant to bound has none — measured, removing the SQL LIMIT left this green
+      if (!/\bLIMIT\b/.test(body)) missing.push(`${file}:${fn} lost its LIMIT`)
+      if (/\bOFFSET\b/i.test(body)) missing.push(`${file}:${fn} paginates by OFFSET (rows shift under a reader)`)
+    }
+    expect(missing, missing.join('; ')).toEqual([])
+  })
+
+  it('the members list is bounded too (it is a route body, not a named function)', () => {
+    const src = readFileSync(resolve(import.meta.dirname, '..', 'routes/members.ts'), 'utf8')
+    const at = src.indexOf(`app.get<{ Querystring: { limit?: string; cursor?: string; q?: string } }>('/members'`)
+    expect(at, 'the members route no longer takes a cursor').toBeGreaterThan(-1)
+    // comments stripped and the window cut at the next route: the prose ABOVE the query says "never
+    // OFFSET", and a search that reads its own explanation as the thing it forbids finds a defect in
+    // every correct implementation
+    const raw = src.slice(at, at + 9000)
+    const nextRoute = raw.indexOf('\n  app.', 10)
+    const body = raw.slice(0, nextRoute > 0 ? nextRoute : raw.length)
+      .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/--.*$/, '')).join('\n')
+    expect(body, 'and still limits').toMatch(/\bLIMIT\b/)
+    expect(body, 'without an OFFSET').not.toMatch(/\bOFFSET\b/i)
+    // the tiebreaker is the part that is easy to drop in a refactor and impossible to see afterwards
+    expect(body, 'ordered with a tiebreaker, or two members sharing a timestamp straddle the boundary')
+      .toMatch(/ORDER BY m\.created_at, m\.sub/)
+  })
+})

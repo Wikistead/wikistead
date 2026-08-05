@@ -67,9 +67,10 @@ describe('#228 createWebhook (creation gate)', () => {
     expect(row!.secret_enc).not.toBe(secret) // encrypted at rest, not plaintext
     expect(decryptSecret(row!.secret_enc)).toBe(secret) // round-trips to the returned secret
     // the LIST never exposes the secret (no secret/secret_enc field).
-    const list = await listWebhooks(db)
-    expect(Object.keys(list[0]!)).not.toContain('secret_enc')
-    expect(Object.keys(list[0]!)).not.toContain('secret')
+    // #623: the answer is a PAGE now (webhooks + nextCursor), not the whole table
+    const { webhooks } = await listWebhooks(db)
+    expect(Object.keys(webhooks[0]!)).not.toContain('secret_enc')
+    expect(Object.keys(webhooks[0]!)).not.toContain('secret')
   })
 })
 
