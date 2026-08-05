@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
 import { useCreateApiKey, useRevokeApiKey, useAdminRevokeApiKey, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
@@ -55,7 +56,9 @@ export function ApiKeysPanel({
   // #628: how long the key should live. "" = no expiry, which the server refuses when the tenant has a
   // ceiling — the choice is offered rather than pre-decided, so somebody who wants a permanent key on a
   // tenant that forbids them is told, instead of quietly getting a short one.
-  const [expiry, setExpiry] = useState<string>("");
+  // Starts on the longest lifetime the tenant permits, which is always a value that EXISTS in the list.
+  // A Select whose value matches no option renders as a bare chevron with no width (#603).
+  const [expiry, setExpiry] = useState<string>(() => defaultExpiry(maxAgeDays));
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   // #504: a revoked key never authenticates again (the member issues a new one) — confirm, by name.
   const [revoking, setRevoking] = useState<{ id: string; name: string } | null>(null);
@@ -64,18 +67,24 @@ export function ApiKeysPanel({
   const scopeOptions = (maxScope === "read" ? (["read"] as ApiScope[]) : (["read", "write"] as ApiScope[]))
     .map((s) => ({ value: s, label: t(`adminApi.scope_${s}`) }));
   const effScope: ApiScope = maxScope === "read" ? "read" : scope;
-  // Offer the usual lifetimes, plus "never" only where the tenant allows it. Anything longer than the
-  // ceiling is left out rather than shown-and-refused.
-  const expiryChoices = [7, 30, 90, 365].filter((d) => maxAgeDays == null || d <= maxAgeDays);
-  const expiryOptions = [
-    ...(maxAgeDays == null ? [{ value: "", label: t("adminApi.expiryNever") }] : []),
-    ...expiryChoices.map((d) => ({ value: String(d), label: t("adminApi.expiryDays", { count: d }) })),
-  ];
+  // #628the choices are DERIVED from the ceiling, not a fixed ladder filtered by it. Filtering
+  // left a 3-day policy with nothing to offer, so the form refused what the API would have granted —
+  // see `key-expiry-choices`.
+  const expiryOptions = expiryChoices(maxAgeDays).map((c) => ({
+    value: c.value,
+    label: c.days === null ? t("adminApi.expiryNever") : t("adminApi.expiryDays", { count: c.days }),
+  }));
+  // The ceiling arrives from a query, so the first render has none and the choices change under the
+  // control. If what is selected stops existing, fall back to the default rather than leaving a Select
+  // pointing at nothing — that is the blank-chevron state again, just reached a moment later.
+  useEffect(() => {
+    if (!expiryOptions.some((o) => o.value === expiry)) setExpiry(defaultExpiry(maxAgeDays));
+  }, [maxAgeDays]);
 
   const onCreate = () => {
     if (!name.trim()) return;
     create.mutate({ name: name.trim(), scope: effScope, expiresInDays: expiry === "" ? null : Number(expiry) }, {
-      onSuccess: (k) => { setCreated(k); setName(""); setExpiry(""); notify.success(t("toast.saved")); },
+      onSuccess: (k) => { setCreated(k); setName(""); setExpiry(defaultExpiry(maxAgeDays)); notify.success(t("toast.saved")); },
       onError: () => notify.error(t("toast.actionFailed")),
     });
   };
