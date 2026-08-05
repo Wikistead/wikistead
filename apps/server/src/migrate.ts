@@ -5,9 +5,12 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
+// #621: the same split-brain the seed can fall into — migrating another session's stack is worse.
+import { assertStackTarget } from '../../../scripts/assert-stack-target.mjs'
 
 const url = process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL
 if (!url) { console.error('DATABASE_ADMIN_URL or DATABASE_URL required'); process.exit(1) }
+assertStackTarget(url, 'migrate')
 
 const sql = postgres(url, { max: 1, onnotice: () => {} })
 

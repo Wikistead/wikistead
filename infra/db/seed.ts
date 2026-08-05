@@ -8,8 +8,11 @@ import { encryptSecret } from '../../apps/server/src/auth/secret-crypto.js'
 // `wc<conn8>_` would drift from the one that mints real connections, and the drift would only show
 // up as members appearing twice.
 import { subjectPrefixFor } from '../../apps/server/src/routes/admin-connections.js'
+// #621: refuse to seed another session's stack — see the guard for what went wrong without it.
+import { assertStackTarget } from '../../scripts/assert-stack-target.mjs'
 
 ;(async () => {
+  assertStackTarget(process.env.DATABASE_ADMIN_URL, 'db:seed')
   const sql = postgres(process.env.DATABASE_ADMIN_URL!)
 
   // Space and page IDs must match the FGA tuples in infra/openfga/seed.ts
