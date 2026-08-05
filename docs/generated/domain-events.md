@@ -81,4 +81,5 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `member.password_reset_completed` | A member completed a password reset (all their sessions were signed out). |
 | `invite.created` | A member invite was created. |
 | `invite.revoked` | A member invite was revoked. |
+| `invite.reissued` | A pending invite was given a fresh link; the previous one stopped working. |
 | `comment.created` | A comment was created on a page. |

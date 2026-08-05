@@ -8,7 +8,7 @@ import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import {
-  listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword, removePassword,
+  listMembers, listInvites, createInvite, revokeInvite, reissueInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword, removePassword,
   suspendMember, reactivateMember,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
@@ -548,8 +548,37 @@ export function MembersPage() {
           <h3>{t("members.pendingTitle")}</h3>
           <ul>
             {invites.map((i) => (
-              <li key={i.id} style={{ marginBottom: 4 }}>
+              <li key={i.id} style={{ marginBottom: 4 }} data-testid="invite-row" data-invite={i.id}>
                 {t("members.pendingRow", { email: i.email || t("members.noEmail"), role: i.role })}{" "}
+                {/* #638 3: which of these has anybody actually received. Sending has always
+                    been best-effort, and its outcome was reported once — on the response to the call that
+                    created the invite — and then forgotten. */}
+                <span style={{ color: "var(--fg-dim)" }} data-testid="invite-mailed" data-mailed={i.last_emailed_at ? "yes" : "no"}>
+                  {i.last_emailed_at ? t("members.inviteMailed") : t("members.inviteNotMailed")}
+                </span>{" "}
+                {/* #638the invitation could be neither re-sent nor read back, and it is the one
+                    that strands people — a tenant with no mail configured has only the link that appeared
+                    once on the screen that made it. Two deliveries of ONE act: the token is hashed at
+                    rest, so both mint a new link and the old one stops working. The confirm says that
+                    outright rather than leaving an admin to hand out a link they just invalidated. */}
+                <Button variant="ghost" size="sm" data-testid="invite-reissue"
+                  onClick={() => setConfirming({
+                    message: t("members.reissueConfirm", { email: i.email || t("members.noEmail") }),
+                    run: () => void guarded(async () => {
+                      const r = await reissueInvite(token, i.id);
+                      setLastLink({ url: r.inviteUrl, emailed: r.emailed, kind: "invite" });
+                    })(),
+                  })}>{t("members.reissue")}</Button>{" "}
+                {i.email && (
+                  <Button variant="ghost" size="sm" data-testid="invite-resend"
+                    onClick={() => setConfirming({
+                      message: t("members.resendConfirm", { email: i.email }),
+                      run: () => void guarded(async () => {
+                        const r = await reissueInvite(token, i.id, { email: true });
+                        setLastLink({ url: r.inviteUrl, emailed: r.emailed, kind: "invite" });
+                      })(),
+                    })}>{t("members.resend")}</Button>
+                )}{" "}
                 {/* #504: revoking kills the sent link for good — confirm first. */}
                 <Button variant="dangerGhost" size="sm" data-testid="invite-revoke"
                   onClick={() => setConfirming({ message: t("members.revokeConfirm", { email: i.email || t("members.noEmail") }), run: () => void guarded(() => revokeInvite(token, i.id))() })}>{t("members.revoke")}</Button>

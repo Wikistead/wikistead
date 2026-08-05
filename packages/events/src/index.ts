@@ -139,6 +139,7 @@ export type DomainEvent =
   | { type: 'member.password_reset_completed'; tenantId: string; targetSub: string }
   | { type: 'invite.created';      tenantId: string; actorId: string; role: string }
   | { type: 'invite.revoked';      tenantId: string; actorId: string }
+  | { type: 'invite.reissued';     tenantId: string; actorId: string; emailed: boolean }
   // ── Comments (P4) ─────────────────────────────────────────────────────
   | { type: 'comment.created'; tenantId: string; actorId: string; pageId: string; threadId: string }
 

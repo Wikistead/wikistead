@@ -1,0 +1,12 @@
+-- #638 (user ruling): a pending invite says whether it has been mailed.
+--
+-- "まとめて 20 人招待した直後 … 誰にまだ渡せていないかが一覧で分かること". Sending was already
+-- best-effort — an invite whose mail bounced or whose tenant has no SMTP is still a valid link, and the
+-- admin is expected to hand it over. But the outcome of that attempt was reported once, on the response
+-- to the create call, and then forgotten: the list of pending invites had no idea which of its rows
+-- anybody had actually received.
+--
+-- A timestamp rather than a flag, because a re-send is the other half of this ticket and "when" is what
+-- distinguishes an invite mailed a moment ago from one mailed a week before the address turned out to be
+-- wrong. NULL means the link has only ever existed on the screen that created it.
+ALTER TABLE invites ADD COLUMN IF NOT EXISTS last_emailed_at TIMESTAMPTZ;
