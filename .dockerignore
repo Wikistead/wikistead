@@ -1,0 +1,15 @@
+# Keep the build context to sources. Without this, a developer's incremental state travels into the image
+# and `tsc -b` reads it as "already built" — the CE image build then reports success WITHOUT TYPECHECKING
+# ANYTHING. Measured (#622 investigation): the same commit built clean with a local tsbuildinfo present and
+# produced twenty errors without it. CI checks out fresh and was never fooled; a developer running the same
+# command locally was.
+**/*.tsbuildinfo
+**/node_modules
+**/dist
+**/.turbo
+
+# Not build inputs, and the largest things in the tree.
+.git
+test-results
+playwright-report
+**/coverage

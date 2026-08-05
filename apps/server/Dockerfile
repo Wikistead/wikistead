@@ -8,7 +8,13 @@ RUN corepack enable
 WORKDIR /repo
 
 FROM base AS build
-COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
+# The LOCKFILE travels too. Without it every dependency re-resolves to the newest match of its range, so
+# the image compiled against a different SDK than the repo pins — measured: `stripe: ^22.2.1` resolved past
+# the pinned 22.2.1 and its `apiVersion` literal type moved, failing routes/billing.ts in the image while
+# every local check stayed green. The install below stays non-frozen because the devDependency surgery on
+# line 30 edits package.json after this copy; with the lockfile present pnpm still reuses the pinned
+# versions for everything it does not have to re-resolve.
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/types ./packages/types
 COPY packages/hooks ./packages/hooks
 COPY packages/auth ./packages/auth
@@ -21,6 +27,11 @@ COPY apps/server ./apps/server
 # COPY'd (by design), and pnpm resolves workspace:^ references even for devDependencies. This line
 # disappears with #178 (EE physical separation removes the reference from the public tree entirely).
 RUN node -e "const fs=require('fs');const f='apps/server/package.json';const p=JSON.parse(fs.readFileSync(f));delete p.devDependencies['@wikistead/entitlements-cloud'];fs.writeFileSync(f,JSON.stringify(p,null,2))"
+# …and the tests that import it. `tsc -b` compiles this directory too, so nineteen TS2307s came from files
+# that are not part of the artifact and never could be: the package they import is deliberately outside the
+# CE build context. Removing them here (image-local, like the line above) rather than excluding them from
+# the repo's tsconfig, which would stop local typechecking from seeing them.
+RUN rm -rf apps/server/src/__tests__
 RUN pnpm install --frozen-lockfile=false
 RUN pnpm --filter @wikistead/server... build
 # Self-contained production tree: the app + its workspace deps (dist) + prod node_modules only —
