@@ -5,6 +5,7 @@ import { Select as SelectRoot, SelectTrigger, SelectValue, SelectContent, Select
 import { useControlScale } from "./FormRow";
 import { placeBeside } from "./panel-placement";
 import { HINT_PANEL, HINT_PANEL_W, HINT_PANEL_ANIM, HINT_OPEN_DELAY_MS, HINT_CLOSE_GRACE_MS } from "./hint-panel";
+import { useHintPresence } from "./use-hint-presence";
 
 export interface SelectOption {
   value: string;
@@ -67,6 +68,11 @@ export function Select({
   // one step and snapped back (measured: a 40-step walk never reached its target). Tracking the row was
   // the point of the #582 fix; doing it through state made the list unusable from the keyboard.
   const [hint, setHint] = useState<{ node: React.ReactNode } | null>(null);
+  // #630the panel outlives `hint` by one exit animation, so the content it was showing has to
+  // outlive it too — reading `hint.node` while it is leaving would render an empty box.
+  const hintPresence = useHintPresence(hint !== null);
+  const hintShown = useRef<React.ReactNode>(null);
+  if (hint) hintShown.current = hint.node;
   // the rendered panel, so its placement can use its real height instead of a constant that was a guess
   const panelRef = useRef<HTMLDivElement | null>(null);
   // where the panel goes, remembered across the render that mounts it (the element does not exist yet
@@ -234,9 +240,13 @@ export function Select({
           </SelectItem>
         ))}
       </SelectContent>
-      {hint && createPortal(
+      {/* #630kept mounted through its exit, the way Radix keeps its own — the panel used to
+          vanish the instant the grace timer fired while the tooltip beside it faded out. `hintShown`
+          holds the last content so the leaving panel does not blank out mid-animation. */}
+      {hintPresence.present && hintShown.current && createPortal(
         <div
           role="tooltip"
+          data-state={hintPresence.state}
           data-testid={testId ? `${testId}-hint` : "select-hint"}
           className={`pointer-events-none fixed z-[60] text-sm ${HINT_PANEL_W} ${HINT_PANEL} ${HINT_PANEL_ANIM}`}
           ref={(el) => {
@@ -251,7 +261,7 @@ export function Select({
             if (el && anchors.current) place(anchors.current.beside, anchors.current.align);
           }}
         >
-          {hint.node}
+          {hintShown.current}
         </div>,
         document.body,
       )}

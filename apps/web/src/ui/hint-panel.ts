@@ -1,4 +1,4 @@
-import { TOOLTIP_DELAY_MS } from "../components/ui/tooltip";
+import { TOOLTIP_DELAY_MS, TOOLTIP_CLOSE_GRACE_MS } from "../components/ui/tooltip";
 
 // #582 (review rejection,⑤): the box a floating explanation is drawn in — once.
 //
@@ -36,7 +36,7 @@ export const HINT_PANEL_W = "w-[220px]";
 // pointer crosses; a shared behaviour that dropped it would take that walk away. So the grace is handed
 // to every implementation rather than removed from the one that had it.
 export const HINT_OPEN_DELAY_MS = TOOLTIP_DELAY_MS;
-export const HINT_CLOSE_GRACE_MS = 160;
+export const HINT_CLOSE_GRACE_MS = TOOLTIP_CLOSE_GRACE_MS;
 
 // The entrance: a pop, at the motion tokens' values.
 //
@@ -57,5 +57,20 @@ export const HINT_CLOSE_GRACE_MS = 160;
 // the counter-example was already in the tree: `GroupRolesMark` measures with `offsetWidth`/
 // `offsetHeight` — the LAYOUT box, which a transform does not touch — exactly so a scaling entrance
 // cannot lie to it. `getBoundingClientRect` is the one that reads the box after transform.
+//
+// The exit is written the same way, keyed off `data-state` exactly as Radix's is, so both mechanisms run
+// the one pair of keyframes. Without it a hand-placed panel simply stopped existing when its grace timer
+// fired: measured, a role name's panel faded over 180ms while the Select hint blinked off. The
+// grace and the exit are separate — the first is for the pointer crossing a gap, the second is how the
+// panel leaves once it has decided to.
 export const HINT_PANEL_ANIM =
-  "animate-in fade-in-0 zoom-in-95 duration-[var(--dur-base)] ease-[var(--ease-out)]";
+  "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 " +
+  "data-[state=closed]:zoom-out-95 duration-[var(--dur-base)] ease-[var(--ease-out)]";
+
+/** How long a hand-placed panel stays mounted after it closes, so its exit can run.
+ *
+ *  Radix reads the animation off the node; these panels are unmounted by their own React state, so the
+ *  duration has to be known here too. It is `--dur-base` — the same 180ms the class above animates for —
+ *  and the pin measures the two mechanisms against each other rather than against this number, so a
+ *  drift between them fails rather than being enshrined. */
+export const HINT_EXIT_MS = 180;

@@ -6,6 +6,7 @@ import { ChevronRight, Users } from "lucide-react"; // #544: an icon component, 
 import { RoleCaps } from "../ui/RoleTip";
 import { placeBelow, placeBeside, type At } from "../ui/panel-placement";
 import { HINT_PANEL, HINT_PANEL_W, HINT_PANEL_ANIM, HINT_OPEN_DELAY_MS, HINT_CLOSE_GRACE_MS } from "../ui/hint-panel";
+import { useHintPresence } from "../ui/use-hint-presence";
 import { TENANT_TIER_CAPS } from "./role-nouns";
 import type { GroupConferredRole } from "./tenant-role-rows";
 
@@ -59,6 +60,9 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [at, measured, setAt] = useSettledAt();
+  // #630mounted through its exit, so it fades the way the Radix tooltip beside it does rather
+  // than blinking off the moment the grace timer fires.
+  const presence = useHintPresence(open);
   const anchor = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   // one timer for the whole chain: leaving the mark for the list (or the list for a role name) crosses a
@@ -127,11 +131,12 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
         <Users size={12} aria-hidden />
         {roles.length}
       </span>
-      {open && at && createPortal(
+      {presence.present && at && createPortal(
         <div
           ref={(el) => { panel.current = el; if (el) place(); }}
           role="tooltip"
           data-role-panel
+          data-state={presence.state}
           data-testid="group-roles-list"
           className={`fixed z-[60] w-max max-w-[320px] ${HINT_PANEL} ${measured ? HINT_PANEL_ANIM : "opacity-0"}`}
           style={{ top: at.top, left: at.left }}
@@ -172,6 +177,7 @@ function RoleNameWithCaps({ role, caps, list }: {
 }) {
   const [open, setOpen] = useState(false);
   const [at, measured, setAt] = useSettledAt();
+  const presence = useHintPresence(open);
   const ref = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const place = () => {
@@ -198,10 +204,11 @@ function RoleNameWithCaps({ role, caps, list }: {
         {role.role}
         <ChevronRight size={11} aria-hidden className="text-fg-dim" />
       </span>
-      {open && at && createPortal(
+      {presence.present && at && createPortal(
         <div
           ref={(el) => { panel.current = el; if (el) place(); }}
           role="tooltip"
+          data-state={presence.state}
           data-testid="group-role-caps"
           className={`pointer-events-none fixed z-[70] ${HINT_PANEL_W} ${HINT_PANEL} ${measured ? HINT_PANEL_ANIM : "opacity-0"}`}
           style={{ top: at.top, left: at.left }}

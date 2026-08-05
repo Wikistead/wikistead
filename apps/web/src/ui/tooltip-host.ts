@@ -1,5 +1,5 @@
 import { TOOLTIP_DELAY_MS } from "../components/ui/tooltip";
-import { HINT_CLOSE_GRACE_MS } from "./hint-panel";
+import { HINT_CLOSE_GRACE_MS, HINT_EXIT_MS } from "./hint-panel";
 
 // #530: the DELEGATED tooltip for DOM built outside React — CodeMirror widgets, macro chrome, and the
 // other ~34 `setAttribute("title", …)` sites. Those cannot be wrapped in <Tooltip>, but they must not
@@ -26,6 +26,7 @@ import { HINT_CLOSE_GRACE_MS } from "./hint-panel";
 let bubble: HTMLDivElement | null = null;
 let showTimer: number | null = null;
 let hideTimer: number | null = null;
+let exitTimer: number | null = null;
 let current: HTMLElement | null = null;
 let installed = false;
 
@@ -57,8 +58,20 @@ function place(target: HTMLElement, tip: HTMLDivElement): void {
 function hide(): void {
   if (showTimer != null) { window.clearTimeout(showTimer); showTimer = null; }
   if (hideTimer != null) { window.clearTimeout(hideTimer); hideTimer = null; }
+  if (exitTimer != null) { window.clearTimeout(exitTimer); exitTimer = null; }
   current = null;
-  if (bubble) { bubble.hidden = true; bubble.textContent = ""; }
+  if (bubble) { bubble.hidden = true; bubble.removeAttribute("data-state"); bubble.textContent = ""; }
+}
+
+// #630 (review rejection): …and it LEAVES the way the others do. The node is reused rather than
+// unmounted, so the exit is a state flag on it: mark it closed, let the same keyframe pair the React
+// panels use run, then hide it. Re-entering during those milliseconds clears the flag rather than
+// queueing a second exit, so a pointer that comes back finds the bubble it left.
+function fadeOut(): void {
+  if (!bubble || bubble.hidden) return hide();
+  bubble.dataset.state = "closed";
+  current = null;
+  exitTimer = window.setTimeout(() => { exitTimer = null; hide(); }, HINT_EXIT_MS);
 }
 
 // #630: the shared close grace. Leaving a target used to hide the bubble on the same tick, while the
@@ -70,7 +83,7 @@ function hide(): void {
 // was pointing at has moved".
 function hideAfterGrace(): void {
   if (hideTimer != null) window.clearTimeout(hideTimer);
-  hideTimer = window.setTimeout(() => { hideTimer = null; hide(); }, HINT_CLOSE_GRACE_MS);
+  hideTimer = window.setTimeout(() => { hideTimer = null; fadeOut(); }, HINT_CLOSE_GRACE_MS);
 }
 
 // `scrollWidth` exceeds `clientWidth` exactly when the content does not fit — i.e. when the ellipsis is
