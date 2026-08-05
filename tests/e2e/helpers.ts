@@ -13,6 +13,11 @@ export const API = `http://dev.localhost:${P.server}`; // server REST base (dire
 export const WEB = `http://dev.localhost:${P.web}`; // dev-token web origin (baseURL)
 export const WEB_PORT = P.web; // dev-token web port, for other hosts (e.g. `acme.localhost:${WEB_PORT}`)
 export const WEB_REAL_PORT = P.webReal; // real-auth web port, for `${slug}.localhost:${WEB_REAL_PORT}`
+// #484 slice 2 left ONE port behind: invite.spec had `http://localhost:8026` inline, so on any
+// isolated stack the mail went to that session's Mailpit while the spec queried offset 0's. It read
+// as "the invite email never arrived" — a product claim — and the spec was permanently red for every
+// session but one. Derived here so there is nowhere left to hardcode it.
+export const MAILPIT_API = `http://localhost:${P.mailpit}/api/v1`;
 
 // #354: publish a page and WAIT until its published body actually contains `expectSubstring`. The publish flush
 // (collab Valkey req/ack) has a timeout and, under parallel-load, can snapshot a stale/empty ydoc so
