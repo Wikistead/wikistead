@@ -42,8 +42,9 @@ function TooltipContent({
   sideOffset = 6,
   children,
   portal = true,
+  animated = true,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content> & { portal?: boolean }) {
+}: React.ComponentProps<typeof TooltipPrimitive.Content> & { portal?: boolean; animated?: boolean }) {
   // #586: a tooltip on an option INSIDE an open Select must not be portalled to the body. A modal Radix
   // layer marks everything outside itself `aria-hidden`, and a tooltip that lands there is invisible to
   // the accessibility tree — measured: the content rendered and the a11y tree had no tooltip at all.
@@ -58,7 +59,11 @@ function TooltipContent({
           // Surface tokens (light/dark follow automatically), a wrapping max-width the native tooltip
           // cannot offer, and the shared enter animation.
           "z-50 max-w-[min(22rem,90vw)] whitespace-normal break-words rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md",
-          "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+          // #582 (review rejection, ①): the role panels appear on SIX surfaces and only this one
+          // moved, because only this one is a Radix tooltip. A caller that belongs to that family opts
+          // out here rather than fighting the classes from outside — the component owns the choice, and
+          // an ordinary tooltip keeps the animation it has always had.
+          animated && "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
           className,
         )}
         {...props}
@@ -79,6 +84,7 @@ export function Tooltip({
   side,
   align,
   portal,
+  animated,
   ...props
 }: {
   content: React.ReactNode
@@ -87,12 +93,14 @@ export function Tooltip({
   align?: React.ComponentProps<typeof TooltipPrimitive.Content>["align"]
   /** false inside another modal layer (an open Select) — see TooltipContent */
   portal?: boolean
+  /** #582 ①: false for a panel that belongs to the un-animated role-explanation family */
+  animated?: boolean
 } & Omit<React.ComponentProps<typeof TooltipPrimitive.Root>, "children">) {
   if (content == null || content === "") return <>{children}</>
   return (
     <TooltipRoot {...props}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side={side} align={align} portal={portal}>{content}</TooltipContent>
+      <TooltipContent side={side} align={align} portal={portal} animated={animated}>{content}</TooltipContent>
     </TooltipRoot>
   )
 }

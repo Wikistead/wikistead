@@ -65,6 +65,11 @@ export function RoleTip({
     <Tooltip
       open={open}
       onOpenChange={setOpen}
+      // #582 (review rejection, ①): six surfaces raise this panel and only this one animated,
+      // because only this one is a Radix tooltip. The other five appear instantly; one panel easing
+      // in while its siblings do not is the inconsistency the ruling asked to end, and instant is the
+      // side that already had five votes.
+      animated={false}
       // #582 (ruling 2026-08-05): ONE kind of panel, and it is the one that comes out at the SIDE. The
       // badges used to raise this at the top-left while `ui/Select` raised its own to the right, so the
       // same information arrived in two places depending on what the pointer happened to be over. Same
@@ -125,7 +130,10 @@ export function RoleCaps({
     // #582 (ruling 2026-08-05): the same 220px box the select raises, and text that follows the settings
     // body rather than the browser default — the panel inherited 16px from <body> (a missing size, not a
     // choice), which read as larger than everything around it.
-    <div className="w-[220px] text-sm" data-testid={testId ? `${testId}-content` : undefined}>
+    // #582 the FAMILY is named in the product, the way #589 named the sign-in rows — a pin that
+    // walks "every panel explaining a role" has to know which panels those are, and inferring it from a
+    // shared affordance swept up unrelated tooltips (a status icon's label is not one of these).
+    <div data-role-panel className="w-[220px] text-sm" data-testid={testId ? `${testId}-content` : undefined}>
       <span className="block text-[11px] font-medium">
         {origin === "grant" ? t("roleTip.individual") : t("roleTip.role")}
       </span>

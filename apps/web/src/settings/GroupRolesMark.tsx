@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronRight, Users } from "lucide-react"; // #544: an icon component, never a text glyph
 import { RoleCaps } from "../ui/RoleTip";
 import { placeBelow, placeBeside, type At } from "../ui/panel-placement";
+import { HINT_PANEL, HINT_PANEL_W } from "../ui/hint-panel"; // #582 ⑤: the shared box (width stays content-led here)
 import { TENANT_TIER_CAPS } from "./role-nouns";
 import type { GroupConferredRole } from "./tenant-role-rows";
 
@@ -89,8 +90,9 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
         <div
           ref={panel}
           role="tooltip"
+          data-role-panel
           data-testid="group-roles-list"
-          className="fixed z-[60] w-max max-w-[320px] rounded-md border border-border bg-panel px-2 py-1.5 shadow-md"
+          className={`fixed z-[60] w-max max-w-[320px] ${HINT_PANEL}`}
           style={{ top: at.top, left: at.left }}
           onPointerEnter={show}
           onPointerLeave={hide}
@@ -159,7 +161,7 @@ function RoleNameWithCaps({ role, caps, list }: {
           ref={panel}
           role="tooltip"
           data-testid="group-role-caps"
-          className="pointer-events-none fixed z-[70] w-[220px] rounded-md border border-border bg-panel px-2 py-1.5 shadow-md"
+          className={`pointer-events-none fixed z-[70] ${HINT_PANEL_W} ${HINT_PANEL}`}
           style={{ top: at.top, left: at.left }}
         >
           <RoleCaps origin="role" scope="tenant" roleCapabilities={caps} />
