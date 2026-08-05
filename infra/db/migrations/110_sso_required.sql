@@ -9,8 +9,12 @@ ALTER TABLE tenant_login_prefs ADD COLUMN IF NOT EXISTS sso_required BOOLEAN NOT
 
 -- ADR-210 §2 (a): the named members who may still use the password door while the stance bites. A row
 -- here is the EXEMPTION; whether the member can actually sign in also needs a local_credentials row
--- (§5: the credential is the only honest witness that a key exists). Revoking the exemption is enough
--- on its own — the key stays but opens nothing.
+-- (§5: the credential is the only honest witness that a key exists).
+--
+-- CORRECTED by #626 / ADR-214: revoking the exemption is NOT enough on its own. The login path consults
+-- exemptions only while the stance is in force; during a lapse (the IdP is down — ADR-210 §2(d)) every
+-- credential holder is admitted, named or not. The key does open something, once a year, on the day it
+-- matters most. Taking the credential away is a separate act — see DELETE /members/:sub/password-setup.
 CREATE TABLE IF NOT EXISTS sso_exemptions (
   tenant_id  TEXT NOT NULL,
   member_sub TEXT NOT NULL,

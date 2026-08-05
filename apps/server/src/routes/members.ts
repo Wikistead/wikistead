@@ -227,6 +227,69 @@ export async function membersPlugin(app: FastifyInstance) {
   // available for IdP-derived subs on purpose: an SSO tenant is entirely IdP-derived, so refusing them
   // would refuse the case the feature exists for. The consequence is real and belongs in the ledger: the
   // IdP stops being the only authority for that account, so the act is audited with the admin as actor.
+  // #626 / ADR-214: the entrance an admin can GIVE, an admin can take back.
+  //
+  // Until this existed a password outlived every decision about it: removing somebody from the SSO-required
+  // exemption list left their credential in place, and during a stance lapse (the IdP is down, so the
+  // password door opens for everyone who has one — ADR-210 §2(d)) that person signs in although they are no
+  // longer named. The exemption row was revoked; the key was not.
+  //
+  // NOT behind the tenant's password switch. Granting belongs there, but a tenant that has since turned
+  // password sign-in off would otherwise be unable to clear the credentials it already handed out.
+  app.delete<{ Params: { sub: string } }>('/members/:sub/password-setup', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    const sub = req.params.sub
+    const [member] = await req.db.sql<[{ sub: string; identity_source: string }?]>`
+      SELECT sub, identity_source FROM members WHERE sub = ${sub}`
+    if (!member) return reply.code(404).send({ error: 'member not found' })
+    const [cred] = await req.db.sql<[{ member_sub: string }?]>`
+      SELECT member_sub FROM local_credentials WHERE member_sub = ${sub}`
+    if (!cred) return reply.code(404).send({ error: 'this member has no password entrance', code: 'no_password_entrance' })
+
+    // (1) THIS PERSON's way in, not the tenant's. A `wlocal_` sub arrives from no connection at all — the
+    // prefix is stamped by the connection that mints it — so "does the tenant have a federated door" both
+    // lets a local-only member be locked out for good AND refuses every removal on a tenant using the
+    // shared platform IdP, which is not a door anyone here came through either.
+    if (member.identity_source === 'local') {
+      return reply.code(409).send({
+        error: 'this is the only way this member can sign in — suspend them instead of removing their password',
+        code: 'last_way_in',
+      })
+    }
+
+    // (2) the SSO-required floor, guarded from the side it is not written on. The two existing guards read
+    // the EXEMPTION rows (admin-login-methods.ts); this route removes the CREDENTIAL, so a tenant could be
+    // left requiring SSO with an exemption that can no longer open anything — the outage case the floor
+    // exists for. Same code, so a caller handles one refusal.
+    const [pref] = await req.db.sql<[{ sso_required: boolean }?]>`SELECT sso_required FROM tenant_login_prefs LIMIT 1`
+    if (pref?.sso_required) {
+      const [other] = await req.db.sql<[{ member_sub: string }?]>`
+        SELECT se.member_sub FROM sso_exemptions se JOIN local_credentials lc ON lc.member_sub = se.member_sub
+        WHERE se.member_sub <> ${sub} LIMIT 1`
+      if (!other) {
+        return reply.code(409).send({
+          error: 'name at least one exempt member who holds a password (and keep password sign-in selected) before requiring SSO — they are the way back in when the IdP is down.',
+          code: 'sso_exemption_required',
+        })
+      }
+    }
+
+    await req.db.tx(async (tx) => {
+      await tx`DELETE FROM local_credentials WHERE member_sub = ${sub}`
+      // (3) and the tokens that would put it back. A setup token whose UPDATE matches no row INSERTS the
+      // credential (password-reset.ts) — so a link minted in the last hour silently undoes this removal.
+      await tx`DELETE FROM password_resets WHERE member_sub = ${sub}`
+      await auditIfEntitled(tx, req.tenant, {
+        actor: `user:${req.user.sub}`, action: 'member.password_removed', target: `member:${sub}`,
+      })
+    })
+    // (4) sessions are per MEMBER, so "the ones opened with the password" cannot be expressed. Removing a
+    // credential is a security act rather than housekeeping (#474), so every session goes.
+    await destroyMemberSessions(app.valkey, req.tenant.id, sub)
+    emit({ type: 'member.password_removed', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: sub })
+    return reply.code(200).send({ removed: true })
+  })
+
   app.post<{ Params: { sub: string } }>('/members/:sub/password-setup', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     const [member] = await req.db.sql<[{ sub: string }?]>`SELECT sub FROM members WHERE sub = ${req.params.sub}`

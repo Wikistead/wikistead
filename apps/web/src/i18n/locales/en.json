@@ -1037,7 +1037,12 @@
     "lastDirectAdmin": "A group holds admin, but group-granted admins can be lost by an IdP-side change. At least one directly granted admin must remain.",
     "groupRolesMark_one": "1 role from a group",
     "groupRolesMark_other": "{{count}} roles from groups",
-    "groupRolesTitle": "From groups"
+    "groupRolesTitle": "From groups",
+    "removePassword": "Remove password entrance",
+    "removePasswordConfirm": "Remove the password entrance for {{name}}? Their sessions end with it, and they sign in through the identity provider from now on.",
+    "removePasswordDone": "Password entrance removed",
+    "removePasswordLastWayIn": "This is the only way this member can sign in. Suspend them instead.",
+    "removePasswordSsoFloor": "SSO is required here, and this is the last exempt member who holds a password. Name another before removing this one."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
