@@ -23,6 +23,12 @@
 }
 
 @media print {
+  /* #636: no trailing room on paper. The tail exists so the last line is not pinned to the bottom of a
+     WINDOW and so writing at the end of a document is comfortable; on a sheet it is just an empty page.
+     Reset at the root so every surface that reads the token loses it at once. */
+  :root {
+    --wks-tail-room: 0;
+  }
   /* Hide the entire live app (chrome, the virtualised CM reading surface, floating controls, toasts —
      everything), show ONLY the static print portal. display:none removes them from layout entirely, so
      the portal flows from the top of the sheet and paginates naturally.
