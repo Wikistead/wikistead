@@ -394,6 +394,22 @@ test("#85 the downloaded file, opened with the app closed, IS the document", asy
   expect(Math.min(...rhythm.gaps), "no two blocks are flush (the -35% cramping)").toBeGreaterThan(0)
   expect(rhythm.gaps.some((g) => g === rhythm.bodyLineBox), "the block gap IS the editor's blank line").toBe(true)
 
+  // 3. #636 (user ruling): the file ENDS with room. "
+  // " — about the saved file, not the app, which is where the first attempt
+  // at this went. A document that stops flush against the bottom of the window reads as one that was cut
+  // off rather than one that finished.
+  //
+  // Measured against the WINDOW rather than as a CSS value, because that is the complaint: what matters
+  // is how much empty space follows the last thing you read when you have scrolled as far as you can.
+  const tail = await opened.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    const root = document.querySelector("main.wks-export-doc")!;
+    const kids = [...root.children].filter((el) => (el as HTMLElement).offsetParent !== null);
+    const last = kids[kids.length - 1]!.getBoundingClientRect();
+    return { below: Math.round(document.documentElement.scrollHeight - (last.bottom + window.scrollY)), viewport: window.innerHeight };
+  });
+  expect(tail.below, `only ${tail.below}px follows the last block of the saved file`).toBeGreaterThan(96);
+
   // 4. the SAME opened file under print media: fixing "blank on screen" must not bring back "blank in
   // print" (the marker round-trip called out). Root visible in BOTH media, pinned side by side.
   await opened.emulateMedia({ media: "print" });

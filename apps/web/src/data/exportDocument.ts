@@ -5,12 +5,12 @@
 // (not one shared selector). This builds the file out of the DOM the app has ALREADY rendered, wearing the
 // app's own stylesheet, so "looks the same" stops being a thing to keep in sync.
 //
-// Two properties this module owns, both pinned:
-//   1. It is INERT. No <script>, no event-handler attribute, no non-raster data: URL — the same shape the
-//      server's sanitizer enforces for what it serves. The file goes to disk and gets opened later, often
-//      by someone else, so it must not be able to do anything.
-//   2. It carries no CHROME. Copy buttons, edit affordances, presence boxes and the rest are the app's
-//      controls, not the document's content; a printed page with a "Copy" button on it is a bug.
+// Two properties this module owns, both pinned
+// 1. It is INERT. No <script>, no event-handler attribute, no non-raster data: URL — the same shape the
+// server's sanitizer enforces for what it serves. The file goes to disk and gets opened later, often
+// by someone else, so it must not be able to do anything.
+// 2. It carries no CHROME. Copy buttons, edit affordances, presence boxes and the rest are the app's
+// controls, not the document's content; a printed page with a "Copy" button on it is a bug.
 //
 // The root must NOT carry `data-print-root` (#85, measured twice): that attribute belongs to the
 // app's print PORTAL, and the app stylesheet — which travels with this file — attaches a contract to it
@@ -101,7 +101,7 @@ function stripChrome(root: HTMLElement): void {
 }
 
 // #85 (review rejection 2026-08-05): a callout's icon did not travel. The screen drew ⚠ and the saved file
-// drew a filled rectangle in the same place — measured as `--cb-icon: url()` on all six types.
+// drew a filled rectangle in the same place — measured as `--cb-icon: url` on all six types.
 //
 // It was not an accident: the icon is a CSS `mask` whose value is a `data:image/svg+xml` URL, and
 // `sanitizeCss` drops exactly that scheme on purpose (ADR-194 addendum A — an svg data: URL is a document
@@ -245,7 +245,7 @@ export function collectAppCss(doc: Document = document): string {
 
 // #85 / ADR-194 addendum A, ruling A2 (2026-08-05): embed the CODE face and nothing else.
 //
-// The collected stylesheet carries @font-face rules whose url() is root-absolute (`/assets/…woff2`), so a
+// The collected stylesheet carries @font-face rules whose url is root-absolute (`/assets/…woff2`), so a
 // file opened from disk asks the FILESYSTEM ROOT for them and every one 404s — measured by the parity gate,
 // which listed those requests as known-red. A1 (embed everything) was rejected: 3.2MB of HTML is its own
 // kind of broken. A2 keeps code blocks looking like the screen (~40KB) and lets prose fall to a generic.
@@ -334,17 +334,17 @@ const escapeHtml = (s: string): string =>
 
 // #85 / ADR-194 addendum A: the stylesheet is interpolated into a <style> block, and until this ruling it
 // went in unexamined — so "the file is inert" was a claim about ELEMENTS while a whole second language rode
-// along beside them. The element rules and the CSS rules are the same rules now:
-//   - a data: URL may be a raster image or a font, and nothing else (an svg data: URL is a document with a
-//     script surface; a woff2 is not);
-//   - no `@import`, which is a fetch the reader did not ask for and a channel out of the file;
-//   - no `</style` sequence, which ends the block early and hands the rest of the sheet to the HTML parser.
+// along beside them. The element rules and the CSS rules are the same rules now
+// - a data: URL may be a raster image or a font, and nothing else (an svg data: URL is a document with a
+// script surface; a woff2 is not);
+// - no `@import`, which is a fetch the reader did not ask for and a channel out of the file;
+// - no `</style` sequence, which ends the block early and hands the rest of the sheet to the HTML parser.
 // Values are dropped rather than rewritten, for the same reason makeInert drops attributes.
 const CSS_SAFE_DATA_URL = /^data:(?:image\/(?:png|jpeg|gif|webp)|font\/[\w.+-]+|application\/font-woff2?)[;,]/i;
 export function sanitizeCss(css: string): string {
   return css
     .replace(/@import[^;]*;?/gi, "")
-    // Quoted first, and the quoted forms may CONTAIN `)` — `url("data:image/svg+xml,<svg onload=steal()>")`
+    // Quoted first, and the quoted forms may CONTAIN `)` — `url("data:image/svg+xml,<svg onload=steal>")`
     // is the case that slipped through a `[^)]*` body (measured: the smuggled svg survived).
     .replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi, (whole, dq?: string, sq?: string, bare?: string) => {
       const url = (dq ?? sq ?? bare ?? "").trim()
@@ -381,8 +381,14 @@ export function buildExportDocument(input: ExportDocumentInput): string {
 <style>
 :root{color-scheme:light}
 body{margin:0;background:var(--bg,#fff);color:var(--fg,#1f2328)}
-.wks-export-doc{max-width:46rem;margin:2rem auto;padding:0 1rem}
-/* #207: expandTabs() replaces the strip with titled sections, and .cm-lp-tab-label is a class this module
+/* #636 (user ruling): the file ends with room. A document that stops flush against the bottom of
+   the window reads as one that was cut off rather than one that finished — "
+   PADDING, not the margin already here: a bottom margin on the last in-flow element does not extend the
+   scrollable area, so the 2rem below was invisible to anyone scrolling — measured 0px following the last
+   block. A fixed amount rather than a fraction of the window, because this is one page in a file, not a
+   surface being scrolled through. */
+.wks-export-doc{max-width:46rem;margin:2rem auto;padding:0 1rem 8rem}
+/* #207: expandTabs replaces the strip with titled sections, and .cm-lp-tab-label is a class this module
    INVENTS — the app stylesheet has no rule for it, so every tab title printed as bare body text and the tabs
    arrived with no frame or separation at all (measured in the real print document: the label was
    indistinguishable from a paragraph). The look is borrowed from the on-screen active tab
@@ -401,7 +407,8 @@ body{margin:0;background:var(--bg,#fff);color:var(--fg,#1f2328)}
   display:inline-flex;align-items:center;justify-content:center}
 [data-export-icon]>svg{display:block;width:100%;height:100%}
 @page{margin:14mm}
-@media print{.wks-export-doc{max-width:none;margin:0}}
+/* …and none of it on paper, where trailing space is a blank page rather than breathing room. */
+@media print{.wks-export-doc{max-width:none;margin:0;padding-bottom:0}}
 </style>
 </head>
 <body>
