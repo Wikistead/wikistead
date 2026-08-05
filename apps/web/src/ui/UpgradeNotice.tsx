@@ -28,7 +28,7 @@ export function UpgradeNotice({
   if (!kind || !shouldShowUpgradeAffordance(kind, role)) return null;
   return (
     <div
-      className="mb-5 rounded-lg border border-border border-l-[3px] border-l-[var(--accent)] bg-panel px-3.5 py-3"
+      className="mb-5 rounded-r-lg border border-border border-l-[3px] border-l-[var(--accent)] bg-panel px-3.5 py-3"
       data-testid={testId}
       role="status"
     >

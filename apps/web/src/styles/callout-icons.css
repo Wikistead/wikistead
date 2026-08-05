@@ -24,7 +24,10 @@
    scoped (memory cm-basetheme-editor-scoped), so a preview/public panel rendered flat as text ("no box").
    --cb-color is already global (set per type above); the per-type tint % mirrors the baseTheme so the
    preview matches the editor exactly. Inside .cm-editor the higher-specificity baseTheme still wins. */
-.cm-lp-callout-panel{border-left:3px solid var(--cb-color,var(--callout-note,#6e7781));border-radius:4px;background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 10%,transparent)}
+/* #632: the radius is on the RIGHT corners only. A 3px coloured bar against a rounded left edge curves
+   inward at both ends — the shape the ruling calls out. The bar stays (colour is how a callout says
+   which kind it is, #199) and the tint, the icon and the width are untouched. */
+.cm-lp-callout-panel{border-left:3px solid var(--cb-color,var(--callout-note,#6e7781));border-radius:0 4px 4px 0;background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 10%,transparent)}
 .cm-lp-callout-panel.cm-lp-callout-note{background:color-mix(in srgb,var(--callout-note,#57606a) 8%,transparent)}
 .cm-lp-callout-panel.cm-lp-callout-warning{background:color-mix(in srgb,var(--callout-warning,#d29922) 13%,transparent)}
 /* #267: the diagram/media alignment classes (#255) also live only in the .cm-editor baseTheme, so a

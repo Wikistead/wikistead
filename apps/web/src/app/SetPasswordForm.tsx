@@ -50,7 +50,7 @@ export function SetPasswordForm({ token, mode, onDone }: { token: string; mode: 
   return (
     <form className="flex flex-col gap-2" onSubmit={submit} data-testid="set-password">
       {error && (
-        <div className="rounded-md border border-border border-l-[3px] border-l-[var(--danger)] bg-panel-2 px-3 py-2 text-sm"
+        <div className="rounded-r-md border border-border border-l-[3px] border-l-[var(--danger)] bg-panel-2 px-3 py-2 text-sm"
           data-testid="set-password-error" role="alert">
           {t(error === "weak" ? "auth.passwordTooShort" : error === "mismatch" ? "auth.passwordMismatch" : "auth.linkDead")}
         </div>
