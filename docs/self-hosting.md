@@ -147,10 +147,43 @@ policy (open / verified email domain / IdP groups / invite-only) is configured i
 the same place; email-domain enrollment requires a DNS-TXT ownership challenge.
 
 For evaluation, the compose bootstrap seeds a `dev` tenant (host `dev.localhost`)
-wired to whatever IdP your `OIDC_*` env points at. For a fresh production tenant,
-create the tenant row + OIDC config through the signup/enrollment flow, then
-promote the first member to tenant admin. Guests never touch the IdP — share
-links mint short-lived app-signed tokens (`GUEST_TOKEN_SECRET`).
+wired to whatever IdP your `OIDC_*` env points at. Guests never touch the IdP —
+share links mint short-lived app-signed tokens (`GUEST_TOKEN_SECRET`).
+
+### Making the first admin of a new tenant
+
+```
+pnpm tenant:local-admin <tenant-slug> <email> --create [--plan=free] [--by=<you>]
+```
+
+It creates the tenant, turns password sign-in on for it, and prints a **first-admin
+invite link**. Hand that link to the person: they set a password, and they are the
+tenant's administrator. From there they configure OIDC in the admin console and can
+turn password sign-in back off.
+
+The command does not take a subject id, and cannot. A tenant's sign-in connections
+stamp a prefix onto the subjects that arrive through them, so the id a real login
+carries is not one an operator can type — passing the "right" one is refused, and
+passing one that is accepted creates an administrator nobody can sign in as. The
+invite is what makes the account real.
+
+Run it with the same admin database credentials as the other `tenant:` commands. It
+bypasses RLS, has no HTTP surface, and records what it did in the operator ledger.
+
+### Recovering a tenant nobody can get into
+
+The same command without `--create` works on an existing tenant that has no
+administrator — after a restore, or one that was provisioned and never used:
+
+```
+pnpm tenant:local-admin <tenant-slug> <email>
+```
+
+If that tenant requires SSO, the recovery goes past that requirement to issue the
+invite, **says so in its output**, and records it in the operator ledger as a
+separate entry. It does not switch the requirement off: the tenant's policy still
+applies to everybody else, and to the recovered administrator as soon as they are
+in. Only the one invite link is exempt, and it expires on the invite's own schedule.
 
 If a tenant's OIDC config locks everyone out, see
 `docs/runbooks/tenant-oidc-lockout-recovery.md`.

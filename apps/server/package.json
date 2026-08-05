@@ -33,6 +33,7 @@
     "tenant:oidc-disable": "tsx --env-file=../../.env src/scripts/oidc-disable.ts",
     "tenant:saml-disable": "tsx --env-file=../../.env src/scripts/saml-disable.ts",
     "tenant:login-methods": "tsx --env-file=../../.env src/scripts/login-methods.ts",
+    "tenant:local-admin": "tsx --env-file=../../.env src/scripts/local-admin.ts",
     "orphan:sweep": "tsx --env-file=../../.env src/scripts/orphan-claim-sweep.ts",
     "revisions:gc": "tsx --env-file=../../.env src/scripts/revisions-gc.ts",
     "analytics:gc": "tsx --env-file=../../.env src/scripts/analytics-gc.ts",
