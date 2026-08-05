@@ -35,23 +35,38 @@ describe("#578: a person who cannot be named is named as unnamed, not as a hash"
     expect(files.length, "at least the surfaces the reject listed").toBeGreaterThanOrEqual(3);
   });
 
-  it("every file that unwraps a principal has an answer for an unresolvable one", () => {
-    // The question, asked of the code rather than of a spelling. A file that reduces a principal to its
-    // id is about to show it to somebody; if it never reaches the shared label, it has no answer for the
-    // case where the name is missing — which is exactly the four surfaces this ticket found.
-    const missing = filesThatUnwrapAPrincipal()
-      .filter(({ src }) => !/memberLabel\s*\(/.test(src))
-      // A file may show a bare id ON PURPOSE — the audit ledger records WHO acted, and the id is the
-      // record. Those say so with a marker next to the line, rather than in a list somewhere else, the
-      // same discipline `fga-read-ok:` uses (#574). A file with no name resolution and no marker is the
-      // defect this ticket is about.
-      .filter(({ src }) => !/raw-principal-ok:/.test(src))
-      .filter(({ src }) => !/shortPrincipalId\s*\(/.test(src))
-      .map(({ path }) => path.slice(SRC.length + 1));
+  it("every EXPRESSION that unwraps a principal has an answer for an unresolvable one", () => {
+    // Per EXPRESSION, not per file. The file-level version of this check was vacuous, and measured so
+    // `PermissionsDialog.tsx` calls `memberLabel` at one of its three unwrapping sites, and that single
+    // call excused the other two — which went on printing 70 characters of hex in the real dialog while
+    // this pin stayed green (review rejection, 2026-08-05).
+    //
+    // The asymmetry is what made it vacuous: the deliberate-exception marker already worked per line,
+    // so a file could be forgiven wholesale for something it only did right in one place. The question
+    // is asked of each site now: this expression reduces a principal to an id, so who names it?
+    const missing: string[] = [];
+    for (const { path, src } of filesThatUnwrapAPrincipal()) {
+      if (path.endsWith("principal-label.ts")) continue; // the label itself is where the unwrapping lives
+      const lines = src.split("\n");
+      lines.forEach((line, i) => {
+        if (!/replace\(\/\^user:\//.test(line)) return;
+        // Deliberate, and it says so where it happens: on the line, or on the one directly above it
+        // JSX puts a comment above the expression it is about. ONE line, never a window: a window is how
+        // `PermissionsDialog`'s single good call came to excuse two bad ones 36 lines away.
+        if (/raw-principal-ok:/.test(line) || /raw-principal-ok:/.test(lines[i - 1] ?? "")) return;
+        if (/memberLabel\s*\(|shortPrincipalId\s*\(/.test(line)) return; // named on the spot
+        // Or the id is BOUND to a name and handed to the label a line or two later, which is how the
+        // space screens read. Followed by the binding rather than by a window of lines: a fixed window
+        // is how `PermissionsDialog`'s one good call came to excuse two bad ones 36 lines away.
+        const bound = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/.exec(line)?.[1];
+        if (bound && new RegExp(`(?:memberLabel|shortPrincipalId)\\s*\\(\\s*${bound}\\b`).test(src)) return;
+        missing.push(`${path.slice(SRC.length + 1)}:${i + 1}`);
+      });
+    }
     expect(
       missing,
-      `these files turn a principal into a bare id and never reach memberLabel (#578). Use it, or ` +
-      `annotate the line with \`// raw-principal-ok: <why a bare id is right here>\`: ${missing.join(", ")}`,
+      `these expressions turn a principal into a bare id with nothing to name it (#578). Reach ` +
+      `memberLabel/shortPrincipalId, or annotate THAT LINE with \`// raw-principal-ok: <why>\`: ${missing.join(", ")}`,
     ).toEqual([]);
   });
 

@@ -1252,14 +1252,25 @@ export async function listPageRestrictions(
   db: TenantDb,
   fga: OpenFgaClient,
   args: { pageId: string; userId: string },
-): Promise<{ principal: string }[]> {
+): Promise<{ principal: string; displayName?: string | null }[]> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // #574: paginated — `restricted` is PER-PRINCIPAL, so this list silently stopped at fifty.
   const tuples = await readObjectTuples(fga, `page:${args.pageId}`)
-  const out: { principal: string }[] = []
+  const out: { principal: string; displayName?: string | null }[] = []
   for (const key of tuples) {
     if (key.relation === 'restricted' && key.user) out.push({ principal: key.user })
+  }
+  // #578: a restriction names a person, so it carries a name for the same reason the grant list does
+  // and from the same authorization-bounded set (the `share` verb above), resolved on the caller's RLS
+  // handle. Without it the dialog's second list would still print a subject id beside a first list that
+  // does not, which is the drift this ticket is about.
+  const userSubs = out.filter((r) => r.principal.startsWith('user:')).map((r) => r.principal.slice('user:'.length))
+  if (userSubs.length > 0) {
+    const ids = await resolveAuthorIdentities(db, userSubs)
+    for (const r of out) {
+      if (r.principal.startsWith('user:')) r.displayName = ids.get(r.principal.slice('user:'.length))?.displayName ?? null
+    }
   }
   return out
 }
@@ -1634,7 +1645,7 @@ export async function listPageAccess(
   fga: OpenFgaClient,
   db: TenantDb,
   args: { pageId: string; tenantId: string; userId: string },
-): Promise<{ grantee: string; relation: PageRelation; groupName?: string }[]> {
+): Promise<{ grantee: string; relation: PageRelation; groupName?: string; displayName?: string | null }[]> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   const tuples = await readObjectTuples(fga, `page:${args.pageId}`) // #574: paginated — a truncated read under-lists who has access
@@ -1658,7 +1669,7 @@ export async function listPageAccess(
     WHERE a.resource_type = 'page' AND a.resource_id = ${args.pageId}`) {
     for (const c of r.caps ?? []) (r.builtin_capability != null ? builtinOwned : customOwned).add(`${r.principal} ${c}`)
   }
-  const out: { grantee: string; relation: PageRelation; groupName?: string }[] = []
+  const out: { grantee: string; relation: PageRelation; groupName?: string; displayName?: string | null }[] = []
   for (const key of tuples) {
     const cap = capForFgaRelation(key.relation)
     if (!cap) continue // maps view_base→view, comment/edit/manage; skips space/view/comment_open
@@ -1667,6 +1678,21 @@ export async function listPageAccess(
     if (cap !== 'manage' && customOwned.has(`${key.user} ${cap}`) && !builtinOwned.has(`${key.user} ${cap}`)) continue
     const groupName = resolveGroupName(key.user, byId)
     out.push({ grantee: key.user, relation: cap, ...(groupName ? { groupName } : {}) })
+  }
+  // #578 (review rejection 2026-08-05): the dialog printed 70 characters of hex where a name belongs,
+  // because this answer carried no name to print. The space list has resolved names since #523; the page
+  // list simply never grew the same half, so the client had nothing to fall back FROM.
+  //
+  // Same shape, same reasoning as `/spaces/:id/access`: a VIEW-GATED set (the caller passed the `share`
+  // verb above), so naming these principals is not a membership oracle — it is the set they already see.
+  // Resolved on the caller's RLS handle, so a cross-tenant sub comes back ABSENT and the client says the
+  // name is unknown rather than inventing one.
+  const userSubs = out.filter((g) => g.grantee.startsWith('user:') && !g.groupName).map((g) => g.grantee.slice('user:'.length))
+  if (userSubs.length > 0) {
+    const ids = await resolveAuthorIdentities(db, userSubs)
+    for (const g of out) {
+      if (g.grantee.startsWith('user:') && !g.groupName) g.displayName = ids.get(g.grantee.slice('user:'.length))?.displayName ?? null
+    }
   }
   return out
 }

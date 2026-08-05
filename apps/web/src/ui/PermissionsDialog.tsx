@@ -178,10 +178,15 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
     setPickedGrant(null);
   };
   // Prefer the server-resolved group name (groupFgaId is one-way); fall back to the raw id.
-  const label = (g: { grantee: string; groupName?: string }) =>
+  //
+  // #578 (review rejection 2026-08-05): the person arm printed the bare subject — 70 characters of hex where
+  // a name belongs — because this list carried no name to print. `/pages/:id/access` resolves display
+  // names now, the same half `/spaces/:id/access` has had since #523, and an unresolvable one is named
+  // unknown by the shared label rather than by its id.
+  const label = (g: { grantee: string; groupName?: string; displayName?: string | null }) =>
     g.groupName ? `${g.groupName} (${t("permissions.group")})`
     : g.grantee.startsWith("group:") ? `${g.grantee.replace(/^group:/, "").replace(/#member$/, "")} (${t("permissions.group")})`
-    : g.grantee.replace(/^user:/, "");
+    : memberLabel(g.grantee, g.displayName, t("spaceMembers.unknownMember"));
 
   return (
     <>
@@ -434,7 +439,11 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           <div className="mt-2 flex flex-col gap-2" data-testid="restrict-list">
             {(restrictions ?? []).map((r) => (
               <div key={r.principal} className="flex items-center gap-2" data-testid="restrict-item">
-                <span className="min-w-0 flex-1 truncate text-sm text-foreground">{r.principal.replace(/^user:/, "").replace(/^group:/, "").replace(/#member$/, "")}</span>
+                {/* #578: a restriction names a person too — the same label, so the two lists in this
+                    dialog cannot disagree about who somebody is. */}
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">{r.principal.startsWith("group:")
+                  ? `${r.principal.replace(/^group:/, "").replace(/#member$/, "")} (${t("permissions.group")})`
+                  : memberLabel(r.principal, r.displayName, t("spaceMembers.unknownMember"))}</span>
                 <IconButton aria-label={t("permissions.unrestrict")} data-testid="restrict-remove" onClick={() => unrestrict.mutate({ principal: r.principal }, {
                   onSuccess: () => notify.success(t("toast.saved")),
                   onError: () => notify.error(t("toast.actionFailed")),

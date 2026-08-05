@@ -119,6 +119,7 @@ export function SpaceMembersTab() {
   const roleNameBySub = new Map(
     (roleAssignments.data ?? [])
       .filter((a) => a.principal.startsWith("user:"))
+      // raw-principal-ok: a MAP KEY, not a label — the value beside it is the name memberLabel then renders
       .map((a) => [a.principal.replace(/^user:/, ""), a.displayName ?? null] as const),
   );
   // #536⑥: a group principal is a HASH — the server resolves the name (group-sync.ts is the id
