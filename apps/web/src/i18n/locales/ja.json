@@ -1026,7 +1026,8 @@
     },
     "lastAdmin": "最後の管理者は変更できません。",
     "lastDirectAdmin": "グループが admin を持っていますが、グループ経由の管理者は IdP 側の変更で失われ得るため、直接付与の管理者を最低 1 人残す必要があります。",
-    "viaGroup": "（{{group}} 経由）"
+    "groupRolesMark_other": "グループ由来のロール {{count}} 件",
+    "groupRolesTitle": "グループ由来"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",
