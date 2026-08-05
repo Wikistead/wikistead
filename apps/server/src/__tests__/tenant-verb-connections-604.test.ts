@@ -10,6 +10,7 @@
 //   - an admin still passes (the `or admin` arm; nobody loses anything)
 //   - a member holding a role that carries the verb passes WITHOUT being an admin
 //   - a plain member does not
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -32,6 +33,8 @@ let db: TenantDb
 let roleId = ''
 
 beforeAll(async () => {
+  // #624: a tenant role names somebody who is HERE — seated so this file measures its own subject
+  await seatMembers(admin, TENANT, [HOLDER])
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
   const res = await app.inject({
@@ -48,6 +51,7 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
+  await unseatMembers(admin, TENANT, [HOLDER])
   await admin`DELETE FROM role_assignments WHERE principal = ${`user:${HOLDER}`}`.catch(() => {})
   await admin`DELETE FROM roles WHERE id = ${roleId}`.catch(() => {})
   await db.release(); await app.close(); await admin.end(); await pool.end()

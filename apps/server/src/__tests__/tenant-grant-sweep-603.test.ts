@@ -8,6 +8,7 @@
 //
 // Measured in a real store, both halves, because a row without a tuple is a ledger that lies and a
 // tuple without a row is a power nobody can see.
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -36,6 +37,8 @@ const rows = async (): Promise<number> =>
     WHERE resource_type = 'tenant' AND resource_id = ${TENANT} AND principal = ${`user:${SUB}`}`)[0]!.n)
 
 beforeAll(async () => {
+  // #624: a tenant role names somebody who is HERE — seated so this file measures its own subject
+  await seatMembers(admin, TENANT, [SUB])
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
   const res = await app.inject({ method: 'POST', url: '/admin/roles', headers: H,
@@ -48,6 +51,7 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
+  await unseatMembers(admin, TENANT, [SUB])
   await admin`DELETE FROM role_assignments WHERE principal = ${`user:${SUB}`}`.catch(() => {})
   await admin`DELETE FROM roles WHERE id = ${roleId}`.catch(() => {})
   await db.release(); await app.close(); await admin.end(); await pool.end()

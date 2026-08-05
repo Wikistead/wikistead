@@ -10,6 +10,7 @@
 // boundary), and the sweep below walks every FGA write site in the tree rather than naming the ones
 // that were known to leak — a new one is measured by existing, which is the shape this ticket asked
 // for after "fixing one place and leaving the class open" was called out.
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -33,6 +34,8 @@ const FGA_WORDS = /FGA API|openfga|tuple to be written|cannot delete a tuple|rel
 let app: FastifyInstance
 
 beforeAll(async () => {
+  // #624: a grant names somebody who is HERE — the route refuses a principal with no members row
+  await seatMembers(admin, TENANT, [GRANTEE])
   app = await buildApp()
   // A stand-in for "some route let an FGA error escape". The two tuple helpers translate what the
   // product writes ON PURPOSE (#578), but a check / read / batchCheck failure — a stale model, a
@@ -50,6 +53,7 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
+  await unseatMembers(admin, TENANT, [GRANTEE])
   await app.close()
   await deleteTuples(fgaClient, memberTuples(TENANT, [GRANTEE])).catch(() => {})
   await admin`DELETE FROM role_assignments WHERE resource_id = ${SPACE}`.catch(() => {})

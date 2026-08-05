@@ -9,6 +9,7 @@
 // DISCOVERY, not a table. The cases are generated from ADMIN_SURFACES × TENANT_CAP_RELATION, so a
 // verb added later is measured by existing rather than by somebody remembering to add a row here —
 // which is exactly the failure this ticket is about (a power that nothing led to).
+import { seatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -56,6 +57,9 @@ beforeAll(async () => {
     expect(res.statusCode, res.body).toBe(201)
     const roleId = (res.json() as { id: string }).id
     roleIds.push(roleId)
+    // #624: a tenant role names somebody who is HERE. This file seats its holders a few lines below
+    // (for #471's request-principal rule); the assignment route needs the row FIRST.
+    await seatMembers(admin, TENANT, [sub])
     const assign = await app.inject({
       method: 'POST', url: `/admin/roles/${roleId}/assignments`, headers: H,
       payload: { resourceType: 'tenant', resourceId: TENANT, principal: `user:${sub}` },

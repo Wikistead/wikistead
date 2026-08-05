@@ -1,6 +1,7 @@
 // #553 / ADR-199 §2 (T1): the editor-noun composite grant. N capabilities = N single-capability
 // built-in rows in ONE transaction; each arm independently owned, revocable and idempotent; the bare
 // capability form grants exactly what it says (the honest-API pin); the replace sweep keeps BOTH arms.
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -23,7 +24,14 @@ let db: TenantDb
 let spaceId = ''
 let pageId = ''
 const subs: string[] = []
-const sub = (n: string) => { const s = `cg-${n}-${STAMP}`; subs.push(s); return `user:${s}` }
+// #624: a grant names somebody who is HERE — the routes refuse a principal with no members row
+// now, so the fixture seats the sub it is about to grant to. That is what the test always meant.
+const sub = async (n: string) => {
+  const s = `cg-${n}-${STAMP}`
+  subs.push(s)
+  await seatMembers(adminPool, TENANT, [s])
+  return `user:${s}`
+}
 
 const dev = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
 
@@ -37,6 +45,8 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
+  // #624: the fixture seated these; take them out so the shared dev tenant is not widened
+  await unseatMembers(adminPool, TENANT, subs)
   await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId}`.catch(() => {})
   await deletePage(db, fgaClient, app.searchDriver, { pageId, userId: OWNER }).catch(() => {})
   await deleteSpace(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: OWNER }).catch(() => {})
@@ -52,7 +62,7 @@ const composite = (principal: string, caps: string[]) =>
 
 describe('#553 T1: the editor-noun composite grant', () => {
   it('grants N single-capability rows in one pass; both arms hold; each is independently revocable', async () => {
-    const p = sub('pair')
+    const p = await sub('pair')
     await composite(p, ['edit', 'comment'])
     const rows = await rowsOf(p)
     expect(rows.map((r) => r.builtin_capability)).toEqual(['comment', 'edit'])
@@ -70,7 +80,7 @@ describe('#553 T1: the editor-noun composite grant', () => {
   }, 120_000)
 
   it('is idempotent per arm: a duplicate composite leaves two rows; a half-held principal lands the other arm', async () => {
-    const p = sub('idem')
+    const p = await sub('idem')
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'comment', plan: 'business' })
     await composite(p, ['edit', 'comment'])
     expect((await rowsOf(p)).map((r) => r.builtin_capability)).toEqual(['comment', 'edit'])
@@ -79,7 +89,7 @@ describe('#553 T1: the editor-noun composite grant', () => {
   }, 120_000)
 
   it('the bare capability form grants exactly what it says (one row, no comment ride-along)', async () => {
-    const p = sub('bare')
+    const p = await sub('bare')
     const res = await app.inject({
       method: 'POST', url: `/spaces/${spaceId}/access`, headers: dev,
       payload: { grantee: p, relation: 'edit' },
@@ -89,7 +99,7 @@ describe('#553 T1: the editor-noun composite grant', () => {
   }, 120_000)
 
   it('the composite REPLACES the principal\'s other role (the #536 sweep keeps both arms)', async () => {
-    const p = sub('sweep')
+    const p = await sub('sweep')
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business' })
     const res = await app.inject({
       method: 'POST', url: `/spaces/${spaceId}/access`, headers: dev,
@@ -101,7 +111,7 @@ describe('#553 T1: the editor-noun composite grant', () => {
   }, 120_000)
 
   it('one composite add audits one event per arm (two precise records, ADR-199 ruling)', async () => {
-    const p = sub('audit')
+    const p = await sub('audit')
     const count = async () => Number((await adminPool<{ n: string }[]>`
       SELECT (SELECT count(*) FROM audit_log    WHERE tenant_id = ${TENANT} AND action = 'space.access_granted' AND target = ${`space:${spaceId}`})
            + (SELECT count(*) FROM audit_outbox WHERE tenant_id = ${TENANT} AND action = 'space.access_granted' AND target = ${`space:${spaceId}`}) AS n`)[0]!.n)
@@ -115,7 +125,7 @@ describe('#553 T1: the editor-noun composite grant', () => {
 // an arbitrary capability list must not slip N roles past the #536 one-role convergence.
 describe('#553 review D: composite allowlist', () => {
   it('rejects a non-bundle relations[] with 400 and writes nothing', async () => {
-    const p = sub('freeform')
+    const p = await sub('freeform')
     for (const relations of [['view', 'comment', 'edit', 'moderate', 'manage'], ['view'], ['edit', 'manage'], ['comment']]) {
       const res = await app.inject({
         method: 'POST', url: `/spaces/${spaceId}/access`, headers: dev,
@@ -127,7 +137,7 @@ describe('#553 review D: composite allowlist', () => {
   }, 120_000)
 
   it('accepts the ruled editor bundle in either order', async () => {
-    const p = sub('order')
+    const p = await sub('order')
     const res = await app.inject({
       method: 'POST', url: `/spaces/${spaceId}/access`, headers: dev,
       payload: { grantee: p, relations: ['comment', 'edit'] },
@@ -145,7 +155,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
   const canEdit = (p: string) => check(fgaClient, p, 'edit', { type: 'page', id: pageId })
 
   it('one DELETE with relations[] removes both rows and both leaves', async () => {
-    const p = sub('rev-both')
+    const p = await sub('rev-both')
     await composite(p, ['edit', 'comment'])
     expect(await canEdit(p)).toBe(true)
     expect(await canComment(p)).toBe(true)
@@ -165,7 +175,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
     // about atomicity: what distinguishes the fix is that the arms are deleted TOGETHER — one
     // transaction, one FGA write. Revoking arm by arm (the client's old behaviour, or a server-side
     // loop) issues one write per arm and passes through the half state in between.
-    const p = sub('rev-onewrite')
+    const p = await sub('rev-onewrite')
     await composite(p, ['edit', 'comment'])
     let writes = 0
     const counting = new Proxy(fgaClient, {
@@ -185,7 +195,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
     // the acceptance condition from the ruling: not just "the client sends one request", but "a failure
     // cannot produce the half state either". The failure is injected where it can actually happen —
     // the FGA delete, which runs last inside the transaction.
-    const p = sub('rev-rollback')
+    const p = await sub('rev-rollback')
     await composite(p, ['edit', 'comment'])
     const spy = { calls: 0 }
     // a PROXY, not a spread: the client's methods live on its prototype, and a spread copy would fail
@@ -211,7 +221,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
   }, 120_000)
 
   it('a ROWLESS arm goes too (a legacy comment leaf must not survive the fold\'s revoke)', async () => {
-    const p = sub('rev-rowless')
+    const p = await sub('rev-rowless')
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
     // the pre-composite shape: a comment leaf with no row of its own
     const { writeTuples } = await import('@wikistead/authz')
@@ -230,7 +240,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
     // the leaf already existed. Removing that row deletes nothing by ownership, and because a row
     // EXISTS the rowless arm was skipped too — so the fold reported success and the principal kept
     // commenting. dev happens to have zero such rows, so no review could ever have caught it.
-    const p = sub('rev-unowned')
+    const p = await sub('rev-unowned')
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
     const { writeTuples } = await import('@wikistead/authz')
     await writeTuples(fgaClient, [{ user: p, relation: 'commenter', object: `space:${spaceId}` }])
@@ -248,7 +258,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
   it('an arm whose leaf is already gone does not abort the whole revoke', async () => {
     // deleting a tuple that is not there is an FGA error, and it rolled the transaction back: the
     // fold threw and removed NOTHING — a revoke you can press with no effect.
-    const p = sub('rev-halfgrant')
+    const p = await sub('rev-halfgrant')
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
     expect(await canEdit(p)).toBe(true)
     expect(await canComment(p), 'no comment arm at all — the state this used to choke on').toBe(false)
@@ -263,7 +273,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
   it('a live CUSTOM ROLE covering comment keeps its leaf when the editor noun is revoked', async () => {
     // the rule the recomputed delete set must not break: another row still confers comment, so
     // comment stays — taking the editor noun away is not taking the role away.
-    const p = sub('rev-covered')
+    const p = await sub('rev-covered')
     const roleId = `cg-role-${STAMP}`
     await adminPool`INSERT INTO roles (id, tenant_id, name, capabilities, scope) VALUES (${roleId}, ${TENANT}, ${`cg-cov-${STAMP}`}, ARRAY['comment']::text[], 'resource')
       ON CONFLICT (id) DO NOTHING`
@@ -287,7 +297,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
   }, 120_000)
 
   it('the same allowlist as the grant: a free-form relations[] is 400 and removes nothing', async () => {
-    const p = sub('rev-freeform')
+    const p = await sub('rev-freeform')
     await composite(p, ['edit', 'comment'])
     for (const relations of [['edit'], ['edit', 'manage'], ['view', 'comment']]) {
       const res = await app.inject({ method: 'DELETE', url: `/spaces/${spaceId}/access`, headers: dev, payload: { grantee: p, relations } })
@@ -297,7 +307,7 @@ describe('#553 revoking a folded noun takes every arm, in one transaction', () =
   }, 120_000)
 
   it('the singular form still means exactly one capability (independence, non-regression)', async () => {
-    const p = sub('rev-single')
+    const p = await sub('rev-single')
     await composite(p, ['edit', 'comment'])
     await revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'edit', plan: 'business' })
     expect(await canEdit(p)).toBe(false)
