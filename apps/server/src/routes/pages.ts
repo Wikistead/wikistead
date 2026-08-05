@@ -1365,9 +1365,19 @@ export async function setPagePrivate(
   subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
   void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {}) // #362 E1: privatise cuts inherited view
   invalidatePageBadge(args.tenantId, args.pageId) // #541: the lock badge flips immediately
-  // Raised after the sweep, before the success event: the marker landed, but a page whose public grant
-  // survived is still readable by anyone, and saying "made private" would be the #596 lie about the one
-  // thing this call exists to guarantee. Retrying the same call re-attempts the strip (idempotent).
+  // comment 785 #2: emit share_link.revoked ONLY after the DB revoke committed (never on a rolled-back tx).
+  // BEFORE the raise below (#622 re-review): those links really are revoked in the database, and a consumer
+  // mirroring access has to hear about the ones that went even when the strip did not — swallowing them
+  // because a different half failed is the same "the ledger does not match the world" defect from the
+  // other direction.
+  for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
+  // Raised after every piece of fail-safe work, and before the success event: the marker landed, but a page
+  // whose public grant survived is still readable by anyone, and saying "made private" would be the #596
+  // lie about the one thing this call exists to guarantee. Retrying the same call re-attempts the strip
+  // (idempotent). The `page.made_private` AUDIT row is already committed at this point — the tx that wrote
+  // the marker owns it, and the marker did land — so the ledger says the page was marked private, which is
+  // true; what the caller is being told here is that it is marked private AND still public, which the
+  // 500 + `public_grant_not_removed` says and the missing event does not contradict.
   if (stillPublic.length) {
     console.error('[setPagePrivate] public grant survived — these pages are still anonymously readable', { pageId: args.pageId, stillPublic })
     throw Object.assign(new Error('the page is marked private, but its public grant could not be removed'), {
@@ -1375,8 +1385,6 @@ export async function setPagePrivate(
     })
   }
   emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
-  // comment 785 #2: emit share_link.revoked ONLY after the DB revoke committed (never on a rolled-back tx).
-  for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
   // comment 785 #3: a partial FGA-delete failure is not silent — the page IS private (fail-safe), but these
   // links are still live on FGA until a re-privatise/sweep retries them (they stay revoked_at IS NULL).
   if (failed.length) console.error('[setPagePrivate] subtree share-link revoke incomplete (private applied; links pending FGA delete)', { pageId: args.pageId, failed })
@@ -1720,6 +1728,7 @@ async function applyMovePrivacyBoundary(
   args: { rootId: string; tenantId: string; userId: string; stripSweep: boolean; reindex: boolean },
 ): Promise<void> {
   const subtree = [args.rootId, ...(await descendantIds(db, args.rootId))]
+  let unremoved: string[] = []
   if (args.stripSweep) {
     // Same rule as setPagePrivate's strip: "was not public" is convergence, a refusal is not. The move has
     // made this subtree effectively private, and `view_base`'s `[user:*]` arm is not private-guarded, so a
@@ -1732,12 +1741,12 @@ async function applyMovePrivacyBoundary(
       const { revoked } = await revokeResourceShareLinks(db, fga, { type: 'page', id }, args.tenantId, args.userId)
       for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
     }
-    if (stillPublic.length) {
-      console.error('[applyMovePrivacyBoundary] public grant survived — these pages are still anonymously readable', { rootId: args.rootId, stillPublic })
-      throw Object.assign(new Error('the move made this subtree private, but a public grant could not be removed'), {
-        statusCode: 500, code: 'public_grant_not_removed', pages: stillPublic,
-      })
-    }
+    // Remembered, not thrown yet: the reindex below is part of the fail-safe work, and #622's re-review
+    // caught this raise jumping over it — the search denorm would have kept the pre-move state for a
+    // subtree whose move DID happen. Read-time re-checks mean that was staleness rather than a leak, but
+    // "raise only after everything that can still be done, has been" is the rule the sibling path follows
+    // and this one now follows it too.
+    unremoved = stillPublic;
   }
   if (args.reindex) {
     const oids = await db.tx(async (tx) => {
@@ -1746,6 +1755,12 @@ async function applyMovePrivacyBoundary(
       return os
     })
     subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
+  }
+  if (unremoved.length) {
+    console.error('[applyMovePrivacyBoundary] public grant survived — these pages are still anonymously readable', { rootId: args.rootId, stillPublic: unremoved })
+    throw Object.assign(new Error('the move made this subtree private, but a public grant could not be removed'), {
+      statusCode: 500, code: 'public_grant_not_removed', pages: unremoved,
+    })
   }
 }
 
