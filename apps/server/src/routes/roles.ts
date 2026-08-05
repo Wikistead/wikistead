@@ -728,6 +728,9 @@ export async function rolesPlugin(app: FastifyInstance) {
     await req.db.tx(async (tx) => {
       const dup = await tx<{ id: string }[]>`SELECT id FROM roles WHERE name = ${def.name}`
       if (dup.length) throw Object.assign(new Error('a role with this name already exists'), { statusCode: 409 })
+      // no-resource-authority-ok: a role that exists is not a grant. This row has no assignments yet, so
+      // no principal gains anything from it; authority is asked for where it is HANDED OUT (the assign
+      // door) and where an edit re-expands it into live assignments (#629, below).
       await tx`INSERT INTO roles (id, tenant_id, name, capabilities, scope) VALUES (${id}, ${req.tenant.id}, ${def.name}, ${def.capabilities as string[]}, ${scope})`
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'role.created', target: `role:${id}` })
     })
@@ -772,6 +775,24 @@ export async function rolesPlugin(app: FastifyInstance) {
           // An ADDED capability must be expressible at EVERY assigned scope BEFORE any write (no
           // partial expansion — a space assignment cannot express `comment`).
           for (const a of assignments) for (const c of added) expansionTuples(a.resource_type, a.resource_id, a.principal, c)
+          // #629: …and the caller must be ALLOWED to hand it out at every one of those scopes. This
+          // door had no ceiling: it gated on tenant-wide `manage_roles` while its EFFECT is per
+          // resource, so somebody who could not grant `delete` on a space could add `delete` to a role
+          // already assigned there and let the re-expansion write it — to a third party, or to
+          // themselves. Measured before the fix: four admin-class relations, and a roster that had
+          // answered 403 a moment earlier started answering 200.
+          //
+          // The same authority the grant door uses, not a third one (`requireGrantAuthority` /
+          // `requireSpaceAccessAuthority` are the precedents). Only ADDED capabilities are asked
+          // about — removal takes power away — and one refusal stops the whole edit, so a role
+          // assigned in five places cannot be edited into three of them.
+          for (const a of assignments) {
+            if (!added.length) break
+            await requireAssignmentAuthority(app.fga, {
+              sub: req.user.sub, tenantId: req.tenant.id,
+              resourceType: a.resource_type, resourceId: a.resource_id, capabilities: added,
+            })
+          }
 
           for (const a of assignments) {
             // #445: tenant assignments join NEITHER reindex list — space_creator is a search no-op.
