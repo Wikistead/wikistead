@@ -1340,9 +1340,19 @@ export async function setPagePrivate(
     return os
   })
   // public⊥private invariant, over the whole subtree: strip each page's public grant so is_public can't survive
-  // privatisation. Per-page delete + catch (a batch fails wholesale if any page isn't public — a public
-  // descendant would then keep indexing public). Security-critical + fail-safe: runs AFTER the marker commit.
-  for (const id of subtree) await deleteTuples(fga, [PUBLIC_GRANT(id)]).catch(() => {})
+  // privatisation. Per-page delete (a batch fails wholesale if any page isn't public — a public descendant
+  // would then keep indexing public). Security-critical + fail-safe: runs AFTER the marker commit.
+  //
+  // The catch used to swallow EVERYTHING, which made this the quiet half of a leak: `view_base`'s `[user:*]`
+  // arm is NOT `but not private` (model.fga) — the invariant holds at the WRITE boundary and nowhere else
+  // so a page whose strip failed stays anonymously world-readable while the caller is told it went private.
+  // "Not public to begin with" is convergence and still passes; a real refusal is collected and raised below,
+  // after the rest of the fail-safe work has been attempted (aborting mid-sweep would leave the pages behind
+  // this one public too).
+  const stillPublic: string[] = []
+  for (const id of subtree) {
+    await deleteTuples(fga, [PUBLIC_GRANT(id)]).catch((e) => { if (!isAlreadyConverged(e)) stillPublic.push(id) })
+  }
   // #109 Fix A + ADR-103 2b: revoke the subtree's share links AFTER the marker/strip — the marker + strip +
   // reindex are the security-critical fail-safe part and land first (a revoke failure must NOT roll back them).
   const revoked: { id: string; pageId: string }[] = []
@@ -1355,6 +1365,15 @@ export async function setPagePrivate(
   subtree.forEach((id, i) => processOutboxAsync(driver, oids[i]!, { tenantId: args.tenantId, pageId: id, operation: 'upsert' }))
   void sweepUnviewableWatches(db, fga, [args.pageId]).catch(() => {}) // #362 E1: privatise cuts inherited view
   invalidatePageBadge(args.tenantId, args.pageId) // #541: the lock badge flips immediately
+  // Raised after the sweep, before the success event: the marker landed, but a page whose public grant
+  // survived is still readable by anyone, and saying "made private" would be the #596 lie about the one
+  // thing this call exists to guarantee. Retrying the same call re-attempts the strip (idempotent).
+  if (stillPublic.length) {
+    console.error('[setPagePrivate] public grant survived — these pages are still anonymously readable', { pageId: args.pageId, stillPublic })
+    throw Object.assign(new Error('the page is marked private, but its public grant could not be removed'), {
+      statusCode: 500, code: 'public_grant_not_removed', pages: stillPublic,
+    })
+  }
   emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
   // comment 785 #2: emit share_link.revoked ONLY after the DB revoke committed (never on a rolled-back tx).
   for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
@@ -1512,7 +1531,11 @@ export async function setPagePublic(
   // flagged). Re-read private AFTER the write; if it is now private, REVOKE the grant we just wrote so
   // private always wins (public⊥private converges without an advisory lock). Idempotent.
   if (await readPagePrivate(fga, args.pageId)) {
-    await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
+    // A swallow here defeated the self-heal it was written for: if this delete fails, the private page keeps
+    // the grant we just wrote and is world-readable, and the 409 below would report the tidy outcome ("it
+    // stayed private") for the untidy one. Convergence only; a refusal propagates, and the response boundary
+    // turns it into authz_store_error rather than a 409 that understates what happened.
+    await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch((e) => { if (!isAlreadyConverged(e)) throw e })
     throw Object.assign(new Error('a private page cannot be made public'), { statusCode: 409 })
   }
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
@@ -1537,7 +1560,11 @@ export async function unsetPagePublic(
     const [pg] = await tx<[{ published_at: Date | null; space_id: string }?]>`SELECT published_at, space_id FROM pages WHERE id = ${args.pageId}`
     await fanOutFeedEvent(tx, { tenantId: args.tenantId, eventType: 'page.made_non_public', pageId: args.pageId, spaceId: pg?.space_id ?? null, actor: `user:${args.userId}`, publishedAt: pg?.published_at ?? null })
     // Remove the anonymous grant (idempotent — the page may not be public). Exactly one tuple, so no orphan.
-    await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch(() => {})
+    // Only convergence is forgiven. Measured with a refusing store before this line changed: the call
+    // answered success, wrote `page.made_non_public` to the ledger, fired the webhook — and the page was
+    // still readable by anyone, because the public route authorises off this very tuple (routes/public.ts).
+    // Inside the tx on purpose: a refusal now rolls the audit row and the outbox intent back with it.
+    await deleteTuples(fga, [PUBLIC_GRANT(args.pageId)]).catch((e) => { if (!isAlreadyConverged(e)) throw e })
     return o
   })
   processOutboxAsync(driver, oid, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
@@ -1694,10 +1721,22 @@ async function applyMovePrivacyBoundary(
 ): Promise<void> {
   const subtree = [args.rootId, ...(await descendantIds(db, args.rootId))]
   if (args.stripSweep) {
-    for (const id of subtree) await deleteTuples(fga, [PUBLIC_GRANT(id)]).catch(() => {})
+    // Same rule as setPagePrivate's strip: "was not public" is convergence, a refusal is not. The move has
+    // made this subtree effectively private, and `view_base`'s `[user:*]` arm is not private-guarded, so a
+    // survivor here is a page the move was supposed to close and did not — the caller has to hear it.
+    const stillPublic: string[] = []
+    for (const id of subtree) {
+      await deleteTuples(fga, [PUBLIC_GRANT(id)]).catch((e) => { if (!isAlreadyConverged(e)) stillPublic.push(id) })
+    }
     for (const id of subtree) {
       const { revoked } = await revokeResourceShareLinks(db, fga, { type: 'page', id }, args.tenantId, args.userId)
       for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
+    }
+    if (stillPublic.length) {
+      console.error('[applyMovePrivacyBoundary] public grant survived — these pages are still anonymously readable', { rootId: args.rootId, stillPublic })
+      throw Object.assign(new Error('the move made this subtree private, but a public grant could not be removed'), {
+        statusCode: 500, code: 'public_grant_not_removed', pages: stillPublic,
+      })
     }
   }
   if (args.reindex) {
