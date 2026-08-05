@@ -460,18 +460,61 @@ async function requireSpaceManage(fga: OpenFgaClient, userId: string, spaceId: s
 // and no record of who delegated to whom (the page-scope answer to the same question).
 // In one sentence: this verb runs the roster of READERS and EDITORS; it cannot appoint or remove a
 // moderator, a manager, or another holder of itself.
-export function spaceCallMovesAdminClass(capabilities: readonly string[], replace?: boolean): boolean {
+export function spaceCallMovesAdminClass(
+  capabilities: readonly string[],
+  replace?: boolean,
+  /** What the TARGET principal holds in this space today, read from the store. See below. */
+  targetHolds?: readonly string[],
+): boolean {
   // `manageAccess` is IN `ADMIN_CLASS_ROLE_CAPS` since the 2026-08-05 ruling made it a role capability,
   // so naming it again here made the set non-load-bearing (removing the verb from the set changed no
   // answer — measured). `manage` stays named because it is deliberately not a role capability.
-  return replace === true
-    || capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as never) || c === 'manage')
+  const isAdminClass = (c: string) => ADMIN_CLASS_ROLE_CAPS.has(c as never) || c === 'manage'
+  // Naming an admin-class capability is the same answer it always was: this arm is what stops a holder
+  // appointing a moderator, or writing `manage` to themselves. Untouched by the 2026-08-05 ruling.
+  if (capabilities.some(isAdminClass)) return true
+  if (replace !== true) return false
+  // #607 (user ruling): `replace` used to require `manage` unconditionally, which was correct but
+  // too wide — it meant the roster verb could ADD and REMOVE but never CHANGE anybody, so turning a
+  // viewer into an editor took a revoke and a re-grant. has to be
+  // able to do that.
+  //
+  // The test stays an OPERATION test — this is the difference from ADR-209 rev1, which was rejected for
+  // replacing the axis with "is the requested capability admin-class" and thereby stopping looking at
+  // what `replace` SWEEPS. We still look at the sweep; we just ask what is actually in it. If the target
+  // holds nothing admin-class, the sweep cannot carry an admin-class mark away.
+  //
+  // `targetHolds` MUST come from the tuple store, never from `role_assignments` (①). A space's
+  // creator holds the structural `manager` leaf and NO row — `spaces.ts` says so where the sweep reads
+  // it — so a rows-based answer would classify the owner as "holds nothing admin-class" and hand their
+  // demotion to an access-manager. That is rev1's hole arriving through a different door.
+  //
+  // Absent (the caller could not or did not read): treated as admin-class, so an unanswered question
+  // refuses rather than permits.
+  return (targetHolds ?? ['manage']).some(isAdminClass)
 }
+
+/** What a principal holds in this space, from the TUPLES — including marks that have no row. */
+export async function spaceCapsHeldBy(fga: OpenFgaClient, spaceId: string, principal: string): Promise<string[]> {
+  const held: string[] = []
+  for (const key of await readObjectTuples(fga, `space:${spaceId}`)) {
+    if (key.user !== principal) continue
+    const cap = RELATION_TO_CAP[key.relation]
+    if (cap) held.push(cap)
+  }
+  return held
+}
+
 async function requireSpaceAccessAuthority(
   fga: OpenFgaClient, userId: string, spaceId: string,
-  opts: { capabilities: readonly string[]; replace?: boolean },
+  opts: { capabilities: readonly string[]; replace?: boolean; grantee?: string },
 ): Promise<void> {
-  if (spaceCallMovesAdminClass(opts.capabilities, opts.replace)) return requireSpaceManage(fga, userId, spaceId)
+  // Only a replace needs to know the target, and only when nothing named is admin-class already — one
+  // extra read on the path that changes somebody's role, none on the others.
+  const needsTarget = opts.replace === true
+    && !opts.capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as never) || c === 'manage')
+  const targetHolds = needsTarget && opts.grantee ? await spaceCapsHeldBy(fga, spaceId, opts.grantee) : undefined
+  if (spaceCallMovesAdminClass(opts.capabilities, opts.replace, targetHolds)) return requireSpaceManage(fga, userId, spaceId)
   const ok = await check(fga, `user:${userId}`, 'manageAccess', { type: 'space', id: spaceId })
   if (!ok) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
 }
@@ -740,7 +783,7 @@ export async function grantSpaceAccess(
   requireGroupGrantEntitlement(args.grantee, args.plan)
   // ADR-209 (#607): the roster gate. Admin-class capabilities and replace-mode calls still require
   // `manage` (the ceiling); everything else is the membership verb's job.
-  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [args.capability], replace: args.replace })
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [args.capability], replace: args.replace, grantee: args.grantee })
   // #536 / ADR-188 §6 item 1: a built-in grant IS a role assignment now. It goes through the same helper a
   // custom role does, differing only in which column of the row identifies what was granted -- so a
   // built-in grant finally participates in the reference count that decides whether a shared leaf may be
@@ -813,7 +856,7 @@ export async function grantSpaceAccessComposite(
   if (!allowed.some((b) => sameCapSet(b, args.capabilities))) {
     throw Object.assign(new Error('unknown composite grant'), { statusCode: 400 })
   }
-  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: args.capabilities, replace: args.replace })
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: args.capabilities, replace: args.replace, grantee: args.grantee })
   // machine-row refusal across BOTH arms (the same 409 the single grant gives)
   const held = await db.sql<{ origin: string; builtin_capability: string | null }[]>`
     SELECT origin, builtin_capability FROM role_assignments
@@ -958,7 +1001,7 @@ export async function revokeSpaceAccess(
   validateSpaceGrant(args.grantee, args.capability)
   // ADR-209 (#607): revoking an admin-class capability (a manager, a moderator, another
   // access-manager) still requires `manage`; `replace` is a revoke-in-disguise and takes the same door.
-  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [args.capability], replace: args.replace })
+  await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [args.capability], replace: args.replace, grantee: args.grantee })
   // #536 / ADR-188 §6 item 1: revoke the ROW when there is one, so the reference count decides which
   // leaves may go. A principal holding both a `view` grant and a role bundling `view` keeps viewing after
   // either one is taken away — which is what "still granted" has always meant everywhere else.
@@ -1117,10 +1160,20 @@ export async function listSpaceAccess(
   // So the server answers the OTHER question too, per principal, and answers it through the same helper
   // the route's gate calls (`replace: true`, which is what a role change is) — the client is never asked
   // to infer which capabilities are admin-class.
-  const capsOfPrincipal = new Map<string, SpaceCapability[]>()
-  for (const g of out) capsOfPrincipal.set(g.grantee, [...(capsOfPrincipal.get(g.grantee) ?? []), g.capability])
+  //
+  // #607 (user ruling + review ①): what the principal holds is read from the TUPLES, not
+  // from the rows above. The rows are a display projection — a capability owned by a custom-role
+  // assignment is filtered out of them, and the structural owner leaf belongs to no row at all — so
+  // asking them "does this principal hold anything admin-class" gives the wrong answer in exactly the
+  // two cases that matter. Same source as the gate, so the payload cannot promise what the route
+  // refuses.
+  const heldByPrincipal = new Map<string, SpaceCapability[]>()
+  for (const key of tuples) {
+    const cap = RELATION_TO_CAP[key.relation]
+    if (cap) heldByPrincipal.set(key.user, [...(heldByPrincipal.get(key.user) ?? []), cap])
+  }
   for (const g of out) {
-    g.changeable = callerIsManager || !spaceCallMovesAdminClass(capsOfPrincipal.get(g.grantee) ?? [], true)
+    g.changeable = callerIsManager || !spaceCallMovesAdminClass([], true, heldByPrincipal.get(g.grantee) ?? [])
   }
 
   // #523 / ADR-190: FULL name resolution (override ?? OIDC display_name) for the USER grantees. This is a

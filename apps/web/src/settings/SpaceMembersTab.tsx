@@ -16,7 +16,7 @@ import { RoleTip, RoleCaps } from "../ui/RoleTip";
 import { memberLabel } from "../ui/principal-label"; // #578: one wording for "we cannot name this person"
 import { Input } from "../ui/Input";
 import { Select, type SelectOption } from "../ui/Select";
-import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
+import { resolveGrantDispatch, foldGrantsByPrincipal, revokeCapsForRow } from "./grant-dispatch";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
@@ -351,12 +351,13 @@ export function SpaceMembersTab() {
   // #586 / ADR-203 §4: a custom role IS its capabilities, and the assignment list carries only its id
   // and name — so the tooltip joins against the definitions this screen already holds.
   const roleCapsById = new Map(customRoles.map((r) => [r.id, r.capabilities as readonly string[]]));
-  const foldedGrantees = foldedEditorGrantees(grants);
   // #607 principals whose ROLE this caller may not change (the server answers per principal).
   const frozenPrincipals = new Set(grants.filter((g) => g.changeable === false).map((g) => g.grantee));
-  const visibleGrants = grants.filter((g) => !(foldedGrantees.has(g.grantee) && g.capability === "comment"));
+  // #607 one row per PRINCIPAL, not per capability. The owner used to appear twice — `manage`
+  // (badge) and `view` (control) — and the second row is what offered the demotion that could not work.
+  const visibleGrants = foldGrantsByPrincipal(grants);
   const mergedRows: MergedRow[] = [
-    ...visibleGrants.map((g) => ({
+    ...visibleGrants.map(({ row: g, foldedCaps }) => ({
       kind: "grant" as const, key: `g:${g.grantee}:${g.capability}`, badge: capNoun(g.capability), custom: false as const,
       // #607: `locked` is the ROW answer (may this caller take this row away) and drives the ×.
       // #607 `frozen` is the PRINCIPAL answer (may this caller change what this principal is) and
@@ -366,7 +367,9 @@ export function SpaceMembersTab() {
       // either direction takes something real away or offers something that cannot work.
       label: label(g), managed: g.managed, locked: g.revocable === false, frozen: g.changeable === false,
       grantee: g.grantee, groupName: g.groupName, capability: g.capability,
-      ...(foldedGrantees.has(g.grantee) && g.capability === "edit" ? { foldedCaps: ["edit", "comment"] as PageRelation[] } : {}),
+      // Everything this one row now stands for, so its revoke takes all of it (the editor fold's rule,
+      // generalised — see `foldGrantsByPrincipal`).
+      foldedCaps: foldedCaps as PageRelation[],
     })),
     // #603: `roleId` is nullable now (a tenant TIER row) — this space listing never returns those
     // (the server keeps built-ins out of space/page assignment lists), so the filter is a type guard,
@@ -432,7 +435,7 @@ export function SpaceMembersTab() {
           capability noun, a custom role its name (accent); each row's revoke reaches its own mechanism. */}
       <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto rounded-md border border-border p-1" data-testid="space-member-list">
         {mergedRows.map((r) => (
-          <div key={r.key} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-member-item" data-kind={r.kind}>
+          <div key={r.key} className="flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2" data-testid="space-member-item" data-kind={r.kind} data-principal={r.kind === "grant" ? r.grantee : r.principal}>
             {/* #591 (user ruling): the EXCLUSIVE role is a dropdown, changed in place. A built-in grant is
                 exclusive here — the server's sweep leaves one role per principal (#536) — so demanding
                 × then re-add was asking for two operations and dropping the person's access in between.

@@ -18,7 +18,7 @@ import { entitlementDenied } from '../entitlement-ux.js'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
-import { reindexPublishedPages } from './spaces.js'
+import { reindexPublishedPages, spaceCallMovesAdminClass, spaceCapsHeldBy } from './spaces.js'
 import { assertGranteeIsMember } from '../auth/member-principal.js' // #624
 import { spaceGrantTuplesFor, ADMIN_CLASS_ROLE_CAPS } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table (+ the ONE admin-class set)
 import { groupGrantee, groupNameByFgaId, knownGroupNames, confirmedGroupNames, resolveGroupName } from '../auth/group-sync.js' // #497: mappings assign the group principal; #536 names for display
@@ -597,7 +597,7 @@ export async function unassignRoleTxCore(
 
 export async function requireAssignmentAuthority(
   fga: OpenFgaClient,
-  args: { sub: string; tenantId: string; resourceType: 'page' | 'space' | 'tenant'; resourceId: string; capabilities: AnyRoleCapability[]; replace?: boolean },
+  args: { sub: string; tenantId: string; resourceType: 'page' | 'space' | 'tenant'; resourceId: string; capabilities: AnyRoleCapability[]; replace?: boolean; principal?: string },
 ): Promise<void> {
   const { sub, tenantId, resourceType, resourceId, capabilities } = args
   if (resourceType === 'tenant') { await requireTenantAdmin(fga, sub, tenantId); return }
@@ -614,7 +614,16 @@ export async function requireAssignmentAuthority(
     // a pin could not tell whether the set was consulted at all. One authority, which is what the "no
     // third admin-class set" note in space-grant-expansion asks for. `manage` stays special-cased because
     // it is deliberately NOT a role capability (it is the built-in superset).
-    const movesAdminClass = args.replace === true || capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as RoleCapability) || c === ('manage' as AnyRoleCapability))
+    //
+    // #607 (user ruling): `replace` no longer refuses on its own — it refuses when the sweep would
+    // carry an admin-class mark away, which is a question about the TARGET. Read from the store, for the
+    // reason review ① gives: a space's creator holds the `manager` leaf and no `role_assignments`
+    // row, so a rows-based answer hands their demotion to the roster verb. Same helper as the other door
+    // (`spaceCallMovesAdminClass`), so the two cannot drift into two ceilings.
+    const targetHolds = args.replace === true && args.principal
+      ? await spaceCapsHeldBy(fga, resourceId, args.principal)
+      : undefined
+    const movesAdminClass = spaceCallMovesAdminClass(capabilities as readonly string[], args.replace, targetHolds)
     const rel = movesAdminClass ? 'manage' : 'manageAccess'
     if (!(await check(fga, `user:${sub}`, rel, { type: 'space', id: resourceId }))) throw forbidden()
     return
@@ -999,7 +1008,7 @@ export async function rolesPlugin(app: FastifyInstance) {
       // #485 / ADR-171 Addendum 2: gate on the TARGET resource's authority (space manager / page
       // grant-ceiling / tenant admin), AFTER the existence-bind (so a cross-tenant/unknown id is a
       // uniform 404, never a 403 that confirms it exists). Entitlement was already checked up front.
-      await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps, replace: req.body?.replace === true })
+      await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps, replace: req.body?.replace === true, principal })
       // #624, and the ORDER is the point: after the existence-bind and the authority check above, so a
       // cross-tenant or unknown resource still answers the uniform 404 (#445) rather than a 400 that
       // confirms the caller got that far. Measured — placed earlier, the cross-tenant pin went red.

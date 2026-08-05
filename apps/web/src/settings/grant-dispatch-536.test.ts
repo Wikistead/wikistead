@@ -74,24 +74,52 @@ describe("#497: resolveMappingDispatch", () => {
 });
 
 // #553 review F: the display fold and its revoke set, pinned as values (the component only executes).
-import { foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
+import { foldGrantsByPrincipal, revokeCapsForRow } from "./grant-dispatch";
 
-describe("#553: foldedEditorGrantees / revokeCapsForRow", () => {
+// #607 ("Dev User 2 …"): the roster answers one row per CAPABILITY,
+// and a principal holding several of them appeared several times. #553's editor fold already merged one
+// specific pair; this is that rule generalised, so the screen shows what #536 / #579 settled — one
+// principal, one role.
+describe("#607 / #553: foldGrantsByPrincipal / revokeCapsForRow", () => {
   const g = (grantee: string, capability: string) => ({ grantee, capability });
-  it("folds only the full edit+comment pair; lone arms stay unfolded", () => {
-    const folded = foldedEditorGrantees([
+  const folded = (rows: { grantee: string; capability: string }[]) =>
+    Object.fromEntries(foldGrantsByPrincipal(rows).map((f) => [f.row.grantee, f]));
+
+  it("gives each principal exactly one row, whatever they hold", () => {
+    const rows = [
+      g("user:owner", "manage"), g("user:owner", "view"),
       g("user:pair", "edit"), g("user:pair", "comment"),
-      g("user:edit-only", "edit"),
-      g("user:comment-only", "comment"),
       g("user:viewer", "view"),
-    ]);
-    expect(folded).toEqual(new Set(["user:pair"]));
+    ];
+    const out = foldGrantsByPrincipal(rows);
+    expect(out.length, "one row per principal").toBe(3);
+    expect(new Set(out.map((f) => f.row.grantee)).size, "and no principal twice").toBe(3);
   });
-  it("is origin-blind: the pair folds regardless of which grant came first or what else is held", () => {
-    expect(foldedEditorGrantees([g("g:1#member", "comment"), g("g:1#member", "view"), g("g:1#member", "edit")])).toEqual(new Set(["g:1#member"]));
+
+  it("the row shown is the strongest thing held — the owner is a manager, not a viewer", () => {
+    // The motivating data exactly: the space's owner carries the structural `manage` mark AND an
+    // explicit `view` grant. Drawing the `view` row is what offered a role change that could never work.
+    const f = folded([g("user:owner", "view"), g("user:owner", "manage")]);
+    expect(f["user:owner"]!.row.capability).toBe("manage");
   });
-  it("a folded editor row revokes BOTH arms; an ordinary row revokes exactly itself", () => {
+
+  it("is order-blind: which grant the server listed first cannot change the answer", () => {
+    const a = folded([g("g:1#member", "comment"), g("g:1#member", "view"), g("g:1#member", "edit")]);
+    const b = folded([g("g:1#member", "edit"), g("g:1#member", "comment"), g("g:1#member", "view")]);
+    expect(a["g:1#member"]!.row.capability).toBe("edit");
+    expect(b["g:1#member"]!.row.capability).toBe("edit");
+  });
+
+  it("the folded row stands for everything it replaced, so nothing becomes unremovable", () => {
+    const f = folded([g("user:pair", "edit"), g("user:pair", "comment")]);
+    expect(new Set(f["user:pair"]!.foldedCaps)).toEqual(new Set(["edit", "comment"]));
     expect(revokeCapsForRow({ capability: "edit", foldedCaps: ["edit", "comment"] })).toEqual(["edit", "comment"]);
     expect(revokeCapsForRow({ capability: "comment" })).toEqual(["comment"]);
+  });
+
+  it("an unrecognised capability sorts last rather than winning the row", () => {
+    // A capability this build does not know about must not outrank `manage` and relabel the owner.
+    const f = folded([g("user:x", "manage"), g("user:x", "whatever-comes-next")]);
+    expect(f["user:x"]!.row.capability).toBe("manage");
   });
 });
