@@ -138,7 +138,12 @@ export function RoleCaps({
     // #582the FAMILY is named in the product, the way #589 named the sign-in rows — a pin that
     // walks "every panel explaining a role" has to know which panels those are, and inferring it from a
     // shared affordance swept up unrelated tooltips (a status icon's label is not one of these).
-    <div data-role-panel className="w-[220px] text-sm" data-testid={testId ? `${testId}-content` : undefined}>
+    // #640: NO width here. The panel that hosts this already declares one (`HINT_PANEL_W`), and the same
+    // 220px written in both places was 18px wider than the box could hold: 220 minus `px-2` (16) minus
+    // the border (2) leaves 202px of content, and an `overflow: visible` panel simply shows the rest
+    // hanging out. Measured on all five surfaces that raise this. One authority for the width, which is
+    // the panel — the tooltip-hosted copy has no fixed width at all and sizes to its content there.
+    <div data-role-panel className="w-full text-sm" data-testid={testId ? `${testId}-content` : undefined}>
       <span className="block text-[11px] font-medium">
         {origin === "grant" ? t("roleTip.individual") : t("roleTip.role")}
       </span>
