@@ -98,6 +98,66 @@ test("#582 ①: the tenant tiers raise a panel of their own", async ({ page }) =
   expect(adminPanel.toLowerCase(), "and it lists what admin really confers").toContain("audit");
 });
 
+// #582 (session B, closing the gap C flagged): the rewind above was honestly reported as "a future
+// defence we could not demonstrate" — with the row already on `admin`, reading BEFORE advancing finds the
+// target immediately and the rewind changes nothing. So aim at a tier that sits ABOVE the selected one.
+// `member` is the first option and the row's value is `admin`, so it is reachable ONLY by rewinding
+// read-first cannot see it (the highlight starts on admin) and walking down never comes back to it.
+test("#582 ①: an option ABOVE the selected one is reachable too (the rewind is load-bearing)", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openDemo(page);
+  await page.goto("/admin/members");
+  await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
+  await sleep(400);
+
+  // Find a row whose value is NOT the first option — that is the only shape where rewinding matters, and
+  // which row it is depends on the fixture, so it is discovered rather than named.
+  const triggers = page.getByTestId("member-role-select");
+  const rows = await triggers.count();
+  expect(rows, "there are rows to look at").toBeGreaterThan(0);
+
+  let firstOption = "";
+  let found = false;
+  for (let r = 0; r < rows && !found; r++) {
+    await triggers.nth(r).click();
+    await expect(page.locator("[data-slot=select-content]")).toBeVisible({ timeout: 5_000 });
+    await sleep(200);
+    const state = await page.evaluate(() => {
+      const box = document.querySelector("[data-slot=select-content]")!;
+      const opts = Array.from(box.querySelectorAll<HTMLElement>("[role=option]"));
+      return {
+        first: opts[0]?.dataset.optionValue ?? "",
+        highlighted: box.querySelector<HTMLElement>("[data-highlighted]")?.dataset.optionValue ?? "",
+      };
+    });
+    if (state.first && state.highlighted && state.first !== state.highlighted) {
+      firstOption = state.first;
+      found = true;
+      break;
+    }
+    await page.keyboard.press("Escape");
+    await sleep(150);
+  }
+  expect(found, "a row whose value is not the first option — otherwise this proves nothing").toBe(true);
+
+  // rewind, then walk: the first option is ABOVE the highlight, so read-first cannot see it and walking
+  // down never comes back to it. Only the rewind reaches it.
+  for (let i = 0; i < 12; i++) await page.keyboard.press("ArrowUp");
+  await sleep(120);
+
+  let panel = "";
+  for (let i = 0; i < 12 && !panel; i++) {
+    if (i > 0) await page.keyboard.press("ArrowDown");
+    await sleep(120);
+    panel = await page.evaluate((want) => {
+      const item = document.querySelector<HTMLElement>("[data-slot=select-content] [data-highlighted]");
+      const p = document.querySelector<HTMLElement>("[data-testid$='-hint'], [data-testid=select-hint]");
+      return item?.dataset.optionValue === want && p ? p.textContent ?? "" : "";
+    }, firstOption);
+  }
+  expect(panel, `the first option (${firstOption}) sits above the selected one and still raises its panel`).toBeTruthy();
+});
+
 test("#582: a short viewport still gets the panel", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 450 });
   await openDemo(page);

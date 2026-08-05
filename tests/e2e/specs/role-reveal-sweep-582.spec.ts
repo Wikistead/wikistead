@@ -10,14 +10,26 @@ import { test, expect, type Page } from "@playwright/test";
 async function optionsOf(page: Page, trigger: string): Promise<{ name: string; revealed: string; insideRow?: boolean }[]> {
   const control = page.getByTestId(trigger).first();
   await control.scrollIntoViewIfNeeded();
-  await control.focus();
-  await page.keyboard.press("Enter");
-  await page.waitForSelector("[role=option]", { timeout: 5000 });
   // #578 (2026-08-04, flake hunt): the options EXIST before keyboard focus has moved into the listbox,
-  // and arrows pressed in that window fall through — the walk then collects only the selected option
-  // and the sweep reads as "one role offered". Wait for the focus, not just the DOM.
-  await page.waitForFunction(() => document.activeElement?.closest("[role=listbox]") !== null
-    || document.activeElement?.getAttribute("role") === "option", undefined, { timeout: 5000 }).catch(() => {});
+  // and arrows pressed in that window fall through — the walk then collects only the selected option and
+  // the sweep reads as "one role offered".
+  //
+  // That wait used to end in `.catch( => {})`, which made the precondition ADVISORY: when focus never
+  // arrived the walk ran anyway and produced a one-item answer, so the test failed with "the picker
+  // offered 1 role" — a sentence about the product for what is really a harness timing miss. Measured
+  // green alone, red inside a batch, on identical code and data. The open is retried now, and if focus
+  // never lands the failure SAYS SO instead of blaming the picker.
+  let inList = false;
+  for (let attempt = 0; attempt < 3 && !inList; attempt++) {
+    await control.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("[role=option]", { timeout: 5000 });
+    inList = await page.waitForFunction(() => document.activeElement?.closest("[role=listbox]") !== null
+      || document.activeElement?.getAttribute("role") === "option", undefined, { timeout: 3000 })
+      .then(() => true, () => false);
+    if (!inList) { await page.keyboard.press("Escape"); await page.waitForTimeout(200); }
+  }
+  if (!inList) throw new Error(`${trigger}: keyboard focus never entered the listbox — the walk below would collect one option and read as a product defect`);
   const out: { name: string; revealed: string; insideRow?: boolean }[] = [];
   // Start from the TOP, not from wherever the value happens to be. Radix opens with the highlight on the
   // selected item, so a walk that only goes down never revisits anything above it: with the first row
