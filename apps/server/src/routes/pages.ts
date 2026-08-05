@@ -46,6 +46,7 @@ import { getSpaceInfo, searchMemberCandidates } from './spaces.js'
 import { deletePinsForResources } from './pins.js'
 import { fanOutFeedEvent, sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
 import { enqueueWebhookOutbox } from './webhooks.js'
+import { assertGranteeIsMember } from '../auth/member-principal.js' // #624: a grant names somebody who is here
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames
 // the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
@@ -4264,6 +4265,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   // group:<id>#member via groupGrantee → matches #111's sync id exactly).
   app.post<{ Params: { pageId: string }; Body: { grantee?: string; groupName?: string; relation: string } }>('/pages/:pageId/access', async (req, reply) => {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
+    await assertGranteeIsMember(req.db, grantee) // #624
     await grantPageAccess(req.db, app.fga, app.searchDriver, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
       grantee, relation: req.body?.relation ?? '', plan: req.tenant.plan,
@@ -4300,6 +4302,8 @@ export async function pagesPlugin(app: FastifyInstance) {
   })
   app.post<{ Params: { pageId: string }; Body: { principal?: string; groupName?: string } }>('/pages/:pageId/restrict', async (req, reply) => {
     const principal = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.principal ?? '')
+    // #624: a restriction names somebody too — subtracting a stranger writes permanent litter.
+    await assertGranteeIsMember(req.db, principal)
     await restrictPageAccess(req.db, app.fga, app.searchDriver, {
       pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub, principal, plan: req.tenant.plan,
     })

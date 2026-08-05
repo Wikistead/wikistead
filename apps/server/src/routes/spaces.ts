@@ -6,6 +6,7 @@ import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples,
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
+import { assertGranteeIsMember } from '../auth/member-principal.js' // #624: a grant names somebody who is here
 import { spaceGrantTuplesFor, ADMIN_CLASS_ROLE_CAPS } from '../space-grant-expansion.js' // #514 §6: the ONE table (+ the ONE admin-class set, ADR-209)
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
@@ -1524,6 +1525,9 @@ export async function spacesPlugin(app: FastifyInstance) {
   // group:<id>#member via groupGrantee → groupFgaId, so the id always matches #111's sync).
   app.post<{ Params: { spaceId: string }; Body: { grantee?: string; groupName?: string; relation?: string; relations?: string[]; replace?: boolean } }>('/spaces/:spaceId/access', async (req, reply) => {
     const grantee = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.grantee ?? '')
+    // #624: the request boundary is where a typed string can arrive as a subject id. Groups pass, and
+    // this speaks only about the CALLER'S OWN tenant — it discloses nothing about the target space.
+    await assertGranteeIsMember(req.db, grantee)
     // #553 / ADR-199 §2: `relations` (plural) is the composite form — the editor NOUN grants edit +
     // comment as N single-capability rows in one tx. The singular `relation` keeps meaning exactly
     // what it says.

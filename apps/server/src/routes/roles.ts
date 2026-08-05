@@ -19,6 +19,7 @@ import { auditIfEntitled } from '../audit/outbox.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { reindexPublishedPages } from './spaces.js'
+import { assertGranteeIsMember } from '../auth/member-principal.js' // #624
 import { spaceGrantTuplesFor, ADMIN_CLASS_ROLE_CAPS } from '../space-grant-expansion.js' // #514 §6: the ONE capability→relation table (+ the ONE admin-class set)
 import { groupGrantee, groupNameByFgaId, knownGroupNames, confirmedGroupNames, resolveGroupName } from '../auth/group-sync.js' // #497: mappings assign the group principal; #536names for display
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: name user principals on the gated list
@@ -978,6 +979,10 @@ export async function rolesPlugin(app: FastifyInstance) {
       // grant-ceiling / tenant admin), AFTER the existence-bind (so a cross-tenant/unknown id is a
       // uniform 404, never a 403 that confirms it exists). Entitlement was already checked up front.
       await requireAssignmentAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType, resourceId, capabilities: caps, replace: req.body?.replace === true })
+      // #624, and the ORDER is the point: after the existence-bind and the authority check above, so a
+      // cross-tenant or unknown resource still answers the uniform 404 (#445) rather than a 400 that
+      // confirms the caller got that far. Measured — placed earlier, the cross-tenant pin went red.
+      await assertGranteeIsMember(req.db, principal)
       // #536item 2 (space scope): ONE principal = ONE role. A machine-owned (mapping/default) row
       // refuses the manual add up front (ADR-183 §1 ownership — 409 before any write); after the new row
       // lands, the principal's OTHER manual roles (grant rows, other assignments, legacy rowless tuples)

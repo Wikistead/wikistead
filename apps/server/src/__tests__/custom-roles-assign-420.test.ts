@@ -11,6 +11,7 @@
 //  (5) guest boundary + entitlement: share_link/user:* principals 400; customRoles OFF refuses
 //      assign/unassign (issuance semantics).
 // Real Postgres + OpenFGA + the app via inject (dev bearer = tenant admin dev-user).
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -42,7 +43,14 @@ async function makeRole(name: string, capabilities: string[]): Promise<string> {
   expect(r.statusCode, `create role ${name}`).toBe(201)
   return (r.json() as { id: string }).id
 }
+const seated = new Set<string>() // #624: subs this file seated, removed in afterAll
 async function assign(roleId: string, resourceType: string, resourceId: string, principal: string) {
+  // #624: a role assignment names somebody who is HERE — the route refuses a principal with no members
+  // row now. Seated here so every case in this file keeps meaning "a member, who is then assigned".
+  if (principal.startsWith('user:')) {
+    seated.add(principal.slice('user:'.length))
+    await seatMembers(admin, tenant.id, [principal.slice('user:'.length)])
+  }
   return app.inject({ method: 'POST', url: `/admin/roles/${roleId}/assignments`, headers: H, payload: { resourceType, resourceId, principal } })
 }
 async function unassign(assignmentId: string) {
@@ -65,6 +73,7 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(async () => {
+  await unseatMembers(admin, tenant.id, [...seated])
   resetEntitlementsResolver()
   // Scoped to the roles THIS file created. The wholesale delete that used to be here also removed the
   // assignments of every other suite file sharing `tenant_dev` — the shape of defect that made the

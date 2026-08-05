@@ -10,6 +10,7 @@
 // What is pinned here is the part a UI cannot fake: the API itself. Two assignments through the route,
 // no client involved, and the second one wins. The capabilities of the first are gone from FGA, not just
 // from a list — a converged role that still grants what it replaced would be the worst of both.
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -49,6 +50,8 @@ const rows = () => admin<{ id: string; role_id: string }[]>`
   WHERE resource_type = 'tenant' AND resource_id = ${TENANT} AND principal = ${`user:${SUBJECT}`}`
 
 beforeAll(async () => {
+  // #624: a grant names somebody who is HERE — the route refuses a principal with no members row
+  await seatMembers(admin, TENANT, [SUBJECT])
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
   roleA = await makeRole(`conv579-a-${STAMP}`, ['createSpaces'])
@@ -56,6 +59,7 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
+  await unseatMembers(admin, TENANT, [SUBJECT])
   await admin`DELETE FROM role_assignments WHERE principal = ${`user:${SUBJECT}`}`.catch(() => {})
   await admin`DELETE FROM roles WHERE id IN (${roleA}, ${roleB})`.catch(() => {})
   await db.release(); await app.close(); await admin.end(); await pool.end()

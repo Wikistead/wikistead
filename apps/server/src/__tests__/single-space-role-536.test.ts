@@ -6,6 +6,7 @@
 //     ADR-183 §1: the mapping owns the principal's role; replacing it manually would strand the mapping.
 //   - legacy ROWLESS tuples (pre-086) converge in the same pass (the recorded migration policy:
 //     duplicates are cleaned on the next add for that principal; untouched principals keep their rows).
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -30,7 +31,14 @@ let spaceId = ''
 let pageId = ''
 let roleId = ''
 const subs: string[] = []
-const sub = (n: string) => { const s = `s1r-${n}-${STAMP}`; subs.push(s); return `user:${s}` }
+// #624: a grant names somebody who is HERE — the routes refuse a principal with no members row
+// now, so the fixture seats the sub it is about to grant to. That is what the test always meant.
+const sub = async (n: string) => {
+  const s = `s1r-${n}-${STAMP}`
+  subs.push(s)
+  await seatMembers(adminPool, TENANT, [s])
+  return `user:${s}`
+}
 
 const dev = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
 
@@ -46,6 +54,8 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
+  // #624: the fixture seated these; take them out so the shared dev tenant is not widened
+  await unseatMembers(adminPool, TENANT, subs)
   await adminPool`DELETE FROM role_assignments WHERE resource_id = ${spaceId}`.catch(() => {})
   await adminPool`DELETE FROM roles WHERE id = ${roleId}`.catch(() => {})
   await deletePage(db, fgaClient, app.searchDriver, { pageId, userId: OWNER }).catch(() => {})
@@ -63,7 +73,7 @@ const canEdit = (principal: string) => check(fgaClient, principal, 'edit', { typ
 
 describe('#536one principal, one space role (replace semantics)', () => {
   it('grant → grant replaces: the second capability is the only one left (row AND access)', async () => {
-    const p = sub('g-g')
+    const p = await sub('g-g')
     await grant(p, 'view')
     await grant(p, 'edit')
     const rows = await rowsOf(p)
@@ -73,7 +83,7 @@ describe('#536one principal, one space role (replace semantics)', () => {
   }, 120_000)
 
   it('grant → role ASSIGN (HTTP route) replaces: only the assignment remains; a direct API double-add converges to one', async () => {
-    const p = sub('g-a')
+    const p = await sub('g-a')
     await grant(p, 'view')
     const res = await app.inject({
       method: 'POST', url: `/admin/roles/${roleId}/assignments`, headers: dev,
@@ -86,7 +96,7 @@ describe('#536one principal, one space role (replace semantics)', () => {
   }, 120_000)
 
   it('a mapping-owned row refuses the manual add up front (409, nothing swept)', async () => {
-    const p = sub('machine')
+    const p = await sub('machine')
     await adminPool`INSERT INTO role_assignments (id, tenant_id, role_id, builtin_capability, resource_type, resource_id, principal, owned_capabilities, origin)
       VALUES (${randomUUID()}, ${TENANT}, NULL, 'view', 'space', ${spaceId}, ${p}, ARRAY['view']::text[], 'mapping')`
     await writeTuples(fgaClient, [
@@ -104,7 +114,7 @@ describe('#536one principal, one space role (replace semantics)', () => {
   }, 120_000)
 
   it('legacy ROWLESS tuples converge in the same pass (the recorded pre-086 migration policy)', async () => {
-    const p = sub('rowless')
+    const p = await sub('rowless')
     // a pre-086 grant: tuples, no row
     await writeTuples(fgaClient, [
       { user: p, relation: 'viewer', object: `space:${spaceId}` },
@@ -137,7 +147,7 @@ describe('#536a manager is demoted only by someone who said so', () => {
   }
 
   it('a weaker grant onto a ROW-TRACKED manager is refused (409) and changes NOTHING', async () => {
-    const p = sub('mgr-row')
+    const p = await sub('mgr-row')
     await grant(p, 'manage')
     await expect(grant(p, 'view')).rejects.toMatchObject({ statusCode: 409, code: 'manager_replacement_requires_confirmation' })
     expect(await rowsOf(p), 'no demotion, and no half-applied new role').toEqual([{ role_id: null, builtin_capability: 'manage', origin: 'manual' }])
@@ -147,7 +157,7 @@ describe('#536a manager is demoted only by someone who said so', () => {
   it('a weaker grant onto a ROWLESS manager (the createSpace creator leaf) is refused too', async () => {
     // the production shape: the space creator holds a manager leaf and no row at all. A guard that only
     // read rows would wave this through and silently demote the owner of the space.
-    const p = sub('mgr-rowless')
+    const p = await sub('mgr-rowless')
     await writeTuples(fgaClient, [{ user: p, relation: 'manager', object: `space:${spaceId}` }])
     await expect(grant(p, 'view')).rejects.toMatchObject({ statusCode: 409, code: 'manager_replacement_requires_confirmation' })
     expect(await rowsOf(p)).toEqual([])
@@ -156,7 +166,7 @@ describe('#536a manager is demoted only by someone who said so', () => {
   }, 120_000)
 
   it('CONFIRMED, it converges: one row, the manager leaf gone, the new role in force', async () => {
-    const p = sub('mgr-replace')
+    const p = await sub('mgr-replace')
     await grant(p, 'manage')
     await grantSpaceAccess(db, fgaClient, app.searchDriver, {
       spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business', replace: true,
@@ -171,7 +181,7 @@ describe('#536a manager is demoted only by someone who said so', () => {
   // same demotion through a row audited normally. An authz change nobody can find in the log is one
   // nobody can review.
   it('a confirmed rowless demotion is AUDITED, like every demotion that goes through a row', async () => {
-    const p = sub('mgr-audit')
+    const p = await sub('mgr-audit')
     await writeTuples(fgaClient, [{ user: p, relation: 'manager', object: `space:${spaceId}` }])
     const revoked = async () => Number((await adminPool<{ n: string }[]>`
       SELECT (SELECT count(*) FROM audit_log    WHERE tenant_id = ${TENANT} AND action = 'space.access_revoked' AND target = ${`space:${spaceId}`})
@@ -185,7 +195,7 @@ describe('#536a manager is demoted only by someone who said so', () => {
 
   // and the sweep must delete the WHOLE grant, not the part that happens to be in the display table
   it('a swept rowless view takes viewer_member with it (or they can still see the space)', async () => {
-    const p = sub('mgr-viewmember')
+    const p = await sub('mgr-viewmember')
     // the legacy shape: both leaves of a view grant, no row
     await writeTuples(fgaClient, [
       { user: p, relation: 'viewer', object: `space:${spaceId}` },
@@ -200,7 +210,7 @@ describe('#536a manager is demoted only by someone who said so', () => {
   }, 120_000)
 
   it('CONFIRMED reaches the rowless creator leaf as well (the production case)', async () => {
-    const p = sub('mgr-rowless-replace')
+    const p = await sub('mgr-rowless-replace')
     await writeTuples(fgaClient, [{ user: p, relation: 'manager', object: `space:${spaceId}` }])
     await grantSpaceAccess(db, fgaClient, app.searchDriver, {
       spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business', replace: true,
@@ -210,14 +220,14 @@ describe('#536a manager is demoted only by someone who said so', () => {
   }, 120_000)
 
   it('granting `manage` ITSELF is not a demotion and needs no confirmation', async () => {
-    const p = sub('mgr-promote')
+    const p = await sub('mgr-promote')
     await grant(p, 'view')
     await grant(p, 'manage') // no replace flag, no refusal
     expect(await holdsManager(p)).toBe(true)
   }, 120_000)
 
   it('the custom-role door asks the same question (HTTP 409, then converges when confirmed)', async () => {
-    const p = sub('mgr-http')
+    const p = await sub('mgr-http')
     await grant(p, 'manage')
     const refused = await app.inject({
       method: 'POST', url: `/admin/roles/${roleId}/assignments`, headers: dev,

@@ -17,6 +17,7 @@
 // dev-user as its admin so the dev bearer works through host resolution): the wildcard-absent
 // windows these tests need would 403 PARALLEL test files' createSpace calls if they touched the
 // shared dev tenant's wildcard (observed flake: notifications-362 mid-suite).
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -57,7 +58,14 @@ const canCreate = (sub: string) => creatorCheck(`user:${sub}`, tenant.id)
 async function makeRole(name: string, capabilities: string[], scope?: string) {
   return app.inject({ method: 'POST', url: '/admin/roles', headers: H, payload: { name, capabilities, ...(scope ? { scope } : {}) } })
 }
+const seated = new Set<string>() // #624: subs this file seated, removed in afterAll
 async function assign(roleId: string, resourceType: string, resourceId: string, principal: string) {
+  // #624: a role assignment names somebody who is HERE — the route refuses a principal with no members
+  // row now. Seated here so every case in this file keeps meaning "a member, who is then assigned".
+  if (principal.startsWith('user:')) {
+    seated.add(principal.slice('user:'.length))
+    await seatMembers(admin, tenant.id, [principal.slice('user:'.length)])
+  }
   return app.inject({ method: 'POST', url: `/admin/roles/${roleId}/assignments`, headers: H, payload: { resourceType, resourceId, principal } })
 }
 async function unassign(assignmentId: string) {
@@ -87,6 +95,7 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(async () => {
+  await unseatMembers(admin, tenant.id, [...seated])
   resetEntitlementsResolver()
   await writeTuples(fgaClient, [wildcard()]).catch(() => {}) // restore the seeded default
   // Scoped to the roles THIS file created. The wholesale delete that used to be here also removed the
