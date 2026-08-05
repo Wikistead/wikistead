@@ -16,7 +16,6 @@
     "preset": "Provider",
     "trustGroups": "Trust this connection’s group claims (group sync, role mappings)",
     "trustGroupsHint": "When on, this connection's group claim is synced at sign-in.",
-    "bootstrapEligible": "May bootstrap the first admin of an empty tenant",
     "presetNone": "Custom (any OIDC provider)",
     "issuerPlaceholder": "Issuer URL (https://idp.example.com)",
     "labelPlaceholder": "Button label (optional, shown on the login screen)",

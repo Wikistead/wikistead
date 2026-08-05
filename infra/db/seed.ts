@@ -84,9 +84,9 @@ import { assertStackTarget } from '../../scripts/assert-stack-target.mjs'
       // they no longer have.
       const connId = randomUUID()
       await tx`
-        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, redirect_uri, bootstrap_eligible, trust_groups, subject_prefix)
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, redirect_uri, trust_groups, subject_prefix)
         VALUES (${connId}, 'tenant_dev', ${process.env.OIDC_ISSUER!}, ${process.env.OIDC_CLIENT_ID!},
-                ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!}, true, true,
+                ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!}, true,
                 ${subjectPrefixFor(connId)})`
     }
     console.log('seeded: tenant_dev / tenant_oidc')

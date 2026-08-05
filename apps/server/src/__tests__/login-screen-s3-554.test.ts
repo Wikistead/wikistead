@@ -64,7 +64,7 @@ describe('#554 S3: the login-options connection list', () => {
     expect(o.connections.map((c) => c.id)).toEqual([connA, connB])
     expect(o.connections.every((c) => c.kind === 'oidc' && c.label === null && c.brand === null)).toBe(true)
     // S6 review N6: the projection is the ONLY thing keeping server-internal connection attributes
-    // (trustGroups, bootstrapEligible) off this unauthenticated surface — pin the exact key set.
+    // (trustGroups, and formerly bootstrapEligible) off this unauthenticated surface — pin the exact key set.
     for (const c of o.connections) expect(Object.keys(c).sort()).toEqual(['brand', 'id', 'kind', 'label'])
     expect(o.connections.some((c) => c.id === tenantId), 'never the tenant id').toBe(false)
     expect(o.methods).toEqual(['oidc'])

@@ -239,9 +239,9 @@ describe('#568 §3 M8: local is a connection, so the lockout guard can see it', 
     expect(available.methods.has('local'), 'the effective set').toBe(true)
     const list = await resolveLoginConnections(db, { plan: 'business' })
     expect(list.some((c) => c.kind === 'local'), 'the connection list').toBe(true)
-    // it never bootstraps an admin and asserts no groups — there is no IdP behind it to trust
+    // it asserts no groups — there is no IdP behind it to trust. (The "never bootstraps an admin"
+    // half went with the mechanism: #616 / ADR-212 slice 2.)
     const local = list.find((c) => c.kind === 'local')!
-    expect(local.bootstrapEligible).toBe(false)
     expect(local.trustGroups).toBe(false)
   }, 120_000)
 

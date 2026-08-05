@@ -18,8 +18,8 @@ async function freshTenant(slug: string): Promise<string> {
 }
 async function enableOidc(tenantId: string): Promise<void> {
   await admin`
-    INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, redirect_uri, enabled, bootstrap_eligible)
-    VALUES (${crypto.randomUUID()}, ${tenantId}, 'https://idp.test/', 'client-abc', 'https://app.test/cb', true, true)
+    INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, redirect_uri, enabled)
+    VALUES (${crypto.randomUUID()}, ${tenantId}, 'https://idp.test/', 'client-abc', 'https://app.test/cb', true)
   `
 }
 

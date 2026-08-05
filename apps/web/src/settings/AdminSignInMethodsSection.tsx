@@ -34,7 +34,7 @@ import { methodBadge } from "./login-method-badge";
 // A blank editor form for a connection row.
 interface Draft {
   issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes: string
-  groupsClaim: string; label: string; trustGroups: boolean; bootstrapEligible: boolean
+  groupsClaim: string; label: string; trustGroups: boolean
 }
 const draftOf = (c: AdminConnectionDTO): Draft => ({
   issuer: c.issuer, clientId: c.clientId, clientSecret: "", redirectUri: c.redirectUri,
@@ -43,7 +43,7 @@ const draftOf = (c: AdminConnectionDTO): Draft => ({
   // some controls apply on Save and others apply on touch has a Cancel button that silently means
   // "cancel some of it" — and these two are the ones an admin is most likely to toggle while
   // deciding.
-  trustGroups: c.trustGroups, bootstrapEligible: c.bootstrapEligible,
+  trustGroups: c.trustGroups,
 });
 
 // The row's name: the brand for a preset, else the admin's label, else the issuer's host.
@@ -100,7 +100,7 @@ export function AdminSignInMethodsSection() {
   const [adding, setAdding] = useState(false);
   const [preset, setPreset] = useState("");
   const [form, setForm] = useState({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "", groupsClaim: "" });
-  const [flags, setFlags] = useState({ bootstrapEligible: false, trustGroups: false });
+  const [flags, setFlags] = useState({ trustGroups: false });
   const [deleting, setDeleting] = useState<AdminConnectionDTO | null>(null);
   // #504: revoking an exemption removes somebody's break-glass — confirm first, like every removal here
   const [revokingExemption, setRevokingExemption] = useState<string | null>(null);
@@ -147,7 +147,6 @@ export function AdminSignInMethodsSection() {
         scopes: draft.scopes,
         groupsClaim: draft.groupsClaim.trim() || null,
         trustGroups: draft.trustGroups,
-        bootstrapEligible: draft.bootstrapEligible,
       },
       {
         onSuccess: () => { notify.success(t("toast.saved")); setDraft({ ...draft, clientSecret: "" }); },
@@ -171,7 +170,7 @@ export function AdminSignInMethodsSection() {
     // row now (#589), but a connection still starts without either.
     // #615: the claim name travels with the flags — blank stays null so the server's default (`groups`)
     // keeps deciding, exactly as it did when this could only be set after the fact.
-    create.mutate({ ...base, bootstrapEligible: flags.bootstrapEligible, trustGroups: flags.trustGroups, groupsClaim: form.groupsClaim.trim() || null }, {
+    create.mutate({ ...base, trustGroups: flags.trustGroups, groupsClaim: form.groupsClaim.trim() || null }, {
       onSuccess: () => { setAdding(false); setForm({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "", groupsClaim: "" }); notify.success(t("adminConnections.created")); },
       onError,
     });
@@ -359,11 +358,6 @@ export function AdminSignInMethodsSection() {
                   <Switch checked={draft.trustGroups} ariaLabel={t("adminConnections.trustGroups")} testId={`admin-connection-trust-groups-${c.id}`}
                     onChange={(on: boolean) => setDraft({ ...draft, trustGroups: on })} />
                   {t("adminConnections.trustGroups")}
-                </label>
-                <label className="flex w-fit items-center gap-2 text-xs text-fg-dim">
-                  <Switch checked={draft.bootstrapEligible} ariaLabel={t("adminConnections.bootstrapEligible")} testId={`admin-connection-bootstrap-${c.id}`}
-                    onChange={(on: boolean) => setDraft({ ...draft, bootstrapEligible: on })} />
-                  {t("adminConnections.bootstrapEligible")}
                 </label>
                 {testResult && (
                   <div className={testResult.ok ? "text-xs text-[#2da44e]" : "text-xs text-destructive"} data-testid="oidc-test-result">
@@ -623,11 +617,6 @@ export function AdminSignInMethodsSection() {
                     whose effect is invisible is why a connection sat there not syncing. */}
                 <span className="block">{t("adminConnections.trustGroupsHint")}</span>
               </span>
-            </label>
-            <label className="flex items-center gap-2 text-xs text-fg-dim">
-              <Switch checked={flags.bootstrapEligible} ariaLabel={t("adminConnections.bootstrapEligible")} testId="admin-connection-bootstrap"
-                onChange={(on: boolean) => setFlags({ ...flags, bootstrapEligible: on })} />
-              {t("adminConnections.bootstrapEligible")}
             </label>
             <div className="flex gap-2">
               <Button variant="primary" size="sm" data-testid="admin-connection-save" disabled={create.isPending} onClick={submitNew}>
