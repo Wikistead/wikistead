@@ -58,7 +58,7 @@ const KNOWN_RED = {
   placeholders: [] as string[],
   // #85 ③ / ADR-194 addendum (ruling pending): the copied CSS carries @font-face rules whose url is
   // root-absolute, so opening the file asks the filesystem root for fonts that are not there.
-  failedRequests: [/wikistead-mono|udevgothic|\.woff2$/],
+  failedRequests: [] as RegExp[],
   // #598 registered macros that ended up in the GENERIC BOX — present, but nothing rendered them.
   // (empty) — this dimension exists because the review measured the gate passing on a dummy macro
   // registered with no working renderer, which is the exact failure the ticket was opened for.
@@ -634,12 +634,10 @@ test("#598: every registered element survives the export, the file, and the page
   // ---- 4. the file is self-contained ----
   const unexpectedFailures = failed.filter((f) => !KNOWN_RED.failedRequests.some((re) => re.test(f)));
   expect(unexpectedFailures, "the opened file asked for something it did not carry").toEqual([]);
-  // …and the known one must still BE known: when the fonts travel, this line goes red and the entry
-  // comes out of KNOWN_RED with the fix.
-  expect(
-    failed.some((f) => KNOWN_RED.failedRequests.some((re) => re.test(f))),
-    "the font requests no longer fail — delete that entry from KNOWN_RED",
-  ).toBe(true);
+  // The "…and it must still be failing" counterpart that lived here is gone with the entry it guarded
+  // #85's A2 ruling landed, the code face travels inside the file and the other @font-face rules are
+  // removed on the way out, so the opened document asks the filesystem for nothing. That mechanism did
+  // its job — it refused to let the fix land quietly, and the line above now carries the whole rule.
 
   await ctx.close();
 });

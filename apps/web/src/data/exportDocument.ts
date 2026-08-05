@@ -160,6 +160,75 @@ export function collectAppCss(doc: Document = document): string {
   return parts.join("\n");
 }
 
+// #85 / ADR-194 addendum A, ruling A2 (2026-08-05): embed the CODE face and nothing else.
+//
+// The collected stylesheet carries @font-face rules whose url() is root-absolute (`/assets/…woff2`), so a
+// file opened from disk asks the FILESYSTEM ROOT for them and every one 404s — measured by the parity gate,
+// which listed those requests as known-red. A1 (embed everything) was rejected: 3.2MB of HTML is its own
+// kind of broken. A2 keeps code blocks looking like the screen (~40KB) and lets prose fall to a generic.
+//
+// The set is DERIVED, not listed. The body face is a user choice (FontProvider / ADR-090), so a hard-coded
+// "Wikistead Mono" would embed the wrong file for anyone who changed their setting — the rule is "whatever
+// --font-code actually resolves to in this document". Everything not embedded has its @font-face REMOVED in
+// the same pass: leaving a rule whose url cannot resolve is the 404 this fixes, and the token stacks all end
+// in a generic (ui-monospace / system-ui), so dropping the rule lands on that generic rather than nowhere.
+const FONT_FACE_BLOCK = /@font-face\s*\{[^}]*\}/gi
+const FAMILY_IN_BLOCK = /font-family\s*:\s*([^;}]+)/i
+const URL_IN_BLOCK = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/i
+
+/** The family names in a CSS font stack, unquoted and lowercased; generics included (harmless — no
+ *  @font-face declares one). */
+export function familiesInStack(stack: string): string[] {
+  return stack.split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, "").toLowerCase()).filter(Boolean)
+}
+
+async function fetchAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const buf = new Uint8Array(await res.arrayBuffer())
+    let bin = ""
+    for (const b of buf) bin += String.fromCharCode(b)
+    return `data:font/woff2;base64,${btoa(bin)}`
+  } catch { return null }
+}
+
+/**
+ * Rewrite the collected CSS so the code face travels inside the file and no other @font-face survives.
+ * Pure with respect to the document; the two seams are injectable so this is measurable without a network.
+ */
+export async function inlineCodeFontFaces(
+  css: string,
+  opts: {
+    codeStack?: string
+    fetchFont?: (url: string) => Promise<string | null>
+  } = {},
+): Promise<string> {
+  const stack = opts.codeStack
+    ?? (typeof getComputedStyle === "function"
+      ? getComputedStyle(document.documentElement).getPropertyValue("--font-code")
+      : "")
+  const wanted = new Set(familiesInStack(stack))
+  const fetchFont = opts.fetchFont ?? fetchAsDataUrl
+  const blocks = css.match(FONT_FACE_BLOCK) ?? []
+  const replacements = new Map<string, string>()
+  for (const block of blocks) {
+    const family = FAMILY_IN_BLOCK.exec(block)?.[1]?.trim().replace(/^['"]|['"]$/g, "").toLowerCase()
+    const url = URL_IN_BLOCK.exec(block)?.[2]
+    // not the code face, or nothing to fetch → the rule goes. A dropped rule falls to the stack's generic;
+    // a kept-but-unresolvable rule is the 404.
+    if (!family || !url || !wanted.has(family) || /^data:/i.test(url)) {
+      replacements.set(block, /^data:/i.test(url ?? "") && family && wanted.has(family) ? block : "")
+      continue
+    }
+    const data = await fetchFont(url)
+    replacements.set(block, data ? block.replace(URL_IN_BLOCK, `url(${data})`) : "")
+  }
+  let out = css
+  for (const [from, to] of replacements) out = out.split(from).join(to)
+  return out
+}
+
 export interface ExportDocumentInput {
   readonly title: string;
   readonly body: HTMLElement; // the rendered read surface (already drawn — diagrams included)
@@ -169,6 +238,28 @@ export interface ExportDocumentInput {
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+// #85 / ADR-194 addendum A: the stylesheet is interpolated into a <style> block, and until this ruling it
+// went in unexamined — so "the file is inert" was a claim about ELEMENTS while a whole second language rode
+// along beside them. The element rules and the CSS rules are the same rules now:
+//   - a data: URL may be a raster image or a font, and nothing else (an svg data: URL is a document with a
+//     script surface; a woff2 is not);
+//   - no `@import`, which is a fetch the reader did not ask for and a channel out of the file;
+//   - no `</style` sequence, which ends the block early and hands the rest of the sheet to the HTML parser.
+// Values are dropped rather than rewritten, for the same reason makeInert drops attributes.
+const CSS_SAFE_DATA_URL = /^data:(?:image\/(?:png|jpeg|gif|webp)|font\/[\w.+-]+|application\/font-woff2?)[;,]/i;
+export function sanitizeCss(css: string): string {
+  return css
+    .replace(/@import[^;]*;?/gi, "")
+    // Quoted first, and the quoted forms may CONTAIN `)` — `url("data:image/svg+xml,<svg onload=steal()>")`
+    // is the case that slipped through a `[^)]*` body (measured: the smuggled svg survived).
+    .replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi, (whole, dq?: string, sq?: string, bare?: string) => {
+      const url = (dq ?? sq ?? bare ?? "").trim()
+      return /^data:/i.test(url) && !CSS_SAFE_DATA_URL.test(url) ? "url()" : whole
+    })
+    // case-insensitive, and any whitespace the parser would tolerate between the name and `>`
+    .replace(/<\s*\/\s*style/gi, "<\\/style");
+}
+
 // Build the standalone document. Pure with respect to the page: it clones before it edits, so the surface
 // the user is looking at is untouched.
 export function buildExportDocument(input: ExportDocumentInput): string {
@@ -177,7 +268,7 @@ export function buildExportDocument(input: ExportDocumentInput): string {
   openDisclosures(clone);
   stripChrome(clone);
   makeInert(clone);
-  const css = input.css ?? collectAppCss();
+  const css = sanitizeCss(input.css ?? collectAppCss());
   const t = escapeHtml(input.title || "Untitled");
   // The wrapper carries `wks-prose` and the light theme: the file is made to be shared and printed, and a
   // reader's OS theme deciding its colours is what the #85 review rejected.

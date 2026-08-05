@@ -1,4 +1,4 @@
-import { buildExportDocument, inlineTransientImages } from "./exportDocument";
+import { buildExportDocument, inlineTransientImages, inlineCodeFontFaces, collectAppCss } from "./exportDocument";
 
 // #85 / ADR-194 (Option B) slice 3: the ONE way a document leaves this app as a file — download and print
 // take the same road, because two roads to paper is exactly the drift #85/#505/#207 kept re-discovering.
@@ -82,7 +82,12 @@ async function withDocument<T>(md: string, title: string, hosts: ExportHosts | u
     // Baked in AFTER settle: a host-rendered diagram lands as `<img src="blob:…">`, which resolves in this
     // session (so print worked) and in no other (so the saved file opened to a broken image —).
     await inlineTransientImages(host);
-    return await use(buildExportDocument({ title, body: host }));
+    // #85 / ADR-194 addendum A (A2): the code face travels inside the file and the other @font-face rules
+    // go, so opening the document from disk stops asking the filesystem root for fonts that are not there.
+    // Here rather than inside buildExportDocument because fetching the font bytes is asynchronous and that
+    // builder is a pure, synchronous function of the DOM it is given.
+    const css = await inlineCodeFontFaces(collectAppCss());
+    return await use(buildExportDocument({ title, body: host, css }));
   } finally {
     host.remove();
   }
