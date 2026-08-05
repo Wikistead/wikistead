@@ -1290,7 +1290,11 @@ export function usePage(pageId: string) {
 // yet. It is a real name and is shown as one; the flag only changes what the row says beside it.
 // #607 / ADR-209: `revocable` — whether THIS caller may take the row away (an access-manager sees the
 // manager/moderator rows but cannot revoke them; a bare × would be a button that answers 403).
-export interface SpaceGrant { grantee: string; capability: PageRelation | "manageAccess"; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean }
+// #607 (review rejection): `changeable` — whether this caller may change THIS PRINCIPAL's role.
+// Different question from `revocable`, and the difference is the defect: a role change is a replace over
+// everything the principal holds, so a principal's revocable `view` row is not evidence that their role
+// can be moved (theirs was also the space's owner).
+export interface SpaceGrant { grantee: string; capability: PageRelation | "manageAccess"; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean; changeable?: boolean }
 export interface MemberCandidate { sub: string; displayName: string | null }
 
 export function useSpaceAccess(spaceId: string, enabled = true) {

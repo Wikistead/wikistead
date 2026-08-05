@@ -176,6 +176,14 @@ export function SpaceMembersTab() {
       setPendingAdd({ run: retry, who, current: capNoun("manage"), next, manager: true });
       return;
     }
+    // #607 the ceiling's refusal has a reason, and a generic "something went wrong" hides it
+    // the reader is left thinking the product is broken when it is doing exactly what it should. The
+    // control that produced this is gone now (the roster no longer offers it), so this is the second
+    // layer: a caller who reaches the refusal another way is told WHICH rule stopped them.
+    if (err instanceof ApiError && err.status === 403) {
+      notify.error(t("spaceMembers.ceilingRefused", { who }));
+      return;
+    }
     notify.error(t("toast.actionFailed"));
   };
 
@@ -328,8 +336,8 @@ export function SpaceMembersTab() {
   // two mechanisms stay underneath (each row's revoke goes to its own machinery); that is an
   // implementation fact, not a reason to split the screen. One sort rule: principal name, then badge.
   type MergedRow =
-    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; locked?: boolean; grantee: string; groupName?: string; capability: PageRelation | "manageAccess"; foldedCaps?: PageRelation[]; principal?: undefined; roleId?: undefined }
-    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; locked?: boolean; assignmentId: string; principal: string; groupName?: string; roleId: string; grantee?: undefined; capability?: undefined };
+    | { kind: "grant"; key: string; badge: string; custom: false; label: string; managed?: boolean; locked?: boolean; frozen?: boolean; grantee: string; groupName?: string; capability: PageRelation | "manageAccess"; foldedCaps?: PageRelation[]; principal?: undefined; roleId?: undefined }
+    | { kind: "assignment"; key: string; badge: string; custom: true; label: string; managed?: boolean; locked?: boolean; frozen?: boolean; assignmentId: string; principal: string; groupName?: string; roleId: string; grantee?: undefined; capability?: undefined };
   // #553 / ADR-199 §2 (rev5 ruling): a principal holding BOTH the edit and comment built-in grants is
   // ONE editor — the pair folds into a single "editor" row whose revoke removes both arms. The word
   // "commenter" appears on no GRANT surface (#552 — the picker); a lone comment grant (an unfolded
@@ -338,11 +346,20 @@ export function SpaceMembersTab() {
   // and name — so the tooltip joins against the definitions this screen already holds.
   const roleCapsById = new Map(customRoles.map((r) => [r.id, r.capabilities as readonly string[]]));
   const foldedGrantees = foldedEditorGrantees(grants);
+  // #607 principals whose ROLE this caller may not change (the server answers per principal).
+  const frozenPrincipals = new Set(grants.filter((g) => g.changeable === false).map((g) => g.grantee));
   const visibleGrants = grants.filter((g) => !(foldedGrantees.has(g.grantee) && g.capability === "comment"));
   const mergedRows: MergedRow[] = [
     ...visibleGrants.map((g) => ({
       kind: "grant" as const, key: `g:${g.grantee}:${g.capability}`, badge: capNoun(g.capability), custom: false as const,
-      label: label(g), managed: g.managed, locked: g.revocable === false, grantee: g.grantee, groupName: g.groupName, capability: g.capability,
+      // #607: `locked` is the ROW answer (may this caller take this row away) and drives the ×.
+      // #607 `frozen` is the PRINCIPAL answer (may this caller change what this principal is) and
+      // drives the control. They are deliberately separate: a manager's `view` row IS individually
+      // revocable, so hiding its × would remove a legitimate action — while changing that principal's
+      // role is a demotion of the space's owner, which the ceiling refuses. Folding the two together in
+      // either direction takes something real away or offers something that cannot work.
+      label: label(g), managed: g.managed, locked: g.revocable === false, frozen: g.changeable === false,
+      grantee: g.grantee, groupName: g.groupName, capability: g.capability,
       ...(foldedGrantees.has(g.grantee) && g.capability === "edit" ? { foldedCaps: ["edit", "comment"] as PageRelation[] } : {}),
     })),
     // #603: `roleId` is nullable now (a tenant TIER row) — this space listing never returns those
@@ -352,7 +369,11 @@ export function SpaceMembersTab() {
       kind: "assignment" as const, key: `a:${a.id}`, badge: a.roleName, custom: true as const,
       // #497 re-review N2: a mapping-owned assignment is read-only here too (ADR-183 §1) — the
       // badge below replaces its revoke exactly as it does for the builtin grant rows.
+      // the SAME principal answer as a built-in row (#607): a custom-role row belonging to
+      // somebody this caller may not move is just as unmovable, and the server's signal travels with the
+      // grants rather than with the assignments, so it is read across by principal
       label: rolePrincipalLabel(a), assignmentId: a.id, principal: a.principal, groupName: a.groupName, roleId: a.roleId!, managed: a.managed,
+      frozen: frozenPrincipals.has(a.principal),
     })),
   ].sort((x, y) => x.label.localeCompare(y.label) || x.badge.localeCompare(y.badge));
 
@@ -415,11 +436,11 @@ export function SpaceMembersTab() {
                 separate built-in grant. (#579's "roles do not stack" was ruled for the tenant scope, where
                 the server now converges; the space sweep already keeps one role per principal here.)
                 #582: no `uppercase` — a role name is a proper noun on every surface. */}
-            {r.managed || r.locked ? (
+            {r.managed || r.locked || r.frozen ? (
               /* Machine-managed (ADR-183 §1) — or, #607: a row THIS caller may not move (the server's
                  per-row `revocable` signal: an access-manager sees the manager/moderator rows but a
                  control the server 403s would be a lie about who is in charge). Read-only badge. */
-              <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability} {...(r.locked ? { "data-testid": "space-grant-locked" } : {})}>{r.badge}</span>
+              <span className="min-w-[52px] flex-none rounded-full border border-border px-2 py-px text-center text-[11px] tracking-[0.03em] text-fg-dim data-[cap=manage]:border-[var(--accent)] data-[cap=manage]:text-[var(--accent)]" data-cap={r.capability} {...(r.locked || r.frozen ? { "data-testid": "space-grant-locked" } : {})} {...(r.frozen && !r.locked ? { "data-tip": t("spaceMembers.roleFrozen") } : {})}>{r.badge}</span>
             ) : (
               /* #586 §1: the ORIGIN is the axis — role-derived wears the accent, an individually granted
                  capability the neutral one — and it now reads off the control instead of a badge beside

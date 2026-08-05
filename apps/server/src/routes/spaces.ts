@@ -460,8 +460,11 @@ async function requireSpaceManage(fga: OpenFgaClient, userId: string, spaceId: s
 // In one sentence: this verb runs the roster of READERS and EDITORS; it cannot appoint or remove a
 // moderator, a manager, or another holder of itself.
 export function spaceCallMovesAdminClass(capabilities: readonly string[], replace?: boolean): boolean {
+  // `manageAccess` is IN `ADMIN_CLASS_ROLE_CAPS` since the 2026-08-05 ruling made it a role capability,
+  // so naming it again here made the set non-load-bearing (removing the verb from the set changed no
+  // answer — measured). `manage` stays named because it is deliberately not a role capability.
   return replace === true
-    || capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as never) || c === 'manage' || c === 'manageAccess')
+    || capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as never) || c === 'manage')
 }
 async function requireSpaceAccessAuthority(
   fga: OpenFgaClient, userId: string, spaceId: string,
@@ -1049,7 +1052,7 @@ export async function listSpaceAccess(
   fga: OpenFgaClient,
   db: TenantDb,
   args: { spaceId: string; tenantId: string; userId: string },
-): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean }[]> {
+): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean; changeable?: boolean }[]> {
   // ADR-209 (#607): reading the roster is the verb's whole point. The per-row `revocable` signal below
   // tells the CLIENT which rows this caller may take away (the server refuses anyway; two layers).
   await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [] })
@@ -1086,7 +1089,7 @@ export async function listSpaceAccess(
   // moderator / access-manager rows but may not revoke them (the ceiling); a bare × on those rows is
   // a button that answers 403, so the payload says per row what the server will do.
   const callerIsManager = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
-  const out: { grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean }[] = []
+  const out: { grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean; changeable?: boolean }[] = []
   for (const key of tuples) {
     if (!(key.relation in RELATION_TO_CAP)) continue
     // Direct member/group grants only — never expose share_link, user:* (public)
@@ -1103,6 +1106,22 @@ export async function listSpaceAccess(
       revocable: callerIsManager || !spaceCallMovesAdminClass([cap]),
     })
   }
+  // #607 (review rejection): `revocable` is a fact about a ROW, and changing somebody's role is not a
+  // row operation — it is a REPLACE over everything that principal holds. The two came apart on the
+  // motivating data: `dev-user` appears twice, once as `manage` (revocable=false, drawn as a badge) and
+  // once as `view` (revocable=true, so the row kept a control). Choosing `editor` in that control offered
+  // to demote the space's owner, read out the demotion confirmation, and then failed with a generic
+  // "something went wrong" — a 403 from the very ceiling that is working correctly.
+  //
+  // So the server answers the OTHER question too, per principal, and answers it through the same helper
+  // the route's gate calls (`replace: true`, which is what a role change is) — the client is never asked
+  // to infer which capabilities are admin-class.
+  const capsOfPrincipal = new Map<string, SpaceCapability[]>()
+  for (const g of out) capsOfPrincipal.set(g.grantee, [...(capsOfPrincipal.get(g.grantee) ?? []), g.capability])
+  for (const g of out) {
+    g.changeable = callerIsManager || !spaceCallMovesAdminClass(capsOfPrincipal.get(g.grantee) ?? [], true)
+  }
+
   // #523 / ADR-190: FULL name resolution (override ?? OIDC display_name) for the USER grantees. This is a
   // server-set, VIEW-GATED result set — the caller already passed requireSpaceManage, so these are grants
   // they can see; naming them is not a membership oracle (the #486/ADR-150 Addendum-2 precedent). Resolved

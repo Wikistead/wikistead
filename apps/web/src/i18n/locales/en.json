@@ -587,6 +587,8 @@
     "commentSummaryMembers": "all viewing members",
     "commentSummaryGuests": "link guests",
     "managedBadge": "mapping",
+    "roleFrozen": "You can add and remove people here. You cannot change what this person is: they hold this space.",
+    "ceilingRefused": "You cannot change what {{who}} is. Running the roster does not include appointing or removing an administrator.",
     "managedByMapping": "Conferred by a group mapping. Group mappings are retired, so this becomes an ordinary grant you can revoke once this workspace’s data upgrade has run.",
     "replaceConfirm": "Replace {{who}}'s current role ({{current}}) with {{next}}?",
     "managerReplaceConfirm": "{{who}} is a MANAGER of this space. Replace their manager role with {{next}}? They lose every management capability here; a tenant admin can restore it.",
