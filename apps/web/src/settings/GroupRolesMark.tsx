@@ -1,8 +1,10 @@
-import { useRef, useState } from "react";
+import type React from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Users } from "lucide-react"; // #544: an icon component, never a text glyph
+import { ChevronRight, Users } from "lucide-react"; // #544: an icon component, never a text glyph
 import { RoleCaps } from "../ui/RoleTip";
+import { placeBelow, placeBeside, type At } from "../ui/panel-placement";
 import { TENANT_TIER_CAPS } from "./role-nouns";
 import type { GroupConferredRole } from "./tenant-role-rows";
 
@@ -26,11 +28,19 @@ const capsOf = (g: GroupConferredRole, tierCaps: TierCaps): readonly string[] | 
 // capability panel every other role name raises (#582), which is why the list must be able to receive
 // the pointer: `pointer-events-none` on it would kill the walk from the mark into the list and onto a
 // name. It stays open while the pointer is anywhere in that chain.
+//
+// #603 (user ruling, 2026-08-05): "1 ". Both panels place themselves
+// through the shared rule in `panel-placement`, which flips to whichever side has room and clamps the
+// other axis. Measured before: the list ran off the bottom at a 420px-tall window and the capability
+// panel off the right at a 1000px-wide one, because each wrote `top`/`left` from its anchor and never
+// asked about the viewport. The size a panel needs is only known once it is rendered, so each measures
+// itself in a layout effect and places again — a guessed constant is what put the old panel 61px adrift.
 export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConferredRole[]; tierCaps: TierCaps }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const [at, setAt] = useState<At | null>(null);
   const anchor = useRef<HTMLSpanElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   // one timer for the whole chain: leaving the mark for the list (or the list for a role name) crosses a
   // gap of a few pixels, and closing on that gap is what makes a nested hover impossible to use
   const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -39,10 +49,19 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
 
   const show = () => {
     if (closing.current) { clearTimeout(closing.current); closing.current = null; }
-    const r = anchor.current?.getBoundingClientRect();
-    if (r) setAt({ top: r.bottom + 4, left: r.left });
+    place();
     setOpen(true);
   };
+  /** Measured when the panel exists, estimated from the anchor for the frame before it does. */
+  const place = () => {
+    const r = anchor.current?.getBoundingClientRect();
+    if (!r) return;
+    const box = panel.current?.getBoundingClientRect();
+    setAt(placeBelow(r, { width: box?.width ?? 0, height: box?.height ?? 0 }));
+  };
+  // The first pass had no panel to measure; this one does, so a list that would have hung off the bottom
+  // flips above on the frame it appears rather than after the reader has already seen it clipped.
+  useLayoutEffect(() => { if (open) place(); }, [open, roles.length]);
   const hide = () => {
     if (closing.current) clearTimeout(closing.current);
     closing.current = setTimeout(() => setOpen(false), 160);
@@ -68,6 +87,7 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
       </span>
       {open && at && createPortal(
         <div
+          ref={panel}
           role="tooltip"
           data-testid="group-roles-list"
           className="fixed z-[60] w-max max-w-[320px] rounded-md border border-border bg-panel px-2 py-1.5 shadow-md"
@@ -82,7 +102,7 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
                 <span className="text-fg-dim">{g.group}</span>
                 {/* the role NAME is the nested hover: it raises the capability panel #582 settled on, so
                     this list carries two axes and no third way of showing what a role can do */}
-                <RoleNameWithCaps role={g} caps={capsOf(g, tierCaps)} />
+                <RoleNameWithCaps role={g} caps={capsOf(g, tierCaps)} list={panel} />
               </li>
             ))}
           </ul>
@@ -93,32 +113,50 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
   );
 }
 
-/** A role name in the list, with the shared capability panel on its own hover. */
-function RoleNameWithCaps({ role, caps }: { role: GroupConferredRole; caps: readonly string[] | null }) {
+/** A role name in the list, with the shared capability panel on its own hover.
+ *
+ *  The panel is placed beside the LIST, not beside the name: level with the name it describes, but clear
+ *  of the list it came from. Anchoring it to the name put it 46px on top of the list (#603), so
+ *  looking up what a role can do hid the other roles — in the one panel whose whole purpose is comparing
+ *  them. That is exactly the two-rect case `placeBeside` exists for, and the same one an open Select uses.
+ *
+ *  The chevron is the ruling's fourth point: the second tier was there but nothing said so, and a
+ *  hover nobody knows about is a hover nobody uses. */
+function RoleNameWithCaps({ role, caps, list }: {
+  role: GroupConferredRole;
+  caps: readonly string[] | null;
+  list: React.RefObject<HTMLDivElement | null>;
+}) {
   const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const [at, setAt] = useState<At | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const place = () => {
     const r = ref.current?.getBoundingClientRect();
-    if (r) setAt({ top: r.top, left: r.right + 8 });
+    if (!r) return;
+    const box = panel.current?.getBoundingClientRect();
+    setAt(placeBeside(list.current?.getBoundingClientRect() ?? r, r, { width: 220, height: box?.height ?? 0 }));
     setOpen(true);
   };
+  useLayoutEffect(() => { if (open) place(); }, [open]);
   return (
     <>
       <span
         ref={ref}
         tabIndex={0}
         data-testid="group-role-name"
-        className="cursor-help font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex cursor-help items-center gap-0.5 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onPointerEnter={place}
         onPointerLeave={() => setOpen(false)}
         onFocus={place}
         onBlur={() => setOpen(false)}
       >
         {role.role}
+        <ChevronRight size={11} aria-hidden className="text-fg-dim" />
       </span>
       {open && at && createPortal(
         <div
+          ref={panel}
           role="tooltip"
           data-testid="group-role-caps"
           className="pointer-events-none fixed z-[70] w-[220px] rounded-md border border-border bg-panel px-2 py-1.5 shadow-md"
