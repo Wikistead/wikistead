@@ -31,9 +31,11 @@ let tenantId = ''
 let connA = ''
 let connB = ''
 
-const insertConn = async (id: string, sort: number, iss: TestIssuer, tenant = tenantId, host = HOST, eligible = false) => {
-  await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, bootstrap_eligible)
-    VALUES (${id}, ${tenant}, ${iss.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${host}/auth/callback`}, true, ${sort}, ${eligible})`
+// the `eligible` parameter went with the mechanism (#616 / ADR-212 slice 2) — connections differ by
+// their issuer and sort order now, which is what the surviving cases are about
+const insertConn = async (id: string, sort: number, iss: TestIssuer, tenant = tenantId, host = HOST) => {
+  await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort)
+    VALUES (${id}, ${tenant}, ${iss.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${host}/auth/callback`}, true, ${sort})`
 }
 
 beforeAll(async () => {
@@ -134,46 +136,50 @@ describe('#554 S2: per-connection start/callback', () => {
   }, 60_000)
 })
 
-// #554 S2 review N1 (the ADR-197 §2 rev2 pinned rule, wired): a default-flag connection NEVER
-// takes the first-admin bootstrap — a named start now reaches non-first rows, so the flag is the
-// only thing standing between "any enabled oidc row" and tenant admin on a member-less tenant.
-describe('#554 S2 review N1: bootstrap_eligible gates the first-admin bootstrap', () => {
+// RE-AIMED (#616 / ADR-212 slice 2). The block here measured the eligibility FLAG gating the
+// first-admin bootstrap: a default-flag connection refused, an eligible one seated an administrator.
+// The whole mechanism is retired (user ruling 2026-08-05), and the flag with it — so the assertion
+// that survives is the STRONGER half, aimed at the property the retirement is supposed to deliver:
+//
+//     no connection, however configured, seats an administrator by being logged into.
+//
+// That is the statement whose failure would silently restore a third way to become an admin. It is
+// asked of every enabled connection rather than of one flag value, so a future re-introduction is
+// caught wherever it lands.
+describe('#616 / ADR-212: logging in never makes you the administrator of a member-less tenant', () => {
   const SLUG2 = `s2bs-${STAMP}`
   const HOST2 = `${SLUG2}.localhost`
   const BOOT = `s2bs-admin-${STAMP}`
-  let t2 = ''
-  let eligibleConn = ''
-  let defaultConn = ''
 
-  it('a bootstrap_eligible=false connection refuses; the eligible one seats the first admin', async () => {
-    // a GENUINE member-less CE tenant: the row only, no provisioning — bootstrapFirstAdmin writes
-    // the baseline tuples itself, and a provisioned tenant's leftovers make FGA answer
-    // 'already exists' (the known trap)
-    t2 = randomUUID()
+  it('a genuinely member-less tenant stays member-less, through EVERY enabled connection', async () => {
+    // a GENUINE member-less tenant: the row only, no provisioning — a provisioned tenant's leftovers
+    // would make this pass for the wrong reason
+    const t2 = randomUUID()
     await admin`INSERT INTO tenants (id, slug, plan, isolation) VALUES (${t2}, ${SLUG2}, 'business', 'logical')`
-    eligibleConn = randomUUID()
-    defaultConn = randomUUID()
-    await insertConn(eligibleConn, 0, issuer, t2, HOST2, true)
-    await insertConn(defaultConn, 1, issuer2, t2, HOST2, false)
+    const connA = randomUUID()
+    const connB = randomUUID()
+    await insertConn(connA, 0, issuer, t2, HOST2)
+    await insertConn(connB, 1, issuer2, t2, HOST2)
     issuer.setSubject(BOOT, { email: 'b@s2.test' })
     issuer2.setSubject(BOOT, { email: 'b@s2.test' })
     try {
-      const viaDefault = await start(defaultConn, HOST2)
-      expect(viaDefault.status).toBe(302)
-      const refused = await cb(viaDefault.cbPath!, HOST2)
-      expect(refused.statusCode).toBe(302)
-      expect(String(refused.headers.location), 'identity proven, but a default-flag connection never bootstraps').toContain('/login?error=access')
-      expect((await admin<{ sub: string }[]>`SELECT sub FROM members WHERE tenant_id = ${t2}`).length, 'no admin row').toBe(0)
-
-      const viaEligible = await start(eligibleConn, HOST2)
-      expect(viaEligible.status).toBe(302)
-      const seated = await cb(viaEligible.cbPath!, HOST2)
-      expect(seated.statusCode).toBe(302)
-      expect(String(seated.headers['set-cookie'] ?? '')).toContain(`${SESSION_COOKIE}=`)
-      const [row] = await admin<{ sub: string; role: string }[]>`SELECT sub, role FROM members WHERE tenant_id = ${t2}`
-      expect(row, 'the eligible connection seats the first admin').toMatchObject({ sub: BOOT, role: 'admin' })
+      expect((await admin`SELECT sub FROM members WHERE tenant_id = ${t2}`).length, 'premise: nobody seated').toBe(0)
+      for (const [name, conn] of [['first', connA], ['second', connB]] as const) {
+        const started = await start(conn, HOST2)
+        expect(started.status).toBe(302)
+        const done = await cb(started.cbPath!, HOST2)
+        expect(done.statusCode).toBe(302)
+        expect(
+          String(done.headers.location),
+          `${name} connection: identity proven, membership refused — the entrance is an invite`,
+        ).toContain('/login?error=access')
+        expect(
+          (await admin<{ sub: string }[]>`SELECT sub FROM members WHERE tenant_id = ${t2}`).length,
+          `${name} connection: still nobody seated`,
+        ).toBe(0)
+      }
     } finally {
       await admin`DELETE FROM tenants WHERE id = ${t2}`.catch(() => {})
     }
-  }, 60_000)
+  }, 120_000)
 })

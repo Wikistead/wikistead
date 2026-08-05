@@ -172,7 +172,6 @@ export interface LoginConnection {
   kind: 'oidc' | 'saml' | 'platform' | 'local'
   label: string | null
   brand: string | null
-  bootstrapEligible: boolean
   // #554 S6 / ADR-197 §6: whether this connection's asserted groups claim is persisted. SERVER-
   // INTERNAL — login-options projects {id, kind, label, brand} explicitly, so this never publishes.
   // The platform connection is trusted (the deployment operator's own IdP — today's behavior).
@@ -190,11 +189,11 @@ export async function resolveLoginConnections(
   const ceiling = loginMethodCeiling(env)
   const out: LoginConnection[] = []
   if (ceiling.has('tenant-oidc')) {
-    const rows = await db.sql<{ id: string; bootstrap_eligible: boolean; trust_groups: boolean; subject_prefix: string | null; label: string | null; preset: string | null }[]>`
-      SELECT id, bootstrap_eligible, trust_groups, subject_prefix, label, preset FROM tenant_oidc WHERE enabled ORDER BY sort, id`
+    const rows = await db.sql<{ id: string; trust_groups: boolean; subject_prefix: string | null; label: string | null; preset: string | null }[]>`
+      SELECT id, trust_groups, subject_prefix, label, preset FROM tenant_oidc WHERE enabled ORDER BY sort, id`
     // rev3 labels: a tenant-authored label publishes ONLY preset-less (a preset connection wears
     // its fixed brand; the API refuses labels on presets, this is the second seatbelt)
-    for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: r.preset ? null : r.label, brand: r.preset, bootstrapEligible: r.bootstrap_eligible, trustGroups: r.trust_groups, subjectPrefix: r.subject_prefix })
+    for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: r.preset ? null : r.label, brand: r.preset, trustGroups: r.trust_groups, subjectPrefix: r.subject_prefix })
   }
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso) {
     // one per tenant in v1 (ADR-197 §1 B5); SAML never bootstraps (§2 rev2: oidc-only in v1)
@@ -202,13 +201,13 @@ export async function resolveLoginConnections(
       if ((err as { code?: string }).code === '42P01') return [] as { id: string; trust_groups: boolean }[]
       throw err
     })
-    if (row) out.push({ id: row.id, kind: 'saml', label: null, brand: null, bootstrapEligible: false, trustGroups: row.trust_groups, subjectPrefix: null })
+    if (row) out.push({ id: row.id, kind: 'saml', label: null, brand: null, trustGroups: row.trust_groups, subjectPrefix: null })
   }
   // #568: local is a connection with no configuration to point at — a fixed id, like platform, which
   // cannot collide with a minted uuid. It never bootstraps an admin (§7 keeps that on the CLI) and
   // asserts no groups, so it trusts none.
   if (ceiling.has('local') && (await localLoginEnabled(db))) {
-    out.push({ id: 'local', kind: 'local', label: null, brand: null, bootstrapEligible: false, trustGroups: false, subjectPrefix: null })
+    out.push({ id: 'local', kind: 'local', label: null, brand: null, trustGroups: false, subjectPrefix: null })
   }
   const ownIdpEffective = out.length > 0
   let platform = ceiling.has('platform-oidc') ? loadPlatformOidc() : null
@@ -221,7 +220,7 @@ export async function resolveLoginConnections(
     out.push(...keep)
     platform = null
   }
-  if (platform) out.push({ id: 'platform', kind: 'platform', label: null, brand: null, bootstrapEligible: false, trustGroups: true, subjectPrefix: null })
+  if (platform) out.push({ id: 'platform', kind: 'platform', label: null, brand: null, trustGroups: true, subjectPrefix: null })
   return out
 }
 
@@ -253,7 +252,7 @@ export async function assertNotLastWayIn(
     // the stance lapses after this write — count the doors it was hiding (local; platform is handled
     // by the ruling-4 lapse below, exactly as today)
     if (loginMethodCeiling(env).has('local') && (await localLoginEnabled(db)) && !remaining.some((c) => c.kind === 'local')) {
-      remaining = [...remaining, { id: 'local', kind: 'local', label: null, brand: null, bootstrapEligible: false, trustGroups: false, subjectPrefix: null }]
+      remaining = [...remaining, { id: 'local', kind: 'local', label: null, brand: null, trustGroups: false, subjectPrefix: null }]
     }
   }
   if (remaining.length > 0) return

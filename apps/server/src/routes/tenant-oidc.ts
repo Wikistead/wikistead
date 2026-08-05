@@ -132,14 +132,15 @@ export async function updateTenantOidc(
 
   // #554 S1 / ADR-197 §1: tenant_oidc is N-capable (PK = minted uuid), so the old
   // ON CONFLICT (tenant_id) upsert is gone — this surface updates ITS row by id, or mints one.
-  // A fresh row minted here is the legacy tenant-IdP connection, so it keeps today's bootstrap
-  // behavior: bootstrap_eligible = true (ADR-197 §2 rev2 — the flag is set only where connections
-  // are created, and THIS is that surface for the tenant IdP).
+  // A fresh row minted here is the legacy tenant-IdP connection. It used to be stamped
+  // `bootstrap_eligible = true` — which is how rows kept appearing for a mechanism nobody was
+  // choosing (#616 / ADR-212: the flag was described as grandfathered onto old rows, and this route
+  // was quietly minting new ones). The mechanism is gone; nothing is stamped.
   //
   // S1 review A: the old ON CONFLICT carried a DB-level single-row guarantee this read-then-write
   // lost — two concurrent first saves would mint two connections (one an orphan the legacy read
   // paths never show, but enabled and bootstrap-eligible). One transaction + an advisory lock on
-  // the tenant (the bootstrapFirstAdmin discipline) restores it; the row is RE-read under the lock
+  // it; the row is RE-read under the lock
   // so the loser of the race lands on the winner's row.
   await db.tx(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(hashtext(${'tenant-oidc-save:' + args.tenantId})::bigint)`
@@ -154,13 +155,13 @@ export async function updateTenantOidc(
         WHERE id = ${row.id}
       `
     } else {
-      // #554 S6 review N1: the legacy surface's connection is TRUSTED for groups too (the same
-      // grandfathering as bootstrap_eligible — this row IS "the tenant's IdP", and a silent
-      // default-false here killed group sync / default roles / admin mappings for every tenant
+      // #554 S6 review N1: the legacy surface's connection is TRUSTED for groups (this row IS
+      // "the tenant's IdP", and a silent
+      // default-false killed group sync / default roles / admin mappings for every tenant
       // configuring OIDC after migration 093, with no UI to fix it until S4).
       await tx`
-        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible, trust_groups)
-        VALUES (${randomUUID()}, ${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim}, true, true)
+        INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, trust_groups)
+        VALUES (${randomUUID()}, ${args.tenantId}, ${issuer}, ${clientId}, ${secretEnc}, ${scopes}, ${redirectUri}, ${args.enabled}, ${groupsClaim}, true)
       `
     }
   })

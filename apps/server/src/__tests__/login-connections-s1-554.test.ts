@@ -3,7 +3,7 @@
 //   - minted ids: a row created through the legacy admin surface carries a uuid, NEVER the tenant id
 //     (review B4 — tenant ids must not surface on the unauthenticated login screen);
 //   - the legacy surface stays single-row: a second save UPDATES the same row (same id, count 1);
-//   - bootstrap_eligible: TRUE on the legacy-surface connection (today's exact bootstrap behavior),
+//   - (the bootstrap-eligibility clause retired with the mechanism — #616 / ADR-212 slice 2),
 //     FALSE by default on a directly-inserted extra connection (ADR-197 §2 rev2 — an explicit trust
 //     attribute, set only where connections are created);
 //   - resolveLoginConnections: ordered (sort, id), ceiling-respecting, enabled-only, SAML entitled-
@@ -53,14 +53,16 @@ const save = (enabled: boolean) =>
   }, fakeDiscovery)
 
 describe('#554 S1: connection identities and the list resolver', () => {
-  it('the legacy admin surface mints a uuid id (never the tenant id), stays single-row across saves, and is bootstrap-eligible', async () => {
+  // #616 / ADR-212 slice 2: the bootstrap-eligibility clause is RETIRED BY NAME, not quietly dropped.
+  // It asserted that this surface stamped `bootstrap_eligible = true` on every row it minted — which is
+  // how rows kept appearing for a mechanism nobody was choosing, and is exactly what the retirement
+  // removes. What survives is the identity property the case is named for.
+  it('the legacy admin surface mints a uuid id (never the tenant id) and stays single-row across saves', async () => {
     await save(true)
-    const rows1 = await admin<{ id: string; bootstrap_eligible: boolean }[]>`
-      SELECT id, bootstrap_eligible FROM tenant_oidc WHERE tenant_id = ${tenantId}`
+    const rows1 = await admin<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${tenantId}`
     expect(rows1.length).toBe(1)
     expect(rows1[0]!.id).not.toBe(tenantId)
     expect(rows1[0]!.id).toMatch(/^[0-9a-f-]{36}$/)
-    expect(rows1[0]!.bootstrap_eligible, 'the legacy tenant-IdP surface keeps today\'s bootstrap behavior').toBe(true)
 
     await save(true) // second save = update, not a sibling row
     const rows2 = await admin<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${tenantId}`
@@ -68,7 +70,7 @@ describe('#554 S1: connection identities and the list resolver', () => {
     expect(rows2[0]!.id, 'the same connection, updated in place').toBe(rows1[0]!.id)
   }, 60_000)
 
-  it('resolveLoginConnections: ordered list, enabled-only, ceiling-respecting; a second row defaults bootstrap_eligible=false', async () => {
+  it('resolveLoginConnections: ordered list, enabled-only, ceiling-respecting', async () => {
     // a second connection, inserted where connections are created (no legacy surface for it yet — S4)
     // S3 review N5: force the second row's id LEXICOGRAPHICALLY SMALLER than the first's, so the
     // sort-order pin cannot pass by id-order coincidence (dropping `sort` must go RED).
@@ -79,9 +81,10 @@ describe('#554 S1: connection identities and the list resolver', () => {
     try {
       const list = await resolveLoginConnections(db, { plan: 'business' }, 'tenant-oidc')
       expect(list.map((c) => c.kind)).toEqual(['oidc', 'oidc'])
-      expect(list[0]!.bootstrapEligible, 'legacy surface row first (sort 0), eligible').toBe(true)
       expect(list[1]!.id).toBe(secondId)
-      expect(list[1]!.bootstrapEligible, 'a NEW connection is ineligible unless flipped knowingly (§2 rev2)').toBe(false)
+      // the eligibility assertions retired with the mechanism (#616 / ADR-212 slice 2); the ORDER they
+      // rode on is the property this case is named for, and it stays
+      expect(list[0]!.id, 'the legacy surface row sorts first (sort 0)').not.toBe(secondId)
 
       // disabled rows drop out
       await admin`UPDATE tenant_oidc SET enabled = false WHERE id = ${secondId}`
@@ -96,7 +99,7 @@ describe('#554 S1: connection identities and the list resolver', () => {
     }
   }, 60_000)
 
-  it('SAML: listed only when entitled, with its own minted id, never bootstrap-eligible', async () => {
+  it('SAML: listed only when entitled, with its own minted id', async () => {
     const samlId = randomUUID()
     await admin`INSERT INTO tenant_saml (id, tenant_id, idp_entity_id, sso_url, idp_cert_enc, sp_entity_id, acs_url, enabled)
       VALUES (${samlId}, ${tenantId}, 'https://idp.example/meta', 'https://idp.example/sso', 'enc', 'https://wks/sp', 'https://wks/acs', true)`
@@ -104,7 +107,6 @@ describe('#554 S1: connection identities and the list resolver', () => {
       const entitled = await resolveLoginConnections(db, { plan: 'business' }, 'tenant-oidc,saml')
       const saml = entitled.find((c) => c.kind === 'saml')
       expect(saml?.id).toBe(samlId)
-      expect(saml?.bootstrapEligible, 'SAML never bootstraps in v1 (§2 rev2)').toBe(false)
       // CE's default resolver is UNLIMITED — the entitlement gate needs a managed-style resolver
       const { registerEntitlementsResolver, resetEntitlementsResolver, resolveEntitlements } = await import('@wikistead/entitlements')
       const unlimited = resolveEntitlements('business')

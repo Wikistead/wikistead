@@ -48,8 +48,8 @@ beforeAll(async () => {
   // #554 S1: no tenant uniqueness on tenant_oidc — reset the tenant's rows and seed one
   await db.sql`DELETE FROM tenant_oidc`
   await db.sql`
-    INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible, trust_groups)
-    VALUES (${crypto.randomUUID()}, ${tenant.id}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${REDIRECT}, true, true)`
+    INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, trust_groups)
+    VALUES (${crypto.randomUUID()}, ${tenant.id}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${REDIRECT}, true)`
   // MEMBER is provisioned (FGA tenant#member); STRANGER is not.
   await writeTuples(fgaClient, [{ user: `user:${MEMBER}`, relation: 'member', object: `tenant:${tenant.id}` }])
 })
@@ -159,9 +159,15 @@ describe('OIDC login flow', () => {
   })
 })
 
-// CE first-admin bootstrap THROUGH the real callback (P1.2 P2c): a member-less
-// tenant configured with its own IdP makes the FIRST login admin, exactly once.
-describe('CE first-admin bootstrap via callback', () => {
+// RE-AIMED (#616 / ADR-212 slice 2), and it was the strongest pin the ADR listed: this block fixed the
+// retired behaviour END TO END, through the real callback — a member-less tenant with its own IdP made
+// the FIRST login its admin, exactly once. The user ruling of 2026-08-05 retires that entrance, so the
+// same route now proves the OPPOSITE, at the same depth: logging in is not a way to become an
+// administrator, and the tenant stays member-less however many people try.
+//
+// Its second case survives verbatim — "a login is not a membership grant" was always true of everyone
+// after the first, and is now true of the first as well.
+describe('#616: the real callback never bootstraps an admin', () => {
   const admin = postgres(process.env.DATABASE_ADMIN_URL!)
   const slug = `boot-cb-${Date.now().toString(36)}`
   const host = `${slug}.localhost`
@@ -173,8 +179,8 @@ describe('CE first-admin bootstrap via callback', () => {
     const [t] = await admin<{ id: string }[]>`INSERT INTO tenants (slug, plan) VALUES (${slug}, 'free') RETURNING id`
     tenantId = t.id
     await admin`
-      INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, bootstrap_eligible, trust_groups)
-      VALUES (${crypto.randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${`http://${host}/auth/callback`}, true, true)`
+      INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, trust_groups)
+      VALUES (${crypto.randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, ${encryptSecret('test-secret')}, 'openid email profile', ${`http://${host}/auth/callback`}, true)`
   })
   afterAll(async () => {
     await deleteTuples(fgaClient, [
@@ -187,16 +193,21 @@ describe('CE first-admin bootstrap via callback', () => {
     await admin.end()
   })
 
-  it('first login into a member-less tenant is bootstrapped as admin', async () => {
+  it('the FIRST login into a member-less tenant is refused, and seats nobody', async () => {
+    expect((await admin`SELECT sub FROM members WHERE tenant_id = ${tenantId}`).length, 'premise: nobody seated').toBe(0)
     issuer.setSubject(BOOT, { email: 'boot@x.test' })
     const res = await cb(await startLogin('/', host), host)
     expect(res.statusCode).toBe(302)
-    expect(res.headers.location).toBe('/')
-    expect(String(res.headers['set-cookie'] ?? '')).toContain(`${SESSION_COOKIE}=`)
-    expect((await fgaClient.check({ user: `user:${BOOT}`, relation: 'admin', object: `tenant:${tenantId}` })).allowed).toBe(true)
+    expect(res.headers.location, 'identity proven, membership refused — the same vague denial as anyone else').toBe('/login?error=access')
+    expect(String(res.headers['set-cookie'] ?? ''), 'no session').not.toContain(`${SESSION_COOKIE}=`)
+    expect(
+      (await fgaClient.check({ user: `user:${BOOT}`, relation: 'admin', object: `tenant:${tenantId}` })).allowed,
+      'and no administrator was made by the act of logging in',
+    ).toBe(false)
+    expect((await admin`SELECT sub FROM members WHERE tenant_id = ${tenantId}`).length, 'the tenant is still empty').toBe(0)
   })
 
-  it('a second login is NOT auto-admitted — membership now requires an invite', async () => {
+  it('a second login is NOT auto-admitted either — membership requires an invite', async () => {
     issuer.setSubject(SECOND, { email: 'second@x.test' })
     const res = await cb(await startLogin('/', host), host)
     expect(res.statusCode).toBe(302)

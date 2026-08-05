@@ -2,7 +2,8 @@
 // (P1.2). The ONLY paths that grant membership besides invite (P1.4):
 //   - provisionTenant: Cloud signup creates a NEW tenant with the creator as its
 //     sole initial admin, atomically.
-//   - bootstrapFirstAdmin: CE — the FIRST OIDC login into an existing, member-less
+//   - (bootstrapFirstAdmin lived here until #616 / ADR-212 retired it — see the note below)
+//     it was: CE — the FIRST OIDC login into an existing, member-less
 //     tenant becomes admin, exactly once (an advisory lock makes concurrent
 //     first-logins resolve to a single admin). After that, identity≠membership
 //     holds fully and 2nd+ logins require an invite.
@@ -74,33 +75,12 @@ export async function provisionTenant(
   return { tenantId }
 }
 
-// CE: bootstrap the first admin of an existing member-less tenant. Returns true if
-// THIS login became the admin, false if the tenant already had members (caller
-// then applies the normal membership gate — i.e., denies an un-invited user).
-export async function bootstrapFirstAdmin(
-  deps: { db: TenantDb; fga: OpenFgaClient },
-  tenant: { id: string },
-  claims: { sub: string; email?: string | null; name?: string | null; picture?: string | null },
-  // #554 S4 / §5 rev3 gate flip: set only by a caller that validated the RAW sub and minted the
-  // namespaced form itself. Never set from request data.
-  opts?: { subMintedInternally?: boolean },
-): Promise<boolean> {
-  // #554 / ADR-197 §5 (S0): a reserved-prefix (or over-long) sub never bootstraps the first admin —
-  // this seam writes the member row and the admin tuple BEFORE any session gate runs, so the check
-  // must live here, not downstream. Refusal = false, the same answer a non-empty tenant gives.
-  if (!opts?.subMintedInternally) {
-    const { externalSubViolation } = await import('./reserved-subs.js')
-    if (externalSubViolation(claims.sub)) return false
-  }
-  return deps.db.tx(async (tx) => {
-    // Serialize concurrent first-logins for this tenant so EXACTLY ONE wins.
-    await tx`SELECT pg_advisory_xact_lock(hashtext(${'bootstrap:' + tenant.id})::bigint)`
-    const existing = await tx`SELECT 1 FROM members WHERE tenant_id = ${tenant.id} LIMIT 1`
-    if (existing.length) return false // already has members → not the first → no bootstrap
-    await tx`
-      INSERT INTO members (tenant_id, sub, email, display_name, picture_url, role)
-      VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${claims.picture ?? null}, 'admin')`
-    await writeTuples(deps.fga, adminTuples(tenant.id, claims.sub)) // FGA last; throw → rollback
-    return true
-  })
-}
+// #616 / ADR-212 (user ruling 2026-08-05): `bootstrapFirstAdmin` lived here — the first person to
+// complete an OIDC login into a member-less tenant became its administrator. It is gone, and the
+// entrances are `provisionTenant` (signup) and `pnpm tenant:local-admin` (the operator route). What
+// removed it was ADR-198's earlier ruling that a tenant is never created without an admin: that took
+// away the situation this answered, leaving a third way to become an administrator which was reachable
+// by whoever logged in first.
+//
+// `adminTuples` above is shared with the surviving entrance, so the shape of "what an admin holds" is
+// still stated once.

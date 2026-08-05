@@ -9,7 +9,6 @@ import { buildLogin, exchangeCode, loadPlatformOidc, type TenantOidcConfig } fro
 import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
-import { bootstrapFirstAdmin } from '../auth/provisioning.js'
 import { acceptInvite } from '../auth/invites.js'
 import { resolveAvailableLogin, resolveLoginConnections } from '../auth/login-methods.js'
 
@@ -26,11 +25,11 @@ async function loadTenantOidc(db: TenantDb): Promise<TenantOidcConfig | null> {
   return row ? toOidcCfg(row) : null
 }
 
-type TenantOidcRow = { id: string; issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null; bootstrap_eligible: boolean; trust_groups: boolean; subject_prefix: string | null }
+type TenantOidcRow = { id: string; issuer: string; client_id: string; client_secret_enc: string | null; scopes: string; redirect_uri: string; enabled: boolean; groups_claim: string | null; trust_groups: boolean; subject_prefix: string | null }
 
 async function firstEnabledTenantOidc(db: TenantDb): Promise<TenantOidcRow | null> {
   const [row] = await db.sql<TenantOidcRow[]>`
-    SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, bootstrap_eligible, trust_groups, subject_prefix
+    SELECT id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, groups_claim, trust_groups, subject_prefix
     FROM tenant_oidc WHERE enabled ORDER BY sort, id LIMIT 1`
   return row ?? null
 }
@@ -204,13 +203,7 @@ export async function authPlugin(app: FastifyInstance) {
       // #554 S2 (the B3 generalization, per-connection): a state minted under a NAMED connection
       // completes only against that exact connection — still effective, same kind, its own config.
       // Disabling the connection (or the ceiling/entitlement dropping it) closes the 300s window.
-      // The bootstrap gate below stays keyed on viaTenantOidc — wiring it to bootstrap_eligible
-      // awaits the #572ruling (grandfathered legacy surface vs explicit flip).
       let resolved: { cfg: TenantOidcConfig; viaTenantOidc: boolean } | null = null
-      // S2 review N1: bootstrap eligibility is read HERE, at completion time, from the connection
-      // the state is bound to — the ADR-197 §2 rev2 pinned rule (a default-flag connection never
-      // bootstraps) wired at last. The platform pseudo-connection and SAML are structurally false.
-      let bootstrapEligible = false
       // #554 S6 / ADR-197 §6: whether the state's connection trusts the asserted groups claim —
       // read alongside eligibility, from the same connection the state is bound to. The platform
       // connection is trusted (the operator's own IdP, today's behavior).
@@ -224,7 +217,6 @@ export async function authPlugin(app: FastifyInstance) {
           const cfg = conn ? (conn.kind === 'platform' ? loadPlatformOidc() : await loadTenantOidcById(db, conn.id)) : null
           if (!conn || !cfg) return reply.code(404).send({ error: 'not found' })
           resolved = { cfg, viaTenantOidc: conn.kind === 'oidc' }
-          bootstrapEligible = conn.bootstrapEligible
           trustGroups = conn.trustGroups
           subjectPrefix = conn.subjectPrefix
         } else {
@@ -233,7 +225,6 @@ export async function authPlugin(app: FastifyInstance) {
           resolved = available.oidc
           if (resolved?.viaTenantOidc) {
             const first = await firstEnabledTenantOidc(db)
-            bootstrapEligible = first?.bootstrap_eligible ?? false
             trustGroups = first?.trust_groups ?? false
             subjectPrefix = first?.subject_prefix ?? null
           }
@@ -318,13 +309,12 @@ export async function authPlugin(app: FastifyInstance) {
         }
       }
 
-      // (2) CE first-admin bootstrap — the bounded exception (tenant's own IdP +
-      // member-less tenant). A 2nd login or the platform IdP (Cloud) never does.
-      // #554 S2 review N1: AND the connection must be bootstrap_eligible (ADR-197 §2 rev2) — a
-      // named non-first connection is reachable now, and a default-flag one never bootstraps.
-      if (!sid && st.viaTenantOidc && bootstrapEligible && (await bootstrapFirstAdmin({ db, fga: app.fga }, tenant, claims, { subMintedInternally }))) {
-        sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally })
-      }
+      // (2) There is no step (2) any more. #616 / ADR-212 (user ruling 2026-08-05): the first person
+      // to complete a login into a member-less tenant used to become its administrator. ADR-198 had
+      // already decided that a tenant is never created without an admin, which removed the situation
+      // this answered; what remained was a THIRD way to become an administrator, reachable by whoever
+      // logged in first. The entrances are signup and `pnpm tenant:local-admin` (slice 1) — the
+      // open-core shape, where the first admin is made deliberately rather than raced for.
       if (!sid) {
         // Seat-full is a billing state the user should see; everything else stays
         // deliberately VAGUE (no "authenticated but not a member" — that would confirm

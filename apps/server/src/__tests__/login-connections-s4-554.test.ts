@@ -48,8 +48,8 @@ beforeAll(async () => {
   const t = await provisionTenant(fgaClient, { slug: SLUG, admin: { sub: ADMIN_SUB } })
   tenantId = t.tenantId
   // the legacy (raw-sub) connection, enabled — the tenant's first way in
-  await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, trust_groups, bootstrap_eligible)
-    VALUES (${randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 0, true, true)`
+  await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, trust_groups)
+    VALUES (${randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 0, true)`
   app = await buildApp()
   await app.ready()
   valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')

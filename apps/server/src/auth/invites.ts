@@ -1,6 +1,6 @@
 // Tenant invites (P1.4). The third membership-grant path — the open-ended,
 // fully-normal one (after Cloud signup's provisionTenant and the bounded CE
-// bootstrapFirstAdmin). All three share ADR-003: DB writes first, FGA last, throw
+// the operator route). All three share ADR-003: DB writes first, FGA last, throw
 // → full rollback, so a member never exists in DB without its FGA grant (or vice
 // versa).
 //

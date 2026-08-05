@@ -44,13 +44,15 @@ describe("#589: one list, one place to edit a sign-in method", () => {
     expect(owners).toEqual(["AdminSignInMethodsSection.tsx"]);
   });
 
-  it("the editor offers the three flags that used to be creation-only", () => {
+  it("the editor offers the flags that used to be creation-only", () => {
     const list = read("./AdminSignInMethodsSection.tsx");
     // #554 S6 called these out: a connection stuck with trust_groups=false could never sync groups,
     // and only the creation form could set them.
+    // #616 / ADR-212 slice 2: it was three, and the bootstrap one went with its mechanism. The two
+    // that remain are the ones the complaint was actually about.
     expect(list).toContain("admin-connection-trust-groups-");
-    expect(list).toContain("admin-connection-bootstrap-");
     expect(list).toContain('data-testid="oidc-groups-claim"');
+    expect(list, "and the retired one is not lingering in the editor").not.toContain("admin-connection-bootstrap-");
   });
 
   it("a cleared label is SENT, so a label can be unset and not only set", () => {
@@ -123,13 +125,18 @@ describe("#589: one list, one place to edit a sign-in method", () => {
   });
 
   it("F6: everything in the editor is part of the draft, so Cancel cancels all of it", () => {
+    // #616 / ADR-212 slice 2: `bootstrapEligible` left this list with the toggle it named. Rather than
+    // shrink to the one field that remains — which would stop noticing a NEW field wired straight to
+    // the server — the statement is asked of every switch the editor draws, discovered from the source.
     const list = read("./AdminSignInMethodsSection.tsx");
-    for (const field of ["trustGroups: draft.trustGroups", "bootstrapEligible: draft.bootstrapEligible"]) {
-      expect(list, field).toContain(field);
+    const editorBlock = list.slice(list.indexOf("setDraft("), list.lastIndexOf("setDraft(") + 200);
+    const switched = [...editorBlock.matchAll(/setDraft\(\{ \.\.\.draft, (\w+): on \}\)/g)].map((m) => m[1]!);
+    expect(switched.length, "the editor draws at least one switch (a broken match must not pass vacuously)")
+      .toBeGreaterThan(0);
+    for (const field of switched) {
+      expect(list, `${field} is part of the draft, so Cancel cancels it`).toContain(`${field}: draft.${field}`);
     }
-    // ...and the switches write the draft, not the server
-    expect(list).toContain("setDraft({ ...draft, trustGroups: on })");
-    expect(list).toContain("setDraft({ ...draft, bootstrapEligible: on })");
+    expect(list, "the bootstrap toggle is gone with its mechanism").not.toContain("bootstrapEligible");
   });
 
   it("F7: an unreachable issuer keeps its own message instead of the generic failure", () => {

@@ -14,7 +14,7 @@ import { fgaClient } from '@wikistead/authz'
 import { externalSubViolation, mintMcpAccessToken } from './helpers/reserved-subs-helper.js'
 import { establishMemberSession } from '../auth/session.js'
 import { acceptInvite, createInvite } from '../auth/invites.js'
-import { provisionTenant, bootstrapFirstAdmin } from '../auth/provisioning.js'
+import { provisionTenant } from '../auth/provisioning.js'
 import { buildApp } from '../app.js'
 import IORedis from 'ioredis'
 import type { Tenant } from '@wikistead/types'
@@ -112,19 +112,19 @@ describe('#554 S0: the reserved sub space', () => {
   it('seam 4 — CE first-admin bootstrap: a reserved sub never becomes the first admin (false, no row)', async () => {
     // bootstrap only fires on a member-less tenant; on tenant_dev (members exist) it answers false
     // for everyone — so drive the guard's ORDER: it must refuse BEFORE the member-count decision.
-    // A fresh tenant proves it: reserved → false AND the tenant stays member-less.
+    // RETIRED BY NAME (#616 / ADR-212 slice 2): the case used to prove that `bootstrapFirstAdmin`
+    // refused a reserved sub. That entrance is gone, and the same guard is measured where the
+    // surviving one lives — `provisionTenant` calls `assertExternalSub` unconditionally, which is the
+    // reason slice 1's operator command cannot take a sub at all.
     const slug = `rs554b-${STAMP}`
-    const { tenantId } = await provisionTenant(fgaClient, { slug, admin: { sub: `rs554-real-admin-${STAMP}` } })
-    // simulate member-less (the bootstrap precondition) by removing the seeded admin row + tuples
-    await adminPool`DELETE FROM members WHERE tenant_id = ${tenantId}`
-    const tdb = await acquireTenantDb(asTenant(tenantId))
-    try {
-      expect(await bootstrapFirstAdmin({ db: tdb, fga: fgaClient }, { id: tenantId }, { sub: RESERVED[0]! })).toBe(false)
-      expect((await adminPool<{ sub: string }[]>`SELECT sub FROM members WHERE tenant_id = ${tenantId}`).length, 'no admin row written').toBe(0)
-    } finally {
-      await tdb.release()
-      await adminPool`DELETE FROM tenants WHERE id = ${tenantId}`.catch(() => {})
-    }
+    await expect(
+      provisionTenant(fgaClient, { slug, admin: { sub: RESERVED[0]! } }),
+      'a reserved-prefix sub never seats an admin through the surviving entrance either',
+    ).rejects.toMatchObject({ statusCode: 400 })
+    expect(
+      (await adminPool`SELECT id FROM tenants WHERE slug = ${slug}`).length,
+      'and no tenant is left behind by the refusal',
+    ).toBe(0)
   }, 60_000)
 
   // RE-AIMED by #592 / ADR-204. This asserted that a reserved-prefix sub is 401 at the MCP entry "even

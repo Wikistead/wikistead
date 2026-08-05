@@ -5,7 +5,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import { fgaClient, deleteTuples } from '@wikistead/authz'
-import { provisionTenant, bootstrapFirstAdmin, isValidSlug } from '../auth/provisioning.js'
+import { provisionTenant, isValidSlug } from '../auth/provisioning.js'
 import type { Tenant } from '@wikistead/types'
 
 // Raw FGA relation check (tenant#admin/#member are not page/space Capabilities).
@@ -85,51 +85,36 @@ describe('provisionTenant (Cloud signup)', () => {
   })
 })
 
-describe('bootstrapFirstAdmin (CE first-login)', () => {
-  async function freshTenant(slug: string): Promise<Tenant> {
-    const [t] = await admin<{ id: string }[]>`INSERT INTO tenants (slug, plan) VALUES (${slug}, 'free') RETURNING id`
-    created.push(t.id)
-    return { id: t.id, slug, isolation: 'logical', plan: 'free' } as Tenant
-  }
-  const cleanupTuples = (id: string, sub: string) =>
-    deleteTuples(fgaClient, [
-      { user: `user:${sub}`, relation: 'admin', object: `tenant:${id}` },
-      { user: `user:${sub}`, relation: 'member', object: `tenant:${id}` },
+// RE-AIMED (#616 / ADR-212 slice 2). The `bootstrapFirstAdmin` block that stood here measured the
+// first-login route to admin: that somebody became one, and that concurrent logins resolved to exactly
+// ONE. The mechanism is retired (user ruling 2026-08-05) — but the SECOND property is not about it, it
+// is about tenant creation racing, and it now belongs to the entrance that survives.
+//
+// The first property is not re-aimed here: "the person the operator invited becomes an administrator"
+// is measured end to end by `local-admin-cli-616`, against the store rather than the members row.
+describe('#616: creating a tenant still resolves a race to exactly one admin', () => {
+  it('two concurrent provisions of the same slug: one wins, one is refused, and no half-tenant is left', async () => {
+    // `provisionTenant` guards on UNIQUE(slug) inside its transaction, so a lost race must roll back
+    // the tenant AND the member row it had begun to write — a slug that 409s while leaving a member
+    // behind is the shape the retired advisory lock existed to prevent, in the surviving entrance.
+    const slug = `p2race-${Date.now().toString(36)}`
+    const results = await Promise.allSettled([
+      provisionTenant(fgaClient, { slug, admin: { sub: 'race-a-616' } }),
+      provisionTenant(fgaClient, { slug, admin: { sub: 'race-b-616' } }),
     ])
+    const won = results.filter((r) => r.status === 'fulfilled')
+    expect(won.length, 'exactly one provision wins the slug').toBe(1)
+    const winner = (won[0] as PromiseFulfilledResult<{ tenantId: string }>).value.tenantId
+    created.push(winner)
 
-  it('the first login into a member-less tenant becomes admin; a later login does not', async () => {
-    const t = await freshTenant(`p2boot-${Date.now().toString(36)}`)
-    const db = await acquireTenantDb(t)
-    try {
-      expect(await bootstrapFirstAdmin({ db, fga: fgaClient }, t, { sub: 'first-1' })).toBe(true)
-      expect(await hasRel('user:first-1', 'admin', `tenant:${t.id}`)).toBe(true)
-      // second login: tenant now has a member → NOT auto-admitted (needs invite)
-      expect(await bootstrapFirstAdmin({ db, fga: fgaClient }, t, { sub: 'second-2' })).toBe(false)
-      expect(await hasRel('user:second-2', 'member', `tenant:${t.id}`)).toBe(false)
-    } finally {
-      await cleanupTuples(t.id, 'first-1')
-      await db.release()
-    }
-  })
-
-  it('concurrent first-logins resolve to EXACTLY ONE admin (atomic guard)', async () => {
-    const t = await freshTenant(`p2race-${Date.now().toString(36)}`)
-    const db1 = await acquireTenantDb(t)
-    const db2 = await acquireTenantDb(t)
-    try {
-      const [a, b] = await Promise.all([
-        bootstrapFirstAdmin({ db: db1, fga: fgaClient }, t, { sub: 'race-a' }),
-        bootstrapFirstAdmin({ db: db2, fga: fgaClient }, t, { sub: 'race-b' }),
-      ])
-      expect([a, b].filter(Boolean).length).toBe(1) // exactly one won
-      const ms = await admin`SELECT sub FROM members WHERE tenant_id = ${t.id}`
-      expect(ms.length).toBe(1)
-    } finally {
-      // only the winner has tuples; tolerate the loser's missing-tuple delete
-      await cleanupTuples(t.id, 'race-a').catch(() => {})
-      await cleanupTuples(t.id, 'race-b').catch(() => {})
-      await db1.release()
-      await db2.release()
-    }
+    const rows = await admin`SELECT id FROM tenants WHERE slug = ${slug}`
+    expect(rows.length, 'and there is ONE tenant, not two').toBe(1)
+    const members = await admin<{ sub: string }[]>`SELECT sub FROM members WHERE tenant_id = ${winner}`
+    expect(members.length, 'seated exactly one admin — the loser left nothing behind').toBe(1)
+    await deleteTuples(fgaClient, [
+      { user: `user:${members[0]!.sub}`, relation: 'admin', object: `tenant:${winner}` },
+      { user: `user:${members[0]!.sub}`, relation: 'member', object: `tenant:${winner}` },
+      { user: `tenant:${winner}#member`, relation: 'space_creator', object: `tenant:${winner}` },
+    ]).catch(() => {})
   })
 })

@@ -61,8 +61,8 @@ const enableTenantOidc = async () => {
   // #554 S1: no tenant uniqueness on tenant_oidc — idempotence by hand
   const [row] = await admin<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${tenant.id} ORDER BY sort, id LIMIT 1`
   if (row) await admin`UPDATE tenant_oidc SET enabled = true WHERE id = ${row.id}`
-  else await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, redirect_uri, enabled, bootstrap_eligible)
-    VALUES (${crypto.randomUUID()}, ${tenant.id}, 'https://idp.example', 'c', ${'http://' + HOST + '/auth/callback'}, true, true)`
+  else await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, redirect_uri, enabled)
+    VALUES (${crypto.randomUUID()}, ${tenant.id}, 'https://idp.example', 'c', ${'http://' + HOST + '/auth/callback'}, true)`
 }
 const get = (h: Record<string, string> = ADMIN_H) => app.inject({ method: 'GET', url: '/admin/login-methods', headers: h })
 const patch = (enabled: boolean, h: Record<string, string> = ADMIN_H) =>
