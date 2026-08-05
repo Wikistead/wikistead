@@ -191,6 +191,50 @@ describe('a refused removal is not reported as a removal', () => {
   }, 180_000)
 })
 
+// The fifth removal site is the one inside setPagePublic: its pre-write private check is outside the tx,
+// so a privatise landing in between leaves a private page carrying `view_base@user:*`. It re-reads private
+// AFTER the write and revokes what it just granted — the higher-stakes self-heal, and until now the ONLY
+// thing covering it was the static sweep above (measured in the #622 re-review). A swallow here reported
+// the tidy outcome ("it stayed private") for the untidy one.
+const raceThenRefuseDeletes = () => {
+  let privateReads = 0
+  return Object.assign(Object.create(Object.getPrototypeOf(fgaClient) as object), fgaClient, {
+    // not private when the route asks the first time (so the grant is written), private afterwards — the
+    // concurrent setPagePrivate the self-heal exists for
+    read: async (body: { object?: string; relation?: string }, ...rest: unknown[]) => {
+      if (body?.relation === 'private') {
+        privateReads += 1
+        if (privateReads > 1) return { tuples: [{ key: { user: 'user:*', relation: 'private', object: body.object } }] }
+        return { tuples: [] }
+      }
+      return (fgaClient.read as (b: unknown, ...r: unknown[]) => Promise<unknown>).call(fgaClient, body, ...rest)
+    },
+    write: async (body: { deletes?: unknown[] }, ...rest: unknown[]) => {
+      if (body?.deletes?.length) throw new Error('the permission store is unavailable')
+      return (fgaClient.write as (b: unknown, ...r: unknown[]) => Promise<unknown>).call(fgaClient, body, ...rest)
+    },
+  }) as typeof fgaClient
+}
+
+describe('the self-heal inside setPagePublic', () => {
+  it('a grant it could not take back is reported, not dressed up as "it stayed private"', async () => {
+    const { id: pageId } = await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: OWNER, title: `pgr-race-${STAMP}` })
+    pages.push(pageId)
+    await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId, subject: `user:${OWNER}`, createdBy: `user:${OWNER}` })
+
+    let err: unknown
+    await setPagePublic(db, raceThenRefuseDeletes(), app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, plan: 'business' })
+      .catch((e: unknown) => { err = e })
+
+    expect(err, 'the call has to fail — the page is private AND carries the public grant').toBeTruthy()
+    // …and not with the calm 409, which says the page merely stayed private and nothing leaked
+    expect((err as { statusCode?: number }).statusCode, `409 understates it: ${String((err as Error).message)}`).not.toBe(409)
+    expect(await anyoneCanRead(pageId), 'the grant it wrote is still there, which is what the caller must hear').toBe(true)
+    // put it back for the teardown
+    await unsetPagePublic(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, plan: 'business' }).catch(() => {})
+  }, 180_000)
+})
+
 describe('every path that removes a public grant, found rather than listed', () => {
   it('no site swallows the whole failure', () => {
     // The defect was copies of one line, and naming them would not catch the next. The first version of
@@ -199,14 +243,22 @@ describe('every path that removes a public grant, found rather than listed', () 
     // walks the routes directory: any delete of a *PUBLIC_GRANT must either let a refusal through or
     // filter it with isAlreadyConverged. A bare `.catch(() => {})` there is the leak this file is about.
     const dir = resolve(import.meta.dirname, '../routes')
-    const sites: { file: string; n: number; line: string }[] = []
+    const sites: { file: string; n: number; stmt: string }[] = []
     for (const entry of readdirSync(dir)) {
       if (!entry.endsWith('.ts')) continue
-      readFileSync(join(dir, entry), 'utf8').split('\n').forEach((line, i) => {
-        if (/deleteTuples\([^)]*PUBLIC_GRANT/.test(line)) sites.push({ file: entry, n: i + 1, line: line.trim() })
+      const lines = readFileSync(join(dir, entry), 'utf8').split('\n')
+      lines.forEach((line, i) => {
+        // the call plus the two lines that can still belong to it — enough for `.catch(…)` wrapped onto
+        // its own line, which is exactly how the hole below was found
+        if (/deleteTuples\([^)]*PUBLIC_GRANT/.test(line)) sites.push({ file: entry, n: i + 1, stmt: lines.slice(i, i + 3).join(' ').trim() })
       })
     }
-    const offenders = sites.filter(({ line }) => /\.catch\(\s*\(\s*\)\s*=>/.test(line)); // a catch that ignores its argument
+    // Read the STATEMENT, not the line. The first version tested the matched line alone, so putting the
+    // same swallow on the next line walked straight past it — measured in the #622 re-review, on the very
+    // site this sweep had just been widened to cover. The rule is: either no catch at all (a refusal
+    // propagates) or a catch that consults isAlreadyConverged. Anything else reports success regardless of
+    // what the store said.
+    const offenders = sites.filter(({ stmt }) => /\.catch\(/.test(stmt) && !/isAlreadyConverged/.test(stmt))
     expect(offenders, 'these report success no matter what the store said').toEqual([])
     // …and the sweep is not vacuous: the sites exist, in more than one file.
     expect(sites.length, `found: ${JSON.stringify(sites.map((s) => `${s.file}:${s.n}`))}`).toBeGreaterThanOrEqual(5)
