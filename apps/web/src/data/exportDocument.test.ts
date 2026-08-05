@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
-import { buildExportDocument, inlineTransientImages } from "./exportDocument";
+import { buildExportDocument, inlineTransientImages, inlineCodeFontFaces } from "./exportDocument";
 
 // #85 / ADR-194 (Option B) acceptance 5: the exported file is INERT, and it carries the document rather
 // than the app. These are the properties that make it safe to write to disk and open later — often by
@@ -70,6 +70,30 @@ describe("#85: the browser-built export document", () => {
     // ADR-194 anti-test: no non-raster data: URL. A drawn SVG travels as an inline element, never as a
     // data: URL, so nothing legitimate is lost by refusing the scheme.
     expect(out).not.toContain("data:image/svg");
+  });
+
+  // #85 / ADR-194 addendum A (ruling A2, 2026-08-05): the rule is not "no data: URLs" — it never was, and
+  // saying so in the test would have made the ruling unimplementable. It is "no data: URL that can ACT".
+  //
+  // This is a rewrite, not a deletion, and it is aimed at what the old assertion could not see: it read the
+  // URL ATTRIBUTES of elements, so a `data:image/svg+xml` hidden inside a <style> block passed it. The
+  // document is checked as TEXT here, which is how it will be read by whatever opens it.
+  it("a font may travel as a data: URL; an svg still may not, wherever it hides", () => {
+    const withFont = buildExportDocument({
+      title: "t",
+      body: surface("<p>x</p>"),
+      css: '@font-face{font-family:"Wikistead Mono";src:url(data:font/woff2;base64,AAAA) format("woff2")}',
+    });
+    expect(withFont, "the embedded code face is the point of A2").toContain("data:font/woff2;base64,AAAA");
+
+    // …and the refusal the old pin claimed but did not measure: inside a stylesheet, where an <img src>
+    // check never looks. A data: SVG is a document with a script surface; a woff2 is not.
+    const withSvgInCss = buildExportDocument({
+      title: "t",
+      body: surface("<p>x</p>"),
+      css: '.x{background:url("data:image/svg+xml,<svg onload=steal()></svg>")}',
+    });
+    expect(withSvgInCss, "an svg data: URL smuggled through CSS").not.toContain("data:image/svg");
   });
 
   // #85 review reject: a blob: URL is a handle into the session that built the file, dead as
@@ -212,5 +236,98 @@ describe("#85: the browser-built export document", () => {
     buildExportDocument({ title: "t", body: live, css: "" });
     expect(live.querySelector("button"), "the live page still has its controls").not.toBeNull();
     expect(live.querySelector("p")?.getAttribute("onclick")).toBe("x()");
+  });
+});
+
+// #85 / ADR-194 addendum A — ruling A2 (2026-08-05): the CODE face travels inside the file, and every other
+// @font-face goes with its unresolvable url(). The set is DERIVED from what --font-code resolves to, because
+// the body face is a user choice (ADR-090) and a hard-coded family embeds the wrong file for anyone who
+// changed their setting. That derivation is what these measure — a test that named the family would pass
+// against exactly the implementation the ruling refused.
+describe("#85 A2: which faces travel with the file", () => {
+  const CSS = [
+    '@font-face{font-family:"Wikistead Mono";font-weight:400;src:url(/assets/wikistead-mono.woff2) format("woff2")}',
+    '@font-face{font-family:"UDEV Gothic";src:url(/assets/udevgothic.woff2) format("woff2")}',
+    '@font-face{font-family:"Inter";src:url(/assets/inter.woff2) format("woff2")}',
+    ".x{color:red}",
+  ].join("\n");
+  const fetchFont = async (url: string) => `data:font/woff2;base64,${url.includes("mono") ? "MONO" : "OTHER"}`;
+
+  it("embeds the face the document actually resolves for code, and drops the rest", async () => {
+    const out = await inlineCodeFontFaces(CSS, {
+      codeStack: '"Wikistead Mono", ui-monospace, monospace',
+      fetchFont,
+    });
+    expect(out, "the code face is inside the file").toContain("data:font/woff2;base64,MONO");
+    expect(out, "no rule is left pointing at a path that will 404 from disk").not.toContain(".woff2)");
+    expect(out, "the faces this file does not use are gone, not merely unfetched").not.toContain("UDEV Gothic");
+    expect(out, "and the ordinary rules are untouched").toContain(".x{color:red}");
+  });
+
+  it("follows the SETTING: a different resolved stack embeds a different file", async () => {
+    // the same document, a user whose code face resolves to UDEV Gothic — a listed-family implementation
+    // would still embed Wikistead Mono here, which is the failure the ruling names
+    const out = await inlineCodeFontFaces(CSS, { codeStack: '"UDEV Gothic", monospace', fetchFont });
+    expect(out).toContain("UDEV Gothic");
+    expect(out).toContain("data:font/woff2;base64,OTHER");
+    expect(out, "the face that is no longer resolved does not travel").not.toContain("Wikistead Mono");
+  });
+
+  it("a face it cannot fetch is dropped, never left as a dead reference", async () => {
+    const out = await inlineCodeFontFaces(CSS, {
+      codeStack: '"Wikistead Mono", monospace',
+      fetchFont: async () => null,
+    });
+    expect(out).not.toContain("Wikistead Mono");
+    expect(out).not.toContain(".woff2");
+    expect(out, "and the document keeps its other CSS").toContain(".x{color:red}");
+  });
+});
+
+// #85 / ADR-194 addendum A (ruling, 2026-08-05): "the file is inert" is a claim about the BYTES that reach
+// the disk, and every assertion above reads the string this module returns — which is the same thing, but
+// only because nothing re-parses it. The document is built by hand (`makeInert` + `innerHTML` serialisation)
+// and it deliberately carries `<svg>` and `<style>`, the two places where a parser's second look differs
+// from its first (mXSS). So this parses the OUTPUT and asks the resulting DOM, which is what a browser
+// opening the file will actually see.
+describe("#85: inert measured on the parsed output, not on the DOM that produced it", () => {
+  const parse = (html: string): Document => new DOMParser().parseFromString(html, "text/html");
+
+  it("no script, no handler attribute, no javascript: URL survives a re-parse", () => {
+    const out = buildExportDocument({
+      title: "t",
+      body: surface(
+        '<p onclick="steal()">hi</p>' +
+        '<svg><style>@import url(evil.css)</style><a xlink:href="javascript:steal()">x</a></svg>' +
+        '<div><!--<img src=x onerror=steal()>--></div>',
+      ),
+      css: "",
+    });
+    const doc = parse(out);
+    expect(doc.querySelectorAll("script"), "a script element after the parse").toHaveLength(0);
+    const acting = Array.from(doc.querySelectorAll("*")).flatMap((el) =>
+      Array.from(el.attributes).filter((a) => a.name.toLowerCase().startsWith("on")).map((a) => `${el.tagName}@${a.name}`));
+    expect(acting, "an event-handler attribute after the parse").toEqual([]);
+    const urls = Array.from(doc.querySelectorAll("*")).flatMap((el) =>
+      ["href", "src", "xlink:href", "action"].map((n) => el.getAttribute(n) ?? "").filter(Boolean));
+    expect(urls.filter((u) => /^\s*(javascript|vbscript):/i.test(u)), "an executable URL after the parse").toEqual([]);
+    expect(doc.body.textContent, "and the document's own text is still there").toContain("hi");
+  });
+
+  it("the stylesheet cannot end its own block and become markup", () => {
+    // `${css}` is interpolated into <style> unescaped. A sheet containing `</style><img onerror=…>` would
+    // close the block early and hand the rest to the HTML parser — invisible to any assertion that reads
+    // the pre-serialisation DOM, because at that point it is still just a string.
+    const out = buildExportDocument({
+      title: "t",
+      body: surface("<p>doc</p>"),
+      css: '.a{color:red}</style><img src=x onerror="steal()"><style>.b{color:blue}',
+    });
+    const doc = parse(out);
+    expect(doc.querySelectorAll("img"), "the sheet broke out of its block").toHaveLength(0);
+    const acting = Array.from(doc.querySelectorAll("*")).flatMap((el) =>
+      Array.from(el.attributes).filter((a) => a.name.toLowerCase().startsWith("on")));
+    expect(acting, "…and brought a handler with it").toEqual([]);
+    expect(doc.body.textContent).toContain("doc");
   });
 });
