@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
+import { SELECTED_ROW } from "../ui/selected-row"; // #632: one answer to "which row am I on"
 import { NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
@@ -55,7 +56,7 @@ export function SettingsShell({
             end={tab.end}
             className={({ isActive }) => cn(
               "flex items-center gap-2 rounded-md px-2 py-[7px] text-[length:var(--text-ui)] text-foreground no-underline hover:bg-panel-2",
-              isActive && "bg-panel-2 font-semibold shadow-[inset_2px_0_0_var(--accent)]",
+              isActive && SELECTED_ROW,
             )}
             data-testid={`settings-tab-${tab.key}`}
           >

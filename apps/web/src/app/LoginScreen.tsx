@@ -159,7 +159,7 @@ export function LoginScreen() {
           <p className="mb-5 text-sm text-fg-dim">{t("auth.signInBody")}</p>
           {error && (
             <div
-              className="mb-4 rounded-md border border-border border-l-[3px] border-l-[var(--danger)] bg-panel-2 px-3 py-2 text-sm"
+              className="mb-4 rounded-r-md border border-border border-l-[3px] border-l-[var(--danger)] bg-panel-2 px-3 py-2 text-sm"
               data-testid="login-error"
               role="alert"
             >

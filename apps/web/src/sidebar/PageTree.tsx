@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SELECTED_ROW } from "../ui/selected-row"; // #632: shared with the settings nav
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
@@ -124,7 +125,7 @@ export function PageTree({
          className={cn(
            "flex h-full w-full min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-lg pr-2 transition-colors duration-[120ms]",
            selected
-             ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium"
+             ? SELECTED_ROW
              : "hover:bg-panel-2",
          )}
          style={{ paddingLeft: `calc(${indent}px + 0.5rem)` }} // indent shifts only the content; 8px label room
