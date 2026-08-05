@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, filterAuthorized, writeTuples, deleteTuples, isAlreadyConverged, deleteObjectTuples, readObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
+import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -965,6 +965,11 @@ export async function revokeSpaceAccess(
     throw Object.assign(new Error('managed by a group mapping — delete the mapping instead'), { statusCode: 409 })
   }
   let stillCovered: { capability: string; via?: string }[] = []
+  // #619 re-review: whether this call actually took a leaf away. A rowless revoke of a grant that is
+  // already absent succeeds (the caller's desired state holds) but must NOT narrate the removal — an
+  // audit line and a webhook for a revoke that removed nothing is the #596 lie, in a ledger that is
+  // hash-chained in EE.
+  let removedLeaves = true
   if (row) {
     const r = await unassignRoleInTx(db, fga, driver, {
       tenant: { id: args.tenantId, plan: args.plan ?? '' },
@@ -992,20 +997,35 @@ export async function revokeSpaceAccess(
         statusCode: 409, code: 'still_covered', coveredBy: covering.map((c) => c.via),
       })
     }
-    await db.tx(async (tx) => {
-      if (args.plan !== undefined) {
-        await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
-      }
-      // #619: taking away a grant that is already gone is the state the caller asked for, not a
-      // failure. It happens on the ordinary path — a built-in capability is exclusive, so promoting a
-      // viewer to editor already removed the viewer leaf, and revoking the view row afterwards asked
-      // the store to delete something absent. That answered with FGA's validation text (before #578)
-      // and with a 500 (after it) for a button whose job was done. Convergence is success; anything
-      // else still throws.
-      await deleteTuples(fga, spaceGrantTuples(args.grantee, args.capability, args.spaceId))
-        .catch((err) => { if (!isAlreadyConverged(err)) throw err })
-    })
-    await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+    // #619: taking away a grant that is already gone is the state the caller asked for, not a failure.
+    // It happens on the ordinary path — a built-in capability is exclusive, so promoting a viewer to
+    // editor already removed the viewer leaf, and revoking the view row afterwards asked the store to
+    // delete something absent, which answered with a refusal for a button whose job was done.
+    //
+    // #619 re-review: the first fix asked for the whole leaf set anyway and forgave the refusal. That is
+    // only safe for a ONE-leaf capability. `view` has TWO (viewer + viewer_member, space-grant-expansion
+    // .ts) and an FGA write is atomic per batch, so a principal holding only `viewer` — exactly what a
+    // pre-#258 grant looks like, which is why backfillSpaceViewerMembers exists — made the batch fail on
+    // the ABSENT leaf, and the forgiveness reported success with the LIVE leaf still granting view.
+    // Deciding the delete set from the live tuples instead removes the need to forgive anything: the same
+    // rule the composite revoke above already follows (its heldRelations read, and #596's (b)).
+    // fga-read-ok: ONE principal on ONE object — a (user, relation, object) tuple is unique, so this is bounded by the type's relation count, never by tenant size.
+    const { tuples: heldTuples } = await fga.read({ user: args.grantee, object: `space:${args.spaceId}` })
+    const held = new Set((heldTuples ?? []).map((t) => t.key?.relation ?? ''))
+    const present = spaceGrantTuples(args.grantee, args.capability, args.spaceId).filter((t) => held.has(t.relation))
+    removedLeaves = present.length > 0
+    if (removedLeaves) {
+      await db.tx(async (tx) => {
+        if (args.plan !== undefined) {
+          await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.access_revoked', target: `space:${args.spaceId}` })
+        }
+        // No catch: the set came from the live tuples, so a refusal here means something real happened
+        // (a concurrent write, a store that moved) and the caller must hear about it — #596's whole
+        // point is that a revoke never claims more than it did.
+        await deleteTuples(fga, present)
+      })
+      await reindexPublishedPages(db, driver, args.tenantId, args.spaceId)
+    }
   }
   // #362 E1: revocation watch sweep (post-FGA, best-effort; per-watcher view re-check inside — a watcher
   // whose view survives via another path keeps their watch). Space-scoped: sweeps watches ON the space id
@@ -1013,7 +1033,7 @@ export async function revokeSpaceAccess(
   void sweepUnviewableWatches(db, fga, [args.spaceId]).catch(() => {})
   // #596 review F3: the event means the principal LOST the relation. A surviving assignment that still
   // confers it makes that false, and a consumer mirroring permissions would de-provision on it.
-  if (!stillCovered.some((c) => c.capability === args.capability)) {
+  if (removedLeaves && !stillCovered.some((c) => c.capability === args.capability)) {
     emit({ type: 'space.access_revoked', tenantId: args.tenantId, spaceId: args.spaceId, grantee: args.grantee, relation: args.capability, actorId: args.userId })
   }
   return { stillCovered }
