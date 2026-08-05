@@ -17,7 +17,18 @@
 // constant and was 61px adrift; a guess here would be the same defect with a new owner.
 
 const GAP = 8;
-const EDGE = 8;
+
+/**
+ * How much room a floating panel keeps between itself and the edge of the window.
+ *
+ * Exported because Radix positions its own tooltips and defaults that distance to ZERO, so the same
+ * family of panels kept two answers: the ones placed here stopped 8px short, the Radix one sat flush
+ * against the edge (measured at 1280x420: a box at y=375, 45 tall, in a 420 window — over by a fraction
+ * of a pixel, and with nothing between the text and the edge). #582's ruling is one behaviour for the
+ * family, so the number is shared rather than written twice.
+ */
+export const PANEL_EDGE = 8;
+const EDGE = PANEL_EDGE;
 
 export type Box = { width: number; height: number };
 export type Viewport = { width: number; height: number };

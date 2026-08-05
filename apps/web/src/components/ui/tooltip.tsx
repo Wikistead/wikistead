@@ -2,6 +2,7 @@ import * as React from "react"
 import { Tooltip as TooltipPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { PANEL_EDGE } from "@/ui/panel-placement"
 
 // #530: the shadcn/Radix tooltip primitive. The native `title` attribute cannot be styled, cannot be
 // themed, does not appear on keyboard focus, and its ~1–2s delay is browser-controlled — the reason this
@@ -43,6 +44,10 @@ function TooltipContent({
   children,
   portal = true,
   animated = true,
+  // #582 (review rejection): Radix keeps a tooltip on screen but defaults the distance from the edge
+  // to zero, so a panel opening on a low row in a short window landed flush against the bottom — while
+  // the panels placed by `panel-placement` stopped 8px short. One family, one distance.
+  collisionPadding = PANEL_EDGE,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content> & { portal?: boolean; animated?: boolean }) {
   // #586: a tooltip on an option INSIDE an open Select must not be portalled to the body. A modal Radix
@@ -55,6 +60,7 @@ function TooltipContent({
       <TooltipPrimitive.Content
         data-slot="tooltip-content"
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
         className={cn(
           // Surface tokens (light/dark follow automatically), a wrapping max-width the native tooltip
           // cannot offer, and the shared enter animation.
