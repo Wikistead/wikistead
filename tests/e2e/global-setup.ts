@@ -32,9 +32,20 @@ export default async function globalSetup() {
   const sql = postgres(E2E.pgAdmin);
   try {
     // Clean up tenants created by prior signup.spec runs (unique slugs accumulate).
+    //
+    // The list has to cover everything the signup FLOW makes, not everything it made when this was
+    // written: signup seats an admin who is then handed a starter space, and `spaces_tenant_id_fkey`
+    // refuses the tenant delete while it exists. The symptom is nasty out of proportion to the cause —
+    // globalSetup throws, so the ENTIRE run fails before a single spec starts, and it happens on the
+    // second run rather than the first, which reads like flakiness rather than leftovers. Hit three
+    // times in one session before it was worth fixing rather than hand-cleaning.
     const stale = await sql<{ id: string }[]>`SELECT id FROM tenants WHERE slug LIKE 'e2esignup%'`;
     for (const t of stale) {
+      await sql`DELETE FROM pages WHERE space_id IN (SELECT id FROM spaces WHERE tenant_id = ${t.id})`;
+      await sql`DELETE FROM spaces WHERE tenant_id = ${t.id}`;
+      await sql`DELETE FROM invites WHERE tenant_id = ${t.id}`;
       await sql`DELETE FROM members WHERE tenant_id = ${t.id}`;
+      await sql`DELETE FROM tenant_login_prefs WHERE tenant_id = ${t.id}`;
       await sql`DELETE FROM tenant_oidc WHERE tenant_id = ${t.id}`;
       await sql`DELETE FROM tenants WHERE id = ${t.id}`;
     }
