@@ -147,7 +147,7 @@
   --accent-fg: #ffffff; /* text/icon on an accent fill */
   --danger: #cf222e;    /* destructive actions (delete / remove / revoke) */
   --danger-fg: #ffffff;
-  /* #464 page-views chart series (dataviz: fixed categorical order; validated on the light surface —
+  /* #464 page-views chart series (dataviz: fixed categorical order; validated on the light surface
      lightness/chroma/contrast PASS, adjacent CVD in the 6–8 floor legalised by the legend's direct labels). */
   --views-member: #2563eb;
   --views-guest: #d97706;
@@ -161,7 +161,7 @@
   --callout-tip: #2ea043;    /* green — success/tip */
   --callout-warning: #d29922;/* yellow — caution */
   --callout-danger: var(--danger); /* red — danger (a fixed semantic token, not the accent) */
-  /* Syntax highlight (#158-C2 / ADR-052): Everforest LIGHT (medium) hues as semantic tokens —
+  /* Syntax highlight (#158-C2 / ADR-052): Everforest LIGHT (medium) hues as semantic tokens
      code-fence highlighting consumes these so the palette is themeable (Neovim-consistent). */
   --hl-keyword: #f85552;   /* red */
   --hl-string: #8da101;    /* green */
@@ -265,7 +265,7 @@
   --space-6: 32px;
   --header-h: 40px;
   --sidebar-w: 260px;
-  /* #158-C1 / #190 (ADR-090) fonts — three PURPOSE tokens (locale-defaulted, user-overridable):
+  /* #158-C1 / #190 (ADR-090) fonts — three PURPOSE tokens (locale-defaulted, user-overridable)
        --font-ui   : chrome/labels — Inter (Latin) + Noto Sans JP (JP), self-hosted woff2 (OFL). Fixed.
        --font-body : editor/reading PROSE — locale default (JP=UDEV Gothic keeps the vim column grid;
                      EN also monospace per #190 vim-first — both use the mono grid so vim columns line
@@ -737,6 +737,25 @@ body {
   animation: wks-pop var(--dur-fast) var(--ease-out);
 }
 .wks-tip[hidden] { display: none; }
+
+/* #630 (user ruling, 2026-08-05): " tooltip ".
+   This is the delegated host's single reused node — plain DOM built outside React, so it gets no
+   Tailwind and cannot take `HINT_PANEL_ANIM`. It takes the same entrance written out, off the same two
+   tokens, so a change to the motion scale reaches both. Keep this in step with `HINT_PANEL_ANIM` in
+   `ui/hint-panel.ts`; the sweep in `tooltip-behaviour-630.spec.ts` compares them on the device rather
+   than trusting that they were kept in step. */
+.wks-tip:not([hidden]) {
+  animation: wks-hint-in var(--dur-fast) var(--ease-out);
+}
+@keyframes wks-hint-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+/* A reader who asked for less motion gets the panel without the entrance, not a panel that never
+   arrives (ADR: reduced motion removes animation, never information). */
+@media (prefers-reduced-motion: reduce) {
+  .wks-tip:not([hidden]) { animation: none; }
+}
 
 /* #525/ host-rendered diagram states. The renderer is a ~1.4s round trip to the operator's
    endpoint, so say "rendering" instead of leaving the raw source looking broken; and when the endpoint

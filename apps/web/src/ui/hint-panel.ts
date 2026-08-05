@@ -1,3 +1,5 @@
+import { TOOLTIP_DELAY_MS } from "../components/ui/tooltip";
+
 // #582 (review rejection, ⑤): the box a floating explanation is drawn in — once.
 //
 // Measured on the device: the capability panel was `w-[220px]` with `px-2`, and its content reported
@@ -18,3 +20,38 @@ export const HINT_PANEL =
  *  "make every panel the same width" ask), so this is not a shared constant — it belongs to the one
  *  panel that lists capabilities, and it is here so its box and its width stay together. */
 export const HINT_PANEL_W = "w-[220px]";
+
+// #630 (user ruling, 2026-08-05): " tooltip ".
+//
+// Placement was unified in #603 and the box in #582 ⑤; what was left drifting is the BEHAVIOUR.
+// Measured before this: four implementations, three different open delays (180 / 180 / 0), two different
+// close graces (0 / 160) and animation on exactly one of them (the Radix tooltip). A reader moving
+// between the members table and a macro's chrome met two different products.
+//
+// This reverses #582 ①, which had settled the disagreement the other way — towards the majority,
+// which was "no animation". The ruling picks the app's ordinary tooltip as the one everything matches.
+//
+// The close grace is NOT zero, and unifying does not mean making it zero. #603's nested hover (mark →
+// list → role name → capability panel) only works because the panel survives the few pixels of gap the
+// pointer crosses; a shared behaviour that dropped it would take that walk away. So the grace is handed
+// to every implementation rather than removed from the one that had it.
+export const HINT_OPEN_DELAY_MS = TOOLTIP_DELAY_MS;
+export const HINT_CLOSE_GRACE_MS = 160;
+
+// The entrance, as classes for React panels. Duration and easing come from the tokens (`--dur-fast`,
+// `--ease-out`) rather than tw-animate's defaults, so a change to the motion scale reaches these too.
+// `.wks-tip` — the delegated host's single reused node, which is plain DOM and gets no Tailwind — is
+// given the same animation in `tokens.css`, keyed off the same variables.
+//
+// FADE ONLY, deliberately: the app tooltip's entrance was `fade-in-0 zoom-in-95`, and the scale half of
+// it broke placement. These panels measure themselves to decide which side to open on (#603), and
+// `getBoundingClientRect` returns the box AFTER transform — so a panel measured mid-entrance reports 95%
+// of the height it is about to have, the clamp is computed against the smaller number, and the second
+// tier ended up 17px below a 420px-tall viewport. The #603 pin caught it. Measuring the layout box
+// instead is not enough on its own, because the panel has to exist before it can be measured and the
+// first pass necessarily runs without it.
+//
+// So the shared entrance is opacity only. It is the same motion on every surface, which is what the
+// ruling asked for, and it cannot lie to a measurement.
+export const HINT_PANEL_ANIM =
+  "animate-in fade-in-0 duration-[var(--dur-fast)] ease-[var(--ease-out)]";

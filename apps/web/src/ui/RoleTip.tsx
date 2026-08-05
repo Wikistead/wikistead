@@ -65,11 +65,9 @@ export function RoleTip({
     <Tooltip
       open={open}
       onOpenChange={setOpen}
-      // #582 (review rejection, ①): six surfaces raise this panel and only this one animated,
-      // because only this one is a Radix tooltip. The other five appear instantly; one panel easing
-      // in while its siblings do not is the inconsistency the ruling asked to end, and instant is the
-      // side that already had five votes.
-      animated={false}
+      // #582 ① made this panel opt OUT of the animation, to match the five surfaces that had
+      // none. #630 reverses that: the ruling picks the app's ordinary tooltip as what everything
+      // matches, so this one keeps the default and the hand-placed panels gained the same entrance.
       // #582 (ruling 2026-08-05): ONE kind of panel, and it is the one that comes out at the SIDE. The
       // badges used to raise this at the top-left while `ui/Select` raised its own to the right, so the
       // same information arrived in two places depending on what the pointer happened to be over. Same
