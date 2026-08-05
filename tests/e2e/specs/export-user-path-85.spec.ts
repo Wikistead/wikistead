@@ -245,7 +245,9 @@ test("#85the downloaded file, opened with the app closed, IS the document", asyn
 
   // 1b. the text is VISIBLE — Playwright visibility is layout-backed, not textContent-backed
   await expect(opened.getByText("ordinary body text"), "body text is visible").toBeVisible();
-  await expect(opened.getByRole("heading", { name: "Heading one" }), "the heading is visible").toBeVisible();
+  // #579whole name, not a prefix — "Heading one" would also match a "Heading one and a half"
+  // the fixture might grow, and this assertion is about the document rendering, not about matching.
+  await expect(opened.getByRole("heading", { name: "Heading one", exact: true }), "the heading is visible").toBeVisible();
 
   // 1c. the pixels: a screenshot of the opened file contains foreground. Counted, not eyeballed.
   const shot = await opened.screenshot();
