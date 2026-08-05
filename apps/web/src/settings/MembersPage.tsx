@@ -9,9 +9,10 @@ import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import {
   listMembers, listInvites, createInvite, revokeInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword, removePassword,
+  suspendMember, reactivateMember,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
-import { User, Users, KeyRound, Eraser, UserMinus } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
+import { User, Users, KeyRound, Eraser, UserMinus, Ban, Undo2 } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
 import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
@@ -395,6 +396,9 @@ export function MembersPage() {
                     },
                     // #626: only offered when the server would accept it — see memberMenuValues.
                     { value: "passwordRemove", label: t("members.removePassword"), icon: <KeyRound size={14} />, testId: "member-remove-password", danger: true },
+                    // #627: one of these at a time — see memberMenuValues.
+                    { value: "suspend", label: t("members.suspend"), icon: <Ban size={14} />, testId: "member-suspend", danger: true },
+                    { value: "reactivate", label: t("members.reactivate"), icon: <Undo2 size={14} />, testId: "member-reactivate" },
                     { value: "erase", label: t("members.eraseAnalytics"), icon: <Eraser size={14} />, testId: "member-erase-analytics", danger: true },
                     { value: "remove", label: t("members.remove"), icon: <UserMinus size={14} />, testId: "member-remove", danger: true },
                   ].filter((i) => memberMenuValues(m).includes(i.value as MemberMenuValue))}
@@ -434,6 +438,20 @@ export function MembersPage() {
                               : code === "sso_exemption_required" ? t("members.removePasswordSsoFloor")
                               : t("toast.actionFailed"));
                           }
+                        })(),
+                      });
+                      return;
+                    }
+                    if (v === "suspend" || v === "reactivate") {
+                      // #627 ruling 3: the groups are cleared by the suspension and the DIRECTORY puts
+                      // them back — for a member with no IdP they simply do not come back. Said here,
+                      // in the confirmation, rather than left to be discovered afterwards.
+                      const isSuspend = v === "suspend";
+                      setConfirming({
+                        message: t(isSuspend ? "members.suspendConfirm" : "members.reactivateConfirm",
+                          { name: m.display_name || m.email || m.sub }),
+                        run: () => void guarded(async () => {
+                          await (isSuspend ? suspendMember(token, m.sub) : reactivateMember(token, m.sub));
                         })(),
                       });
                       return;

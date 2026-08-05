@@ -14,6 +14,7 @@ import { groupFgaId } from '../auth/group-sync.js'
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
+import { suspendMember, reactivateMember, LastAdminSuspensionError } from '../auth/member-suspension.js' // #627: the shared suspension verb (CE)
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEntitlements } from '@wikistead/entitlements' // #520: EE gate for the tenant analytics roll-up
 import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
@@ -135,10 +136,11 @@ export async function membersPlugin(app: FastifyInstance) {
       {
         sub: string; email: string | null; display_name: string | null; picture_url: string | null
         role: string; groups: string[] | null; created_at: Date
-        identity_source: string; deactivated_at: Date | null; has_password: boolean
+        identity_source: string; deactivated_at: Date | null; deactivation_reason: string | null; has_password: boolean
       }[]
     >`SELECT m.sub, m.email, m.display_name, m.picture_url, m.role, m.groups, m.created_at,
-             m.identity_source, m.deactivated_at, (lc.member_sub IS NOT NULL) AS has_password
+             -- #627: WHOSE suspension it is decides whether the console may offer to undo it
+             m.identity_source, m.deactivated_at, m.deactivation_reason, (lc.member_sub IS NOT NULL) AS has_password
       FROM members m
       LEFT JOIN local_credentials lc ON lc.tenant_id = m.tenant_id AND lc.member_sub = m.sub
       ORDER BY m.created_at`
@@ -191,9 +193,21 @@ export async function membersPlugin(app: FastifyInstance) {
     const role = req.body?.role
     if (role !== 'admin' && role !== 'member') return reply.code(400).send({ error: 'invalid role' })
 
-    const [existing] = await req.db.sql<[{ role: string }?]>`
-      SELECT role FROM members WHERE sub = ${req.params.sub}`
+    const [existing] = await req.db.sql<[{ role: string; deactivated_at: Date | null }?]>`
+      SELECT role, deactivated_at FROM members WHERE sub = ${req.params.sub}`
     if (!existing) return reply.code(404).send({ error: 'member not found' })
+    // #627 ruling 2: refused while the member is suspended, at WRITE time. This handler does not read
+    // `deactivated_at` otherwise, so a promotion wrote `tenant#admin` immediately — restoring a tuple the
+    // suspension had removed and lighting up every relation that unions `or admin`, while `tenant#member`
+    // stayed false. Deferring the question to reactivation instead would let a promotion written during a
+    // suspension fire later with nobody watching; refusing costs nothing, since the change can be made
+    // once they are back.
+    if (existing.deactivated_at) {
+      return reply.code(409).send({
+        error: 'this member is suspended — bring them back before changing their role',
+        code: 'member_suspended',
+      })
+    }
     if (existing.role === role) return { ok: true } // no-op
 
     if (existing.role === 'admin' && role === 'member' && (await isLastAdmin(req.db.sql, req.params.sub))) {
@@ -227,6 +241,54 @@ export async function membersPlugin(app: FastifyInstance) {
   // available for IdP-derived subs on purpose: an SSO tenant is entirely IdP-derived, so refusing them
   // would refuse the case the feature exists for. The consequence is real and belongs in the ledger: the
   // IdP stops being the only authority for that account, so the act is audited with the admin as actor.
+  // #627 / ADR-213: SUSPEND and REACTIVATE, the operations a tenant without SCIM had no way to reach.
+  // The verb is shared with the directory (auth/member-suspension.ts) — an admin's suspension differs
+  // only in its reason, and the reason is what the ledger and the seat count read.
+  app.post<{ Params: { sub: string } }>('/members/:sub/suspend', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    // #627 setting 3: not yourself. An admin who suspends their own account signs themselves out of a
+    // console they may be the only one holding — the last-admin guard below catches the worst case, but
+    // this is the accident it cannot see (a tenant with two admins is not protected by it at all).
+    if (req.params.sub === req.user.sub) {
+      return reply.code(409).send({ error: 'you cannot suspend yourself', code: 'self_suspend' })
+    }
+    try {
+      const outcome = await suspendMember(
+        { db: req.db, fga: app.fga, valkey: app.valkey }, req.tenant, req.params.sub,
+        { reason: 'admin', actor: `user:${req.user.sub}` },
+      )
+      if (outcome === 'notMember') return reply.code(404).send({ error: 'member not found' })
+      return reply.code(200).send({ suspended: true, alreadySuspended: outcome === 'already' })
+    } catch (err) {
+      if (err instanceof LastAdminSuspensionError) {
+        return reply.code(409).send({ error: err.message, code: err.code })
+      }
+      throw err
+    }
+  })
+
+  app.post<{ Params: { sub: string } }>('/members/:sub/reactivate', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    // #627 ruling 4: only an admin's own suspension. A member the DIRECTORY removed is not the console's
+    // to restore — a tenant whose IdP dropped somebody could otherwise put them back, admin grant and
+    // all, from inside the product. A billing freeze is cleared by re-upgrading, not from here.
+    const r = await reactivateMember(
+      { db: req.db, fga: app.fga }, req.tenant, req.params.sub,
+      { allow: ['admin'], actor: `user:${req.user.sub}` },
+    )
+    if (r === 'notMember') return reply.code(404).send({ error: 'member not found' })
+    if (r === 'notYours') {
+      return reply.code(409).send({
+        error: 'this member was not suspended from here — a directory removal is undone in the directory, and a plan freeze by upgrading',
+        code: 'not_your_suspension',
+      })
+    }
+    if (r === 'seatLimit') {
+      return reply.code(409).send({ error: 'no seat is free for this member', code: 'seat_limit' })
+    }
+    return reply.code(200).send({ reactivated: true })
+  })
+
   // #626 / ADR-214: the entrance an admin can GIVE, an admin can take back.
   //
   // Until this existed a password outlived every decision about it: removing somebody from the SSO-required

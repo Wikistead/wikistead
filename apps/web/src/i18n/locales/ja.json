@@ -1041,7 +1041,11 @@
     "removePasswordConfirm": "{{name}} のパスワードの入口を外しますか？セッションも終了し、以後は ID プロバイダ経由でのサインインになります。",
     "removePasswordDone": "パスワードの入口を外しました",
     "removePasswordLastWayIn": "このメンバーはこれ以外でサインインできません。外すのではなく停止してください。",
-    "removePasswordSsoFloor": "このテナントは SSO 必須で、パスワードを持つ例外はこの人が最後です。先に別の例外を指名してください。"
+    "removePasswordSsoFloor": "このテナントは SSO 必須で、パスワードを持つ例外はこの人が最後です。先に別の例外を指名してください。",
+    "suspend": "停止",
+    "reactivate": "再開",
+    "suspendConfirm": "{{name}} を停止しますか？サインインできなくなり、権限と API キーは失効し、セッションも終了します。座席は保持され、何も削除されません。",
+    "reactivateConfirm": "{{name}} を再開しますか？グループ由来のロールは戻りません。次回のサインインで ID プロバイダが入れ直します（IdP を持たないメンバーには戻りません）。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

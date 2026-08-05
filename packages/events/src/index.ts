@@ -121,6 +121,11 @@ export type DomainEvent =
   // #606 / ADR-205 §2: an admin gave an existing member a password entrance. Distinct from a change:
   // the account had no password before, and the IdP that minted the sub stops being its only authority.
   | { type: 'member.password_enabled'; tenantId: string; actorId: string; targetSub: string }
+  // #627 / ADR-213: an admin suspended a member (sign-in blocked, grants stripped, keys revoked,
+  // sessions ended) and, later, brought them back. Distinct from `member.removed`, which SCIM emits and
+  // which means the account is gone from this tenant's directory.
+  | { type: 'member.suspended'; tenantId: string; actorId: string; targetSub: string }
+  | { type: 'member.reactivated'; tenantId: string; actorId: string; targetSub: string }
   // #626 / ADR-214: the pair to the one above — an admin took the password entrance back.
   | { type: 'member.password_removed'; tenantId: string; actorId: string; targetSub: string }
   // #568 / ADR-198 §6 (OQ7): a reset was ASKED FOR, and later COMPLETED. Both are named by sub and

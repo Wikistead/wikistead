@@ -19,6 +19,8 @@ export interface Member {
   has_password?: boolean;
   /** #614: SCIM/downgrade freeze timestamp; null/absent = active. The row stays listed either way. */
   deactivated_at?: string | null;
+  /** #627: whose suspension this is — only an `admin` one is the console's to undo. */
+  deactivation_reason?: "scim" | "admin" | "downgrade_freeze" | null;
 }
 export interface Invite {
   id: string;
@@ -62,6 +64,15 @@ export { ApiError };
  *  (`last_way_in`, `sso_exemption_required`) — they are two different reasons and neither is a failure. */
 export async function removePassword(token: string, sub: string): Promise<void> {
   await apiFetch<{ removed: boolean } | null>(`/members/${encodeURIComponent(sub)}/password-setup`, token, { method: "DELETE" });
+}
+
+/** #627 / ADR-213: suspend a member (sign-in blocked, grants stripped, keys revoked, sessions ended). */
+export async function suspendMember(token: string, sub: string): Promise<void> {
+  await apiFetch<{ suspended: boolean } | null>(`/members/${encodeURIComponent(sub)}/suspend`, token, { method: "POST" });
+}
+/** …and bring them back. Group-derived roles do not return — the directory re-adds those. */
+export async function reactivateMember(token: string, sub: string): Promise<void> {
+  await apiFetch<{ reactivated: boolean } | null>(`/members/${encodeURIComponent(sub)}/reactivate`, token, { method: "POST" });
 }
 
 export async function enablePassword(token: string, sub: string): Promise<{ setupUrl: string; email: string }> {

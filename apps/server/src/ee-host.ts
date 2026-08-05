@@ -43,3 +43,8 @@ export { encryptSecret, decryptSecret } from './auth/secret-crypto.js'
 export { SESSION_COOKIE, establishMemberSession, sessionCookieOptions, destroyMemberSessions, createSession } from './auth/session.js' // #477: SCIM deactivation drops the member's sessions too
 export { safeReturnTo } from './auth/return-to.js'
 export { appendOperatorEntry, type OperatorAction } from './audit/operator-ledger.js'
+
+// #627 / ADR-213: the suspension verb lives in CE now — SCIM calls it with `reason: 'scim'` rather than
+// carrying its own copy, so there is one meaning of "suspended" for the console and the directory alike.
+export { suspendMember, reactivateMember, isScimSuspension, grantsShouldBeRebuilt, LastAdminSuspensionError } from './auth/member-suspension.js'
+export type { SuspensionReason, SuspendOutcome, ReactivateOutcome } from './auth/member-suspension.js'

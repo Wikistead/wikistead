@@ -32,7 +32,7 @@ export function memberStatusKeys(m: Pick<Member, "identity_source" | "has_passwo
 // So the item stays for everyone and its MEANING changes: give an entrance to somebody with none, or
 // re-issue a link for somebody who has one. Same server route, same `pwr_` token; the page picks the
 // words from `passwordAction` so the two are never one sentence.
-export function memberMenuValues(m: Pick<Member, "has_password" | "identity_source">): MemberMenuValue[] {
+export function memberMenuValues(m: Pick<Member, "has_password" | "identity_source" | "deactivated_at" | "deactivation_reason">): MemberMenuValue[] {
   // #626 / ADR-214: removing the entrance is an ADDITIONAL item, never a replacement for the one above it.
   // #614 settled that "they already have a password" must not take the grant/reissue item away — the reset
   // link is the only route left for a tenant with no working mail, which is exactly #605's break-glass
@@ -41,9 +41,15 @@ export function memberMenuValues(m: Pick<Member, "has_password" | "identity_sour
   // Somebody whose ONLY way in is that password does not see it at all: the server refuses with
   // `last_way_in`, and offering an action that cannot succeed is the defect #596 and #606 are about.
   const removable = m.has_password && m.identity_source !== "local";
-  return ["password", ...(removable ? (["passwordRemove"] as const) : []), "erase", "remove"];
+  // #627: suspend, or bring back — never both, and never on somebody the server would refuse. A member
+  // frozen by a plan downgrade or removed by the directory shows neither: the console does not own those
+  // suspensions (rulings 4 and 5 put the first behind an admin decision and the second in the directory).
+  const suspension = m.deactivated_at
+    ? (m.deactivation_reason === "admin" ? (["reactivate"] as const) : ([] as const))
+    : (["suspend"] as const);
+  return ["password", ...(removable ? (["passwordRemove"] as const) : []), ...suspension, "erase", "remove"];
 }
-export type MemberMenuValue = "password" | "passwordRemove" | "erase" | "remove";
+export type MemberMenuValue = "password" | "passwordRemove" | "suspend" | "reactivate" | "erase" | "remove";
 
 /** Which of the two the password item is for this member — the label, the toast and the audit differ. */
 export function passwordAction(m: Pick<Member, "has_password">): "grant" | "reissue" {
