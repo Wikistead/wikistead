@@ -724,6 +724,37 @@ const vimVisualSync = EditorView.updateListener.of((u) => {
   if (u.view.state.field(vimVisualField) !== want) u.view.dispatch({ effects: setVimVisual.of(want) });
 });
 
+// #631 (user request, 2026-08-05): " …
+//
+// Dragging a selection with the mouse puts vim in visual mode too, so the flag above cannot tell the
+// two apart — and the hint that says "press \" was answering a reader who was already holding a mouse.
+// The missing axis is not the MODE, it is what made the selection.
+//
+// Last input wins, in both directions: a pointer press marks the selection as pointer-made, and any key
+// takes that back. That is the same rule the request is built on ("using the mouse ⇒ likely to pick from
+// the palette with the mouse"), applied to whichever device was touched most recently. Touch and
+// trackpad arrive as pointer events, so they behave like the mouse — which is what someone tapping a
+// selection would expect.
+//
+// Kept in this file, beside `vimVisualField`, because the hint and the toolbar must read ONE answer
+// split across two, they drift into "both showing" or "neither".
+export const pointerSelectionField = StateField.define<boolean>({
+  create: () => false,
+  update(value, tr) {
+    // CodeMirror already knows: it annotates a drag as `select.pointer` and a keymap-made selection as
+    // plain `select`. Asking the transaction is better than watching DOM events, which was the first
+    // attempt — vim consumes its keys before a `domEventHandlers` keydown can see them, so the flag
+    // never came back down and a dragged selection stayed "pointer-made" through every motion after it.
+    if (tr.isUserEvent("select.pointer")) return true;
+    if (tr.selection) return false; // any other selection change — a motion, a command — is not the mouse
+    return value;
+  },
+});
+
+/** vim visual that the KEYBOARD made — the state the `\` hint is for. */
+export const vimKeyboardVisual = (state: EditorState): boolean =>
+  state.field(vimVisualField, false) === true && state.field(pointerSelectionField, false) !== true;
+
 // A small, unobtrusive hint shown ONLY during a vim VISUAL selection, at the format
 // toolbar's spot (a tooltip above the selection): tells the user `\` opens the format/
 // macro palette (matching backslashDecorate). Display-only — a CM tooltip (NOT a node in
@@ -733,7 +764,7 @@ const vimVisualSync = EditorView.updateListener.of((u) => {
 const vimHintField = StateField.define<readonly Tooltip[]>({
   create: () => [],
   update(_value, tr) {
-    const show = tr.state.field(vimVisualField) && tr.state.field(decorateField, false) == null;
+    const show = vimKeyboardVisual(tr.state) && tr.state.field(decorateField, false) == null;
     return show ? [contextHintTooltip(tr.state.selection.main.from, i18n.t("palette.vimHint"), "vim-decorate-hint")] : [];
   },
   provide: (f) => showTooltip.computeN([f], (state) => state.field(f)),
@@ -767,7 +798,7 @@ function imageInsert(upload: ImageUploader, container?: HTMLElement): Extension 
 export function slashPalette(opts: { uploadImage?: ImageUploader; container?: HTMLElement; openPageEmbedPicker?: PageEmbedPicker; openTemplateInsertPicker?: TemplateInsertPicker } = {}): Extension {
   // Order matters: vimVisualField before vimHintField (the field reads it); both before
   // the floating toolbar's bubble (added after slashPalette) so the bubble can read it.
-  const core = [dismissedField, paletteField, decorateField, vimVisualField, vimHintField, paletteKeymap, decorateKeys, backslashDecorate, vimVisualSync];
+  const core = [dismissedField, paletteField, decorateField, vimVisualField, pointerSelectionField, vimHintField, paletteKeymap, decorateKeys, backslashDecorate, vimVisualSync];
   const ext = opts.uploadImage ? [...core, imageInsert(opts.uploadImage, opts.container)] : core;
   // #323: the `[[` input trigger ships with the picker seam (it no-ops without it — the facet is null).
   const withEmbed = opts.openPageEmbedPicker ? [...ext, pageEmbedPicker.of(opts.openPageEmbedPicker), pageLinkTrigger()] : ext;
