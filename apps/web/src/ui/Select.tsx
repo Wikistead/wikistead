@@ -71,8 +71,56 @@ export function Select({
   // when its position is computed, and a panel that paints once at 0,0 reads as a flicker)
   const pending = useRef<{ top: number; left: number } | null>(null);
   const [open, setOpen] = useState(false);
+  // #582 (review rejection,/): the panel has to be readable BEFORE the list is opened — "what can
+  // this person do" is the question the closed row already asks. The trigger raises the SAME panel, placed
+  // by the SAME rule; a second implementation would be a second look, which is the thing this ticket keeps
+  // saying not to build. The rule takes two rects because an option's panel sits beside the LIST but level
+  // with its own ROW; for the trigger both are the trigger.
+  const anchors = useRef<{ beside: DOMRect; align: DOMRect } | null>(null);
+  const place = (beside: DOMRect, align: DOMRect) => {
+    anchors.current = { beside, align };
+    const width = 220;
+    // beside it, and on the other side when there is no room — a panel off the screen edge is the same as
+    // no panel
+    const right = beside.right + 8;
+    const left = right + width > window.innerWidth ? Math.max(8, beside.left - width - 8) : right;
+    // #582 (review rejection): the panel belongs BESIDE the thing it describes, and it used to clamp to a
+    // fixed `innerHeight - 120` — so every option below that line got a panel parked on the line instead
+    // of next to itself (measured: 61px adrift at a 450px viewport, and invisible on short screens because
+    // the constant was a guess at the panel's height, not its height).
+    //
+    // Now: start at the row, and move only if the panel would not fit, only as far as it must. The height
+    // is MEASURED from the rendered panel — the first pass uses the row's own height as a floor, and every
+    // later pass has the real number, so a taller panel corrects itself rather than being guessed forever.
+    const panelH = panelRef.current?.offsetHeight ?? align.height;
+    const top = Math.max(8, Math.min(align.top, window.innerHeight - 8 - panelH));
+    pending.current = { top, left };
+    if (panelRef.current) {
+      panelRef.current.style.top = `${top}px`;
+      panelRef.current.style.left = `${left}px`;
+    }
+  };
+  const selected = options.find((o) => o.value === value);
+  // Pointer movement, not just enter: after choosing an option the list closes under a pointer that never
+  // left the trigger, and an enter-only reveal would stay dark until the reader moved away and back.
+  // which value the trigger's panel is currently describing — pointermove fires constantly, and setting
+  // state on each one re-renders the whole row under the pointer. Keyed by the value rather than "is
+  // something shown", so a select whose value changes while the pointer rests on it updates instead of
+  // keeping the panel of the role that is no longer there.
+  const triggerKey = useRef<string | null>(null);
+  const revealSelected = () => {
+    if (open || disabled || !selected?.hint) return;
+    const r = trigger.current?.getBoundingClientRect();
+    if (!r) return;
+    place(r, r);
+    if (triggerKey.current === value) return; // already describing this one; the move above is enough
+    triggerKey.current = value;
+    setHint({ node: selected.hint });
+  };
+  const clearTriggerHint = () => { triggerKey.current = null; setHint(null); };
   useEffect(() => {
-    if (!open) { setHint(null); return; }
+    if (!open) { clearTriggerHint(); return; }
+    triggerKey.current = null; // the open list owns the panel from here
     // The list is found in the document rather than through a ref: it is portalled, it mounts after the
     // open, and only one select's list is open at a time. A ref would also have to survive the wrapper
     // chain between here and Radix's own content element, which is one more thing to be wrong.
@@ -89,30 +137,10 @@ export function Select({
       const item = box?.querySelector<HTMLElement>("[data-highlighted]") ?? box?.querySelector<HTMLElement>("[role=option]:hover");
       const o = item ? options.find((x) => x.value === (item.dataset.optionValue ?? "")) : undefined;
       if (!box || !item || !o?.hint) { if (key !== "") { key = ""; setHint(null); } return; }
-      const list = box.getBoundingClientRect();
-      const row = item.getBoundingClientRect();
-      const width = 220;
-      // beside the list, and on the other side when there is no room — a panel off the screen edge is
-      // the same as no panel
-      const right = list.right + 8;
-      const left = right + width > window.innerWidth ? Math.max(8, list.left - width - 8) : right;
-      // #582 (review rejection): the panel belongs BESIDE the option it describes, and it used to clamp to
-      // a fixed `innerHeight - 120` — so every option below that line got a panel parked on the line
-      // instead of next to itself (measured: 61px adrift at a 450px viewport, and invisible on short
-      // screens because the constant was a guess at the panel's height, not its height).
-      //
-      // Now: start at the option, and move only if the panel would not fit, only as far as it must. The
-      // height is MEASURED from the rendered panel — the first pass uses the option's own height as a
-      // floor, and every later pass (this runs on pointermove and on highlight changes) has the real
-      // number, so a taller panel corrects itself rather than being guessed at forever.
-      const panelH = panelRef.current?.offsetHeight ?? row.height;
-      const top = Math.max(8, Math.min(row.top, window.innerHeight - 8 - panelH));
-      // position first, so the element is already in the right place when it is (or stays) mounted
-      pending.current = { top, left };
-      if (panelRef.current) {
-        panelRef.current.style.top = `${top}px`;
-        panelRef.current.style.left = `${left}px`;
-      }
+      // beside the LIST, level with the OPTION's own row — the shared rule, so the open list and the
+      // closed trigger cannot drift into two different placements. Position first, so the element is
+      // already in the right place when it is (or stays) mounted.
+      place(box.getBoundingClientRect(), item.getBoundingClientRect());
       if (o.value === key) return; // same option — the move above is all that was needed
       key = o.value;
       setHint({ node: o.hint });
@@ -134,7 +162,17 @@ export function Select({
       // read on open, not on mount: the trigger may be mounted before the dialog around it exists
       onOpenChange={(isOpen) => { setOpen(isOpen); if (isOpen) setBoundary(trigger.current?.closest("[role=dialog]") ?? null); }}
     >
-      <SelectTrigger ref={trigger} size={scale === "sm" ? "sm" : "default"} aria-label={ariaLabel} data-testid={testId}>
+      <SelectTrigger
+        ref={trigger}
+        size={scale === "sm" ? "sm" : "default"}
+        aria-label={ariaLabel}
+        data-testid={testId}
+        onPointerEnter={revealSelected}
+        onPointerMove={revealSelected}
+        // Only when closed: while the list is open the watcher above owns the panel, and clearing here
+        // would blank it the moment the pointer crossed from the trigger onto the list.
+        onPointerLeave={() => { if (!open) clearTriggerHint(); }}
+      >
         {/* The trigger shows the LABEL, not the option's rendered children. Radix's default clones the
             selected item, which since #586 carries a hidden capability line — so the closed control held
             text nobody could see, reserved width for it, and handed it to anything reading the element.
@@ -162,9 +200,14 @@ export function Select({
           className="pointer-events-none fixed z-[60] w-[220px] rounded-md border border-border bg-panel px-2 py-1.5 shadow-md"
           ref={(el) => {
             panelRef.current = el;
-            // a freshly mounted panel has no position yet: place it on the option that raised it before
+            // a freshly mounted panel has no position yet: place it on the thing that raised it before
             // the browser paints, or it flashes at the top-left corner
             if (el && pending.current) { el.style.top = `${pending.current.top}px`; el.style.left = `${pending.current.left}px`; }
+            // …then place it again now that its real height can be measured. The open list re-runs its
+            // watcher on every pointer move and corrects itself that way; a panel raised from the closed
+            // trigger gets no second event, so without this it would keep the floor-height guess and a
+            // tall panel would hang off a short viewport.
+            if (el && anchors.current) place(anchors.current.beside, anchors.current.align);
           }}
         >
           {hint.node}

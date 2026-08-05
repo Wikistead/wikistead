@@ -74,10 +74,17 @@ test("#582 ①: the tenant tiers raise a panel of their own", async ({ page }) =
   await expect(page.locator("[data-slot=select-content]")).toBeVisible({ timeout: 5_000 });
   await sleep(200);
 
+  // Rewind to the first option before walking. Radix opens with the highlight on the SELECTED item, so
+  // walking only downwards never reaches a tier that sits above it — with dev-user already `admin` this
+  // test could not reach `tier:admin` at all and was red on master for that reason, not for a missing
+  // panel (measured in the #582 review; the panel was there the whole time).
+  for (let i = 0; i < 12; i++) await page.keyboard.press("ArrowUp");
+  await sleep(120);
+
   // walk to the admin tier and read its panel
   let adminPanel = "";
-  for (let i = 0; i < 8 && !adminPanel; i++) {
-    await page.keyboard.press("ArrowDown");
+  for (let i = 0; i < 12 && !adminPanel; i++) {
+    if (i > 0) await page.keyboard.press("ArrowDown");
     await sleep(120);
     const seen = await page.evaluate(() => {
       const item = document.querySelector<HTMLElement>("[data-slot=select-content] [data-highlighted]");
