@@ -587,5 +587,39 @@ paths:
         "403": { description: Permitted to see the resource but not to perform this action }
         "404": { description: Not viewable or absent (uniform — existence hiding) }
         default: { $ref: "#/components/responses/Error" }
+  /members/{sub}/suspend:
+    # #627 / ADR-213: an admin suspends a member. Sign-in is blocked, tenant and group grants are
+    # stripped, API keys are revoked and sessions end. The row, the external id and the SEAT stay
+    # (ruling 1: a suspension is not a way to stop paying for somebody).
+    post:
+      operationId: suspendMember
+      tags: [members]
+      summary: Suspend a member (admin only)
+      parameters:
+        - { name: sub, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: "{ suspended, alreadySuspended }" }
+        "401": { description: Missing or invalid credentials }
+        "403": { description: Permitted to see the resource but not to perform this action }
+        "404": { description: Not viewable or absent (uniform — existence hiding) }
+        "409": { description: "The last admin (`last_admin`), or yourself (`self_suspend`)" }
+        default: { $ref: "#/components/responses/Error" }
+  /members/{sub}/reactivate:
+    # The pair. Only an admin's own suspension is the console's to undo: a directory removal is reversed
+    # in the directory (ruling 4) and a plan freeze by upgrading (ruling 5). Roles a group conferred do
+    # NOT come back here — the identity provider re-adds those.
+    post:
+      operationId: reactivateMember
+      tags: [members]
+      summary: Bring a suspended member back (admin only)
+      parameters:
+        - { name: sub, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: "{ reactivated }" }
+        "401": { description: Missing or invalid credentials }
+        "403": { description: Permitted to see the resource but not to perform this action }
+        "404": { description: Not viewable or absent (uniform — existence hiding) }
+        "409": { description: "Not this console's suspension (`not_your_suspension`), or no free seat (`seat_limit`)" }
+        default: { $ref: "#/components/responses/Error" }
   /embed/providers:
     get: { operationId: listEmbedProviders, tags: [embed], summary: The tenant's external-embed host allowlist, responses: { "200": { description: "{ providers }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }

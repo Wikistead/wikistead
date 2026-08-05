@@ -73,6 +73,8 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `member.removed` | A member was removed from the tenant. |
 | `member.locked` | Password sign-in was locked for an identifier after repeated failures (it expires on its own). |
 | `member.password_changed` | A member changed their own password (their other sessions were signed out). |
+| `member.suspended` | An admin suspended a member: sign-in blocked, grants stripped, API keys revoked, sessions ended. The row and the seat stay. |
+| `member.reactivated` | An admin brought a suspended member back. Group-derived roles are not restored — the directory re-adds those. |
 | `member.password_enabled` | An admin gave an existing member a password entrance (the account had none before). |
 | `member.password_removed` | An admin removed a member's password entrance; their sessions were ended with it. |
 | `member.password_reset_requested` | A password reset link was requested for a member. |

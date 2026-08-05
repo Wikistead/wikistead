@@ -41,15 +41,13 @@ describe("memberMenuValues (#614)", () => {
   });
 
   it("#626: taking the entrance back is an EXTRA item, and only where the server would allow it", () => {
-    // no password → nothing to remove
-    expect(memberMenuValues({ has_password: false })).toEqual(["password", "erase", "remove"]);
+    // no password → nothing to remove (#627 adds `suspend` to an active member, which is not this claim)
+    expect(memberMenuValues({ has_password: false })).not.toContain("passwordRemove");
     // a federated member with a password → both errands
-    expect(memberMenuValues({ has_password: true, identity_source: "oidc" }))
-      .toEqual(["password", "passwordRemove", "erase", "remove"]);
+    expect(memberMenuValues({ has_password: true, identity_source: "oidc" })).toContain("passwordRemove");
     // …but a password-born member has no other way in, and the server refuses with `last_way_in`. An
     // action that cannot succeed is the defect #596/#606 are about, so it is not offered.
-    expect(memberMenuValues({ has_password: true, identity_source: "local" }))
-      .toEqual(["password", "erase", "remove"]);
+    expect(memberMenuValues({ has_password: true, identity_source: "local" })).not.toContain("passwordRemove");
   });
 
   it("and it is a DIFFERENT errand depending on the state", () => {
@@ -98,4 +96,28 @@ describe("status strings exist (#614)", () => {
       }
     });
   }
+});
+
+describe("#627: the suspension items", () => {
+  // One of the two, never both — and only where the console owns the decision.
+  it("an active member can be suspended", () => {
+    expect(memberMenuValues({ has_password: false })).toContain("suspend");
+    expect(memberMenuValues({ has_password: false })).not.toContain("reactivate");
+  });
+
+  it("an admin's suspension is the console's to undo", () => {
+    const m = { has_password: false, deactivated_at: "2026-01-01T00:00:00Z", deactivation_reason: "admin" as const };
+    expect(memberMenuValues(m)).toContain("reactivate");
+    expect(memberMenuValues(m), "and it is not offered twice").not.toContain("suspend");
+  });
+
+  it("but a directory removal and a plan freeze are not", () => {
+    // ruling 4: a member SCIM removed comes back through SCIM, or a tenant could restore somebody their
+    // IdP dropped — admin grant and all — from inside the product. ruling 5: a freeze is billing's.
+    for (const reason of ["scim", "downgrade_freeze"] as const) {
+      const m = { has_password: false, deactivated_at: "2026-01-01T00:00:00Z", deactivation_reason: reason };
+      expect(memberMenuValues(m), reason).not.toContain("reactivate");
+      expect(memberMenuValues(m), reason).not.toContain("suspend");
+    }
+  });
 });

@@ -51,6 +51,18 @@ import type { TupleKey } from '@openfga/sdk'
 const groupFgaId = (tenantId: string, name: string): string =>
   createHash('sha256').update(`${tenantId} ${name}`).digest('hex').slice(0, 24)
 
+// #627 / ADR-213: the same ALLOWLIST `auth/member-suspension.ts` exports, inlined for the same reason
+// `groupFgaId` is — this script stays self-contained. MUST match that file: a reason added there and not
+// here brings a suspended member's grants back on the next rebuild.
+//
+// An allowlist because this side REBUILDS. A `downgrade_freeze` keeps its tuples (plan-reconcile never
+// touches FGA), so a rebuild must restore them; a suspension stripped its own on purpose and an unknown
+// reason must therefore rebuild NOTHING. The mirror predicate (SCIM's "already done?") is a denylist,
+// because refusing work needs the opposite default — sharing one makes one of them fail open.
+const REASONS_THAT_KEEP_GRANTS = new Set(['downgrade_freeze'])
+const grantsShouldBeRebuilt = (deactivatedAt: unknown, reason: string | null): boolean =>
+  !deactivatedAt || REASONS_THAT_KEEP_GRANTS.has(reason ?? '')
+
 ;(async () => {
   const apiUrl = process.env.OPENFGA_API_URL ?? 'http://localhost:8080'
   const storeId = process.env.OPENFGA_STORE_ID

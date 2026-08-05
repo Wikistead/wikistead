@@ -1042,7 +1042,11 @@
     "removePasswordConfirm": "Remove the password entrance for {{name}}? Their sessions end with it, and they sign in through the identity provider from now on.",
     "removePasswordDone": "Password entrance removed",
     "removePasswordLastWayIn": "This is the only way this member can sign in. Suspend them instead.",
-    "removePasswordSsoFloor": "SSO is required here, and this is the last exempt member who holds a password. Name another before removing this one."
+    "removePasswordSsoFloor": "SSO is required here, and this is the last exempt member who holds a password. Name another before removing this one.",
+    "suspend": "Suspend",
+    "reactivate": "Bring back",
+    "suspendConfirm": "Suspend {{name}}? They cannot sign in, their grants and API keys are revoked, and their sessions end. The seat stays theirs and nothing is deleted.",
+    "reactivateConfirm": "Bring {{name}} back? Roles they had through a group do NOT return. The identity provider re-adds those on their next sign-in, and a member without one keeps none of them."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
