@@ -6,6 +6,7 @@ import { useAdminSurfaces } from "../data/queries";
 import { useTheme, type Theme } from "./ThemeProvider";
 import { LANGS, setLang } from "../i18n";
 import { Avatar } from "../ui/Avatar";
+import { shortPrincipalId } from "../ui/principal-label"; // #578
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
 
 // Header user menu (member chrome only — rendered when onLogout is provided).
@@ -25,7 +26,10 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
   const canEnterAdmin = (surfaces.data?.length ?? 0) > 0;
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
-  const name = displayName ?? sub ?? t("userMenu.label");
+  // #578: `?? sub` put the raw 70-character id in the menu and its tooltip. For YOUR OWN row the
+  // "unknown member" wording would be odd — you are not unknown to yourself — so the short id is
+  // what shows when no display name has arrived yet.
+  const name = displayName ?? (sub ? shortPrincipalId(sub) : t("userMenu.label"));
   // #406 S1 (ADR-159 §3 header): below md the standalone header toggles fold in here — cycle theme /
   // switch language from the account menu. Hidden at md+ (the standalone toggles are back).
   const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length]!;
@@ -44,7 +48,7 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
     )}
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger className="ml-2 flex cursor-pointer rounded-full p-0 leading-none transition-shadow hover:shadow-[0_0_0_2px_var(--panel-2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" aria-label={t("userMenu.label")} data-tip={name} data-testid="user-menu">
-        <Avatar name={name} src={picture} seed={user.seed ?? sub ?? name} size={26} data-testid="user-avatar" />
+        <Avatar name={name} src={picture} seed={user.seed ?? sub ?? name /* raw-principal-ok: a colour seed, never rendered — shortening it would make two people share a colour */} size={26} data-testid="user-avatar" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid="user-menu-content">
         {/* #406 S1: mobile-only rows — the folded theme/language controls (md+ shows the standalone

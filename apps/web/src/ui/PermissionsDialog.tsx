@@ -10,6 +10,7 @@ import { ConfirmDialog } from "./dialogs";
 import { notify } from "./toast";
 import { Select } from "./Select";
 import { Button, IconButton } from "./Button";
+import { memberLabel } from "./principal-label"; // #578: the `??` form here did not look like the others, and was the surface the grep missed
 import { Input } from "./Input";
 import { Switch } from "./Switch";
 import { RadioGroup } from "./RadioGroup";
@@ -397,7 +398,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               <RoleTip roleCapabilities={a.roleId ? roleCapsById.get(a.roleId) : undefined} origin="role" scope="page" testId="grant-origin">
                 <span className="whitespace-nowrap rounded border border-[var(--accent)] px-1 text-[10px] tracking-wide text-[var(--accent)]" data-testid="grant-role-badge">{a.roleName}</span>
               </RoleTip>
-              <span className="min-w-0 flex-1 truncate text-sm text-foreground">{a.groupName ? `${a.groupName} (${t("spaceMembers.group")})` : (a.displayName ?? a.principal.replace(/^user:/, ""))}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-foreground">{a.groupName ? `${a.groupName} (${t("spaceMembers.group")})` : memberLabel(a.principal, a.displayName, t("spaceMembers.unknownMember"))}</span>
               <IconButton aria-label={t("permissions.revoke")} data-testid="grant-role-revoke" variant="danger" onClick={() => unassignRole.mutate(a.id, {
                 onSuccess: (data) => notifyRevokeOutcome(t, data),
                 onError: (err) => notifyRevokeError(t, err),

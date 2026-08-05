@@ -12,6 +12,7 @@ import { Button, IconButton } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
+import { memberLabel } from "../ui/principal-label"; // #578
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { MemberSearchInput } from "../ui/MemberSearchInput"; // #617 ①: the one pick-a-member surface (#416 / ADR-161)
@@ -93,7 +94,9 @@ export function AdminSignInMethodsSection() {
   // people surfaces stop doing this. One resolver, used by both, falling back to the sub only when the
   // member genuinely has no name yet (the same rule MemberSearchInput's rows follow).
   const memberNames = useTenantMemberNames(canManageStance);
-  const nameOf = (sub: string): string => memberNames.get(sub) || sub;
+  // #578: `|| sub` printed the 70-character hex when the member had no resolvable name. Same answer as
+  // the space and page surfaces now — one wording, shared, so these four cannot drift apart again.
+  const nameOf = (sub: string): string => memberLabel(sub, memberNames.get(sub), t("spaceMembers.unknownMember"));
   const [expanded, setExpanded] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; error: string | null } | null>(null);

@@ -11,6 +11,7 @@ import { useTocPref } from "../toc/useTocPref";
 import { AccentPicker } from "./AccentPicker";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
+import { shortPrincipalId } from "../ui/principal-label"; // #578: your own id, readable
 import { Input } from "../ui/Input";
 import { RadioGroup } from "../ui/RadioGroup";
 import { CheckboxRow } from "../ui/Checkbox";
@@ -127,7 +128,7 @@ function ProfileTab() {
         {settings.data && settings.data.identitySource !== "local" ? (
           <>
             <p className="mb-2 text-xs text-fg-dim">{t("account.displayNameIdpManaged")}</p>
-            <p className="text-sm font-medium" data-testid="account-name-readonly">{settings.data.oidcDisplayName ?? sub ?? ""}</p>
+            <p className="text-sm font-medium" data-testid="account-name-readonly">{settings.data.oidcDisplayName ?? (sub ? shortPrincipalId(sub) : "")}</p>
           </>
         ) : (
           <>
@@ -136,14 +137,14 @@ function ProfileTab() {
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={settings.data?.oidcDisplayName ?? sub ?? ""}
+                placeholder={settings.data?.oidcDisplayName ?? (sub ? shortPrincipalId(sub) : "")}
                 data-testid="account-name-input"
               />
               <Button onClick={saveName} disabled={update.isPending} data-testid="account-name-save">{t("common.save")}</Button>
             </div>
             {settings.data?.displayNameOverride != null && (
               <button type="button" className="mt-2 text-xs text-fg-dim underline hover:text-foreground" onClick={resetName} data-testid="account-name-reset">
-                {t("account.resetToIdp", { name: settings.data?.oidcDisplayName ?? sub ?? "" })}
+                {t("account.resetToIdp", { name: settings.data?.oidcDisplayName ?? (sub ? shortPrincipalId(sub) : "") })}
               </button>
             )}
           </>
@@ -154,7 +155,16 @@ function ProfileTab() {
         <label className="mb-1 block text-sm font-medium">{t("account.avatar")}</label>
         <p className="mb-2 text-xs text-fg-dim">{t("account.avatarHint")}</p>
         <div className="flex items-center gap-3">
-          <Avatar name={displayName ?? sub ?? ""} src={picture} seed={sub ?? ""} size={48} data-testid="account-avatar" />
+          <Avatar
+            /* #578: `name` here drives the INITIALS drawn in the chip, so a raw id put two hex
+               characters where a person's letters belong. The short id gives the same two, from
+               something a reader can also match against the id shown above. */
+            name={displayName ?? (sub ? shortPrincipalId(sub) : "")}
+            src={picture}
+            seed={sub ?? "" /* raw-principal-ok: a colour seed, never rendered */}
+            size={48}
+            data-testid="account-avatar"
+          />
           <input
             ref={fileRef}
             type="file"
