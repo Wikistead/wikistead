@@ -65,6 +65,10 @@ async function pageHasLiveAccess(fga: OpenFgaClient, pageId: string, liveSubs: S
 //
 // Detection errs toward NOT listing: a space/public/group grant is treated as reachable so a
 // shared or published-into-a-space page never falsely shows as orphan (no false recovery target).
+// How many never-published drafts one sweep considers. Each one costs an FGA question, so this is a
+// budget rather than a page size — the screen shows what the sweep found.
+export const ORPHAN_DRAFT_SCAN_LIMIT = 500
+
 export async function listOrphanDrafts(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -73,8 +77,12 @@ export async function listOrphanDrafts(
   // Candidate drafts: never published. RLS scopes the query to the current tenant. A TRASHED draft is
   // excluded (#411 / ADR-153): its recovery surface is the trash (restore), not the orphan-drafts claim —
   // listing it here would leak its title past the trash's per-root manage gate.
+  // #623: bounded, and this is one of the places where an unbounded list costs the most — every
+  // candidate below is asked of FGA one at a time, so the number of rows read is also the number of
+  // authorization round trips.
   const candidates = await db.sql<{ id: string; title: string; created_at: Date }[]>`
-    SELECT id, title, created_at FROM pages WHERE published_at IS NULL AND deleted_at IS NULL ORDER BY created_at
+    SELECT id, title, created_at FROM pages WHERE published_at IS NULL AND deleted_at IS NULL
+    ORDER BY created_at, id LIMIT ${ORPHAN_DRAFT_SCAN_LIMIT}
   `
   if (candidates.length === 0) return []
   const liveSubs = await liveMemberSubs(db)

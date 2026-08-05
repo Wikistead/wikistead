@@ -2297,7 +2297,9 @@ export async function listSpaceTrash(
            (SELECT COUNT(*)::int - 1 FROM pages c WHERE c.deleted_root_id = p.id) AS descendants
     FROM pages p
     WHERE p.space_id = ${args.spaceId} AND p.deleted_root_id = p.id
-    ORDER BY p.deleted_at DESC
+    -- #623: the LIMIT was already here; the tiebreaker was not. Two pages deleted in the same instant
+    -- (a subtree goes at once) have no defined order between them, so the boundary is arbitrary.
+    ORDER BY p.deleted_at DESC, p.id DESC
     LIMIT 200
   `
   const out: TrashEntry[] = []

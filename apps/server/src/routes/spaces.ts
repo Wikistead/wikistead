@@ -522,6 +522,10 @@ async function requireSpaceAccessAuthority(
 // Tenant-wide spaces overview for the admin console (Phase 5 #4). tenant#admin
 // gated. pageCount = pages in the space; grantCount = people/groups with a DIRECT
 // space grant (inherited tenant-admin access is not counted — that's everyone).
+// #623: bounded — and each row below reads that space's tuples to count its grantees, so the row count
+// is also the number of FGA reads.
+export const ADMIN_SPACES_PAGE_LIMIT = 200
+
 export async function listAdminSpaces(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -531,7 +535,7 @@ export async function listAdminSpaces(
   const rows = await db.sql<{ id: string; name: string; page_count: number }[]>`
     SELECT s.id, s.name, count(p.id)::int AS page_count
     FROM spaces s LEFT JOIN pages p ON p.space_id = s.id
-    GROUP BY s.id, s.name ORDER BY s.created_at
+    GROUP BY s.id, s.name ORDER BY s.created_at, s.id LIMIT ${ADMIN_SPACES_PAGE_LIMIT}
   `
   const out: { id: string; name: string; pageCount: number; grantCount: number }[] = []
   for (const r of rows) {
