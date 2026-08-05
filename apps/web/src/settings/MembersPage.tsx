@@ -80,19 +80,43 @@ export function MembersPage() {
   const tierDefaults = useTenantRoleDefaults();
   const tierCaps = tenantTierCaps(tierDefaults.data?.member);
 
+  // #623: the filter is a SERVER query now. Filtering here while the server pages would answer "among
+  // the ones already fetched", which reads identically and is a different question. Debounced so
+  // a keystroke is not a request; the box keeps its own text so typing never waits on the network.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const id = window.setTimeout(() => setQuery(filter), 250);
+    return () => window.clearTimeout(id);
+  }, [filter]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const refresh = useCallback(async () => {
     try {
-      const [m, i] = await Promise.all([listMembers(token), listInvites(token)]);
-      setMembers(m);
+      const [m, i] = await Promise.all([listMembers(token, { q: query }), listInvites(token)]);
+      setMembers(m.members);
+      setNextCursor(m.nextCursor);
       setInvites(i);
       setForbidden(false);
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) setForbidden(true);
       else setError("Could not load members");
     }
-  }, [token]);
+  }, [token, query]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // …and the next page is fetched when the reader reaches the end of the box.
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const more = await listMembers(token, { cursor: nextCursor, q: query });
+      setMembers((prev) => [...prev, ...more.members]);
+      setNextCursor(more.nextCursor);
+    } catch { /* the box keeps what it has; the error surfaces on the next refresh */ }
+    finally { setLoadingMore(false); }
+  }, [token, query, nextCursor, loadingMore]);
 
   const onInvite = async () => {
     setError(null);
@@ -142,7 +166,8 @@ export function MembersPage() {
   const roleRows = new Map(
     buildTenantRoleRows(members, assignments.data ?? [], roles.data?.custom ?? []).map((r) => [r.sub, r]),
   );
-  const shownMembers = filterMembers(members, filter);
+  // the server already applied the query; `filterMembers` would now be filtering a filtered page
+  const shownMembers = members;
   // #579 ① (user ruling): people and groups are one list. A group holding a tenant role is a principal
   // with a role, exactly like a person, and giving it its own section with its own shape is what made
   // it read as a different kind of thing under different rules.
@@ -258,6 +283,15 @@ export function MembersPage() {
           placeholder={t("members.filterPlaceholder")} aria-label={t("members.filterLabel")} data-testid="members-filter" />
       </FormRow>
 
+      {/* #623 (ruling): a fixed box with the list scrolling INSIDE it, the same shape #581/#539/
+          #521/#503 already use — not a pager, which would be a new part. The next page is fetched when
+          the reader reaches the bottom, so "how many members does this tenant have" stops deciding how
+          tall this screen is. */}
+      <div className="max-h-[26rem] overflow-y-auto" data-testid="members-scroller"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          if (el.scrollTop + el.clientHeight >= el.scrollHeight - 64) void loadMore();
+        }}>
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 32 }}>
         <thead>
           <tr style={{ textAlign: "left", borderBottom: "1px solid var(--border, #333)" }}>
@@ -470,6 +504,13 @@ export function MembersPage() {
           ))}
         </tbody>
       </table>
+      {nextCursor && (
+        <button type="button" data-testid="members-more" onClick={() => void loadMore()} disabled={loadingMore}
+          className="m-2 rounded-md border border-border px-2 py-1 text-xs text-fg-dim">
+          {t("spacePages.more")}
+        </button>
+      )}
+      </div>
 
       <h3>{t("members.inviteTitle")}</h3>
       <FormRow>

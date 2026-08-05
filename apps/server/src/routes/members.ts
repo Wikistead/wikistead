@@ -14,6 +14,10 @@ import { groupFgaId } from '../auth/group-sync.js'
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
 import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
+
+// #623: how many members one answer carries. Small enough that the screen paints at once, large enough
+// that a normal tenant is one request.
+export const MEMBERS_PAGE_LIMIT = 50
 import { suspendMember, reactivateMember, LastAdminSuspensionError } from '../auth/member-suspension.js' // #627: the shared suspension verb (CE)
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEntitlements } from '@wikistead/entitlements' // #520: EE gate for the tenant analytics roll-up
@@ -109,7 +113,7 @@ export async function sweepMemberDirectGrants(
 
 export async function membersPlugin(app: FastifyInstance) {
   // ── Members ────────────────────────────────────────────────────────────────
-  app.get('/members', async (req, reply) => {
+  app.get<{ Querystring: { limit?: string; cursor?: string; q?: string } }>('/members', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     // ADR-207 rev3 (#603): `groups` joins a person to what a group confers on them (the admin-via-group
     // marker). This surface is admin-gated and the group rows themselves are already listed here, so
@@ -132,6 +136,26 @@ export async function membersPlugin(app: FastifyInstance) {
     // login gate), and `isLastAdmin` counts `deactivated_at IS NULL`, so no lockout follows; but the
     // contract "suspended means the grants are off" is not held. Whether a write-time guard belongs
     // here is an authz ruling, not an implementation detail — raised on the ticket rather than decided.
+    // #623 (review ruling), slice 2: this list grew with the tenant and the screen drew all of it —
+    // the motivating case for the whole ticket ("does the page stretch forever as members are added?").
+    //
+    // LIMIT with a CURSOR, never OFFSET: members are added while somebody is reading, and an offset
+    // silently repeats or skips a row when the list shifts. `created_at` is not unique (a bulk import
+    // stamps many rows in the same instant), so the cursor carries `sub` as the tiebreaker the ORDER BY
+    // needs — without it two members sharing a timestamp straddle a page boundary forever.
+    //
+    // The search moves in the same change, because it cannot move separately. Filtering on the client
+    // while the server pages turns "find this person" into "find this person among the ones already
+    // fetched" — the same words, a quietly different question. What it matches is what the client
+    // filter matched: display name, email, sub. This is the admin console, where every one of those is
+    // already on screen, so naming them in a query is not an enumeration oracle; opening the same search
+    // to a non-admin surface would be a different question and needs its own review.
+    const q = (req.query as { q?: string } | undefined)?.q?.trim() ?? ''
+    const rawLimit = Number.parseInt((req.query as { limit?: string } | undefined)?.limit ?? '', 10)
+    const limit = Math.min(200, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : MEMBERS_PAGE_LIMIT))
+    const cursor = (req.query as { cursor?: string } | undefined)?.cursor
+    const at = cursor?.indexOf('|') ?? -1
+    const after = cursor && at > 0 ? { at: cursor.slice(0, at), sub: cursor.slice(at + 1) } : null
     const rows = await req.db.sql<
       {
         sub: string; email: string | null; display_name: string | null; picture_url: string | null
@@ -143,8 +167,19 @@ export async function membersPlugin(app: FastifyInstance) {
              m.identity_source, m.deactivated_at, m.deactivation_reason, (lc.member_sub IS NOT NULL) AS has_password
       FROM members m
       LEFT JOIN local_credentials lc ON lc.tenant_id = m.tenant_id AND lc.member_sub = m.sub
-      ORDER BY m.created_at`
-    return { members: rows }
+      WHERE TRUE
+        ${q ? req.db.sql`AND (m.display_name ILIKE ${'%' + q + '%'} OR m.email ILIKE ${'%' + q + '%'} OR m.sub ILIKE ${'%' + q + '%'})` : req.db.sql``}
+        ${after ? req.db.sql`AND (m.created_at, m.sub) > (${after.at}::timestamptz, ${after.sub})` : req.db.sql``}
+      ORDER BY m.created_at, m.sub
+      LIMIT ${limit + 1}`
+    // one row past the limit answers "is there more" without a second count query
+    const hasMore = rows.length > limit
+    const page = hasMore ? rows.slice(0, limit) : rows
+    const last = page[page.length - 1]
+    return {
+      members: page,
+      nextCursor: hasMore && last ? `${last.created_at.toISOString()}|${last.sub}` : null,
+    }
   })
 
   // #579: the tenant-scope group name source. Assigning a tenant role to a GROUP needs the names the
