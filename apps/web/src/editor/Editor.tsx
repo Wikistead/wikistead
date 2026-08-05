@@ -351,16 +351,31 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   // Security-timing invalidation (ADR-104 Finding B): the collab server broadcasts a stateless
   // "dict-invalidate" ping (carrying NO pageId — existence-hiding even on the wire); we refetch the
   // viewer-scoped dictionary, throttled so a burst of reindex pings costs one round-trip.
+  //
+  // #620: the throttle DROPPED the pings inside its window, and a dropped invalidation is not a
+  // delay — the next refetch is the 120s TTL away. Measured: a rename's ping landed 1.1s after the
+  // background-fill ping #534 publishes on every cold dictionary load, was discarded, and the stale
+  // coloured link stayed for the rest of the session. So the window now COALESCES: the first ping
+  // refetches at once, and any ping inside the window schedules exactly one refetch at its end. A
+  // burst still costs one round-trip, which is what the throttle was for, and the last signal is
+  // never the one thrown away.
   const dictInvalidateAt = useRef(0);
+  const dictPendingTimer = useRef<number | null>(null);
   const onDictStateless = useCallback((data: { payload: string }) => {
     try {
       if ((JSON.parse(data.payload) as { type?: string })?.type !== "dict-invalidate") return;
     } catch { return; }
-    const now = Date.now();
-    if (now - dictInvalidateAt.current < 2000) return;
-    dictInvalidateAt.current = now;
-    void queryClient.invalidateQueries({ queryKey: ["title-dictionary"] });
+    const run = () => {
+      dictInvalidateAt.current = Date.now();
+      dictPendingTimer.current = null;
+      void queryClient.invalidateQueries({ queryKey: ["title-dictionary"] });
+    };
+    const since = Date.now() - dictInvalidateAt.current;
+    if (since >= 2000) { run(); return; }
+    if (dictPendingTimer.current !== null) return; // one trailing refetch per window, not one per ping
+    dictPendingTimer.current = window.setTimeout(run, 2000 - since);
   }, [queryClient]);
+  useEffect(() => () => { if (dictPendingTimer.current !== null) window.clearTimeout(dictPendingTimer.current); }, []);
 
   // Dev-only probe for the isolation invariant (ADR-013): editor content is not in
   // React state, so typing must NOT re-render this component (read before/after).
