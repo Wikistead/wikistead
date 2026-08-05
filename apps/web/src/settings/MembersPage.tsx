@@ -20,6 +20,7 @@ import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, groupConferredRoles, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 import { GroupRolesMark } from "./GroupRolesMark"; // #603: what the member's GROUPS confer, folded into one mark
+import { RowLead, ROW_LEAD_PX } from "../ui/RowLead"; // #625: one box, so both row kinds start their name at one x
 import { tenantTierCaps } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
@@ -268,8 +269,13 @@ export function MembersPage() {
               <td style={{ padding: "8px 4px" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                   {/* the kind is an ICON, not a suffix: "(group)" made the label read as part of the name */}
-                  <Users size={16} aria-hidden data-testid="row-kind-group" />
-                  {row.label}
+                  {/* #625: the icon reads at 16px (a lucide glyph drawn at 24 looks fat beside a filled
+                      avatar chip), so the BOX is what matches the avatar — 24px, icon centred. Same column,
+                      same rule: a person's name and a group's name start at one x. */}
+                  <RowLead>
+                    <Users size={16} aria-hidden data-testid="row-kind-group" />
+                  </RowLead>
+                  <span data-testid="group-name">{row.label}</span>
                 </span>
               </td>
               <td data-testid="member-roles">
@@ -322,7 +328,8 @@ export function MembersPage() {
               style={{ borderBottom: "1px solid var(--border, #222)" }}>
               <td style={{ padding: "8px 4px" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <Avatar name={m.display_name || m.email || m.sub} src={m.picture_url} seed={m.sub} size={24} />
+                  {/* #625: the same one number the group row's box uses — they cannot drift apart */}
+                  <Avatar name={m.display_name || m.email || m.sub} src={m.picture_url} seed={m.sub} size={ROW_LEAD_PX} />
                   <span data-testid="member-name" style={{ opacity: dimmed ? 0.7 : undefined }}>
                     {m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}
                   </span>
