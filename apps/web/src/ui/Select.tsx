@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Select as SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 import { useControlScale } from "./FormRow";
 import { placeBeside } from "./panel-placement";
+import { HINT_PANEL, HINT_PANEL_W } from "./hint-panel"; // #582⑤: one box for every floating explanation
 
 export interface SelectOption {
   value: string;
@@ -194,7 +195,7 @@ export function Select({
         <div
           role="tooltip"
           data-testid={testId ? `${testId}-hint` : "select-hint"}
-          className="pointer-events-none fixed z-[60] w-[220px] rounded-md border border-border bg-panel px-2 py-1.5 text-sm shadow-md"
+          className={`pointer-events-none fixed z-[60] text-sm ${HINT_PANEL_W} ${HINT_PANEL}`}
           ref={(el) => {
             panelRef.current = el;
             // a freshly mounted panel has no position yet: place it on the thing that raised it before
