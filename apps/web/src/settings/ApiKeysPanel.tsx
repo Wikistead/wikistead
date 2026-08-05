@@ -33,11 +33,13 @@ function LastUsed({ at }: { at: string | null }) {
 // `canIssue` hides the form when the tenant has restricted issuing to admins — the SERVER refuses
 // regardless, this only avoids offering something that will be turned down.
 export function ApiKeysPanel({
-  keys, canIssue, maxScope, emptyText, admin = false,
+  keys, canIssue, maxScope, maxAgeDays, emptyText, admin = false,
 }: {
   keys: ApiKeySummary[];
   canIssue: boolean;
   maxScope: ApiScope;
+  // #628 / ADR-215 §1: the tenant's ceiling on key lifetime, or null for none.
+  maxAgeDays?: number | null;
   emptyText?: string;
   // #495 / ADR-182: the ADMIN console passes admin — it shows the OWNER of each key and revokes via
   // the admin-gated route (kill any member's key). The member self-view leaves it false (owner-only).
@@ -50,6 +52,10 @@ export function ApiKeysPanel({
   const revoke = admin ? revokeAdmin : revokeOwn;
   const [name, setName] = useState("");
   const [scope, setScope] = useState<ApiScope>("read");
+  // #628: how long the key should live. "" = no expiry, which the server refuses when the tenant has a
+  // ceiling — the choice is offered rather than pre-decided, so somebody who wants a permanent key on a
+  // tenant that forbids them is told, instead of quietly getting a short one.
+  const [expiry, setExpiry] = useState<string>("");
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   // #504: a revoked key never authenticates again (the member issues a new one) — confirm, by name.
   const [revoking, setRevoking] = useState<{ id: string; name: string } | null>(null);
@@ -58,11 +64,18 @@ export function ApiKeysPanel({
   const scopeOptions = (maxScope === "read" ? (["read"] as ApiScope[]) : (["read", "write"] as ApiScope[]))
     .map((s) => ({ value: s, label: t(`adminApi.scope_${s}`) }));
   const effScope: ApiScope = maxScope === "read" ? "read" : scope;
+  // Offer the usual lifetimes, plus "never" only where the tenant allows it. Anything longer than the
+  // ceiling is left out rather than shown-and-refused.
+  const expiryChoices = [7, 30, 90, 365].filter((d) => maxAgeDays == null || d <= maxAgeDays);
+  const expiryOptions = [
+    ...(maxAgeDays == null ? [{ value: "", label: t("adminApi.expiryNever") }] : []),
+    ...expiryChoices.map((d) => ({ value: String(d), label: t("adminApi.expiryDays", { count: d }) })),
+  ];
 
   const onCreate = () => {
     if (!name.trim()) return;
-    create.mutate({ name: name.trim(), scope: effScope }, {
-      onSuccess: (k) => { setCreated(k); setName(""); notify.success(t("toast.saved")); },
+    create.mutate({ name: name.trim(), scope: effScope, expiresInDays: expiry === "" ? null : Number(expiry) }, {
+      onSuccess: (k) => { setCreated(k); setName(""); setExpiry(""); notify.success(t("toast.saved")); },
       onError: () => notify.error(t("toast.actionFailed")),
     });
   };
@@ -76,6 +89,7 @@ export function ApiKeysPanel({
           <FormRow>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} aria-label={t("adminApi.name")} data-testid="api-key-name" />
             <Select value={effScope} onChange={(v) => setScope(v as ApiScope)} ariaLabel={t("adminApi.scope")} testId="api-key-scope" options={scopeOptions} />
+            <Select value={expiry} onChange={setExpiry} ariaLabel={t("adminApi.expiry")} testId="api-key-expiry" options={expiryOptions} />
             <Button variant="primary" disabled={!name.trim() || create.isPending} onClick={onCreate} data-testid="api-key-create">{t("adminApi.create")}</Button>
           </FormRow>
         </>

@@ -550,6 +550,7 @@ function ApiKeysTab() {
           keys={keys.data ?? []}
           canIssue={canIssue}
           maxScope={policy.data?.maxScope ?? "write"}
+          maxAgeDays={policy.data?.maxAgeDays ?? null}
           emptyText={t("accountApiKeys.empty")}
         />
       </div>

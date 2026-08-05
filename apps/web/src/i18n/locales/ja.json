@@ -364,7 +364,12 @@
     "neverUsed": "未使用",
     "lastUsed": "最終使用",
     "lastUsedRel": "{{rel}}に使用",
-    "revokeConfirm": "API キー「{{name}}」を失効しますか？以後この認証は使えません。"
+    "revokeConfirm": "API キー「{{name}}」を失効しますか？以後この認証は使えません。",
+    "expiry": "有効期限",
+    "expiryNever": "無期限",
+    "expiryDays": "{{count}} 日後",
+    "expiryLabel": "{{when}} に失効",
+    "expiryNone": "無期限"
   },
   "adminAuth": {
     "title": "認証",

@@ -1575,6 +1575,9 @@ export function usePortal() {
 // below its owner's authority. The tenant policy caps issuable scope.
 export type ApiScope = "read" | "write";
 export interface ApiKeySummary { id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: string; lastUsedAt: string | null;
+  // #628 / ADR-215 §1: when the key stops working on its own. null = never — every key issued before
+  // the feature, and every key whose owner did not ask for a lifetime.
+  expiresAt?: string | null;
   // #495 / ADR-182: present ONLY on the admin list (GET /api-keys) so an admin can revoke a specific
   // member's key. ownerName follows #486 (null → null, no email fallback). Never a secret.
   ownerUserId?: string; ownerName?: string | null }
@@ -1594,7 +1597,7 @@ export function useMyApiKeys(enabled = true) {
 // regardless of what this says.
 // #496 / ADR-181: the `policy` enum field is gone — `canIssue` IS the server's capability check
 // (isApiKeyIssuer), so this can never disagree with the gate.
-export interface ApiKeyPolicy { canIssue: boolean; maxScope: ApiScope }
+export interface ApiKeyPolicy { canIssue: boolean; maxScope: ApiScope; maxAgeDays?: number | null }
 export function useMyApiKeyPolicy() {
   const { token } = useSession();
   return useQuery({ queryKey: ["api-keys", "policy"], queryFn: () => apiFetch<ApiKeyPolicy>("/api-keys/policy", token) });
@@ -1603,7 +1606,7 @@ export function useCreateApiKey() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { name: string; scope: ApiScope }) => apiFetch<ApiKeyCreated>("/api-keys", token, { method: "POST", body: JSON.stringify(args) }),
+    mutationFn: (args: { name: string; scope: ApiScope; expiresInDays?: number | null }) => apiFetch<ApiKeyCreated>("/api-keys", token, { method: "POST", body: JSON.stringify(args) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }), // refreshes both lists (shared key prefix)
   });
 }
@@ -1873,14 +1876,14 @@ export function useDeleteWebhook() {
 }
 export function useApiPolicy() {
   const { token } = useSession();
-  return useQuery({ queryKey: ["api-policy"], queryFn: () => apiFetch<{ maxScope: ApiScope }>("/admin/api-policy", token) });
+  return useQuery({ queryKey: ["api-policy"], queryFn: () => apiFetch<{ maxScope: ApiScope; maxAgeDays: number | null }>("/admin/api-policy", token) });
 }
 // #496: only the scope cap is set here now — "who may issue" moved to the Roles tab (ADR-181 §5).
 export function useUpdateApiPolicy() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (patch: { maxScope?: ApiScope }) =>
+    mutationFn: (patch: { maxScope?: ApiScope; maxAgeDays?: number | null }) =>
       apiFetch<null>("/admin/api-policy", token, { method: "PATCH", body: JSON.stringify(patch) }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["api-policy"] }); void qc.invalidateQueries({ queryKey: ["api-keys"] }); },
   });
