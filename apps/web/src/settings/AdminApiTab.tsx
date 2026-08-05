@@ -37,7 +37,7 @@ export function AdminApiTab() {
         options={[{ value: "write", label: t("adminApi.policyWrite") }, { value: "read", label: t("adminApi.policyRead") }]}
       />
 
-      <ApiKeysPanel keys={keys.data ?? []} canIssue maxScope={cap} admin />
+      <ApiKeysPanel keys={keys.data ?? []} canIssue maxScope={cap} maxAgeDays={policy.data?.maxAgeDays ?? null} admin />
     </div>
   );
 }

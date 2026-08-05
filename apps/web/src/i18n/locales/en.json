@@ -364,7 +364,12 @@
     "neverUsed": "Never used",
     "lastUsed": "Last used",
     "lastUsedRel": "Used {{rel}}",
-    "revokeConfirm": "Revoke the API key \"{{name}}\"? It never authenticates again."
+    "revokeConfirm": "Revoke the API key \"{{name}}\"? It never authenticates again.",
+    "expiry": "Expires",
+    "expiryNever": "Never expires",
+    "expiryDays": "In {{count}} days",
+    "expiryLabel": "Expires {{when}}",
+    "expiryNone": "No expiry"
   },
   "adminAuth": {
     "title": "Authentication",

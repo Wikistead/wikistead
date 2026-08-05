@@ -12,6 +12,18 @@ import type { TenantDb } from './db/index.js'
 import { fgaClient, isTenantMember } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
+import { getNarrowedKeyGate } from '@wikistead/hooks'
+
+// #628 / ADR-215 §2: routes that hand out a SECOND credential. Shut to a narrowed key whatever it
+// carries — see the note at the call site. Keyed by "METHOD pattern", where the pattern is the one the
+// route was registered with, because a raw URL never matches a path parameter.
+const CREDENTIAL_MINTING_ROUTES = new Set([
+  'POST /api-keys',
+  'DELETE /api-keys/:id',
+  'DELETE /admin/api-keys/:id',
+  'POST /auth/collab-token',
+  'POST /share-links',
+])
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from './rate-limit.js'
 import { getAuthProviders, getSearchDriver, getEmailDriver, getEeFeatures, type EmailDriver } from '@wikistead/hooks'
@@ -387,6 +399,33 @@ export async function buildApp(): Promise<FastifyInstance> {
           emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'owner deactivated' })
           await reply.code(403).send({ error: 'account deactivated by a plan change', code: 'member_deactivated' })
           return
+        }
+        // #628 / ADR-215 §2: a NARROWED key is asked, per request, whether it may be here at all.
+        //
+        // Two rules, and the first one has no exceptions. A route that hands out ANOTHER CREDENTIAL is
+        // shut to a narrowed key whatever it carries: `POST /api-keys` would let it mint an un-narrowed
+        // key in one request (and is gated by `isApiKeyIssuer`, not by anything this could reach), and
+        // `POST /auth/collab-token` / `POST /share-links` mint tokens that OTHER processes honour with
+        // the owner's full rights. A capability table cannot express those — the honest entry for the
+        // collab token is `view`, which every narrowed key would hold — so they are named here instead.
+        //
+        // Then the EE gate, if one is registered. NOTHING registered means a narrowed key is refused
+        // outright rather than guessed at: CE cannot mint one, so the only way to be holding one on a
+        // CE deployment is that the EE overlay was removed after it was issued, and widening it back to
+        // the owner's full rights is the one answer that must never happen.
+        if (apiUser.capabilities) {
+          const pattern = req.routeOptions?.url
+          if (pattern && CREDENTIAL_MINTING_ROUTES.has(`${req.method} ${pattern}`)) {
+            emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'narrowed key on a credential-minting route' })
+            await reply.code(403).send({ error: 'this API key may not issue credentials', code: 'narrowed_key' })
+            return
+          }
+          const gate = getNarrowedKeyGate()
+          if (!gate || !gate({ capabilities: apiUser.capabilities, method: req.method, routePattern: pattern })) {
+            emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: gate ? 'narrowed key outside its capabilities' : 'narrowed key with no gate registered' })
+            await reply.code(403).send({ error: 'this API key is not permitted here', code: 'narrowed_key' })
+            return
+          }
         }
         // Scope ceiling (Phase 5f): a 'read' key may only GET/HEAD — any mutation is
         // 403. This only RESTRICTS; FGA still checks the owner's authority, so a key

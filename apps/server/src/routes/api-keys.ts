@@ -322,6 +322,9 @@ export async function apiKeysPlugin(app: FastifyInstance) {
     // #496 / ADR-181: `canIssue` is the SAME check the POST gate runs (isApiKeyIssuer), so the console can
     // never show an affordance the server would refuse. The `policy` enum field is gone with the enum.
     const canIssue = await isApiKeyIssuer(app.fga, req.user.sub, req.tenant.id)
-    return { canIssue, maxScope: await getApiKeyMaxScope(req.db) }
+    // #628: the lifetime ceiling rides along for the same reason the scope cap does — so the form can
+    // offer the lifetimes the tenant will actually accept, rather than offering all of them and letting
+    // the server refuse one the member already chose.
+    return { canIssue, maxScope: await getApiKeyMaxScope(req.db), maxAgeDays: await getApiKeyMaxAgeDays(req.db) }
   })
 }

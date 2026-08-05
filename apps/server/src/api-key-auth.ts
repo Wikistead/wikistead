@@ -11,12 +11,18 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { withTenantTx } from './db/index.js' // #382
 
-interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null; expires_at: Date | null; deactivated_at: Date | null }
+interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null; expires_at: Date | null; capabilities: string[] | null; deactivated_at: Date | null }
 
 // #476 / ADR-178: the two ways a valid key can be answered. `deactivated` is the owner being frozen —
 // a state the tenant can undo by upgrading — so the caller says so rather than returning the generic
 // "invalid key" that would send a paying customer hunting for a credential problem they do not have.
-export type ApiKeyPrincipal = { sub: string; scope: 'read' | 'write'; keyId: string; deactivated: false }
+export type ApiKeyPrincipal = {
+  sub: string; scope: 'read' | 'write'; keyId: string; deactivated: false
+  // #628 / ADR-215 §2: the capabilities a NARROWED key carries, or undefined for an un-narrowed one.
+  // Undefined and empty are different states: undefined is "this key was never narrowed", empty is
+  // "narrowed to nothing", and reading them the same way would open every route to the second.
+  capabilities?: readonly string[]
+}
 export type ApiKeyDeactivated = { deactivated: true }
 // #628 / ADR-215 §5: an EXPIRED key answers the caller exactly as an unknown one does — the same 401,
 // because telling somebody "that key existed and ran out" is telling them a key existed. What differs is
@@ -50,7 +56,7 @@ export async function verifyApiKey(
   // and the deactivation would be indistinguishable from an unknown key.
   const row = await (withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<ApiKeyRow[]>`
-      SELECT k.id, k.owner_user_id, k.key_hash, k.scope, k.expires_at, m.deactivated_at
+      SELECT k.id, k.owner_user_id, k.key_hash, k.scope, k.expires_at, k.capabilities, m.deactivated_at
       FROM api_keys k
       LEFT JOIN members m ON m.sub = k.owner_user_id
       WHERE k.key_prefix    = ${keyPrefix}
@@ -87,5 +93,8 @@ export async function verifyApiKey(
   void withTenantTx(tenantId, (tx) => tx`UPDATE api_keys SET last_used_at = now() WHERE id = ${row.id}`).catch(() => {})
 
   // keyId enables per-key rate limiting (#175) without re-querying on the hot path.
-  return { sub: row.owner_user_id, scope: row.scope === 'read' ? 'read' : 'write', keyId: row.id, deactivated: false }
+  return {
+    sub: row.owner_user_id, scope: row.scope === 'read' ? 'read' : 'write', keyId: row.id, deactivated: false,
+    ...(row.capabilities ? { capabilities: row.capabilities } : {}),
+  }
 }

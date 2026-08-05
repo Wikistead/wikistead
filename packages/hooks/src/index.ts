@@ -9,6 +9,8 @@ export type { EmailDriver, EmailMessage, EmailDriverContext, EmailDriverResolver
 export { registerAIProvider, getAIProvider, resetAIProvider } from './ai-provider.js'
 export type { AIProvider } from './ai-provider.js'
 export { registerEeFeatures, getEeFeatures, resetEeFeatures } from './ee-features.js'
+export { registerNarrowedKeyGate, getNarrowedKeyGate, resetNarrowedKeyGate } from './api-key-narrowing.js'
+export type { NarrowedKeyGate, NarrowedKeyRequest } from './api-key-narrowing.js'
 export type { EeMount } from './ee-features.js'
 export { RESERVED_SUB_RE, MAX_EXTERNAL_SUB_LENGTH, externalSubViolation, assertExternalSub } from './reserved-subs.js'
 export type { ExternalSubViolation } from './reserved-subs.js'
