@@ -1,6 +1,7 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { EditorUser } from "../editor/Editor";
 import { apiFetch, assetUrl } from "../data/apiClient";
+import { shortPrincipalId } from "../ui/principal-label"; // #578
 import { colorFromString } from "../ui/avatar";
 
 // An uploaded avatar comes back as a relative API path (/members/:sub/avatar-image) that
@@ -123,7 +124,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // the display name, falling back to the sub when the IdP omits it.
   const user = useMemo<EditorUser>(() => {
     const seed = sub ?? "anon";
-    return { name: displayName ?? sub ?? "anon", color: colorFromString(seed), picture, seed };
+    // #578: this name rides the collab cursor, so it is what OTHER people see. Falling through to
+    // `sub` put a 70-character hex string on somebody else's screen; the short id is readable and
+    // still distinguishes two unnamed editors.
+    return { name: displayName ?? (sub ? shortPrincipalId(sub) : "anon"), color: colorFromString(seed), picture, seed };
   }, [sub, displayName, picture]);
 
   const logout = async () => {

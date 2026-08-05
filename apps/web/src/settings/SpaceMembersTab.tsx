@@ -13,6 +13,7 @@ import { FormRow } from "../ui/FormRow";
 import { GranteeRoleForm } from "./GranteeRoleForm";
 import { capNoun, effectiveCaps } from "./role-nouns";
 import { RoleTip, RoleCaps } from "../ui/RoleTip";
+import { memberLabel } from "../ui/principal-label"; // #578: one wording for "we cannot name this person"
 import { Input } from "../ui/Input";
 import { Select, type SelectOption } from "../ui/Select";
 import { resolveGrantDispatch, foldedEditorGrantees, revokeCapsForRow } from "./grant-dispatch";
@@ -129,7 +130,10 @@ export function SpaceMembersTab() {
       return `${a.groupName} (${t("spaceMembers.group")}${suffix})`;
     }
     const sub = a.principal.replace(/^user:/, "");
-    return roleNameBySub.get(sub) || sub; // server-resolved name; raw sub only for a departed/cross-tenant one
+    // #578 (review rejection): the comment that used to sit here said "raw sub only for a departed or
+    // cross-tenant one" — writing the defect down as though it were the rule. A 70-character hex string
+    // is not a name for anybody, departed or not; the group arm three lines up had always known that.
+    return memberLabel(sub, roleNameBySub.get(sub), t("spaceMembers.unknownMember"));
   };
 
   // #536 / ADR-188 §6: one control, two mechanisms underneath. A custom role goes through the assignment
@@ -328,7 +332,9 @@ export function SpaceMembersTab() {
     // printing the hash; the row keeps its revoke (unreadable must not mean unremovable).
     if (g.grantee.startsWith("group:")) return `${t("spaceMembers.unknownGroup")} (${t("spaceMembers.group")})`;
     const sub = g.grantee.replace(/^user:/, "");
-    return g.displayName || sub;
+    // #578: the same answer the group arm above gives — an id that resolves to nothing is named as
+    // unresolved, with enough of it left to tell two orphans apart, and the row keeps its revoke.
+    return memberLabel(sub, g.displayName, t("spaceMembers.unknownMember"));
   };
 
   // #536 ①: ONE list. A built-in grant row and a custom-role assignment row are the same thing to
