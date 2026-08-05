@@ -157,6 +157,9 @@ export async function executeCommentIndependence(
   // pass 1b: role definitions gain comment; live assignments claim the leaf where absent
   for (const d of plan.roleDefs) {
     await withTenantTx(tenantOf(d.tenantId), async (tx) => {
+// no-resource-authority-ok: an operator-run backfill, not a request. There is no caller to hold
+// authority for; what it writes is the #553 ruling being applied to rows that predate it, and the
+// operator ledger is where that act is accounted for (#629's ceiling guards the REQUEST doors).
       await tx`UPDATE roles SET capabilities = array_append(capabilities, 'comment') WHERE id = ${d.roleId} AND NOT ('comment' = ANY(capabilities))`
     })
     log(`1b: role ${d.name} (${d.roleId}) gains comment in its definition`)
