@@ -216,11 +216,24 @@ export function AdminSignInMethodsSection() {
     const notWorking = enabled && !reason && working === false;
     return (
       <span className="flex flex-none items-center gap-2">
-        <span className={enabled && working !== false && !reason ? "text-xs text-[#2da44e]" : "text-xs text-fg-dim"} data-testid="sign-in-method-state">
+        {/* #605 (review rejection, 2026-08-05): "SSO". Both facts were
+            the same 11px grey, so the row read as ON with a footnote. The REASON is the headline — it gets
+            a bordered warning badge — and the selection state steps back to a plain label when a reason is
+            present. The row itself is NOT dimmed (the ruling is explicit): the setting is still there, it
+            just does not bite right now. */}
+        <span
+          className={enabled && working !== false && !reason ? "text-xs text-[#2da44e]" : "text-xs text-fg-dim"}
+          data-testid="sign-in-method-state"
+        >
           {t(enabled ? "signInMethods.selectionOn" : "signInMethods.selectionOff")}
         </span>
         {reason && (
-          <span className="text-xs text-fg-dim" data-testid={reason.testId}>{reason.label}</span>
+          <span
+            className="rounded border border-[var(--callout-warning)] bg-panel-2 px-1.5 py-px text-xs font-medium text-[var(--callout-warning)]"
+            data-testid={reason.testId}
+          >
+            {reason.label}
+          </span>
         )}
         {notWorking && (
           <span className="text-xs text-fg-dim" data-testid="sign-in-method-blocked">{t("signInMethods.notWorking")}</span>
@@ -447,7 +460,12 @@ export function AdminSignInMethodsSection() {
                 shared badges, so the reason cannot be doubled by a second one rendered here. */}
             {stateBadges(m.local.selected, m.local, m.local.effective,
               m.local.blockedByStance ? { label: t("adminAuth.blockedByStance"), testId: "blocked-by-stance" } : undefined)}
+            {/* #605 (review rejection): an accent-green track reads as "this is on and working" — the one thing
+                the row must not say while the stance holds it shut. The track goes grey; the KNOB stays
+                right, because ADR-195 §1's promise is that the selection is preserved, and the switch stays
+                PRESSABLE (not disabled) so the setting can still be changed. */}
             <Switch checked={m.local.selected} testId="local-login-toggle" ariaLabel={t("adminAuth.methodLocal")}
+              className={m.local.blockedByStance ? "data-[state=checked]:bg-[var(--panel-3)]" : undefined}
               disabled={!canManageStance}
               onChange={(on: boolean) => localLogin.mutate(on, {
                 onSuccess: () => notify.success(t("toast.saved")),
@@ -470,6 +488,7 @@ export function AdminSignInMethodsSection() {
                 m["platform-oidc"].blockedByStance ? { label: t("adminAuth.blockedByStance"), testId: "blocked-by-stance" } : undefined)}
               {m["platform-oidc"].inCeiling && (
                 <Switch checked={m["platform-oidc"].selected} onChange={onTogglePlatform} testId="platform-login-toggle"
+                  className={m["platform-oidc"].blockedByStance ? "data-[state=checked]:bg-[var(--panel-3)]" : undefined}
                   disabled={!canManageStance} ariaLabel={t("adminAuth.methodPlatformOidc")} />
               )}
             </div>

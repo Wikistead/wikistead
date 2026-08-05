@@ -134,6 +134,47 @@ test("#605: a blocked row says why once, and still fits its sentence", async ({ 
     });
     expect(shot.clipped, "the description survives the badges").toEqual([]);
     expect(shot.reasons, "one reason, not two — the selection badge carries the other fact").toBe(1);
+
+    // #605 (review rejection, 2026-08-05): "SSO /
+    // ON ". Both facts were the same 11px grey, and the
+    // switch wore the accent — so the row read as ON with a footnote. MEASURED, not eyeballed: the colour
+    // of a thing is a computed style, and "it looks clearer now" is not a check.
+    const look = await page.evaluate(() => {
+      const row = document.querySelector("[data-testid=sign-in-method-local]") as HTMLElement;
+      const badge = row.querySelector("[data-testid=blocked-by-stance]") as HTMLElement;
+      const track = row.querySelector("[data-testid=local-login-toggle]") as HTMLElement;
+      // The knob has no element of its own: the track paints it with background-position (wks-switch,
+      // ds-controls.css, #389). So `data-state` IS the knob position, and the muted colour is read
+      // off a probe rather than hard-coded — a literal here would pass on a theme that moved the token.
+      const probe = document.createElement("div");
+      probe.style.background = "var(--panel-3)";
+      document.body.appendChild(probe);
+      const muted = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      const b = getComputedStyle(badge);
+      const t = getComputedStyle(track);
+      return {
+        badgeBorder: b.borderTopWidth,
+        badgeColour: b.color,
+        stateColour: getComputedStyle(row.querySelector("[data-testid=sign-in-method-state]") as HTMLElement).color,
+        trackBg: t.backgroundColor,
+        checked: track?.getAttribute("data-state") ?? track?.getAttribute("aria-checked"),
+        disabled: (track as HTMLButtonElement)?.disabled ?? false,
+        rowOpacity: getComputedStyle(row).opacity,
+        muted,
+      };
+    });
+    // the reason is the headline: it wears a border, and it is NOT the same colour as the selection text
+    expect(parseFloat(look.badgeBorder), `the reason has no border :: ${JSON.stringify(look)}`).toBeGreaterThan(0);
+    expect(look.badgeColour, `the reason reads exactly like the selection label :: ${JSON.stringify(look)}`)
+      .not.toBe(look.stateColour);
+    // the track is not wearing the accent — an accent track says "on and working", the one thing it is not
+    expect(look.trackBg, `the blocked toggle does not wear the muted track :: ${JSON.stringify(look)}`)
+      .toBe(look.muted);
+    // …while the selection itself is preserved, pressable, and the row is not dimmed (all three ruled)
+    expect(String(look.checked), "the selection is still shown as made").toMatch(/checked|true/);
+    expect(look.disabled, "the switch stays pressable — the setting can still be changed").toBe(false);
+    expect(look.rowOpacity, "the row is not dimmed").toBe("1");
   } finally {
     await page.unrouteAll({ behavior: "ignoreErrors" });
   }
