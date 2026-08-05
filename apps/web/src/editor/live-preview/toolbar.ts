@@ -1,7 +1,7 @@
 import { EditorView, showTooltip, type Tooltip } from "@codemirror/view";
 import { StateField } from "@codemirror/state";
 import i18n from "../../i18n";
-import { vimVisualField } from "./palette";
+import { vimKeyboardVisual } from "./palette";
 import { INLINE_FORMATS } from "./commands";
 import { formatButtonContent } from "./format-preview";
 
@@ -57,9 +57,12 @@ export function floatingToolbar() {
     update(value, tr) {
       if (!tr.docChanged && !tr.selection && !tr.effects.length) return value;
       const sel = tr.state.selection.main;
-      // In vim VISUAL mode the small "\" hint takes the ribbon spot instead of this full
-      // bubble (the bubble is the mouse/non-vim entry) — suppress it there.
-      if (sel.empty || tr.state.field(vimVisualField, false)) return [];
+      // In a KEYBOARD-made vim visual selection the small "\" hint takes the ribbon spot instead of
+      // this full bubble — suppress it there. #631: a selection dragged with the mouse puts vim in
+      // visual mode too, and someone already holding a mouse is not looking for a keystroke, so the
+      // bubble comes back for those. Both this and the hint read the SAME answer (`vimKeyboardVisual`);
+      // asking the question twice is how you get both showing, or neither.
+      if (sel.empty || vimKeyboardVisual(tr.state)) return [];
       return [bubble(sel.from, sel.to)];
     },
     provide: (f) => showTooltip.computeN([f], (state) => state.field(f)),
