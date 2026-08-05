@@ -552,7 +552,9 @@
     "bulkMoveDone": "Moved {{count}} page(s).",
     "bulkMovePartial": "Moved {{moved}}; skipped {{skipped}}.",
     "bulkMoveNested": "Moved {{moved}} page(s); {{nested}} moved with their parent.",
-    "movePlaceholder": "Choose a space"
+    "movePlaceholder": "Choose a space",
+    "filter": "Filter pages",
+    "more": "Show more"
   },
   "spaceMembers": {
     "title": "Members & permissions",

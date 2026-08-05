@@ -1706,24 +1706,58 @@ export async function listPageAccess(
 export interface PageOverview {
   id: string; title: string; published: boolean; hasUnpublishedChanges: boolean; grantCount: number; linkCount: number
 }
+// #623 (review ruling): the page a space manager opens grew with the space. Every page came back in
+// one response, each one costing an FGA read, and the screen drew all of them — so a space with a thousand
+// pages was a thousand rows and a thousand reads.
+//
+// LIMIT with a CURSOR, not OFFSET: pages move (that is what `position` is for), and an offset silently
+// skips or repeats a row when the list shifts under the reader. The cursor carries the tiebreaker the
+// ORDER BY needs — `position` is not unique, so two pages sharing one would straddle a page boundary
+// forever without the id.
+//
+// The search moves with it, in the same change. Filtering on the client while the server pages would turn
+// "find a page in this space" into "find a page among the ones already fetched" — the same words, a
+// quietly different question, and no way for the reader to tell.
+export const PAGES_OVERVIEW_LIMIT = 50
+
+export interface PageOverviewPage { items: PageOverview[]; nextCursor: string | null }
+
+/** `position|id` — opaque to the client, which only ever hands it back. */
+const encodeCursor = (position: number, id: string): string => `${position}|${id}`
+const decodeCursor = (c: string | undefined): { position: number; id: string } | null => {
+  const at = c?.lastIndexOf('|') ?? -1
+  if (at == null || at <= 0) return null
+  const position = Number(c!.slice(0, at))
+  return Number.isFinite(position) ? { position, id: c!.slice(at + 1) } : null
+}
+
 export async function listSpacePagesOverview(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { spaceId: string; userId: string },
-): Promise<PageOverview[]> {
+  args: { spaceId: string; userId: string; limit?: number; cursor?: string; q?: string },
+): Promise<PageOverviewPage> {
   const canManage = await check(fga, `user:${args.userId}`, 'manage', { type: 'space', id: args.spaceId })
   if (!canManage) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
-  const rows = await db.sql<{ id: string; title: string; published: boolean; has_unpublished_changes: boolean; link_count: number }[]>`
-    SELECT p.id, p.title, (p.published_at IS NOT NULL) AS published, p.has_unpublished_changes,
+  const limit = Math.min(200, Math.max(1, args.limit ?? PAGES_OVERVIEW_LIMIT))
+  const after = decodeCursor(args.cursor)
+  const q = (args.q ?? '').trim()
+  // one row past the limit answers "is there more" without a second count query
+  const rows = await db.sql<{ id: string; title: string; published: boolean; has_unpublished_changes: boolean; link_count: number; position: number }[]>`
+    SELECT p.id, p.title, (p.published_at IS NOT NULL) AS published, p.has_unpublished_changes, p.position,
            count(sl.id) FILTER (WHERE sl.revoked_at IS NULL)::int AS link_count
     FROM pages p
     LEFT JOIN share_links sl ON sl.resource_type = 'page' AND sl.resource_id = p.id
     WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL
+      ${q ? db.sql`AND p.title ILIKE ${'%' + q + '%'}` : db.sql``}
+      ${after ? db.sql`AND (p.position, p.id) > (${after.position}, ${after.id})` : db.sql``}
     GROUP BY p.id, p.title, p.published_at, p.has_unpublished_changes, p.position, p.created_at
-    ORDER BY p.position, p.created_at
+    ORDER BY p.position, p.id
+    LIMIT ${limit + 1}
   `
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
   const out: PageOverview[] = []
-  for (const r of rows) {
+  for (const r of page) {
     const tuples = await readObjectTuples(fga, `page:${r.id}`) // #574: paginated — this number is "who can reach this page"
     let grantCount = 0
     for (const key of tuples) {
@@ -1735,7 +1769,8 @@ export async function listSpacePagesOverview(
     }
     out.push({ id: r.id, title: r.title, published: r.published, hasUnpublishedChanges: r.has_unpublished_changes, grantCount, linkCount: r.link_count })
   }
-  return out
+  const last = page[page.length - 1]
+  return { items: out, nextCursor: hasMore && last ? encodeCursor(last.position, last.id) : null }
 }
 
 // All descendant page ids of root (RLS-scoped to the tenant), via the parent_id tree.
@@ -3789,9 +3824,14 @@ export async function pagesPlugin(app: FastifyInstance) {
   })
 
   // Pages overview for space managers (Phase 5 #5) — space#manage gated.
-  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/pages-overview', async (req) => {
-    return listSpacePagesOverview(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
-  })
+  app.get<{ Params: { spaceId: string }; Querystring: { limit?: string; cursor?: string; q?: string } }>(
+    '/spaces/:spaceId/pages-overview', async (req) => {
+      const raw = Number.parseInt(req.query?.limit ?? '', 10)
+      return listSpacePagesOverview(req.db, app.fga, {
+        spaceId: req.params.spaceId, userId: req.user.sub,
+        limit: Number.isFinite(raw) ? raw : undefined, cursor: req.query?.cursor, q: req.query?.q,
+      })
+    })
 
   app.get<{ Params: { pageId: string } }>('/pages/:pageId', async (req) => {
     return getPage(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })

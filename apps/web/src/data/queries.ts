@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
 import { useSession } from "../session/SessionProvider";
 
@@ -2109,11 +2109,28 @@ export function useRemoveEnrollDomain() {
 
 // Pages overview for a space (Phase 5 #5) — space#manage only.
 export interface PageOverview { id: string; title: string; published: boolean; hasUnpublishedChanges: boolean; grantCount: number; linkCount: number }
-export function useSpacePagesOverview(spaceId: string, enabled = true) {
+export interface PageOverviewPage { items: PageOverview[]; nextCursor: string | null }
+/**
+ * #623: a page of the space's pages, plus the search that goes with it.
+ *
+ * The search term is part of the QUERY, not a filter applied after: with the server paging, filtering
+ * here would answer "among the ones already fetched", which reads the same and is not the same question.
+ */
+export function useSpacePagesOverview(spaceId: string, enabled = true, q = "") {
   const { token } = useSession();
-  return useQuery({
-    queryKey: ["pages-overview", spaceId],
-    queryFn: () => apiFetch<PageOverview[]>(`/spaces/${encodeURIComponent(spaceId)}/pages-overview`, token).then((r) => r ?? []),
+  return useInfiniteQuery({
+    queryKey: ["pages-overview", spaceId, q],
+    initialPageParam: null as string | null,
+    getNextPageParam: (last: PageOverviewPage) => last.nextCursor,
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams();
+      if (pageParam) params.set("cursor", pageParam as string);
+      if (q.trim()) params.set("q", q.trim());
+      const qs = params.toString();
+      return apiFetch<PageOverviewPage>(
+        `/spaces/${encodeURIComponent(spaceId)}/pages-overview${qs ? `?${qs}` : ""}`, token,
+      ).then((r) => r ?? { items: [], nextCursor: null });
+    },
     enabled: enabled && spaceId.length > 0,
   });
 }

@@ -552,7 +552,9 @@
     "bulkMoveDone": "{{count}} 件のページを移動しました。",
     "bulkMovePartial": "{{moved}} 件を移動・{{skipped}} 件をスキップ。",
     "bulkMoveNested": "{{moved}} 件を移動・{{nested}} 件は親と一緒に移動しました。",
-    "movePlaceholder": "スペースを選択"
+    "movePlaceholder": "スペースを選択",
+    "filter": "ページを絞り込む",
+    "more": "さらに表示"
   },
   "spaceMembers": {
     "title": "メンバーと権限",
