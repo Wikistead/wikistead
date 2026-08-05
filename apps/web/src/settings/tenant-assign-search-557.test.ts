@@ -17,7 +17,11 @@ const src = readFileSync(resolve(import.meta.dirname, "./MembersPage.tsx"), "utf
 describe("#557: members are found by search, never enumerated into a control", () => {
   it("the table has a filter, and it is the only 'find a member' affordance", () => {
     expect(src).toMatch(/data-testid="members-filter"/);
-    expect(src).toContain("filterMembers(members, filter)");
+    // #623 slice 2: the filtering moved to the SERVER (paging and filtering cannot be split without the
+    // box answering "among what I already fetched"). The claim here is unchanged — there is ONE way to
+    // find a member and it is a search box — so it is asked of the search rather than of the helper that
+    // used to implement it.
+    expect(src, "the filter box drives a query").toMatch(/setQuery\(filter\)|listMembers\(token, \{ q/);
   });
 
   it("the every-member dropdown stays gone", () => {

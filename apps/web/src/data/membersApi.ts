@@ -31,8 +31,16 @@ export interface Invite {
   created_at: string;
 }
 
-export async function listMembers(token: string): Promise<Member[]> {
-  return (await apiFetch<{ members: Member[] }>("/members", token))?.members ?? [];
+/** #623: one page of members, plus the cursor for the next. `q` is a SERVER query — see MembersPage. */
+export async function listMembers(
+  token: string, opts: { cursor?: string | null; q?: string } = {},
+): Promise<{ members: Member[]; nextCursor: string | null }> {
+  const params = new URLSearchParams();
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  if (opts.q?.trim()) params.set("q", opts.q.trim());
+  const qs = params.toString();
+  const r = await apiFetch<{ members: Member[]; nextCursor: string | null }>(`/members${qs ? `?${qs}` : ""}`, token);
+  return { members: r?.members ?? [], nextCursor: r?.nextCursor ?? null };
 }
 export async function listInvites(token: string): Promise<Invite[]> {
   return (await apiFetch<{ invites: Invite[] }>("/members/invites", token))?.invites ?? [];
