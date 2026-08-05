@@ -175,6 +175,10 @@ import { PageTitle } from "./PageTitle";
 import { PrintSurface } from "./PrintSurface"; // #505the print-only static (paginating) surface
 import { downloadBrowserExport, printBrowserExport } from "../data/exportBrowser"; // #85 / ADR-194 Option B
 import { makeDiagramRenderer } from "../editor/diagram-renderer"; // #505: the export asks the host for plantuml
+// #85: the export asks the host for an EMBED too — the same resolver and the same denied wording
+// the editing surface uses, so the file and the screen answer from one place.
+import { makeTranscludeResolver } from "../editor/transclude-resolver";
+import { deniedEmbedLabel } from "../editor/macros/placeholder";
 import { currentMacroTheme } from "../editor/macros/theme";
 
 // The editor re-reports these on every document change, which is every keystroke. Setting state with a
@@ -604,6 +608,14 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     // plantuml source when asked (#342), and a dark-baked figure on a light page is the defect.
     // The SCREEN's renderer (Editor's own wiring) keeps following the theme.
     render: (lang: string, source: string) => makeDiagramRenderer(token, pageId)(lang, source, "light"),
+  }, transclude: {
+    // #85 (review rejection): `:::embed-page` declares `exportFidelity: "preserve"`, and a file that
+    // says "loading" forever keeps none of it. The export gets the SAME resolver the editing surface is
+    // given — the screen and the file answer from one place, which is the whole shape of Option B.
+    resolve: makeTranscludeResolver(token, pageId),
+    // the SAME sentence the live surface uses for a denied / cyclic / absent embed — a file that invents
+    // its own wording is a second vocabulary for the same fact (#600).
+    deniedLabel: deniedEmbedLabel(),
   } } : undefined), [pageId, token]);
   const exportSource = useCallback((): string => {
     const pub = published?.publishedMd ?? "";

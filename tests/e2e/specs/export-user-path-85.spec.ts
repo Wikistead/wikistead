@@ -422,3 +422,75 @@ test("#85the downloaded file, opened with the app closed, IS the document", asyn
 
   await ctx.close();
 });
+
+
+// #85 (review rejection): `:::embed-page` reached the saved file saying "loading" — forever. Its
+// siblings are honest (`children` / `tagged` declare `exportFidelity: "degrade"` and say so in words);
+// transclude declares **preserve**, which is a promise that the content survives the file. A placeholder
+// baked at the moment of serialisation keeps none of it and tells the reader to wait for something that
+// will never arrive.
+//
+// The fix is (a): the export gets the resolver the screen has, and WAITS. So the measurement is the saved
+// BYTES — the embedded page's own words have to be in them.
+test("#85an embedded page travels with the file, not a 'loading' that never resolves", async ({ page }) => {
+  test.setTimeout(240_000);
+  await page.addInitScript(() => { try { localStorage.setItem("wks.lang", "ja"); } catch { /* private mode */ } });
+  const stamp = Date.now();
+  const TARGET_BODY = `embedded-body-${stamp}`;
+
+  // the page being embedded: published, so the resolver can see it
+  const targetId = await openScratch(page, `export85-target-${stamp}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.evaluate((text) => {
+    const el = document.querySelector("[data-pane=preview] .cm-content") as { cmView?: { view?: unknown }; cmTile?: { view?: unknown } } | null;
+    const view = (el?.cmView?.view ?? el?.cmTile?.view) as { state: { doc: { length: number } }; dispatch(t: unknown): void } | undefined;
+    if (!view) throw new Error("no editor view for the embed target");
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+  }, `# target\n\n${TARGET_BODY}\n`);
+  await sleep(1200);
+  await page.evaluate(async ({ api, pageId }) => {
+    const res = await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+    if (!res.ok) throw new Error(`publishing the embed target failed: ${res.status}`);
+  }, { api: API, pageId: targetId });
+
+  // the page doing the embedding, beside the two macros that are honest about degrading
+  await openScratch(page, `export85-host-${stamp}`);
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.evaluate((text) => {
+    const el = document.querySelector("[data-pane=preview] .cm-content") as { cmView?: { view?: unknown }; cmTile?: { view?: unknown } } | null;
+    const view = (el?.cmView?.view ?? el?.cmTile?.view) as { state: { doc: { length: number } }; dispatch(t: unknown): void } | undefined;
+    if (!view) throw new Error("no editor view for the embedding page");
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+  }, `# host\n\n:::embed-page\n${targetId}\n:::\n\n:::children\n:::\n`);
+  await sleep(1800);
+
+  await page.click("[data-testid=page-overflow-trigger]");
+  const dl = page.waitForEvent("download");
+  await page.getByTestId("export-page-html").click();
+  const download = await dl;
+  const dir = mkdtempSync(join(tmpdir(), "wks-export-embed-"));
+  const savedPath = join(dir, "embed.html");
+  await download.saveAs(savedPath);
+  const bytes = readFileSync(savedPath, "utf8");
+
+  // the promise `preserve` makes: the embedded page's words are in the file
+  expect(bytes, "the embedded page's body did not travel").toContain(TARGET_BODY);
+  // …and NO macro reached the file in a transient state. Measured on the attribute `showPlaceholder`
+  // stamps (`data-wks-placeholder`), not on the words: the class this ticket names is "the next async
+  // macro does the same thing", and a wording check would only ever catch this one. `loading` is the
+  // transient state — a state that says "wait" in a file nobody can wait in. The settled ones
+  // (`empty-page`, and the degrade sentences `children` / `tagged` write) are FINE and must survive,
+  // which is why this refuses one state rather than the attribute.
+  // …and the transient placeholder is not in the file. Measured as WORDS, deliberately: the attribute
+  // `showPlaceholder` stamps (`data-wks-placeholder`) does not survive into the saved bytes — checked, and
+  // an assertion on it passed vacuously — so the reader's own evidence is the sentence. The run is pinned
+  // to Japanese above so the expected words are deterministic.
+  expect(bytes, 'the file still says "loading" — the embed never resolved').not.toContain("読み込み中");
+  // The sibling that DOES degrade still says so: this fix must not turn every macro silent. That is the
+  // other half of the ruling — `children` promises `degrade` and keeps its sentence, `embed-page` promises
+  // `preserve` and now keeps its content, and neither is allowed to become the other.
+  expect(bytes, "the degrade sentence a sibling macro promises is gone").toContain("この面では表示されません");
+  expect(bytes.length, "a non-trivial document was saved").toBeGreaterThan(5_000);
+});
