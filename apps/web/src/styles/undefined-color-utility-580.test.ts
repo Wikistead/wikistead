@@ -53,7 +53,10 @@ const NOT_A_COLOUR: Record<string, Set<string>> = {
   border: new Set(["0", "2", "4", "8", "t", "b", "l", "r", "x", "y", "t-0", "b-0", "t-2", "b-2", "l-0", "r-0", "collapse", "separate", "solid", "dashed", "dotted", "double", "hidden", "spacing", "box", "radius", "color"]),
   ring: new Set(["0", "1", "2", "4", "8", "inset"]),
   fill: new Set([]),
-  stroke: new Set(["0", "1", "2"]),
+  // `stroke-width` and friends are SVG ATTRIBUTE names, not utilities — they appear wherever this app
+  // builds an svg (the export's icon allow-list, #85). Tailwind has no colour utility by those names, so
+  // they belong here for the same reason `bg-cover` does: same prefix, different property.
+  stroke: new Set(["0", "1", "2", "width", "linecap", "linejoin", "dasharray", "dashoffset", "opacity", "miterlimit"]),
 };
 
 /** `ring-offset-2` sets a WIDTH and `ring-offset-background` sets a colour — same prefix, and the

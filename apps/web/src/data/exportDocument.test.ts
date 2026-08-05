@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
-import { buildExportDocument, inlineTransientImages, inlineCodeFontFaces } from "./exportDocument";
+import { buildExportDocument, inlineTransientImages, inlineCodeFontFaces, iconFromCssUrl } from "./exportDocument";
 
 // #85 / ADR-194 (Option B) acceptance 5: the exported file is INERT, and it carries the document rather
 // than the app. These are the properties that make it safe to write to disk and open later — often by
@@ -329,5 +329,43 @@ describe("#85: inert measured on the parsed output, not on the DOM that produced
       Array.from(el.attributes).filter((a) => a.name.toLowerCase().startsWith("on")));
     expect(acting, "…and brought a handler with it").toEqual([]);
     expect(doc.body.textContent).toContain("doc");
+  });
+});
+
+// #85 (review rejection 2026-08-05): the icon is a `data:image/svg+xml` mask, and `sanitizeCss` drops that
+// scheme on purpose. The drawing travels as an ELEMENT instead — which means the export now has a second
+// door that an svg comes through, and the CSS door being shut says nothing about this one.
+//
+// The rebuild is tested directly: reading `--cb-icon` off a holder needs a cascade, and happy-dom has none.
+// That the holder is found and filled is measured where it can be — in the real browser, on the file the
+// user downloads (export-user-path-85).
+describe("#85: an icon crosses into the file through an allow-list", () => {
+  const html = (el: SVGElement | null) => (el ? new XMLSerializer().serializeToString(el) : "");
+  const url = (svg: string) => `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+
+  it("brings the drawing across, strokable by the callout's colour", () => {
+    const out = html(iconFromCssUrl(url(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2"><path d="M12 9v4"></path></svg>`), document));
+    expect(out, "the shape travels").toContain('d="M12 9v4"');
+    expect(out, "…and strokes with the inherited colour rather than the mask's black").toContain('stroke="currentColor"');
+    expect(out, "…while a deliberate `none` stays none").toContain('fill="none"');
+  });
+
+  it("refuses everything the drawing did not need", () => {
+    const out = html(iconFromCssUrl(url(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" onload="steal()">` +
+      `<foreignObject><iframe src="http://evil.test"></iframe></foreignObject>` +
+      `<image href="http://evil.test/x.png"></image><path d="M1 1" onclick="steal()"></path>` +
+      `</svg>`), document));
+    expect(out, "the harmless shape still arrives, so this does not pass by refusing everything").toContain('d="M1 1"');
+    for (const forbidden of ["onload", "onclick", "foreignObject", "iframe", "image", "evil.test"]) {
+      expect(out, `${forbidden} came through the icon door`).not.toContain(forbidden);
+    }
+  });
+
+  it("takes nothing that is not an svg data URL", () => {
+    expect(iconFromCssUrl('url("http://evil.test/icon.svg")', document), "a remote icon is not fetched").toBeNull();
+    expect(iconFromCssUrl('url("data:image/png;base64,AAAA")', document), "a raster is not an icon element").toBeNull();
+    expect(iconFromCssUrl("none", document), "and a holder with no icon is left alone").toBeNull();
   });
 });

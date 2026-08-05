@@ -59,6 +59,12 @@ const FIXTURE = [
   "callout body",
   ":::",
   "",
+  // #85 (review rejection 2026-08-05): the callout icon did not travel. EVERY type is here, because the icon
+  // is a per-type CSS variable and fixing one says nothing about the other four.
+  ":::info[Info]", "info body", ":::", "",
+  ":::tip[Tip]", "tip body", ":::", "",
+  ":::warning[Warning]", "warning body", ":::", "",
+  ":::danger[Danger]", "danger body", ":::", "",
   "| H1 | H2 |",
   "| --- | --- |",
   "| a | b |",
@@ -288,23 +294,69 @@ test("#85the downloaded file, opened with the app closed, IS the document", asyn
   // Measured as WIDTH, not as a name: a stack is a preference list and the interesting question is which
   // face won. Canvas with the element's own resolved stack answers that, and the two numbers come from the
   // two documents — nothing here enumerates a font.
+  //
+  // The element it measures is found by its TEXT, not by a selector. Asking for the first `p` picked the
+  // paragraph inside the mermaid diagram on both sides — which agree because mermaid sets its own font, so
+  // the check read 165.4 vs 165.4 and proved nothing (measured, 2026-08-05). A figure is not the body.
   const RULER = "あいうえおABCabc123";
-  const measure = (ctxPage: typeof page, sel: string) => ctxPage.evaluate(({ sel, text }) => {
-    const el = document.querySelector(sel) as HTMLElement | null;
+  const BODY_MARK = "ordinary body text";
+  const measure = (ctxPage: typeof page, root: string) => ctxPage.evaluate(({ root, text, mark }) => {
+    const scope = document.querySelector(root) ?? document.body;
+    const el = [...scope.querySelectorAll<HTMLElement>("p, .cm-line")]
+      .find((e) => (e.textContent || "").includes(mark));
     if (!el) return null;
     const cs = getComputedStyle(el);
     const c = document.createElement("canvas").getContext("2d")!;
     c.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-    return { width: Math.round(c.measureText(text).width), family: cs.fontFamily, lang: document.documentElement.lang };
-  }, { sel, text: RULER });
+    return { width: Math.round(c.measureText(text).width), family: cs.fontFamily, lang: document.documentElement.lang, tag: el.tagName };
+  }, { root, text: RULER, mark: BODY_MARK });
 
-  const appBody = await measure(page, "[data-pane=preview] .cm-content p, [data-pane=preview] p");
-  const fileBody = await measure(opened as unknown as typeof page, "main.wks-export-doc p");
+  const appBody = await measure(page, "[data-pane=preview]");
+  const fileBody = await measure(opened as unknown as typeof page, "main.wks-export-doc");
   expect(appBody, "the app surface has a paragraph to measure").not.toBeNull();
   expect(fileBody, "the opened file has a paragraph to measure").not.toBeNull();
   expect(fileBody!.lang, "the saved document speaks the page's language, not a literal").toBe(appBody!.lang);
   expect(fileBody!.width, `body face differs: screen ${appBody!.width}px (${appBody!.family}) vs file ${fileBody!.width}px (${fileBody!.family})`)
     .toBe(appBody!.width);
+
+  // 1e. the callout icons ARRIVED and are DRAWN. The screen showed a warning triangle and the saved file
+  // showed a filled block in the same place: the icon is a CSS mask whose value is a `data:image/svg+xml`
+  // URL, and the export's CSS sanitizer drops that scheme on purpose (ADR-194 addendum A). The drawing
+  // travels as an element instead, so the security line is untouched.
+  //
+  // Discovery, not a list of five: every icon holder the file contains is required to carry a drawing and
+  // to paint ink. A sixth callout type tomorrow is covered by existing here.
+  const icons = await opened.evaluate(() => [...document.querySelectorAll<HTMLElement>("[data-icon]")].map((el) => {
+    const svg = el.querySelector("svg");
+    const r = el.getBoundingClientRect();
+    return {
+      icon: el.getAttribute("data-icon"),
+      shapes: svg ? svg.querySelectorAll("path,circle,line,polyline,polygon,rect,ellipse").length : 0,
+      // the mask painted with background-color; as an element the svg strokes with the inherited colour,
+      // and a holder still painting its own background would be the filled block the reject reported
+      background: getComputedStyle(el).backgroundColor,
+      colour: getComputedStyle(el).color,
+      box: { x: r.x, y: r.y, w: r.width, h: r.height },
+    };
+  }));
+  expect(icons.length, "the document really contains callout icons to check").toBeGreaterThanOrEqual(5);
+  expect(icons.filter((i) => i.shapes === 0), `an icon holder arrived with no drawing :: ${JSON.stringify(icons)}`).toEqual([]);
+  const painted = icons.filter((i) => !/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(i.background));
+  expect(painted, `an icon holder still paints its own block behind the drawing :: ${JSON.stringify(painted)}`).toEqual([]);
+  // …and the types kept their palette: five callouts, five different stroke colours
+  expect(new Set(icons.map((i) => i.colour)).size, `the icons all drew in one colour :: ${JSON.stringify(icons.map((i) => [i.icon, i.colour]))}`)
+    .toBeGreaterThanOrEqual(4);
+  // INK, not markup: a screenshot of each holder must contain pixels that are not its background.
+  //
+  // Taken from the ELEMENT, not from a clip rectangle. A rect is viewport-relative and a clip is
+  // page-relative, so the third icon down came back 28x3 — the part of it that was still above the fold
+  // and read as "no ink" while it was drawing perfectly (measured: 18 foreground of 84, against 210 of 784
+  // for the one above it). Playwright scrolls the element into view for an element screenshot.
+  const holders = opened.locator("[data-export-icon]");
+  for (const [i, icon] of icons.entries()) {
+    const { foreground, total } = countForegroundPixels(await holders.nth(i).screenshot());
+    expect(foreground, `the ${icon.icon} icon drew no ink in the saved file (${foreground} of ${total})`).toBeGreaterThan(20);
+  }
 
   // 2. parity: the same computed properties, read off the app and off the OPENED FILE
   const appProbes = (await page.evaluate(
