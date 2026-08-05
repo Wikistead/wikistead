@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Trash2, Upload, Lock, LockOpen, Download, FolderInput } from "lucide-react";
@@ -28,7 +28,15 @@ export function SpacePagesTab() {
   const { t } = useTranslation();
   const { spaceId } = useOutletContext<SpaceCtx>();
   const navigate = useNavigate();
-  const pages = useSpacePagesOverview(spaceId);
+  // #623: the filter is a SERVER query — see useSpacePagesOverview. Debounced so a keystroke is not a
+  // request, and the box keeps its own text so typing never waits on the network.
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const id = window.setTimeout(() => setQuery(search), 250);
+    return () => window.clearTimeout(id);
+  }, [search]);
+  const pages = useSpacePagesOverview(spaceId, true, query);
   const bulkDelete = useBulkDeletePages();
   const bulkPublish = useBulkPublishPages();
   const bulkVisibility = useBulkSetPageVisibility();
@@ -41,7 +49,7 @@ export function SpacePagesTab() {
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveTarget, setMoveTarget] = useState("");
 
-  const rows = pages.data ?? [];
+  const rows = (pages.data?.pages ?? []).flatMap((p) => p.items);
   const allSelected = rows.length > 0 && rows.every((p) => selected.has(p.id));
   const toggle = (id: string) =>
     setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -185,8 +193,31 @@ export function SpacePagesTab() {
         </div>
       )}
 
+      {/* #623: the search sits above the box and asks the SERVER. It is shown even when the current answer
+          is empty — a filter that disappears when it finds nothing cannot be cleared. */}
+      <div className="mb-2">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t("spacePages.filter")}
+          aria-label={t("spacePages.filter")}
+          data-testid="space-pages-filter"
+          className="w-full max-w-[320px] rounded-md border border-border bg-panel px-2 py-1.5 text-sm"
+        />
+      </div>
       {rows.length > 0 && (
-        <div className="overflow-x-auto" data-testid="space-pages-scroller">
+        // #623 (ruling): a fixed box with the list scrolling INSIDE it — the same shape #581/#539/
+        // #521/#503 already use, rather than a pager, which would be a new part. The next page is fetched
+        // when the reader reaches the bottom of the box, so "how many pages does this space have" never
+        // becomes "how tall is this screen".
+        <div className="max-h-[26rem] overflow-y-auto overflow-x-auto" data-testid="space-pages-scroller"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 64 && pages.hasNextPage && !pages.isFetchingNextPage) {
+              void pages.fetchNextPage();
+            }
+          }}>
         <table className="w-full min-w-[500px] table-fixed border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
           <thead>
             <tr>
@@ -232,6 +263,13 @@ export function SpacePagesTab() {
             ))}
           </tbody>
         </table>
+        {pages.hasNextPage && (
+          <button type="button" data-testid="space-pages-more" onClick={() => void pages.fetchNextPage()}
+            disabled={pages.isFetchingNextPage}
+            className="m-2 rounded-md border border-border px-2 py-1 text-xs text-fg-dim">
+            {t("spacePages.more")}
+          </button>
+        )}
         </div>
       )}
 
