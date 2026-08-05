@@ -121,8 +121,16 @@ export async function membersPlugin(app: FastifyInstance) {
     //   identity_source — who minted the identity (IdP vs this product), migration 083.
     //   deactivated_at — a SCIM-suspended member looked identical to a live one here. Rows stay listed:
     //     deactivation is a freeze, not a removal (migration 037), and hiding them would make the seat
-    //     they still occupy invisible. Role changes while suspended are MEANINGFUL: reactivation
-    //     re-derives FGA from members.role (ee-server provision.ts), so the change takes effect then.
+    //     they still occupy invisible.
+    //
+    // A CORRECTION (#614 review, measured): the first version of this comment said a role change while
+    // suspended "takes effect THEN", at reactivation. It takes effect NOW. PATCH below does not read
+    // `deactivated_at`, so promoting a suspended member writes `tenant#admin` immediately — restoring a
+    // tuple the deactivation removed, and lighting up every relation that unions `or admin`, while
+    // `tenant#member` stays false. Sign-in is still shut (sessions destroyed, API keys revoked, the
+    // login gate), and `isLastAdmin` counts `deactivated_at IS NULL`, so no lockout follows; but the
+    // contract "suspended means the grants are off" is not held. Whether a write-time guard belongs
+    // here is an authz ruling, not an implementation detail — raised on the ticket rather than decided.
     const rows = await req.db.sql<
       {
         sub: string; email: string | null; display_name: string | null; picture_url: string | null
@@ -225,16 +233,28 @@ export async function membersPlugin(app: FastifyInstance) {
     if (!member) return reply.code(404).send({ error: 'member not found' })
     const { mintPasswordSetup } = await import('../auth/password-reset.js')
     const minted = await mintPasswordSetup(req.db, req.params.sub)
-    // One answer for every refusal a caller may not distinguish: password sign-in is off, they already
-    // have a password, they have no address, or the address belongs to somebody else's credential.
+    // One answer for every refusal a caller may not distinguish: password sign-in is off, they have no
+    // address, or the address belongs to somebody ELSE's credential.
+    //
+    // #614 (review rejection): "they already have a password" is NOT among them any more. It used to be,
+    // and that left the reset with one delivery route — email — for a product whose invite has always
+    // had a copy-link fallback. An admin could not help somebody who had forgotten their password and
+    // could not read mail, which is precisely #605's break-glass member.
     if (!minted) return reply.code(400).send({ error: 'this member cannot be given a password entrance', code: 'password_setup_unavailable' })
     const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
     const setupUrl = `${scheme}://${req.headers.host}/reset-password?token=${minted.token}`
+    // Two different events, because they are two different things to anyone reading the ledger later:
+    // granting a password entrance changes who may authenticate this account; re-issuing a link for one
+    // that already exists does not. The catalog already had the second (`member.password_reset_requested`
+    // — the same act, initiated by the member) so no new event type is invented for it.
+    const action = minted.reissue ? 'member.password_reset_requested' : 'member.password_enabled'
     await req.db.tx(async (tx) => auditIfEntitled(tx, req.tenant, {
-      actor: `user:${req.user.sub}`, action: 'member.password_enabled', target: `member:${req.params.sub}`,
+      actor: `user:${req.user.sub}`, action, target: `member:${req.params.sub}`,
     })).catch((err: unknown) => req.log.warn({ err }, 'password-setup audit failed'))
-    emit({ type: 'member.password_enabled', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub })
-    return reply.code(201).send({ setupUrl, email: minted.email })
+    emit(minted.reissue
+      ? { type: 'member.password_reset_requested', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub }
+      : { type: 'member.password_enabled', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub })
+    return reply.code(201).send({ setupUrl, email: minted.email, reissue: minted.reissue })
   })
 
   // Remove a member. ADR-003 ordering; then revoke ALL their live sessions so the

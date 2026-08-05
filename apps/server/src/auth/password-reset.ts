@@ -59,28 +59,41 @@ export async function mintPasswordReset(db: TenantDb, tenant: { plan: string }, 
  * hold a password at all, which is what made #605's break-glass unbuildable.
  *
  * Admin-initiated (the route gates it), so no lookup by address: the member is named by their sub. The
- * tenant's `local_login_enabled` still gates it — the same door the invite uses — and a member who
- * already HAS a credential is refused here, because changing an existing password is a reset and a
- * reset is somebody else's function.
+ * tenant's `local_login_enabled` still gates it — the same door the invite uses.
+ *
+ * #614 (review rejection, 2026-08-05): a member who already HAS a credential used to be refused here, on
+ * the reasoning that changing an existing password is a reset and a reset is somebody else's function.
+ * That reasoning left the reset with EXACTLY ONE delivery route — email — while the invite has always
+ * had a copy-link fallback for a tenant with no SMTP. So an admin could not help somebody who had
+ * forgotten their password and could not read mail, which is the person #605's break-glass exists for:
+ * under `sso_required` the exempt member's password IS the way back in.
+ *
+ * So "they already have one" is no longer a refusal. It is the case the caller most wants. `reissue`
+ * says which of the two happened, so the audit line and the wording can differ without a second
+ * mechanism: the token is the same `pwr_` reset token, one hour, single use.
  */
-export async function mintPasswordSetup(db: TenantDb, memberSub: string): Promise<{ token: string; email: string } | null> {
+export async function mintPasswordSetup(
+  db: TenantDb,
+  memberSub: string,
+): Promise<{ token: string; email: string; reissue: boolean } | null> {
   if (!(await localLoginEnabled(db))) return null
   const [member] = await db.sql<{ email: string | null }[]>`
     SELECT email FROM members WHERE sub = ${memberSub}`
   const email = (member?.email ?? '').trim().toLowerCase()
   if (!email) return null // no address is no sign-in name; the route answers 400
   const [existing] = await db.sql`SELECT 1 FROM local_credentials WHERE member_sub = ${memberSub}`
-  if (existing) return null // they already have one — that is a reset, not a setup
-  // the address must not already be somebody else's sign-in name (the same collision the invite
-  // acceptance checks; two people cannot share one identifier)
-  const [taken] = await db.sql`SELECT 1 FROM local_credentials WHERE identifier = ${email}`
+  // The address must not already be SOMEBODY ELSE's sign-in name (the same collision the invite
+  // acceptance checks; two people cannot share one identifier). Their own row is not a collision —
+  // that is the reissue case — so the check excludes it rather than the whole table.
+  const [taken] = await db.sql`
+    SELECT 1 FROM local_credentials WHERE identifier = ${email} AND member_sub <> ${memberSub}`
   if (taken) return null
   const token = `pwr_${randomBytes(32).toString('base64url')}`
   await db.sql`
     INSERT INTO password_resets (tenant_id, member_sub, token_hash, expires_at)
     SELECT tenant_id, ${memberSub}, ${hashToken(token)}, now() + ${`${RESET_TTL_MS} milliseconds`}::interval
     FROM members WHERE sub = ${memberSub}`
-  return { token, email }
+  return { token, email, reissue: Boolean(existing) }
 }
 
 // Complete a reset. Returns the member whose password changed, or null for every failure — an

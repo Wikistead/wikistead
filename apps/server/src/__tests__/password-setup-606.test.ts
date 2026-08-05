@@ -7,8 +7,12 @@
 //
 // What must be true, and is measured against real rows: the credential binds to the sub they ALREADY
 // have (nobody is duplicated), an IdP-derived sub is allowed (an SSO tenant is entirely IdP-derived, so
-// refusing them refuses the case this exists for), and a member who already has a password is refused
-// (changing one is a reset, which is somebody else's function).
+// refusing them refuses the case this exists for), and the tenant's password switch still gates it.
+//
+// #614 (review rejection, 2026-08-05) removed one clause that used to be here: "a member who already has a
+// password is refused". That refusal left the reset with a single delivery route — email — while the
+// invite has always had a copy-link fallback, so an admin could not help somebody who had forgotten
+// their password and could not read mail. A second call re-issues now, and says which errand it was.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -71,10 +75,19 @@ describe('#606: a password entrance is added to the person who is already here',
     expect(await members(), 'and nobody was added').toBe(1)
   }, 180_000)
 
-  it('a second setup is refused — they have a password now, and changing it is a reset', async () => {
+  // SUPERSEDED by #614 (review rejection, 2026-08-05). This used to assert that a second call was REFUSED,
+  // on the reasoning that changing an existing password is a reset and a reset is somebody else's
+  // function. The review found what that cost: the reset had exactly one delivery route (email)
+  // while the invite has always had a copy-link fallback, so an admin could not help somebody who had
+  // forgotten their password and could not read mail — the member `sso_required`'s break-glass depends
+  // on (#605). The refusal is gone; what survives is that the second call is a DIFFERENT errand and says
+  // so, and that a real impossibility is still refused.
+  it('a second call re-issues a link rather than refusing, and names itself a reissue', async () => {
     const res = await app.inject({ method: 'POST', url: `/members/${encodeURIComponent(SUB)}/password-setup`, headers: H })
-    expect(res.statusCode).toBe(400)
-    expect((res.json() as { code?: string }).code).toBe('password_setup_unavailable')
+    expect(res.statusCode, 'the admin can hand them a fresh link').toBe(201)
+    const body = res.json() as { setupUrl?: string; reissue?: boolean }
+    expect(body.reissue, 'and the answer distinguishes it from a grant').toBe(true)
+    expect(body.setupUrl, 'same pwr_ token family — no second mechanism').toMatch(/token=pwr_/)
   }, 120_000)
 
   it('with password sign-in switched off, the tenant cannot issue one at all', async () => {

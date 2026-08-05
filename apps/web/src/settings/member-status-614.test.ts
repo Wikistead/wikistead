@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { memberStatusKeys, memberMenuValues } from "./member-status";
+import { memberStatusKeys, memberMenuValues, passwordAction } from "./member-status";
 
 // #614: the two pure decisions — which marks a row wears, and whether the ⋯ menu still offers a
 // password entrance. Both sides of the menu split are pinned (→→), because the defect this
 // descends from (#606) was an offered action that could only fail.
+
+const src = readFileSync(resolve(import.meta.dirname, "MembersPage.tsx"), "utf8");
 
 describe("memberStatusKeys (#614)", () => {
   it("an IdP-born member wears the origin mark alone", () => {
@@ -27,27 +29,42 @@ describe("memberStatusKeys (#614)", () => {
 });
 
 describe("memberMenuValues (#614)", () => {
-  it("no password yet → the entrance is offered (the old behaviour survives)", () => {
+  // RE-AIMED by the review rejection: removing the item from a member who already had a password was the
+  // first answer, and it cost the admin the only way to hand somebody a reset link without email — the
+  // person #605's break-glass exists for. The item stays for everyone; what changes is what it MEANS.
+  it("the password item is offered whatever state the member is in", () => {
     expect(memberMenuValues({ has_password: false })).toEqual(["password", "erase", "remove"]);
+    expect(memberMenuValues({ has_password: true })).toEqual(["password", "erase", "remove"]);
     expect(memberMenuValues({})).toEqual(["password", "erase", "remove"]);
   });
-  it("already has one → the item that could only fail is gone; everything else stays", () => {
-    expect(memberMenuValues({ has_password: true })).toEqual(["erase", "remove"]);
+
+  it("and it is a DIFFERENT errand depending on the state", () => {
+    expect(passwordAction({ has_password: false })).toBe("grant");
+    expect(passwordAction({})).toBe("grant");
+    expect(passwordAction({ has_password: true })).toBe("reissue");
+  });
+
+  it("the page picks its words from that, rather than from one sentence for both", () => {
+    expect(src, "the label branches").toMatch(/passwordAction\(m\) === "reissue" \? t\("members\.reissuePassword"\)/);
+    expect(src, "and so does the toast").toMatch(/members\.reissuePasswordDone/);
   });
 });
 
 // The page must actually consume both helpers — a pure pin over an unwired function proves nothing
 // (the vacuous-pin lesson). Source-shape check, not a render: the wiring is one line each.
 describe("MembersPage wiring (#614)", () => {
-  const src = readFileSync(resolve(import.meta.dirname, "MembersPage.tsx"), "utf8");
   it("the row draws the status icon group", () => {
     expect(src).toMatch(/<MemberStatusIcons member=\{m\}/);
   });
   it("the ⋯ menu filters through memberMenuValues", () => {
     expect(src).toMatch(/\.filter\(\(i\) => memberMenuValues\(m\)/);
   });
-  it("a suspended row is dimmed", () => {
-    expect(src).toMatch(/opacity: m\.deactivated_at != null \? 0\.55/);
+  it("a suspended row dims its NAME, not the whole row", () => {
+    // #614 (review rejection, measured): dimming the <tr> took the status marks down with it — 2.22:1 in
+    // light, under the 3:1 a non-text UI element needs — so the evidence that a row is suspended was the
+    // hardest thing on it to see. The marks and the actions keep full opacity; the name carries the mute.
+    expect(src, "the name is what dims").toMatch(/data-testid="member-name"[\s\S]{0,80}opacity: dimmed/);
+    expect(src, "and the row itself no longer carries an opacity").not.toMatch(/<tr[\s\S]{0,200}opacity:/);
   });
 });
 

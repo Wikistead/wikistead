@@ -36,12 +36,34 @@ test("#614: status marks, the dim, and the menu split reach the screen", async (
   await expect(row("Password Born").getByTestId("member-status-local")).toBeVisible();
   await expect(row("Password Born").getByTestId("member-status-idp")).toHaveCount(0);
 
-  // the suspended row wears the mark AND is measurably dim
+  // The suspended row wears the mark AND reads as dormant — but the MARK must stay legible, because it
+  // is how a reader learns the row is suspended at all. Measured as contrast, not as "it looks dim":
+  // dimming the whole row put the marks at 2.22:1 in light, under the 3:1 a non-text UI element needs.
   await expect(row("Suspended One").getByTestId("member-status-deactivated")).toBeVisible();
-  const opacity = await row("Suspended One").evaluate((el) => getComputedStyle(el).opacity);
-  expect(Number(opacity)).toBeLessThan(0.7);
-  const liveOpacity = await row("IdP Only").evaluate((el) => getComputedStyle(el).opacity);
-  expect(Number(liveOpacity)).toBe(1);
+  const geom = await page.evaluate(() => {
+    const parse = (c: string): [number, number, number] => {
+      const n = (c.match(/-?[\d.]+/g) ?? []).map(Number);
+      return c.startsWith("color(")
+        ? [(n[0] ?? 0) * 255, (n[1] ?? 0) * 255, (n[2] ?? 0) * 255]
+        : [n[0] ?? 0, n[1] ?? 0, n[2] ?? 0];
+    };
+    const lum = (rgb: [number, number, number]) => {
+      const [r, g, b] = rgb.map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }) as [number, number, number];
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const effective = (el: Element) => { let o = 1, p: Element | null = el; while (p) { o *= Number(getComputedStyle(p).opacity || 1); p = p.parentElement; } return o; };
+    const paint = (el: Element) => { let p: Element | null = el, bg = "rgba(0, 0, 0, 0)"; while (p && (bg === "rgba(0, 0, 0, 0)" || bg === "transparent")) { bg = getComputedStyle(p).backgroundColor; p = p.parentElement; } return parse(bg); };
+    const mark = document.querySelector("[data-testid=member-row-deactivated] [data-testid=member-status-deactivated]")!;
+    const bg = paint(mark);
+    const fg = parse(getComputedStyle(mark).color);
+    const a = effective(mark);
+    // composite the mark over its paint at its effective opacity, then the standard WCAG ratio
+    const mixed = fg.map((v, i) => v * a + bg[i]! * (1 - a)) as [number, number, number];
+    const [l1, l2] = [lum(mixed), lum(bg)].sort((x, y) => y - x) as [number, number];
+    return { ratio: (l1 + 0.05) / (l2 + 0.05), markOpacity: a };
+  });
+  expect(geom.ratio, `the suspended row's mark is at ${geom.ratio.toFixed(2)}:1 — a non-text UI element needs 3:1`)
+    .toBeGreaterThanOrEqual(3);
 
   // hover explains a mark (the #586 school): the key's words appear on hover, in the tooltip layer
   await row("IdP Plus Password").getByTestId("member-status-password").hover();

@@ -124,7 +124,11 @@ export type DomainEvent =
   // #568 / ADR-198 §6 (OQ7): a reset was ASKED FOR, and later COMPLETED. Both are named by sub and
   // both matter to an account-takeover investigation — the request says when someone started, the
   // completion says whether they finished, and the gap between them is where a stolen link lives.
-  | { type: 'member.password_reset_requested'; tenantId: string; targetSub: string }
+  // #614: `actorId` is OPTIONAL because the two ways this happens differ in who acted. A member asking
+  // for their own reset has no actor but themselves (the request is unauthenticated by design — the
+  // uniform answer must not confirm an address). An ADMIN re-issuing a link for somebody who already has
+  // a password does, and a consumer investigating a takeover needs to tell those apart.
+  | { type: 'member.password_reset_requested'; tenantId: string; targetSub: string; actorId?: string }
   | { type: 'member.password_reset_completed'; tenantId: string; targetSub: string }
   | { type: 'invite.created';      tenantId: string; actorId: string; role: string }
   | { type: 'invite.revoked';      tenantId: string; actorId: string }

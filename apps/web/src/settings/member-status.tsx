@@ -22,11 +22,23 @@ export function memberStatusKeys(m: Pick<Member, "identity_source" | "has_passwo
   return keys;
 }
 
-// #606→ #614: a member who already has a password entrance must not be OFFERED one — that menu
-// item could only ever fail (the server's uniform 400). The server stays the fortress; this is the
-// convenience layer finally telling the truth. Values only, so the page keeps owning labels/icons.
+// #606→ #614: the row's actions, by state.
+//
+// The first cut REMOVED the password item from anyone who already had one, because the server refused
+// them and an item that can only fail is worse than no item. The review then found what that
+// refusal cost: an admin could not hand a reset link to somebody who had forgotten their password and
+// could not read mail — and under `sso_required` that person's password IS the way back in (#605).
+//
+// So the item stays for everyone and its MEANING changes: give an entrance to somebody with none, or
+// re-issue a link for somebody who has one. Same server route, same `pwr_` token; the page picks the
+// words from `passwordAction` so the two are never one sentence.
 export function memberMenuValues(m: Pick<Member, "has_password">): ("password" | "erase" | "remove")[] {
-  return m.has_password ? ["erase", "remove"] : ["password", "erase", "remove"];
+  return ["password", "erase", "remove"];
+}
+
+/** Which of the two the password item is for this member — the label, the toast and the audit differ. */
+export function passwordAction(m: Pick<Member, "has_password">): "grant" | "reissue" {
+  return m.has_password ? "reissue" : "grant";
 }
 
 const ICON = { idp: IdCard, password: KeyRound, local: KeyRound, deactivated: Ban } as const;
