@@ -147,7 +147,7 @@
   --accent-fg: #ffffff; /* text/icon on an accent fill */
   --danger: #cf222e;    /* destructive actions (delete / remove / revoke) */
   --danger-fg: #ffffff;
-  /* #464 page-views chart series (dataviz: fixed categorical order; validated on the light surface —
+  /* #464 page-views chart series (dataviz: fixed categorical order; validated on the light surface
      lightness/chroma/contrast PASS, adjacent CVD in the 6–8 floor legalised by the legend's direct labels). */
   --views-member: #2563eb;
   --views-guest: #d97706;
@@ -161,7 +161,7 @@
   --callout-tip: #2ea043;    /* green — success/tip */
   --callout-warning: #d29922;/* yellow — caution */
   --callout-danger: var(--danger); /* red — danger (a fixed semantic token, not the accent) */
-  /* Syntax highlight (#158-C2 / ADR-052): Everforest LIGHT (medium) hues as semantic tokens —
+  /* Syntax highlight (#158-C2 / ADR-052): Everforest LIGHT (medium) hues as semantic tokens
      code-fence highlighting consumes these so the palette is themeable (Neovim-consistent). */
   --hl-keyword: #f85552;   /* red */
   --hl-string: #8da101;    /* green */
@@ -265,7 +265,7 @@
   --space-6: 32px;
   --header-h: 40px;
   --sidebar-w: 260px;
-  /* #158-C1 / #190 (ADR-090) fonts — three PURPOSE tokens (locale-defaulted, user-overridable):
+  /* #158-C1 / #190 (ADR-090) fonts — three PURPOSE tokens (locale-defaulted, user-overridable)
        --font-ui   : chrome/labels — Inter (Latin) + Noto Sans JP (JP), self-hosted woff2 (OFL). Fixed.
        --font-body : editor/reading PROSE — locale default (JP=UDEV Gothic keeps the vim column grid;
                      EN also monospace per #190 vim-first — both use the mono grid so vim columns line
@@ -309,6 +309,11 @@
      durations, ease-out for entrances. Reference these everywhere — never sprinkle
      ad-hoc durations — so motion stays consistent. Surface-only (toasts, menus,
      panels, hovers); the editor / collab / presence path is never animated. */
+  /* #636: how much empty space follows the last line of a document. A fraction of the viewport, so the
+     last line lands somewhere comfortable to read and to type at whatever the window's height. Print
+     resets it to zero — trailing space there is a blank page, not breathing room. */
+  --wks-tail-room: 40vh;
+
   --dur-fast: 120ms;  /* hover / press / small state changes */
   --dur-base: 180ms;  /* default: menus, dialogs, toasts */
   --dur-slow: 240ms;  /* larger surfaces: panels */
@@ -630,8 +635,16 @@ body {
    SHORTHAND at (0,5,0) specificity, so these clearances need an equal-specificity form declared
    LATER to keep winning padding-top/bottom on the editor pane (the pre-addendum rules won by
    source order at equal specificity — preserve that). */
+/* #636: the clearance below the last line is the TAIL — "
+   4.5rem was enough to clear the floating controls and not enough to
+   stop a finished document reading as a cut-off one; and writing at the end of it meant typing along the
+   very edge of the window. `--wks-tail-room` is a viewport fraction, because what makes the last line
+   comfortable is where it lands on the SCREEN, and a rem value that suits a laptop is nearly nothing on
+   a large display. Print resets the token to 0 (print.css) — trailing space on a sheet is a blank page.
+   Written here rather than in the shorthand above for the reason the note explains: this rule wins the
+   bottom by source order at equal specificity, so a shorthand up there would be overwritten. */
 [data-pane="preview"] .lp-editor-host > .cm-editor > .cm-scroller > .cm-content,
-.lp-editor-host > .cm-editor > .cm-scroller > .cm-content { padding-bottom: 4.5rem; }
+.lp-editor-host > .cm-editor > .cm-scroller > .cm-content { padding-bottom: var(--wks-tail-room); }
 /* #212 bounce 3: the header band is an absolute frosted overlay at the editor's top, so the first line
    must clear it — pad the content top by the band's measured height (--wks-band-h, published by bandRef).
    Falls back to 0 before the var is set (e.g. a header-less route). This gives the backdrop-blur real
