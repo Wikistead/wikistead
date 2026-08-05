@@ -73,10 +73,17 @@ describe('per-page access (grant/revoke/list)', () => {
 
   it('list returns direct grantees for a manager; a non-manager is rejected (403)', async () => {
     const list = await listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    // #578: the row now carries the name to show for the grantee (null when it cannot be resolved), the
+    // same half /spaces/:id/access has had since #523 — matched per-field so this pin is about WHO is in
+    // the list rather than about the exact shape of the row.
     expect(list).toEqual(expect.arrayContaining([
-      { grantee: GRANTEE, relation: 'view' },
-      { grantee: 'user:dev-user', relation: 'manage' }, // the creator grant (listPageAccess returns the CAPABILITY)
+      expect.objectContaining({ grantee: GRANTEE, relation: 'view' }),
+      expect.objectContaining({ grantee: 'user:dev-user', relation: 'manage' }), // creator grant (the CAPABILITY)
     ]))
+    // the projection RAN: the key is present for a user grant (its value is null when this tenant's row
+    // has no name, which is exactly the case the dialog labels as unknown). That names ARE shown when
+    // there is one is measured where it can be — in the dialog (permissions-dialog-names-578).
+    expect(list.find((g) => g.grantee === 'user:dev-user')).toHaveProperty('displayName')
     await expect(listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
 
@@ -125,7 +132,7 @@ describe('per-page restrict (monotonic deny)', () => {
     expect(await check(fgaClient, R, 'view', { type: 'page', id: pageId })).toBe(false)
     // the deny appears in the restriction list (distinct from the grant list)
     expect(await listPageRestrictions(db, fgaClient, { pageId, userId: 'dev-user' })).toEqual(
-      expect.arrayContaining([{ principal: R }]),
+      expect.arrayContaining([expect.objectContaining({ principal: R })]), // #578: carries displayName too
     )
     // unrestrict → the grant re-applies, view=true again
     await unrestrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: R })

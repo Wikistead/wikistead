@@ -121,6 +121,7 @@ export function AdminAuditTab() {
                     entry that showed a display name would be evidence of something the name
                     could later stop meaning. Rendered as an id (mono, wrapping), not as a
                     person, which is why #578's "unknown member" label does not belong here. */}
+                {/* raw-principal-ok: the ledger records WHO acted and the id IS the record (a name could later stop meaning what it meant) */}
                 <td className="font-mono text-xs [overflow-wrap:anywhere]">{r.actor.replace(/^user:/, "")}</td>
                 <td>{r.action}</td>
                 <td className="font-mono text-xs [overflow-wrap:anywhere]">{r.target}</td>

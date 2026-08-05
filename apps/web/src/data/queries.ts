@@ -948,7 +948,7 @@ export interface PageMeta {
 
 // ── per-page access (Phase 4) ──────────────────────────────────────────────
 export type PageRelation = "view" | "comment" | "edit" | "manage" | "moderate"; // #100 comment grant; #330 moderate
-export interface PageGrant { grantee: string; relation: PageRelation; groupName?: string }
+export interface PageGrant { grantee: string; relation: PageRelation; groupName?: string; displayName?: string | null }
 
 // #596: the revoke/unassign honesty payload. `stillCovered` names what keeps granting a capability
 // after this removal (a custom role's name / a built-in capability), so surfaces can say "removed,
@@ -990,7 +990,7 @@ export function useRevokeAccess(pageId: string) {
 
 // #109 / ADR-072 monotonic deny — the per-page restriction (deny) list, distinct from grants. A
 // restricted principal 404s on the page even as a space viewer.
-export interface PageRestriction { principal: string }
+export interface PageRestriction { principal: string; displayName?: string | null }
 export function usePageRestrictions(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
