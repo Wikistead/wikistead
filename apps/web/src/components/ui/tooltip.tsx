@@ -65,19 +65,21 @@ function TooltipContent({
           // Surface tokens (light/dark follow automatically), a wrapping max-width the native tooltip
           // cannot offer, and the shared enter animation.
           "z-50 max-w-[min(22rem,90vw)] whitespace-normal break-words rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md",
-          // #582① let a caller opt OUT of the animation, so the role panels could match the five
-          // surfaces that had none. #630 reverses the direction — everything matches THIS — so the flag
+          // #582① let a caller opt OUT of the animation so the role panels could match the five
+          // surfaces that had none. #630 reversed the direction — everything matches THIS — so the flag
           // survives only as a way to say "not this one", and nothing in the product passes it now.
           //
-          // The duration and easing come from the motion tokens rather than tw-animate's defaults.
-          // Measured: the hand-placed panels ran at `--dur-fast` (0.12s) and this one at the library's
-          // 0.15s, which is a difference nobody would name but everybody would feel when moving between
-          // two screens. Same reason `.wks-tip` in tokens.css spells out the same two variables.
+          // The pop, at the tokens' values. #630 briefly replaced it with a bare fade at `--dur-fast`
+          // and the motion became invisible — a cross-fade that quick, on a panel the eye is already
+          // resting on, reads as nothing happening.
           //
-          // The `zoom-in-95` this used to carry is gone — see `HINT_PANEL_ANIM`, which explains why a
-          // scaling entrance and a self-measuring panel cannot both be right. Dropping it here as well
-          // is the point: the ruling is that these all move the same way.
-          animated && "animate-in fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 duration-[var(--dur-fast)] ease-[var(--ease-out)]",
+          // This uses tw-animate's enter/exit pair rather than the `.wks-pop` class the hand-placed
+          // panels take, and the reason is measured, not stylistic: `.wks-pop` sets `animation` as a
+          // SHORTHAND, which overrides the `animate-out` Radix drives through `data-[state=closed]` —
+          // the tooltip then vanished with no exit at all (102ms against the 180 its siblings take).
+          // The hand-placed panels unmount instead of animating out, so the shorthand costs them
+          // nothing. Same keyframe values either way; `hint-timing-630` measures that they agree.
+          animated && "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 duration-[var(--dur-base)] ease-[var(--ease-out)]",
           className,
         )}
         {...props}

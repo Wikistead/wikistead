@@ -47,17 +47,26 @@ async function livePanels(page: import("@playwright/test").Page) {
         let node: HTMLElement | null = el as HTMLElement;
         let name = 'none';
         let dur = '';
+        // the element the animation was found ON — the loop below walks past it, so it is captured here
+        // rather than reconstructed from `node` afterwards (which lands on its PARENT, and reads the
+        // transform of a box that never moved)
+        let animatedEl: HTMLElement | null = null;
         while (node && name === 'none') {
           const cs = getComputedStyle(node);
-          if (cs.animationName !== 'none') { name = cs.animationName; dur = cs.animationDuration; }
+          if (cs.animationName !== 'none') { name = cs.animationName; dur = cs.animationDuration; animatedEl = node; }
           node = node.parentElement;
         }
+        // The transform of whichever ancestor carries the animation — that is where a scaling entrance
+        // shows up. Read from the same node the animation was found on, not from the element the sweep
+        // started at, or a panel whose parent scales reads as identity.
+        const tf = animatedEl ? getComputedStyle(animatedEl).transform : 'none';
         return {
           id: (el as HTMLElement).dataset.testid ?? (el as HTMLElement).className.slice(0, 40),
           radix: !!el.closest('[data-slot=tooltip-content]'),
           visible: box.width > 0 && box.height > 0,
           animationName: name,
           animationDuration: dur,
+          transform: tf,
         };
       })
       .filter((p) => p.visible));
@@ -144,4 +153,48 @@ test("#630: the nested walk still works with the delay in front of it (#603 non-
   await list.getByTestId("group-role-name").first().hover();
   await expect(page.getByTestId("group-role-caps"), "the second tier still opens").toBeVisible({ timeout: 3_000 });
   await expect(list, "and the first is still there to read").toBeVisible();
+});
+
+
+//
+// The first attempt at "one behaviour" replaced the design system's own entrance with a bespoke 120ms
+// cross-fade, and a cross-fade at that speed, on a panel the eye is already resting on, is invisible.
+// Two things went wrong at once: a ticket about having ONE way to do this added a second way, and it
+// picked `--dur-fast` — the token for "hover / press / small state changes" — for a floating panel,
+// which is what `--dur-base` is for.
+//
+// So the assertion is that the panel actually MOVES. A name and a duration can match across four
+// implementations while nothing visibly happens; a non-identity transform cannot.
+test("#630: every floating panel pops — the entrance is not a bare fade", async ({ page }) => {
+  await stub(page);
+  await openDemo(page);
+  await page.goto("/admin/members");
+  await expect(page.getByText("Has Groups")).toBeVisible({ timeout: 10_000 });
+  await sleep(500);
+
+  // caught DURING the animation: `wks-pop` ends at `transform: none`, so a panel measured after it has
+  // finished looks exactly like one that never moved
+  await page.getByTestId("group-roles-mark").first().hover();
+  // open delay (180) + a slice of the 180ms entrance — `wks-pop` ends at `transform: none`, so a panel
+  // sampled after it finishes is indistinguishable from one that never moved
+  await sleep(230);
+  const handMade = (await livePanels(page)).filter((p) => !p.radix);
+  expect(handMade.length, "a hand-placed panel is open").toBeGreaterThan(0);
+
+  await page.mouse.move(0, 0);
+  await sleep(600);
+  await page.goto("/admin/roles");
+  await sleep(600);
+  const roleName = page.locator('[data-testid^="role-tip-"]').first();
+  await expect(roleName).toBeVisible({ timeout: 8_000 });
+  await roleName.hover();
+  await sleep(230);
+  const radixMade = (await livePanels(page)).filter((p) => p.radix);
+  expect(radixMade.length, "the Radix mechanism is open too — else this compares one thing with itself").toBeGreaterThan(0);
+
+  for (const p of [...handMade, ...radixMade]) {
+    expect(p.animationDuration, `${p.id}: the panel entrance runs at --dur-base, not --dur-fast`).toBe("0.18s");
+    expect(p.transform, `${p.id}: a bare fade leaves the box where it was — this must be scaling`).not.toBe("none");
+    expect(p.transform, `${p.id}: …and not the identity matrix either`).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
+  }
 });

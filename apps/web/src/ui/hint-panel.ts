@@ -38,20 +38,24 @@ export const HINT_PANEL_W = "w-[220px]";
 export const HINT_OPEN_DELAY_MS = TOOLTIP_DELAY_MS;
 export const HINT_CLOSE_GRACE_MS = 160;
 
-// The entrance, as classes for React panels. Duration and easing come from the tokens (`--dur-fast`,
-// `--ease-out`) rather than tw-animate's defaults, so a change to the motion scale reaches these too.
-// `.wks-tip` — the delegated host's single reused node, which is plain DOM and gets no Tailwind — is
-// given the same animation in `tokens.css`, keyed off the same variables.
+// The entrance: a pop, at the motion tokens' values.
 //
-// FADE ONLY, deliberately: the app tooltip's entrance was `fade-in-0 zoom-in-95`, and the scale half of
-// it broke placement. These panels measure themselves to decide which side to open on (#603), and
-// `getBoundingClientRect` returns the box AFTER transform — so a panel measured mid-entrance reports 95%
-// of the height it is about to have, the clamp is computed against the smaller number, and the second
-// tier ended up 17px below a 420px-tall viewport. The #603 pin caught it. Measuring the layout box
-// instead is not enough on its own, because the panel has to exist before it can be measured and the
-// first pass necessarily runs without it.
+// #630 first replaced the pop with a bare fade at `--dur-fast`, and the result was invisible — a 120ms
+// cross-fade on a panel the eye is already resting on reads as nothing happening ("
+// "). `--dur-fast` is the token for "hover / press / small state
+// changes"; a floating panel arriving is what `--dur-base` is for, which is what `.wks-pop` in tokens.css
+// already used.
 //
-// So the shared entrance is opacity only. It is the same motion on every surface, which is what the
-// ruling asked for, and it cannot lie to a measurement.
+// So why not `.wks-pop` itself, which the review pointed at? Measured: it sets `animation` as a
+// SHORTHAND, and that overrides the `animate-out` Radix drives through `data-[state=closed]` — the
+// tooltip lost its exit entirely (102ms against the 180 its siblings take). These hand-placed panels
+// unmount rather than animating out, so the shorthand would cost THEM nothing, but then the two
+// mechanisms would run different keyframes and #582's parity pin would be right to fail. Same
+// utilities on both sides, same tokens, one animation name.
+//
+// The scale was once dropped on the theory that a panel cannot both scale and measure itself. Wrong, and
+// the counter-example was already in the tree: `GroupRolesMark` measures with `offsetWidth`/
+// `offsetHeight` — the LAYOUT box, which a transform does not touch — exactly so a scaling entrance
+// cannot lie to it. `getBoundingClientRect` is the one that reads the box after transform.
 export const HINT_PANEL_ANIM =
-  "animate-in fade-in-0 duration-[var(--dur-fast)] ease-[var(--ease-out)]";
+  "animate-in fade-in-0 zoom-in-95 duration-[var(--dur-base)] ease-[var(--ease-out)]";
