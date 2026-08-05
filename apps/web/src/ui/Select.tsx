@@ -132,11 +132,27 @@ export function Select({
       triggerKey.current = value;
       setHint({ node: selected.hint });
     }, HINT_OPEN_DELAY_MS);
+    // re-entering during the grace period keeps the panel: cancel the close that was already queued
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
   };
-  const clearTriggerHint = () => {
+  // #630 (review rejection): this used to drop the panel the instant the pointer left, while the other
+  // two implementations held it for `HINT_CLOSE_GRACE_MS` — measured on the device at 35ms against 172 and
+  // 174. The constant was imported and never used, which is why a source scan for "does this file share
+  // the constant" said yes: a dead import references it perfectly.
+  //
+  // The grace is for the POINTER leaving, and only that. Opening or closing the list, or the control being
+  // disabled, still clears at once: those are the panel's subject going away, not the reader's pointer
+  // wandering off it — the same split `tooltip-host` makes for scroll and Escape.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTriggerHint = (grace = false) => {
     if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null; }
-    triggerKey.current = null;
-    setHint(null);
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    if (!grace) { triggerKey.current = null; setHint(null); return; }
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null;
+      triggerKey.current = null;
+      setHint(null);
+    }, HINT_CLOSE_GRACE_MS);
   };
   useEffect(() => {
     if (!open) { clearTriggerHint(); return; }
@@ -196,7 +212,7 @@ export function Select({
         onPointerMove={revealSelected}
         // Only when closed: while the list is open the watcher above owns the panel, and clearing here
         // would blank it the moment the pointer crossed from the trigger onto the list.
-        onPointerLeave={() => { if (!open) clearTriggerHint(); }}
+        onPointerLeave={() => { if (!open) clearTriggerHint(true); }}
       >
         {/* The trigger shows the LABEL, not the option's rendered children. Radix's default clones the
             selected item, which since #586 carries a hidden capability line — so the closed control held
