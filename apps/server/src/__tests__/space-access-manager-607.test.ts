@@ -10,6 +10,7 @@
 //       capability (a `view` grant with replace demotes the owner).
 // And a plain member is refused everything.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
@@ -18,6 +19,7 @@ import { buildApp } from '../app.js'
 import {
   createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listSpaceAccess, listTenantGroups, listMemberCandidates,
 } from '../routes/spaces.js'
+import { assignRoleInTx } from '../routes/roles.js'
 import { spaceGrantTuplesFor } from '../space-grant-expansion.js'
 import type { FastifyInstance } from 'fastify'
 import type { Tenant } from '@wikistead/types'
@@ -41,7 +43,17 @@ beforeAll(async () => {
   await app.ready()
   db = await acquireTenantDb(asTenant(T))
   spaceId = (await createSpace(db, fgaClient, { tenantId: T, userId: OWNER, plan: 'free', name: `am607-${STAMP}` })).id
-  await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: OWNER, grantee: `user:${AM}`, capability: 'manageAccess', plan: 'free' })
+  // The verb reaches its holder through a CUSTOM ROLE now (user ruling 2026-08-05): the built-in door
+  // stopped naming it, on an edition boundary. The route behaviour under test is unchanged — the ceiling
+  // reads the caller's relations, not how they came to hold them — and setting it up this way keeps that
+  // honest: if the two paths ever wrote different tuples, every case below would notice.
+  const roleId = randomUUID()
+  await db.sql`INSERT INTO roles (id, tenant_id, name, capabilities, scope)
+               VALUES (${roleId}, ${T}, ${`am607-verb-${STAMP}`}, ARRAY['manageAccess']::text[], 'resource')`
+  await assignRoleInTx(db, fgaClient, app.searchDriver, {
+    tenant: { id: T, plan: 'business' }, roleId, capabilities: ['manageAccess'],
+    resourceType: 'space', resourceId: spaceId, principal: `user:${AM}`, actorSub: OWNER,
+  })
   cleanup.push(...spaceGrantTuplesFor(`user:${AM}`, 'manageAccess', spaceId))
 }, 120_000)
 
@@ -86,12 +98,34 @@ describe('#607 (b): the fifteen sites that stay on manage still refuse', () => {
 })
 
 describe('#607 (c): the ceiling — admin-class capabilities need manage, at both doors', () => {
-  it.each(['manage', 'moderate', 'manageAccess'] as const)('built-in door: granting %s is refused', async (cap) => {
+  // `manageAccess` left this list on 2026-08-05, so the built-in door refuses it to EVERYONE (400 from
+  // the vocabulary) rather than to the weak (403 from the ceiling). Both are pinned, and the codes are
+  // kept apart on purpose: collapsing them to "it throws" would let the ceiling quietly disappear behind
+  // a vocabulary error, which is the shape of failure this whole describe block exists to catch.
+  it.each(['manage', 'moderate'] as const)('built-in door: granting %s is refused by the ceiling', async (cap) => {
     await expect403(
       grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: AM, grantee: `user:${TARGET}`, capability: cap, plan: 'free' }),
-      `an access-manager cannot hand out ${cap}`,
+      `the roster verb cannot hand out ${cap}`,
     )
-    expect(await check(fgaClient, `user:${TARGET}`, cap === 'manage' ? 'manage' : cap === 'moderate' ? 'moderate' : 'manageAccess', { type: 'space', id: spaceId }), 'nothing was written').toBe(false)
+    expect(await check(fgaClient, `user:${TARGET}`, cap, { type: 'space', id: spaceId }), 'nothing was written').toBe(false)
+  }, 60_000)
+
+  it('built-in door: the verb itself is not in that vocabulary at all — refused to an OWNER too', async () => {
+    for (const caller of [AM, OWNER]) {
+      await expect(
+        grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: caller, grantee: `user:${TARGET}`, capability: 'manageAccess', plan: 'free' }),
+        'a paid composition is not handed out by the free door, however strong the caller',
+      ).rejects.toMatchObject({ statusCode: 400 })
+    }
+    expect(await check(fgaClient, `user:${TARGET}`, 'manageAccess', { type: 'space', id: spaceId }), 'nothing was written').toBe(false)
+  }, 60_000)
+
+  it('roles door: the verb is still refused to the holder of it — the ceiling covers its own delegation', async () => {
+    const { requireAssignmentAuthority } = await import('./../routes/roles.js')
+    await expect403(
+      requireAssignmentAuthority(app.fga, { sub: AM, tenantId: T, resourceType: 'space', resourceId: spaceId, capabilities: ['manageAccess'] }),
+      'appointing another holder of the roster verb needs manage — the delegation chain stays recorded',
+    )
   }, 60_000)
 
   it('roles door: assigning a role that bundles an admin-class capability is refused', async () => {

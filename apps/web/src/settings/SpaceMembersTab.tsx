@@ -37,15 +37,16 @@ interface SpaceCtx { spaceId: string; name: string }
 // exported for the copy pin (#553): a paragraph that tells the reader how to grant something must
 // be checked against the list this picker actually offers, not against a second copy of it.
 export const GRANTABLE: PageRelation[] = ["view", "edit", "moderate", "manage"];
-// #607 / ADR-209 §2: what the picker offers DEPENDS ON THE CALLER now. An access-manager runs the
-// roster of readers and editors — the admin-class nouns (moderator, manager, access-manager itself)
-// are not theirs to hand out, and an option the server answers 403 to is not an option. A manager
-// additionally sees the new access-manager noun (it is theirs to delegate).
-// #604 C (user ruling (a)): the three admin-class leaves join the manager's list under the model's own
-// nouns (deleter / sharer / settings-editor) — direct grants of what custom roles could always carry.
-// Admin-class, so only the manager branch: for anyone weaker the server answers 403.
-export const GRANTABLE_FOR = (callerManages: boolean): (PageRelation | "manageAccess" | "delete" | "share" | "settings")[] =>
-  callerManages ? [...GRANTABLE, "manageAccess", "delete", "share", "settings"] : ["view", "edit"];
+// #607 / ADR-209 §2: what the picker offers DEPENDS ON THE CALLER. Someone who runs the roster without
+// holding the space runs it for readers and editors — the admin-class nouns are not theirs to hand out,
+// and an option the server answers 403 to is not an option.
+//
+// The manager's list is now the SAME four (user ruling 2026-08-05, #604/ #607). The single-
+// verb nouns that briefly extended it — access-manager, deleter, sharer, settings-editor — are gone from
+// every built-in surface: composing one verb is what a CUSTOM ROLE does, and custom roles are EE. They
+// are still grantable, through the role list below this picker, which is where the paid line lives.
+export const GRANTABLE_FOR = (callerManages: boolean): PageRelation[] =>
+  callerManages ? [...GRANTABLE] : ["view", "edit"];
 // #445the WIRE value stays the verb (the internal relation — view→viewer_member, edit→editor_member,
 // etc. — is unchanged), but the LABEL is the noun a role is called, shown as a literal to match the Roles tab
 // (which renders `r.name` verbatim). One noun set across Members and Roles.

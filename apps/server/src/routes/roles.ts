@@ -27,7 +27,13 @@ import type { Sql } from 'postgres'
 
 // The ADR-164 §1 atomic vocabulary a custom RESOURCE role may bundle. `manage` is deliberately absent
 // it is the built-in SUPERSET (manager); a custom bundle wanting everything lists the atoms.
-export const ROLE_CAPABILITIES = ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings', 'moderate'] as const
+//
+// `manageAccess` JOINS it with the ruling of 2026-08-05 (#607), and the order matters: that ruling
+// takes the verb out of the built-in door and says "compose it as a custom role instead". Removing the
+// built-in without adding it here would not have moved the verb to the paid side — it would have made it
+// ungrantable by any path, silently deleting the capability #607 exists to create. It is admin-class
+// (ADMIN_CLASS_ROLE_CAPS lists it), so a role bundling it still needs `manage` to assign.
+export const ROLE_CAPABILITIES = ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings', 'moderate', 'manageAccess'] as const
 export type RoleCapability = (typeof ROLE_CAPABILITIES)[number]
 
 // #445 / ADR-171: the TENANT-scope vocabulary — tenant-action capabilities (the target resource does
@@ -63,17 +69,19 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
   { name: 'editor', capabilities: ['view', 'comment', 'edit', 'publish'] },
   { name: 'moderator', capabilities: ['moderate'] },
   { name: 'manager', capabilities: ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings'] },
-  // ADR-209 (#607): the membership verb — runs the roster of readers and editors, cannot appoint or
-  // remove a moderator, a manager, or another holder of itself (the spaces.ts ceiling). The declared
-  // list is minimal like moderator's; what it CONFERS is measured (role-capability-truth-586).
-  { name: 'access-manager', capabilities: ['manageAccess'] },
-  // #604 C (user ruling (a)): the three admin-class leaves, under the model's own names — they were
-  // grantable via custom roles all along, and the built-in door now says so too. Declarations are
-  // minimal like moderator's; what each CONFERS is measured (role-capability-truth-586). All three sit
-  // inside the ADR-209 ceiling: a manager hands them out, an access-manager cannot.
-  { name: 'deleter', capabilities: ['delete'] },
-  { name: 'sharer', capabilities: ['share'] },
-  { name: 'settings-editor', capabilities: ['settings'] },
+  // The list ends at four ON PURPOSE — user ruling 2026-08-05 (#604/ #607), an EDITION
+  // boundary, not a taste
+  //
+  // custom roles EE-entitled (roles.ts gates on `customRoles`)
+  // built-in direct grant no gate at all
+  //
+  // `access-manager` (ADR-209) and `deleter` / `sharer` / `settings-editor` (ADR-208 §C) were briefly
+  // here. Naming them as built-ins moved "hand over exactly one verb" — which is what a custom role IS
+  //
+  // Their FGA leaves and capability vocabulary stay (`space_grant_expansion` still maps every one), so a
+  // custom role bundles them exactly as before. What went is only the ungated door. "In the model but
+  // not directly grantable" is therefore not the contradiction ADR-208 §C called it — it is the paid
+  // line, and it is drawn here.
 ]
 // #552: RESERVED_NAMES derives from BUILT_IN_ROLES, so dropping `commenter` above deliberately
 // FREES the name for custom roles — reserving a name no built-in carries would be a claim with no
@@ -81,8 +89,10 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
 // #497 (088): the built-ins a group mapping may confer, and the noun each renders as (the same
 // vocabulary the Members picker uses). `comment` is deliberately absent — theruling removed
 // the commenter noun from every grant surface; comment-only stays a custom-role composition.
-const BUILTIN_MAPPABLE = new Set(['view', 'edit', 'moderate', 'manage', 'manageAccess'])
-const BUILTIN_NOUN: Record<string, string> = { view: 'viewer', edit: 'editor', moderate: 'moderator', manage: 'manager', manageAccess: 'access-manager' }
+// `manageAccess` left with the built-in noun (ruling 2026-08-05, above): a mapping may only confer a
+// built-in, and there is no longer a built-in by that name.
+const BUILTIN_MAPPABLE = new Set(['view', 'edit', 'moderate', 'manage'])
+const BUILTIN_NOUN: Record<string, string> = { view: 'viewer', edit: 'editor', moderate: 'moderator', manage: 'manager' }
 // #497 re-review N1 / ADR-199 §2 rev5: the NOUN is the unit a human picks, and `editor` means
 // edit + comment (severing edit ⇒ comment left the bare capability unable to comment). The Members
 // picker already grants the bundle; a GROUP MAPPING offering the same word has to mean the same
@@ -101,7 +111,13 @@ interface RoleRow { id: string; name: string; capabilities: string[]; scope: Rol
 // Page leaves mirror fgaRelationForCap (pages.ts); space relations mirror the member grant path
 // (spaces.ts CAP_TO_RELATION + the #258 viewer/viewer_member pair). #529 / ADR-193 added the missing
 // space-scoped `comment` leaf, so every capability is assignable at space scope now.
-const PAGE_CAP_RELATION: Record<RoleCapability, string> = {
+// PARTIAL on purpose since 2026-08-05: `manageAccess` is a SPACE verb — it runs a space's roster, and a
+// page has no roster to run, so there is no page leaf to map it to. A total Record forced every role
+// capability to have a page meaning, which is what made "custom-role only" impossible to build when
+// ADR-209 rev0 first considered it. The refusal below replaces the compile-time guard for the
+// keys that ARE page-shaped: a capability missing from this table is refused at page scope with a 400,
+// never mapped to `undefined` and written as a tuple with no relation.
+const PAGE_CAP_RELATION: Partial<Record<RoleCapability, string>> = {
   view: 'view_direct', comment: 'comment_direct', edit: 'edit_direct', moderate: 'moderate',
   delete: 'delete_direct', share: 'share_direct', settings: 'settings_direct', publish: 'publish_direct',
 }
@@ -156,7 +172,9 @@ export function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resou
       if (!allowSuperset) throw Object.assign(new Error(`capability "manage" is not assignable at page scope`), { statusCode: 400 })
       return [{ user: principal, relation: 'manage_direct', object: `page:${resourceId}` }]
     }
-    return [{ user: principal, relation: PAGE_CAP_RELATION[cap as RoleCapability], object: `page:${resourceId}` }]
+    const pageRel = PAGE_CAP_RELATION[cap as RoleCapability]
+    if (!pageRel) throw Object.assign(new Error(`capability "${cap}" is not assignable at page scope`), { statusCode: 400 })
+    return [{ user: principal, relation: pageRel, object: `page:${resourceId}` }]
   }
   // Two-layer defence (#514 §6 review): the shared table carries `manage` because the BUILT-IN grant needs
   // it, so absence from the table no longer refuses a custom role that asks for the superset. The vocabulary
@@ -589,7 +607,13 @@ export async function requireAssignmentAuthority(
     // space capability" — a sentence that stopped being true the moment a weaker principal
     // (access_manager) could hold this gate. A role whose capabilities intersect the admin-class set,
     // or an assignment made with `replace`, still requires `manage`; roster roles need only the verb.
-    const movesAdminClass = args.replace === true || capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as RoleCapability) || c === ('manage' as AnyRoleCapability) || c === ('manageAccess' as AnyRoleCapability))
+    // `manageAccess` used to be named here as well as living in the set. Since the 2026-08-05 ruling made
+    // it a role capability it is IN `ADMIN_CLASS_ROLE_CAPS`, and keeping the extra clause made the set
+    // non-load-bearing at this door — measured: removing the verb from the set changed no answer here, so
+    // a pin could not tell whether the set was consulted at all. One authority, which is what the "no
+    // third admin-class set" note in space-grant-expansion asks for. `manage` stays special-cased because
+    // it is deliberately NOT a role capability (it is the built-in superset).
+    const movesAdminClass = args.replace === true || capabilities.some((c) => ADMIN_CLASS_ROLE_CAPS.has(c as RoleCapability) || c === ('manage' as AnyRoleCapability))
     const rel = movesAdminClass ? 'manage' : 'manageAccess'
     if (!(await check(fga, `user:${sub}`, rel, { type: 'space', id: resourceId }))) throw forbidden()
     return

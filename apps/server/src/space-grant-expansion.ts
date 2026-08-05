@@ -22,7 +22,11 @@ import type { RoleCapability } from './routes/roles.js'
 // ceiling (roles.ts), the space membership ceiling (spaces.ts, ADR-209 §2) and nothing else. It lives
 // here because both route modules import this file already (they reach each other only dynamically),
 // and a third hand-written copy is the drift this module exists to prevent.
-export const ADMIN_CLASS_ROLE_CAPS = new Set<RoleCapability>(['delete', 'share', 'settings', 'publish', 'moderate'])
+// `manageAccess` joins the set with the 2026-08-05 ruling that made it a role capability: ADR-209's
+// ceiling always covered the verb (a holder must not appoint another holder), and the ceiling reads THIS
+// set at the roles door. Leaving it out would have re-opened the delegation chain the moment the verb
+// stopped being a built-in — the same hole, through the other door.
+export const ADMIN_CLASS_ROLE_CAPS = new Set<RoleCapability>(['delete', 'share', 'settings', 'publish', 'moderate', 'manageAccess'])
 
 // The Record constraint below is load-bearing, not decoration: it is the COMPILE-TIME guard the two old
 // tables had. Adding a capability to `SpaceCapability` (spaces.ts) or `RoleCapability` (roles.ts) without a
@@ -39,7 +43,7 @@ export const SPACE_GRANT_RELATIONS = {
   settings: ['settings_editor'],
   publish: ['publisher'],
   manage: ['manager'], // superset leaf — see the note above; never expanded into the bundle
-  manageAccess: ['access_manager'], // ADR-209 (#607): the membership verb — built-in only, admin-class
+  manageAccess: ['access_manager'], // ADR-209 (#607): the membership verb — custom-role only since 2026-08-05, admin-class
 } as const satisfies Record<SpaceCapability | RoleCapability, readonly string[]>
 
 export type SpaceGrantCapability = keyof typeof SPACE_GRANT_RELATIONS

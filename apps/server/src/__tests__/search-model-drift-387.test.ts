@@ -9,10 +9,12 @@
 // hides authorized results (the availability bug this pin exists to catch). If model.fga's view graph
 // changes without a doc-builder update, this file goes red naming the exact principal × page.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import postgres from 'postgres'
 import * as Y from 'yjs'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
+import { assignRoleInTx } from '../routes/roles.js'
 import { fgaClient, check, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
@@ -76,7 +78,18 @@ beforeAll(async () => {
   await grantSpaceAccess(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: OWNER, grantee: `${GROUP}#member`, capability: 'view' })
   const groupTuple = { user: `user:${GM}`, relation: 'member', object: GROUP }
   await writeTuples(fgaClient, [groupTuple]); cleanupTuples.push(groupTuple)
-  await grantSpaceAccess(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: OWNER, grantee: `user:${AM}`, capability: 'manageAccess' })
+  // the roster verb comes through a CUSTOM ROLE since the 2026-08-05 ruling; the denormalizer must see
+  // the same principal either way (the tuples are identical — one expansion table), which is precisely
+  // what this file is here to catch if it ever stops being true
+  {
+    const roleId = randomUUID()
+    await db.sql`INSERT INTO roles (id, tenant_id, name, capabilities, scope)
+                 VALUES (${roleId}, ${TENANT}, ${`drift-am-${Date.now().toString(36)}`}, ARRAY['manageAccess']::text[], 'resource')`
+    await assignRoleInTx(db, fgaClient, driver, {
+      tenant: { id: TENANT, plan: 'free' }, roleId, capabilities: ['manageAccess'],
+      resourceType: 'space', resourceId: spaceId, principal: `user:${AM}`, actorSub: OWNER,
+    })
+  }
   // RS is a space viewer whose view is then subtracted per-page (the documented over-inclusion case).
   await grantSpaceAccess(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: OWNER, grantee: `user:${RS}`, capability: 'view' })
 

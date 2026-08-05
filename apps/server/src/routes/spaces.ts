@@ -382,12 +382,16 @@ export async function updateSpace(
 // `manage`: absent from ROLE_CAPABILITIES so no custom role can bundle it, reachable through the
 // built-in door alone, and ADMIN-CLASS for the ceiling below (a holder cannot appoint another).
 export type SpaceCapability = 'view' | 'comment' | 'edit' | 'moderate' | 'manage' | 'manageAccess' | 'delete' | 'share' | 'settings'
-// #604 C (user ruling (a),/): the three admin-class leaves join the DIRECT-grant vocabulary
-// under the model's own leaf names (deleter / sharer / settings-editor — nothing invented). They were
-// grantable through custom roles all along; the built-in door refusing them was the "in the model but
-// not directly grantable" contradiction C exists to remove. All three are admin-class, so the ADR-209
-// ceiling below already answers WHO may hand them out: a manager, never an access-manager.
-const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'manage', 'manageAccess', 'delete', 'share', 'settings']
+// The DIRECT-grant vocabulary — this door has no entitlement gate, which is why it is short.
+//
+// User ruling 2026-08-05 (#604/ #607) took `manageAccess` / `delete` / `share` / `settings`
+// back out: handing over exactly one verb is what a CUSTOM ROLE is for, and custom roles are EE. Adding
+// them here had quietly moved that capability to the free side. The leaves still exist and a custom role
+// still bundles them (space-grant-expansion maps all four) — a paid path, not a missing one.
+//
+// So this list is also the answer to "which capability may a built-in grant name": everything else must
+// come through a role, and the 400 below is where that is enforced.
+export const SPACE_CAPS: SpaceCapability[] = ['view', 'comment', 'edit', 'moderate', 'manage']
 // Capability vocabulary (shared with page access) → the space's FGA relations.
 // #274 / ADR-135: a member EDIT grant writes `editor_member` (the member-only leaf viewer_member /
 // template#view reference); `editor` itself now carries only space edit SHARE-LINKS. The reverse map
@@ -429,7 +433,9 @@ function requireGroupGrantEntitlement(grantee: string, plan: string | undefined)
 
 function validateSpaceGrant(grantee: string, capability: string): asserts capability is SpaceCapability {
   if (!SPACE_CAPS.includes(capability as SpaceCapability)) {
-    throw Object.assign(new Error('relation must be view, comment, edit, moderate, manage, or manageAccess'), { statusCode: 400 })
+    // Named from the list rather than restated: the sentence and the vocabulary drifted apart twice as
+    // capabilities came and went, and a refusal that names the wrong set teaches the caller the wrong fix.
+    throw Object.assign(new Error(`relation must be one of: ${SPACE_CAPS.join(', ')} (anything finer is composed as a role)`), { statusCode: 400 })
   }
   if (!/^user:[^*\s]+$/.test(grantee) && !/^group:[^\s]+#member$/.test(grantee)) {
     throw Object.assign(new Error('grantee must be user:<sub> or group:<id>#member'), { statusCode: 400 })

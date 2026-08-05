@@ -41,16 +41,26 @@ describe("#529: the space grant picker offers exactly the roles the Roles tab li
   it("reads a non-empty built-in list from the server (a broken match must not pass vacuously)", () => {
     expect(BUILT_IN_ROLE_NOUNS.length).toBeGreaterThanOrEqual(4);
     expect(BUILT_IN_ROLE_NOUNS).toContain("manager");
-    expect(BUILT_IN_ROLE_NOUNS, "the hyphen fix is not vacuous").toContain("access-manager");
+    // The hyphen tolerance used to be shown by naming a live hyphenated built-in (`access-manager`), and
+    // the ruling of 2026-08-05 removed every one of them. Demonstrating it against the PATTERN keeps the
+    // guard honest without a hostage: a regression to `[a-z]+` still turns this red, and it stays red
+    // whether or not a hyphenated built-in ever comes back.
+    const hyphenated = [...`{ name: 'a-b', capabilities:`.matchAll(/\{\s*name:\s*'([a-z-]+)',\s*capabilities:/g)];
+    expect(hyphenated[0]?.[1], "the parse must be able to see a hyphenated name").toBe("a-b");
   });
 
-  // #607/#604 C: the picker is caller-dependent now, so the list the pin compares is the MANAGER's —
-  // the widest one, the one that must equal the Roles tab. The narrowed non-manager list is pinned in
+  // #607/#604 C: the picker is caller-dependent, so the list the pin compares is the MANAGER's — the
+  // widest one, the one that must equal the Roles tab. The narrowed non-manager list is pinned in
   // access-manager-607.test.ts (an option the server 403s is not an option).
+  //
+  // The manager's branch carried four extra single-verb nouns until the 2026-08-05 ruling took them back
+  // out, so the trailing group is optional now. It is parsed rather than assumed absent: if a fifth noun
+  // is ever added to that branch, this pin must compare it, not skip it.
   const managerOffer = (): string[] => {
-    const m = SRC.match(/callerManages \? \[\.\.\.GRANTABLE, ([^\]]*)\]/);
+    const m = SRC.match(/callerManages \? \[\.\.\.GRANTABLE(,\s*([^\]]*))?\]/);
     if (!m) throw new Error("GRANTABLE_FOR's manager branch not found — re-aim this pin rather than deleting it");
-    return [...listOf("GRANTABLE"), ...m[1]!.split(",").map((s) => s.trim().replace(/["']/g, "")).filter(Boolean)];
+    const extras = (m[2] ?? "").split(",").map((s) => s.trim().replace(/["']/g, "")).filter(Boolean);
+    return [...listOf("GRANTABLE"), ...extras];
   };
 
   it("offers no capability whose noun is absent from the built-in roles", () => {

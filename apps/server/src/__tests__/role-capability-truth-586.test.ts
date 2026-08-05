@@ -18,12 +18,14 @@
 // belief.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check } from '@wikistead/authz'
-import { createSpace, deleteSpace, grantSpaceAccess, grantSpaceAccessComposite } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, grantSpaceAccessComposite, SPACE_CAPS } from '../routes/spaces.js'
+import { assignRoleInTx } from '../routes/roles.js'
 import { createPage, deletePage, publishPage, grantPageAccess } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { FastifyInstance } from 'fastify'
@@ -75,6 +77,19 @@ function uiTable(name = 'BUILTIN_EFFECTIVE_CAPS'): Record<string, string[]> {
   return out
 }
 
+/** Confer capabilities through a custom role — the surviving path for anything the built-in door no
+ *  longer names. The tuples are the SAME ones the direct grant wrote (one expansion table serves both),
+ *  which is why swapping the path leaves every measurement below meaning what it meant. */
+async function conferByRole(principal: string, caps: string[]): Promise<void> {
+  const roleId = randomUUID()
+  await db.sql`INSERT INTO roles (id, tenant_id, name, capabilities, scope)
+               VALUES (${roleId}, ${TENANT}, ${`caps586-${caps.join('-')}-${roleId.slice(0, 8)}-${STAMP}`}, ${caps}, 'resource')`
+  await assignRoleInTx(db, fgaClient, app.searchDriver, {
+    tenant: { id: TENANT, plan: 'business' }, roleId, capabilities: caps as never,
+    resourceType: 'space', resourceId: spaceId, principal, actorSub: OWNER,
+  })
+}
+
 /** What a principal holding `noun` really resolves to on a page of that space. */
 async function measured(noun: 'view' | 'comment' | 'edit' | 'moderate' | 'manage' | 'manageAccess' | 'delete' | 'share' | 'settings'): Promise<string[]> {
   const sub = `user:caps586-${noun}-${STAMP}`
@@ -84,8 +99,15 @@ async function measured(noun: 'view' | 'comment' | 'edit' | 'moderate' | 'manage
     await grantSpaceAccessComposite(db, fgaClient, app.searchDriver, {
       spaceId, tenantId: TENANT, userId: OWNER, grantee: sub, capabilities: ['edit', 'comment'], plan: 'business',
     })
-  } else {
+  } else if (SPACE_CAPS.includes(noun as never)) {
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: sub, capability: noun, plan: 'business' })
+  } else {
+    // Not in the free door's vocabulary (user ruling 2026-08-05 took the single-verb nouns out on an
+    // edition boundary) — so it is conferred the way the product now confers it, through a CUSTOM ROLE.
+    // Which branch a capability takes is read from SPACE_CAPS rather than listed here: the point of this
+    // file is that the table matches the store, and a hand-written split would go stale the same way the
+    // hand-written bundle did.
+    await conferByRole(sub, [noun])
   }
   const held: string[] = []
   for (const v of VERBS) if (await check(fgaClient, sub, v, { type: 'page', id: pageId })) held.push(v)
@@ -159,8 +181,10 @@ describe('#586: the built-in display table is the store\'s answer', () => {
   // ADR-209 (#607): the SPACE-verb axis for the membership verb — the page-verb rows above cannot see
   // a space gate at all, so the verb's own grain is measured against {type:'space'} directly.
   it('access-manager runs the roster and nothing else (space axis)', async () => {
+    // conferred through a CUSTOM ROLE — the built-in door stopped naming this verb on 2026-08-05, and
+    // the point of the case (what the verb resolves to) is unchanged by which door wrote the tuple
     const sub = `user:caps586-am-${STAMP}`
-    await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: sub, capability: 'manageAccess', plan: 'business' })
+    await conferByRole(sub, ['manageAccess'])
     expect(await check(fgaClient, sub, 'manageAccess', { type: 'space', id: spaceId }), 'holds the verb').toBe(true)
     expect(await check(fgaClient, sub, 'view', { type: 'space', id: spaceId }), 'sees the space (the viewer arm)').toBe(true)
     expect(await check(fgaClient, sub, 'manage', { type: 'space', id: spaceId }), 'does NOT hold the space').toBe(false)
