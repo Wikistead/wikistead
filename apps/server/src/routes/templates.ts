@@ -92,9 +92,17 @@ export interface TemplateSummary { id: string; name: string; scope: TemplateScop
 // The tenant's templates the user may VIEW (server FGA-filtered — scope containment is enforced here, not
 // by reading the columns). RLS scopes `db` to the tenant, so cross-tenant rows never appear. `canManage`
 // lets the UI hide rename/delete on templates the user can't manage (the server still re-checks — #249).
-export async function listTemplates(db: TenantDb, fga: OpenFgaClient, args: { userId: string }): Promise<TemplateSummary[]> {
+// #623: bounded, and doubly worth bounding — this asks FGA about every row it reads, twice, so an
+// unbounded list was also an unbounded number of authorization calls.
+export const TEMPLATES_PAGE_LIMIT = 50
+
+export async function listTemplates(
+  db: TenantDb, fga: OpenFgaClient, args: { userId: string; limit?: number },
+): Promise<TemplateSummary[]> {
+  const limit = Math.min(200, Math.max(1, args.limit ?? TEMPLATES_PAGE_LIMIT))
   const rows = await db.sql<{ id: string; name: string; scope: TemplateScope; space_id: string | null; created_by: string; created_at: Date }[]>`
-    SELECT id, name, scope, space_id, created_by, created_at FROM templates ORDER BY created_at DESC`
+    SELECT id, name, scope, space_id, created_by, created_at FROM templates
+    ORDER BY created_at DESC, id DESC LIMIT ${limit}`
   const out: TemplateSummary[] = []
   for (const r of rows) {
     if (await canView(fga, args.userId, r.id)) {

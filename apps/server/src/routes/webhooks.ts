@@ -53,8 +53,28 @@ export async function createWebhook(
   return { id: row!.id, secret } // secret returned ONCE (write-once)
 }
 
-export async function listWebhooks(db: TenantDb): Promise<WebhookRow[]> {
-  return db.sql<WebhookRow[]>`SELECT id, url, event_filter, active, failure_count, created_at FROM webhooks ORDER BY created_at DESC`
+// #623 (ruling): one row per subscription, and nothing capped it. A cursor rather than an offset
+// (rows are added while somebody reads), with `id` as the tiebreaker — `created_at` is not unique when
+// several subscriptions are created by one script.
+export const WEBHOOKS_PAGE_LIMIT = 50
+
+export interface WebhookPage { webhooks: WebhookRow[]; nextCursor: string | null }
+
+export async function listWebhooks(
+  db: TenantDb, opts: { limit?: number; cursor?: string } = {},
+): Promise<WebhookPage> {
+  const limit = Math.min(200, Math.max(1, opts.limit ?? WEBHOOKS_PAGE_LIMIT))
+  const at = opts.cursor?.indexOf('|') ?? -1
+  const after = opts.cursor && at > 0 ? { at: opts.cursor.slice(0, at), id: opts.cursor.slice(at + 1) } : null
+  const rows = await db.sql<WebhookRow[]>`
+    SELECT id, url, event_filter, active, failure_count, created_at FROM webhooks
+    WHERE TRUE ${after ? db.sql`AND (created_at, id) < (${after.at}::timestamptz, ${after.id})` : db.sql``}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${limit + 1}`
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const last = page[page.length - 1]
+  return { webhooks: page, nextCursor: hasMore && last ? `${last.created_at.toISOString()}|${last.id}` : null }
 }
 
 export async function deleteWebhook(db: TenantDb, id: string): Promise<boolean> {
@@ -199,9 +219,11 @@ export async function webhooksPlugin(app: FastifyInstance) {
     return reply.code(201).send(created) // { id, secret } — secret shown ONCE
   })
 
-  app.get('/webhooks', async (req, reply) => {
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/webhooks', async (req, reply) => {
     await requireAdmin(req)
-    return reply.send(await listWebhooks(req.db)) // no secret in the list
+    const raw = Number.parseInt(req.query?.limit ?? '', 10)
+    // no secret in the list
+    return reply.send(await listWebhooks(req.db, { limit: Number.isFinite(raw) ? raw : undefined, cursor: req.query?.cursor }))
   })
 
   app.delete<{ Params: { id: string } }>('/webhooks/:id', async (req, reply) => {
