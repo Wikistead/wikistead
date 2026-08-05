@@ -235,6 +235,41 @@ describe('the self-heal inside setPagePublic', () => {
   }, 180_000)
 })
 
+// Every delete of a WILDCARD grant under routes/, with the statement it belongs to.
+//
+// Two widenings over the version #622 shipped, both from holes the final review listed as "not blockers,
+// not filed" — a second-order net with known doors is worth less than the sentence describing it:
+//   - the site test was `PUBLIC_GRANT`, so a future site that spells the tuple inline would be invisible.
+//     `user:*` is what actually makes one of these dangerous, so that is what is looked for.
+//   - the window was a fixed 3 lines, so a catch pushed further down by a long argument list escaped. The
+//     statement now ends where it ends (balanced parens, or a line that closes the expression), capped so
+//     a malformed file cannot make this run away.
+function publicGrantDeleteSites(): { file: string; n: number; stmt: string }[] {
+  const dir = resolve(import.meta.dirname, '../routes')
+  const found: { file: string; n: number; stmt: string }[] = []
+  for (const entry of readdirSync(dir)) {
+    if (!entry.endsWith('.ts')) continue
+    const lines = readFileSync(join(dir, entry), 'utf8').split('\n')
+    lines.forEach((line, i) => {
+      if (!/deleteTuples\(/.test(line)) return
+      // the statement: from the call until the line that ends it (`;`, or a `}` / `)` closing at column 0
+      // of the surrounding block), capped at 8 lines
+      const window: string[] = []
+      for (let j = i; j < Math.min(i + 8, lines.length); j++) {
+        window.push(lines[j]!)
+        const text = lines[j]!.trimEnd()
+        if (j > i && (text.endsWith(';') || /^\s{0,6}\}/.test(text))) break
+        if (j === i && text.endsWith(';')) break
+      }
+      const stmt = window.join(' ').trim()
+      // a wildcard grant, by constant OR spelled out — the `user:*` is what makes the tuple dangerous
+      if (!/PUBLIC_GRANT|user:\\?\*/.test(stmt)) return
+      found.push({ file: entry, n: i + 1, stmt })
+    })
+  }
+  return found
+}
+
 describe('every path that removes a public grant, found rather than listed', () => {
   it('no site swallows the whole failure', () => {
     // The defect was copies of one line, and naming them would not catch the next. The first version of
@@ -242,23 +277,22 @@ describe('every path that removes a public grant, found rather than listed', () 
     // spaces.ts, the widest of them all. Walking one file is a list wearing a discovery costume, so this
     // walks the routes directory: any delete of a *PUBLIC_GRANT must either let a refusal through or
     // filter it with isAlreadyConverged. A bare `.catch(() => {})` there is the leak this file is about.
-    const dir = resolve(import.meta.dirname, '../routes')
-    const sites: { file: string; n: number; stmt: string }[] = []
-    for (const entry of readdirSync(dir)) {
-      if (!entry.endsWith('.ts')) continue
-      const lines = readFileSync(join(dir, entry), 'utf8').split('\n')
-      lines.forEach((line, i) => {
-        // the call plus the two lines that can still belong to it — enough for `.catch(…)` wrapped onto
-        // its own line, which is exactly how the hole below was found
-        if (/deleteTuples\([^)]*PUBLIC_GRANT/.test(line)) sites.push({ file: entry, n: i + 1, stmt: lines.slice(i, i + 3).join(' ').trim() })
-      })
-    }
+    const sites = publicGrantDeleteSites()
     // Read the STATEMENT, not the line. The first version tested the matched line alone, so putting the
     // same swallow on the next line walked straight past it — measured in the #622 re-review, on the very
-    // site this sweep had just been widened to cover. The rule is: either no catch at all (a refusal
-    // propagates) or a catch that consults isAlreadyConverged. Anything else reports success regardless of
-    // what the store said.
-    const offenders = sites.filter(({ stmt }) => /\.catch\(/.test(stmt) && !/isAlreadyConverged/.test(stmt))
+    // site this sweep had just been widened to cover. The rule is: either no swallow at all (a refusal
+    // propagates) or one that consults isAlreadyConverged. Anything else reports success regardless of
+    // what the store said. `} catch {` counts as much as `.catch(`: the shape of the syntax was never the
+    // point, and a net that only knows one of them is a net with a door in it.
+    //
+    // The NEGATED call, not merely a mention: `if (isAlreadyConverged(e)) throw e` reads as consulting the
+    // helper while doing the exact opposite, and a rule that accepts any appearance of the name passes it
+    // (measured). That prescribes a shape — `if (!isAlreadyConverged(e)) …` — which is the point: there are
+    // five of these, they are authz-critical, and a differently-shaped one should have to change this rule
+    // on purpose rather than slip past it.
+    const swallows = ({ stmt }: { stmt: string }) => /\.catch\(|\bcatch\s*[({]/.test(stmt)
+    const guarded = ({ stmt }: { stmt: string }) => /!\s*isAlreadyConverged/.test(stmt)
+    const offenders = sites.filter((s) => swallows(s) && !guarded(s))
     expect(offenders, 'these report success no matter what the store said').toEqual([])
     // …and the sweep is not vacuous: the sites exist, in more than one file.
     expect(sites.length, `found: ${JSON.stringify(sites.map((s) => `${s.file}:${s.n}`))}`).toBeGreaterThanOrEqual(5)
