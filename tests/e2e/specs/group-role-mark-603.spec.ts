@@ -14,27 +14,37 @@ import { openDemo, sleep } from "../helpers";
 const MEMBERS = {
   members: [
     { sub: "none", email: "a@x.test", display_name: "No Groups", picture_url: null, role: "member", groups: null, created_at: "2026-01-01T00:00:00Z", identity_source: "oidc", has_password: false, deactivated_at: null },
-    { sub: "one", email: "b@x.test", display_name: "One Group", picture_url: null, role: "member", groups: ["G1"], created_at: "2026-01-02T00:00:00Z", identity_source: "oidc", has_password: false, deactivated_at: null },
-    { sub: "three", email: "c@x.test", display_name: "Three Groups", picture_url: null, role: "member", groups: ["G1", "G2", "G3"], created_at: "2026-01-03T00:00:00Z", identity_source: "oidc", has_password: false, deactivated_at: null },
+    { sub: "one", email: "b@x.test", display_name: "One Group", picture_url: null, role: "member", groups: ["wiki Editors"], created_at: "2026-01-02T00:00:00Z", identity_source: "oidc", has_password: false, deactivated_at: null },
+    { sub: "three", email: "c@x.test", display_name: "Three Groups", picture_url: null, role: "member", groups: ["wiki Editors", "workspace Users", "calender Users"], created_at: "2026-01-03T00:00:00Z", identity_source: "oidc", has_password: false, deactivated_at: null },
+    // #579the reject asked for 1, 3 and FIVE, and five was never measured. Five is not more of
+    // the same — the badge shape it replaced put ~160px of chip on the row per conferring group, so five
+    // is where a row that survives three would still break.
+    //
+    // The names are REAL lengths ("wiki Editors", "content-reviewer"), not G1/r-bbb. With short ones the
+    // badges fit and every geometry assertion here passes with the badge shape restored — measured. A
+    // degenerate fixture cannot reproduce a defect about width.
+    { sub: "five", email: "d@x.test", display_name: "Five Groups", picture_url: null, role: "member", groups: ["wiki Editors", "workspace Users", "calender Users", "support Engineers", "platform Operators"], created_at: "2026-01-04T00:00:00Z", identity_source: "oidc", has_password: false, deactivated_at: null },
   ],
 };
 
 /** Tenant-scope assignments: three groups, three different roles (one principal converges to one role,
  *  so several roles need several groups —). */
 const ASSIGNMENTS = [
-  { id: "a1", roleId: null, roleName: "admin", builtin: "admin", principal: "group:h1#member", groupName: "G1" },
-  { id: "a2", roleId: "r-bbb", roleName: "bbb", principal: "group:h2#member", groupName: "G2" },
-  { id: "a3", roleId: "r-ccc", roleName: "ccc", principal: "group:h3#member", groupName: "G3" },
+  { id: "a1", roleId: null, roleName: "admin", builtin: "admin", principal: "group:h1#member", groupName: "wiki Editors" },
+  { id: "a2", roleId: "r-bbb", roleName: "content-reviewer", principal: "group:h2#member", groupName: "workspace Users" },
+  { id: "a3", roleId: "r-ccc", roleName: "space-auditor", principal: "group:h3#member", groupName: "calender Users" },
+  { id: "a4", roleId: "r-ddd", roleName: "template-maintainer", principal: "group:h4#member", groupName: "support Engineers" },
+  { id: "a5", roleId: "r-eee", roleName: "integration-operator", principal: "group:h5#member", groupName: "platform Operators" },
 ];
 
-async function stub(page: import("@playwright/test").Page) {
+async function stub(page: import("@playwright/test").Page, opts: { assignments?: typeof ASSIGNMENTS } = {}) {
   await page.route("**/api/members", (r) =>
     r.request().method() === "GET"
       ? r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MEMBERS) })
       : r.fallback());
   await page.route("**/api/admin/roles/assignments**", (r) =>
     r.request().method() === "GET"
-      ? r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ASSIGNMENTS) })
+      ? r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(opts.assignments ?? ASSIGNMENTS) })
       : r.fallback());
 }
 
@@ -48,9 +58,33 @@ test("#603: a group-conferred role is one mark, and the row keeps its height", a
   const heightOf = (name: string) =>
     page.locator("tr", { hasText: name }).first().evaluate((el) => Math.round(el.getBoundingClientRect().height));
 
-  const [none, one, three] = await Promise.all([heightOf("No Groups"), heightOf("One Group"), heightOf("Three Groups")]);
-  expect([...new Set([none, one, three])], `rows must share one height — measured ${none} / ${one} / ${three}`)
-    .toHaveLength(1);
+  // #579③: the ROLE COLUMN's width as well as the row's height. The defect was a row whose role
+  // cell grew with the number of conferring groups (measured then: 3 badges = 494px of content in a 421px
+  // column, wrapping to two lines and squeezing the name column). Height alone would pass a row that got
+  // wider without getting taller, which is the same defect one axis over.
+  const names = ["No Groups", "One Group", "Three Groups", "Five Groups"];
+  const heights = await Promise.all(names.map(heightOf));
+  expect([...new Set(heights)], `rows must share one height — measured ${heights.join(" / ")}`).toHaveLength(1);
+
+  // The width the reject asked for, measured where the count actually lands. Two shapes were tried first
+  // and both were confounded: row-to-row comparison of the role CELL is equal by construction (a table
+  // gives every row one column width), and re-rendering with fewer assignments changes what the OTHER
+  // columns hold, so the column moved for reasons that had nothing to do with groups (1 group = 257px,
+  // 5 groups = 224px — narrower, because less content elsewhere).
+  //
+  // What no one controls is the COUNT, and what the badge shape did with it was put ~160px on the row per
+  // conferring group. So the assertion is that the thing carrying the count has one width whatever the
+  // count is: five groups take exactly as much room as one.
+  const markWidth = (name: string) =>
+    page.locator("tr", { hasText: name }).first().getByTestId("group-roles-mark")
+      .evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  const [w1, w3, w5] = await Promise.all([markWidth("One Group"), markWidth("Three Groups"), markWidth("Five Groups")]);
+  // Three and five are IDENTICAL: the count is on the mark, and past one digit it costs nothing more.
+  expect(w5, `five groups took more room than three — ${w3} → ${w5}`).toBe(w3);
+  // One is 3px narrower because "1" is one digit and "3" is one digit too — the difference is the digit,
+  // not the group. Stated as a bound rather than as equality because a digit is a real, bounded cost,
+  // while a badge per group was ~160px each: this number cannot absorb one.
+  expect(w5 - w1, `the mark grew with the group count — 1 group ${w1}px, 5 groups ${w5}px`).toBeLessThan(10);
 
   // one mark, whatever the count — and the count is on it, so "how many" is readable before hovering
   const markThree = page.locator("tr", { hasText: "Three Groups" }).getByTestId("group-roles-mark");
@@ -64,7 +98,7 @@ test("#603: a group-conferred role is one mark, and the row keeps its height", a
   await markThree.hover();
   const panel = page.getByTestId("group-roles-list");
   await expect(panel).toBeVisible({ timeout: 3_000 });
-  for (const [group, role] of [["G1", "admin"], ["G2", "bbb"], ["G3", "ccc"]] as const) {
+  for (const [group, role] of [["wiki Editors", "admin"], ["workspace Users", "content-reviewer"], ["calender Users", "space-auditor"]] as const) {
     await expect(panel, `${group} and what it confers`).toContainText(group);
     await expect(panel).toContainText(role);
   }
