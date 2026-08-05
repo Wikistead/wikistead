@@ -126,7 +126,15 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
   const restrictCandidates = usePageMemberCandidates(open && tab === "restrictions" && !pickedRestrict ? pageId : null, restrictSub);
 
   const addRestrict = () => {
-    const principal = pickedRestrict?.grantee ?? (restrictSub.trim() ? `user:${restrictSub.trim()}` : null);
+  // #624: the principal is the CHOSEN candidate, never the raw text in the box. The fallback that used
+  // to sit here — `sub.trim ? \`user:${sub.trim}\` : null` — sent whatever was typed as a subject id,
+  // and a sub is not something a person knows: it is minted by a connection or by this product. What it
+  // produced was a grant that reported success, conferred nothing, and left a permanent tuple nobody
+  // held; the roster then displayed the raw hex, which somebody could copy and paste straight back in.
+  // Four such rows existed in dev. The server refuses these now (assertGranteeIsMember), so the fallback
+  // could only ever produce an error — this removes the affordance rather than leaving a button that
+  // fails.
+    const principal = pickedRestrict?.grantee ?? null;
     if (!principal) return;
     restrict.mutate({ principal }, {
       onSuccess: () => { notify.success(t("toast.saved")); setRestrictSub(""); setPickedRestrict(null); },
@@ -139,7 +147,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
     // page grant route takes ONE relation per call (ADR-199 keeps the editor noun at space scope).
     const action = resolveGrantDispatch({
       pick, mode, groupName,
-      picked: pickedGrant ? { grantee: pickedGrant.grantee } : (sub.trim() ? { grantee: `user:${sub.trim()}` } : null),
+      picked: pickedGrant ? { grantee: pickedGrant.grantee } : null, // #624: chosen candidate only — see addRestrict
       noComposite: true,
     });
     if (action.path === "assign") {
@@ -159,7 +167,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
       });
       return;
     }
-    const grantee = pickedGrant?.grantee ?? (sub.trim() ? `user:${sub.trim()}` : null);
+    const grantee = pickedGrant?.grantee ?? null; // #624: chosen candidate only — see addRestrict
     if (!grantee) return;
     grant.mutate({ grantee, relation }, {
       onSuccess: () => notify.success(t("toast.accessGranted")),
