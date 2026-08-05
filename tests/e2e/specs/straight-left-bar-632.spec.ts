@@ -57,38 +57,85 @@ for (const [name, path] of [["settings", "/admin/members"], ["login", "/"], ["sp
   });
 }
 
-test("#632: a callout keeps its bar, its tint and its icon — only the corners changed", async ({ page }) => {
-  await openScratch(page, "callout-632");
+// #632 (user ruling, after): every macro that draws a left bar, rendered and measured.
+//
+// The earlier version of this file rendered ONE callout, so `:::todo` shipped bent and the pin stayed
+// green — the exact failure names (" pin ").
+// The sources come from the registry via a unit-side list, so a macro registered next month is drawn
+// here without this file being edited.
+//
+// What is measured is the BEND, not the corners. The ruling is explicit that the frame may stay round
+// , so a rounded box is fine — what must not happen
+// is the bar following that curve. A `border-left` always does; an absolutely-positioned strip never
+// does. So the check is: anything that looks like a left bar must NOT be a border on a rounded box.
+const CONTAINER_SOURCES = [
+  ":::note\nnote body\n:::",
+  ":::info\ninfo body\n:::",
+  ":::tip\ntip body\n:::",
+  ":::warning\nwarning body\n:::",
+  ":::danger\ndanger body\n:::",
+  ":::todo\n- [ ] one\n- [ ] two\n:::",
+  ":::details[more]\ndetails body\n:::",
+];
+
+test("#632: no container macro's bar bends around its frame", async ({ page }) => {
+  await openScratch(page, "container-bars-632");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.insertText(":::warning\nheads up\n:::\n\nbelow\n");
-  await sleep(700);
-  await page.getByTestId("displaymode-wysiwyg").click();
-  await sleep(700);
+  await page.keyboard.insertText(CONTAINER_SOURCES.join("\n\n") + "\n\ntail\n");
+  await sleep(1500);
 
-  const panel = page.locator("[data-pane=preview] .cm-lp-callout-panel").first();
-  await expect(panel, "a callout rendered").toBeVisible({ timeout: 5_000 });
-  const seen = await panel.evaluate((el) => {
-    const cs = getComputedStyle(el);
-    return {
-      borderLeftWidth: cs.borderLeftWidth,
-      borderLeftColor: cs.borderLeftColor,
-      background: cs.backgroundColor,
-      topLeft: cs.borderTopLeftRadius,
-      topRight: cs.borderTopRightRadius,
-      // the icon sits before the text and the ruling said not to move it
-      paddingLeft: cs.paddingLeft,
-      display: cs.display,
-    };
+  const found = await page.evaluate(() => {
+    const px = (v: string) => parseFloat(v) || 0;
+    const out: { cls: string; why: string }[] = [];
+    let barsSeen = 0;
+    for (const el of [...document.querySelectorAll<HTMLElement>("[data-pane=preview] *")]) {
+      const cs = getComputedStyle(el);
+      // "a left bar" = a left border noticeably thicker than the others, or a left-only colour. A plain
+      // 1px frame in the border token is a box, not a bar — hit nine false positives by not
+      // drawing that line.
+      const l = px(cs.borderLeftWidth);
+      const others = [px(cs.borderTopWidth), px(cs.borderRightWidth), px(cs.borderBottomWidth)];
+      const thicker = l >= 2 && l > Math.max(...others);
+      const leftOnlyColour = l >= 2 && cs.borderLeftColor !== cs.borderTopColor;
+      // …and a bar drawn the RIGHT way: a narrow strip pinned to the left edge. Counted so the premise
+      // below survives the fix — after it, no bar is a border at all, and a premise that only knew about
+      // borders would report "nothing rendered" on a correct page.
+      const b = getComputedStyle(el, "::before");
+      const strip = b.position === "absolute" && px(b.width) >= 2 && px(b.width) <= 6 && b.left === "0px";
+      if (strip) barsSeen++;
+      if (!thicker && !leftOnlyColour) continue;
+      barsSeen++;
+      const rounded = px(cs.borderTopLeftRadius) > 0 || px(cs.borderBottomLeftRadius) > 0;
+      if (rounded) out.push({ cls: el.className.toString().slice(0, 60), why: `border ${cs.borderLeftWidth} on a radius ${cs.borderTopLeftRadius}/${cs.borderBottomLeftRadius}` });
+    }
+    return { out, barsSeen };
   });
-  // the bar is still 3px and still coloured — the ruling said keep it
-  expect(parseFloat(seen.borderLeftWidth), "the bar is still there").toBeGreaterThanOrEqual(2);
-  expect(seen.borderLeftColor, "and still carries the type's colour").not.toBe("rgba(0, 0, 0, 0)");
-  expect(seen.background, "the tint is untouched").not.toBe("rgba(0, 0, 0, 0)");
-  // the icon's layout is untouched: the panel is still the flex row it was, with its own padding
-  expect(seen.display, "the icon still sits in the same flex row").toBe("flex");
-  expect(parseFloat(seen.paddingLeft), "and the padding that positions it is unchanged").toBeGreaterThan(0);
-  // …and the LEFT corners are square while the right ones are not
-  expect(parseFloat(seen.topLeft), "left corner is square").toBe(0);
-  expect(parseFloat(seen.topRight), "right corner keeps its radius").toBeGreaterThan(0);
+
+  // the premise: bars were actually drawn. Without this the assertion below passes on a blank page,
+  // which is how the previous version of this pin stayed green while `:::todo` was bent.
+  expect(found.barsSeen, "the fixture rendered elements that carry a left bar").toBeGreaterThan(0);
+  expect(found.out, `a bar drawn as a border on a rounded frame will bend: ${JSON.stringify(found.out)}`).toEqual([]);
+});
+
+test("#632: the bar is still there, still 3px, still the type's colour", async ({ page }) => {
+  // Removing the border would satisfy the test above by deleting the bar, which the ruling refused
+  // outright . So the strip is measured for real, on the widest-known types.
+  await openScratch(page, "container-bars-632-b");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(":::warning\nheads up\n:::\n\n:::todo\n- [ ] a\n:::\n\ntail\n");
+  await sleep(1500);
+
+  const strips = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>("[data-pane=preview] .cm-lp-callout")].slice(0, 4).map((el) => {
+      const before = getComputedStyle(el, "::before");
+      return { cls: el.className.slice(0, 40), w: before.width, bg: before.backgroundColor, pos: before.position };
+    }));
+  expect(strips.length, "callout containers rendered").toBeGreaterThan(0);
+  for (const s of strips) {
+    expect(parseFloat(s.w), `${s.cls}: the bar is still 3px`).toBeCloseTo(3, 0);
+    expect(s.bg, `${s.cls}: and still carries a colour`).not.toBe("rgba(0, 0, 0, 0)");
+    expect(s.pos, `${s.cls}: drawn absolutely, so the frame's radius cannot bend it`).toBe("absolute");
+  }
 });
