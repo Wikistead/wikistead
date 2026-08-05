@@ -19,10 +19,16 @@ async function optionsOf(page: Page, trigger: string): Promise<{ name: string; r
   await page.waitForFunction(() => document.activeElement?.closest("[role=listbox]") !== null
     || document.activeElement?.getAttribute("role") === "option", undefined, { timeout: 5000 }).catch(() => {});
   const out: { name: string; revealed: string; insideRow?: boolean }[] = [];
-  // walk with the arrow keys: that is the highlight the reveal follows, and it is the path a keyboard
-  // user takes — a mouse-only measurement would miss a reveal bound to focus alone
-  for (let i = 0; i < 10; i++) {
-    await page.keyboard.press("ArrowDown");
+  // Start from the TOP, not from wherever the value happens to be. Radix opens with the highlight on the
+  // selected item, so a walk that only goes down never revisits anything above it: with the first row
+  // already `admin`, this sweep collected one option and passed, and the built-ins it exists to check
+  // were never pointed at (measured in the #582 review). ArrowUp rather than Home because it needs no
+  // assumption about which keys the listbox implements, and it stops at the first item on its own.
+  for (let i = 0; i < 12; i++) await page.keyboard.press("ArrowUp");
+  // Read, THEN move — the first item is already highlighted after the rewind, and a loop that pressed
+  // first would skip it (the same off-by-one that hid the built-ins before).
+  for (let i = 0; i < 12; i++) {
+    if (i > 0) await page.keyboard.press("ArrowDown");
     // RE-AIMED by #582 (2026-08-04): the reveal is a FLOATING panel now, not text inside the option, so
     // it is read from the panel and the option is read for its name alone. Which is also the assertion
     // the ruling cares about: nothing capability-shaped is left in the row.
@@ -65,6 +71,46 @@ test("#582: a role picker offers names, and points at what they confer", async (
   const withPanel = options.find((o) => o.revealed.length > 0)!;
   expect(withPanel.revealed.length, `the panel carries a heading and the capabilities :: ${withPanel.revealed}`).toBeGreaterThan(4);
 });
+
+// #582 (review rejection,/): . The reveal
+// was bound to the open list, so the closed row — the thing a reader looks at when they want to know what
+// someone can do, before deciding whether to change it — stayed silent. Both states are the acceptance, so
+// both are measured here, and the panel raised by the closed control must be the SAME element as the one
+// the open list raises (a second implementation is what every round of this ticket has refused).
+async function panelOnHover(page: Page, trigger: string): Promise<{ text: string; testId: string | null }> {
+  const control = page.getByTestId(trigger).first();
+  await control.scrollIntoViewIfNeeded();
+  await control.hover();
+  // the panel is raised from a pointer event, so give the frame that paints it a moment
+  await page.waitForTimeout(300);
+  return page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>("[data-testid$='-hint'], [data-testid=select-hint]");
+    const visible = panel && getComputedStyle(panel).visibility !== "hidden" && panel.getBoundingClientRect().width > 0;
+    return { text: visible ? (panel!.textContent ?? "").trim() : "", testId: panel?.getAttribute("data-testid") ?? null };
+  });
+}
+
+for (const [where, url, ready, trigger] of [
+  ["the space members row", "/spaces/demo_space/settings/members", "space-members", "space-member-role-select"],
+  ["the tenant members row", "/admin/members", "members-filter", "member-role-select"],
+] as const) {
+  test(`#582: ${where} says what the current role confers WITHOUT being opened`, async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.goto(url);
+    await expect(page.getByTestId(ready)).toBeVisible({ timeout: 15_000 });
+
+    const closed = await panelOnHover(page, trigger);
+    expect(closed.text, `hovering the closed control raised nothing :: ${JSON.stringify(closed)}`).not.toBe("");
+
+    // …and opening it still works, from the same element, with the same panel (not a second one that
+    // happens to look similar)
+    const open = await optionsOf(page, trigger);
+    expect(open.some((o) => o.revealed.length > 0), `the open list stopped revealing: ${JSON.stringify(open)}`).toBe(true);
+    const panels = await page.evaluate(() =>
+      document.querySelectorAll("[data-testid$='-hint'], [data-testid=select-hint]").length);
+    expect(panels, "a second panel implementation appeared").toBeLessThanOrEqual(1);
+  });
+}
 
 // " — measured on the device as member and
 // admin staying silent while the custom roles explained themselves.
