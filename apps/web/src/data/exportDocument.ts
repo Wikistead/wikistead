@@ -100,6 +100,89 @@ function stripChrome(root: HTMLElement): void {
   for (const el of Array.from(root.querySelectorAll("[contenteditable]"))) el.removeAttribute("contenteditable");
 }
 
+// #85 (review rejection 2026-08-05): a callout's icon did not travel. The screen drew ⚠ and the saved file
+// drew a filled rectangle in the same place — measured as `--cb-icon: url()` on all six types.
+//
+// It was not an accident: the icon is a CSS `mask` whose value is a `data:image/svg+xml` URL, and
+// `sanitizeCss` drops exactly that scheme on purpose (ADR-194 addendum A — an svg data: URL is a document
+// with a script surface; a woff2 is not). The security line is right, and it collides with the promise the
+// export makes, so the icon has to reach the file some other way: as an ELEMENT, which is the same route
+// every drawn diagram already takes, and which passes through `makeInert` like any other markup.
+//
+// The drawing is not re-declared here. It is read from the live element's own `--cb-icon`, so the icon in
+// the file is the icon the reader was looking at — a second copy in TypeScript would be a second source of
+// truth that drifts the first time the stylesheet changes.
+const ICON_TAGS = new Set(["svg", "g", "path", "circle", "ellipse", "line", "polyline", "polygon", "rect"]);
+const ICON_ATTRS = new Set([
+  "viewBox", "d", "cx", "cy", "r", "rx", "ry", "x", "y", "x1", "y1", "x2", "y2",
+  "width", "height", "points", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin",
+]);
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Rebuild an svg from an allow-list. Nothing is copied that was not asked for, so a handler or a nested
+ *  document cannot ride in even though the source is a URL the CSS sanitizer refuses. */
+function rebuildIcon(src: SVGElement, doc: Document): SVGElement | null {
+  const tag = src.tagName.toLowerCase();
+  if (!ICON_TAGS.has(tag)) return null;
+  const el = doc.createElementNS(SVG_NS, tag) as SVGElement;
+  for (const attr of Array.from(src.attributes)) {
+    if (!ICON_ATTRS.has(attr.name)) continue;
+    // The mask painted the icon with the callout's colour (`background-color: var(--cb-color)`). As an
+    // element it paints itself, so the hard-coded black the mask never showed becomes the inherited colour
+    // and the type's palette survives — with `color` set on the host below.
+    const value = /^(fill|stroke)$/.test(attr.name) && attr.value !== "none" ? "currentColor" : attr.value;
+    el.setAttribute(attr.name, value);
+  }
+  for (const child of Array.from(src.children)) {
+    const rebuilt = rebuildIcon(child as SVGElement, doc);
+    if (rebuilt) el.appendChild(rebuilt);
+  }
+  return el;
+}
+
+export function iconFromCssUrl(value: string, doc: Document = document): SVGElement | null {
+  const url = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/i.exec(value);
+  const raw = (url?.[1] ?? url?.[2] ?? url?.[3] ?? "").trim();
+  if (!/^data:image\/svg\+xml[,;]/i.test(raw)) return null;
+  const comma = raw.indexOf(",");
+  const payload = raw.slice(comma + 1);
+  let source: string;
+  try {
+    source = /;base64/i.test(raw.slice(0, comma)) ? atob(payload) : decodeURIComponent(payload);
+  } catch { return null }
+  const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
+  if (parsed.querySelector("parsererror")) return null;
+  const root = parsed.documentElement as unknown as SVGElement;
+  return root.tagName.toLowerCase() === "svg" ? rebuildIcon(root, doc) : null;
+}
+
+/**
+ * Give every icon holder in the clone the drawing its live twin was showing.
+ *
+ * `live` and `clone` are walked in parallel: the clone is an untouched `cloneNode(true)` at this point, so
+ * the two lists are the same elements in the same order — and only the live one has a computed style to
+ * read, because the clone is not in a document.
+ */
+export function inlineIcons(live: HTMLElement, clone: HTMLElement): void {
+  const holders = Array.from(live.querySelectorAll<HTMLElement>("[data-icon]"));
+  const targets = Array.from(clone.querySelectorAll<HTMLElement>("[data-icon]"));
+  if (holders.length !== targets.length) return; // parallel walk broken — leave the file as it was
+  holders.forEach((holder, i) => {
+    const cs = getComputedStyle(holder);
+    const icon = iconFromCssUrl(cs.getPropertyValue("--cb-icon"), clone.ownerDocument);
+    if (!icon) return;
+    const target = targets[i]!;
+    icon.setAttribute("width", "100%");
+    icon.setAttribute("height", "100%");
+    // The colour the mask was painting with, resolved. Read from the live element rather than left to the
+    // cascade: the holder's own variable may come from a class the export CSS does not carry.
+    const colour = cs.getPropertyValue("--cb-color").trim() || cs.backgroundColor;
+    if (colour) target.style.color = colour;
+    target.setAttribute("data-export-icon", "");
+    target.appendChild(icon);
+  });
+}
+
 function makeInert(root: HTMLElement): void {
   for (const el of Array.from(root.querySelectorAll("script, iframe, object, embed, form"))) el.remove();
   for (const el of Array.from(root.querySelectorAll("*"))) {
@@ -275,6 +358,7 @@ export function sanitizeCss(css: string): string {
 // the user is looking at is untouched.
 export function buildExportDocument(input: ExportDocumentInput): string {
   const clone = input.body.cloneNode(true) as HTMLElement;
+  inlineIcons(input.body, clone); // first: the parallel walk needs the clone still identical to the live tree
   expandTabs(clone); // before the chrome goes: the labels live on the tab BUTTONS
   openDisclosures(clone);
   stripChrome(clone);
@@ -309,6 +393,13 @@ body{margin:0;background:var(--bg,#fff);color:var(--fg,#1f2328)}
 .wks-export-tabs>.cm-lp-tabpanel:first-child{border-top:none;padding-top:0}
 .cm-lp-tab-label{display:inline-block;font:inherit;font-weight:600;color:var(--fg);
   padding:0.2em 0.6em 0.2em 0;border-bottom:2px solid var(--accent);margin-bottom:0.6em}
+/* #85: the icon now hangs in the holder as an element (inlineIcons). The mask rule that used to draw it is
+   still in the app stylesheet and its url() has been emptied by the sanitizer, which leaves the holder
+   painting its own background — a filled block behind the drawing. The holder becomes a frame for the svg
+   instead: no fill of its own, and the inline colour (set per icon) is what the svg strokes with. */
+[data-export-icon]{background:none!important;-webkit-mask:none!important;mask:none!important;
+  display:inline-flex;align-items:center;justify-content:center}
+[data-export-icon]>svg{display:block;width:100%;height:100%}
 @page{margin:14mm}
 @media print{.wks-export-doc{max-width:none;margin:0}}
 </style>
