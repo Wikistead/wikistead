@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, requireTenantAdmin, isSpaceCreator } from '@wikistead/authz'
+import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, requireTenantAdmin, isSpaceCreator, isAlreadyConverged } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -1243,7 +1243,14 @@ export async function unsetSpacePublic(
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'space.made_non_public', target: `space:${args.spaceId}` })
     }
     const j = await enqueueSpaceReindex(tx, { tenantId: args.tenantId, spaceId: args.spaceId })
-    await deleteTuples(fga, [SPACE_PUBLIC_GRANT(args.spaceId)]).catch(() => {}) // idempotent — may not be public
+    // Idempotent — the space may not be public — but ONLY that. The bare catch here was the same defect
+    // as the four in pages.ts and the widest of the five: `view_base_from_space` is `viewer from space
+    // but not private`, so this one tuple opens every non-private published page under the space to
+    // anyone. Measured before this line changed: the call returned success, wrote the audit row, fired
+    // `space.made_non_public`, and an anonymous check on a page under it still answered true.
+    // Inside the tx on purpose, so a refusal takes the audit row and the reindex intent back with it.
+    await deleteTuples(fga, [SPACE_PUBLIC_GRANT(args.spaceId)])
+      .catch((e) => { if (!isAlreadyConverged(e)) throw e })
     return j
   })
   for (const j of jobs) processOutboxAsync(driver, j.id, { tenantId: args.tenantId, pageId: j.pageId, operation: 'upsert' })

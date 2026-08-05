@@ -11,16 +11,16 @@
 // was still true. The tests below assert on that check — the access itself — rather than on a status code.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, readdirSync } from 'node:fs'
+import { resolve, join } from 'node:path'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check } from '@wikistead/authz'
 import { onDomainEvent } from '@wikistead/events'
 import { buildApp } from '../app.js'
-import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, publishPage, setPagePublic, unsetPagePublic, setPagePrivate } from '../routes/pages.js'
+import { createSpace, deleteSpace, setSpacePublic, unsetSpacePublic } from '../routes/spaces.js'
+import { createPage, deletePage, publishPage, setPagePublic, unsetPagePublic, setPagePrivate, movePage } from '../routes/pages.js'
 import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -34,11 +34,24 @@ let app: FastifyInstance
 let db: TenantDb
 let spaceId = ''
 const pages: string[] = []
+const spaces: string[] = []
 
 // A client that cannot write. This is what "the store is unavailable" or "the model moved" looks like from
 // inside a route — the case the swallows turned into success.
 const refusing = () => Object.assign(Object.create(Object.getPrototypeOf(fgaClient) as object), fgaClient, {
   write: async () => { throw new Error('the permission store is unavailable') },
+}) as typeof fgaClient
+
+// …and one that refuses ONLY deletes. #622's re-review found the blunt client above never reached the code
+// under test on the paths that WRITE first: setPagePrivate's marker write threw before the strip ran, so
+// reverting the strip changed nothing the tests could see. A store that accepts writes and refuses deletes
+// is also the more realistic failure (a stale model rejects the relation being deleted), and it is the only
+// way to reach a strip that runs AFTER a successful write.
+const refusingDeletes = () => Object.assign(Object.create(Object.getPrototypeOf(fgaClient) as object), fgaClient, {
+  write: async (body: { deletes?: unknown[] }, ...rest: unknown[]) => {
+    if (body?.deletes?.length) throw new Error('the permission store is unavailable')
+    return (fgaClient.write as (b: unknown, ...r: unknown[]) => Promise<unknown>).call(fgaClient, body, ...rest)
+  },
 }) as typeof fgaClient
 
 async function freshPublicPage(tag: string): Promise<string> {
@@ -59,6 +72,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const id of pages.reverse()) await deletePage(db, fgaClient, app.searchDriver, { pageId: id, userId: OWNER }).catch(() => {})
+  for (const id of spaces) await deleteSpace(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId: id, userId: OWNER }).catch(() => {})
   await deleteSpace(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: OWNER }).catch(() => {})
   for (const id of pages) await admin`DELETE FROM search_outbox WHERE page_id = ${id}`.catch(() => {})
   await db.release(); await app.close(); await admin.end(); await pool.end()
@@ -97,16 +111,63 @@ describe('a refused removal is not reported as a removal', () => {
     ).rejects.toThrow()
   }, 180_000)
 
-  it('setPagePrivate: a page whose grant survived does not pass as private', async () => {
+  it('setPagePrivate: the marker lands, the grant does not — and it does NOT pass as private', async () => {
+    // The strip runs after a successful marker write, so this needs the delete-only refusal: with the
+    // blunt client the marker threw first and the code under test never ran (measured in the #622
+    // re-review, which is why this test used to pass with the fix reverted).
     const pageId = await freshPublicPage('private')
-    const before = await auditCount(pageId)
-
     const events = await eventsDuring(() =>
-      setPagePrivate(db, refusing(), app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, plan: 'business' }))
+      setPagePrivate(db, refusingDeletes(), app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, plan: 'business' }))
 
-    // The marker write is refused too, so nothing landed — but the point is what is SAID about it.
-    expect(events, 'no "made private" for a page anyone can still read').toEqual([])
-    expect(await auditCount(pageId) - before, 'and nothing in the ledger').toBe(0)
+    expect(await anyoneCanRead(pageId), 'the grant survived, so anyone can still read it').toBe(true)
+    expect(events, 'and nothing called it private').toEqual([])
+    await expect(
+      setPagePrivate(db, refusingDeletes(), app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, plan: 'business' }),
+      'the caller is told, rather than being handed a page that is private in name only',
+    ).rejects.toThrow(/public grant/i)
+  }, 180_000)
+
+  it('unsetSpacePublic: the widest one — a space grant that survived is not reported as removed', async () => {
+    // `view_base_from_space` is `viewer from space but not private`, so this single tuple opens every
+    // non-private published page under the space. The per-page fix does not cover it; this is the fifth
+    // site, found in the #622 re-review after the first sweep only walked pages.ts.
+    const openSpace = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: OWNER, plan: 'business', name: `pgr-space-${STAMP}` })).id
+    spaces.push(openSpace)
+    const { id: pageId } = await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId: openSpace, userId: OWNER, title: `pgr-inspace-${STAMP}` })
+    pages.push(pageId)
+    await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId, subject: `user:${OWNER}`, createdBy: `user:${OWNER}` })
+    await setSpacePublic(db, fgaClient, app.searchDriver, { spaceId: openSpace, tenantId: TENANT, userId: OWNER, plan: 'business' })
+    expect(await anyoneCanRead(pageId), 'the page is readable through the space grant').toBe(true)
+
+    let spaceEvents = 0
+    const off = onDomainEvent((e) => { if (e.type === 'space.made_non_public') spaceEvents++ })
+    await unsetSpacePublic(db, refusingDeletes(), app.searchDriver, { spaceId: openSpace, tenantId: TENANT, userId: OWNER, plan: 'business' })
+      .catch(() => {})
+    off()
+
+    expect(await anyoneCanRead(pageId), 'still readable through the space — that is what to report').toBe(true)
+    expect(spaceEvents, 'no event for a removal that did not happen').toBe(0)
+    await expect(
+      unsetSpacePublic(db, refusingDeletes(), app.searchDriver, { spaceId: openSpace, tenantId: TENANT, userId: OWNER, plan: 'business' }),
+      'and the call fails rather than answering success',
+    ).rejects.toThrow()
+    // clean: really take it out of public view before the suite tears down
+    await unsetSpacePublic(db, fgaClient, app.searchDriver, { spaceId: openSpace, tenantId: TENANT, userId: OWNER, plan: 'business' }).catch(() => {})
+  }, 180_000)
+
+  it('a move under a private parent: the boundary raises instead of leaving the page public', async () => {
+    // applyMovePrivacyBoundary had no behaviour pin at all — its raise could be deleted and every test
+    // stayed green (measured in the re-review).
+    const parent = (await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: OWNER, title: `pgr-parent-${STAMP}` })).id
+    pages.push(parent)
+    await setPagePrivate(db, fgaClient, app.searchDriver, { pageId: parent, tenantId: TENANT, userId: OWNER, plan: 'business' })
+    const child = await freshPublicPage('moved')
+
+    await expect(
+      movePage(db, refusingDeletes(), app.searchDriver, { pageId: child, parentId: parent, afterId: null, userId: OWNER }),
+      'the move made it private but could not close it, and says so',
+    ).rejects.toThrow(/public grant/i)
+    expect(await anyoneCanRead(child), 'and it really is still readable').toBe(true)
   }, 180_000)
 
   it('the working path still works, and still says so', async () => {
@@ -130,19 +191,25 @@ describe('a refused removal is not reported as a removal', () => {
   }, 180_000)
 })
 
-describe('every path that removes the public grant, found rather than listed', () => {
+describe('every path that removes a public grant, found rather than listed', () => {
   it('no site swallows the whole failure', () => {
-    // The defect was four copies of one line, and naming them would not catch the fifth. Walk the routes
-    // instead: any delete of PUBLIC_GRANT must either let a refusal through or filter it with
-    // isAlreadyConverged — a bare `.catch(() => {})` there is the leak this file exists for.
-    const file = resolve(import.meta.dirname, '../routes/pages.ts')
-    const lines = readFileSync(file, 'utf8').split('\n')
-    const offenders = lines
-      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
-      .filter(({ line }) => /deleteTuples\([^)]*PUBLIC_GRANT/.test(line))
-      .filter(({ line }) => /\.catch\(\s*\(\s*\)\s*=>/.test(line)) // a catch that ignores its argument
+    // The defect was copies of one line, and naming them would not catch the next. The first version of
+    // this sweep walked `pages.ts` ALONE and therefore missed the fifth site — the space-scoped grant in
+    // spaces.ts, the widest of them all. Walking one file is a list wearing a discovery costume, so this
+    // walks the routes directory: any delete of a *PUBLIC_GRANT must either let a refusal through or
+    // filter it with isAlreadyConverged. A bare `.catch(() => {})` there is the leak this file is about.
+    const dir = resolve(import.meta.dirname, '../routes')
+    const sites: { file: string; n: number; line: string }[] = []
+    for (const entry of readdirSync(dir)) {
+      if (!entry.endsWith('.ts')) continue
+      readFileSync(join(dir, entry), 'utf8').split('\n').forEach((line, i) => {
+        if (/deleteTuples\([^)]*PUBLIC_GRANT/.test(line)) sites.push({ file: entry, n: i + 1, line: line.trim() })
+      })
+    }
+    const offenders = sites.filter(({ line }) => /\.catch\(\s*\(\s*\)\s*=>/.test(line)); // a catch that ignores its argument
     expect(offenders, 'these report success no matter what the store said').toEqual([])
-    // …and the sweep is not vacuous: the sites exist.
-    expect(lines.filter((l) => /deleteTuples\([^)]*PUBLIC_GRANT/.test(l)).length).toBeGreaterThanOrEqual(4)
+    // …and the sweep is not vacuous: the sites exist, in more than one file.
+    expect(sites.length, `found: ${JSON.stringify(sites.map((s) => `${s.file}:${s.n}`))}`).toBeGreaterThanOrEqual(5)
+    expect(new Set(sites.map((s) => s.file)).size, 'a one-file sweep is what missed the space grant').toBeGreaterThan(1)
   })
 })
