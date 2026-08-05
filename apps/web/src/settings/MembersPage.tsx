@@ -19,8 +19,8 @@ import { useRoles, useRoleAssignments, useAssignRole, useAssignTenantTier, useUn
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, groupConferredRoles, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
-import { RoleTip } from "../ui/RoleTip"; // #603: the conferred-admin marker explains itself like every role name (#586)
-import { TENANT_TIER_CAPS, tenantTierCaps } from "./role-nouns";
+import { GroupRolesMark } from "./GroupRolesMark"; // #603: what the member's GROUPS confer, folded into one mark
+import { tenantTierCaps } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
 import { MemberStatusIcons, memberMenuValues, passwordAction } from "./member-status"; // #614: origin / password / suspended, beside the name
@@ -342,25 +342,12 @@ export function MembersPage() {
                     demote somebody while the group kept conferring admin would be the "successful action
                     that changes nothing" this repo has fixed twice (#596, #536). The marker names its
                     source, wears tokens only, and explains itself on hover like every role name (#586). */}
-                {/* #603 (review rejection 2026-08-05): ONE BADGE PER ROLE, and for every role a group
-                    confers — not only `admin`. Two groups giving two roles are two facts; the old shape
-                    (one badge, group names joined by a comma) had nowhere to put the second role. */}
-                {(row.groupRoles ?? []).map((g) => (
-                  <RoleTip
-                    key={`${g.role}@${g.group}`}
-                    origin="role"
-                    scope="tenant"
-                    {...(g.builtin
-                      ? { roleCapabilities: g.builtin === "admin" ? TENANT_TIER_CAPS.admin : tierCaps.member }
-                      : { roleCapabilities: g.capabilities ?? null })}
-                    testId={`role-via-${m.sub}-${g.role}`}
-                  >
-                    <span data-testid="role-via-group" className="mr-2 inline-flex items-center gap-1 rounded border border-[var(--accent)] px-1 text-[11px] text-[var(--accent)]">
-                      {g.role}
-                      <span className="text-fg-dim">{t("members.viaGroup", { group: g.group })}</span>
-                    </span>
-                  </RoleTip>
-                ))}
+                {/* #603 (review rejection 2026-08-05, ruling): the badge-per-role shape that used to
+                    sit here is RETRACTED. It stacked above the control and stretched the row to 57px
+                    against 41px for every other one, and a member in three groups stretched it further —
+                    now, beside the control, carrying the count; the group × role pairs are behind its
+                    hover. See GroupRolesMark. */}
+                <span className="inline-flex items-center">
                 <Select
                   size="sm"
                   value={currentRoleValue(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })}
@@ -371,6 +358,8 @@ export function MembersPage() {
                   options={withRoleTips(roleOptions(roles.data?.custom ?? [], tierCaps), "tenant")}
                   onChange={(value) => applyUserRole(m.sub, value)}
                 />
+                <GroupRolesMark roles={row.groupRoles ?? []} tierCaps={tierCaps} />
+                </span>
               </td>
               <td style={{ textAlign: "right" }}>
                 {/* #579 (review rejection, 2026-08-04): three word-buttons per row made the ACTIONS louder than

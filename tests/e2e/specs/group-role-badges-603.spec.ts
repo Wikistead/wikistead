@@ -3,12 +3,17 @@ import { openDemo, sleep, API } from "../helpers";
 
 // #603 (review rejection 2026-08-05): "admin " — a group conferring a CUSTOM
 // tenant role left its members holding the capability with nothing on screen saying where it came from.
-// Only `admin` produced the "(via <group>)" badge.
+// Only `admin` was shown.
 //
-// Measured through the real screen, with a real grant: a group is given a custom tenant role, and the
-// member who carries that group must wear a badge naming it. The fixture is made and removed here — a
-// leftover tenant role piles into every picker on this shared dev tenant (the #582 sweep drowned in
-// exactly that debris).
+// That statement outlived the shape that first answered it. The per-role badge is retracted (ruling
+//, see group-role-mark-603) and what a group confers now lives behind one mark — so this asks the
+// same question of the new surface: open the mark, and a CUSTOM role is named there exactly as admin is.
+// Kept as its own spec because the sibling stubs /members to build a three-group member, and this one
+// must go through a REAL grant: the path from "a group holds a custom tenant role" to "the row knows"
+// runs through the server, and a stub would pin the component while leaving that path unmeasured.
+//
+// The fixture is made and removed here — a leftover tenant role piles into every picker on this shared
+// dev tenant (the #582 sweep drowned in exactly that debris).
 const STAMP = Date.now().toString(36);
 const ROLE = `e2e603-${STAMP}`;
 const GROUP = "wiki Editors"; // the group the e2e fixture's dev-user carries
@@ -45,14 +50,18 @@ test("#603: a group's CUSTOM tenant role is named on the member's row, like admi
     await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
     await sleep(600);
 
-    // the member carrying that group wears a badge naming the ROLE and the GROUP
-    const badges = page.getByTestId("role-via-group");
-    await expect(badges.filter({ hasText: ROLE }).first(),
-      "a group's custom role is named on the row, not only admin").toBeVisible({ timeout: 8_000 });
-    await expect(badges.filter({ hasText: ROLE }).first()).toContainText(GROUP);
+    // the member carrying that group has a mark; opening it names the custom ROLE and the GROUP it came
+    // from — the same two axes admin gets, which is the whole complaint
+    const mark = page.getByTestId("group-roles-mark").first();
+    await expect(mark, "a group conferring a custom role puts a mark on the row").toBeVisible({ timeout: 8_000 });
+    await mark.hover();
+    const list = page.getByTestId("group-roles-list");
+    await expect(list).toBeVisible({ timeout: 3_000 });
+    await expect(list, "a group's custom role is named, not only admin").toContainText(ROLE);
+    await expect(list, "and the group it came from").toContainText(GROUP);
 
-    // and the row's own control still shows the member's OWN role — the badge is beside it, never inside
-    const row = page.locator("tr").filter({ has: badges.filter({ hasText: ROLE }) }).first();
+    // and the row's own control still shows the member's OWN role — the mark is beside it, never inside
+    const row = page.locator("tr").filter({ has: page.getByTestId("group-roles-mark") }).first();
     await expect(row.getByTestId("member-role-select"), "the control is untouched by what a group confers")
       .toBeVisible();
   } finally {

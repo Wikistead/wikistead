@@ -103,7 +103,7 @@ describe("#603: the floor's 409 carries its reason to the reader", () => {
 // gap was built in the first place — the badge only ever looked at admin because the data it read was
 // called `adminVia` and computed by `adminGroupNames`.
 describe("#603: no admin-only path grows back", () => {
-  const files = ["tenant-role-rows.ts", "MembersPage.tsx"];
+  const files = ["tenant-role-rows.ts", "MembersPage.tsx", "GroupRolesMark.tsx"];
   for (const f of files) {
     it(`${f} carries no admin-specific via vocabulary`, () => {
       const src = readFileSync(resolve(import.meta.dirname, f), "utf8");
@@ -113,9 +113,18 @@ describe("#603: no admin-only path grows back", () => {
     });
   }
 
-  it("the row renders one badge per conferred role, from the general field", () => {
-    const src = readFileSync(resolve(import.meta.dirname, "MembersPage.tsx"), "utf8");
-    expect(src, "iterated, not indexed at [0] or joined").toMatch(/\(row\.groupRoles \?\? \[\]\)\.map\(/);
-    expect(src, "and the group name is one badge's own, not a comma-joined list").not.toMatch(/groupRoles[\s\S]{0,80}\.join\(/);
+  // EVERY conferred role reaches the screen. The shape that carries them changed — the per-role badge is
+  // retracted (ruling) and the mark's hover list carries them now — but the failure this guards is
+  // the same one, and it is the one that actually happened: the first version read `groupRoles[0]` and
+  // joined the group names, so a second conferred role had nowhere to go.
+  it("every conferred role reaches the list, iterated rather than indexed or joined", () => {
+    const mark = readFileSync(resolve(import.meta.dirname, "GroupRolesMark.tsx"), "utf8");
+    expect(mark, "iterated, not indexed at [0]").toMatch(/roles\.map\(/);
+    expect(mark, "not folded into one line of joined names").not.toMatch(/roles[\s\S]{0,80}\.join\(/);
+    expect(mark, "the count is the list's own length, so it cannot disagree with it").toMatch(/roles\.length/);
+
+    const page = readFileSync(resolve(import.meta.dirname, "MembersPage.tsx"), "utf8");
+    expect(page, "the row hands the whole field over").toMatch(/<GroupRolesMark roles=\{row\.groupRoles \?\? \[\]\}/);
+    expect(page, "and keeps none of the retracted per-role badge").not.toContain("role-via-group");
   });
 });
