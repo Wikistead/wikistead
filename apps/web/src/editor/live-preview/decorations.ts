@@ -5830,7 +5830,11 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     // single-container widget — the columns/tabs-style revealOnCursor conversion, a follow-up if the
     // reviewer wants true centering over the gutter-panel). This lifts "small top-left / cheap".
     position: "relative",
-    paddingLeft: "2.8em",
+    // …plus the bar's own width. The strip sits ON this padding rather than beside it the way a border
+    // did, so without the term the gutter shrinks by the bar and the icon slides toward the edge
+    // which is exactly what shipped, because the other two strip sites got this term and this
+    // one did not. Reading it from the token is what keeps the three from drifting again.
+    paddingLeft: "calc(2.8em + var(--wks-bar-w, 3px))",
   },
   // The strip itself. Absolutely positioned, so the rounded first/last lines do not bend it. Drawn on
   // every line of the container, which reads as one continuous rule down the left edge.
@@ -5840,7 +5844,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     left: "0",
     top: "0",
     bottom: "0",
-    width: "3px",
+    width: "var(--wks-bar-w, 3px)",
     background: "var(--cb-bar, var(--callout-note, #6e7781))",
     pointerEvents: "none",
   },

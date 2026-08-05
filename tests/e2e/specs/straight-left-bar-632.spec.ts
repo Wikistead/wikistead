@@ -118,6 +118,62 @@ test("#632: no container macro's bar bends around its frame", async ({ page }) =
   expect(found.out, `a bar drawn as a border on a rounded frame will bend: ${JSON.stringify(found.out)}`).toEqual([]);
 });
 
+// #632 (user ruling): the strip replaced a border, and a border occupied space that a strip does
+// not. Whatever the bar is drawn with, the content behind it has to start in the same place — the ruling
+// is explicit that " 3px ".
+//
+// This shipped wrong once BECAUSE nobody compared: the panel and the Tailwind boxes each got the 3px
+// added back to their padding, and the CM baseTheme rule did not, so `:::todo`'s icon and body slid 3px
+// left.
+//
+// "The padding reserves at least the strip's width" is the obvious check and it is worthless here — the
+// gutter is 2.8em, so it clears a 3px strip by a mile whether or not anyone compensated. What has to be
+// true is stronger: the padding must be DERIVED from the bar's width. So the bar's width is a token, and
+// this widens it at runtime and watches: every element that draws a strip must move its content by
+// exactly as much as the strip grew. A site that hard-codes its padding does not move, and fails.
+//
+// That is why this pin needs no table of remembered numbers and names no implementation — a fourth strip
+// written next month is measured the same way, and the todo regression is caught at its own site.
+test("#632: a strip does not eat into the space the border used to hold", async ({ page }) => {
+  await openScratch(page, "container-bars-632-c");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(CONTAINER_SOURCES.join("\n\n") + "\n\ntail\n");
+  await sleep(1500);
+
+  const GROW = 10;
+  const measured = await page.evaluate((grow) => {
+    const px = (v: string) => parseFloat(v) || 0;
+    const bars = () => {
+      const out = new Map<HTMLElement, { strip: number; padLeft: number }>();
+      for (const el of [...document.querySelectorAll<HTMLElement>("[data-pane=preview] *")]) {
+        const b = getComputedStyle(el, "::before");
+        if (b.position !== "absolute" || b.left !== "0px") continue;
+        const w = px(b.width);
+        if (w < 2 || w > 6 + grow) continue;
+        out.set(el, { strip: w, padLeft: px(getComputedStyle(el).paddingLeft) });
+      }
+      return out;
+    };
+    const before = bars();
+    document.documentElement.style.setProperty("--wks-bar-w", `${3 + grow}px`);
+    const after = bars();
+    document.documentElement.style.removeProperty("--wks-bar-w");
+    return [...before].map(([el, b]) => ({
+      cls: el.className.toString().slice(0, 50),
+      stripGrew: (after.get(el)?.strip ?? b.strip) - b.strip,
+      padGrew: (after.get(el)?.padLeft ?? b.padLeft) - b.padLeft,
+    }));
+  }, GROW);
+
+  expect(measured.length, "the fixture rendered elements that draw a strip").toBeGreaterThan(0);
+  for (const m of measured) {
+    expect(m.stripGrew, `${m.cls}: draws its bar from the shared width token`).toBeCloseTo(GROW, 0);
+    expect(m.padGrew, `${m.cls}: reserves the bar's width — its content moved ${m.padGrew}px when the bar grew ${GROW}px`)
+      .toBeCloseTo(GROW, 0);
+  }
+});
+
 test("#632: the bar is still there, still 3px, still the type's colour", async ({ page }) => {
   // Removing the border would satisfy the test above by deleting the bar, which the ruling refused
   // outright . So the strip is measured for real, on the widest-known types.

@@ -314,6 +314,13 @@
      resets it to zero — trailing space there is a blank page, not breathing room. */
   --wks-tail-room: 40vh;
 
+  /* #632 (user ruling): the width of the coloured bar down the left of a callout, a todo block, a
+     notice. It is one token because three surfaces draw that bar and all three have to reserve the same
+     space behind it — when the bar became a strip instead of a border, two of them added the width back
+     to their padding and the third did not, and `:::todo`'s icon slid 3px toward the edge. Written into
+     both the strip's width AND the padding that clears it, so the two can no longer disagree. */
+  --wks-bar-w: 3px;
+
   --dur-fast: 120ms;  /* hover / press / small state changes */
   --dur-base: 180ms;  /* default: menus, dialogs, toasts */
   --dur-slow: 240ms;  /* larger surfaces: panels */
