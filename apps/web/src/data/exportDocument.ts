@@ -233,6 +233,17 @@ export interface ExportDocumentInput {
   readonly title: string;
   readonly body: HTMLElement; // the rendered read surface (already drawn — diagrams included)
   readonly css?: string; // defaults to the live document's stylesheets
+  /**
+   * The language the page is written in. Defaults to the live document's, which is the point: this used to
+   * be the literal `en`, and `:root:lang(en)` (#190 / ADR-090 — an English body is monospaced so vim's
+   * columns hold) then switched the BODY of a Japanese page to the code face. Measured: the same string
+   * drew 152px on screen and 170px in the saved file. Embedding the code face (A2) is what made that
+   * visible — before it, the mismatch fell back to `ui-monospace` and hid.
+   *
+   * A Japanese document announcing `lang="en"` is also simply wrong for assistive technology and line
+   * breaking, so this is not only a typography fix.
+   */
+  readonly lang?: string;
 }
 
 const escapeHtml = (s: string): string =>
@@ -270,10 +281,14 @@ export function buildExportDocument(input: ExportDocumentInput): string {
   makeInert(clone);
   const css = sanitizeCss(input.css ?? collectAppCss());
   const t = escapeHtml(input.title || "Untitled");
+  // The document's OWN language, not a literal (see ExportDocumentInput.lang). Escaped like any other
+  // attribute: it comes from the page, and the page is not the author of this file's markup.
+  const lang = escapeHtml((input.lang ?? document.documentElement.lang ?? "").trim() || "en");
   // The wrapper carries `wks-prose` and the light theme: the file is made to be shared and printed, and a
-  // reader's OS theme deciding its colours is what the #85 review rejected.
+  // reader's OS theme deciding its colours is what the #85 review rejected. The THEME stays pinned
+  // (#207paper is light whatever the screen is); only the language travels.
   return `<!doctype html>
-<html lang="en" data-theme="light">
+<html lang="${lang}" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { inflateSync } from "node:zlib";
 import { openScratch, enterEdit, sleep, API } from "../helpers";
 
-// #85(user ruling): acceptance is defined on the ONE path the user actually walks —
+// #85(user ruling): acceptance is defined on the ONE path the user actually walks
 // "⋯ → Export as HTML → open the downloaded file with the app closed → it looks like the editor".
 // Four reviews burned on gates that inspected the document the app ASSEMBLED while nobody ever
 // OPENED the file it SAVED (blank on screen;blank again, from the fix for the previous
@@ -13,15 +13,15 @@ import { openScratch, enterEdit, sleep, API } from "../helpers";
 // opened from file:// in a fresh browser context, where the only stylesheet is the one that travelled.
 //
 // Every assertion here runs against that opened file (or compares it to the live app), never against
-// an in-app iframe or an HTML string:
-//   1. the root has real dimensions, the text is VISIBLE, and a screenshot contains pixels that are
-//      not the background — thedefect (root 0×0, display:none) goes red on all three;
-//   2. side-by-side parity (heading/body/callout/table/fence computed styles) read off the OPENED file;
-//   3. diagrams (mermaid / excalidraw / plantuml) are figures inside the saved bytes — blob: count 0;
-//   4. the same opened file survives print media (the marker round-tripwarned about: fixing
-//      "blank when printed" must not restore "blank on screen", and vice versa — both media pinned);
-//   5. tabs all panes / details open / fence chrome / no chrome buttons, all asserted as VISIBILITY in
-//      the opened file, not as substrings of a string nobody rendered.
+// an in-app iframe or an HTML string
+// 1. the root has real dimensions, the text is VISIBLE, and a screenshot contains pixels that are
+// not the background — thedefect (root 0×0, display:none) goes red on all three;
+// 2. side-by-side parity (heading/body/callout/table/fence computed styles) read off the OPENED file;
+// 3. diagrams (mermaid / excalidraw / plantuml) are figures inside the saved bytes — blob: count 0;
+// 4. the same opened file survives print media (the marker round-tripwarned about: fixing
+// "blank when printed" must not restore "blank on screen", and vice versa — both media pinned);
+// 5. tabs all panes / details open / fence chrome / no chrome buttons, all asserted as VISIBILITY in
+// the opened file, not as substrings of a string nobody rendered.
 
 const EXCALIDRAW_SCENE = JSON.stringify({
   type: "excalidraw",
@@ -91,8 +91,8 @@ const PLANTUML_PNG = Buffer.from(
   "base64",
 );
 
-// Minimal PNG reader (truecolor / truecolor+alpha, 8-bit, non-interlaced — what page.screenshot()
-// produces), dependency-free on purpose. Returns unfiltered RGB(A) scanlines so pixels can be COUNTED:
+// Minimal PNG reader (truecolor / truecolor+alpha, 8-bit, non-interlaced — what page.screenshot
+// produces), dependency-free on purpose. Returns unfiltered RGB(A) scanlines so pixels can be COUNTED
 // "the screenshot is not blank" must be a number, not an impression (§1).
 function decodePng(buf: Buffer): { width: number; height: number; bpp: number; pixels: Buffer } {
   let pos = 8;
@@ -200,7 +200,14 @@ test("#85the downloaded file, opened with the app closed, IS the document", asyn
   test.setTimeout(240_000);
   await page.route("**/plantuml/render", (route) =>
     route.fulfill({ status: 200, contentType: "image/png", body: PLANTUML_PNG }));
+  // #85 (review rejection, 2026-08-05): the reader whose file did not match their screen was reading in
+  // JAPANESE, and that is the whole of the defect — `:root:lang(en)` (#190) makes an ENGLISH body
+  // monospaced on purpose, so an English fixture agrees with a hard-coded `lang="en"` and measures
+  // nothing. The app's own switch is used (localStorage, read at boot by i18n/index.ts) rather than a
+  // stub, so what is exported is a page the product really produces.
+  await page.addInitScript(() => { try { localStorage.setItem("wks.lang", "ja"); } catch { /* private mode */ } });
   await authorAndPublish(page);
+  expect(await page.evaluate(() => document.documentElement.lang), "the app is in Japanese for this run").toBe("ja");
 
   // ---- the user's export: ⋯ → Export as HTML → a real download ----
   await page.click("[data-testid=page-overflow-trigger]");
@@ -268,6 +275,34 @@ test("#85the downloaded file, opened with the app closed, IS the document", asyn
   const excaliBox = await opened.locator("[data-testid=macro-excalidraw] svg").first().boundingBox();
   expect(excaliBox, "the excalidraw drawing drew as an inline svg").not.toBeNull();
   expect(excaliBox!.width, "…with real width").toBeGreaterThan(10);
+
+  // 1d. #85 (review rejection, 2026-08-05): the BODY FACE — measured before the generic parity loop so a
+  // face mismatch is named as one rather than surfacing as whichever probe happens to be checked first. The parity probes above read computed values off
+  // matching elements, and `font-family` matched because both sides resolved to a stack — while the FACE
+  // actually painting the glyphs differed: the file announced `lang="en"`, `:root:lang(en)` (#190) swapped
+  // `--font-body` to the code face, and A2 had just embedded that face, so the saved document drew the body
+  // in Wikistead Mono. Measured then: 152px on screen, 170px in the file for the same string.
+  //
+  // Measured as WIDTH, not as a name: a stack is a preference list and the interesting question is which
+  // face won. Canvas with the element's own resolved stack answers that, and the two numbers come from the
+  // two documents — nothing here enumerates a font.
+  const RULER = "あいうえおABCabc123";
+  const measure = (ctxPage: typeof page, sel: string) => ctxPage.evaluate(({ sel, text }) => {
+    const el = document.querySelector(sel) as HTMLElement | null;
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    const c = document.createElement("canvas").getContext("2d")!;
+    c.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    return { width: Math.round(c.measureText(text).width), family: cs.fontFamily, lang: document.documentElement.lang };
+  }, { sel, text: RULER });
+
+  const appBody = await measure(page, "[data-pane=preview] .cm-content p, [data-pane=preview] p");
+  const fileBody = await measure(opened as unknown as typeof page, "main.wks-export-doc p");
+  expect(appBody, "the app surface has a paragraph to measure").not.toBeNull();
+  expect(fileBody, "the opened file has a paragraph to measure").not.toBeNull();
+  expect(fileBody!.lang, "the saved document speaks the page's language, not a literal").toBe(appBody!.lang);
+  expect(fileBody!.width, `body face differs: screen ${appBody!.width}px (${appBody!.family}) vs file ${fileBody!.width}px (${fileBody!.family})`)
+    .toBe(appBody!.width);
 
   // 2. parity: the same computed properties, read off the app and off the OPENED FILE
   const appProbes = (await page.evaluate(
