@@ -1867,7 +1867,10 @@ async function syncPageParentTuple(fga: OpenFgaClient, pageId: string, oldParent
     try {
       await deleteTuples(fga, [{ user: `page:${oldParent}`, relation: 'parent', object: `page:${pageId}` }])
     } catch (err) {
-      if (!String((err as Error)?.message ?? '').includes('did not exist')) throw err
+      // #578 leftover, caught by #622's review: this matched FGA's prose, and #578 replaced that prose at
+      // the tuple-helper boundary — so the branch became UNREACHABLE and a page whose parent tuple was
+      // already gone started failing its move with a 500. Asked by code now, like every other site.
+      if (!isAlreadyConverged(err)) throw err
     }
   }
   if (newParent) await writeTuples(fga, [{ user: `page:${newParent}`, relation: 'parent', object: `page:${pageId}` }])
@@ -2113,7 +2116,10 @@ export async function trashPage(
       // the marker is the authorization change and MUST land before the page "disappears" anywhere else.
       // (Never key on the generic write_failed_due_to_invalid_input code — a model/relation mismatch
       // reports the same code, and swallowing that would trash the row with NO revocation = a leak.)
-      if (!String(e).includes('already exists')) throw e
+      // #578 leftover (#622 review): unreachable since the boundary replaced FGA's prose, so a retry after
+      // a partial failure could no longer converge — the marker-up/stamp-missing invisible orphan this
+      // catch exists to make retryable was stuck. The code carries the fact now.
+      if (!isAlreadyConverged(e)) throw e
     })
   }
   try {
@@ -2163,7 +2169,9 @@ export async function restorePage(
       // BEFORE the stamps are cleared — clearing them with markers still up would drop the row from the
       // trash listing while it stays invisible everywhere (the invisible-orphan state trash must never
       // produce); aborting here leaves a retryable half-state (still listed, partially visible).
-      if (!String((e as Error)?.message ?? e).includes('did not exist')) throw e
+      // #578 leftover (#622 review): same — unreachable, so a restore retried after a partial failure
+      // failed forever instead of converging.
+      if (!isAlreadyConverged(e)) throw e
     })
   }
   // Re-parent when the original parent is itself trashed or purged (ADR §2): the restored root moves to
