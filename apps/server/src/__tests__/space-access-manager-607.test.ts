@@ -18,6 +18,7 @@ import { fgaClient, check, deleteTuples } from '@wikistead/authz'
 import { buildApp } from '../app.js'
 import {
   createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listSpaceAccess, listTenantGroups, listMemberCandidates,
+  spaceCallMovesAdminClass,
 } from '../routes/spaces.js'
 import { assignRoleInTx } from '../routes/roles.js'
 import { spaceGrantTuplesFor } from '../space-grant-expansion.js'
@@ -147,18 +148,76 @@ describe('#607 (c): the ceiling — admin-class capabilities need manage, at bot
   }, 60_000)
 })
 
-describe('#607 (d): replace is a demotion in disguise — refused at both doors', () => {
-  it('a view grant with replace: true is refused (the one-boolean hole)', async () => {
+// (d) — #607 user ruling, which narrowed this. `replace` used to refuse unconditionally, which was
+// safe but meant the roster verb could add and remove and never CHANGE: turning a viewer into an editor
+// took a revoke and a re-grant. It now refuses when the sweep would carry an admin-class mark away —
+// still an OPERATION test (that is what separates it from ADR-209 rev1, which stopped looking at the
+// sweep entirely), asked of what the target actually holds.
+//
+// All three directions, because either one alone can pass a broken implementation: a server that always
+// refuses satisfies the first, one that always permits satisfies the second, and one that reads
+// `role_assignments` instead of the store satisfies BOTH while handing the owner's demotion away.
+describe('#607 (d): replace is refused when it would sweep an admin-class mark', () => {
+  it('a target holding something admin-class cannot be replaced', async () => {
+    // TARGET is a moderator here — `moderate` is in ADMIN_CLASS_ROLE_CAPS, so the picture the ruling
+    // describes is "manager AND moderator rows stay badges" (review②), not manager alone.
+    const tuples = spaceGrantTuplesFor(`user:${TARGET}`, 'moderate', spaceId)
+    await fgaClient.write({ writes: tuples })
+    try {
+      await expect403(
+        grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: AM, grantee: `user:${TARGET}`, capability: 'view', plan: 'free', replace: true }),
+        'replacing a moderator sweeps their moderate mark',
+      )
+      const { requireAssignmentAuthority } = await import('./../routes/roles.js')
+      await expect403(
+        requireAssignmentAuthority(app.fga, { sub: AM, tenantId: T, resourceType: 'space', resourceId: spaceId, capabilities: ['view'], replace: true, principal: `user:${TARGET}` }),
+        'same rule at the roles door',
+      )
+    } finally {
+      await deleteTuples(fgaClient, tuples).catch(() => {})
+    }
+  }, 120_000)
+
+  it('a target holding nothing admin-class CAN be replaced — the point of the ruling', async () => {
+    const tuples = spaceGrantTuplesFor(`user:${TARGET}`, 'view', spaceId)
+    await fgaClient.write({ writes: tuples })
+    try {
+      await expect(
+        grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: AM, grantee: `user:${TARGET}`, capability: 'edit', plan: 'free', replace: true }),
+        'a viewer becomes an editor in one move',
+      ).resolves.not.toThrow()
+      expect(await check(fgaClient, `user:${TARGET}`, 'edit', { type: 'space', id: spaceId }), 'and the change landed').toBe(true)
+    } finally {
+      await deleteTuples(fgaClient, [...tuples, ...spaceGrantTuplesFor(`user:${TARGET}`, 'edit', spaceId)]).catch(() => {})
+    }
+  }, 120_000)
+
+  it('an UNANSWERED question refuses — the default is not an empty set', () => {
+    // The predicate takes what the target holds as an argument, so there is a caller who does not supply
+    // it. That caller must get a refusal, not a pass: `?? []` would read as "holds nothing admin-class"
+    // and open the ceiling wherever the read was skipped or failed. Measured as a unit because no route
+    // reaches it today — which is exactly why it needs saying here rather than being left to whichever
+    // call site is added next.
+    expect(spaceCallMovesAdminClass([], true), 'replace with no answer about the target').toBe(true)
+    expect(spaceCallMovesAdminClass([], true, []), 'and an answer of "nothing" is a different thing').toBe(false)
+    expect(spaceCallMovesAdminClass(['manage'], false, []), 'naming an admin-class capability still refuses').toBe(true)
+  })
+
+  it('the ROWLESS owner cannot be replaced — the answer comes from the store, not from rows', async () => {
+    // The case review① insisted on. `createSpace` writes the creator's `manager` leaf directly and
+    // records NO `role_assignments` row, so a rows-based "does this principal hold admin-class" returns
+    // "no" for the one principal who must never be demoted by this verb. Measured first with the rows
+    // implementation: it answered 204 and the owner lost the space.
+    const rows = await db.sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM role_assignments
+      WHERE resource_type = 'space' AND resource_id = ${spaceId} AND principal = ${`user:${OWNER}`}`
+    expect(rows[0]!.n, 'the premise: the owner really has no row (else this case proves nothing)').toBe(0)
+    expect(await check(fgaClient, `user:${OWNER}`, 'manage', { type: 'space', id: spaceId }), 'but does hold the leaf').toBe(true)
     await expect403(
-      grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: AM, grantee: `user:${TARGET}`, capability: 'view', plan: 'free', replace: true }),
-      'replace moves whatever the principal held, including the owner mark',
+      grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: AM, grantee: `user:${OWNER}`, capability: 'view', plan: 'free', replace: true }),
+      'the owner is not a "principal holding nothing admin-class"',
     )
-    const { requireAssignmentAuthority } = await import('./../routes/roles.js')
-    await expect403(
-      requireAssignmentAuthority(app.fga, { sub: AM, tenantId: T, resourceType: 'space', resourceId: spaceId, capabilities: ['view'], replace: true }),
-      'same rule at the roles door',
-    )
-  }, 60_000)
+  }, 120_000)
 })
 
 describe('#607: a plain member is refused everything', () => {

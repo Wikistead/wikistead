@@ -29,14 +29,37 @@ export type GrantAction =
 // the edit chain in the model).
 export const COMPOSITE_BUILTINS: Record<string, string[]> = { edit: ["edit", "comment"] };
 
-// #553 / ADR-199 §2 display bundling, as a value (review F): a principal holding BOTH built-in
-// arms is ONE editor — the comment arm hides behind the edit row, and that row's revoke must
-// remove BOTH arms. Origin-blind on purpose: however the pair arrived, the display rule is the
-// same. A lone arm (edit-only or comment-only) stays its own capability row.
-export function foldedEditorGrantees(grants: { grantee: string; capability: string }[]): Set<string> {
-  const caps = new Map<string, Set<string>>();
-  for (const g of grants) caps.set(g.grantee, new Set([...(caps.get(g.grantee) ?? []), g.capability]));
-  return new Set([...caps.entries()].filter(([, c]) => c.has("edit") && c.has("comment")).map(([k]) => k));
+
+// #607 (user ruling): "Dev User 2 …". The roster answers one row per
+// CAPABILITY, and the screen drew them straight through — so the space's owner appeared twice, once as
+// manager and once as viewer. "1 principal = 1 role" (#536 / #579) is the settled shape of this product;
+// a screen that shows one person wearing two is showing the thing those rulings removed.
+//
+// This is the editor fold above, generalised: that one already merged a principal's `edit` and `comment`
+// arms into a single row whose revoke takes both. The same rule now applies to whatever else a principal
+// holds, so there is one mechanism rather than a special case for one pair.
+//
+// Strongest first. `manage` subsumes everything (it is the built-in superset, and the owner's structural
+// mark). The severable admin-class verbs come next — each confers something `edit` does not, and none is
+// implied by another. The tail is the model's own implication chain, moderate → edit → comment → view.
+const CAP_STRENGTH = ["manage", "moderate", "manageAccess", "delete", "share", "settings", "edit", "comment", "view"];
+const strength = (cap: string): number => {
+  const i = CAP_STRENGTH.indexOf(cap);
+  return i === -1 ? CAP_STRENGTH.length : i; // an unknown capability sorts last rather than winning
+};
+
+/** One entry per principal: the row that represents them, and everything it stands for. */
+export function foldGrantsByPrincipal<T extends { grantee: string; capability: string }>(
+  grants: readonly T[],
+): { row: T; foldedCaps: string[] }[] {
+  const byPrincipal = new Map<string, T[]>();
+  for (const g of grants) byPrincipal.set(g.grantee, [...(byPrincipal.get(g.grantee) ?? []), g]);
+  return [...byPrincipal.values()].map((held) => {
+    const ordered = [...held].sort((a, b) => strength(a.capability) - strength(b.capability));
+    // The revoke set is everything this row now stands for — otherwise folding would quietly make the
+    // weaker grants unremovable, which is the failure the editor fold was written to avoid.
+    return { row: ordered[0]!, foldedCaps: ordered.map((g) => g.capability) };
+  });
 }
 
 // The revoke set for a rendered grant row: a folded editor row revokes what the noun granted.

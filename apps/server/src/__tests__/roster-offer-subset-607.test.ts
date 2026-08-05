@@ -130,23 +130,23 @@ describe('#607the roster offers no operation the server would refuse', () => {
     expect(roster.every((r) => r.changeable === true), 'a manager may change any principal here').toBe(true)
   }, 120_000)
 
-  it('for the roster verb, NO principal is role-changeable — and that is the ceiling, stated', async () => {
-    // Worth pinning precisely because it is stronger than it looks. ADR-209 §2 makes `replace: true`
-    // require `manage` UNCONDITIONALLY — the rule reads the operation, not the target — because a `view`
-    // grant with replace sweeps whatever the principal held, including the owner mark. A role CHANGE is
-    // exactly that operation, so the roster verb cannot move anybody between roles; it adds and revokes.
+  it('the roster verb changes ordinary principals and not admin-class ones — both, or the pin is empty', async () => {
+    // #607 (user ruling) narrowed the ceiling: `replace` used to require `manage` unconditionally,
+    // so this verb could add and revoke but never CHANGE anybody, and every row drew as a badge. It now
+    // refuses only when the sweep would carry an admin-class mark away.
     //
-    // The screen is now honest about it (every row draws as a badge for this caller) rather than offering
-    // a control that 403s. Whether the ceiling SHOULD narrow to "replace is refused only when the target
-    // holds admin-class" is a change to an authorization invariant, so it is raised on the ticket rather
-    // than made here.
+    // BOTH halves are asserted because either alone is satisfiable by a broken signal. "Nobody is
+    // changeable" was true before the ruling and is what a server that lost the narrowing would answer;
+    // "everybody is changeable" is what a server that lost the ceiling would answer. The subset property
+    // above holds vacuously under either, which is exactly whyasked for this premise.
     const roster = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: AM })
     expect(roster.length).toBeGreaterThan(2)
-    expect(roster.every((r) => r.changeable === false), 'no role change, ordinary member included').toBe(true)
+    const frozen = roster.filter((r) => r.changeable === false)
+    const movable = roster.filter((r) => r.changeable === true)
+    expect(frozen.length, 'somebody must be beyond this verb (else the ceiling is gone)').toBeGreaterThan(0)
+    expect(movable.length, 'and somebody within it (else the ruling never landed)').toBeGreaterThan(0)
 
-    // …while the ADD and REVOKE the verb exists for still work, so this is a narrowed screen, not a dead
-    // one. Measured, because "everything is frozen" would otherwise be indistinguishable from a broken
-    // signal that says no to everything.
+    // …and the ADD and REVOKE the verb exists for still work.
     const fresh = `user:ros607-fresh-${STAMP}`
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: AM, grantee: fresh, capability: 'view', plan: 'free' })
     cleanup.push(...spaceGrantTuplesFor(fresh, 'view', spaceId))
@@ -154,7 +154,9 @@ describe('#607the roster offers no operation the server would refuse', () => {
     await revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: AM, grantee: fresh, capability: 'view', plan: 'free' })
     expect(await check(fgaClient, fresh, 'view', { type: 'space', id: spaceId }), 'and still removes them').toBe(false)
 
-    // the two answers genuinely differ on the owner's row — the defect's shape, still present in the data
+    // The owner is on the frozen side, and for a reason no row records: `createSpace` writes their
+    // `manager` leaf with no `role_assignments` row at all (review①). A predicate built from rows
+    // would put them on the OTHER side and hand their demotion to this verb.
     const owner = roster.find((r) => r.grantee === `user:${OWNER}` && r.capability === 'view')
     expect(owner, 'the owner has a plain view row — the shape that produced the defect').toBeTruthy()
     expect(owner?.revocable, 'that row IS individually revocable').not.toBe(false)
