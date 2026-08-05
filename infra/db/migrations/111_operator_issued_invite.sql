@@ -1,0 +1,15 @@
+-- #616 / ADR-212 slice 1: mark the ONE invite an operator break-glass issued.
+--
+-- The tenant's SSO stance refuses a password invite in TWO places — at issue (`createInvite`) and again
+-- at acceptance (`acceptLocalInvite`). The user ruling of 2026-08-05 (#616, option (i)) lets an
+-- operator recovery step over it, and stepping over only the first half produces a link that dies
+-- silently at the second: the exact "half-broken at 3am" failure the recovery exists to prevent.
+-- (Measured — `local-admin-cli-616` caught it on the first run.)
+--
+-- The exemption is carried by THE INVITE, not by the tenant and not by a flag on a session: the stance
+-- keeps applying to everyone else, and to this person the moment they are in. It is one row, it expires
+-- with the invite's own TTL, and it is readable next to the act in the operator ledger.
+--
+-- DEFAULT false so every existing row keeps today's behaviour, and NOT NULL so no reader has to decide
+-- what a null means about a security boundary.
+ALTER TABLE invites ADD COLUMN operator_issued BOOLEAN NOT NULL DEFAULT false;

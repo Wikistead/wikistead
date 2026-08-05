@@ -113,6 +113,16 @@ export async function createInvite(
     // looking at the screen here, while the person who would see a failure at acceptance did not
     // choose any of this.
     kind?: 'oidc' | 'local'
+    // #616 / ADR-212 slice 1 (user ruling, option (i)): an OPERATOR recovery may step over the
+    // tenant's own SSO stance, with the operator ledger carrying the accountability — the same trade
+    // `tenant:login-methods` already makes with the 409 lockout guards. Never set from request data:
+    // the only caller is the CLI, which runs on admin DB credentials with no HTTP surface.
+    //
+    // It steps over exactly ONE thing. Measured (adminless-invite-probe-616): the stance guard lives
+    // inside the `kind: 'local'` branch and bites only when a federated way in is real, so the domain
+    // is "a password recovery into a tenant that has a working IdP and nobody seated". The stance
+    // itself is NOT rewritten — a tenant's policy survives its own rescue (ruling condition 3).
+    operatorOverride?: boolean
   },
 ): Promise<{ id: string; token: string; expiresAt: Date; seatWarning: boolean }> {
   const ent = resolveEntitlements(args.plan)
@@ -140,7 +150,7 @@ export async function createInvite(
     // person cannot arrive by password. ADMIN surface → an explicit refusal with the reason (ADR-195
     // §9), never the uniform not-found a stranger gets.
     const { resolveSsoStance } = await import('./sso-stance.js')
-    if ((await resolveSsoStance(db, { plan: args.plan })).biting) {
+    if (!args.operatorOverride && (await resolveSsoStance(db, { plan: args.plan })).biting) {
       throw Object.assign(new Error('SSO is required for this tenant — a new member cannot be invited with a password while it is on'), { statusCode: 400, code: 'sso_required' })
     }
     // #606: a password invite MINTS a new identity (`acceptLocalInvite` always allocates a fresh
@@ -161,8 +171,8 @@ export async function createInvite(
   const token = generateToken()
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS)
   const [row] = await db.sql<[{ id: string }]>`
-    INSERT INTO invites (tenant_id, token_hash, email, role, invited_by, expires_at, role_id, kind)
-    VALUES (${args.tenantId}, ${hashInviteToken(token)}, ${args.email}, ${args.role}, ${args.invitedBy}, ${expiresAt}, ${args.roleId ?? null}, ${kind})
+    INSERT INTO invites (tenant_id, token_hash, email, role, invited_by, expires_at, role_id, kind, operator_issued)
+    VALUES (${args.tenantId}, ${hashInviteToken(token)}, ${args.email}, ${args.role}, ${args.invitedBy}, ${expiresAt}, ${args.roleId ?? null}, ${kind}, ${args.operatorOverride === true})
     RETURNING id
   `
   return { id: row.id, token, expiresAt, seatWarning }
@@ -259,8 +269,17 @@ export async function acceptLocalInvite(
   if (!(await localLoginEnabled(deps.db))) return { ok: false }
   // #605 / ADR-210 §4 row 9: the sub does not exist until acceptance mints it, so there is nobody to
   // exempt — while the stance bites, a local invite link answers as the uniform dead link.
+  //
+  // #616 (ruling, option (i)): EXCEPT the one invite an operator break-glass issued. The stance
+  // refuses in two places, and overriding only the issue side hands the operator a link that dies here
+  // instead — measured, on the first run of `local-admin-cli-616`. The exemption is carried by THE
+  // INVITE ROW, so it is one link, it expires with the invite's own TTL, and the stance still applies
+  // to everyone else and to this person the moment they are in. The row is read before the stance is
+  // consulted; an unknown token falls through to the same dead-link answer as before.
   const { resolveSsoStance } = await import('./sso-stance.js')
-  if ((await resolveSsoStance(deps.db, tenant)).biting) return { ok: false }
+  const [operatorRow] = await deps.db.sql<{ operator_issued: boolean }[]>`
+    SELECT operator_issued FROM invites WHERE token_hash = ${hashInviteToken(token)} AND status = 'pending' LIMIT 1`
+  if (operatorRow?.operator_issued !== true && (await resolveSsoStance(deps.db, tenant)).biting) return { ok: false }
   const { hashPassword } = await import('./password-hash.js')
   const { validatePasswordPolicy } = await import('./password-policy.js')
   if (!validatePasswordPolicy(password)) {
