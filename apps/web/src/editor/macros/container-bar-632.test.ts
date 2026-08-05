@@ -54,6 +54,20 @@ describe("#632: a container macro's left bar is a strip, not a border", () => {
   it("the space the border occupied is given back, so nothing inside moves", () => {
     // Removing a 3px border shrinks the content box by 3px and slides the icon. The ruling's standing
     // condition across every revision of this ticket is that the icon does not move.
-    expect(css(), "the panel pads for the strip it no longer borders").toMatch(/padding:[^;]*calc\(0\.8em \+ 3px\)/);
+    //
+    // Three surfaces draw this bar, and the first attempt gave the width back in two of them — the
+    // panel and the notice boxes — leaving `:::todo`'s icon 3px adrift. So the width is one
+    // token and both halves of every site read it: the strip's own width, and the padding that clears
+    // it. Whether each site actually MOVED with the token is measured in the real DOM by
+    // `straight-left-bar-632.spec.ts`, which widens it and watches the content follow — a source scan
+    // cannot tell a padding that merely mentions the token from one that is derived from it.
+    // Deliberately NOT written as "for each strip found, …": both files carry several `::before` rules
+    // that are not bars (the callout icon, the code-fence label), and a scan that tries to tell them
+    // apart by their declarations picks up whichever one it reaches first. What is worth asserting from
+    // the source is the pairing itself — a file that draws a bar also reserves room for it.
+    for (const [where, text] of [["the shared stylesheet", css()], ["the editor's baseTheme", baseTheme()]] as const) {
+      expect(text, `${where}: the strip's width comes from the token`).toMatch(/width:\s*"?var\(--wks-bar-w/);
+      expect(text, `${where}: and the padding beside it reserves that same width`).toMatch(/padding[^;{}]*--wks-bar-w/);
+    }
   });
 });

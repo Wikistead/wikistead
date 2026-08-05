@@ -20,7 +20,7 @@
 /* #632: the left padding carries the 3px the border used to occupy (the bar is a ::before strip now
    see below), so the icon does not move. Written HERE rather than on the single-class rule because this
    two-class selector wins the cascade and its shorthand would put it back. */
-.cm-lp-callout.cm-lp-callout-panel{display:flex;align-items:center;gap:0.75em;padding:0.6em 0.8em 0.6em calc(0.8em + 3px);position:relative}
+.cm-lp-callout.cm-lp-callout-panel{display:flex;align-items:center;gap:0.75em;padding:0.6em 0.8em 0.6em calc(0.8em + var(--wks-bar-w, 3px));position:relative}
 /* #267: the callout PANEL box — background tint + semantic left bar — for renderCalloutPanel output shown
    OUTSIDE the editor (the template preview .cm-lp-md-preview and the public reader). Editor callouts get
    the tint/bar from the .cm-lp-callout-<type> CM baseTheme (decorations.ts), but baseTheme is .cm-editor-
@@ -33,7 +33,7 @@
    The frame stays round; the strip is a rectangle that ignores it.
    `padding-left` carries the 3px the border used to occupy, so nothing inside moves. */
 .cm-lp-callout-panel{border-radius:4px;background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 10%,transparent)}
-.cm-lp-callout-panel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--cb-color,var(--callout-note,#6e7781));pointer-events:none}
+.cm-lp-callout-panel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--wks-bar-w, 3px);background:var(--cb-color,var(--callout-note,#6e7781));pointer-events:none}
 .cm-lp-callout-panel.cm-lp-callout-note{background:color-mix(in srgb,var(--callout-note,#57606a) 8%,transparent)}
 .cm-lp-callout-panel.cm-lp-callout-warning{background:color-mix(in srgb,var(--callout-warning,#d29922) 13%,transparent)}
 /* #267: the diagram/media alignment classes (#255) also live only in the .cm-editor baseTheme, so a
@@ -279,5 +279,5 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
    left padding carries the 3px the border used to occupy so nothing inside shifts.
    A class rather than five copies of the same utilities: the fifth box written next month gets it by
    asking for it, not by somebody remembering the trick. */
-.wks-left-bar{position:relative;padding-left:calc(var(--wks-left-bar-pad,0.875rem) + 3px)}
-.wks-left-bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--wks-left-bar-color,var(--accent));pointer-events:none}
+.wks-left-bar{position:relative;padding-left:calc(var(--wks-left-bar-pad,0.875rem) + var(--wks-bar-w, 3px))}
+.wks-left-bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--wks-bar-w, 3px);background:var(--wks-left-bar-color,var(--accent));pointer-events:none}
