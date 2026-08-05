@@ -178,6 +178,36 @@ export async function createInvite(
   return { id: row.id, token, expiresAt, seatWarning }
 }
 
+/** Give a pending invite a fresh link. Returns null if there is no pending invite by that id.
+ *
+ * #638 (user ruling): an invite that was never received used to be a dead end. The password
+ * entrance beside it has had a re-issue since #626, but the invite had neither a resend nor a way to
+ * read the link back — and it is the one that CANNOT be recovered, because in a tenant with no mail
+ * configured the link shown once at creation was the only copy. Losing it meant revoking and inviting
+ * again, which is a different invite to anybody reading the ledger.
+ *
+ * RE-ISSUE, not re-display, and the distinction is forced rather than chosen: the token is stored as a
+ * SHA-256 hash exactly so a leak of the table is not a leak of the links. Nothing can show the old one
+ * again. So a new token replaces it and the old link stops working — which the screen has to say plainly,
+ * or an admin hands somebody a link they have just invalidated for the person they mailed it to.
+ *
+ * Same ROW, deliberately. The seat accounting, the role, the kind and who invited them all belong to the
+ * invitation rather than to the link, and minting a second row is how #606 put the same person on two
+ * seats. The clock restarts because a link nobody could use should not expire on its original schedule.
+ */
+export async function reissueInvite(
+  db: { sql: Sql },
+  id: string,
+): Promise<{ token: string; email: string | null; expiresAt: Date } | null> {
+  const token = generateToken()
+  const expiresAt = new Date(Date.now() + INVITE_TTL_MS)
+  const [row] = await db.sql<[{ email: string | null }?]>`
+    UPDATE invites SET token_hash = ${hashInviteToken(token)}, expires_at = ${expiresAt}
+     WHERE id = ${id} AND status = 'pending'
+    RETURNING email`
+  return row ? { token, email: row.email, expiresAt } : null
+}
+
 // Accept an invite: turn a verified-but-not-yet-member identity into a member.
 // Returns true if THIS call granted (or idempotently confirmed) membership; false if the
 // token is unknown, expired, already consumed, revoked, or belongs to another tenant (all

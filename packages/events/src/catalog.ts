@@ -92,6 +92,10 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'member.password_reset_completed': 'A member completed a password reset (all their sessions were signed out).',
   'invite.created': 'A member invite was created.',
   'invite.revoked': 'A member invite was revoked.',
+  // #638: a re-issue is not a second invitation — the invitation, its seat and its role are unchanged,
+  // only the link is. Reading it as `invite.created` would make a tenant look like it invited the same
+  // person twice.
+  'invite.reissued': 'A pending invite was given a fresh link; the previous one stopped working.',
   // Comments
   'comment.created': 'A comment was created on a page.',
 }

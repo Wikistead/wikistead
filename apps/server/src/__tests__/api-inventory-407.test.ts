@@ -51,7 +51,7 @@ const EXCLUDED_PATHS = new Set([
   '/admin/roles/assignments', '/admin/roles/:roleId/assignments', '/admin/roles/assignments/:assignmentId', // role assignments (#420 inc3)
   '/admin/roles/admin-mappings', '/admin/roles/admin-mappings/:mappingId', // IdP group -> tenant admin declarations (#497 §2b; admin console plumbing)
   '/spaces/:spaceId/branding', '/spaces/:spaceId/icon-image', '/branding', '/branding/logo', '/tenant/branding', '/tenant/branding/logo', // branding/UI
-  '/me/settings', '/me/capabilities', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', // account/invite UI plumbing
+  '/me/settings', '/me/capabilities', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', '/members/invites/:id/reissue', // account/invite UI plumbing (#638: handing a pending invitation over again is the same console surface)
   '/ai/ask', '/ai/capability',     // AI feature surface (own contract)
   '/pages/:pageId/mentionable',    // comment @-mention candidates (UI-shaped)
   '/pages/:pageId/member-candidates', // permissions-dialog member typeahead (UI-shaped; #416)

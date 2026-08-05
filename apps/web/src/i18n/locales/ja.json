@@ -1045,7 +1045,13 @@
     "suspend": "停止",
     "reactivate": "再開",
     "suspendConfirm": "{{name}} を停止しますか？サインインできなくなり、権限と API キーは失効し、セッションも終了します。座席は保持され、何も削除されません。",
-    "reactivateConfirm": "{{name}} を再開しますか？グループ由来のロールは戻りません。次回のサインインで ID プロバイダが入れ直します（IdP を持たないメンバーには戻りません）。"
+    "reactivateConfirm": "{{name}} を再開しますか？グループ由来のロールは戻りません。次回のサインインで ID プロバイダが入れ直します（IdP を持たないメンバーには戻りません）。",
+    "inviteMailed": "· メール送信済み",
+    "inviteNotMailed": "· メール未送信",
+    "reissue": "新しいリンク",
+    "resend": "再送",
+    "reissueConfirm": "{{email}} に新しいリンクを作りますか？ 以前に渡したリンクは使えなくなります。",
+    "resendConfirm": "{{email}} に新しいリンクを送りますか？ 以前に送ったリンクは使えなくなります。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

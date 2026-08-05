@@ -12,7 +12,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/outbox.js'
 import { reindexPublishedPages } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
-import { createInvite, revokeInvite, type InviteRole } from '../auth/invites.js'
+import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 
 // #623: how many members one answer carries. Small enough that the screen paints at once, large enough
@@ -558,8 +558,8 @@ export async function membersPlugin(app: FastifyInstance) {
   app.get('/members/invites', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     const rows = await req.db.sql<
-      { id: string; email: string | null; role: string; invited_by: string; expires_at: Date; created_at: Date }[]
-    >`SELECT id, email, role, invited_by, expires_at, created_at
+      { id: string; email: string | null; role: string; invited_by: string; expires_at: Date; created_at: Date; last_emailed_at: Date | null }[]
+    >`SELECT id, email, role, invited_by, expires_at, created_at, last_emailed_at
         FROM invites WHERE status = 'pending' AND expires_at > now() ORDER BY created_at DESC`
     return { invites: rows }
   })
@@ -607,12 +607,60 @@ export async function membersPlugin(app: FastifyInstance) {
           html: `<p>You've been invited to join <strong>${req.tenant.slug}</strong> on ${productName()}.</p><p><a href="${inviteUrl}">Accept your invitation</a></p>`,
         })
         emailed = true
+        // #638: the outcome used to be reported once, in this response, and then forgotten — the list of
+        // pending invites could not say which of its rows anybody had actually received.
+        await req.db.sql`UPDATE invites SET last_emailed_at = now() WHERE token_hash = ${hashInviteToken(token)}`
       } catch (err) {
         req.log.warn({ err }, 'invite email send failed — link still valid')
       }
     }
     emit({ type: 'invite.created', tenantId: req.tenant.id, actorId: req.user.sub, role })
     return reply.code(201).send({ inviteUrl, emailed, seatWarning })
+  })
+
+  // #638 (user ruling): hand a pending invitation over again.
+  //
+  // The asymmetry this closes: a password entrance could always be re-issued (#626), while an invite had
+  // neither a resend nor a way to read its link back — and it is the invite that strands people, because
+  // a tenant with no mail configured has only the link that appeared once on the screen that made it.
+  // The recovery was to revoke and invite again, which is a different invitation to anyone reading the
+  // ledger and a second chance to get the address wrong.
+  //
+  // One act, two deliveries. `email: true` sends the new link and also returns it, because sending is
+  // best-effort here as it is everywhere else: an admin whose mail silently fails still needs the copy in
+  // their hand. Both paths invalidate the old link — that is not a choice, the token is hashed at rest —
+  // and the response says so through `previousLinkRevoked` rather than leaving the screen to assume.
+  app.post<{ Params: { id: string }; Body: { email?: boolean } }>('/members/invites/:id/reissue', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    const reissued = await reissueInvite(req.db, req.params.id)
+    if (!reissued) return reply.code(404).send({ error: 'invite not found or not pending' })
+
+    const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
+    const inviteUrl = `${scheme}://${req.headers.host}/invite?token=${reissued.token}`
+
+    let emailed = false
+    if (req.body?.email === true && reissued.email) {
+      try {
+        const { resolveTenantEmailDriver } = await import('@wikistead/hooks')
+        await resolveTenantEmailDriver({ tenantId: req.tenant.id, plan: req.tenant.plan }, req.server.email).send({
+          to: reissued.email,
+          subject: `You're invited to ${req.tenant.slug} on ${productName()}`,
+          text: `You've been invited to join ${req.tenant.slug}. Open this link to accept:\n\n${inviteUrl}`,
+          html: `<p>You've been invited to join <strong>${req.tenant.slug}</strong> on ${productName()}.</p><p><a href="${inviteUrl}">Accept your invitation</a></p>`,
+        })
+        emailed = true
+        await req.db.sql`UPDATE invites SET last_emailed_at = now() WHERE id = ${req.params.id}`
+      } catch (err) {
+        req.log.warn({ err }, 'invite re-send failed — the new link is still valid')
+      }
+    }
+    // The ledger keeps this apart from `invite.created`: no new invitation exists, and no seat moved.
+    // Reading a re-issue as a creation would make a tenant look like it invited the same person twice.
+    await req.db.tx(async (tx) => auditIfEntitled(tx, req.tenant, {
+      actor: `user:${req.user.sub}`, action: 'invite.reissued', target: `invite:${req.params.id}`,
+    })).catch((err: unknown) => req.log.warn({ err }, 'invite reissue audit failed'))
+    emit({ type: 'invite.reissued', tenantId: req.tenant.id, actorId: req.user.sub, emailed })
+    return reply.code(200).send({ inviteUrl, emailed, previousLinkRevoked: true, expiresAt: reissued.expiresAt })
   })
 
   app.delete<{ Params: { id: string } }>('/members/invites/:id', async (req, reply) => {

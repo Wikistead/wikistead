@@ -29,6 +29,9 @@ export interface Invite {
   invited_by: string;
   expires_at: string;
   created_at: string;
+  /** #638: when this invitation was last mailed, or null if it has only ever existed on screen.
+   *  Sending is best-effort, so "invited" and "reached" are different facts and the list says which. */
+  last_emailed_at?: string | null;
 }
 
 /** #623: one page of members, plus the cursor for the next. `q` is a SERVER query — see MembersPage. */
@@ -47,6 +50,18 @@ export async function listInvites(token: string): Promise<Invite[]> {
 }
 export async function createInvite(token: string, body: { email: string; role: "admin" | "member"; roleId?: string | null }): Promise<{ inviteUrl: string; emailed: boolean }> {
   return (await apiFetch<{ inviteUrl: string; emailed: boolean }>("/members/invites", token, { method: "POST", body: JSON.stringify(body) }))!;
+}
+/** #638: hand a pending invitation over again.
+ *
+ *  A RE-ISSUE, not a re-display: the token is stored hashed, so nothing can show the old link again. The
+ *  previous one stops working, which is why the response says so and the screen has to repeat it. Passing
+ *  `email` also mails the new link — the same act, a second delivery, and the link still comes back
+ *  because sending is best-effort and an admin whose mail fails silently still needs their copy. */
+export async function reissueInvite(token: string, id: string, opts: { email?: boolean } = {}): Promise<{ inviteUrl: string; emailed: boolean; previousLinkRevoked: boolean }> {
+  return (await apiFetch<{ inviteUrl: string; emailed: boolean; previousLinkRevoked: boolean }>(
+    `/members/invites/${encodeURIComponent(id)}/reissue`, token,
+    { method: "POST", body: JSON.stringify({ email: opts.email === true }) },
+  ))!;
 }
 export async function revokeInvite(token: string, id: string): Promise<void> {
   await apiFetch(`/members/invites/${encodeURIComponent(id)}`, token, { method: "DELETE" });
