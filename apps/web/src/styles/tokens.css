@@ -771,6 +771,15 @@ body {
   animation: enter var(--dur-base) var(--ease-out);
 }
 
+/* #630 and the same pair on the way out. This node is reused rather than unmounted, so the host
+   marks it closed and hides it a beat later — without this it disappeared on the tick its grace expired
+   while the Radix tooltip beside it faded, which is the two-products difference this ticket removes. */
+.wks-tip[data-state="closed"] {
+  --tw-exit-opacity: 0;
+  --tw-exit-scale: 0.95;
+  animation: exit var(--dur-base) var(--ease-out);
+}
+
 /* #525/ host-rendered diagram states. The renderer is a ~1.4s round trip to the operator's
    endpoint, so say "rendering" instead of leaving the raw source looking broken; and when the endpoint
    reports the DIAGRAM is invalid (422) say so above the source the author can fix — the mermaid parity

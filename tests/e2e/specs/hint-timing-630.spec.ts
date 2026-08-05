@@ -49,6 +49,90 @@ async function graceOf(page: Page, hover: () => Promise<void>): Promise<number |
   return Math.round(end - start);
 }
 
+// #630 (review rejection): …and they must LEAVE the same way, not merely wait the same time.
+//
+// The grace and the exit are two different things and the previous round only unified the first: all
+// three panels waited ~170ms, then the Radix one faded out over another 180ms while the hand-placed two
+// blinked off the instant the timer fired. That is the same "two products" the ticket set out to remove,
+// moved from the arrival to the departure.
+//
+// Sampled rather than measured at one instant, because an exit animation is a window: the panel is gone
+// by the time a single late read happens, and a single early read catches the enter animation still
+// named on the element. Poll from the moment the pointer leaves and keep every name seen.
+async function namesWhileClosing(page: Page, hover: () => Promise<void>): Promise<string[] | null> {
+  await page.mouse.move(NEUTRAL.x, NEUTRAL.y);
+  await sleep(400);
+  await hover();
+  const opened = await page.waitForFunction(
+    `(() => { const el = ${VISIBLE}[0]; return el ? Number(getComputedStyle(el).opacity) >= 1 : false })()`,
+    undefined, { timeout: 6_000 }).catch(() => null);
+  if (!opened) return null;
+
+  await page.mouse.move(NEUTRAL.x, NEUTRAL.y, { steps: 6 });
+  const seen = await page.evaluate(async (visibleExpr) => {
+    const names = new Set<string>();
+    const deadline = performance.now() + 4_000;
+    // eslint-disable-next-line no-constant-condition
+    while (performance.now() < deadline) {
+      const els = eval(visibleExpr) as HTMLElement[];
+      if (!els.length) break;
+      for (const el of els) {
+        // the animation runs on the panel's BOX, not on the content inside it — a child keeps its own
+        // `opacity: 1` however faded its parent is, and its `animationName` is `none`. The first version
+        // of this sampler read the inner `[data-role-panel]` div and saw nothing on either mechanism,
+        // which is the same box-versus-content confusion recorded on the grace measurement.
+        const box = (el.closest("[data-slot=tooltip-content]") ?? el.closest("[role=tooltip]") ?? el) as HTMLElement;
+        const cs = getComputedStyle(box);
+        if (Number(cs.opacity) < 1) names.add(cs.animationName);
+      }
+      await new Promise((r) => setTimeout(r, 8));
+    }
+    return [...names];
+  }, VISIBLE);
+  return seen;
+}
+
+test("#630: every floating explanation leaves the same way, not just after the same wait", async ({ page }) => {
+  test.setTimeout(180_000);
+  await openDemo(page);
+
+  await page.goto("/admin/roles");
+  await page.waitForSelector("[class*=cursor-help]", { timeout: 15_000 });
+  await sleep(600);
+  const radix = await namesWhileClosing(page, async () => {
+    const t = page.locator("css=[class*=cursor-help]").first();
+    const b = (await t.boundingBox())!;
+    await page.mouse.move(b.x - 20, b.y + b.height / 2);
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
+  });
+
+  await page.goto("/admin/members");
+  await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 15_000 });
+  await sleep(600);
+  const hand = await namesWhileClosing(page, async () => {
+    const t = page.getByTestId("member-role-select").first();
+    const b = (await t.boundingBox())!;
+    await page.mouse.move(b.x - 20, b.y + b.height / 2);
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
+  });
+
+  // both mechanisms were reached — the premise every pin on this family has needed
+  expect(radix, "the Radix panel opened and closed").not.toBeNull();
+  expect(hand, "the hand-placed hint opened and closed").not.toBeNull();
+
+  // What disqualifies a panel is fading with the ENTER animation still named on it, or with none at all:
+  // both mean nothing was authored for the way out and the browser is simply removing the node.
+  for (const [name, seen] of [["Radix", radix!], ["the hand-placed hint", hand!]] as const) {
+    const exits = seen.filter((n) => n !== "enter" && n !== "none" && n !== "");
+    expect(exits.length, `${name} animates on the way out — names seen while it faded: ${JSON.stringify(seen)}`)
+      .toBeGreaterThan(0);
+  }
+  // …and it is the SAME exit, which is what "one behaviour" means
+  expect(new Set([...radix!, ...hand!].filter((n) => n !== "enter" && n !== "none" && n !== "")).size,
+    `the two mechanisms run different exits: Radix ${JSON.stringify(radix)} / hand-placed ${JSON.stringify(hand)}`)
+    .toBe(1);
+});
+
 test("#630: every floating explanation waits the same beat before it closes", async ({ page }) => {
   test.setTimeout(180_000);
   await openDemo(page);

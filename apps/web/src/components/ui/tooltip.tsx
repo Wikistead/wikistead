@@ -14,6 +14,13 @@ import { PANEL_EDGE } from "@/ui/panel-placement"
 // instant on purpose-driven hover, slow enough not to flash while the pointer crosses a toolbar.
 export const TOOLTIP_DELAY_MS = 180
 
+// …and the wait on the way out, for the same reason: `hint-panel` re-exports it as
+// `HINT_CLOSE_GRACE_MS`, which is the name the rest of the app knows it by. It sits HERE rather than
+// there because `hint-panel` already reads the open delay from this module, and having this file read
+// the grace back from it would be a cycle — evaluated in the wrong order, one of the two constants is
+// undefined at module load.
+export const TOOLTIP_CLOSE_GRACE_MS = 160
+
 function TooltipProvider({
   delayDuration = TOOLTIP_DELAY_MS,
   ...props
@@ -30,8 +37,33 @@ function TooltipProvider({
   )
 }
 
-function TooltipRoot({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+// #630 (review rejection, second finding): the closing GRACE lives here too.
+//
+// The earlier round read the three implementations as agreeing on it — Radix ~182ms against the
+// hand-placed ~172. They were not the same number: Radix's was its exit animation with no grace behind
+// it, and the hand-placed panels' was a grace with no exit in front of it. Two different behaviours
+// summing to the same total. Giving the hand-placed panels their exit made that visible immediately
+// (340 against 180), which is the one useful thing about a pin that measures the whole span.
+//
+// So the grace is handed to this side as well: leaving waits, then the exit runs, on all four surfaces.
+// It is what lets a pointer cross the gap between a trigger and the panel it raised — #603's walk — and
+// re-entering inside the grace cancels the close rather than queuing a second one.
+function TooltipRoot({ open, onOpenChange, ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+  const [shown, setShown] = React.useState(false)
+  const closing = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  React.useEffect(() => () => { if (closing.current) clearTimeout(closing.current) }, [])
+
+  // a caller that drives `open` itself keeps doing so — this only supplies the behaviour for the
+  // uncontrolled case, which is every tooltip in the product today
+  const controlled = open !== undefined
+  const change = (next: boolean) => {
+    onOpenChange?.(next)
+    if (controlled) return
+    if (closing.current) { clearTimeout(closing.current); closing.current = null }
+    if (next) setShown(true)
+    else closing.current = setTimeout(() => { closing.current = null; setShown(false) }, TOOLTIP_CLOSE_GRACE_MS)
+  }
+  return <TooltipPrimitive.Root data-slot="tooltip" open={controlled ? open : shown} onOpenChange={change} {...props} />
 }
 
 function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {

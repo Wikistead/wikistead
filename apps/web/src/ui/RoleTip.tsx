@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "../components/ui/tooltip";
 import { effectiveCaps } from "../settings/role-nouns";
+import { graced } from "./use-hint-presence";
 
 // #586 / ADR-203 §2: a role name says what it lets someone do, without leaving the screen.
 //
@@ -47,6 +48,8 @@ export function RoleTip({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (closing.current) clearTimeout(closing.current); }, []);
   const anchor = useRef<HTMLSpanElement>(null);
   // #578 bounce ③: a row whose role is CHANGED in place wraps a Select, not a badge. Same tooltip, same
   // origin colour, but the control inside owns the focus stop and the click — taking either would make
@@ -64,7 +67,11 @@ export function RoleTip({
   return (
     <Tooltip
       open={open}
-      onOpenChange={setOpen}
+      // #630 this one is CONTROLLED (a tap toggles it, see the note at the top), so the closing
+      // grace `TooltipRoot` supplies for the uncontrolled case never reached it — measured, this panel
+      // left after 234ms while the hand-placed ones took 397. `graced` runs the same wait before the
+      // close, and cancels it if the pointer comes back, so all four surfaces leave the same way.
+      onOpenChange={graced(setOpen, closing)}
       // #582 ① made this panel opt OUT of the animation, to match the five surfaces that had
       // none. #630 reverses that: the ruling picks the app's ordinary tooltip as what everything
       // matches, so this one keeps the default and the hand-placed panels gained the same entrance.
