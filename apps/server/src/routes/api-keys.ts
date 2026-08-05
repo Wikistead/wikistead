@@ -21,9 +21,13 @@ export type ApiScope = 'read' | 'write'
 interface ApiKeyRow {
   id: string; tenant_id: string; owner_user_id: string; name: string
   key_prefix: string; scope: string | null; created_at: Date; last_used_at: Date | null; revoked_at: Date | null
+  expires_at?: Date | null
 }
 export interface ApiKeySummary {
   id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: Date; lastUsedAt: Date | null
+  // #628 / ADR-215 §1: when this key stops working on its own. NULL = never — the state every key
+  // issued before this feature is in, and the one a caller gets by not asking for a lifetime.
+  expiresAt?: Date | null
   // #495 / ADR-182 (Q1): the ADMIN list discloses WHO owns each key so an admin can revoke a specific
   // member's key. Present only on the admin view (GET /api-keys); the self view (/api-keys/mine) omits
   // them. ownerName follows #486 (override ?? display_name; null → null, never an email fallback). The
@@ -33,6 +37,33 @@ export interface ApiKeySummary {
 
 // The tenant policy cap on what scope keys may be issued with (admin-set). NULL =
 // 'write' (no cap). A key's scope may never EXCEED this.
+// #628 / ADR-215 §1: the tenant's ceiling on how long a key may live, in days. NULL = no ceiling, which
+// is what every tenant starts with — the migration adds a column and nothing else, so no existing key
+// and no existing tenant changes behaviour.
+export async function getApiKeyMaxAgeDays(db: TenantDb): Promise<number | null> {
+  const [row] = await db.sql<{ api_key_max_age_days: number | null }[]>`
+    SELECT api_key_max_age_days FROM tenant_settings LIMIT 1
+  `
+  return row?.api_key_max_age_days ?? null
+}
+
+export async function setApiKeyMaxAgeDays(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { tenantId: string; userId: string; maxAgeDays: number | null },
+): Promise<void> {
+  await requireTenantAdmin(fga, args.userId, args.tenantId)
+  const d = args.maxAgeDays
+  if (d !== null && (!Number.isInteger(d) || d < 1 || d > 3650)) {
+    throw Object.assign(new Error('max age must be between 1 and 3650 days, or null for no ceiling'), { statusCode: 400, code: 'invalid_max_age' })
+  }
+  await db.sql`
+    INSERT INTO tenant_settings (tenant_id, api_key_max_age_days, updated_at)
+    VALUES (${args.tenantId}, ${d}, now())
+    ON CONFLICT (tenant_id) DO UPDATE SET api_key_max_age_days = ${d}, updated_at = now()
+  `
+}
+
 export async function getApiKeyMaxScope(db: TenantDb): Promise<ApiScope> {
   const [row] = await db.sql<{ api_key_max_scope: string | null }[]>`
     SELECT api_key_max_scope FROM tenant_settings LIMIT 1
@@ -75,7 +106,7 @@ export interface ApiKeyCreated extends ApiKeySummary {
 // Which plans get apiAccess is a business placeholder; self-host (UNLIMITED) is always on.
 export async function createApiKey(
   db: TenantDb,
-  args: { tenantId: string; plan: string; ownerUserId: string; name: string; scope?: ApiScope },
+  args: { tenantId: string; plan: string; ownerUserId: string; name: string; scope?: ApiScope; expiresInDays?: number | null },
 ): Promise<ApiKeyCreated> {
   if (!resolveEntitlements(args.plan).apiAccess) {
     throw entitlementDenied('api', 'API keys are not available on this plan') // 403 api_not_entitled + upgrade
@@ -85,6 +116,17 @@ export async function createApiKey(
   if (scope === 'write' && (await getApiKeyMaxScope(db)) === 'read') {
     throw Object.assign(new Error('this tenant allows read-only API keys only'), { statusCode: 403, code: 'scope_capped' })
   }
+  // #628 / ADR-215 §1: the lifetime, capped by the tenant's ceiling. Asking for longer than the ceiling
+  // is refused rather than quietly shortened — a caller who asked for a year and got a week would go on
+  // believing they had a year, and find out when the automation stopped.
+  const ceiling = await getApiKeyMaxAgeDays(db)
+  const days = args.expiresInDays ?? null
+  if (days !== null && (!Number.isInteger(days) || days < 1)) {
+    throw Object.assign(new Error('expiresInDays must be a positive whole number of days'), { statusCode: 400, code: 'invalid_expiry' })
+  }
+  if (ceiling !== null && (days === null || days > ceiling)) {
+    throw Object.assign(new Error(`this tenant caps API key lifetime at ${ceiling} days`), { statusCode: 403, code: 'expiry_capped' })
+  }
   const prefix    = randomBytes(6).toString('base64url')   // exactly 8 chars (6 bytes → base64url)
   const secret    = randomBytes(24).toString('base64url')  // exactly 32 chars (24 bytes → base64url)
   const plaintext = `wks_${prefix}_${secret}`
@@ -92,11 +134,12 @@ export async function createApiKey(
   const keyHash   = createHash('sha256').update(plaintext).digest('hex')
 
   const [row] = await db.sql<ApiKeyRow[]>`
-    INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash, scope)
-    VALUES (${args.tenantId}, ${args.ownerUserId}, ${args.name}, ${keyPrefix}, ${keyHash}, ${scope})
-    RETURNING id, tenant_id, owner_user_id, name, key_prefix, scope, created_at, last_used_at, revoked_at
+    INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash, scope, expires_at)
+    VALUES (${args.tenantId}, ${args.ownerUserId}, ${args.name}, ${keyPrefix}, ${keyHash}, ${scope},
+            ${days === null ? null : new Date(Date.now() + days * 86_400_000)})
+    RETURNING id, tenant_id, owner_user_id, name, key_prefix, scope, created_at, last_used_at, revoked_at, expires_at
   `
-  const result: ApiKeyCreated = { id: row.id, name: row.name, keyPrefix: row.key_prefix, scope, createdAt: row.created_at, lastUsedAt: null, plaintext }
+  const result: ApiKeyCreated = { id: row.id, name: row.name, keyPrefix: row.key_prefix, scope, createdAt: row.created_at, lastUsedAt: null, expiresAt: row.expires_at ?? null, plaintext }
   emit({ type: 'api_key.created', tenantId: args.tenantId, keyId: row.id, actorId: args.ownerUserId })
   return result
 }
@@ -114,11 +157,11 @@ export async function listApiKeys(db: TenantDb, args: { ownerUserId?: string } =
   // the self view keeps its minimal columns. Both stay RLS-tenant-bound.
   const rows = owner
     ? await db.sql<ApiKeyRow[]>`
-        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id
+        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at
         FROM api_keys WHERE revoked_at IS NULL AND owner_user_id = ${owner}
         ORDER BY created_at DESC`
     : await db.sql<ApiKeyRow[]>`
-        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id
+        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at
         FROM api_keys WHERE revoked_at IS NULL
         ORDER BY created_at DESC`
   // #495 / ADR-182 (Q1): resolve owner names on the ADMIN view only — the canonical #486 helper on the
@@ -128,7 +171,7 @@ export async function listApiKeys(db: TenantDb, args: { ownerUserId?: string } =
   return rows.map(r => ({
     id: r.id, name: r.name, keyPrefix: r.key_prefix,
     scope: r.scope === 'read' ? 'read' : 'write',
-    createdAt: r.created_at, lastUsedAt: r.last_used_at,
+    createdAt: r.created_at, lastUsedAt: r.last_used_at, expiresAt: r.expires_at ?? null,
     ...(owner ? {} : { ownerUserId: r.owner_user_id, ownerName: names.get(r.owner_user_id)?.displayName ?? null }),
   }))
 }
@@ -199,7 +242,7 @@ export async function revokeApiKeyAsAdmin(
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function apiKeysPlugin(app: FastifyInstance) {
-  app.post<{ Body: { name: string; scope?: ApiScope } }>('/api-keys', async (req, reply) => {
+  app.post<{ Body: { name: string; scope?: ApiScope; expiresInDays?: number | null } }>('/api-keys', async (req, reply) => {
     // #496 / ADR-181: ONE capability check is the gate — no settings read, no branching. The relation's
     // `or admin` arm covers what `admins_only` used to mean, the `tenant#member` userset covers `members`,
     // and a custom tenant role covers "only these people". The console hiding the button is a convenience;
@@ -214,6 +257,7 @@ export async function apiKeysPlugin(app: FastifyInstance) {
       ownerUserId: req.user.sub,
       name: req.body.name,
       scope: req.body?.scope,
+      expiresInDays: req.body?.expiresInDays ?? null,
     })
     return reply.code(201).send(created)
   })
@@ -251,10 +295,10 @@ export async function apiKeysPlugin(app: FastifyInstance) {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     // #496 / ADR-181: `issuePolicy` is gone with the enum — who may issue is configured on the Roles
     // tab now (the member toggle / a tenant role capability). Only the scope cap lives here.
-    return { maxScope: await getApiKeyMaxScope(req.db) }
+    return { maxScope: await getApiKeyMaxScope(req.db), maxAgeDays: await getApiKeyMaxAgeDays(req.db) }
   })
 
-  app.patch<{ Body: { maxScope?: ApiScope } }>('/admin/api-policy', async (req, reply) => {
+  app.patch<{ Body: { maxScope?: ApiScope; maxAgeDays?: number | null } }>('/admin/api-policy', async (req, reply) => {
     // Admin-gate the request itself, not only each setter: an empty body would otherwise call no
     // setter and hand a non-admin a 204, which reads like success on an admin route.
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
@@ -262,6 +306,12 @@ export async function apiKeysPlugin(app: FastifyInstance) {
     // each other with a stale copy of the other's value.
     if (req.body?.maxScope !== undefined) {
       await setApiKeyMaxScope(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, maxScope: req.body.maxScope })
+    }
+    // #628 / ADR-215 §1: `null` is a value here, not an omission — it is how a tenant REMOVES the
+    // ceiling. `undefined` (the field absent) leaves it alone, which is what lets the two switches on
+    // this panel be sent independently.
+    if (req.body?.maxAgeDays !== undefined) {
+      await setApiKeyMaxAgeDays(req.db, app.fga, { tenantId: req.tenant.id, userId: req.user.sub, maxAgeDays: req.body.maxAgeDays })
     }
     return reply.code(204).send()
   })
