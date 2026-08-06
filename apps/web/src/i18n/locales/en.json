@@ -39,7 +39,6 @@
     "off": "OFF",
     "yes": "Yes",
     "no": "No",
-    "edit": "Edit",
     "confirm": "Confirm",
     "memberSearch": "Search members…",
     "granteeSearch": "Search members or groups…",
@@ -58,7 +57,6 @@
   "toc": {
     "copyAnchor": "Copy link to heading",
     "title": "On this page",
-    "empty": "No headings yet",
     "toggle": "Table of contents"
   },
   "collab": {
@@ -134,15 +132,10 @@
     "spaceCreateDenied": "You do not have permission to create spaces."
   },
   "theme": {
-    "label": "Theme",
-    "light": "Light",
-    "dark": "Dark",
-    "system": "System"
+    "label": "Theme"
   },
   "language": {
-    "label": "Language",
-    "en": "English",
-    "ja": "日本語"
+    "label": "Language"
   },
   "nav": {
     "toggleSidebar": "Toggle sidebar",
@@ -171,10 +164,6 @@
     "activityLess": "Less",
     "activityMore": "More",
     "activityAria": "Your activity heatmap. {{count}} contributions in the last year",
-    "activityNone": "No activity on {{date}}",
-    "activityCount": "{{count}} on {{date}}",
-    "activityCount_one": "{{count}} on {{date}}",
-    "activityCount_other": "{{count}} on {{date}}",
     "profileHint": "How collaborators see you across the workspace.",
     "editorHint": "How the editor behaves for you: keymap, startup mode, fonts, and shortcuts.",
     "displayName": "Display name",
@@ -287,8 +276,7 @@
     "shrinkHint": "Reject a publish whose new text is smaller than this fraction of the published text (0–1, e.g. 0.2 = under 20%). Leave blank to turn off.",
     "off": "Off",
     "wordsLabel": "Banned words",
-    "wordsHint": "One per line. A publish is rejected only when a listed word is newly added. Leave blank to turn off.",
-    "saved": "Saved"
+    "wordsHint": "One per line. A publish is rejected only when a listed word is newly added. Leave blank to turn off."
   },
   "spaceModeration": {
     "abuseTitle": "Space moderation policy",
@@ -373,9 +361,7 @@
     "revokeConfirm": "Revoke the API key \"{{name}}\"? It never authenticates again.",
     "expiry": "Expires",
     "expiryNever": "Never expires",
-    "expiryDays": "In {{count}} days",
-    "expiryLabel": "Expires {{when}}",
-    "expiryNone": "No expiry"
+    "expiryDays": "In {{count}} days"
   },
   "adminAuth": {
     "title": "Authentication",
@@ -475,7 +461,6 @@
     "pages": "Pages",
     "analytics": "Analytics",
     "trash": "Trash",
-    "theme": "Theme",
     "nameLabel": "Space name",
     "iconLabel": "Space icon",
     "iconHint": "Upload an image, or leave it empty to show an auto-generated initials chip from the name.",
@@ -565,14 +550,7 @@
   "spaceMembers": {
     "title": "Members & permissions",
     "body": "Grant members access to this space. Access flows to every published page in it.",
-    "customRolesTitle": "Custom roles",
-    "customRolesBody": "Custom roles assigned in this space. Roles are defined in tenant settings → Roles, and assigned from the picker above. Capabilities apply across the space.",
-    "customRolesEmpty": "No custom roles assigned in this space yet.",
-    "selectRole": "Select a role",
     "capability": "Permission",
-    "view": "Can view",
-    "edit": "Can edit",
-    "moderate": "Moderator",
     "manage": "Can manage",
     "add": "Add",
     "revoke": "Revoke",
@@ -584,13 +562,10 @@
     "granteeType": "Grantee",
     "typeUser": "Member",
     "typeGroup": "Group",
-    "selectGroup": "Select a group",
-    "noGroups": "No groups (imported from your IdP)",
     "commentAudienceTitle": "Commenting",
     "commentAudienceBody": "These toggles open commenting to everyone who can view, and to guests holding a link. To let one person comment, assign a custom role that includes comment, or grant comment on a single page from that page’s permissions. The two are independent: turning the toggles off does not remove a comment grant.",
     "commentGuests": "Link guests (view or edit) may comment",
     "commentMembers": "Anyone who can view (public) may comment",
-    "mappingBody": "Confer a role on everyone in an IdP group, for THIS space. Membership resolves live from your identity provider; nobody is added or billed.",
     "commentMembersOn": "ON: view-only members can comment too (in addition to explicit comment grants).",
     "commentMembersOff": "OFF: view-only members cannot comment (explicit comment grants still can; managers and moderators always can).",
     "commentGuestsOn": "ON: every guest who can see the page can comment (view and edit links alike).",
@@ -655,7 +630,6 @@
     "recoveryBody": "For members named as exceptions while SSO is required. Sign in with your email address and password."
   },
   "share": {
-    "opening": "Opening shared page…",
     "invalid": "This share link is invalid, expired, or revoked.",
     "spaceTitle": "Shared space",
     "treeError": "Couldn't load the page list.",
@@ -679,8 +653,6 @@
     "publish": "Publish",
     "vimMode": "Vim mode",
     "vimTouchDisabled": "Vim is unavailable on touch devices (soft-keyboard input)",
-    "split": "Vim mode",
-    "single": "Normal mode",
     "comments": "Comments",
     "draft": "Draft",
     "unpublishedChanges": "Unpublished changes",
@@ -714,14 +686,12 @@
     "movePinUp": "Move pin up",
     "movePinDown": "Move pin down",
     "noSpacesMatch": "No spaces match.",
-    "moreSpacesHint": "{{count}} more. Search to filter",
     "showAllSpaces": "Show all spaces ({{count}} more)",
     "newSpace": "New space",
     "renameSpace": "Rename space",
     "spaceName": "Space name",
     "createSpace": "Create",
     "spaceSettings": "Space settings",
-    "deleteSpace": "Delete space",
     "deletePageConfirm": "Move page \"{{name}}\" and its sub-pages to the trash? You can restore it from the space settings for 30 days.",
     "newPage": "New page",
     "addSubpage": "Add sub-page",
@@ -782,11 +752,7 @@
     "body": "Grant members access to this page. An unpublished page is private to the people listed here.",
     "member": "Member",
     "relation": "Relation",
-    "view": "view",
     "comment": "comment",
-    "edit": "edit",
-    "manage": "manage",
-    "moderate": "moderate",
     "add": "Add",
     "revoke": "Revoke",
     "empty": "No direct grants yet.",
@@ -795,7 +761,6 @@
     "typeUser": "Member",
     "typeGroup": "Group",
     "selectGroup": "Select a group",
-    "noGroups": "No groups (imported from your IdP)",
     "restrictTitle": "Restricted (denied even if a space viewer)",
     "restrictAdd": "Restrict",
     "unrestrict": "Remove restriction",
@@ -806,7 +771,6 @@
     "freezeHint": "Lock the page body against edits. Managers can always edit; commenting stays open for viewers.",
     "freezeGuestsHint": "Frozen for share-link guests. Members and managers can still edit.",
     "freezeFullHint": "Frozen for everyone below manager. Members and guests are read-only; managers can always edit.",
-    "freezeOff": "Off",
     "freezeGuests": "Guests only",
     "freezeFull": "Everyone",
     "publicTitle": "Make this page public",
@@ -833,11 +797,6 @@
     "tabRestrictions": "Restrictions",
     "tabAdvanced": "Advanced"
   },
-  "spaceTheme": {
-    "title": "Theme",
-    "body": "Choose an accent colour for this space. It overrides the workspace accent for everyone viewing this space; light/dark is each person's own choice.",
-    "inherit": "Inherit"
-  },
   "branding": {
     "upgradeTitle": "Branding is a Pro feature",
     "upgradeBody": "Upgrade your plan to set a custom accent and logo."
@@ -860,23 +819,7 @@
     "logoSize": "Image too large (max 512 KB)."
   },
   "accent": {
-    "label": "Accent colour",
-    "blue": "Blue",
-    "indigo": "Indigo",
-    "violet": "Violet",
-    "green": "Green",
-    "teal": "Teal",
-    "amber": "Amber",
-    "rose": "Rose",
-    "slate": "Slate"
-  },
-  "comments": {
-    "title": "Comments",
-    "addOnSelection": "Comment on selection",
-    "placeholder": "Add a comment…",
-    "pagePlaceholder": "Comment on the page…",
-    "submit": "Comment",
-    "empty": "No comments yet."
+    "label": "Accent colour"
   },
   "history": {
     "title": "History",
@@ -889,7 +832,6 @@
     "diffTitle": "Changes since {{when}}",
     "diffHint": "Compared with the current published version.",
     "noChanges": "No changes since this version.",
-    "backToList": "Back to history",
     "revertRun": "Revert run",
     "revertRunLabel": "This guest's edits: {{author}} ({{count}} revisions)",
     "revertRunConfirmTitle": "Revert this guest's edits",
@@ -916,11 +858,8 @@
   },
   "lpToolbar": {
     "bold": "Bold",
-    "heading": "Heading",
-    "bulletList": "Bullet list",
     "inlineCode": "Inline code",
-    "link": "Link",
-    "image": "Insert image"
+    "link": "Link"
   },
   "palette": {
     "italic": "Italic",
@@ -956,7 +895,6 @@
     "link": "Link",
     "insertTemplate": "Insert template",
     "pageLink": "Page link",
-    "backlinks": "Backlinks (pages that link here)",
     "highlight": "Highlight",
     "tagged": "Tagged pages (dynamic list)",
     "children": "Child pages (dynamic list)",
@@ -986,12 +924,12 @@
     "clearFormat": "Clear formatting",
     "insert": "Insert…",
     "copyBlockRef": "Copy block reference",
-    "alignLeft": "Align left",
-    "alignCenter": "Align center",
-    "alignRight": "Align right",
     "codeSettingsWithKey": "Code block settings (Ctrl+Alt+↵)",
     "codeSettings": "Code block settings",
-    "copyBlock": "Copy block"
+    "copyBlock": "Copy block",
+    "alignLeft": "Align left",
+    "alignCenter": "Align center",
+    "alignRight": "Align right"
   },
   "members": {
     "title": "Members",
@@ -1022,9 +960,6 @@
     "filterLabel": "Filter members",
     "seatLimit": "Seat limit reached. Upgrade to invite more members.",
     "inviteFailed": "Could not create the invite.",
-    "pendingRow": "{{email}} · {{role}}",
-    "inviteRoleOptional": "Custom role (optional)",
-    "inviteRoleNone": "No custom role",
     "inviteAlreadyMember": "That address already belongs to a member. Inviting them again would create a second account.",
     "enablePassword": "Add a password entrance",
     "reissuePassword": "Issue a password reset link",
@@ -1041,8 +976,6 @@
     },
     "lastAdmin": "Cannot change the last admin.",
     "lastDirectAdmin": "A group holds admin, but group-granted admins can be lost by an IdP-side change. At least one directly granted admin must remain.",
-    "groupRolesMark_one": "1 role from a group",
-    "groupRolesMark_other": "{{count}} roles from groups",
     "groupRolesTitle": "From groups",
     "removePassword": "Remove password entrance",
     "removePasswordConfirm": "Remove the password entrance for {{name}}? Their sessions end with it, and they sign in through the identity provider from now on.",
@@ -1080,7 +1013,6 @@
     "notFound": "Page not found"
   },
   "backlinks": {
-    "title": "Backlinks",
     "untitled": "(untitled)",
     "empty": "No pages link here yet."
   },
@@ -1125,10 +1057,6 @@
     },
     "needsPublish": "Publish the page first to save it as a template."
   },
-  "delete": {
-    "backlinkWarning_one": "This page is referenced by {{count}} page. Deleting it will leave a broken link.",
-    "backlinkWarning_other": "This page is referenced by {{count}} pages. Deleting it will leave broken links."
-  },
   "macro": {
     "placeholder": "{{name}}: {{detail}}",
     "placeholderEmpty": "Empty {{name}}: {{detail}}",
@@ -1165,17 +1093,6 @@
     "empty": "No templates yet. Save a page as a template from its ⋯ menu.",
     "selectPrompt": "Select a template to preview it.",
     "use": "Use template"
-  },
-  "layoutEdit": {
-    "tabN": "Tab {{n}}",
-    "columnN": "Column {{n}}",
-    "addTab": "Add tab",
-    "addColumn": "Add column",
-    "removeTab": "Remove tab",
-    "removeColumn": "Remove column",
-    "tabName": "Tab name",
-    "moveLeft": "Move left",
-    "moveRight": "Move right"
   },
   "adminWebhooks": {
     "title": "Webhooks",
@@ -1337,7 +1254,6 @@
     "title": "Roles",
     "rename": "Rename role",
     "lastCap": "A role keeps at least one capability.",
-    "builtInTitle": "Built-in roles",
     "builtIn": "built-in",
     "customEmpty": "No custom roles yet.",
     "create": "New role",
@@ -1346,17 +1262,7 @@
     "namePlaceholder": "e.g. recycler",
     "conflict": "Name in use, or the role still has assignments. Unassign first.",
     "notEntitled": "Custom roles are an Enterprise feature on this plan.",
-    "assignTitle": "Assignments",
-    "assignBody": "Assign a custom role to a member on a space. The capabilities become real grants; unassigning removes exactly what the role added.",
-    "roleLabel": "Role",
     "rolePlaceholder": "Select role",
-    "spaceLabel": "Space",
-    "spacePlaceholder": "Select space",
-    "subLabel": "Member",
-    "subPlaceholder": "Search by name",
-    "assign": "Assign",
-    "unassign": "Unassign",
-    "assignEmpty": "No assignments on this space.",
     "cap": {
       "view": "View",
       "comment": "Comment",
@@ -1379,17 +1285,11 @@
     "deleteConfirm": "Delete the role \"{{name}}\"? Its assignments are removed with it. This cannot be undone.",
     "tenantAssignTitle": "Tenant role assignments",
     "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
-    "memberLabel": "Member",
-    "mixedScopeHint": "A role is either a space/page role or a tenant role. Uncheck one side to save.",
     "sectionTenant": "Tenant",
     "sectionResource": "Space / Page",
     "memberDefaultsTitle": "Member defaults",
     "memberDefaultsBody": "What every member of this tenant can do, whatever role they hold.",
-    "groupAssignTitle": "Group roles",
     "groupAssignBody": "Assign a tenant role to an IdP group. Everyone in the group gets it, and loses it when they leave the group.",
-    "groupAssignEmpty": "No group holds a tenant role.",
-    "groupLabel": "Group",
-    "groupPlaceholder": "Select a group…",
     "scopeQuestion": "Which kind of role is this?",
     "impliedBy": "(included in {{cap}})",
     "editCaps": "Edit capabilities"
