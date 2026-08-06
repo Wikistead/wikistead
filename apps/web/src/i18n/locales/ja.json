@@ -150,7 +150,8 @@
     "theme": "テーマ",
     "data": "データ",
     "notifications": "通知",
-    "apiKeys": "API キー"
+    "apiKeys": "API キー",
+    "security": "セキュリティ"
   },
   "account": {
     "activityTitle": "アクティビティ",
@@ -236,7 +237,25 @@
     "vimMono": "vim のときは等幅",
     "vimMonoHint": "vim は桁で揃えるため、ON の間はエディタが等幅の書体になります。vim のキー操作だけを使い、書体は読みやすいままにしたい場合は OFF にしてください。",
     "vimMonoOn": "ON",
-    "vimMonoOff": "OFF"
+    "vimMonoOff": "OFF",
+    "factorsTitle": "2 段階のサインイン",
+    "factorsDesc": "認証アプリが、パスワードのあとに 6 桁のコードを聞きます。",
+    "factorsHint": "スマホのアプリに追加してから、コードを入れて動くことを確かめます。",
+    "factorAdd": "認証アプリを追加",
+    "factorLabel": "名前",
+    "factorLabelPlaceholder": "仕事用のスマホ",
+    "factorUnnamed": "認証アプリ",
+    "factorScanHint": "このキーを認証アプリに入力し、表示されたコードを入れてください。",
+    "factorSecretNote": "このキーは一度しか表示されません。いま入力してください。",
+    "factorCode": "コード",
+    "factorCodePlaceholder": "123456",
+    "factorConfirm": "確認",
+    "factorAdded": "認証アプリを追加しました。",
+    "factorRemove": "外す",
+    "factorRemoved": "認証アプリを外しました。",
+    "factorCodeWrong": "コードが一致しませんでした。",
+    "factorStartFailed": "開始できませんでした。もう一度お試しください。",
+    "factorLimit": "すでに上限まで登録されています。1 つ外してから追加してください。"
   },
   "settings": {
     "back": "アプリに戻る",

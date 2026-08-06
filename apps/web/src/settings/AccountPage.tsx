@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound, Zap, Code, Eye, BookOpen, MonitorSmartphone } from "lucide-react"; // #493: display-mode glyphs
+import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound, ShieldCheck, Zap, Code, Eye, BookOpen, MonitorSmartphone } from "lucide-react"; // #493: display-mode glyphs
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
@@ -20,6 +20,7 @@ import { notify } from "../ui/toast";
 import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemoveAvatar, useMyApiKeys, useMyApiKeyPolicy, useMyActivity } from "../data/queries";
 import { ActivityHeatmap } from "./ActivityHeatmap"; // #483 / ADR-180: personal contribution heatmap
 import { ApiKeysPanel } from "./ApiKeysPanel"; // #462: shared with the admin console's key list
+import { SecondFactorPanel } from "./SecondFactorPanel"; // #653 / ADR-219
 import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
 import { EditorOnboardingDialog } from "../app/EditorOnboarding"; // #289: "redo the setup questions"
 import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
@@ -47,6 +48,9 @@ function useAccountTabs(): SettingsTab[] {
     // request. The tenant can still restrict issuing to admins; then this tab lists what they hold
     // and offers no form.
     { key: "api-keys", label: t("accountNav.apiKeys"), to: "/settings/account/api-keys", icon: KeyRound },
+    // #653 / ADR-219: the member's own second factors. Beside the API keys rather than inside Profile,
+    // because both are credentials this account holds — a name and an avatar are not.
+    { key: "security", label: t("accountNav.security"), to: "/settings/account/security", icon: ShieldCheck },
     { key: "data", label: t("accountNav.data"), to: "/settings/account/data", icon: HardDriveDownload },
   ];
 }
@@ -537,6 +541,17 @@ function ThemeTab() {
 // #462: a member's own API keys — issue, see, revoke. What is offered here depends on the tenant's
 // issuing policy, but only for the affordance: the server refuses an unauthorised issue regardless
 // of what this screen shows, and the list it renders is owner-scoped server-side.
+// #653 / ADR-219: two-step sign-in. Its own tab rather than a block inside Profile, because a factor is
+// a credential and the profile is a name and a picture.
+function SecurityTab() {
+  const { t } = useTranslation();
+  return (
+    <SettingsPage title={t("account.factorsTitle")} description={t("account.factorsDesc")}>
+      <SecondFactorPanel />
+    </SettingsPage>
+  );
+}
+
 function ApiKeysTab() {
   const { t } = useTranslation();
   const policy = useMyApiKeyPolicy();
@@ -616,6 +631,7 @@ export function AccountRoot() {
         <Route path="theme" element={<ThemeTab />} />
         <Route path="notifications" element={<NotificationsTab />} />
         <Route path="api-keys" element={<ApiKeysTab />} />
+        <Route path="security" element={<SecurityTab />} />
         <Route path="data" element={<DataTab />} />
         <Route path="*" element={<Navigate to="/settings/account" replace />} />
       </Route>

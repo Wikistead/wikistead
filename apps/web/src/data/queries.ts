@@ -2327,3 +2327,56 @@ export function useReorderConnections() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-connections"] }),
   });
 }
+
+// ── second factors (#653 / ADR-219) ──────────────────────────────────────────────────────────────
+// Self-scope, like the rest of /me: the server keys everything to the session's own subject, so no id
+// of another member is addressable from here.
+export interface MemberFactor {
+  id: string;
+  kind: "totp" | "passkey";
+  label: string;
+  createdAt: string;
+  confirmedAt: string | null;
+  lastUsedAt: string | null;
+}
+export function useMyFactors() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["me", "factors"],
+    queryFn: () => apiFetch<{ factors: MemberFactor[] }>("/me/factors", token).then((r) => r?.factors ?? []),
+  });
+}
+/** Begin an enrolment. The secret comes back ONCE, in this response — there is no way to ask again. */
+export function useStartTotpEnrolment() {
+  const { token } = useSession();
+  return useMutation({
+    mutationFn: (args: { label?: string }) =>
+      apiFetch<{ factorId: string; secret: string; uri: string }>("/me/factors/totp", token, {
+        method: "POST", body: JSON.stringify(args),
+      }),
+  });
+}
+export function useConfirmFactor() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { factorId: string; code: string }) =>
+      apiFetch<{ confirmed: boolean }>(`/me/factors/${encodeURIComponent(args.factorId)}/confirm`, token, {
+        method: "POST", body: JSON.stringify({ code: args.code }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "factors"] }),
+  });
+}
+/** #660: removing one needs a current code FROM it — possession, not a password (ADR-219 §8). */
+export function useRemoveFactor() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { factorId: string; code?: string }) =>
+      apiFetch<void>(
+        `/me/factors/${encodeURIComponent(args.factorId)}${args.code ? `?code=${encodeURIComponent(args.code)}` : ""}`,
+        token, { method: "DELETE" },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "factors"] }),
+  });
+}

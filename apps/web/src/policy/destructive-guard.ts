@@ -39,6 +39,13 @@ export const ALLOWLIST: Record<string, string> = {
   // holds again and the exemption STAYS. Nothing here deletes more than one re-grantable row.
   "PermissionsDialog.tsx:revoke": "a page grant is re-grantable in one step (#504 exception; premise re-verified by #596)",
   "SpaceMembersTab.tsx:revoke": "a space grant is re-grantable in one step (#504 exception; premise re-verified by #596)",
+  // #653/#660: removing a second factor is NOT here because it is reversible — re-enrolling means
+  // going back to the phone. It is here because it carries a STRONGER gate than the ConfirmDialog this
+  // policy asks for: the server refuses unless a current code from that authenticator is presented
+  // (ADR-219 §8), so the reader must fetch the thing they are giving up before it goes. A confirm
+  // dialog on top would ask them to agree to what they have just proved.
+  // dash-ok: the guard's own rationale, read in test output
+  "SecondFactorPanel.tsx:remove": "removal requires a current code FROM the factor (ADR-219 §8): a stronger gate than a confirm, not an exemption from one",
   // dash-ok: these strings are the guard's own rationale, read in test output, never on a screen
   "SpaceMembersTab.tsx:revokeCapsForRow": "pure helper — computes which caps a row's revoke covers, deletes nothing itself (#553)",
   "SpaceMembersTab.tsx:unassignRole": "a space role assignment is re-assignable in one step (#485/#504 exception)",
