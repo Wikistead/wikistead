@@ -43,12 +43,17 @@ describe("#632: a container macro's left bar is a strip, not a border", () => {
   // that is the same blindness caught in the original sweep. The bend itself is measured in the
   // real DOM by `straight-left-bar-632.spec.ts`, which renders every macro this query returns.
 
-  it("…and the bar it draws instead is an absolutely-positioned strip", () => {
+  it("…and the bar it draws instead is painted as part of the box", () => {
     const sources = [css(), baseTheme()].join("\n");
-    // The strip is what makes the previous assertion mean something: without it, deleting the border
-    // would satisfy that test by removing the bar entirely, which the ruling explicitly refused
-    expect(sources, "the callout strip").toMatch(/cm-lp-callout::before/);
-    expect(sources, "positioned so the frame's radius cannot bend it").toMatch(/position:\s*"?absolute/);
+    // The bar still existing is what makes the previous assertion mean something: without it, deleting
+    // the border would satisfy that test by removing the bar entirely, which the ruling refused outright
+    //
+    // #632 it is a BACKGROUND BAND now, not an absolutely-positioned child. A child could not be
+    // clipped by the box's corners — given `border-radius: inherit` its radius was clamped to half its
+    // own 3px width, so the left corner came out squarer than the right. A background is clipped by the
+    // radius whatever it says, so both corners take the same arc.
+    expect(sources, "a hard-edged band at the left of the box").toMatch(/linear-gradient\(\s*to right/);
+    expect(sources, "…sized from the shared token, not from a literal").toMatch(/to right[^;]*--wks-bar-w/);
   });
 
   it("the space the border occupied is given back, so nothing inside moves", () => {
@@ -66,7 +71,7 @@ describe("#632: a container macro's left bar is a strip, not a border", () => {
     // apart by their declarations picks up whichever one it reaches first. What is worth asserting from
     // the source is the pairing itself — a file that draws a bar also reserves room for it.
     for (const [where, text] of [["the shared stylesheet", css()], ["the editor's baseTheme", baseTheme()]] as const) {
-      expect(text, `${where}: the strip's width comes from the token`).toMatch(/width:\s*"?var\(--wks-bar-w/);
+      expect(text, `${where}: the bar's width comes from the token`).toMatch(/--wks-bar-w[^;]*\)|width:\s*"?var\(--wks-bar-w/);
       expect(text, `${where}: and the padding beside it reserves that same width`).toMatch(/padding[^;{}]*--wks-bar-w/);
     }
   });
