@@ -62,7 +62,11 @@ function confinementTip(k: ApiKeySummary, t: TFunction): string {
     const hidden = k.spaces.count - named.length;
     lines.push([...named, hidden > 0 ? t("adminApi.confinedHidden", { count: hidden }) : null].filter(Boolean).join(", "));
   }
-  if (k.capabilities) lines.push(k.capabilities.map((c) => t(`adminApi.cap_${c}`, { defaultValue: c })).join(", "));
+  // #662: the LIST had the same defect as the form, under a different invented namespace —
+  // `adminApi.cap_*` exists in neither locale either, and `defaultValue: c` painted the wire verb. Both
+  // now read the one vocabulary that exists. Found by the scan, not by looking: the form was the
+  // reported symptom and this line renders the same capabilities two panels down.
+  if (k.capabilities) lines.push(k.capabilities.map((c) => t(`adminRoles.cap.${c}`)).join(", "));
   return lines.join(" · ");
 }
 
@@ -202,7 +206,13 @@ export function ApiKeysPanel({
                     <label key={c} className="flex items-center gap-1 text-sm" data-testid="api-key-cap-option">
                       <input type="checkbox" checked={pickedCaps.includes(c)}
                         onChange={() => toggle(pickedCaps, setPickedCaps, c)} data-testid={`api-key-cap-${c}`} />
-                      <span>{t(`roleCaps.${c}`, c)}</span>
+                      {/* #662: this read `roleCaps.${c}`, a namespace that exists in neither locale, and
+                          the fallback `c` painted the raw wire verb — so a Japanese reader was offered
+                          "view edit publish". The vocabulary already exists at `adminRoles.cap.*`, on the
+                          surface that EDITS a role definition, which is what choosing what a key may do
+                          is. No fallback: a missing key should render its own path and be seen, not
+                          impersonate a translation. */}
+                      <span>{t(`adminRoles.cap.${c}`)}</span>
                     </label>
                   ))}
                 </div>
