@@ -21,6 +21,7 @@ import { storePasskey } from '../auth/passkeys.js'
 import { generateTotpSecret } from '../auth/totp.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import type { Tenant } from '@wikistead/types'
+import { onDomainEvent } from '@wikistead/events' // #676 ⑤ / #228: the event is additive
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const T = 'tenant_dev'
@@ -268,5 +269,64 @@ describe('#676: the floor holds on the way out too', () => {
     const [row] = await admin<{ id: string }[]>`
       SELECT id FROM member_factors WHERE member_sub = ${a} AND kind = 'totp'`
     expect(await wouldStrandTenant(db, { memberSub: a, factorId: row!.id, host: HOST })).toBe(false)
+  }, 180_000)
+})
+
+// #676 ruling ⑤ / #228: the event GREW. It did not change shape.
+//
+// `kinds` is the new fact; `required` stays, derived, so a subscriber written against the boolean —
+// one that has never heard of a stance — keeps working. That is what "additive" means, and it is the
+// half of the ruling that has a consumer outside this repository.
+//
+// Measured because nothing did: pinning `required` to `false` at the emit site left twenty-four
+// assertions green. A subscriber that pages somebody when a tenant drops its second-factor
+// requirement would have gone quiet, and the suite would have said nothing.
+describe('#676 ⑤: the event grew rather than changed', () => {
+  const emitted: { required: boolean; kinds?: string }[] = []
+  let off: (() => void) | undefined
+
+  beforeAll(() => {
+    off = onDomainEvent((e) => {
+      if (e.type === 'tenant.second_factor_policy_changed' && e.tenantId === T) {
+        emitted.push({ required: e.required, kinds: (e as { kinds?: string }).kinds })
+      }
+    })
+  })
+  afterAll(() => off?.())
+
+  // The floor refuses a stance nobody can satisfy, and this file's `beforeEach` clears the factors —
+  // so each case here seats an admin who can. Without it the switch answers 409 and the emissions
+  // being measured never happen, which reads as "the event is missing" rather than "the floor held".
+  let n = 0
+  beforeEach(async () => {
+    // A FRESH admin per case. The file-level `beforeEach` clears the factors, and re-enrolling for the
+    // same sub each time stacks rows on one member rather than restoring the precondition.
+    await giveTotp(await seatAdmin(`evt${n++}`))
+  })
+
+  it('carries both the new value and the old one, and they agree', async () => {
+    // Every stance, because the derivation is where a boolean and a set can disagree: `off` is the
+    // only one that means "not required", and the other three all mean "required" for a subscriber
+    // that only knows the boolean.
+    for (const [stance, required] of [['any', true], ['totp', true], ['off', false]] as const) {
+      emitted.length = 0
+      expect((await setStance(stance)).statusCode, `${stance} was refused`).toBe(204)
+      const last = emitted.at(-1)
+      expect(last, `${stance} emitted nothing`).toBeTruthy()
+      expect(last!.kinds, `${stance}: the new fact is missing`).toBe(stance)
+      expect(last!.required, `${stance}: an old subscriber would read this as ${last!.required}`).toBe(required)
+    }
+  }, 180_000)
+
+  it('…including the narrowing that has no boolean of its own', async () => {
+    // `any → totp` changes nothing a boolean can express: it was required before and it is required
+    // now. The point of `kinds` is that the change is visible at all — and `required` must not flicker
+    // while it happens, or a subscriber sees a policy being turned off and on.
+    await setStance('any')
+    emitted.length = 0
+    expect((await setStance('totp')).statusCode).toBe(204)
+    expect(emitted.map((e) => e.required), 'the requirement appeared to drop during a narrowing')
+      .not.toContain(false)
+    expect(emitted.at(-1)?.kinds).toBe('totp')
   }, 180_000)
 })
