@@ -234,6 +234,72 @@ export async function passkeyAuthenticationOptions(
 export const counterAcceptable = (stored: number, next: number): boolean => next >= stored
 
 /**
+ * The options for proving possession of ONE passkey — the one being given up (#666 / ADR-219 §8).
+ *
+ * `allowCredentials` names that credential alone. Offering the member's others would let a key they
+ * still hold authorise the removal of a different one, which is the cross-factor substitution the
+ * per-factor rule exists to prevent.
+ *
+ * The challenge goes in the same place a registration's does, keyed by (tenant, subject): this path
+ * has a session, so there is a subject to key by, and a second store would be a second lifetime to
+ * reason about.
+ */
+export async function passkeyRemovalOptions(
+  deps: { db: TenantDb; valkey: IORedis },
+  args: { tenantId: string; memberSub: string; factorId: string; host: string | undefined },
+): Promise<{ challenge: string; rpId: string; allowCredentials: { id: string; transports: string[] }[] } | null> {
+  const stored = (await passkeysFor(deps.db, args.memberSub)).find((p) => p.factorId === args.factorId)
+  if (!stored) return null
+  const options = await generateAuthenticationOptions({
+    rpID: rpIdFromHost(args.host),
+    allowCredentials: [{ id: stored.credentialId, transports: stored.transports as never }],
+    userVerification: 'preferred',
+  })
+  await putChallenge(deps.valkey, args.tenantId, args.memberSub, options.challenge)
+  return {
+    challenge: options.challenge,
+    rpId: options.rpId ?? rpIdFromHost(args.host),
+    allowCredentials: [{ id: stored.credentialId, transports: stored.transports }],
+  }
+}
+
+/**
+ * Verify an assertion offered as proof for removing `factorId`.
+ *
+ * The credential the assertion names must BE that factor's. A member holding two keys must not be able
+ * to sign with one and remove the other: possession is proof of the thing being given up, not of
+ * something else they happen to have.
+ */
+export async function verifyPasskeyForRemoval(
+  deps: { db: TenantDb; valkey: IORedis },
+  args: { tenantId: string; memberSub: string; factorId: string; host: string | undefined; response: AuthenticationResponseJSON },
+): Promise<boolean> {
+  // Spent whatever happens: a failed attempt must not leave a live challenge for a better-formed try.
+  const expectedChallenge = await takeChallenge(deps.valkey, args.tenantId, args.memberSub)
+  if (!expectedChallenge) return false
+  const stored = (await passkeysFor(deps.db, args.memberSub)).find((p) => p.factorId === args.factorId)
+  if (!stored || stored.credentialId !== args.response?.id) return false
+  try {
+    const verified = await verifyAuthenticationResponse({
+      response: args.response,
+      expectedChallenge,
+      expectedOrigin: originFromHost(args.host),
+      expectedRPID: rpIdFromHost(args.host),
+      credential: {
+        id: stored.credentialId,
+        publicKey: Buffer.from(stored.publicKey, 'base64url'),
+        counter: stored.signCount,
+        transports: stored.transports as never,
+      },
+      requireUserVerification: false,
+    })
+    return verified.verified === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Check an assertion. Returns the factor it proved, or null.
  *
  * The SIGN COUNTER is the one interesting rule. A counter that goes BACKWARDS is the signal the spec

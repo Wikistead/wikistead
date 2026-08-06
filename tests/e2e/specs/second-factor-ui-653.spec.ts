@@ -238,3 +238,31 @@ test("#652: the last admin is told WHY, not that their code was wrong", async ({
   // …and the factor is still there, which is the point of the refusal
   await expect(row).toBeVisible();
 });
+
+test("#666: a passkey is given up with the key, not with a code", async ({ page }) => {
+  test.setTimeout(120_000);
+  // The row used to offer a code box for every factor, and a passkey holder had nothing to type into
+  // it — the server refused unconditionally, so the key was permanent. What the screen must do is ask
+  // for the proof THAT factor has.
+  await page.route("**/api/me/factors", (r) => r.request().method() === "GET"
+    ? r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ factors: [
+        { id: "f-key", kind: "passkey", label: "yubikey", createdAt: new Date().toISOString(),
+          confirmedAt: new Date().toISOString(), lastUsedAt: null },
+        { id: "f-app", kind: "totp", label: "phone", createdAt: new Date().toISOString(),
+          confirmedAt: new Date().toISOString(), lastUsedAt: null },
+      ] }) })
+    : r.fallback());
+
+  await gotoSecurity(page);
+  const key = page.locator('[data-testid="factor-row"]').filter({ hasText: "yubikey" }).first();
+  const app_ = page.locator('[data-testid="factor-row"]').filter({ hasText: "phone" }).first();
+  await expect(key, "both kinds are listed").toBeVisible({ timeout: 15_000 });
+
+  // the passkey asks for the KEY…
+  await expect(key.getByTestId("factor-remove-passkey"), "a key confirms itself").toBeVisible();
+  await expect(key.getByTestId("factor-remove"), "…and is not offered a code box").toHaveCount(0);
+
+  // …and the TOTP still asks for a code, which is the other half of "the proof belongs to the factor"
+  await expect(app_.getByTestId("factor-remove"), "the app still asks for a code").toBeVisible();
+  await expect(app_.getByTestId("factor-remove-passkey")).toHaveCount(0);
+});

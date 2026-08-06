@@ -2331,6 +2331,8 @@ export function useReorderConnections() {
 // ── second factors (#653 / ADR-219) ──────────────────────────────────────────────────────────────
 // Self-scope, like the rest of /me: the server keys everything to the session's own subject, so no id
 // of another member is addressable from here.
+type PublicKeyCredentialRequestOptionsJSON = Record<string, unknown>;
+
 export interface MemberFactor {
   id: string;
   kind: "totp" | "passkey";
@@ -2367,14 +2369,28 @@ export function useConfirmFactor() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "factors"] }),
   });
 }
+/** #666: the challenge for proving possession of the PASSKEY being given up. */
+export function useRemovePasskeyChallenge() {
+  const { token } = useSession();
+  return useMutation({
+    mutationFn: (factorId: string) =>
+      apiFetch<{ options: PublicKeyCredentialRequestOptionsJSON }>(
+        `/me/factors/${encodeURIComponent(factorId)}/remove-challenge`, token, { method: "POST", body: "{}" }),
+  });
+}
+
 /** #660: removing one needs a current code FROM it — possession, not a password (ADR-219 §8). */
 export function useRemoveFactor() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { factorId: string; code?: string }) =>
+    // #666: a passkey proves itself with an assertion, a TOTP with a code — the proof belongs to the
+    // FACTOR. One kind must not authorise the other's removal, or taking one lets somebody strip both.
+    mutationFn: (args: { factorId: string; code?: string; passkey?: unknown }) =>
       apiFetch<void>(
-        `/me/factors/${encodeURIComponent(args.factorId)}${args.code ? `?code=${encodeURIComponent(args.code)}` : ""}`,
+        `/me/factors/${encodeURIComponent(args.factorId)}${
+          args.passkey ? `?passkey=${encodeURIComponent(JSON.stringify(args.passkey))}`
+          : args.code ? `?code=${encodeURIComponent(args.code)}` : ""}`,
         token, { method: "DELETE" },
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "factors"] }),

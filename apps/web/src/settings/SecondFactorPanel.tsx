@@ -8,7 +8,8 @@ import { ListRow, ListBox } from "../ui/list-rows"; // #639: the one list shape 
 import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { QrCode } from "../ui/QrCode"; // #653 (ruling): qr-creator, MIT, no dependencies
 import { notify } from "../ui/toast";
-import { useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor } from "../data/queries";
+import { useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor, useRemovePasskeyChallenge } from "../data/queries";
+import { startAuthentication } from "@simplewebauthn/browser"; // #666: the key proves itself
 import { ApiError } from "../data/apiClient";
 
 // #653 / ADR-219: a member's own second factors. SELF-SCOPE — every call is keyed to the session's
@@ -28,6 +29,7 @@ export function SecondFactorPanel() {
   const startEnrolment = useStartTotpEnrolment();
   const confirm = useConfirmFactor();
   const remove = useRemoveFactor();
+  const removeChallenge = useRemovePasskeyChallenge();
 
   const [label, setLabel] = useState("");
   const [pending, setPending] = useState<{ factorId: string; secret: string; uri: string } | null>(null);
@@ -67,6 +69,24 @@ export function SecondFactorPanel() {
       notify.success(t("account.factorAdded"));
     } catch {
       notify.error(t("account.factorCodeWrong"));
+    }
+  };
+
+  /** Give up a passkey by signing with it (#666). */
+  const onRemovePasskey = async (id: string) => {
+    try {
+      const issued = await removeChallenge.mutateAsync(id);
+      // `apiFetch` types every body as nullable — a 204 carries none. Here a null body is the server
+      // declining to issue one, which is the same "that did not work" as a refused assertion.
+      if (!issued) throw new Error("no challenge");
+      const { options } = issued;
+      // The browser refuses if the key is not present, which is exactly the proof being asked for.
+      const assertion = await startAuthentication({ optionsJSON: options as never });
+      await remove.mutateAsync({ factorId: id, passkey: assertion });
+      notify.success(t("account.factorRemoved"));
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "last_admin_factor") notify.error(t("account.factorLastAdmin"));
+      else notify.error(t("account.factorKeyFailed"));
     }
   };
 
@@ -115,7 +135,15 @@ export function SecondFactorPanel() {
                   </span>
                 )}
               </span>
-              {removing?.id === f.id ? (
+              {f.kind === "passkey" && f.confirmedAt ? (
+                // #666: a passkey has no code to type. It proves itself, which is the same rule the
+                // code is — possession of the thing being given up — in the only form this factor has.
+                <Button variant="danger" size="sm" data-testid="factor-remove-passkey"
+                  disabled={remove.isPending || removeChallenge.isPending}
+                  onClick={() => void onRemovePasskey(f.id)}>
+                  {t("account.factorRemoveWithKey")}
+                </Button>
+              ) : removing?.id === f.id ? (
                 <>
                   {/* The code is asked for HERE rather than in a dialog, because #660 wants possession
                       and the reader has to fetch it from the device they are giving up. */}
