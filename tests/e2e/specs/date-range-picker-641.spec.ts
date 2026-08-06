@@ -57,6 +57,49 @@ test("#641: the calendar is the app's, and a keyboard can reach every day", asyn
   expect(fromValue, `Enter picked the focused day (${week})`).toBe(week);
 });
 
+test("#641: a range is two clicks in one open panel", async ({ page }) => {
+  test.setTimeout(180_000);
+  // The ruling was "the first click starts, the second closes". On a device it was one click per open:
+  // picking a date changes the query key, the row of controls lived inside the loading branch, and so the
+  // calendar the reader was clicking in was unmounted underneath them. What is measured is therefore not
+  // the panel's own state machine — that was always right — but that the ROW SURVIVES a refetch.
+  await openAnalytics(page);
+  const trigger = page.locator("[data-testid$=-trigger]").first();
+  test.skip(!(await trigger.count()), "analytics is not entitled on this tenant");
+
+  // watch for the controls being torn out, for as long as the interaction lasts
+  await page.evaluate(() => {
+    (window as unknown as { __ctrlGone: number }).__ctrlGone = 0;
+    const seen = document.querySelector("[data-testid$=-controls]");
+    new MutationObserver(() => {
+      if (seen && !seen.isConnected) (window as unknown as { __ctrlGone: number }).__ctrlGone++;
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+
+  await trigger.click();
+  await expect(page.locator(PANEL)).toBeVisible({ timeout: 8_000 });
+  const days = page.locator("[data-day]");
+  const start = (await days.nth(8).getAttribute("data-day"))!;
+  const end = (await days.nth(12).getAttribute("data-day"))!;
+
+  await days.nth(8).click();
+  await sleep(1200); // long enough for the refetch that used to take the panel with it
+  await expect(page.locator(PANEL), `the panel closed after the first click of a range (${start})`)
+    .toBeVisible();
+
+  await days.nth(12).click();
+  await sleep(800);
+  await expect(page.locator(PANEL), "…and the second click closes it").toBeHidden({ timeout: 4_000 });
+
+  const [from, to] = await Promise.all([
+    page.locator("[data-testid$=-from]").first().inputValue(),
+    page.locator("[data-testid$=-to]").first().inputValue(),
+  ]);
+  expect({ from, to }, "two clicks made one range").toEqual({ from: start, to: end });
+  expect(await page.evaluate(() => (window as unknown as { __ctrlGone: number }).__ctrlGone),
+    "the controls were never unmounted while the reader was using them").toBe(0);
+});
+
 test("#641: the month and weekday names follow the app's language", async ({ page }) => {
   test.setTimeout(180_000);
   // Not "a name appears" — that is true of any language and stays true if the formatter is deleted and
