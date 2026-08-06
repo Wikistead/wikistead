@@ -21,6 +21,13 @@ export interface SelectOption {
    * by the caller so this component stays about selects.
    */
   hint?: React.ReactNode;
+  /**
+   * #643: a placeholder that cannot be chosen. The group row used to REVOKE a grant when the reader
+   * picked "choose a role" — a destructive act sitting in the list of ordinary choices, wearing a label
+   * that only invites. The revocation moved to the row's ⋯ menu, and the placeholder went back to
+   * meaning what it says, which it can only do if it is unselectable.
+   */
+  disabled?: boolean;
 }
 
 // DS select wrapper over shadcn/Radix Select. Drop-in for the common single-value
@@ -235,6 +242,7 @@ export function Select({
             // the highlight watcher reads this rather than the Radix value, which carries the empty
             // sentinel and would not match the caller's own vocabulary
             data-option-value={o.value}
+            disabled={o.disabled}
           >
             {o.label}
           </SelectItem>
