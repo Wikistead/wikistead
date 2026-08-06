@@ -115,3 +115,38 @@ describe('#677: a door is found by what makes it a door', () => {
     expect(stale, `exempted routes that no longer exist: ${stale.join(', ')}`).toEqual([])
   })
 })
+
+// #678: and every door that MINTS one applies the cap.
+//
+// The ticket said it plainly: the session-less doors had no cap, no discard and no rate limit, and
+// adding a passkey version in the same shape would make the hole two holes instead of one. Both
+// interstitial doors now share `guardEnrolment` and the two settings doors check inline. Four doors,
+// one rule, and nothing watching whether a FIFTH joins them — a member holding a receipt could open
+// unconfirmed rows without limit, which is the cap's whole subject.
+const MINTS_A_FACTOR = ['startTotpEnrolment', 'startPasskeyEnrolment']
+
+/** How a handler applies it: the constant itself, or the helper that reads it. */
+const CAPS = /MAX_FACTORS_PER_MEMBER|guardEnrolment\(/
+
+describe('#678: a door that mints a factor applies the cap', () => {
+  it('finds the minting doors', () => {
+    // The premise, again: renamed primitives would leave nothing to check and the case below true.
+    const minting = sources.flatMap((s) => handlersIn(s.src)
+      .filter((h) => MINTS_A_FACTOR.some((p) => h.body.includes(`${p}(`)))
+      .map((h) => h.name))
+    expect(minting.length, `nothing calls ${MINTS_A_FACTOR.join(' or ')}`).toBeGreaterThanOrEqual(4)
+  })
+
+  it('every one of them applies it', () => {
+    const uncapped: string[] = []
+    for (const { file, src } of sources) {
+      for (const h of handlersIn(src)) {
+        const mints = MINTS_A_FACTOR.filter((p) => h.body.includes(`${p}(`))
+        if (!mints.length) continue
+        if (CAPS.test(h.body)) continue
+        uncapped.push(`${file} ${h.name} calls ${mints.join(', ')} with no cap`)
+      }
+    }
+    expect(uncapped, `these can open rows without limit:\n  ${uncapped.join('\n  ')}`).toEqual([])
+  })
+})
