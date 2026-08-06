@@ -25,6 +25,8 @@ const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isol
 const WEB = { host: 'dev.localhost', 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
 const PASSWORD = 'correct horse battery staple 652'
 
+/** What `local_login_enabled` was before this file touched it, so afterAll can put it back. */
+let priorLocalLogin = false
 let app: FastifyInstance
 let db: TenantDb
 const subs: string[] = []
@@ -70,15 +72,29 @@ const setStance = (on: boolean) =>
 beforeAll(async () => {
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
+  const [pref] = await adminPool<{ local_login_enabled: boolean }[]>`
+    SELECT local_login_enabled FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`
+  priorLocalLogin = pref?.local_login_enabled === true
 }, 180_000)
 
 beforeEach(async () => {
   await setStance(false)
-  await app.valkey.flushdb().catch(() => {}) // the limiter is shared and this file trips it
+  // The limiter keys THIS file trips, and only those. `flushdb` was here first and it is far too
+  // broad: the Valkey is shared with every other suite in the run, so wiping it takes their sessions
+  // and their counters with it.
+  for (const sub of ['dev-user', ...subs]) {
+    await app.valkey.del(`authlocal:id:${sub}`).catch(() => {})
+  }
+  await app.valkey.del(`authlocal:ip:127.0.0.1`).catch(() => {})
 })
 
 afterAll(async () => {
-  await setStance(false)
+  // Put the STANCE back and stop forcing the password door open. Leaving `local_login_enabled = TRUE`
+  // behind changed what other suites measured — #537's lockout guard counts the effective methods, and
+  // it went red on a fixture this file had edited.
+  await adminPool`
+    UPDATE tenant_login_prefs SET second_factor_required = FALSE, local_login_enabled = ${priorLocalLogin}
+    WHERE tenant_id = ${TENANT}`.catch(() => {})
   for (const sub of subs) {
     await adminPool`DELETE FROM member_factors WHERE member_sub = ${sub}`.catch(() => {})
     await adminPool`DELETE FROM local_credentials WHERE member_sub = ${sub}`.catch(() => {})

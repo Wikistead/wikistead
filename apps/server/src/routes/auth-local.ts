@@ -19,6 +19,7 @@ import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
 import { FACTOR_COOKIE, createFactorSession, readFactorSession, destroyFactorSession, factorCookieOptions } from '../auth/factor-session.js' // #652 / ADR-219 §6
+import { passkeyAuthenticationOptions, verifyPasskeyAssertion } from '../auth/passkeys.js' // #665
 import { secondFactorRequired } from '../auth/factor-policy.js'
 import { hasConfirmedFactor, totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
 import { verifyTotp, generateTotpSecret, totpUri } from '../auth/totp.js'
@@ -514,7 +515,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
   // PUBLIC, like the sign-in above — the caller has no session yet, which is the whole point. What
   // stands in for one is the factor cookie, and it is the only thing here that says who this is: the
   // request body carries a code and nothing else, so no `sub` is addressable from outside.
-  app.post<{ Body: { code?: string; returnTo?: string } }>('/auth/local/factor', { config: { public: true } }, async (req, reply) => {
+  app.post<{ Body: { code?: string; passkey?: unknown; returnTo?: string } }>('/auth/local/factor', { config: { public: true } }, async (req, reply) => {
     if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
       return reply.code(403).send({ error: 'cross-origin sign-in refused' })
     }
@@ -533,9 +534,38 @@ export async function authLocalPlugin(app: FastifyInstance) {
       return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
     }
 
+    // #665: a passkey answers the same question a code does, so it arrives at the same door. The
+    // session's `door` stays `local+factor` either way — WHICH kind of factor was presented is a fact
+    // about the row, not about the entrance, and adding a value would grow both #655's table and #652's
+    // decision for nothing.
+    if (req.body?.passkey) {
+      const proved = await verifyPasskeyAssertion(
+        { db: req.db, valkey: app.valkey },
+        { memberSub: pending.sub, host: req.headers.host, receiptSid: fsid!, response: req.body.passkey as never },
+      )
+      if (!proved) {
+        await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+        await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
+        emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'local', reason: 'invalid credentials' })
+        return reply.code(401).send({ error: 'that key did not work', code: 'passkey_invalid' })
+      }
+      const sid = await establishMemberSession(
+        { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
+        req.tenant, { sub: pending.sub }, { localIdentity: true, door: 'local+factor' },
+      )
+      await destroyFactorSession(app.valkey, fsid)
+      reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
+      await app.valkey.del(idKey).catch(() => {})
+      await markFactorUsed(req.db, proved.factorId)
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: pending.sub, method: 'local' })
+      return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
+    }
+
     const code = typeof req.body?.code === 'string' ? req.body.code : ''
     const rows = await req.db.sql<{ id: string }[]>`
-      SELECT id FROM member_factors WHERE member_sub = ${pending.sub} AND confirmed_at IS NOT NULL`
+      SELECT id FROM member_factors
+      WHERE member_sub = ${pending.sub} AND kind = 'totp' AND confirmed_at IS NOT NULL`
     let matched: { id: string; counter: number } | null = null
     for (const r of rows) {
       const secret = await totpSecretFor(req.db, r.id)
@@ -575,6 +605,22 @@ export async function authLocalPlugin(app: FastifyInstance) {
     reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
     emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: pending.sub, method: 'local' })
     return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
+  })
+
+  /**
+   * The options for a passkey assertion, for somebody holding a receipt (#665).
+   *
+   * A GET-shaped question answered by POST because it WRITES: issuing options banks a challenge, and a
+   * challenge minted by a cacheable GET is one a proxy can hand to the next caller.
+   */
+  app.post('/auth/local/factor/passkey/options', { config: { public: true } }, async (req, reply) => {
+    const held = await receipt(req as never)
+    if (!held) return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
+    const options = await passkeyAuthenticationOptions(
+      { db: req.db, valkey: app.valkey },
+      { memberSub: held.pending.sub, host: req.headers.host, receiptSid: held.sid! },
+    )
+    return reply.code(200).send({ options })
   })
 
   // ── enrolling FROM the interstitial (ADR-219 §6's circle) ───────────────────────────────────────
