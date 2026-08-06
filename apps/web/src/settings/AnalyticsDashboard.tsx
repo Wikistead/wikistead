@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { SpaceAnalytics, SpaceAnalyticsParams } from "../data/queries";
 import { PageViewsChart } from "../app/PageViewsChart";
 import { Input } from "../ui/Input";
+import { DateRangePicker } from "../ui/DateRangePicker"; // #641 / ADR-218
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 
@@ -50,14 +51,14 @@ export function AnalyticsDashboard({
         <>
           {/* Controls: period, viewer-class filter, sort, unique. */}
           <div className="mb-4 flex flex-wrap items-end gap-3" data-testid={`${testId}-controls`}>
-            <label className="flex flex-col gap-1 text-xs text-fg-dim">
-              {t("spaceAnalytics.from")}
-              <Input inputSize="sm" type="date" value={params.from ?? ""} onChange={(e) => onParams({ from: e.target.value || undefined })} data-testid={`${testId}-from`} aria-label={t("spaceAnalytics.from")} />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-fg-dim">
-              {t("spaceAnalytics.to")}
-              <Input inputSize="sm" type="date" value={params.to ?? ""} onChange={(e) => onParams({ to: e.target.value || undefined })} data-testid={`${testId}-to`} aria-label={t("spaceAnalytics.to")} />
-            </label>
+            {/* #641: one range instead of two independent boxes, with the calendar this product draws
+                and the typed fields kept beside it. */}
+            <DateRangePicker
+              from={params.from}
+              to={params.to}
+              onChange={(r) => onParams(r)}
+              testId={testId}
+            />
             <label className="flex flex-col gap-1 text-xs text-fg-dim">
               {t("spaceAnalytics.viewerClass")}
               <Select size="sm" value={params.viewerClass ?? "all"} testId={`${testId}-class`} ariaLabel={t("spaceAnalytics.viewerClass")}

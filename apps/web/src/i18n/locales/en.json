@@ -87,7 +87,12 @@
     "sortLeast": "Least viewed",
     "unique": "Unique viewers",
     "uniqueCaveat": "Unique counts distinct members across the space. Guests and anonymous readers have no cross-page identity, so their figures remain a per-day session estimate, not a head-count.",
-    "pages": "Across {{n}} pages you manage"
+    "pages": "Across {{n}} pages you manage",
+    "pickRange": "Pick dates",
+    "period": "Period",
+    "prevMonth": "Previous month",
+    "nextMonth": "Next month",
+    "clearRange": "Clear"
   },
   "tenantAnalytics": {
     "title": "Workspace analytics",
