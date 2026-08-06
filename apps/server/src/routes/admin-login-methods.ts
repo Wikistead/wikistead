@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { requireTenantAdmin, requireConnectionManager, isTenantAdmin } from '@wikistead/authz'
+import { mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired } from '../auth/factor-policy.js' // #652 / ADR-219 §4
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { loginMethodCeiling, setPlatformLoginDisabled } from '../auth/login-methods.js'
@@ -39,6 +40,12 @@ export interface LoginMethodsView {
   // closing doors right now (selected && a federated way in is real); selected && !biting is the
   // LAPSE, which the screen must show as such (ADR-195 §1: never silently off, never silently open).
   ssoRequired: { selected: boolean; biting: boolean }
+  // #652 / ADR-219 §4: the SECOND-FACTOR stance. `canEnable` is the write-time precondition answered
+  // ahead of time, so the screen can say WHY the switch is unavailable instead of offering it and
+  // failing — the same courtesy `blockedByStance` pays above. `entitled` is the edition seam
+  // (`mfaPolicyEntitled`), separated from `canEnable` because "your plan does not include this" and
+  // "nobody here could satisfy it" are different problems with different fixes.
+  secondFactorRequired: { selected: boolean; canEnable: boolean; entitled: boolean }
   // #604-B: may the CALLER change the stance / platform / password selections and manage the
   // SSO exemptions? Those writes stayed on the admin tier while the read opened to
   // `manage_connections`, so the screen has to be told which of its controls belong to it.
@@ -72,6 +79,11 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
       // the server rather than guessing from a tier flag it happens to hold.
       canManageStance: await isTenantAdmin(app.fga, req.user.sub, req.tenant.id),
       ssoRequired: { selected: !!pref?.sso_required, biting: stance.biting },
+      secondFactorRequired: {
+        selected: await secondFactorRequired(req.db),
+        canEnable: (await adminWithFactorCount(req.db)) > 0,
+        entitled: mfaPolicyEntitled(req.tenant),
+      },
       methods: {
         'tenant-oidc': {
           inCeiling: ceiling.has('tenant-oidc'),
@@ -107,11 +119,43 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     }
   })
 
-  app.patch<{ Body: { platformLoginEnabled?: boolean; localLoginEnabled?: boolean; ssoRequired?: boolean } }>('/admin/login-methods', async (req, reply) => {
+  app.patch<{ Body: { platformLoginEnabled?: boolean; localLoginEnabled?: boolean; ssoRequired?: boolean; secondFactorRequired?: boolean } }>('/admin/login-methods', async (req, reply) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     // #605 / ADR-210: the STANCE switch. ON has write-time preconditions (§R5-4, own_idp_required's
     // twin); OFF is always allowed. Audited in-tx — a deliberate DECISION, not an inheritance from the
     // platform toggle (which only emits an event): turning every other door off is an authz change.
+    // #652 / ADR-219 §4: the SECOND-FACTOR stance, on the same switchboard as the others because it is
+    // the same kind of fact — what this tenant demands of the people signing in.
+    if (typeof req.body?.secondFactorRequired === 'boolean') {
+      const on = req.body.secondFactorRequired
+      // ⚠️ the edition question is `mfaPolicyEntitled` and nowhere else — see its comment. It answers
+      // CE today, which is the recommendation and ADR-210 §8's precedent; the ruling on #644 changes
+      // that one function.
+      if (on && !mfaPolicyEntitled(req.tenant)) {
+        throw Object.assign(new Error('a second-factor requirement is not available on this plan'),
+          { statusCode: 402, code: 'mfa_policy_not_entitled' })
+      }
+      if (on && (await adminWithFactorCount(req.db)) === 0) {
+        // #605's precondition, mirrored. Turning it on while nobody can satisfy it is a lock-out
+        // wearing a success response — and the person who would have to undo it is the one shut out.
+        throw Object.assign(
+          new Error('enrol a second factor on at least one admin account before requiring one — otherwise the requirement locks out the people who could turn it off.'),
+          { statusCode: 409, code: 'admin_factor_required' },
+        )
+      }
+      await req.db.tx(async (tx) => {
+        await tx`INSERT INTO tenant_login_prefs (tenant_id, second_factor_required) VALUES (${req.tenant.id}, ${on})
+                 ON CONFLICT (tenant_id) DO UPDATE SET second_factor_required = ${on}, updated_at = now()`
+        await auditIfEntitled(tx, req.tenant, {
+          actor: `user:${req.user.sub}`,
+          action: on ? 'tenant.second_factor_required_on' : 'tenant.second_factor_required_off',
+          target: `tenant:${req.tenant.id}`,
+        })
+      })
+      emit({ type: 'tenant.second_factor_policy_changed', tenantId: req.tenant.id, actorId: req.user.sub, required: on })
+      return reply.code(204).send()
+    }
+
     if (typeof req.body?.ssoRequired === 'boolean') {
       const on = req.body.ssoRequired
       if (on) {

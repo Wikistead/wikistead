@@ -7,6 +7,7 @@ import {
 } from '../auth/second-factors.js'
 import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
 import { spendTotpCounter } from '../auth/second-factors.js'
+import { secondFactorRequired, wouldStrandTenant } from '../auth/factor-policy.js' // #652: the floor
 import { productName } from '../product-name.js'
 
 // Enrolling a second factor (#657 / ADR-219 §7). SELF-SCOPE, like the rest of /me: every read and
@@ -24,11 +25,11 @@ import { productName } from '../product-name.js'
 // cannot supply, and it leaves the lost-phone case where the design already put it: an administrator
 // reset (#644).
 //
-// ⚠️ WHAT #652 MUST ADD HERE: while the tenant policy is on, the LAST admin holding a factor may not
-// remove it (ADR-219 §4 — the outbound half of #605's two-sided guard, without which the switch's own
-// precondition dies one delete later). It cannot be written now: with no policy, nobody can be locked
-// out, so the guard's counterfactual is unreachable and its pin would pass because the case cannot
-// occur. Scheduled on #660, not forgotten.
+// #652 slice 2 ADDED the floor this file used to describe as unwritable: while the tenant policy is on,
+// the LAST admin holding a factor may not remove it (ADR-219 §4 — the outbound half of #605's two-sided
+// guard, without which the switch's own precondition dies one delete later). It genuinely could not be
+// written before the policy column existed: with nothing to turn on, the guard's counterfactual was
+// unreachable and its pin would have passed because the case could not occur.
 //
 // WHO MAY ENROL: anybody with a member row, including a member who signs in through the IdP today.
 // ADR-219 §3 says a federated door is never asked for a product-side factor, which is a fact about
@@ -205,6 +206,16 @@ export async function secondFactorPlugin(app: FastifyInstance) {
     const [own] = await req.db.sql<[{ id: string; confirmed_at: Date | null }?]>`
       SELECT id, confirmed_at FROM member_factors WHERE id = ${id} AND member_sub = ${req.user.sub}`
     if (!own) return reply.code(404).send({ error: 'no such factor', code: 'factor_not_found' })
+
+    if (own.confirmed_at && await secondFactorRequired(req.db)
+        && await wouldStrandTenant(req.db, { memberSub: req.user.sub, factorId: id })) {
+      // The floor. Refused with a reason, and the reason names the two ways out — because a member who
+      // is told only "no" will try again rather than enrol a second one or turn the policy off.
+      return reply.code(409).send({
+        error: 'you are the last admin who can sign in under this tenant\'s second-factor requirement — enrol another authenticator, or turn the requirement off, before removing this one',
+        code: 'last_admin_factor',
+      })
+    }
 
     if (own.confirmed_at) {
       const secret = await totpSecretFor(req.db, id)
