@@ -7,3 +7,6 @@ export type { TupleInput } from './tuples.js'
 // #637 / ADR-216 §1: the ambient authorization scope (see scope.ts for why it is ambient).
 export { runInAuthzScope, openAuthzScope, setAuthzRestriction, currentAuthzScope, requireAuthzScope, resetAuthzScopeRequirement, authzScopeForCheck, SYSTEM_SCOPE } from './scope.js'
 export type { AuthzScope } from './scope.js'
+// #637 / ADR-216 §5, §7: the AND at the primitives — CE owns the seam and the refusal, EE the rule.
+export { registerAuthzRestrictionEvaluator, getAuthzRestrictionEvaluator, resetAuthzRestrictionEvaluator, restrictionAllows } from './restriction.js'
+export type { AuthzRestrictionEvaluator } from './restriction.js'
