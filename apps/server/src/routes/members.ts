@@ -90,10 +90,6 @@ export async function sweepMemberDirectGrants(
   // confers nothing. That is the ledger-versus-world split #596 exists to forbid, and it is where the
   // "unknown member" rows #578 had to render came from: the display was handled, the source was not.
   //
-  // Deleted by the SAME set the tuples are filtered by (`ownedSpaces` / `ownedPages`), not by a second
-  // ownership rule written beside it — one line, two consumers. RLS already scopes this connection to
-  // the tenant, so the id filter is about which OBJECTS, not which tenant.
-  //
   // `origin` is deliberately NOT consulted. ADR-183 §1 says a machine-owned row is removed where the
   // machine is, and that holds while the principal exists — a mapping re-materialises what it owns. This
   // member does not exist any more: nothing will ever re-evaluate a row keyed to their sub, so leaving
