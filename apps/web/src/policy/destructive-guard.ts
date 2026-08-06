@@ -45,6 +45,8 @@ export const ALLOWLIST: Record<string, string> = {
   // (ADR-219 §8), so the reader must fetch the thing they are giving up before it goes. A confirm
   // dialog on top would ask them to agree to what they have just proved.
   // dash-ok: the guard's own rationale, read in test output
+  "SecondFactorPanel.tsx:removeChallenge": "issues the challenge the removal is proved with (#666); it deletes nothing itself, and the removal it precedes carries the stronger gate below",
+  // dash-ok: the guard's own rationale, read in test output
   "SecondFactorPanel.tsx:remove": "removal requires a current code FROM the factor (ADR-219 §8): a stronger gate than a confirm, not an exemption from one",
   // dash-ok: these strings are the guard's own rationale, read in test output, never on a screen
   "SpaceMembersTab.tsx:revokeCapsForRow": "pure helper — computes which caps a row's revoke covers, deletes nothing itself (#553)",

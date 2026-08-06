@@ -10,6 +10,13 @@ import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
 import { spendTotpCounter } from '../auth/second-factors.js'
 import { secondFactorRequired, wouldStrandTenant } from '../auth/factor-policy.js' // #652: the floor
 import { passkeyRegistrationOptions, verifyPasskeyRegistration, storePasskey } from '../auth/passkeys.js' // #663
+import { passkeyRemovalOptions, verifyPasskeyForRemoval } from '../auth/passkeys.js' // #666
+
+/** The assertion arrives as a query string, so a malformed one is an answer rather than a 500. */
+function parseAssertion(raw: unknown): unknown {
+  if (typeof raw !== 'string') return null
+  try { return JSON.parse(raw) } catch { return null }
+}
 import { productName } from '../product-name.js'
 
 // Enrolling a second factor (#657 / ADR-219 §7). SELF-SCOPE, like the rest of /me: every read and
@@ -260,6 +267,30 @@ export async function secondFactorPlugin(app: FastifyInstance) {
   })
 
   /**
+   * The challenge for giving up a PASSKEY (#666).
+   *
+   * A POST because it WRITES — issuing options banks a challenge, and one minted by a cacheable GET is
+   * one a proxy can hand to the next caller.
+   */
+  app.post<{ Params: { id: string } }>('/me/factors/:id/remove-challenge', async (req, reply) => {
+    const [own] = await req.db.sql<[{ kind: string; confirmed_at: Date | null }?]>`
+      SELECT kind, confirmed_at FROM member_factors WHERE id = ${req.params.id} AND member_sub = ${req.user.sub}`
+    // Not yours and not existing answer the same, for the reason the delete below gives.
+    if (!own) return reply.code(404).send({ error: 'no such factor', code: 'factor_not_found' })
+    // A TOTP factor has no assertion to give. Answering 400 rather than issuing a useless challenge
+    // keeps "which proof does this factor take" a fact about the factor rather than a guess.
+    if (own.kind !== 'passkey' || !own.confirmed_at) {
+      return reply.code(400).send({ error: 'this factor is not removed with a key', code: 'factor_wrong_proof' })
+    }
+    const options = await passkeyRemovalOptions(
+      { db: req.db, valkey: app.valkey },
+      { tenantId: req.tenant.id, memberSub: req.user.sub, factorId: req.params.id, host: req.headers.host },
+    )
+    if (!options) return reply.code(404).send({ error: 'no such factor', code: 'factor_not_found' })
+    return reply.code(200).send({ options })
+  })
+
+  /**
    * Give one up. #660 — the operation #626 named as the one that must exist beside adding.
    *
    * A CONFIRMED factor needs a current code from it (see the header). A PENDING one does not: it guards
@@ -267,15 +298,15 @@ export async function secondFactorPlugin(app: FastifyInstance) {
    * member would hold a row they cannot use and cannot clear, which is a worse version of the problem
    * this route exists to fix.
    */
-  app.delete<{ Params: { id: string }; Querystring: { code?: string } }>('/me/factors/:id', async (req, reply) => {
+  app.delete<{ Params: { id: string }; Querystring: { code?: string; passkey?: string } }>('/me/factors/:id', async (req, reply) => {
     const { id } = req.params
     if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
       return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
     }
     // Scoped to the caller, and one answer for "no such factor" and "not yours": distinguishing them
     // would make this an oracle for which ids exist.
-    const [own] = await req.db.sql<[{ id: string; confirmed_at: Date | null }?]>`
-      SELECT id, confirmed_at FROM member_factors WHERE id = ${id} AND member_sub = ${req.user.sub}`
+    const [own] = await req.db.sql<[{ id: string; kind: string; confirmed_at: Date | null }?]>`
+      SELECT id, kind, confirmed_at FROM member_factors WHERE id = ${id} AND member_sub = ${req.user.sub}`
     if (!own) return reply.code(404).send({ error: 'no such factor', code: 'factor_not_found' })
 
     if (own.confirmed_at && await secondFactorRequired(req.db)
@@ -289,14 +320,26 @@ export async function secondFactorPlugin(app: FastifyInstance) {
     }
 
     if (own.confirmed_at) {
-      const secret = await totpSecretFor(req.db, id)
-      const code = typeof req.query?.code === 'string' ? req.query.code : ''
-      if (secret === null || verifyTotp(secret, code, Date.now()) === null) {
+      // #666: the proof is the FACTOR'S OWN. `totpSecretFor` answers null for a passkey, so asking for
+      // a code refused every one of them unconditionally — registered and permanent. And a TOTP code
+      // must not remove a passkey either way: somebody who took one factor would be able to strip the
+      // other, and holding two would stop meaning anything.
+      const proved = own.kind === 'passkey'
+        ? await verifyPasskeyForRemoval(
+            { db: req.db, valkey: app.valkey },
+            { tenantId: req.tenant.id, memberSub: req.user.sub, factorId: id, host: req.headers.host,
+              response: parseAssertion(req.query?.passkey) as never },
+          )
+        : await (async () => {
+            const secret = await totpSecretFor(req.db, id)
+            const code = typeof req.query?.code === 'string' ? req.query.code : ''
+            return secret !== null && verifyTotp(secret, code, Date.now()) !== null
+          })()
+      if (!proved) {
         await countFailure(app.valkey, req.tenant.id, req.user.sub)
-        return reply.code(400).send({
-          error: 'enter a current code from this authenticator to remove it',
-          code: 'factor_code_invalid',
-        })
+        return reply.code(400).send(own.kind === 'passkey'
+          ? { error: 'use this key to confirm removing it', code: 'passkey_invalid' }
+          : { error: 'enter a current code from this authenticator to remove it', code: 'factor_code_invalid' })
       }
     }
 
