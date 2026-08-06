@@ -261,8 +261,12 @@
     "factorCodeWrong": "That code did not match.",
     "factorStartFailed": "Could not start. Try again.",
     "factorLimit": "You already have the maximum number. Remove one before adding another.",
-    "factorUnfinished": "unfinished",
+    "factorUnfinished": "awaiting confirmation",
     "factorLastAdmin": "You are the last admin who can sign in under this workspace's second-factor requirement. Enrol another authenticator, or turn the requirement off, before removing this one.",
+    "factorRename": "Rename",
+    "factorRenameSave": "Save",
+    "factorRenamed": "Name changed.",
+    "factorRenameFailed": "Could not change the name.",
     "factorRemoveWithKey": "Remove with this key",
     "factorKeyFailed": "That key did not confirm it."
   },

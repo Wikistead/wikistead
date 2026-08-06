@@ -2379,6 +2379,23 @@ export function useRemovePasskeyChallenge() {
   });
 }
 
+/**
+ * #653④: rename one. NO code, unlike removal — #660 asks for possession before taking a door
+ * away, and a label touches no secret and grants nothing. Requiring the device to fix a typo would
+ * just leave the wrong name in place.
+ */
+export function useRenameFactor() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { factorId: string; label: string }) =>
+      apiFetch<void>(`/me/factors/${encodeURIComponent(args.factorId)}`, token, {
+        method: "PATCH", body: JSON.stringify({ label: args.label }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "factors"] }),
+  });
+}
+
 /** #660: removing one needs a current code FROM it — possession, not a password (ADR-219 §8). */
 export function useRemoveFactor() {
   const { token } = useSession();
