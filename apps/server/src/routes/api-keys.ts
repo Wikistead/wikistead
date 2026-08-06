@@ -127,12 +127,23 @@ export async function createApiKey(
     // the overlay, or a key issued while EE was present would widen when it is removed.
     capabilities?: readonly string[] | null
     spaces?: readonly string[] | null
+    // #667 / ADR-221: the v2 matrix. Same contract as the two above — CE stores it, EE decides what may
+    // be written. Its presence is what makes the row a v2 key, and the two vocabularies never mix
+    // (refused at the issuing route, which is where a ledger that lies gets stopped).
+    permissions?: Readonly<Record<string, string>> | null
   },
 ): Promise<ApiKeyCreated> {
   if (!resolveEntitlements(args.plan).apiAccess) {
     throw entitlementDenied('api', 'API keys are not available on this plan') // 403 api_not_entitled + upgrade
   }
-  const scope: ApiScope = args.scope === 'read' ? 'read' : 'write'
+  // #667 / ADR-221 §5: with a matrix, `scope` is DERIVED rather than asked. Every cell `read` gives a
+  // read key; one `write` cell makes it a write key. The ceiling itself stays a separate mechanism —
+  // it refuses a non-GET by HTTP method alone, without consulting any table — which is what #642 bought
+  // and what keeps an all-read key unable to write even when the route map is wrong.
+  const derived: ApiScope | undefined = args.permissions
+    ? (Object.values(args.permissions).some((a) => a === 'write') ? 'write' : 'read')
+    : undefined
+  const scope: ApiScope = derived ?? (args.scope === 'read' ? 'read' : 'write')
   // Cap: a key may never exceed the tenant policy (deny write when capped to read).
   if (scope === 'write' && (await getApiKeyMaxScope(db)) === 'read') {
     throw Object.assign(new Error('this tenant allows read-only API keys only'), { statusCode: 403, code: 'scope_capped' })
@@ -155,11 +166,14 @@ export async function createApiKey(
   const keyHash   = createHash('sha256').update(plaintext).digest('hex')
 
   const [row] = await db.sql<ApiKeyRow[]>`
-    INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash, scope, expires_at, capabilities, space_ids)
+    INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash, scope, expires_at,
+                          capabilities, space_ids, permission_model, permissions)
     VALUES (${args.tenantId}, ${args.ownerUserId}, ${args.name}, ${keyPrefix}, ${keyHash}, ${scope},
             ${days === null ? null : new Date(Date.now() + days * 86_400_000)},
             ${args.capabilities ? db.sql.array([...args.capabilities]) : null},
-            ${args.spaces ? db.sql.array([...args.spaces]) : null})
+            ${args.spaces ? db.sql.array([...args.spaces]) : null},
+            ${args.permissions ? 2 : 1},
+            ${args.permissions ? db.sql.json(args.permissions as Record<string, string>) : null})
     RETURNING id, tenant_id, owner_user_id, name, key_prefix, scope, created_at, last_used_at, revoked_at, expires_at
   `
   const result: ApiKeyCreated = { id: row.id, name: row.name, keyPrefix: row.key_prefix, scope, createdAt: row.created_at, lastUsedAt: null, expiresAt: row.expires_at ?? null, plaintext }
