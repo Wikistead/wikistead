@@ -3,6 +3,7 @@ import type { Sql } from 'postgres'
 import { requireTenantAdmin, runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
 import { resolveEntitlements } from '@wikistead/entitlements'
+import { passkeysStrandedBy } from '../auth/passkeys.js' // #664 / ADR-219 §1
 import { emit } from '@wikistead/events'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { pool } from '../db/pool.js'
@@ -29,6 +30,13 @@ export interface CustomDomainView {
   domain: string; status: string; verifiedAt: Date | null
   // What the tenant must publish in DNS to prove ownership (shown until verified).
   challengeRecord: string; challengeValue: string
+  /**
+   * #664: how many members would lose a passkey if this domain became the one serving the tenant.
+   *
+   * ZERO means the warning is not shown. A caution about something that cannot happen is one nobody
+   * reads the next time it appears, and this screen has to be believed on the day it matters.
+   */
+  passkeysStranded?: number
 }
 
 function toView(row: { domain: string; verification_token: string; status: string; verified_at: Date | null }): CustomDomainView {
@@ -42,7 +50,15 @@ export async function listCustomDomains(db: TenantDb): Promise<CustomDomainView[
   const rows = await db.sql<{ domain: string; verification_token: string; status: string; verified_at: Date | null }[]>`
     SELECT domain, verification_token, status, verified_at FROM custom_domains ORDER BY created_at
   `
-  return rows.map(toView)
+  // #664 / ADR-219 §1 (ruling 4): a passkey is bound to an RP ID, so moving the tenant to its own
+  // domain invalidates every one made under the old host. The ruling requires the warning to appear in
+  // the FLOW, before it commits — not in a release note — so the count travels with the row that the
+  // "verify" button sits on.
+  //
+  // Counted per DOMAIN rather than once, because each pending domain is a different destination and the
+  // answer differs: a domain already serving this tenant strands nobody.
+  const views = rows.map(toView)
+  return Promise.all(views.map(async (v) => ({ ...v, passkeysStranded: await passkeysStrandedBy(db, v.domain) })))
 }
 
 // Add a custom domain (pending). Entitlement-gated (customDomain); a domain already claimed by
@@ -357,11 +373,31 @@ export async function customDomainsPlugin(app: FastifyInstance) {
     return reply.code(201).send(view)
   })
 
-  app.post<{ Params: { domain: string } }>('/admin/custom-domains/:domain/verify', async (req, reply) => {
-    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
-    await verifyCustomDomain(req.db, { tenantId: req.tenant.id, domain: req.params.domain })
-    return reply.code(204).send()
-  })
+  app.post<{ Params: { domain: string }; Body: { acknowledgePasskeyLoss?: boolean } }>(
+    '/admin/custom-domains/:domain/verify',
+    async (req, reply) => {
+      await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+      // #664 / ADR-219 §1 (ruling 4): verification is the step that makes this domain the one serving
+      // the tenant, and a passkey is bound to the RP ID it was made under — so this is the moment every
+      // enrolled key stops working.
+      //
+      // REFUSED rather than merely reported. There is no console for custom domains yet (this surface
+      // is API-only while #235 is blocked), so a field in the list response is a warning that can be
+      // skipped by not reading it, and the ruling asks for one that appears BEFORE it commits. The
+      // acknowledgement is the same shape #605 uses: a refusal with a reason and a named way through,
+      // which a future screen turns into a checkbox rather than into a surprise.
+      const stranded = await passkeysStrandedBy(req.db, req.params.domain)
+      if (stranded > 0 && req.body?.acknowledgePasskeyLoss !== true) {
+        return reply.code(409).send({
+          error: `${stranded} member${stranded === 1 ? '' : 's'} would lose every passkey: a passkey only works on the host it was created for, and they will each have to enrol again. Confirm to continue.`,
+          code: 'passkeys_would_be_lost',
+          passkeysStranded: stranded,
+        })
+      }
+      await verifyCustomDomain(req.db, { tenantId: req.tenant.id, domain: req.params.domain })
+      return reply.code(204).send()
+    },
+  )
 
   app.delete<{ Params: { domain: string } }>('/admin/custom-domains/:domain', async (req, reply) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
