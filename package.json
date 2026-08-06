@@ -18,6 +18,7 @@
     "lint:no-css-modules": "node scripts/check-no-css-modules.mjs",
     "lint:doc-links": "node scripts/check-doc-links.mjs",
     "lint:deploy-secrets": "node scripts/check-deploy-secrets.mjs",
+    "lint:commit-types": "node scripts/check-commit-types.mjs",
     "build:ee": "turbo run build",
     "search:sync": "pnpm --filter @wikistead/server search:sync",
     "preflight:deploy": "tsx apps/server/src/deploy/preflight-cli.ts",

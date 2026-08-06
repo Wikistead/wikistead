@@ -4,7 +4,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth 0: `lint:commit-types` compares this branch against master, and the default
+      # shallow clone has no master to compare with — it would silently fall back to checking only the
+      # last commit, which is a weaker check wearing the same green tick.
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: pnpm/action-setup@v4
         with: { version: 9 }
       - uses: actions/setup-node@v4
@@ -19,6 +23,7 @@ jobs:
       - run: pnpm docs:check           # ADR-080 doc↔code linkage: generated docs not stale
       - run: pnpm lint:doc-links       # ADR-080: warn if a code region changed without its docs page
       - run: pnpm lint:deploy-secrets  # #147/ADR-042no NEW plaintext credential in deploy/ (the known two are owed, not allowed)
+      - run: pnpm lint:commit-types    # #138 prep: the release tooling reads these subjects, so the type list is fixed now
   test:
     # #293 / #268: the unit + integration test suite. The server suite runs against the ISOLATED
     # server-test middleware (docker-compose.server-test.yml) brought up, migrated, and seeded by
