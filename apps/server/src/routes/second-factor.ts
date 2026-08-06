@@ -1,0 +1,180 @@
+import type { FastifyInstance } from 'fastify'
+import type IORedis from 'ioredis'
+import { emit } from '@wikistead/events'
+import { auditIfEntitled } from '../audit/outbox.js'
+import {
+  startTotpEnrolment, totpSecretFor, confirmFactor, listFactors, markFactorUsed,
+} from '../auth/second-factors.js'
+import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
+import { spendTotpCounter } from '../auth/second-factors.js'
+import { productName } from '../product-name.js'
+
+// Enrolling a second factor (#657 / ADR-219 §7). SELF-SCOPE, like the rest of /me: every read and
+// write is keyed to `req.user.sub`, never to a parameter. Guests have no member row and never reach
+// here — the default guard requires `req.user`.
+//
+// NOT here, deliberately:
+//   - The tenant POLICY and its enforcement (#652). Nothing in this file asks whether a factor is
+//     required; it only lets somebody get one.
+//   - Removing a factor. ADR-219 §8 requires re-authentication for that, and §4 requires refusing the
+//     last admin's removal while the policy is on — the second of which cannot even be written before
+//     the policy exists, and would be a guard whose counterfactual is unreachable (a pin that passes
+//     because the case cannot occur). Reported on #657 so it is scheduled rather than forgotten.
+//
+// WHO MAY ENROL: anybody with a member row, including a member who signs in through the IdP today.
+// ADR-219 §3 says a federated door is never asked for a product-side factor, which is a fact about
+// DOORS, not about accounts — and #626/migration 109 lets an admin give any member a password
+// entrance later, so a member who is federated-only this morning may have a product-side door this
+// afternoon. Refusing enrolment on today's doors would be a refusal that becomes wrong without
+// anybody changing this file.
+
+const num = (env: string | undefined, fallback: number) => {
+  const n = Number(env)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+// The SHAPE of `auth-local.ts:36-39` — 5 attempts per identity in a 15-minute window, then a lock
+// that expires on its own — under its OWN names.
+//
+// Not an import. `LOCAL_LOGIN_ID_MAX` is read from `process.env.LOCAL_LOGIN_ID_MAX`, so importing it
+// would make a deployment's LOGIN attempt budget silently govern how many times a factor code may be
+// tried. They are different questions with different right answers, and the coupling would be
+// invisible: nothing at either call site mentions the other.
+/**
+ * How many factors one member may hold.
+ *
+ * A cap rather than a page. #623's ledger caught `GET /me/factors` as a list with no bound, and the two
+ * ways to answer that are not equivalent here: paging a list of authenticators would mean a member
+ * could hold more than they can see, which is the fail-open the ledger exists to prevent — somebody
+ * removing "all my factors" would leave the ones on page two. Ten is a phone, a laptop and several
+ * keys; the enrolment is refused past it, so the list is bounded by construction rather than truncated.
+ */
+export const MAX_FACTORS_PER_MEMBER = num(process.env.MAX_FACTORS_PER_MEMBER, 10)
+
+export const FACTOR_VERIFY_MAX = num(process.env.FACTOR_VERIFY_MAX, 5)
+export const FACTOR_VERIFY_WINDOW_S = num(process.env.FACTOR_VERIFY_WINDOW_S, 15 * 60)
+export const FACTOR_VERIFY_LOCK_S = num(process.env.FACTOR_VERIFY_LOCK_S, 30 * 60)
+
+const attemptKey = (tenantId: string, sub: string) => `factor:try:${tenantId}:${sub}`
+const lockKey = (tenantId: string, sub: string) => `factor:lock:${tenantId}:${sub}`
+
+/**
+ * Read the lock without touching it. FAILS CLOSED on a Valkey error, like the login limiter: a
+ * limiter that disappears under load is not a limiter. It says so in the log rather than pretending
+ * the member is locked out for a reason they could act on.
+ */
+async function locked(valkey: IORedis, tenantId: string, sub: string): Promise<boolean> {
+  try {
+    return (await valkey.get(lockKey(tenantId, sub))) !== null
+  } catch (err) {
+    console.error('[factor] lock unreadable — refusing (fail closed)', err)
+    return true
+  }
+}
+
+/** Count a failure, and lock once the window's budget is gone. */
+async function countFailure(valkey: IORedis, tenantId: string, sub: string): Promise<void> {
+  try {
+    const n = await valkey.incr(attemptKey(tenantId, sub))
+    if (n === 1) await valkey.expire(attemptKey(tenantId, sub), FACTOR_VERIFY_WINDOW_S)
+    if (n >= FACTOR_VERIFY_MAX) await valkey.set(lockKey(tenantId, sub), '1', 'EX', FACTOR_VERIFY_LOCK_S)
+  } catch (err) {
+    console.error('[factor] counter unwritable — a failure went uncounted', err)
+  }
+}
+
+/** Forget the failures. A success is the end of that window, not a smaller number in it. */
+async function clearFailures(valkey: IORedis, tenantId: string, sub: string): Promise<void> {
+  try {
+    await valkey.del(attemptKey(tenantId, sub), lockKey(tenantId, sub))
+  } catch { /* a stale counter costs the member a wait, never access */ }
+}
+
+export async function secondFactorPlugin(app: FastifyInstance) {
+  /** The member's own factors. Never carries a secret — the list is for naming and removing. */
+  app.get('/me/factors', async (req) => ({ factors: await listFactors(req.db, req.user.sub) }))
+
+  /**
+   * Begin a TOTP enrolment. Returns the secret ONCE, in the response that created it: the phone has
+   * to be given it, and this product does not keep a way to show it again (`totpSecretFor` is server
+   * side and never leaves it). Somebody who loses the phone between start and confirm starts again.
+   *
+   * Starting does not enrol anything. The row is unconfirmed, so no policy counts it and the member's
+   * own list does not show it — an abandoned start is invisible rather than a half-factor.
+   */
+  app.post<{ Body: { label?: string } }>('/me/factors/totp', async (req, reply) => {
+    // Counting PENDING rows too: otherwise starting enrolments without confirming them is an unbounded
+    // write, and the cap would only bound what the member can see rather than what they can create.
+    const [held] = await req.db.sql<[{ n: number }?]>`
+      SELECT count(*)::int AS n FROM member_factors WHERE member_sub = ${req.user.sub}`
+    if ((held?.n ?? 0) >= MAX_FACTORS_PER_MEMBER) {
+      return reply.code(409).send({
+        error: `you already have ${MAX_FACTORS_PER_MEMBER} — remove one before adding another`,
+        code: 'factor_limit_reached',
+      })
+    }
+    const secret = generateTotpSecret()
+    const label = typeof req.body?.label === 'string' ? req.body.label.slice(0, 100) : ''
+    const { factorId } = await startTotpEnrolment(req.db, {
+      tenantId: req.tenant.id, memberSub: req.user.sub, secret, label,
+    })
+    // The account name in the app's list. The email is what the reader recognises; the sub is what is
+    // unique, and is used when there is no address to show.
+    const [row] = await req.db.sql<[{ email: string | null }?]>`
+      SELECT email FROM members WHERE sub = ${req.user.sub}`
+    const uri = totpUri({ secret, account: row?.email || req.user.sub, issuer: productName() })
+    return reply.code(201).send({ factorId, secret, uri })
+  })
+
+  /**
+   * Confirm it, by proving a code can be produced from the secret.
+   *
+   * This is the ONE place the enrolment becomes real. Without it, "enrolled" would mean "was shown a
+   * QR code", and a policy counting those would lock out everybody who scanned nothing.
+   */
+  app.post<{ Params: { id: string }; Body: { code?: string } }>('/me/factors/:id/confirm', async (req, reply) => {
+    const { id } = req.params
+    if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
+      return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
+    }
+    // The factor must be THIS member's. An id is a bearer token for a row otherwise, and confirming
+    // somebody else's enrolment would hand them a factor they never proved.
+    const [own] = await req.db.sql<[{ id: string }?]>`
+      SELECT id FROM member_factors WHERE id = ${id} AND member_sub = ${req.user.sub} AND confirmed_at IS NULL`
+    // One answer for two cases a caller may not distinguish: no such factor, and not yours. Saying
+    // which would make this an oracle for whether an id exists.
+    if (!own) return reply.code(404).send({ error: 'no pending enrolment', code: 'factor_not_pending' })
+
+    const secret = await totpSecretFor(req.db, id)
+    const code = typeof req.body?.code === 'string' ? req.body.code : ''
+    const counter = secret ? verifyTotp(secret, code, Date.now()) : null
+    if (counter === null) {
+      await countFailure(app.valkey, req.tenant.id, req.user.sub)
+      return reply.code(400).send({ error: 'that code did not match', code: 'factor_code_invalid' })
+    }
+    // Bank the step. Not primarily a replay refusal HERE — confirmation is one-shot, so the same code
+    // cannot be presented to this factor twice — but the floor #652 starts from: a code spent to
+    // confirm an enrolment must not then sign the same person in, inside the same window, as if it
+    // were fresh. Verification asked more than once is what makes the refusal reachable, and that is
+    // #652's slice; this route's job is to leave the counter behind.
+    if (!(await spendTotpCounter(req.db, id, counter))) {
+      await countFailure(app.valkey, req.tenant.id, req.user.sub)
+      return reply.code(400).send({ error: 'that code has already been used', code: 'factor_code_replayed' })
+    }
+    if (!(await confirmFactor(req.db, id))) {
+      return reply.code(409).send({ error: 'this enrolment is no longer pending', code: 'factor_not_pending' })
+    }
+    await clearFailures(app.valkey, req.tenant.id, req.user.sub)
+    await markFactorUsed(req.db, id)
+    // ADR-219's acceptance: ENROLMENT is audited, not only removal. A ledger that records the taking
+    // away cannot answer "when did this account get its factor", which is the question asked when an
+    // account turns out to have been reachable by somebody else.
+    await req.db.tx(async (tx) => auditIfEntitled(tx, req.tenant, {
+      actor: `user:${req.user.sub}`, action: 'member.factor_enrolled', target: `member:${req.user.sub}`,
+    })).catch((err: unknown) => req.log.warn({ err }, 'factor enrolment audit failed'))
+    // #228's policy: a new feature brings its webhook with it. Something changed about who can
+    // authenticate this account, which is the same reason `member.password_enabled` is emitted.
+    emit({ type: 'member.factor_enrolled', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.user.sub })
+    return reply.code(200).send({ confirmed: true })
+  })
+}
