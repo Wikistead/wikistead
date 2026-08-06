@@ -18,6 +18,7 @@ jobs:
       - run: pnpm lint:no-css-modules  # shadcn/Tailwind migration: no new CSS Modules
       - run: pnpm docs:check           # ADR-080 doc↔code linkage: generated docs not stale
       - run: pnpm lint:doc-links       # ADR-080: warn if a code region changed without its docs page
+      - run: pnpm lint:deploy-secrets  # #147/ADR-042 no NEW plaintext credential in deploy/ (the known two are owed, not allowed)
   test:
     # #293 / #268: the unit + integration test suite. The server suite runs against the ISOLATED
     # server-test middleware (docker-compose.server-test.yml) brought up, migrated, and seeded by
