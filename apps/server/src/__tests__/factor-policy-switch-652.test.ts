@@ -55,13 +55,13 @@ beforeAll(async () => {
 beforeEach(async () => {
   // Both the stance and dev-user's factors are shared state this file writes; every case states its own
   // starting point rather than inheriting the last one's.
-  await adminPool`UPDATE tenant_login_prefs SET second_factor_required = FALSE WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await adminPool`UPDATE tenant_login_prefs SET second_factor_required = FALSE, second_factor_kinds = 'off' WHERE tenant_id = ${TENANT}`.catch(() => {})
   await adminPool`DELETE FROM member_factors WHERE tenant_id = ${TENANT} AND member_sub = 'dev-user'`.catch(() => {})
   for (const sub of subs) await adminPool`DELETE FROM member_factors WHERE member_sub = ${sub}`.catch(() => {})
 })
 
 afterAll(async () => {
-  await adminPool`UPDATE tenant_login_prefs SET second_factor_required = FALSE WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await adminPool`UPDATE tenant_login_prefs SET second_factor_required = FALSE, second_factor_kinds = 'off' WHERE tenant_id = ${TENANT}`.catch(() => {})
   await adminPool`DELETE FROM member_factors WHERE tenant_id = ${TENANT} AND member_sub = 'dev-user'`.catch(() => {})
   for (const sub of subs) {
     await adminPool`DELETE FROM member_factors WHERE member_sub = ${sub}`.catch(() => {})

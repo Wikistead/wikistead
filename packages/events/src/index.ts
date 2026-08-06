@@ -137,7 +137,11 @@ export type DomainEvent =
   | { type: 'member.factor_removed'; tenantId: string; actorId: string; targetSub: string }
   // #652: the tenant's stance on second factors. A change to who may get in at all, which is why it is
   // an event rather than a settings write nobody hears about.
-  | { type: 'tenant.second_factor_policy_changed'; tenantId: string; actorId: string; required: boolean }
+  // #676 / ADR-222: `kinds` is which factors the tenant now accepts ('off' | 'any' | 'passkey' |
+  // 'totp'). `required` stays, derived from it, so a subscriber written against #652 keeps working —
+  // additive, per #228. Without `kinds` an `any → passkey` change, which signs out everyone holding
+  // only an authenticator app, is indistinguishable from no change at all.
+  | { type: 'tenant.second_factor_policy_changed'; tenantId: string; actorId: string; required: boolean; kinds?: string }
   // #568 / ADR-198 §6 (OQ7): a reset was ASKED FOR, and later COMPLETED. Both are named by sub and
   // both matter to an account-takeover investigation — the request says when someone started, the
   // completion says whether they finished, and the gap between them is where a stolen link lives.

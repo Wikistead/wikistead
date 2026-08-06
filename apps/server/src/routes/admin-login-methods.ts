@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { requireTenantAdmin, requireConnectionManager, isTenantAdmin } from '@wikistead/authz'
-import { mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersWithoutConfirmedFactor } from '../auth/factor-policy.js' // #652 / ADR-219 §4
+import {
+  mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersWithoutConfirmedFactor,
+  secondFactorStance, floorMet, type FactorStance,
+} from '../auth/factor-policy.js' // #652 / ADR-219 §4, #676 / ADR-222
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { loginMethodCeiling, setPlatformLoginDisabled } from '../auth/login-methods.js'
@@ -46,7 +49,9 @@ export interface LoginMethodsView {
   // failing — the same courtesy `blockedByStance` pays above. `entitled` is the edition seam
   // (`mfaPolicyEntitled`), separated from `canEnable` because "your plan does not include this" and
   // "nobody here could satisfy it" are different problems with different fixes.
-  secondFactorRequired: { selected: boolean; canEnable: boolean; entitled: boolean }
+  // #676 / ADR-222: `stance` is WHICH kinds are accepted; `selected` stays as "is anything required",
+  // derived from it, so #652's screen keeps working while #679 grows the picker.
+  secondFactorRequired: { selected: boolean; canEnable: boolean; entitled: boolean; stance: FactorStance }
   // #604-B: may the CALLER change the stance / platform / password selections and manage the
   // SSO exemptions? Those writes stayed on the admin tier while the read opened to
   // `manage_connections`, so the screen has to be told which of its controls belong to it.
@@ -81,6 +86,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
       canManageStance: await isTenantAdmin(app.fga, req.user.sub, req.tenant.id),
       ssoRequired: { selected: !!pref?.sso_required, biting: stance.biting },
       secondFactorRequired: {
+        stance: await secondFactorStance(req.db),
         selected: await secondFactorRequired(req.db),
         canEnable: (await adminWithFactorCount(req.db, req.headers.host)) > 0,
         entitled: mfaPolicyEntitled(req.tenant),
@@ -120,36 +126,72 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     }
   })
 
-  app.patch<{ Body: { platformLoginEnabled?: boolean; localLoginEnabled?: boolean; ssoRequired?: boolean; secondFactorRequired?: boolean } }>('/admin/login-methods', async (req, reply) => {
+  app.patch<{ Body: { platformLoginEnabled?: boolean; localLoginEnabled?: boolean; ssoRequired?: boolean; secondFactorRequired?: boolean; secondFactorKinds?: string } }>('/admin/login-methods', async (req, reply) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     // #605 / ADR-210: the STANCE switch. ON has write-time preconditions (§R5-4, own_idp_required's
     // twin); OFF is always allowed. Audited in-tx — a deliberate DECISION, not an inheritance from the
     // platform toggle (which only emits an event): turning every other door off is an authz change.
     // #652 / ADR-219 §4: the SECOND-FACTOR stance, on the same switchboard as the others because it is
     // the same kind of fact — what this tenant demands of the people signing in.
-    if (typeof req.body?.secondFactorRequired === 'boolean') {
-      const on = req.body.secondFactorRequired
-      // ⚠️ the edition question is `mfaPolicyEntitled` and nowhere else — see its comment. It answers
-      // CE today, which is the recommendation and ADR-210 §8's precedent; the ruling on #644 changes
-      // that one function.
+    // #676 / ADR-222: the stance is now WHICH kinds, and the boolean is the two ends of it. Both spellings
+    // are accepted — an existing client sending `secondFactorRequired` keeps working, and means off/any.
+    const asked: FactorStance | null =
+      typeof req.body?.secondFactorKinds === 'string'
+        ? (['off', 'any', 'passkey', 'totp'].includes(req.body.secondFactorKinds)
+            ? req.body.secondFactorKinds as FactorStance
+            : (() => { throw Object.assign(new Error('unknown second-factor stance'), { statusCode: 400, code: 'bad_stance' }) })())
+        : typeof req.body?.secondFactorRequired === 'boolean'
+          ? (req.body.secondFactorRequired ? 'any' : 'off')
+          : null
+    if (asked !== null) {
+      const stance = asked
+      const on = stance !== 'off'
+      // ⚠️ the edition question is `mfaPolicyEntitled` and nowhere else — see its comment. Ruled CE on
+      // #672 and permanent; the seam stays so the answer is in one place rather than as an `if (plan …)`
+      // beside every check.
       if (on && !mfaPolicyEntitled(req.tenant)) {
         throw Object.assign(new Error('a second-factor requirement is not available on this plan'),
           { statusCode: 402, code: 'mfa_policy_not_entitled' })
       }
-      if (on && (await adminWithFactorCount(req.db, req.headers.host)) === 0) {
-        // #605's precondition, mirrored. Turning it on while nobody can satisfy it is a lock-out
-        // wearing a success response — and the person who would have to undo it is the one shut out.
+      // THE FLOOR, asked about the stance being ASKED FOR — not about "is it going on". `any → passkey`
+      // leaves the requirement on the whole time, so a guard keyed to the transition would wave through
+      // the narrowing that is most likely to strand a tenant (ADR-222 §2).
+      if (!(await floorMet(req.db, stance, req.headers.host))) {
+        // #605's precondition, mirrored. Selecting a stance nobody can satisfy is a lock-out wearing a
+        // success response — and the person who would have to undo it is the one shut out. The passkey
+        // floor is TWO, because a passkey cannot be written down (#672 ruling ②).
         throw Object.assign(
-          new Error('enrol a second factor on at least one admin account before requiring one — otherwise the requirement locks out the people who could turn it off.'),
+          new Error(stance === 'passkey'
+            ? 'enrol at least two passkeys on admin accounts before requiring passkeys — a passkey cannot be written down, so one is a single accident away from locking the workspace.'
+            : 'enrol a second factor on at least one admin account before requiring one — otherwise the requirement locks out the people who could turn it off.'),
           { statusCode: 409, code: 'admin_factor_required' },
         )
       }
+      // #672 ruling ②-2: a one-member tenant is not offered `passkey` until #650 gives them a way back
+      // in. What is exposed there is "the only admin loses their key", which is that ticket's subject.
+      if (stance === 'passkey') {
+        const [seats] = await req.db.sql<[{ n: number }?]>`
+          SELECT count(*)::int AS n FROM members WHERE deactivated_at IS NULL`
+        if ((seats?.n ?? 0) < 2) {
+          throw Object.assign(
+            new Error('requiring passkeys needs a second person in the workspace: losing the only key would leave nobody able to sign in.'),
+            { statusCode: 409, code: 'passkey_needs_second_member' },
+          )
+        }
+      }
       await req.db.tx(async (tx) => {
-        await tx`INSERT INTO tenant_login_prefs (tenant_id, second_factor_required) VALUES (${req.tenant.id}, ${on})
-                 ON CONFLICT (tenant_id) DO UPDATE SET second_factor_required = ${on}, updated_at = now()`
+        await tx`INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds)
+                 VALUES (${req.tenant.id}, ${on}, ${stance})
+                 ON CONFLICT (tenant_id) DO UPDATE
+                   SET second_factor_required = ${on}, second_factor_kinds = ${stance}, updated_at = now()`
         await auditIfEntitled(tx, req.tenant, {
           actor: `user:${req.user.sub}`,
           action: on ? 'tenant.second_factor_required_on' : 'tenant.second_factor_required_off',
+          // #672 ruling ⑤ asked this line to carry {from, to}: `any → passkey` keeps `required` true,
+          // so as it stands the narrowing that signs half a tenant out writes the same row as the last
+          // change. `audit_log` has no payload column and its rows are hash-chained, so adding one
+          // changes what verification hashes — a decision with its own slice. Reported on #676; the
+          // WEBHOOK carries the pair today (below), which is the half that breaks no ledger.
           target: `tenant:${req.tenant.id}`,
         })
       })
@@ -163,7 +205,9 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
           app.valkey, req.tenant.id, await membersWithoutConfirmedFactor(req.db, req.headers.host))
         req.log.info({ tenantId: req.tenant.id, revoked }, 'second-factor policy on: revoked unsatisfied sessions')
       }
-      emit({ type: 'tenant.second_factor_policy_changed', tenantId: req.tenant.id, actorId: req.user.sub, required: on })
+      // Additive (#228): `required` stays, derived, so an existing subscriber is not broken by a field
+      // it has never seen.
+      emit({ type: 'tenant.second_factor_policy_changed', tenantId: req.tenant.id, actorId: req.user.sub, required: on, kinds: stance })
       return reply.code(204).send()
     }
 

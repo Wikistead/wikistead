@@ -85,10 +85,44 @@ export const PRINCIPALS_OUTSIDE_POLICY = ['api-key', 'oidc-bearer', 'mcp-oauth',
  * requirement) would lock out every tenant that predates the column.
  */
 export async function secondFactorRequired(db: TenantDb): Promise<boolean> {
-  const [row] = await db.sql<[{ second_factor_required: boolean }?]>`
-    SELECT second_factor_required FROM tenant_login_prefs LIMIT 1`
-  return row?.second_factor_required === true
+  return (await secondFactorStance(db)) !== 'off'
 }
+
+/**
+ * WHICH kinds this tenant accepts (#676 / ADR-222 §1). Migration 120.
+ *
+ * `off` is not the empty set — see the migration. It means the tenant asks for nothing, so both
+ * enrolment doors stay open, the floor is not consulted, and the sweep does not run.
+ */
+export type FactorStance = 'off' | 'any' | 'passkey' | 'totp'
+
+export async function secondFactorStance(db: TenantDb): Promise<FactorStance> {
+  const [row] = await db.sql<[{ second_factor_kinds: string }?]>`
+    SELECT second_factor_kinds FROM tenant_login_prefs LIMIT 1`
+  const v = row?.second_factor_kinds
+  // An unknown value reads as `off` rather than as a requirement nobody can satisfy: a half-applied
+  // migration or a value from a newer deployment must not lock a tenant out of its own product. The
+  // CHECK constraint is what keeps this branch unreachable in practice.
+  return v === 'any' || v === 'passkey' || v === 'totp' ? v : 'off'
+}
+
+/** The kinds a stance accepts. `off` accepts everything — it asks for nothing at all. */
+export const acceptedKinds = (stance: FactorStance): FactorKind[] =>
+  stance === 'passkey' ? ['passkey'] : stance === 'totp' ? ['totp'] : ['totp', 'passkey']
+
+/**
+ * How many admins must be able to satisfy a stance before it may be selected.
+ *
+ * TWO for `passkey`, one for everything else, and the asymmetry is the ruling on #672 rather than an
+ * off-by-one: **a passkey cannot be written down.** A TOTP has a de-facto backup — the QR was
+ * photographed, the secret sits in a password manager — and a passkey has none, so the same floor does
+ * not buy the same safety. Two makes "every admin loses their key at once" two independent accidents.
+ *
+ * Counted in KEYS rather than in admins, deliberately: one admin holding two passkeys is as safe from
+ * a single loss as two admins holding one each, and refusing the first shape would push a one-admin
+ * tenant towards seating a second person for the guard's benefit.
+ */
+export const floorFor = (stance: FactorStance): number => (stance === 'passkey' ? 2 : 1)
 
 /**
  * ⚠️ THE EDITION SEAM, and it is deliberately one function.
@@ -163,13 +197,35 @@ export async function presentableKinds(
  * carrying admin capabilities is a different question and is not one this precondition can ask without
  * an FGA round trip per member.
  */
-export async function adminWithFactorCount(db: TenantDb, host: string | undefined): Promise<number> {
+export async function adminFactorCount(
+  db: TenantDb, stance: FactorStance, host: string | undefined,
+): Promise<number> {
+  const kinds = acceptedKinds(stance)
   const [row] = await db.sql<[{ n: number }?]>`
-    SELECT count(DISTINCT m.sub)::int AS n
+    SELECT count(*)::int AS n
     FROM members m
     JOIN member_factors f ON f.member_sub = m.sub AND ${presentableHere(db, host)}
-    WHERE m.role = 'admin' AND m.deactivated_at IS NULL`
+    WHERE m.role = 'admin' AND m.deactivated_at IS NULL AND f.kind = ANY(${kinds})`
   return row?.n ?? 0
+}
+
+/** The floor as a yes/no, which is what both sides of the guard actually ask. */
+export async function floorMet(
+  db: TenantDb, stance: FactorStance, host: string | undefined,
+): Promise<boolean> {
+  if (stance === 'off') return true // nothing is required, so nobody has to be able to satisfy it
+  return (await adminFactorCount(db, stance, host)) >= floorFor(stance)
+}
+
+/**
+ * Kept for the reading `canEnable` has always had: may the requirement be turned on AT ALL.
+ *
+ * Expressed through the counter above rather than with a query of its own — the walk in
+ * `one-answer-to-presentable-675` exists to keep the condition in one place, and a second count here
+ * would be the first drift.
+ */
+export async function adminWithFactorCount(db: TenantDb, host: string | undefined): Promise<number> {
+  return adminFactorCount(db, 'any', host)
 }
 
 /**
