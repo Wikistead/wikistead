@@ -73,6 +73,24 @@ export async function startTotpEnrolment(
 }
 
 /**
+ * Begin a PASSKEY enrolment: a header row and nothing else.
+ *
+ * No detail row yet, and that asymmetry with TOTP is the format's, not an oversight — a passkey's
+ * material does not exist until the authenticator has made it, so there is nothing to write until the
+ * browser comes back. The row is unconfirmed either way, so an abandoned one behaves identically.
+ */
+export async function startPasskeyEnrolment(
+  db: TenantDb,
+  args: { tenantId: string; memberSub: string; label?: string },
+): Promise<{ factorId: string }> {
+  const [row] = await db.sql<{ id: string }[]>`
+    INSERT INTO member_factors (tenant_id, member_sub, kind, label)
+    VALUES (${args.tenantId}, ${args.memberSub}, 'passkey', ${args.label ?? ''})
+    RETURNING id`
+  return { factorId: row!.id }
+}
+
+/**
  * The secret, decrypted, for a factor that exists.
  *
  * Returns null rather than throwing on a missing row: the caller's next line is "then the code is
