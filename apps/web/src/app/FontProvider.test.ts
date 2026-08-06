@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { applyVimMono, vimMonoEnabled, RETIRED_FONT_KEY } from "./FontProvider";
+import { applyVimMono, refreshVimMono, vimMonoEnabled, RETIRED_FONT_KEY } from "./FontProvider";
 
 // #633 / ADR-217, replacing the #190 body-font override this file used to cover.
 //
@@ -30,6 +30,28 @@ describe("#633: vim's typography is a marker, not a face", () => {
     // (editor yes, print no), and a value written here would apply to all of them
     expect(document.documentElement.style.getPropertyValue("--font-body")).toBe("");
     expect(document.documentElement.style.fontFamily).toBe("");
+  });
+
+  it("needs all three of its inputs, and any one of them withdraws the grid", () => {
+    // The three arrive from three owners — vim from the keymap (a server profile for a member, this
+    // device for a guest), editing from the route, the toggle from storage — so the combination is
+    // asserted rather than the calls. Reading a page with vim on is the case the ruling was about:
+    // most of the time here is spent reading, and the font nobody can choose should not also be the
+    // harder one to read.
+    const root = document.documentElement;
+    const set = (vim: boolean, editing: boolean, toggle: boolean) => {
+      vim ? root.setAttribute("data-vim-on", "") : root.removeAttribute("data-vim-on");
+      editing ? root.setAttribute("data-editing", "") : root.removeAttribute("data-editing");
+      localStorage.setItem("wks.vimMono", toggle ? "1" : "0");
+      refreshVimMono();
+      return root.hasAttribute("data-vim-mono");
+    };
+    expect(set(true, true, true), "vim, editing, kept").toBe(true);
+    expect(set(true, false, true), "vim on but only reading").toBe(false);
+    expect(set(false, true, true), "editing without vim").toBe(false);
+    expect(set(true, true, false), "vim and editing, but the reader turned it off").toBe(false);
+    root.removeAttribute("data-vim-on");
+    root.removeAttribute("data-editing");
   });
 
   it("defaults to ON for somebody who has never chosen (user ruling)", () => {

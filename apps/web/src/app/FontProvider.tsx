@@ -39,6 +39,32 @@ export function applyVimMono(on: boolean): void {
   else root.removeAttribute("data-vim-mono");
 }
 
+/**
+ * Recompute the marker from all three of its inputs.
+ *
+ * #633 (user ruling): the grid is for the time spent EDITING. Reading a page is the same document
+ * surface, so the first version put it there too — and the reply was that most of the time with this
+ * product is spent reading, which made "the font you cannot choose" also "the font that is harder to
+ * read". vim's column alignment has nothing to align while nobody is typing.
+ *
+ * Three inputs and one place that combines them, because they arrive from three different owners: vim
+ * from the keymap (a server profile for a member, this device for a guest), editing from the route, the
+ * toggle from storage. Each writes its own marker on <html> and then asks here; nothing has to know the
+ * others' state, and there is no order in which they can arrive that produces a wrong answer.
+ */
+export function refreshVimMono(): void {
+  const root = document.documentElement;
+  applyVimMono(root.hasAttribute("data-vim-on") && root.hasAttribute("data-editing") && vimMonoEnabled());
+}
+
+/** The route's half: whether an editable surface is currently mounted. */
+export function reflectEditing(on: boolean): void {
+  const root = document.documentElement;
+  if (on) root.setAttribute("data-editing", "");
+  else root.removeAttribute("data-editing");
+  refreshVimMono();
+}
+
 const FontContext = createContext<{ vimMono: boolean; setVimMono: (v: boolean) => void }>({
   vimMono: true,
   setVimMono: () => {},
@@ -47,13 +73,9 @@ const FontContext = createContext<{ vimMono: boolean; setVimMono: (v: boolean) =
 export function FontProvider({ children }: { children: ReactNode }) {
   const [vimMono, setState] = useState<boolean>(load);
 
-  // The attribute is only half the condition — the editor adds the other half (is vim on) by calling
-  // `applyVimMono` when it toggles. Here it is mirrored so a change in settings takes effect at once
-  // for a reader who already has vim on.
-  useEffect(() => {
-    if (!vimMono) applyVimMono(false);
-    else if (document.documentElement.hasAttribute("data-vim-on")) applyVimMono(true);
-  }, [vimMono]);
+  // This is one of three inputs; the route supplies the other two. Recomputed here so a change made in
+  // settings takes effect at once for somebody already editing with vim on.
+  useEffect(() => { refreshVimMono(); }, [vimMono]);
 
   const setVimMono = (v: boolean) => {
     setState(v);
