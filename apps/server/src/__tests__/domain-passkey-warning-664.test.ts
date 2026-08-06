@@ -165,4 +165,31 @@ describe('#680: a move that would strand everybody is refused, not acknowledged'
     await setStance('totp')
     expect((await verify({ acknowledgePasskeyLoss: true })).statusCode).not.toBe(409)
   }, 120_000)
+
+  it('refuses even when nobody has enrolled a key yet', async () => {
+    // NOT a smaller version of the first case, and the reason it needs its own pin: the refusal must
+    // not depend on the count #664 measures. A tenant on `passkey` with nothing enrolled is not a safe
+    // one — it is a tenant whose members will enrol at the OLD host tomorrow, and whose admin is being
+    // told today that the move is fine. Gating on the count opens a window that closes itself, and it
+    // is the natural-looking edit (`stance === 'passkey' && stranded > 0`) that the cases above stay
+    // green under.
+    await setStance('passkey') // deliberately no `givePasskey`
+    const res = await verify({ acknowledgePasskeyLoss: true })
+    expect(res.statusCode, res.body).toBe(409)
+    expect(res.json<{ code: string }>().code).toBe('passkey_stance_blocks_move')
+  }, 120_000)
+
+  it('`off` does not block it — a tenant that asks for nothing has nothing to strand', async () => {
+    // The third stance. HONESTLY: it catches nothing the rest of this file misses — a guard written as
+    // "anything other than `any` or `totp`" takes the #664 cases down with it. What it does not do is
+    // depend on AMBIENT state to say so: those cases only cover `off` because the fixture happens to
+    // leave the row there, and the day somebody seeds `any` instead they would go on passing while this
+    // stance went unmeasured. Stated deliberately, it stays true of whatever the fixture becomes.
+    // (`off` is not the empty set — ADR-222 §1 keeps the enrolment doors open — so it is a stance a
+    // real tenant sits on, not a null value.)
+    await givePasskey(`cred-680d-${STAMP}`)
+    await setStance('off')
+    expect((await verify({ acknowledgePasskeyLoss: true })).statusCode,
+      'a workspace requiring no second factor was stopped from moving').not.toBe(409)
+  }, 120_000)
 })
