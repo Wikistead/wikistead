@@ -454,7 +454,11 @@
     "ssoExemptionNoCredential": "no password yet",
     "ssoExemptionRevoke": "Revoke exemption",
     "ssoExemptionSearch": "Add an exempt member…",
-    "ssoExemptionRevokeConfirm": "Revoke the exemption for {{sub}}? While SSO is required they will no longer be able to sign in with a password."
+    "ssoExemptionRevokeConfirm": "Revoke the exemption for {{sub}}? While SSO is required they will no longer be able to sign in with a password.",
+    "secondFactorRequired": "Require a second factor",
+    "secondFactorRequiredBody": "Password sign-in also asks for a second factor. Members signing in through your IdP are not affected: their provider decides. API keys, share links and SCIM keep working.",
+    "secondFactorNoAdmin": "Enrol a second factor on an admin account first, or turning this on locks out the people who could turn it off.",
+    "secondFactorEnableConfirm": "Members who sign in with a password and have no second factor yet are signed out now, and are asked to set one up the next time they sign in. Members who sign in through your IdP are not affected. Require a second factor?"
   },
   "adminEnroll": {
     "title": "Auto-enrolment",

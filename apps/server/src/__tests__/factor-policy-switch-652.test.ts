@@ -14,6 +14,7 @@ import type { Tenant } from '@wikistead/types'
 import { totpCode, generateTotpSecret } from '../auth/totp.js'
 import { startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
 import { adminWithFactorCount, wouldStrandTenant, secondFactorRequired } from '../auth/factor-policy.js'
+import { createSession, readSession } from '../auth/session.js' // #652 / ADR-219 §2: the sweep
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
@@ -192,4 +193,66 @@ describe('#652: the floor on the way out', () => {
     expect(await wouldStrandTenant(db, { memberSub: sub, factorId: row!.id }), 'only an admin can strand a tenant')
       .toBe(false)
   }, 120_000)
+})
+
+// ADR-219 §2's consequence, which slice 2 stated and did not do: enforcement is at the DOOR, so a
+// switch that only writes a row leaves the requirement applying to nobody who is already inside. The
+// house rule it follows is the one every credential change obeys — "a change to a credential kills
+// that member's sessions" (members.ts:403).
+//
+// The doors are what this measures, not the members. §3 puts federated sign-ins outside the policy
+// entirely, so signing those members out would be a mass logout that buys nothing: they would come
+// back through the same door and be admitted. An implementation that revoked "everyone with no
+// factor" passes the first case here and fails the second.
+describe('#652: turning it on ends the sessions the door would now refuse', () => {
+  /** A session of each kind, for members who hold nothing. */
+  async function sessionsOfEveryDoor() {
+    const mk = async (name: string, door: 'local' | 'federated' | 'operator' | undefined) => {
+      const sub = `p652-sess-${name}-${STAMP}`
+      subs.push(sub)
+      await adminPool`
+        INSERT INTO members (tenant_id, sub, email, role) VALUES (${TENANT}, ${sub}, ${`${sub}@e2e.test`}, 'member')
+        ON CONFLICT (tenant_id, sub) DO UPDATE SET role = 'member'`
+      return { sub, sid: await createSession(app.valkey, { tenantId: TENANT, sub, ...(door ? { door } : {}) }) }
+    }
+    return {
+      local: await mk('local', 'local'),
+      federated: await mk('fed', 'federated'),
+      operator: await mk('op', 'operator'),
+      // §2: "a session predating the field reads as NOT satisfied, never as grandfathered"
+      doorless: await mk('old', undefined),
+    }
+  }
+
+  it('revokes the password sessions with no factor, and spares the doors the policy does not ask about', async () => {
+    await memberWithFactor('admin-sweep', 'admin') // so the ON is allowed at all
+    const s = await sessionsOfEveryDoor()
+    // …and one that HAS answered: the same door, satisfied. Without it "revoke every local session"
+    // would pass, and the day somebody signs in with a factor they would be thrown out by the next
+    // admin who toggles the switch.
+    const held = `p652-sess-held-${STAMP}`
+    subs.push(held)
+    await adminPool`
+      INSERT INTO members (tenant_id, sub, email, role) VALUES (${TENANT}, ${held}, ${`${held}@e2e.test`}, 'member')
+      ON CONFLICT (tenant_id, sub) DO UPDATE SET role = 'member'`
+    const heldSid = await createSession(app.valkey, { tenantId: TENANT, sub: held, door: 'local+factor' })
+
+    expect((await setStance(true)).statusCode).toBe(204)
+
+    expect(await readSession(app.valkey, s.local.sid), 'a password session with no factor is over').toBeNull()
+    expect(await readSession(app.valkey, s.doorless.sid), 'and so is one from before the field existed').toBeNull()
+    expect(await readSession(app.valkey, s.federated.sid), 'an IdP session is none of the policy\'s business (§3)').not.toBeNull()
+    expect(await readSession(app.valkey, s.operator.sid), 'and the break-glass session steps over it (§4)').not.toBeNull()
+    expect(await readSession(app.valkey, heldSid), 'a session that already answered stays').not.toBeNull()
+  }, 180_000)
+
+  it('turning it OFF ends nobody\'s session', async () => {
+    // The control in the other direction: relaxing a requirement is not a security act, and signing
+    // the tenant out to celebrate would be a switch nobody dares touch twice.
+    await memberWithFactor('admin-off-sweep', 'admin')
+    expect((await setStance(true)).statusCode).toBe(204)
+    const s = await sessionsOfEveryDoor()
+    expect((await setStance(false)).statusCode).toBe(204)
+    expect(await readSession(app.valkey, s.local.sid), 'still signed in').not.toBeNull()
+  }, 180_000)
 })

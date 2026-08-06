@@ -131,6 +131,22 @@ export async function adminWithFactorCount(db: TenantDb): Promise<number> {
 }
 
 /**
+ * Everyone in the tenant holding no confirmed factor — whose sessions ADR-219 §2 revokes when the
+ * requirement is switched on.
+ *
+ * Deactivated members are included rather than skipped: their sessions should already be gone, and a
+ * sweep that trusts that has to be right about it. Which of these sessions actually goes is decided by
+ * the DOOR at `destroyUnsatisfiedSessions` (§3) — this half only answers "holds nothing".
+ */
+export async function membersWithoutConfirmedFactor(db: TenantDb): Promise<string[]> {
+  const rows = await db.sql<{ sub: string }[]>`
+    SELECT m.sub FROM members m
+    WHERE NOT EXISTS (
+      SELECT 1 FROM member_factors f WHERE f.member_sub = m.sub AND f.confirmed_at IS NOT NULL)`
+  return rows.map((r) => r.sub)
+}
+
+/**
  * Whether removing `factorId` would leave the tenant with no admin who can sign in under the policy.
  *
  * The outbound half of the two-sided guard. #605's is at `admin-login-methods.ts:220-243` and says the
