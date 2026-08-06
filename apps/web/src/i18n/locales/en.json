@@ -357,9 +357,8 @@
     "expiry": "Expires",
     "expiryNever": "Never expires",
     "expiryDays": "In {{count}} days",
-    "narrowShow": "Narrow what it reaches",
-    "narrowHide": "Close",
-    "narrowHint": "Choose nothing and the key reaches everything its owner can.",
+    "narrowShow": "Advanced",
+    "narrowHint": "Leave these unset and the key reaches everything its owner can.",
     "narrowSpaces": "Spaces it reaches",
     "narrowCaps": "What it may do"
   },

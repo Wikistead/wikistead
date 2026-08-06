@@ -357,11 +357,10 @@
     "expiry": "有効期限",
     "expiryNever": "無期限",
     "expiryDays": "{{count}} 日後",
-    "narrowShow": "届く先を絞る",
-    "narrowHide": "絞りを閉じる",
-    "narrowHint": "選ばなければ、このキーは持ち主に見えるものすべてに届きます。",
-    "narrowSpaces": "届くスペース",
-    "narrowCaps": "できること"
+    "narrowShow": "詳細設定",
+    "narrowHint": "未設定のままなら、持ち主が見られる範囲すべてに届きます。",
+    "narrowSpaces": "対象スペース",
+    "narrowCaps": "許可する操作"
   },
   "adminAuth": {
     "title": "認証",

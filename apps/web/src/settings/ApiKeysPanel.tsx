@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
 import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
 import { useTranslation } from "react-i18next";
-import { Copy, Trash2 } from "lucide-react";
+import { Copy, Trash2, ChevronRight } from "lucide-react"; // #544: an icon component, never a text glyph
 import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpaces, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
@@ -136,12 +136,23 @@ export function ApiKeysPanel({
           {/* #637 / ADR-216: what the key may REACH, beside how long it lives and whether it may write.
               Collapsed by default: most keys are not narrowed, and a form that asks every question at once
               makes the common case harder to answer. */}
+          {/* #659 (user ruling): ONE name, in both states. It used to say "narrow what it reaches" closed
+              and "close" open — a control that renames itself asks the reader to learn two words for one
+              thing, and the second described the ACTION rather than what is behind it. The old name also
+              covered half of what is inside: the panel holds spaces AND capabilities, and a capability is
+              not a destination.
+              With the words the same either way, the CHEVRON is the only thing left saying which way this
+              goes — the same `lucide` chevron the overflow menu and the group-roles mark use, rotated
+              rather than swapped for a second icon. */}
           <Button variant="ghost" size="sm" className="mt-1" data-testid="api-key-narrow-toggle"
+            aria-expanded={narrowing} aria-controls="api-key-narrow-panel"
             onClick={() => setNarrowing((v) => !v)}>
-            {narrowing ? t("adminApi.narrowHide") : t("adminApi.narrowShow")}
+            <ChevronRight size={14} aria-hidden
+              className={`transition-transform duration-150 ${narrowing ? "rotate-90" : ""}`} />
+            {t("adminApi.narrowShow")}
           </Button>
           {narrowing && (
-            <div className="mt-2 flex flex-col gap-2 rounded-md border border-border p-3" data-testid="api-key-narrow">
+            <div id="api-key-narrow-panel" className="mt-2 flex flex-col gap-2 rounded-md border border-border p-3" data-testid="api-key-narrow">
               <p className="text-xs text-fg-dim">{t("adminApi.narrowHint")}</p>
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-fg-dim">{t("adminApi.narrowSpaces")}</span>
@@ -160,7 +171,7 @@ export function ApiKeysPanel({
                 <span className="text-xs text-fg-dim">{t("adminApi.narrowCaps")}</span>
                 {/* The verbs the route table actually offers. The server validates against the same set,
                     so a list invented here would go stale the day a verb is added there. */}
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2" data-testid="api-key-cap-list">
                   {NARROW_CAPS.map((c) => (
                     <label key={c} className="flex items-center gap-1 text-sm" data-testid="api-key-cap-option">
                       <input type="checkbox" checked={pickedCaps.includes(c)}
