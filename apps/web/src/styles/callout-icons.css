@@ -113,7 +113,13 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
    neutralises the preflight the same way every button icon site already does. */
 .cm-lp-footnote-back{display:inline-flex;align-items:center;vertical-align:middle;margin-left:0.4em;text-decoration:none;color:var(--link,#4ea1ff);cursor:pointer}
 .cm-lp-footnote-back:hover{text-decoration:underline}
-.cm-lp-todo-icon{position:absolute;left:0.65em;top:0.35em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat;pointer-events:none}
+/* #632 the strip's width has to be in this offset, not only in the padding. `padding` moves flow
+   children; it does not move an absolutely-positioned one. So when the coloured left BORDER became a
+   `::before` strip, the padding compensation put the body back where it was and left this icon three
+   pixels to its left — closer to the strip and further from the text it labels. The panel-shaped callout
+   escaped it because its icon hangs off the label, which is a flex child and moves with the padding.
+   From the same token as the strip and the padding: a fourth literal 3px is how this drifts again. */
+.cm-lp-todo-icon{position:absolute;left:calc(0.65em + var(--wks-bar-w));top:0.35em;width:1.5em;height:1.5em;background-color:var(--cb-color,var(--accent,#4ea1ff));-webkit-mask:var(--cb-icon) center/contain no-repeat;mask:var(--cb-icon) center/contain no-repeat;pointer-events:none}
 /* #290 (4): round the todo BOX like the callout panel (callout-icons.css .cm-lp-callout-panel — keep
    the radii equal; the e2e asserts the computed values match). Per-line boxes → explicit corner classes. */
 .cm-lp-todo.cm-lp-todo-first{border-top-left-radius:4px;border-top-right-radius:4px}

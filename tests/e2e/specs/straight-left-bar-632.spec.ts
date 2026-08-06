@@ -174,6 +174,67 @@ test("#632: a strip does not eat into the space the border used to hold", async 
   }
 });
 
+// #632 and the same has to hold for what the padding CANNOT move. Padding pushes flow content;
+// an absolutely-positioned child ignores it entirely. So when the coloured border became a strip, the
+// compensation put `:::todo`'s body back and left its icon three pixels behind — nearer the strip, further
+// from the words it labels. The panel-shaped callout was untouched, which is why measuring one shape says
+// nothing about the other: its icon hangs off the label, a flex child, and travels with the padding.
+//
+// Same instrument as above rather than a remembered coordinate: widen the token and watch. Anything
+// absolutely placed inside a strip-bearing box must move with the strip, or it is positioned from a
+// literal that will drift the next time the strip changes.
+test("#632: what the padding cannot move is placed from the bar's width too", async ({ page }) => {
+  await openScratch(page, "container-bars-632-d");
+  await enterEdit(page);
+  await page.click("[data-pane=preview] .cm-content");
+  await page.keyboard.insertText(CONTAINER_SOURCES.join("\n\n") + "\n\ntail\n");
+  await sleep(1500);
+
+  const GROW = 10;
+  const measured = await page.evaluate((grow) => {
+    // every box that draws a strip, and every absolutely-placed thing inside it, by offset from the box
+    const placed = () => {
+      const out: { key: string; dx: number }[] = [];
+      for (const el of [...document.querySelectorAll<HTMLElement>("[data-pane=preview] *")]) {
+        const b = getComputedStyle(el, "::before");
+        if (b.position !== "absolute" || b.left !== "0px") continue;
+        const w = parseFloat(b.width) || 0;
+        if (w < 2 || w > 6 + grow) continue;
+        const box = el.getBoundingClientRect();
+        for (const kid of [...el.querySelectorAll<HTMLElement>("*")]) {
+          const cs = getComputedStyle(kid);
+          if (cs.position !== "absolute") continue;
+          // Which of these belong to the left gutter is a question about GEOMETRY, not about how the rule
+          // was written: for a positioned element Chrome resolves `left` to a used value, so the todo
+          // ring — anchored `right: 0.7em` — reports a number and not `auto`. Reading the declaration
+          // would have called it a left-placed child and demanded it track a strip at the other end.
+          //
+          // So: in the gutter means the child ends before the content does. That excludes the ring, and
+          // it excludes `left: 0`, which is flush to the edge ON PURPOSE (#424 pins every edit affordance
+          // to the block's left edge, deliberately over whatever decorates it).
+          const k = kid.getBoundingClientRect();
+          const padLeft = parseFloat(getComputedStyle(el).paddingLeft) || 0;
+          if (parseFloat(cs.left) === 0 || k.right > box.left + padLeft + 1) continue;
+          const cls = `${el.className.toString().split(/\s+/).slice(-1)[0]} > ${kid.className.toString().split(/\s+/)[0]}`;
+          out.push({ key: cls, dx: kid.getBoundingClientRect().left - box.left });
+        }
+      }
+      return out;
+    };
+    const before = placed();
+    document.documentElement.style.setProperty("--wks-bar-w", `${3 + grow}px`);
+    const after = placed();
+    document.documentElement.style.removeProperty("--wks-bar-w");
+    return before.map((b, i) => ({ key: b.key, moved: (after[i]?.dx ?? b.dx) - b.dx }));
+  }, GROW);
+
+  expect(measured.length, "the fixture drew a strip box with something absolutely placed in it").toBeGreaterThan(0);
+  for (const m of measured) {
+    expect(m.moved, `${m.key}: placed from the bar's width — it moved ${m.moved}px when the bar grew ${GROW}px`)
+      .toBeCloseTo(GROW, 0);
+  }
+});
+
 test("#632: the bar is still there, still 3px, still the type's colour", async ({ page }) => {
   // Removing the border would satisfy the test above by deleting the bar, which the ruling refused
   // outright . So the strip is measured for real, on the widest-known types.
