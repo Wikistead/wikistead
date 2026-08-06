@@ -256,7 +256,8 @@
     "factorCodeWrong": "コードが一致しませんでした。",
     "factorStartFailed": "開始できませんでした。もう一度お試しください。",
     "factorLimit": "すでに上限まで登録されています。1 つ外してから追加してください。",
-    "factorUnfinished": "未完了"
+    "factorUnfinished": "未完了",
+    "factorLastAdmin": "このワークスペースの 2 段階要求のもとでサインインできる最後の管理者です。別の認証アプリを登録するか、要求をオフにしてから外してください。"
   },
   "settings": {
     "back": "アプリに戻る",

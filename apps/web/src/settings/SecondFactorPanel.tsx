@@ -75,8 +75,20 @@ export function SecondFactorPanel() {
       await remove.mutateAsync({ factorId: id, code: confirmed ? removing?.code.trim() : undefined });
       setRemoving(null);
       notify.success(t("account.factorRemoved"));
-    } catch {
-      notify.error(t("account.factorCodeWrong"));
+    } catch (e) {
+      // The floor (#652 / ADR-219 §4) refuses the LAST admin's factor while the policy is on, and the
+      // code they typed was right. Reporting that as "your code did not match" sends them back to the
+      // authenticator for another one, which is refused for the same unstated reason — a loop with no
+      // exit in it.
+      //
+      // The TRANSLATED sentence, not the server's: `ApiError.message` is built from the status and the
+      // path ("api 409 for /me/factors/…"), and the server's own prose is English only. What the code
+      // carries is the FACT; the words belong to the screen.
+      if (e instanceof ApiError && e.code === "last_admin_factor") {
+        notify.error(t("account.factorLastAdmin"));
+      } else {
+        notify.error(t("account.factorCodeWrong"));
+      }
     }
   };
 
