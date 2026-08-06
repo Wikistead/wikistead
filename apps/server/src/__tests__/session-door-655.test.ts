@@ -69,7 +69,11 @@ describe('#655: every path that opens a session says which door it opened', () =
   const EXPECTED: { file: RegExp; doors: string[] }[] = [
     { file: /routes\/auth\.ts$/, doors: ['federated'] },                 // OIDC callback
     { file: /saml\/saml-auth\.ts$/, doors: ['federated'] },              // SAML, in the other package
-    { file: /routes\/auth-local\.ts$/, doors: ['local', 'operator'] },   // password, and break-glass acceptance
+    // #652 slice 3 added `local+factor` here, and it is the only file that may say it: the factor is
+    // answered at the product's own door and nowhere else. `local` still appears in the same file (the
+    // password step, before anything has been presented) — the two are the two halves of one sign-in,
+    // which is why widening this entry is right and widening the federated ones would not be.
+    { file: /routes\/auth-local\.ts$/, doors: ['local', 'local+factor', 'operator'] },
   ]
 
   it('names a door at every product call site', () => {
