@@ -4,11 +4,12 @@ import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/outbox.js'
 import {
   startTotpEnrolment, totpSecretFor, confirmFactor, listFactors, markFactorUsed, deleteFactor,
-  discardPendingFactors,
+  discardPendingFactors, startPasskeyEnrolment,
 } from '../auth/second-factors.js'
 import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
 import { spendTotpCounter } from '../auth/second-factors.js'
 import { secondFactorRequired, wouldStrandTenant } from '../auth/factor-policy.js' // #652: the floor
+import { passkeyRegistrationOptions, verifyPasskeyRegistration, storePasskey } from '../auth/passkeys.js' // #663
 import { productName } from '../product-name.js'
 
 // Enrolling a second factor (#657 / ADR-219 §7). SELF-SCOPE, like the rest of /me: every read and
@@ -189,6 +190,71 @@ export async function secondFactorPlugin(app: FastifyInstance) {
     })).catch((err: unknown) => req.log.warn({ err }, 'factor enrolment audit failed'))
     // #228's policy: a new feature brings its webhook with it. Something changed about who can
     // authenticate this account, which is the same reason `member.password_enabled` is emitted.
+    emit({ type: 'member.factor_enrolled', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.user.sub })
+    return reply.code(200).send({ confirmed: true })
+  })
+
+  /**
+   * Begin a passkey enrolment (#663 / ADR-219 §1).
+   *
+   * Same shape as the TOTP start above and for the same reasons: the cap is checked first, abandoned
+   * rows are cleared, and the factor row exists UNCONFIRMED until the browser comes back with a
+   * credential. What differs is that the secret never leaves the authenticator — there is nothing here
+   * to show once, which is why this returns options rather than a key.
+   */
+  app.post<{ Body: { label?: string } }>('/me/factors/passkey', async (req, reply) => {
+    await discardPendingFactors(req.db, req.user.sub)
+    const [held] = await req.db.sql<[{ n: number }?]>`
+      SELECT count(*)::int AS n FROM member_factors WHERE member_sub = ${req.user.sub}`
+    if ((held?.n ?? 0) >= MAX_FACTORS_PER_MEMBER) {
+      return reply.code(409).send({
+        error: `you already have ${MAX_FACTORS_PER_MEMBER} — remove one before adding another`,
+        code: 'factor_limit_reached',
+      })
+    }
+    const [row] = await req.db.sql<[{ email: string | null }?]>`
+      SELECT email FROM members WHERE sub = ${req.user.sub}`
+    const options = await passkeyRegistrationOptions(
+      { db: req.db, valkey: app.valkey },
+      { tenantId: req.tenant.id, memberSub: req.user.sub, memberName: row?.email || req.user.sub, host: req.headers.host },
+    )
+    const { factorId } = await startPasskeyEnrolment(req.db, {
+      tenantId: req.tenant.id, memberSub: req.user.sub,
+      label: typeof req.body?.label === 'string' ? req.body.label.slice(0, 100) : '',
+    })
+    return reply.code(201).send({ factorId, options })
+  })
+
+  /** Finish it: the browser's credential, checked, stored, and the factor confirmed. */
+  app.post<{ Params: { id: string }; Body: { response?: unknown } }>('/me/factors/:id/passkey', async (req, reply) => {
+    const { id } = req.params
+    if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
+      return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
+    }
+    const [own] = await req.db.sql<[{ id: string }?]>`
+      SELECT id FROM member_factors
+      WHERE id = ${id} AND member_sub = ${req.user.sub} AND kind = 'passkey' AND confirmed_at IS NULL`
+    if (!own) return reply.code(404).send({ error: 'no pending enrolment', code: 'factor_not_pending' })
+
+    const verified = await verifyPasskeyRegistration(
+      { valkey: app.valkey },
+      { tenantId: req.tenant.id, memberSub: req.user.sub, host: req.headers.host, response: req.body?.response as never },
+    )
+    if (!verified) {
+      await countFailure(app.valkey, req.tenant.id, req.user.sub)
+      return reply.code(400).send({ error: 'that key could not be registered', code: 'passkey_invalid' })
+    }
+    await storePasskey(req.db, { tenantId: req.tenant.id, factorId: id, passkey: verified })
+    if (!(await confirmFactor(req.db, id))) {
+      return reply.code(409).send({ error: 'this enrolment is no longer pending', code: 'factor_not_pending' })
+    }
+    await clearFailures(app.valkey, req.tenant.id, req.user.sub)
+    await markFactorUsed(req.db, id)
+    // The same event a TOTP enrolment writes: what the ledger records is that this account gained a
+    // factor, and which kind it was belongs to the row rather than to the verb.
+    await req.db.tx(async (tx) => auditIfEntitled(tx, req.tenant, {
+      actor: `user:${req.user.sub}`, action: 'member.factor_enrolled', target: `member:${req.user.sub}`,
+    })).catch((err: unknown) => req.log.warn({ err }, 'factor enrolment audit failed'))
     emit({ type: 'member.factor_enrolled', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.user.sub })
     return reply.code(200).send({ confirmed: true })
   })
