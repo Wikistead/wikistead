@@ -18,6 +18,10 @@ import type IORedis from 'ioredis'
 import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
+import { FACTOR_COOKIE, createFactorSession, readFactorSession, destroyFactorSession, factorCookieOptions } from '../auth/factor-session.js' // #652 / ADR-219 §6
+import { secondFactorRequired } from '../auth/factor-policy.js'
+import { hasConfirmedFactor, totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
+import { verifyTotp, generateTotpSecret, totpUri } from '../auth/totp.js'
 import { localLoginEnabled, loginMethodCeiling } from '../auth/login-methods.js'
 import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/password-hash.js'
 import { safeReturnTo } from '../auth/return-to.js'
@@ -436,6 +440,28 @@ export async function authLocalPlugin(app: FastifyInstance) {
       // holding a frozen account's address: 403 for the correct password, 401 for a wrong one. It is
       // also the one branch that skipped the failure counters, so it could be probed without limit.
       // Every one of them is the same 401 as any other refusal, counted like any other refusal.
+      // #652 / ADR-219 §6: does this tenant require a second factor? Asked BEFORE a session exists,
+      // because §6's circle is the whole difficulty — a policy enforced only on an existing session
+      // means an un-enrolled member cannot get one, cannot reach settings, and can never enrol. The
+      // password was right; what comes back is a receipt saying so, not the run of the product.
+      //
+      // The FEDERATED doors do not pass through here at all, which is how ADR-219 §3's ruling holds
+      // without a branch: this file is the product's own door and the only one the policy is about.
+      if (await secondFactorRequired(req.db)) {
+        const enrolled = await hasConfirmedFactor(req.db, row.member_sub)
+        const fsid = await createFactorSession(app.valkey, {
+          tenantId: req.tenant.id, sub: row.member_sub, enrolled,
+        })
+        // The counters clear here for the same reason they clear below: the password was correct, and
+        // a member who mistyped twice before getting it right must not be one failure from a lock.
+        await app.valkey.del(idKey).catch(() => {})
+        reply.setCookie(FACTOR_COOKIE, fsid, factorCookieOptions())
+        // Two different situations for the screen, not one: presenting a factor and installing one are
+        // different things to be asked to do, and a single "factor required" would send somebody with
+        // no authenticator to a code box they cannot fill.
+        return { ok: false, factor: enrolled ? 'required' : 'enrolment-required' as const }
+      }
+
       let sid: string
       try {
         sid = await establishMemberSession(
@@ -477,6 +503,156 @@ export async function authLocalPlugin(app: FastifyInstance) {
       // Only NOW are the counters for this identifier cleared — after a session actually exists. A
       // legitimate user who mistyped twice is not one failure away from a lock, and a refusal that
       // happens after the password matched still counts (review B1).
+      await app.valkey.del(idKey).catch(() => {})
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
+    },
+  )
+
+  // #652 / ADR-219 §6: present the factor, and the receipt becomes a session.
+  //
+  // PUBLIC, like the sign-in above — the caller has no session yet, which is the whole point. What
+  // stands in for one is the factor cookie, and it is the only thing here that says who this is: the
+  // request body carries a code and nothing else, so no `sub` is addressable from outside.
+  app.post<{ Body: { code?: string; returnTo?: string } }>('/auth/local/factor', { config: { public: true } }, async (req, reply) => {
+    if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
+      return reply.code(403).send({ error: 'cross-origin sign-in refused' })
+    }
+    const fsid = req.cookies?.[FACTOR_COOKIE]
+    const pending = await readFactorSession(app.valkey, fsid)
+    if (!pending || pending.tenantId !== req.tenant.id) {
+      // Expired, never issued, or issued for another tenant. One answer for all three: which of them
+      // it was is a fact about somebody else's account.
+      return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
+    }
+    // The same limiter the password door uses, keyed the same way. Without it the code is six digits
+    // behind an unlimited retry, which is a weaker door than the password it follows.
+    const ipKey = `authlocal:ip:${req.ip}`
+    const idKey = `authlocal:id:${pending.sub}`
+    if (await overLimit(app.valkey, idKey, LOCAL_LOGIN_ID_MAX) || await overLimit(app.valkey, ipKey, LOCAL_LOGIN_IP_MAX)) {
+      return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
+    }
+
+    const code = typeof req.body?.code === 'string' ? req.body.code : ''
+    const rows = await req.db.sql<{ id: string }[]>`
+      SELECT id FROM member_factors WHERE member_sub = ${pending.sub} AND confirmed_at IS NOT NULL`
+    let matched: { id: string; counter: number } | null = null
+    for (const r of rows) {
+      const secret = await totpSecretFor(req.db, r.id)
+      const counter = secret ? verifyTotp(secret, code, Date.now()) : null
+      // EVERY factor is tried, not just until one matches: somebody who holds a phone and a spare key
+      // presents whichever they have to hand, and stopping early would make which one they used
+      // observable in the response time.
+      if (counter !== null && !matched) matched = { id: r.id, counter }
+    }
+    if (!matched) {
+      await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+      await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
+      emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'local', reason: 'invalid credentials' })
+      return reply.code(401).send({ error: 'that code did not match', code: 'factor_code_invalid' })
+    }
+    // Spend the step BEFORE the session exists. A code is live for its whole window, so without this
+    // the same six digits — shoulder-surfed, or read off a screen share — open a second session
+    // within the minute.
+    if (!(await spendTotpCounter(req.db, matched.id, matched.counter))) {
+      await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+      return reply.code(401).send({ error: 'that code has already been used', code: 'factor_code_replayed' })
+    }
+
+    const sid = await establishMemberSession(
+      { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
+      req.tenant,
+      { sub: pending.sub },
+      // …and NOW the door is `local+factor`. It was `local` at the password step and stayed there
+      // because nothing had been answered yet — claiming otherwise would have been the lie the
+      // enforcement reads.
+      { localIdentity: true, door: 'local+factor' },
+    )
+    await destroyFactorSession(app.valkey, fsid)
+    reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
+    await app.valkey.del(idKey).catch(() => {})
+    await markFactorUsed(req.db, matched.id)
+    reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+    emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: pending.sub, method: 'local' })
+    return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
+  })
+
+  // ── enrolling FROM the interstitial (ADR-219 §6's circle) ───────────────────────────────────────
+  //
+  // Policy on → an un-enrolled member gets no session → cannot reach /settings → can never enrol. The
+  // way out is two routes that take the factor receipt instead of a session.
+  //
+  // They live HERE, next to the door, rather than by loosening the session guard so that `/me/factors`
+  // accepts a half-credential. That guard's value is that it has one input: a route which sometimes
+  // accepts a session and sometimes a receipt is a route whose principal depends on which cookie the
+  // caller sent, and every later reader has to know that. The logic is not duplicated — both call the
+  // same store functions the settings screen does.
+  const receipt = async (req: { cookies?: Record<string, string>; tenant: { id: string } }) => {
+    const sid = req.cookies?.[FACTOR_COOKIE]
+    const pending = await readFactorSession(app.valkey, sid)
+    return pending && pending.tenantId === req.tenant.id ? { sid, pending } : null
+  }
+
+  app.post('/auth/local/factor/enrol', { config: { public: true } }, async (req, reply) => {
+    const held = await receipt(req as never)
+    if (!held) return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
+    // Only somebody who has NOTHING enrolled may take this door. A member who holds a factor and wants
+    // another one has a session to do it from, and letting them through here would turn "I know a
+    // password" into "I can add an authenticator" — which is the re-authentication ADR-219 §8 asks for,
+    // skipped.
+    if (held.pending.enrolled) {
+      return reply.code(409).send({ error: 'present your existing factor first', code: 'factor_required' })
+    }
+    const secret = generateTotpSecret()
+    const { factorId } = await startTotpEnrolment(req.db, {
+      tenantId: req.tenant.id, memberSub: held.pending.sub, secret,
+    })
+    const [row] = await req.db.sql<[{ email: string | null }?]>`
+      SELECT email FROM members WHERE sub = ${held.pending.sub}`
+    return reply.code(201).send({
+      factorId, secret,
+      uri: totpUri({ secret, account: row?.email || held.pending.sub, issuer: productName() }),
+    })
+  })
+
+  app.post<{ Params: { id: string }; Body: { code?: string; returnTo?: string } }>(
+    '/auth/local/factor/enrol/:id/confirm',
+    { config: { public: true } },
+    async (req, reply) => {
+      const held = await receipt(req as never)
+      if (!held) return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
+      const idKey = `authlocal:id:${held.pending.sub}`
+      if (await overLimit(app.valkey, idKey, LOCAL_LOGIN_ID_MAX)) {
+        return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
+      }
+      const [own] = await req.db.sql<[{ id: string }?]>`
+        SELECT id FROM member_factors
+        WHERE id = ${req.params.id} AND member_sub = ${held.pending.sub} AND confirmed_at IS NULL`
+      if (!own) return reply.code(404).send({ error: 'no pending enrolment', code: 'factor_not_pending' })
+
+      const secret = await totpSecretFor(req.db, req.params.id)
+      const counter = secret ? verifyTotp(secret, typeof req.body?.code === 'string' ? req.body.code : '', Date.now()) : null
+      if (counter === null) {
+        await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+        return reply.code(400).send({ error: 'that code did not match', code: 'factor_code_invalid' })
+      }
+      await spendTotpCounter(req.db, req.params.id, counter)
+      if (!(await confirmFactor(req.db, req.params.id))) {
+        return reply.code(409).send({ error: 'this enrolment is no longer pending', code: 'factor_not_pending' })
+      }
+      await req.db.tx(async (tx) => auditIfEntitled(tx, req.tenant, {
+        actor: `user:${held.pending.sub}`, action: 'member.factor_enrolled', target: `member:${held.pending.sub}`,
+      })).catch((err: unknown) => req.log.warn({ err }, 'factor enrolment audit failed'))
+      emit({ type: 'member.factor_enrolled', tenantId: req.tenant.id, actorId: held.pending.sub, targetSub: held.pending.sub })
+
+      // Enrolling IS answering: they produced a code from the thing they just registered, in front of
+      // us. Making them sign in again would be asking for the same proof twice.
+      const sid = await establishMemberSession(
+        { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
+        req.tenant, { sub: held.pending.sub }, { localIdentity: true, door: 'local+factor' },
+      )
+      await destroyFactorSession(app.valkey, held.sid)
+      reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
       await app.valkey.del(idKey).catch(() => {})
       reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
       return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
