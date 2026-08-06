@@ -12,9 +12,9 @@ import {
   useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor, useRemovePasskeyChallenge,
   useRenameFactor, useStartPasskeyEnrolment, useConfirmPasskey,
 } from "../data/queries";
-import { startAuthentication, startRegistration } from "@simplewebauthn/browser"; // #666: the key proves itself
+import { startAuthentication, startRegistration, browserSupportsWebAuthn } from "@simplewebauthn/browser"; // #666: the key proves itself
 import { ApiError } from "../data/apiClient";
-import { classifyRemovalFailure } from "./factor-removal-failure"; // #673 ②
+import { classifyRemovalFailure, classifyEnrolmentFailure } from "./factor-removal-failure"; // #673 ② / #653 ③
 
 // #653 / ADR-219: a member's own second factors. SELF-SCOPE — every call is keyed to the session's
 // subject by the server, so no other member's factor is addressable from this screen.
@@ -93,6 +93,10 @@ export function SecondFactorPanel() {
    * (`discardPendingFactors` only runs on the way IN, so a cancel that leaves a row costs a slot).
    */
   const onAddPasskey = async () => {
+    // #653 ③: asked BEFORE anything is started. A browser that cannot run the ceremony would
+    // otherwise be issued a challenge it can never answer — a row against the cap of ten, bought for
+    // nothing — and then told its key was at fault.
+    if (!browserSupportsWebAuthn()) { notify.error(t("account.factorKeyUnsupported")); return; }
     let started: { factorId: string; options: Record<string, unknown> } | null = null;
     try {
       started = await startPasskey.mutateAsync({ label: label.trim() });
@@ -103,11 +107,15 @@ export function SecondFactorPanel() {
       notify.success(t("account.factorAdded"));
     } catch (e) {
       if (started) await remove.mutateAsync({ factorId: started.factorId }).catch(() => {});
-      if (e instanceof ApiError && e.code === "factor_limit_reached") {
-        setAtLimit(true);
-        notify.error(t("account.factorLimit"));
-      } else {
-        notify.error(t("account.factorKeyFailed"));
+      // #653 ③, the same shape #673 gave removal: situations whose next moves differ get
+      // different sentences. Dismissing the prompt needs nothing; a duplicate key is already in the
+      // list above; a cap needs one removed first. "That key did not confirm it" answers all three by
+      // sending the reader to look for a fault in hardware that is working.
+      switch (classifyEnrolmentFailure(e)) {
+        case "limit": setAtLimit(true); return notify.error(t("account.factorLimit"));
+        case "already": return notify.error(t("account.factorKeyAlready"));
+        case "cancelled": return notify.info(t("account.factorKeyCancelled"));
+        default: return notify.error(t("account.factorKeyFailed"));
       }
     }
   };
@@ -302,6 +310,10 @@ export function SecondFactorPanel() {
             onClick={() => void onAddPasskey()} data-testid="factor-add-passkey">{t("account.factorAddPasskey")}</Button>
         </FormRow>
       )}
+      {/* #653 ④. #664 states this same fact where a domain move is refused — "a passkey only
+          works on the host it was created for" — but that refusal is API-only and no screen carries it.
+          Said here, in the reader's words, while they are deciding to create one. */}
+      <p className="mt-2 text-xs text-fg-dim" data-testid="factor-key-domain-note">{t("account.factorKeyDomainNote")}</p>
     </div>
   );
 }

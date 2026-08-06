@@ -99,6 +99,21 @@ test.describe("#652: the sign-in screen's second step", () => {
     expect(key, "the key the phone needs").toBe(SECRET);
     await expect(page.getByTestId("login-factor-secret-copy"), "copyable rather than retyped").toBeVisible();
 
+    // #653 THIS screen had no QR while the settings screen did, and the reason was never a
+    // missing feature — the server sent `uri` here too and the type dropped it. So the assertion is
+    // that the code drawn here carries the server's own string: a component handed `undefined` renders
+    // an empty box, which "a QR element exists" would not notice.
+    const qr = page.getByTestId("login-factor-qr");
+    await expect(qr, "a phone can be pointed at this screen too").toBeVisible();
+    expect(await qr.getAttribute("data-qr-value"), "…and it encodes what the server sent")
+      .toBe((await page.getByTestId("login-factor-uri").innerText()).trim());
+    // Polled, not read once: the encoder is fetched on demand (`QrCode` imports it inside its effect,
+    // so a browser-only bundle stays out of Node's import graph), so the canvas appears a tick later.
+    await expect.poll(() => qr.evaluate((el) => el.querySelector("canvas") !== null),
+      { timeout: 15_000 }).toBe(true);
+    expect(await qr.evaluate((el) => el.getBoundingClientRect().width), "big enough for a camera")
+      .toBeGreaterThanOrEqual(120);
+
     const code = totp(SECRET);
     await page.getByTestId("login-factor-enrol-code").fill(code);
     await page.getByTestId("login-factor-enrol-submit").click();

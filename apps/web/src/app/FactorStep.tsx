@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { OneTimeSecret } from "../ui/OneTimeSecret";
+import { QrCode } from "../ui/QrCode"; // #653 the same code the settings screen draws
 import { assetUrl } from "../data/apiClient";
 
 // #652 / ADR-219 §6: the half-authenticated step. The password was right; the tenant requires one more
@@ -22,8 +23,11 @@ export function FactorStep({ stage, returnTo }: { stage: "required" | "enrolment
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  // #653 `uri` was in this response all along and the TYPE dropped it, so the sign-in screen
+  // offered typing and nothing else while the settings screen — same server field — drew a QR. Reading
+  // it here is the whole fix; the server is untouched.
   /** the enrolment being set up, once started — the secret is handed over ONCE, in that response */
-  const [enrolling, setEnrolling] = useState<{ factorId: string; secret: string } | null>(null);
+  const [enrolling, setEnrolling] = useState<{ factorId: string; secret: string; uri: string } | null>(null);
 
   const post = async (path: string, body: unknown) =>
     fetch(assetUrl(path), {
@@ -51,7 +55,7 @@ export function FactorStep({ stage, returnTo }: { stage: "required" | "enrolment
     setBusy(true); setFailed(false);
     const res = await post("/auth/local/factor/enrol", {}).catch(() => null);
     if (!res?.ok) { setFailed(true); setBusy(false); return; }
-    setEnrolling(await res.json() as { factorId: string; secret: string });
+    setEnrolling(await res.json() as { factorId: string; secret: string; uri: string });
     setBusy(false);
   };
 
@@ -97,6 +101,12 @@ export function FactorStep({ stage, returnTo }: { stage: "required" | "enrolment
           {/* The key goes to a phone standing in front of the reader, so it is the same one-time box a
               password link uses — shown once, copyable, and saying so. */}
           <p className="m-0 text-sm text-fg-dim">{t("auth.factorEnrolHint")}</p>
+          {/* The URI the SERVER built, drawn as-is — the same component and the same value the
+              settings screen uses. Rebuilding it here would put the spelling of label, issuer, digits
+              and period in a second place, and the day they drift the QR sets up one account while the
+              typed key sets up another. */}
+          <QrCode value={enrolling.uri} testId="login-factor-qr" />
+          <span hidden data-testid="login-factor-uri">{enrolling.uri}</span>
           <OneTimeSecret value={enrolling.secret} testId="login-factor-secret" grouped
             note={t("auth.factorSecretNote")} />
           {codeBox(confirmEnrolment, "login-factor-enrol")}

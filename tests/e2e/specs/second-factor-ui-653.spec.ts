@@ -68,7 +68,10 @@ test("#653: a factor can be enrolled from the screen, and only given up by provi
   // that inverted it would draw a code no phone can see.
   expect(await qr.evaluate((el) => getComputedStyle(el).backgroundColor), "white quiet zone")
     .toBe("rgb(255, 255, 255)");
-  expect(await qr.evaluate((el) => el.querySelector("canvas") !== null), "something was drawn").toBe(true);
+  // Polled, not read once: the encoder is fetched on demand (`QrCode` imports it inside its effect,
+  // so a browser-only bundle stays out of Node's import graph), so the canvas appears a tick later.
+  await expect.poll(() => qr.evaluate((el) => el.querySelector("canvas") !== null),
+    { timeout: 15_000 }).toBe(true);
 
   // …and what was drawn DEPENDS ON THE VALUE. `data-qr-value` says what the encoder was handed; these
   // pixels say what a camera would see, and the two are different claims — a component that drew a
