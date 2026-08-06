@@ -63,6 +63,10 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
   // #630 mounted through its exit, so it fades the way the Radix tooltip beside it does rather
   // than blinking off the moment the grace timer fires.
   const presence = useHintPresence(open);
+  // #647: WHICH role name has its capability panel up — one value, so two cannot be open at once. It
+  // lived in each name before, and independent siblings is what let a mid-exit panel re-open itself and
+  // stack. Keyed by role@group, the same key the list renders by.
+  const [openRole, setOpenRole] = useState<string | null>(null);
   const anchor = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   // one timer for the whole chain: leaving the mark for the list (or the list for a role name) crosses a
@@ -108,7 +112,7 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
   const hide = () => {
     cancelOpen();
     if (closing.current) clearTimeout(closing.current);
-    closing.current = setTimeout(() => setOpen(false), HINT_CLOSE_GRACE_MS);
+    closing.current = setTimeout(() => { setOpen(false); setOpenRole(null); }, HINT_CLOSE_GRACE_MS);
   };
 
   return (
@@ -133,7 +137,14 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
       </span>
       {presence.present && at && createPortal(
         <div
-          ref={(el) => { panel.current = el; if (el) place(); }}
+          // #647: an OBJECT ref, not an inline callback. A callback ref is a new function every render,
+          // so React detaches it (`panel.current = null`) and reattaches on each pass — and a child's
+          // layout effect runs BEFORE the parent's ref is reattached. Once the open name moved up here,
+          // every open re-rendered this list, so `RoleNameWithCaps` measured against a null list rect,
+          // fell back to the name, and placed the capability panel on top of the list: the reject,
+          // back again. An object ref is populated before any layout effect runs. The measuring pass is
+          // the effect below, which already re-runs when `at` changes.
+          ref={panel}
           role="tooltip"
           data-role-panel
           data-state={presence.state}
@@ -150,7 +161,14 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
                 <span className="text-fg-dim">{g.group}</span>
                 {/* the role NAME is the nested hover: it raises the capability panel #582 settled on, so
                     this list carries two axes and no third way of showing what a role can do */}
-                <RoleNameWithCaps role={g} caps={capsOf(g, tierCaps)} list={panel} />
+                <RoleNameWithCaps
+                  role={g}
+                  caps={capsOf(g, tierCaps)}
+                  list={panel}
+                  open={openRole === `${g.role}@${g.group}`}
+                  onOpen={() => setOpenRole(`${g.role}@${g.group}`)}
+                  onClose={() => setOpenRole((cur) => (cur === `${g.role}@${g.group}` ? null : cur))}
+                />
               </li>
             ))}
           </ul>
@@ -170,23 +188,30 @@ export function GroupRolesMark({ roles, tierCaps }: { roles: readonly GroupConfe
  *
  *  The chevron is the ruling's fourth point: the second tier was there but nothing said so, and a
  *  hover nobody knows about is a hover nobody uses. */
-function RoleNameWithCaps({ role, caps, list }: {
+function RoleNameWithCaps({ role, caps, list, open, onOpen, onClose }: {
   role: GroupConferredRole;
   caps: readonly string[] | null;
   list: React.RefObject<HTMLDivElement | null>;
+  /** #647: whether THIS name's panel is the open one. The list owns it, so two cannot be true. */
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [at, measured, setAt] = useSettledAt();
   const presence = useHintPresence(open);
   const ref = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  // #647: MEASURING only. It used to end with `setOpen(true)`, and the ref callback below calls it on
+  // every render — so a panel that was mid-exit (still mounted, because #630 keeps it there to animate)
+  // re-opened itself the moment a sibling was hovered and re-rendered the list. Each hover left one more
+  // panel behind, stacked 95px apart, and none of them closed until the whole list unmounted. Opening is
+  // the pointer's business now, and it belongs to the list, which can only remember one name.
   const place = () => {
     const r = ref.current?.getBoundingClientRect();
     if (!r) return;
     // the layout box again, for the reason `place` above spells out
     const box = panel.current;
     setAt(placeBeside(list.current?.getBoundingClientRect() ?? r, r, { width: 220, height: box?.offsetHeight ?? 0 }), !!box);
-    setOpen(true);
   };
   useLayoutEffect(() => { if (open) place(); }, [open, at]);
   return (
@@ -196,17 +221,20 @@ function RoleNameWithCaps({ role, caps, list }: {
         tabIndex={0}
         data-testid="group-role-name"
         className="inline-flex cursor-help items-center gap-0.5 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onPointerEnter={place}
-        onPointerLeave={() => setOpen(false)}
-        onFocus={place}
-        onBlur={() => setOpen(false)}
+        onPointerEnter={onOpen}
+        onPointerLeave={onClose}
+        onFocus={onOpen}
+        onBlur={onClose}
       >
         {role.role}
         <ChevronRight size={11} aria-hidden className="text-fg-dim" />
       </span>
       {presence.present && at && createPortal(
         <div
-          ref={(el) => { panel.current = el; if (el) place(); }}
+          // an object ref here too, for the reason the list's carries: this one is re-created on every
+          // render of the list as well, and a panel whose ref flickers to null is a panel measured as
+          // zero-height — which is how it hung off the bottom of a 700px window before.
+          ref={panel}
           role="tooltip"
           data-state={presence.state}
           data-testid="group-role-caps"
