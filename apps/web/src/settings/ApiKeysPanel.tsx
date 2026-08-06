@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
+import type { TFunction } from "i18next";
 import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2, ChevronRight } from "lucide-react"; // #544: an icon component, never a text glyph
@@ -40,6 +41,31 @@ function LastUsed({ at }: { at: string | null }) {
 // audiences; the difference is only which list is handed in and whether issuing is allowed here.
 // `canIssue` hides the form when the tenant has restricted issuing to admins — the SERVER refuses
 // regardless, this only avoids offering something that will be turned down.
+/**
+ * #658: the short mark on a confined key's row, and the long form in its tooltip.
+ *
+ * `count` and `named` differ when the reader cannot view every space the key reaches. The label counts,
+ * the tooltip names what it may — saying "2 spaces" is the fact an inventory needs, and "which two" is a
+ * different question that this reader has not been granted.
+ */
+function confinementLabel(k: ApiKeySummary, t: TFunction): string {
+  const parts: string[] = [];
+  if (k.spaces) parts.push(t("adminApi.confinedSpaces", { count: k.spaces.count }));
+  if (k.capabilities) parts.push(t("adminApi.confinedCaps", { count: k.capabilities.length }));
+  return parts.join(" · ");
+}
+
+function confinementTip(k: ApiKeySummary, t: TFunction): string {
+  const lines: string[] = [];
+  if (k.spaces) {
+    const named = k.spaces.named.map((s) => s.name);
+    const hidden = k.spaces.count - named.length;
+    lines.push([...named, hidden > 0 ? t("adminApi.confinedHidden", { count: hidden }) : null].filter(Boolean).join(", "));
+  }
+  if (k.capabilities) lines.push(k.capabilities.map((c) => t(`adminApi.cap_${c}`, { defaultValue: c })).join(", "));
+  return lines.join(" · ");
+}
+
 export function ApiKeysPanel({
   keys, canIssue, maxScope, maxAgeDays, emptyText, admin = false,
 }: {
@@ -197,6 +223,17 @@ export function ApiKeysPanel({
             <span className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{k.name}</span>
             {/* #495: the admin view names WHO owns the key (name, or the sub when the name is null) */}
             {admin && <span className="flex-none max-w-[9rem] truncate text-xs text-fg-dim" data-testid="api-key-owner" data-tip={k.ownerName ?? k.ownerUserId}>{k.ownerName ?? k.ownerUserId}</span>}
+            {/* #658: a confined key says so, in one mark rather than a row of chips — #579/#603 ruled
+                that these rows do not grow taller, and a list of spaces and verbs would do exactly that.
+                The detail lives in the tooltip. An unconfined key carries nothing at all: most keys are
+                unconfined, and marking them would make the exception look ordinary. */}
+            {(k.spaces || k.capabilities) && (
+              <span
+                className="flex-none rounded-full border border-border px-2 py-px text-[11px] text-fg-dim"
+                data-testid="api-key-confinement"
+                data-tip={confinementTip(k, t)}
+              >{confinementLabel(k, t)}</span>
+            )}
             <code className="flex-none font-mono text-xs text-fg-dim">{k.keyPrefix}…</code>
             <LastUsed at={k.lastUsedAt} />
             {/* #504: red at rest (hover-only red is against the policy) + confirm before the kill. */}

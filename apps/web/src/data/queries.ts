@@ -1586,7 +1586,13 @@ export interface ApiKeySummary { id: string; name: string; keyPrefix: string; sc
   expiresAt?: string | null;
   // #495 / ADR-182: present ONLY on the admin list (GET /api-keys) so an admin can revoke a specific
   // member's key. ownerName follows #486 (null → null, no email fallback). Never a secret.
-  ownerUserId?: string; ownerName?: string | null }
+  ownerUserId?: string; ownerName?: string | null;
+  // #658: what the key is confined to, so a roster of credentials can be read back. Absent when the key
+  // is not confined in that dimension — the common case carries no marking, so the exception is what
+  // stands out. `spaces.count` is every space on the key; `spaces.named` only the ones this reader may
+  // view, which is why the two can differ.
+  capabilities?: string[];
+  spaces?: { count: number; named: { id: string; name: string }[] } }
 export interface ApiKeyCreated extends ApiKeySummary { plaintext: string }
 // #462: two lists, because they answer different questions. `useApiKeys` is the tenant-wide ADMIN
 // view (it used to be readable by any member, which laid out who automates what); `useMyApiKeys` is

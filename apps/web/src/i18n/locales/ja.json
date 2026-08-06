@@ -360,7 +360,10 @@
     "narrowShow": "詳細設定",
     "narrowHint": "未設定のままなら、持ち主が見られる範囲すべてに届きます。",
     "narrowSpaces": "対象スペース",
-    "narrowCaps": "許可する操作"
+    "narrowCaps": "許可する操作",
+    "confinedSpaces": "スペース {{count}}",
+    "confinedCaps": "操作 {{count}}",
+    "confinedHidden": "見えないもの {{count}} 件"
   },
   "adminAuth": {
     "title": "認証",

@@ -133,11 +133,11 @@ describe('verifyApiKey', () => {
 describe('listApiKeys and revokeApiKey', () => {
   it('lists only active keys (not revoked)', async () => {
     const k = await createApiKey(db, { tenantId: tenant.id, plan: 'pro', ownerUserId: 'dev-user', name: 'list-test' })
-    const list = await listApiKeys(db)
+    const list = await listApiKeys(db, fgaClient, 'dev-user')
     expect(list.some(x => x.id === k.id)).toBe(true)
 
     await revokeApiKey(db, { id: k.id, ownerUserId: 'dev-user' })
-    const listAfter = await listApiKeys(db)
+    const listAfter = await listApiKeys(db, fgaClient, 'dev-user')
     expect(listAfter.some(x => x.id === k.id)).toBe(false)
   })
 
