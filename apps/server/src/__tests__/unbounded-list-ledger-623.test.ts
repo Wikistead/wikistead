@@ -35,7 +35,9 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // ── A group (the ticket's own list): the page grows with the tenant ────────────────────────────
   'members.ts': { kind: 'debt', why: '#623 A: every member, every invite. The motivating case.' },
   'spaces.ts': { kind: 'debt', why: '#623 A: pages per space, spaces per tenant, the space roster.' },
-  'pages.ts': { kind: 'debt', why: '#623 A: attachments, trash, related/backlinks, per-page grants.' },
+  // #623 slice 6: the flat lists in this file are bounded now (overview, trash, attachments, related,
+  // backlinks). What is left is the TREE — which is why the line stays: a keyset does not page a tree.
+  'pages.ts': { kind: 'debt', why: '#623 A: the page TREE (firstN, the Sidebar shape) and per-page grants.' },
   'api-keys.ts': { kind: 'debt', why: '#623 A: one row per key; grows with integrations.' },
   'notifications.ts': { kind: 'debt', why: '#623 A/B: watches and the feed both grow without limit.' },
   'webhooks.ts': { kind: 'debt', why: '#623 A: one row per subscription.' },
@@ -54,7 +56,10 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'branding.ts': { kind: 'bounded', why: 'one branding row per tenant — a settings record, not a list.' },
   'abuse-config.ts': { kind: 'bounded', why: 'one abuse-filter row per tenant — a settings record, not a list.' },
   'billing.ts': { kind: 'bounded', why: 'one subscription per tenant; the plan table is a constant.' },
-  'public.ts': { kind: 'debt', why: '#623: bounded by listObjects at 1000 — a DIFFERENT ceiling, same slice.' },
+  // #623 slice 6: the flat listing is a keyset window now, on BOTH branches. The public space TREE is
+  // capped per node (200) and by depth (6), which bounds each STEP but not the product — 200⁶ nodes is
+  // a bound the way "eventually" is a deadline. Same shape as the Sidebar, waiting on the same design.
+  'public.ts': { kind: 'debt', why: '#623: the public space TREE is capped per node but not in total; the listing is windowed.' },
   'public-shell.ts': { kind: 'bounded', why: 'renders one page shell for one request — never a collection.' },
   'export.ts': { kind: 'debt', why: '#623 B: an export walks a whole space by design; the bound is a stream.' },
   'ai.ts': { kind: 'bounded', why: 'one completion per request — the model bounds it, not a query.' },
@@ -154,6 +159,7 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // presence of a LIMIT in the ROUTE body, and this one lives in the helper. Listed so it stays that
     // way rather than because it was changed.
     { file: 'routes/pages.ts', fn: 'getRelatedPages' },
+    { file: 'routes/pages.ts', fn: 'getBacklinks' },             // slice 6
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {
@@ -184,6 +190,24 @@ describe('#623: the lists bounded so far still carry their bound', () => {
       .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/--.*$/, '')).join('\n')
     expect(body, 'the assignments query still limits').toMatch(/\bLIMIT\b/)
     expect(body, 'without an OFFSET').not.toMatch(/\bOFFSET\b/)
+  })
+
+  it('the public listing is bounded too, on BOTH of its branches', () => {
+    // #623 slice 6. This one is worth two assertions rather than one: the route feeds `listPublicPages`
+    // through two loaders, and the branch that matters is the fallback — the one that exists BECAUSE the
+    // tenant is past OpenFGA's ceiling, and which used to answer with every published page it had.
+    const src = readFileSync(resolve(import.meta.dirname, '..', 'routes/public.ts'), 'utf8')
+    const at = src.indexOf('export function publicPageLoaders')
+    expect(at, 'the public listing loaders moved — if renamed, rename them here too').toBeGreaterThan(-1)
+    const rest = src.slice(at)
+    const end = rest.indexOf('\nexport ', 1)
+    const body = (end > 0 ? rest.slice(0, end) : rest)
+      .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/--.*$/, '')).join('\n')
+    expect(body.match(/\bLIMIT\b/g) ?? [], 'BOTH loaders limit — the fallback one especially').toHaveLength(2)
+    expect(body, 'without an OFFSET').not.toMatch(/\bOFFSET\b/i)
+    expect(body.match(/ORDER BY created_at DESC, id DESC/g) ?? [],
+      'both ordered with a tiebreaker, or two pages created in the same import straddle the boundary')
+      .toHaveLength(2)
   })
 
   it('the members list is bounded too (it is a route body, not a named function)', () => {

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { ChevronRight, Link as LinkIcon, Maximize2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { RightPanel } from "../ui/RightPanel";
+import { ListBox } from "../ui/list-rows";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { useBacklinks, useLocalGraph, useRelated } from "../data/queries";
 import { LocalGraphCanvas } from "./LocalGraph";
@@ -109,11 +110,17 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
           {backlinks.length === 0 ? (
             <p className="text-[13px] text-fg-dim" data-testid="backlinks-empty">{t("backlinks.empty")}</p>
           ) : (
-            <ul className="flex flex-col gap-0.5">
-              {backlinks.map((b) => (
-                <li key={b.id}>{linkBtn(b.id, b.title, `backlink-${b.id}`)}</li>
-              ))}
-            </ul>
+            // #623: the section scrolls, the panel does not grow. A page that everything links to
+            // returns up to 200 backlinks, and unboxed they pushed §Related and §Local graph so far
+            // below the fold that the panel read as if it had one section. Same box as the admin
+            // lists (#639/#581) rather than a second one invented for the rail.
+            <ListBox>
+              <ul className="flex flex-col gap-0.5">
+                {backlinks.map((b) => (
+                  <li key={b.id}>{linkBtn(b.id, b.title, `backlink-${b.id}`)}</li>
+                ))}
+              </ul>
+            </ListBox>
           )}
         </RelatedSection>
         {/* §Related — 2-hop pages that share a link with this one, grouped by the shared link (Scrapbox-style).
@@ -122,7 +129,8 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
           {relatedGroups.length === 0 ? (
             <p className="text-[13px] text-fg-dim" data-testid="related-empty">{t("related.empty")}</p>
           ) : (
-            <div className="flex flex-col gap-3" data-testid="related-groups">
+            // #623: same box, same reason — 20 groups of up to 12 pages is 240 rows.
+            <ListBox className="flex flex-col gap-3" data-testid="related-groups">
               {relatedGroups.map((g) => (
                 <div key={g.intermediate.id} className="flex flex-col gap-0.5">
                   {/* the shared link (intermediate) heads its group; clicking it navigates to that page. */}
@@ -141,7 +149,7 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
                   </ul>
                 </div>
               ))}
-            </div>
+            </ListBox>
           )}
         </RelatedSection>
         {/* §Local graph (#394 / ADR-147) — collapsed by default; the square mini canvas draws the 1-hop

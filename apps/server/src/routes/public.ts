@@ -6,6 +6,7 @@
 // Collab WebSocket (Hocuspocus) is a completely separate path;
 // anonymous visitors are NOT admitted to collaboration rooms here.
 import { createHash } from 'node:crypto'
+import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import { fgaClient, checkRelation, filterAuthorized } from '@wikistead/authz'
 import { withTenantTx, acquireTenantDb } from '../db/index.js' // #382
@@ -185,24 +186,124 @@ const PUBLIC_RENDER_CACHE_TTL_S = 600
 // is complete there and the original one-call flow stays. Extracted from the route so the ceiling
 // behaviour is pinnable with client-shaped stubs (a real 1000-page fixture would poison the shared
 // store — same reasoning as the #540 pin).
+//
+// #623: and it is answered a WINDOW at a time. The fallback branch above is the one that needs it most
+// it exists precisely because the tenant has more public pages than the ceiling, and it used to load every
+// published page in the tenant and return every confirmed one in a single response. The window is a keyset
+// on `(created_at, id)`: DESC with a tiebreaker, because two pages created in the same millisecond (an
+// import, a template expansion) have no order between them otherwise and would straddle the boundary
+// one repeated, one lost. Never OFFSET: a page published while a reader walks would shift every later row.
+//
+// The confirm makes the window under-fill (a candidate the anonymous check rejects leaves a gap), so the
+// cursor advances past the last candidate EXAMINED rather than the last one emitted — otherwise a rejected
+// row at the boundary would be re-examined forever. A short page therefore does not mean the end; only a
+// null cursor does.
+export type PublicListRow = { id: string; title: string; created_at: string | Date }
+export type PublicPageWindow = { limit: number; after: { createdAt: string; id: string } | null }
+
+export const PUBLIC_PAGES_LIMIT = 100
+export const PUBLIC_PAGES_MAX = 500
+/** Over-fetch factor for the confirm branch, so a window whose candidates are mostly rejected still fills. */
+const CONFIRM_OVER_FETCH = 2
+/** …and how many such windows ONE request may spend looking. Past this the response is short, not longer. */
+const CONFIRM_MAX_WINDOWS = 3
+
+export const encodePublicCursor = (r: PublicListRow): string =>
+  `${new Date(r.created_at).toISOString()}|${r.id}`
+
+export function decodePublicCursor(c: string | undefined): { createdAt: string; id: string } | null {
+  if (!c) return null
+  const at = c.indexOf('|')
+  if (at <= 0) return null
+  const createdAt = c.slice(0, at)
+  const id = c.slice(at + 1)
+  if (!id || Number.isNaN(Date.parse(createdAt))) return null
+  return { createdAt, id }
+}
+
+/**
+ * The two windowed reads behind the listing, as a function rather than inline in the route — so a test
+ * with a real database can run the SQL. Inline, the keyset fragments were reachable only through an HTTP
+ * request nothing exercised, which is how a query that does not parse ships green.
+ */
+export function publicPageLoaders(tenantId: string) {
+  const window = (tx: Sql, win: PublicPageWindow) =>
+    win.after
+      // `pages.id` is TEXT, not uuid (migration 002) — a `::uuid` cast here made every cursor-following
+      // request fail with "operator does not exist: text < uuid". Found by the real-database pin below;
+      // no amount of stubbing would have shown it.
+      ? tx`AND (created_at, id) < (${win.after.createdAt}::timestamptz, ${win.after.id})`
+      : tx``
+  return {
+    // list_objects returns public page IDs across the entire shared FGA store; the RLS-scoped query
+    // narrows to this tenant's pages only. Same anonymous principal as the single-page check.
+    loadByIds: async (ids: string[], win: PublicPageWindow) => await withTenantTx(tenantId, async (tx) => {
+      return tx<PublicListRow[]>`
+        SELECT id, title, created_at FROM pages
+        WHERE id = ANY(${ids})
+          AND published_at IS NOT NULL
+          ${window(tx, win)}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${win.limit}
+      `
+    }) as PublicListRow[],
+    loadPublishedCandidates: async (win: PublicPageWindow) => await withTenantTx(tenantId, async (tx) => {
+      return tx<PublicListRow[]>`
+        SELECT id, title, created_at FROM pages
+        WHERE published_at IS NOT NULL AND deleted_at IS NULL
+          ${window(tx, win)}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${win.limit}
+      `
+    }) as PublicListRow[],
+  }
+}
+
 export async function listPublicPages(
   fga: typeof fgaClient,
   load: {
-    loadByIds: (ids: string[]) => Promise<{ id: string; title: string }[]>
-    loadPublishedCandidates: () => Promise<{ id: string; title: string }[]>
+    loadByIds: (ids: string[], win: PublicPageWindow) => Promise<PublicListRow[]>
+    loadPublishedCandidates: (win: PublicPageWindow) => Promise<PublicListRow[]>
   },
-): Promise<{ id: string; title: string }[]> {
+  opts: { limit?: number; cursor?: string } = {},
+): Promise<{ items: { id: string; title: string }[]; nextCursor: string | null }> {
+  const limit = Math.min(Math.max(1, opts.limit ?? PUBLIC_PAGES_LIMIT), PUBLIC_PAGES_MAX)
+  const after = decodePublicCursor(opts.cursor)
+  const strip = (rows: PublicListRow[]) => rows.map((r) => ({ id: r.id, title: r.title }))
+
   const { objects } = await fga.listObjects({ user: ANON, relation: 'view', type: 'page' })
   const pageIds = (objects ?? []).map((o: string) => o.replace(/^page:/, ''))
 
   if (pageIds.length >= LIST_OBJECTS_TRUNCATION_FLOOR) {
-    const candidates = await load.loadPublishedCandidates()
-    const confirmed = await filterAuthorized(fga, ANON, 'view', candidates.map((r) => r.id), undefined, 'page', 4)
-    return candidates.filter((r) => confirmed.has(r.id))
+    const items: { id: string; title: string }[] = []
+    const width = limit * CONFIRM_OVER_FETCH
+    let cursor = after
+    // A window at a time until the page fills, the tenant runs out, or the REQUEST's own budget does.
+    // The budget is the point: without it, a tenant whose published pages are mostly non-public would
+    // have one request scan the whole tenant looking for `limit` confirmations — the unbounded read this
+    // ticket exists to remove, wearing a loop instead of a missing LIMIT. When the budget runs out the
+    // response is short and carries a cursor, which the contract above already allows.
+    for (let window = 0; window < CONFIRM_MAX_WINDOWS; window++) {
+      const candidates = await load.loadPublishedCandidates({ limit: width, after: cursor })
+      if (candidates.length === 0) return { items, nextCursor: null }
+      const confirmed = await filterAuthorized(fga, ANON, 'view', candidates.map((r) => r.id), undefined, 'page', 4)
+      for (const r of candidates) {
+        cursor = { createdAt: new Date(r.created_at).toISOString(), id: r.id }
+        if (confirmed.has(r.id)) items.push({ id: r.id, title: r.title })
+        if (items.length >= limit) return { items, nextCursor: encodePublicCursor(r) }
+      }
+      // the tenant had fewer candidates than the window asked for — there is nothing after this
+      if (candidates.length < width) return { items, nextCursor: null }
+    }
+    return { items, nextCursor: cursor ? `${cursor.createdAt}|${cursor.id}` : null }
   }
 
-  if (pageIds.length === 0) return []
-  return load.loadByIds(pageIds)
+  if (pageIds.length === 0) return { items: [], nextCursor: null }
+  // Below the floor the ListObjects set is complete, so the DB answers about exactly those ids and the
+  // window is a plain keyset over them — one row past the limit tells us whether a next page exists.
+  const rows = await load.loadByIds(pageIds, { limit: limit + 1, after })
+  const page = rows.slice(0, limit)
+  return { items: strip(page), nextCursor: rows.length > limit && page.length > 0 ? encodePublicCursor(page[page.length - 1]!) : null }
 }
 
 // ── Fastify plugin ────────────────────────────────────────────────────────
@@ -318,31 +419,16 @@ export async function publicPlugin(app: FastifyInstance) {
 
   // GET /public/pages — list all public pages in the current tenant.
   // Uses FGA list_objects with user:anonymous, then filters by tenant via RLS.
-  app.get('/public/pages', async (req, reply) => {
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/public/pages', async (req, reply) => {
     const tenant = await resolveTenantForRequest(req.headers.host ?? '')
     if (!tenant) return reply.code(404).send({ error: 'not found' })
     if (!(await tenantPublicEnabled(tenant.id))) return reply.code(404).send({ error: 'not found' }) // #253: tenant parent switch OFF ⇒ whole public surface hidden
 
-    const pages = await listPublicPages(fgaClient, {
-      // list_objects returns public page IDs across the entire shared FGA store; the RLS-scoped query
-      // narrows to this tenant's pages only. Same anonymous principal as the single-page check.
-      loadByIds: async (ids) => await withTenantTx(tenant.id, async (tx) => {
-        return tx<{ id: string; title: string }[]>`
-          SELECT id, title FROM pages
-          WHERE id = ANY(${ids})
-            AND published_at IS NOT NULL
-          ORDER BY created_at DESC
-        `
-      }) as { id: string; title: string }[],
-      loadPublishedCandidates: async () => await withTenantTx(tenant.id, async (tx) => {
-        return tx<{ id: string; title: string }[]>`
-          SELECT id, title FROM pages
-          WHERE published_at IS NOT NULL AND deleted_at IS NULL
-          ORDER BY created_at DESC
-        `
-      }) as { id: string; title: string }[],
+    const page = await listPublicPages(fgaClient, publicPageLoaders(tenant.id), {
+      limit: Number(req.query.limit) || undefined,
+      cursor: req.query.cursor,
     })
-    return reply.send(pages)
+    return reply.send(page)
   })
 
   // ── #376 / ADR-149 §2: PUBLIC resource resolvers (anonymous; wrappers over the shared services) ──

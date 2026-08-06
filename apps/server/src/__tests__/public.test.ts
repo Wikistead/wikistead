@@ -11,7 +11,7 @@ import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, deletePage } from '../routes/pages.js'
-import { loadPublicChildTree, type PublicChild } from '../routes/public.js'
+import { loadPublicChildTree, publicPageLoaders, type PublicChild } from '../routes/public.js'
 import { checkRelation } from '@wikistead/authz'
 import type { Tenant } from '@wikistead/types'
 
@@ -185,6 +185,32 @@ describe('listObjects for public pages', () => {
     const ids = (objects ?? []).map((o: string) => o.replace(/^page:/, ''))
     expect(ids).toContain(publicPageId)
     expect(ids).not.toContain(privatePageId)
+  })
+})
+
+// ── #623 slice 6: the windowed reads behind GET /public/pages, against a REAL database ────────────
+//
+// The stubbed pin (public-pages-listobjects-cap-545) drives the walking logic; nothing there executes
+// SQL. These two queries carry a conditional keyset fragment, and a fragment that does not parse would
+// ship green everywhere else — the route is reachable only over HTTP and no test made that request.
+describe('#623: the public listing reads a window at a time', () => {
+  it('both loaders run, order with a tiebreaker, and honour the window', async () => {
+    const loaders = publicPageLoaders(tenant.id)
+    const all = await loaders.loadPublishedCandidates({ limit: 50, after: null })
+    expect(all.length, 'the tenant has published pages to window over').toBeGreaterThan(0)
+    expect(all.map((r) => r.id)).toContain(publicPageId)
+
+    const first = await loaders.loadPublishedCandidates({ limit: 1, after: null })
+    expect(first, 'LIMIT 1 means one row').toHaveLength(1)
+    const after = { createdAt: new Date(first[0]!.created_at).toISOString(), id: first[0]!.id }
+    const next = await loaders.loadPublishedCandidates({ limit: 50, after })
+    expect(next.map((r) => r.id), 'the keyset excludes the row it resumed from').not.toContain(first[0]!.id)
+    expect(next.length, 'and returns the rest').toBe(all.length - 1)
+
+    // the id branch takes the same window
+    const byIds = await loaders.loadByIds([publicPageId, privatePageId], { limit: 50, after: null })
+    expect(byIds.map((r) => r.id), 'only the ids it was asked about').toContain(publicPageId)
+    expect(await loaders.loadByIds([publicPageId], { limit: 50, after })).toBeDefined()
   })
 })
 

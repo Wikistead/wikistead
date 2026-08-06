@@ -2929,17 +2929,21 @@ export async function getBacklinks(
       AND deleted_at IS NULL
       AND published_md IS NOT NULL
       AND published_md LIKE ${'%' + args.pageId + '%'}
-    ORDER BY updated_at DESC
+    ORDER BY updated_at DESC, id DESC
     LIMIT ${QUERY_OVER_FETCH}
   `
+  // #623: the confirm is ONE batched question, not one per candidate. The rank-ordered loop it replaces
+  // asked FGA serially and early-exited at the display cap, so a page with many backlinks spent up to 200
+  // SEQUENTIAL round-trips before the panel appeared — the same shape #534 measured as the editor's
+  // fourteen seconds. Batched it is at most twelve requests for the whole over-fetch, four in flight.
+  // The semantics are unchanged: still "the top DISPLAY_N VIEWABLE by rank" (Hole C), because the rank
+  // order is preserved through the filter rather than being recovered from the answer set.
   const candidates = rows.filter((r) => refRe.test(r.published_md))
-  const out: Backlink[] = []
-  for (const c of candidates) {
-    if (out.length >= QUERY_DISPLAY_N) break // top-N VIEWABLE by rank reached (Hole C — no boundary drop)
-    const ok = await check(fga, args.subject, 'view', { type: 'page', id: c.id }, args.context)
-    if (ok) out.push({ id: c.id, title: c.title })
-  }
-  return out
+  const viewable = await filterAuthorized(
+    fga, args.subject, 'view', candidates.map((r) => r.id), args.context, 'page', 4,
+  )
+  return candidates.filter((r) => viewable.has(r.id)).slice(0, QUERY_DISPLAY_N)
+    .map((r) => ({ id: r.id, title: r.title }))
 }
 
 // #322 / ADR-133 §6: the internal-link EDGE INDEX (page_links). A DERIVED index of the outbound page
@@ -3110,7 +3114,7 @@ export async function getRelatedPages(
     JOIN pages mp ON mp.id = pl.to_page_id AND mp.deleted_at IS NULL
     JOIN pages rp ON rp.id = pl.from_page_id AND rp.deleted_at IS NULL
     WHERE pl.from_page_id <> ${args.pageId}
-    ORDER BY rp.updated_at DESC
+    ORDER BY rp.updated_at DESC, pl.from_page_id DESC, pl.to_page_id DESC
     LIMIT ${RELATED_OVER_FETCH}
   `
   if (rows.length === 0) return { groups: [], truncated: false }
