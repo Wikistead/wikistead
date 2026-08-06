@@ -48,6 +48,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const e of emails) await adminPool`DELETE FROM invites WHERE tenant_id = ${TENANT} AND email = ${e}`.catch(() => {})
+  // Accepting an invitation SEATS someone, and a seat outlives the invite row. Left behind, these
+  // pushed tenant_dev over the cap that `plan-freeze` (#131) and `invite-role-582` measure against, and
+  // both went red in a full run while passing alone — the shape that reads as flakiness and is not.
+  await adminPool`DELETE FROM members WHERE tenant_id = ${TENANT} AND sub LIKE ${`reissue638-%-${STAMP}`}`.catch(() => {})
   await db.release(); await app.close(); await adminPool.end(); await pool.end()
 }, 120_000)
 
