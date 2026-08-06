@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Eye, BellOff, Bell, X, SlidersHorizontal } from "lucide-react";
@@ -67,63 +68,68 @@ export function WatchListRoute() {
       {!isLoading && rows.length === 0 && (
         <div className="py-10 text-center text-fg-dim" data-testid="watch-list-empty">{t("watches.empty")}</div>
       )}
-      <ul className="divide-y divide-border" data-testid="watch-list">
-        {rows.map((w) => (
-          <li key={w.id} className={`py-2 ${w.muted ? "opacity-60" : ""}`} data-testid="watch-row">
-            <div className="flex items-center gap-2">
-              <div className="min-w-0 flex-1">
-                {w.title && w.resourceType !== "space" ? (
-                  <button type="button" onClick={() => navigate(`/p/${w.resourceId}`)} className="block max-w-full truncate text-left text-[var(--link)] hover:underline" data-testid="watch-row-title">
-                    {w.title}
-                  </button>
-                ) : (
-                  // A space row (no page route to open) or a view-filtered target (title null → inert).
-                  <span className={`block truncate ${w.title ? "" : "italic text-fg-dim"}`} data-testid="watch-row-title">
-                    {w.title ?? t("watches.untitled")}
-                  </span>
-                )}
-                <span className="text-[length:var(--text-xs)] text-fg-dim">{t(SCOPE_LABEL[w.resourceType])}{w.muted ? ` · ${t("watches.muted")}` : ""}</span>
+      <ListBox>
+          {/* #623 slice 10: the shared box from #639 — the same 26rem everywhere, so a long list
+              scrolls inside itself instead of growing the page. The server bound landed in slice 4; the
+              container waited until #639 settled, so this did not become a second one. */}
+        <ul className="divide-y divide-border" data-testid="watch-list">
+          {rows.map((w) => (
+            <li key={w.id} className={`py-2 ${w.muted ? "opacity-60" : ""}`} data-testid="watch-row">
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  {w.title && w.resourceType !== "space" ? (
+                    <button type="button" onClick={() => navigate(`/p/${w.resourceId}`)} className="block max-w-full truncate text-left text-[var(--link)] hover:underline" data-testid="watch-row-title">
+                      {w.title}
+                    </button>
+                  ) : (
+                    // A space row (no page route to open) or a view-filtered target (title null → inert).
+                    <span className={`block truncate ${w.title ? "" : "italic text-fg-dim"}`} data-testid="watch-row-title">
+                      {w.title ?? t("watches.untitled")}
+                    </span>
+                  )}
+                  <span className="text-[length:var(--text-xs)] text-fg-dim">{t(SCOPE_LABEL[w.resourceType])}{w.muted ? ` · ${t("watches.muted")}` : ""}</span>
+                </div>
+                <button
+                  type="button"
+                  data-tip={t("watches.maskEdit")}
+                  aria-label={t("watches.maskEdit")}
+                  onClick={() => setEditing((cur) => (cur === w.id ? null : w.id))}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-dim hover:bg-panel-2 hover:text-foreground"
+                  data-testid="watch-mask-toggle"
+                >
+                  <SlidersHorizontal size={14} />
+                </button>
+                <button
+                  type="button"
+                  data-tip={w.muted ? t("watches.unmute") : t("watches.mute")}
+                  aria-label={w.muted ? t("watches.unmute") : t("watches.mute")}
+                  aria-pressed={w.muted}
+                  disabled={update.isPending}
+                  onClick={() => update.mutate({ id: w.id, muted: !w.muted })}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-dim hover:bg-panel-2 hover:text-foreground"
+                  data-testid="watch-mute-toggle"
+                >
+                  {w.muted ? <BellOff size={14} /> : <Bell size={14} />}
+                </button>
+                <button
+                  type="button"
+                  data-tip={t("watch.unwatch")}
+                  aria-label={t("watch.unwatch")}
+                  disabled={unwatch.isPending}
+                  onClick={() => unwatch.mutate(w.id)}
+                  // #504: red at rest (the policy forbids hover-only red); no confirm — re-watching is
+                  // one click on the page (exception candidate)
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
+                  data-testid="watch-unwatch"
+                >
+                  <X size={14} />
+                </button>
               </div>
-              <button
-                type="button"
-                data-tip={t("watches.maskEdit")}
-                aria-label={t("watches.maskEdit")}
-                onClick={() => setEditing((cur) => (cur === w.id ? null : w.id))}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-dim hover:bg-panel-2 hover:text-foreground"
-                data-testid="watch-mask-toggle"
-              >
-                <SlidersHorizontal size={14} />
-              </button>
-              <button
-                type="button"
-                data-tip={w.muted ? t("watches.unmute") : t("watches.mute")}
-                aria-label={w.muted ? t("watches.unmute") : t("watches.mute")}
-                aria-pressed={w.muted}
-                disabled={update.isPending}
-                onClick={() => update.mutate({ id: w.id, muted: !w.muted })}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-dim hover:bg-panel-2 hover:text-foreground"
-                data-testid="watch-mute-toggle"
-              >
-                {w.muted ? <BellOff size={14} /> : <Bell size={14} />}
-              </button>
-              <button
-                type="button"
-                data-tip={t("watch.unwatch")}
-                aria-label={t("watch.unwatch")}
-                disabled={unwatch.isPending}
-                onClick={() => unwatch.mutate(w.id)}
-                // #504: red at rest (the policy forbids hover-only red); no confirm — re-watching is
-                // one click on the page (exception candidate)
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
-                data-testid="watch-unwatch"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            {editing === w.id && <MaskEditor row={w} />}
-          </li>
-        ))}
-      </ul>
+              {editing === w.id && <MaskEditor row={w} />}
+            </li>
+          ))}
+        </ul>
+      </ListBox>
     </div>
   );
 }

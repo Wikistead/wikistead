@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { useOrphanDrafts, useClaimOrphanDraft, useReassignOrphanDraft } from "../data/queries";
 import { Button } from "../ui/Button";
@@ -31,53 +32,58 @@ export function AdminOrphanDraftsTab() {
       ) : list.length === 0 ? (
         <p className="text-sm text-fg-dim" data-testid="admin-orphans-empty">{t("adminOrphans.empty")}</p>
       ) : (
+        <ListBox>
+          {/* #623 slice 10: the shared box from #639 — the same 26rem everywhere, so a long list
+              scrolls inside itself instead of growing the page. The server bound landed in slice 4; the
+              container waited until #639 settled, so this did not become a second one. */}
         <ul className="mt-4 list-none p-0">
-          {list.map((o) => (
-            <li key={o.id} className="border-b border-border py-3" data-testid="admin-orphan-row">
-              <div className="font-medium">{o.title || t("adminOrphans.untitled")}</div>
-              <div className="text-xs text-fg-dim">{new Date(o.createdAt).toLocaleDateString()}</div>
-              {!claimed[o.id] ? (
-                <Button
-                  size="sm"
-                  className="mt-2"
-                  onClick={() =>
-                    claim.mutate(o.id, {
-                      onSuccess: () => { setClaimed((c) => ({ ...c, [o.id]: true })); notify.success(t("adminOrphans.claimed")); },
-                      onError: () => notify.error(t("toast.actionFailed")),
-                    })
-                  }
-                >
-                  {t("adminOrphans.claim")}
-                </Button>
-              ) : (
-                <div className="mt-2 flex items-center gap-2">
-                  <Input
-                    inputSize="sm"
-                    value={owner[o.id] ?? ""}
-                    onChange={(e) => setOwner((s) => ({ ...s, [o.id]: e.target.value }))}
-                    placeholder={t("adminOrphans.newOwnerPlaceholder")}
-                    aria-label={t("adminOrphans.newOwnerPlaceholder")}
-                  />
+            {list.map((o) => (
+              <li key={o.id} className="border-b border-border py-3" data-testid="admin-orphan-row">
+                <div className="font-medium">{o.title || t("adminOrphans.untitled")}</div>
+                <div className="text-xs text-fg-dim">{new Date(o.createdAt).toLocaleDateString()}</div>
+                {!claimed[o.id] ? (
                   <Button
                     size="sm"
-                    disabled={!(owner[o.id] ?? "").trim()}
+                    className="mt-2"
                     onClick={() =>
-                      reassign.mutate(
-                        { pageId: o.id, to: (owner[o.id] ?? "").trim() },
-                        {
-                          onSuccess: () => notify.success(t("adminOrphans.reassigned")),
-                          onError: () => notify.error(t("toast.actionFailed")),
-                        },
-                      )
+                      claim.mutate(o.id, {
+                        onSuccess: () => { setClaimed((c) => ({ ...c, [o.id]: true })); notify.success(t("adminOrphans.claimed")); },
+                        onError: () => notify.error(t("toast.actionFailed")),
+                      })
                     }
                   >
-                    {t("adminOrphans.reassign")}
+                    {t("adminOrphans.claim")}
                   </Button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+                ) : (
+                  <div className="mt-2 flex items-center gap-2">
+                    <Input
+                      inputSize="sm"
+                      value={owner[o.id] ?? ""}
+                      onChange={(e) => setOwner((s) => ({ ...s, [o.id]: e.target.value }))}
+                      placeholder={t("adminOrphans.newOwnerPlaceholder")}
+                      aria-label={t("adminOrphans.newOwnerPlaceholder")}
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!(owner[o.id] ?? "").trim()}
+                      onClick={() =>
+                        reassign.mutate(
+                          { pageId: o.id, to: (owner[o.id] ?? "").trim() },
+                          {
+                            onSuccess: () => notify.success(t("adminOrphans.reassigned")),
+                            onError: () => notify.error(t("toast.actionFailed")),
+                          },
+                        )
+                      }
+                    >
+                      {t("adminOrphans.reassign")}
+                    </Button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+      </ListBox>
       )}
     </div>
   );

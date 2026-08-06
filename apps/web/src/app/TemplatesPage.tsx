@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Eye, FileStack, Pencil, Trash2, X } from "lucide-react";
@@ -35,34 +36,39 @@ export function TemplatesRoute() {
       ) : templates.length === 0 ? (
         <p className="text-fg-dim" data-testid="templates-empty">{t("templates.empty")}</p>
       ) : (
+        <ListBox>
+          {/* #623 slice 10: the shared box from #639 — the same 26rem everywhere, so a long list
+              scrolls inside itself instead of growing the page. The server bound landed in slice 4; the
+              container waited until #639 settled, so this did not become a second one. */}
         <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
-          {templates.map((tpl) => (
-            <li key={tpl.id} data-testid="template-row" className="flex items-center gap-2 px-3 py-2">
-              <span
-                data-testid="template-scope-badge"
-                data-scope={tpl.scope}
-                className="flex-none rounded border border-border px-1.5 py-0.5 text-[length:var(--text-xs)] text-fg-dim"
-              >
-                {t(`template.scope.${tpl.scope}`)}
-              </span>
-              <span className="min-w-0 flex-1 truncate" data-testid="template-name">{tpl.name}</span>
-              <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" data-tip={t("templates.preview")} data-testid="template-preview" onClick={() => setPreviewing(tpl)}>
-                <Eye size={14} />
-              </button>
-              {tpl.canManage && (
-                <>
-                  <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" data-tip={t("templates.rename")} data-testid="template-rename" onClick={() => setRenaming(tpl)}>
-                    <Pencil size={14} />
-                  </button>
-                  {/* #504: red at rest (was hover-only) — the confirm below already exists. */}
-                  <button type="button" className="flex-none rounded p-1 text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]" data-tip={t("common.delete")} data-testid="template-delete" onClick={() => setDeleting(tpl)}>
-                    <Trash2 size={14} />
-                  </button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
+            {templates.map((tpl) => (
+              <li key={tpl.id} data-testid="template-row" className="flex items-center gap-2 px-3 py-2">
+                <span
+                  data-testid="template-scope-badge"
+                  data-scope={tpl.scope}
+                  className="flex-none rounded border border-border px-1.5 py-0.5 text-[length:var(--text-xs)] text-fg-dim"
+                >
+                  {t(`template.scope.${tpl.scope}`)}
+                </span>
+                <span className="min-w-0 flex-1 truncate" data-testid="template-name">{tpl.name}</span>
+                <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" data-tip={t("templates.preview")} data-testid="template-preview" onClick={() => setPreviewing(tpl)}>
+                  <Eye size={14} />
+                </button>
+                {tpl.canManage && (
+                  <>
+                    <button type="button" className="flex-none rounded p-1 text-fg-dim hover:bg-panel-2 hover:text-foreground" data-tip={t("templates.rename")} data-testid="template-rename" onClick={() => setRenaming(tpl)}>
+                      <Pencil size={14} />
+                    </button>
+                    {/* #504: red at rest (was hover-only) — the confirm below already exists. */}
+                    <button type="button" className="flex-none rounded p-1 text-destructive hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]" data-tip={t("common.delete")} data-testid="template-delete" onClick={() => setDeleting(tpl)}>
+                      <Trash2 size={14} />
+                    </button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+      </ListBox>
       )}
 
       <RenameDialog

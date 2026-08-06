@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { useAdminSpaces, useAdminDeleteMode, useSetAdminDeleteMode } from "../data/queries";
 import { Button } from "../ui/Button";
@@ -47,28 +48,33 @@ export function AdminSpacesTab() {
       {!spaces.isLoading && (spaces.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("adminSpaces.empty")}</p>}
 
       {(spaces.data?.length ?? 0) > 0 && (
-        <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
-          <thead>
-            <tr>
-              <th className="text-left">{t("adminSpaces.name")}</th>
-              <th className="w-[72px] text-right">{t("adminSpaces.pages")}</th>
-              <th className="w-[72px] text-right">{t("adminSpaces.sharedWith")}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {spaces.data!.map((s) => (
-              <tr key={s.id} data-testid="admin-space-row">
-                <td>{s.name || t("sidebar.untitledSpace")}</td>
-                <td className="w-[72px] text-right">{s.pageCount}</td>
-                <td className="w-[72px] text-right">{s.grantCount}</td>
-                <td className="w-[96px] text-right">
-                  <Button size="sm" variant="ghost" data-testid="admin-space-settings" onClick={() => navigate(`/spaces/${s.id}/settings`)}>{t("adminSpaces.manage")}</Button>
-                </td>
+        <ListBox>
+          {/* #623 slice 10: the shared box from #639 — the same 26rem everywhere, so a long list
+              scrolls inside itself instead of growing the page. The server bound landed in slice 4; the
+              container waited until #639 settled, so this did not become a second one. */}
+          <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
+            <thead>
+              <tr>
+                <th className="text-left">{t("adminSpaces.name")}</th>
+                <th className="w-[72px] text-right">{t("adminSpaces.pages")}</th>
+                <th className="w-[72px] text-right">{t("adminSpaces.sharedWith")}</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {spaces.data!.map((s) => (
+                <tr key={s.id} data-testid="admin-space-row">
+                  <td>{s.name || t("sidebar.untitledSpace")}</td>
+                  <td className="w-[72px] text-right">{s.pageCount}</td>
+                  <td className="w-[72px] text-right">{s.grantCount}</td>
+                  <td className="w-[96px] text-right">
+                    <Button size="sm" variant="ghost" data-testid="admin-space-settings" onClick={() => navigate(`/spaces/${s.id}/settings`)}>{t("adminSpaces.manage")}</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ListBox>
       )}
     </div>
   );
