@@ -202,12 +202,6 @@
     "displayMode_local": "This device (follow toolbar)",
     "displayMode_live": "Always Live",
     "displayMode_source": "Always Source",
-    "bodyFont": "Body font",
-    "bodyFontHint": "The prose face in the editor and reading view (this device). Follow language uses the locale default (Japanese = UDEV Gothic, English = Wikistead Mono). Code always uses the coding face.",
-    "bodyFont_locale": "Follow language",
-    "bodyFont_udev": "UDEV Gothic",
-    "bodyFont_mono": "Wikistead Mono",
-    "bodyFont_sans": "Inter",
     "toc": "Table of contents",
     "tocHint": "Show an outline of the page's headings.",
     "toc_on": "Shown",
@@ -245,7 +239,11 @@
     "activityTooltipNone": "No activity",
     "activityTooltipTotal": "{{count}} activities",
     "activityTooltipEdits": "Edits {{count}}",
-    "activityTooltipComments": "Comments {{count}}"
+    "activityTooltipComments": "Comments {{count}}",
+    "vimMono": "Monospace while vim is on",
+    "vimMonoHint": "Vim aligns by column, so the editor switches to a monospace face while it is on. Turn this off to keep the reading face with vim's keys.",
+    "vimMonoOn": "On",
+    "vimMonoOff": "Off"
   },
   "settings": {
     "back": "Back to app",

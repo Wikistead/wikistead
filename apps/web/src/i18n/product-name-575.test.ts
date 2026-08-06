@@ -27,8 +27,15 @@ const flatten = (tree: Tree, prefix = ""): [string, string][] =>
     return typeof v === "string" ? [[key, v] as [string, string]] : flatten(v, key);
   });
 
-/** Locale keys allowed to say the name: the code face, which is a typeface and not the product. */
-const FONT_KEYS = ["account.bodyFont_mono", "account.bodyFontHint"];
+/**
+ * Locale keys allowed to say the name: the code face, which is a typeface and not the product.
+ *
+ * #633 retired the font picker, and with it the two keys that named "Wikistead Mono" to a reader. The
+ * list is empty rather than deleted — the exemption is a real category (a typeface can share the
+ * product's name), and the next copy that needs it should be added here rather than rediscovered.
+ * The "exemptions are real keys" check below is what caught the removal.
+ */
+const FONT_KEYS: string[] = [];
 
 /** Files allowed to hold a literal: the two fallbacks, plus the mark's own asset. */
 const LITERAL_FILES = [

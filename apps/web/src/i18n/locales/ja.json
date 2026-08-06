@@ -202,12 +202,6 @@
     "displayMode_local": "この端末（ツールバーに従う）",
     "displayMode_live": "常にライブ",
     "displayMode_source": "常にソース",
-    "bodyFont": "本文フォント",
-    "bodyFontHint": "エディタと閲覧の散文フォント（この端末）。「言語に従う」はロケール既定（日本語＝UDEV Gothic、英語＝Wikistead Mono）。コードは常にコーディングフォント。",
-    "bodyFont_locale": "言語に従う",
-    "bodyFont_udev": "UDEV Gothic",
-    "bodyFont_mono": "Wikistead Mono",
-    "bodyFont_sans": "Inter",
     "toc": "目次",
     "tocHint": "ページの見出しのアウトラインを表示します。",
     "toc_on": "表示",
@@ -245,7 +239,11 @@
     "activityTooltipNone": "活動なし",
     "activityTooltipTotal": "活動 {{count}} 件",
     "activityTooltipEdits": "編集 {{count}}",
-    "activityTooltipComments": "コメント {{count}}"
+    "activityTooltipComments": "コメント {{count}}",
+    "vimMono": "vim のときは等幅",
+    "vimMonoHint": "vim は桁で揃えるため、ON の間はエディタが等幅の書体になります。vim のキー操作だけを使い、書体は読みやすいままにしたい場合は OFF にしてください。",
+    "vimMonoOn": "ON",
+    "vimMonoOff": "OFF"
   },
   "settings": {
     "back": "アプリに戻る",
