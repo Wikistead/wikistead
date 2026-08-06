@@ -19,9 +19,17 @@ import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/outbox.js'
 import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
 import { FACTOR_COOKIE, createFactorSession, readFactorSession, destroyFactorSession, factorCookieOptions } from '../auth/factor-session.js' // #652 / ADR-219 §6
-import { passkeyAuthenticationOptions, verifyPasskeyAssertion } from '../auth/passkeys.js' // #665
+import {
+  passkeyAuthenticationOptions, verifyPasskeyAssertion, passkeyRegistrationOptions, verifyPasskeyRegistration,
+  storePasskey,
+} from '../auth/passkeys.js' // #665, #678
 import { secondFactorRequired, presentableHere, secondFactorStance, presentableKinds, acceptedKinds } from '../auth/factor-policy.js'
-import { hasConfirmedFactor, totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor, type FactorKind } from '../auth/second-factors.js'
+import {
+  hasConfirmedFactor, totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor,
+  startPasskeyEnrolment, discardPendingFactors, type FactorKind,
+} from '../auth/second-factors.js'
+import { MAX_FACTORS_PER_MEMBER } from './second-factor.js' // #678: one cap, not a second copy of it
+import type { TenantDb } from '../db/index.js'
 import { verifyTotp, generateTotpSecret, totpUri } from '../auth/totp.js'
 import { localLoginEnabled, loginMethodCeiling } from '../auth/login-methods.js'
 import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/password-hash.js'
@@ -691,15 +699,15 @@ export async function authLocalPlugin(app: FastifyInstance) {
     if (held.pending.enrolled) {
       return reply.code(409).send({ error: 'present your existing factor first', code: 'factor_required' })
     }
-    // …and this door mints TOTP and only TOTP (see the confirm below). Under a passkey stance it would
-    // hand somebody a factor their own tenant will not accept — a dead end with a 201 on it. #678 is
-    // the slice that gives this door a passkey; until then the honest answer is that it cannot help.
     if (!acceptedKinds(await secondFactorStance(req.db)).includes('totp')) {
+      // This door mints TOTP; the passkey one is below. Under `passkey` the honest answer is to use it.
       return reply.code(409).send({
-        error: 'this workspace asks for a passkey; ask an administrator to enrol one for you.',
+        error: 'this workspace asks for a passkey — use the key option instead.',
         code: 'factor_kind_not_accepted',
       })
     }
+    const refused = await guardEnrolment(req.db, held.pending.sub)
+    if (refused) return reply.code(refused.statusCode).send(refused.body)
     const secret = generateTotpSecret()
     const { factorId } = await startTotpEnrolment(req.db, {
       tenantId: req.tenant.id, memberSub: held.pending.sub, secret,
@@ -711,6 +719,122 @@ export async function authLocalPlugin(app: FastifyInstance) {
       uri: totpUri({ secret, account: row?.email || held.pending.sub, issuer: productName() }),
     })
   })
+
+  /**
+   * What both enrolment doors here owe, and what neither of them paid before #678.
+   *
+   * The session doors (`/me/factors/*`) discard the caller's abandoned enrolments and refuse past the
+   * per-member cap; these did neither, so one receipt could create unbounded pending rows — each one a
+   * slot against a cap the member cannot see, which is #653's "you can create it, you cannot see it,
+   * and because you cannot see it you cannot delete it" arriving by a different road. Adding a second
+   * door in the same shape would have doubled it rather than inheriting a fix.
+   *
+   * The rate limit is on the START. The confirm below has one; a start that does not means the cheap
+   * half is unlimited and the expensive half is the only thing counted.
+   */
+  const guardEnrolment = async (
+    db: TenantDb, sub: string,
+  ): Promise<{ statusCode: number; body: unknown } | null> => {
+    const idKey = `authlocal:enrol:${sub}`
+    if (await overLimit(app.valkey, idKey, LOCAL_LOGIN_ID_MAX)) {
+      return { statusCode: 429, body: { error: 'too many attempts — try again later', code: 'locked' } }
+    }
+    await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+    await discardPendingFactors(db, sub)
+    const [n] = await db.sql<[{ n: number }?]>`
+      SELECT count(*)::int AS n FROM member_factors WHERE member_sub = ${sub}`
+    if ((n?.n ?? 0) >= MAX_FACTORS_PER_MEMBER) {
+      return {
+        statusCode: 409,
+        body: { error: `you already have ${MAX_FACTORS_PER_MEMBER} — remove one before adding another`, code: 'factor_limit_reached' },
+      }
+    }
+    return null
+  }
+
+  /**
+   * Enrol a PASSKEY from the interstitial (#678 / ADR-222 §6).
+   *
+   * The circle ADR-219 §6 describes has one more turn under a `passkey` stance: the policy denies a
+   * session to anybody holding nothing, the only session-less door minted TOTP, and a TOTP is not
+   * something this tenant accepts. So `passkey` could not be selected at all — the guard on the switch
+   * asks whether a session-less door can mint an accepted kind, and this is what makes it true.
+   *
+   * The same two calls the settings panel makes, against the factor receipt instead of a session.
+   */
+  app.post<{ Body: { label?: string } }>('/auth/local/factor/enrol/passkey', { config: { public: true } }, async (req, reply) => {
+    const held = await receipt(req as never)
+    if (!held) return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
+    if (held.pending.enrolled) {
+      return reply.code(409).send({ error: 'present your existing factor first', code: 'factor_required' })
+    }
+    if (!acceptedKinds(await secondFactorStance(req.db)).includes('passkey')) {
+      return reply.code(409).send({
+        error: 'this workspace asks for a code from an authenticator app.', code: 'factor_kind_not_accepted',
+      })
+    }
+    const refused = await guardEnrolment(req.db, held.pending.sub)
+    if (refused) return reply.code(refused.statusCode).send(refused.body)
+
+    const [row] = await req.db.sql<[{ email: string | null }?]>`
+      SELECT email FROM members WHERE sub = ${held.pending.sub}`
+    const options = await passkeyRegistrationOptions(
+      { db: req.db, valkey: app.valkey },
+      { tenantId: req.tenant.id, memberSub: held.pending.sub, memberName: row?.email || held.pending.sub, host: req.headers.host },
+    )
+    const { factorId } = await startPasskeyEnrolment(req.db, {
+      tenantId: req.tenant.id, memberSub: held.pending.sub,
+      label: typeof req.body?.label === 'string' ? req.body.label.slice(0, 100) : '',
+    })
+    return reply.code(201).send({ factorId, options })
+  })
+
+  app.post<{ Params: { id: string }; Body: { response?: unknown; returnTo?: string } }>(
+    '/auth/local/factor/enrol/:id/passkey',
+    { config: { public: true } },
+    async (req, reply) => {
+      const held = await receipt(req as never)
+      if (!held) return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
+      const idKey = `authlocal:id:${held.pending.sub}`
+      if (await overLimit(app.valkey, idKey, LOCAL_LOGIN_ID_MAX)) {
+        return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
+      }
+      const [own] = await req.db.sql<[{ id: string }?]>`
+        SELECT id FROM member_factors
+        WHERE id = ${req.params.id} AND member_sub = ${held.pending.sub} AND kind = 'passkey' AND confirmed_at IS NULL`
+      if (!own) return reply.code(404).send({ error: 'no pending enrolment', code: 'factor_not_pending' })
+
+      const verified = await verifyPasskeyRegistration(
+        { valkey: app.valkey },
+        { tenantId: req.tenant.id, memberSub: held.pending.sub, host: req.headers.host, response: req.body?.response as never },
+      )
+      if (!verified) {
+        await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+        return reply.code(400).send({ error: 'that key could not be registered', code: 'passkey_invalid' })
+      }
+      await storePasskey(req.db, { tenantId: req.tenant.id, factorId: req.params.id, passkey: verified })
+      if (!(await confirmFactor(req.db, req.params.id))) {
+        return reply.code(409).send({ error: 'this enrolment is no longer pending', code: 'factor_not_pending' })
+      }
+      await markFactorUsed(req.db, req.params.id)
+      await req.db.tx(async (tx) => auditIfEntitled(tx, req.tenant, {
+        actor: `user:${held.pending.sub}`, action: 'member.factor_enrolled', target: `member:${held.pending.sub}`,
+      })).catch((err: unknown) => req.log.warn({ err }, 'factor enrolment audit failed'))
+      emit({ type: 'member.factor_enrolled', tenantId: req.tenant.id, actorId: held.pending.sub, targetSub: held.pending.sub })
+
+      // Registering IS answering: the key signed, in front of us, the challenge we issued. Asking them
+      // to sign in again would be asking for the same proof twice — the TOTP door's own reasoning.
+      const sid = await establishMemberSession(
+        { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
+        req.tenant, { sub: held.pending.sub }, { localIdentity: true, door: 'local+factor' },
+      )
+      await destroyFactorSession(app.valkey, held.sid)
+      reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
+      await app.valkey.del(idKey).catch(() => {})
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
+    },
+  )
 
   app.post<{ Params: { id: string }; Body: { code?: string; returnTo?: string } }>(
     '/auth/local/factor/enrol/:id/confirm',

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { requireTenantAdmin, requireConnectionManager, isTenantAdmin } from '@wikistead/authz'
 import {
   mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersWithoutConfirmedFactor,
-  secondFactorStance, floorMet, type FactorStance,
+  secondFactorStance, floorMet, interstitialCanMint, type FactorStance,
 } from '../auth/factor-policy.js' // #652 / ADR-219 §4, #676 / ADR-222
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
@@ -165,6 +165,16 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
             ? 'enrol at least two passkeys on admin accounts before requiring passkeys — a passkey cannot be written down, so one is a single accident away from locking the workspace.'
             : 'enrol a second factor on at least one admin account before requiring one — otherwise the requirement locks out the people who could turn it off.'),
           { statusCode: 409, code: 'admin_factor_required' },
+        )
+      }
+      // ADR-222 §6: a stance nobody can enrol into without a session is a state nobody can leave —
+      // the policy denies the session, and the session-less doors are the only way to get a factor.
+      // Asked as a capability so it resolves itself when a door is added, rather than as a ban on the
+      // word `passkey` with a note to delete it later.
+      if (on && !interstitialCanMint(stance)) {
+        throw Object.assign(
+          new Error('nobody could enrol what this stance asks for: a member with nothing enrolled has no way to add one.'),
+          { statusCode: 409, code: 'stance_unreachable' },
         )
       }
       // #672 ruling ②-2: a one-member tenant is not offered `passkey` until #650 gives them a way back
