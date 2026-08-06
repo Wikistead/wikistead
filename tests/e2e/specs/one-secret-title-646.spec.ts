@@ -24,6 +24,7 @@ test("#646: the invite link dialog is called the same thing from either door", a
   const dialog = page.getByTestId("invite-link-dialog");
   await expect(dialog, "the form's dialog opened").toBeVisible({ timeout: 20_000 });
   const fromForm = (await dialog.getByRole("heading").first().innerText()).trim();
+  const noteFromForm = (await dialog.getByTestId("invite-link-note").innerText()).trim();
   await page.getByTestId("secret-dialog-done").click();
   await expect(dialog).toBeHidden({ timeout: 10_000 });
 
@@ -37,6 +38,19 @@ test("#646: the invite link dialog is called the same thing from either door", a
   expect(fromForm, `the two doors name the secret differently: "${fromForm}" vs "${fromRow}"`).toBe(fromRow);
   // …and a heading is not a label: it does not introduce a value beneath it
   expect(fromForm, "a title does not end in a colon").not.toMatch(/[:：]\s*$/);
+
+  // #646 (reviewer,): fixing the TITLE moved the same defect into the body. The hand-it-over
+  // guidance was added at one call site and not the other, so the same secret still said different
+  // things depending on which door produced it — the very shape this ticket exists to remove, and one
+  // the title-only assertion above stays green through.
+  //
+  // Compared in the SAME state, because the note is allowed to depend on whether the link was emailed
+  // both doors here attempt mail, so a difference can only come from the door.
+  await dialog.getByTestId("invite-link-mint-mail").click();
+  await expect(dialog.getByTestId("invite-link-value"), "the row minted a link").toBeVisible({ timeout: 15_000 });
+  const noteFromRow = (await dialog.getByTestId("invite-link-note").innerText()).trim();
+  expect(noteFromRow, `the same secret says different things by door:\n  form: "${noteFromForm}"\n  row:  "${noteFromRow}"`)
+    .toBe(noteFromForm);
 
   await page.keyboard.press("Escape");
   await sleep(300);

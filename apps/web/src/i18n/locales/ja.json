@@ -948,7 +948,7 @@
     "roleFor": "{{sub}} のロール",
     "sendInvite": "招待を送信",
     "emailed": "受信者に送信しました。",
-    "notEmailed": "メール未送信。上のリンクをコピーしてください。",
+    "notEmailed": "メールは送っていません。上のリンクをコピーして、本人に直接お渡しください。",
     "pendingTitle": "保留中の招待",
     "noEmail": "（メールなし）",
     "revoke": "取り消し",
@@ -991,8 +991,7 @@
     "groupUnassign": "ロールを外す",
     "groupUnassignConfirm": "{{group}} に渡したロールを外しますか？ そのグループの全員が、このロールで得ていた権限を失います。",
     "passwordLinkTitle": "パスワード設定リンク",
-    "passwordLinkNote": "メールでは届きません。本人に直接お渡しください。",
-    "inviteLinkNote": "メールが無効なテナントでは、これを手渡ししてください。"
+    "passwordLinkNote": "メールでは届きません。本人に直接お渡しください。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

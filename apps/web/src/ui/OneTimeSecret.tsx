@@ -47,7 +47,9 @@ export function OneTimeSecret({ value, note, testId }: {
           <Copy size={14} />
         </IconButton>
       </div>
-      {note && <p className="mt-1 text-xs text-fg-dim">{note}</p>}
+      {/* #646: named, so the two doors' bodies can be compared. They could not be before, and the
+          title-only pin stayed green while the same secret said different things by door. */}
+      {note && <p className="mt-1 text-xs text-fg-dim" data-testid={testId ? `${testId}-note` : undefined}>{note}</p>}
     </div>
   );
 }
