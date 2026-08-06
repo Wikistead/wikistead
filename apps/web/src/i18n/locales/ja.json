@@ -991,7 +991,7 @@
     "backlinkWarning_other": "このページには他の {{count}} ページからリンクがあります。そのリンクは切れます。"
   },
   "members": {
-    "groupRolesMark_other": "グループ由来のロールを {{count}} 件持っています。ポイントすると内訳が出ます。",
+    "groupRolesMark_other": "グループ由来のロールを {{count}} 件持っています。カーソルを合わせると内訳が出ます。",
     "title": "メンバー",
     "grantTitle": "ロールを割り当てる",
     "listTitle": "メンバーとグループ",
