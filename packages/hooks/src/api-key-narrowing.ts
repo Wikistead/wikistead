@@ -27,6 +27,15 @@ export interface NarrowedKeyRequest {
    * empty capability list does.
    */
   spaces?: ReadonlySet<string> | null
+  /**
+   * #667 / ADR-221 §3: which rule reads this key, and the resource-type matrix when it carries one.
+   *
+   * Both travel, rather than the gate inferring the model from the matrix's presence: an EMPTY matrix is
+   * "narrowed to nothing" and must not read as "no matrix, so use the v1 verbs" — the same
+   * undefined-versus-empty distinction the two fields above spell out, one level up.
+   */
+  permissionModel?: 1 | 2
+  permissions?: Readonly<Record<string, string>> | null
 }
 
 /**

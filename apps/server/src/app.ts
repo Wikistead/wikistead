@@ -486,7 +486,13 @@ export async function buildApp(): Promise<FastifyInstance> {
             return
           }
           const gate = getNarrowedKeyGate()
-          if (!gate || !gate({ capabilities: apiUser.capabilities, method: req.method, routePattern: pattern, spaces: apiUser.spaces ?? null })) {
+          if (!gate || !gate({
+            capabilities: apiUser.capabilities, method: req.method, routePattern: pattern,
+            spaces: apiUser.spaces ?? null,
+            // #667 / ADR-221 §3: both, not just the matrix — the gate branches on the MODEL, because an
+            // empty matrix is "narrowed to nothing" and must not read as "no matrix, use the v1 verbs".
+            permissionModel: apiUser.permissionModel, permissions: apiUser.permissions ?? null,
+          })) {
             emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: gate ? 'narrowed key outside its capabilities' : 'narrowed key with no gate registered' })
             await reply.code(403).send({ error: 'this API key is not permitted here', code: 'narrowed_key' })
             return
