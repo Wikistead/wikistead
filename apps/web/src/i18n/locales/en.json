@@ -948,7 +948,7 @@
     "roleFor": "role for {{sub}}",
     "sendInvite": "Send invite",
     "emailed": "Emailed to recipient.",
-    "notEmailed": "Email not sent. Copy the link above.",
+    "notEmailed": "Not emailed. Copy the link above and hand it over yourself.",
     "pendingTitle": "Pending invites",
     "noEmail": "(no email)",
     "revoke": "Revoke",
@@ -991,8 +991,7 @@
     "groupUnassign": "Remove role",
     "groupUnassignConfirm": "Remove the role granted to {{group}}? Everyone in that group loses what it confers.",
     "passwordLinkTitle": "Password setup link",
-    "passwordLinkNote": "Hand this to the member yourself; it is not emailed.",
-    "inviteLinkNote": "Share it yourself if email is off."
+    "passwordLinkNote": "Hand this to the member yourself; it is not emailed."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",

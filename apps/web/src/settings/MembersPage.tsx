@@ -57,11 +57,20 @@ export function MembersPage() {
   // `kind` decides the words: an invite mints a person, a password setup adds an entrance to one who is
   // already here — the review found the second reusing the first's toast, which resurrects exactly
   // the misreading (#606: "an invite = a new person") this ticket exists to remove.
-  const [lastLink, setLastLink] = useState<{ url: string; emailed: boolean; kind: "invite" | "password" } | null>(null);
-  // #638 the invitation-link dialog is opened by a row and holds NO secret until the reader asks
-  // for one. Opening it used to mint — so looking at an invitation invalidated the link its recipient
-  // already had.
-  const [linkFor, setLinkFor] = useState<{ id: string; email: string; url?: string; emailed?: boolean } | null>(null);
+  //
+  // #646 (reviewer): ONE state and ONE dialog, for both invite doors and the password entrance.
+  // There were two — the form's result and the row's — and they drifted twice: first the title (fixed by
+  // giving each secret one name), then the note, where only the form added the hand-it-over guidance. Two
+  // call sites are two answers, and each reads correctly on its own; the difference only exists when they
+  // are put side by side, which no reader ever does. So the second call site is gone rather than
+  // corrected, and `emailed` decides the words in the one place that renders them.
+  //
+  // `mint` is what a ROW-opened invite carries: which invitation to issue a link for. #638 — the
+  // dialog holds no secret until the reader asks, because opening it used to mint, and looking at an
+  // invitation invalidated the link its recipient already had.
+  const [lastLink, setLastLink] = useState<
+    { kind: "invite" | "password"; url?: string; emailed?: boolean; mint?: { id: string; email: string } } | null
+  >(null);
   // #504: every irreversible action here goes through one ConfirmDialog — removal (access + keys +
   // sessions die), DSAR erasure (the reading history is gone for good), invite revoke (the sent link
   // stops working). The pending action carries its own message + handler.
@@ -134,7 +143,7 @@ export function MembersPage() {
         role: choice.kind === "tier" ? choice.role : "member",
         roleId: choice.kind === "custom" ? choice.roleId : null,
       });
-      setLastLink({ url: res.inviteUrl, emailed: res.emailed, kind: "invite" });
+      setLastLink({ kind: "invite", url: res.inviteUrl, emailed: res.emailed });
       setEmail("");
       setInviteChoice("tier:member");
       await refresh();
@@ -470,7 +479,7 @@ export function MembersPage() {
                       void (async () => {
                         try {
                           const res = await enablePassword(token, m.sub);
-                          setLastLink({ url: res.setupUrl, emailed: false, kind: "password" });
+                          setLastLink({ kind: "password", url: res.setupUrl });
                           notify.success(t(passwordAction(m) === "reissue" ? "members.reissuePasswordDone" : "members.enablePasswordDone"));
                         } catch (e) {
                           notify.error(e instanceof ApiError && e.status === 400
@@ -559,43 +568,17 @@ export function MembersPage() {
         />
         <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>{t("members.sendInvite")}</Button>
       </FormRow>
-      {/* #638 (user ruling): a modal, because the two links are produced from DIFFERENT places
-          the invite from the form above, the password entrance from a row's ⋯ menu most of a screen away
-          — and a result rendered in one fixed spot is in the wrong place for at least one of them.
+      {/* #638 (user ruling): a modal, because the links are produced from DIFFERENT places — the
+          invite from the form above, the password entrance from a row's ⋯ menu most of a screen away, an
+          invitation's link from its own row — and a result rendered in one fixed spot is in the wrong
+          place for at least one of them.
           #606 stays honoured: a password-setup link is not an invite, so it wears its own title, and the
-          emailed/not-emailed note is the invite flow's fact and renders only there. */}
-      {/* #638/ opening is free; minting is the second press. */}
-      <SecretDialog
-        open={linkFor !== null}
-        onClose={() => setLinkFor(null)}
-        testId="invite-link"
-        title={t("members.inviteLinkOpen")}
-        secret={linkFor?.url ?? ""}
-        note={linkFor?.url ? (linkFor.emailed ? t("members.emailed") : t("members.notEmailed")) : undefined}
-        warn={t("members.inviteLinkWarn")}
-        actions={linkFor && (
-          <>
-            <Button variant="primary" size="sm" data-testid="invite-link-mint"
-              onClick={() => void guarded(async () => {
-                const r = await reissueInvite(token, linkFor.id);
-                setLinkFor((s) => (s ? { ...s, url: r.inviteUrl, emailed: r.emailed } : s));
-              })()}>{t("members.inviteLinkMint")}</Button>
-            {linkFor.email !== t("members.noEmail") && (
-              <Button variant="ghost" size="sm" data-testid="invite-link-mint-mail"
-                onClick={() => void guarded(async () => {
-                  const r = await reissueInvite(token, linkFor.id, { email: true });
-                  setLinkFor((s) => (s ? { ...s, url: r.inviteUrl, emailed: r.emailed } : s));
-                })()}>{t("members.inviteLinkMintMail")}</Button>
-            )}
-          </>
-        )}
-      />
-
-      {/* #646: the title belongs to the SECRET, not to the door it came through. `inviteLinkLabel` and
-          `passwordLinkLabel` were labels printed above a value, and #638 promoted them to dialog headings
-          without rewriting them — hence the trailing colon, and hence the same invite link being called
-          two different things depending on whether the row or the form produced it. One name each, shared
-          with the dialog above; what the label used to add is a note under the value. */}
+          emailed/not-emailed note is the invite flow's fact and renders only there.
+          #638/ opening is free; minting is the second press.
+          #646 ONE dialog. There were two of these, and both of them rendered an invite link —
+          which is how the same secret ended up with two titles, and then, after that was fixed, with two
+          different notes. What the reader sees is decided HERE, from `kind` and `emailed`, and there is
+          no second place for it to be decided differently. */}
       <SecretDialog
         open={lastLink !== null}
         onClose={() => setLastLink(null)}
@@ -606,7 +589,28 @@ export function MembersPage() {
           // what the old title carried in brackets: who this is for. It is guidance about the secret,
           // which is what the note under the value is, rather than part of its name.
           ? t("members.passwordLinkNote")
-          : <>{lastLink?.emailed ? t("members.emailed") : t("members.notEmailed")}{" "}{t("members.inviteLinkNote")}</>}
+          // …and for an invite, the ONE fact the reader needs: whether it went by mail, or whether
+          // handing it over is now their job. One sentence per state — the two used to be concatenated,
+          // which put "if email is off" after "Emailed to recipient." (a condition that had already not
+          // applied) and said "copy the link above" and "share it yourself" as if they were two steps.
+          : lastLink?.url ? t(lastLink.emailed ? "members.emailed" : "members.notEmailed") : undefined}
+        warn={lastLink?.mint ? t("members.inviteLinkWarn") : undefined}
+        actions={lastLink?.mint && (
+          <>
+            <Button variant="primary" size="sm" data-testid="invite-link-mint"
+              onClick={() => void guarded(async () => {
+                const r = await reissueInvite(token, lastLink.mint!.id);
+                setLastLink((s) => (s ? { ...s, url: r.inviteUrl, emailed: r.emailed } : s));
+              })()}>{t("members.inviteLinkMint")}</Button>
+            {lastLink.mint.email !== t("members.noEmail") && (
+              <Button variant="ghost" size="sm" data-testid="invite-link-mint-mail"
+                onClick={() => void guarded(async () => {
+                  const r = await reissueInvite(token, lastLink.mint!.id, { email: true });
+                  setLastLink((s) => (s ? { ...s, url: r.inviteUrl, emailed: r.emailed } : s));
+                })()}>{t("members.inviteLinkMintMail")}</Button>
+            )}
+          </>
+        )}
       />
 
       {invites.length > 0 && (
@@ -631,7 +635,7 @@ export function MembersPage() {
                     the screen; `last_emailed_at` stays in the table so a future "this one failed" mark
                     has something to read, and NOTHING reads it today.) */}
                 <Button variant="ghost" size="sm" className="flex-none" data-testid="invite-link-open"
-                  onClick={() => setLinkFor({ id: i.id, email: i.email || t("members.noEmail") })}>
+                  onClick={() => setLastLink({ kind: "invite", mint: { id: i.id, email: i.email || t("members.noEmail") } })}>
                   {t("members.inviteLinkOpen")}
                 </Button>
                 {/* #504: revoking kills the sent link for good — confirm first. */}
