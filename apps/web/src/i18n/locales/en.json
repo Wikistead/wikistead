@@ -246,7 +246,7 @@
     "factorLabelPlaceholder": "Work phone",
     "factorUnnamed": "Authenticator",
     "factorScanHint": "Enter this key in your authenticator app, then type the code it shows.",
-    "factorSecretNote": "This key is shown once. Enter it now.",
+    "factorSecretNote": "Type it into your authenticator app.",
     "factorCode": "Code",
     "factorCodePlaceholder": "123456",
     "factorConfirm": "Confirm",
@@ -255,7 +255,8 @@
     "factorRemoved": "Authenticator removed.",
     "factorCodeWrong": "That code did not match.",
     "factorStartFailed": "Could not start. Try again.",
-    "factorLimit": "You already have the maximum number. Remove one first."
+    "factorLimit": "You already have the maximum number. Remove one before adding another.",
+    "factorUnfinished": "unfinished"
   },
   "settings": {
     "back": "Back to app",

@@ -6,8 +6,10 @@ import { FormRow } from "../ui/FormRow";
 import { Input } from "../ui/Input";
 import { ListRow, ListBox } from "../ui/list-rows"; // #639: the one list shape the admin screens share
 import { OneTimeSecret } from "../ui/OneTimeSecret";
+import { QrCode } from "../ui/QrCode"; // #653 (ruling): qr-creator, MIT, no dependencies
 import { notify } from "../ui/toast";
 import { useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor } from "../data/queries";
+import { ApiError } from "../data/apiClient";
 
 // #653 / ADR-219: a member's own second factors. SELF-SCOPE — every call is keyed to the session's
 // subject by the server, so no other member's factor is addressable from this screen.
@@ -33,6 +35,10 @@ export function SecondFactorPanel() {
   // Which factor is being removed, and the code being typed for it. #660 asks for possession, so the
   // row opens an input rather than a confirm dialog: there is something to enter, not merely to agree to.
   const [removing, setRemoving] = useState<{ id: string; code: string } | null>(null);
+  // #653 ②: a PERMANENT state must not be reported as "try again". The cap is reached until
+  // something is removed, and a toast that says otherwise sends the reader back to a button that will
+  // refuse them again.
+  const [atLimit, setAtLimit] = useState(false);
 
   const onStart = async () => {
     try {
@@ -42,9 +48,14 @@ export function SecondFactorPanel() {
     } catch (e) {
       // #657 refuses past MAX_FACTORS_PER_MEMBER with a 409. Swallowing it would leave the button
       // looking broken, which is the failure mode a silent catch always produces.
-      const msg = e instanceof Error && /factor_limit_reached/.test(e.message)
-        ? t("account.factorLimit") : t("account.factorStartFailed");
-      notify.error(msg);
+      // `code`, not the message. ApiError carries the server's own code for exactly this — matching on
+      // prose would break the day the sentence is reworded, silently, back into "try again".
+      if (e instanceof ApiError && e.code === "factor_limit_reached") {
+        setAtLimit(true);
+        notify.error(t("account.factorLimit"));
+      } else {
+        notify.error(t("account.factorStartFailed"));
+      }
     }
   };
 
@@ -82,6 +93,15 @@ export function SecondFactorPanel() {
               <ShieldCheck size={16} aria-hidden className="text-fg-dim" />
               <span className="min-w-0 flex-1 truncate" data-testid="factor-label">
                 {f.label || t("account.factorUnnamed")}
+                {/* #653 ①: an unconfirmed row IS shown, and says what it is. The cap counts these,
+                    so hiding them made "you can create it, you cannot see it, and because you cannot
+                    see it you cannot delete it" — three closed tabs and the account could never enrol
+                    again. It is not called a factor; it is called unfinished. */}
+                {!f.confirmedAt && (
+                  <span className="ml-2 text-xs text-fg-dim" data-testid="factor-pending-mark">
+                    {t("account.factorUnfinished")}
+                  </span>
+                )}
               </span>
               {removing?.id === f.id ? (
                 <>
@@ -98,7 +118,10 @@ export function SecondFactorPanel() {
                 </>
               ) : (
                 <IconButton aria-label={t("account.factorRemove")} data-testid="factor-remove"
-                  onClick={() => setRemoving({ id: f.id, code: "" })}>
+                  onClick={() => (f.confirmedAt
+                    // possession is only asked for something that guards anything (#660)
+                    ? setRemoving({ id: f.id, code: "" })
+                    : void onRemove(f.id, false))}>
                   <Trash2 size={14} aria-hidden />
                 </IconButton>
               )}
@@ -107,14 +130,26 @@ export function SecondFactorPanel() {
         </ListBox>
       )}
 
+      {atLimit && (
+        <p className="mb-2 text-xs text-[var(--danger)]" data-testid="factor-limit-note">{t("account.factorLimit")}</p>
+      )}
+
       {pending ? (
         <div className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid="factor-enrolling">
           <p className="text-xs text-fg-dim">{t("account.factorScanHint")}</p>
+          {/* The URI the SERVER built, drawn as-is. Rebuilding it here would put the spelling of label,
+              issuer, digits and period in two places, and the day they differ the QR reads one account
+              while the typed key sets up another. */}
+          <QrCode value={pending.uri} testId="factor-qr" />
           {/* The same box a one-time secret always uses: shown once, copyable, and saying so. */}
-          <OneTimeSecret value={pending.secret} testId="factor-secret" note={t("account.factorSecretNote")} />
+          {/* #653 ③: the box already says "shown once, copy it now" (`common.copyOnce`). The note
+              says the one thing it does not — where the key goes — rather than saying it a second time
+              in other words, which is #646's defect committed in the same hand that fixed it. */}
+          <OneTimeSecret value={pending.secret} testId="factor-secret" grouped note={t("account.factorSecretNote")} />
           {/* The URI an authenticator would have read from a QR code, kept in the DOM so the enrolment
               can be driven and verified without one. Not shown: it contains the secret, which is
               already above, and a second copy invites pasting the wrong thing. */}
+          {/* kept for the pin: what the QR was given, in a form a test can read back */}
           <span hidden data-testid="factor-uri">{pending.uri}</span>
           <FormRow>
             <Input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric"
@@ -137,7 +172,7 @@ export function SecondFactorPanel() {
           <Input value={label} onChange={(e) => setLabel(e.target.value)}
             placeholder={t("account.factorLabelPlaceholder")} aria-label={t("account.factorLabel")}
             data-testid="factor-label-input" />
-          <Button variant="primary" disabled={startEnrolment.isPending}
+          <Button variant="primary" disabled={startEnrolment.isPending || atLimit}
             onClick={() => void onStart()} data-testid="factor-add">{t("account.factorAdd")}</Button>
         </FormRow>
       )}

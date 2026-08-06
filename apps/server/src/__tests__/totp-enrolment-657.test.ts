@@ -86,14 +86,32 @@ describe('#657: starting an enrolment', () => {
     expect(new URL(uri).searchParams.get('secret'), 'the URI carries the same secret').toBe(secret)
   }, 120_000)
 
-  it('does not enrol anything — the list stays empty until it is confirmed', async () => {
-    // The distinction this whole slice turns on. "Enrolled" must not mean "was shown a QR code": a
-    // policy counting those would lock out everybody who scanned nothing.
-    await start()
+  it('does not enrol anything — the row is listed, but it is not a factor', async () => {
+    // The distinction this slice turns on: "enrolled" must not mean "was shown a QR code", or a policy
+    // counting those locks out everybody who scanned nothing.
+    //
+    // REWRITTEN by #653's review. This used to assert the row was not LISTED, which was the other
+    // half of a trap: the cap counts pending rows, so hiding them made "you can create it, you cannot
+    // see it, and because you cannot see it you cannot delete it". Both halves read as correct on their
+    // own. What must hold is that it is not a FACTOR — visible and unfinished, not invisible.
+    const { factorId } = await start()
     const res = await app.inject({ method: 'GET', url: '/me/factors', headers: AUTH })
     expect(res.statusCode).toBe(200)
-    const listed = (res.json() as { factors: { id: string }[] }).factors.map((f) => f.id)
-    for (const id of factorIds) expect(listed, `${id} is pending, not listed`).not.toContain(id)
+    const listed = (res.json() as { factors: { id: string; confirmedAt: string | null }[] }).factors
+    const mine = listed.find((f) => f.id === factorId)
+    expect(mine, 'the abandoned start is visible, so it can be cleared').toBeTruthy()
+    expect(mine!.confirmedAt, '…and says it is unfinished').toBeNull()
+  }, 120_000)
+
+  it('a new start clears this member\'s own abandoned ones', async () => {
+    // The other half of #653's fix: coming back to try again must not require tidying up first.
+    await start(); await start(); await start()
+    const { factorId } = await start()
+    const [row] = await adminPool<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM member_factors
+      WHERE tenant_id = ${TENANT} AND member_sub = 'dev-user' AND confirmed_at IS NULL`
+    expect(row!.n, 'only the newest pending row survives').toBe(1)
+    expect(await adminPool`SELECT 1 FROM member_factors WHERE id = ${factorId}`).toHaveLength(1)
   }, 120_000)
 })
 
@@ -248,9 +266,13 @@ describe('#657: the list is bounded by a cap, not by a page', () => {
     // a member who holds more authenticators than they can see would remove "all of them" and leave
     // the ones on page two.
     await wipe()
-    // PENDING rows count too — an uncapped start would be an unbounded write even with a capped list,
-    // so none of these are confirmed and the refusal must still come.
-    for (let i = 0; i < MAX_FACTORS_PER_MEMBER; i++) await start(`fill ${i}`)
+    // CONFIRMED rows, because #653's fix makes each start discard this member's own pending ones — the
+    // cap still counts pending rows (an uncapped start is an unbounded write), but they can no longer
+    // pile up, which was the trap rather than the protection.
+    for (let i = 0; i < MAX_FACTORS_PER_MEMBER; i++) {
+      const f = await start(`fill ${i}`)
+      expect((await post(`/me/factors/${f.factorId}/confirm`, { code: totpCode(f.secret, Date.now()) })).statusCode).toBe(200)
+    }
 
     const res = await post('/me/factors/totp', {})
     expect(res.statusCode, res.body).toBe(409)

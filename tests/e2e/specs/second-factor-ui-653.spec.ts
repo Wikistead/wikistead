@@ -45,7 +45,10 @@ test("#653: a factor can be enrolled from the screen, and only given up by provi
   await page.getByTestId("factor-add").click();
   await expect(page.getByTestId("factor-enrolling"), "the enrolment opened").toBeVisible({ timeout: 15_000 });
 
-  const secret = (await page.getByTestId("factor-secret-value").innerText()).trim();
+  // #653 ④: the key is DISPLAYED in groups of four so it can be typed off the screen. The
+  // spaces are presentation — the value the server sent has none, and everything that consumes it
+  // (the copy button, the phone) gets that one.
+  const secret = (await page.getByTestId("factor-secret-value").innerText()).replace(/\s/g, "");
   expect(secret, "a base32 key the reader can type into an app").toMatch(/^[A-Z2-7]+$/);
 
   // The URI an authenticator would have read from a QR code carries the SAME secret. Asserted because
@@ -53,6 +56,18 @@ test("#653: a factor can be enrolled from the screen, and only given up by provi
   // perfectly correct until somebody scanned it.
   const uri = (await page.getByTestId("factor-uri").innerText()).trim();
   expect(new URL(uri).searchParams.get("secret"), "the URI and the printed key agree").toBe(secret);
+
+  // #653 (ruling): the QR carries THAT string. Asserted on what was handed to the encoder rather than
+  // on the picture, because a canvas with the wrong text in it looks exactly like one with the right
+  // text in it — "an image appeared" is green on a code that sets up somebody else's account.
+  const qr = page.getByTestId("factor-qr");
+  await expect(qr, "there is a QR to scan").toBeVisible();
+  expect(await qr.getAttribute("data-qr-value"), "…and it encodes the server's own URI").toBe(uri);
+  // Black on white whatever the theme: a QR read is the contrast between the two, and a dark theme
+  // that inverted it would draw a code no phone can see.
+  expect(await qr.evaluate((el) => getComputedStyle(el).backgroundColor), "white quiet zone")
+    .toBe("rgb(255, 255, 255)");
+  expect(await qr.evaluate((el) => el.querySelector("canvas") !== null), "something was drawn").toBe(true);
 
   // a wrong code is refused, and the enrolment stays open
   await page.getByTestId("factor-confirm-code").fill("000000");
@@ -81,6 +96,47 @@ test("#653: a factor can be enrolled from the screen, and only given up by provi
   await row.getByTestId("factor-remove-code").fill(totp(secret, Date.now() + 30_000));
   await row.getByTestId("factor-remove-confirm").click();
   await expect(row, "and the right code does").toBeHidden({ timeout: 15_000 });
+});
+
+test("#653: an abandoned enrolment is visible and removable, not an invisible one", async ({ page }) => {
+  test.setTimeout(180_000);
+  // ①: the cap counts pending rows and the list used to hide them, so three closed tabs became
+  // "you can create it, you cannot see it, and because you cannot see it you cannot delete it" — an
+  // account that could never enrol again, with nothing on screen to say why. Two rules that were each
+  // right, and a trap where they met.
+  await gotoSecurity(page);
+  const before = await page.locator('[data-testid="factor-row"]').count();
+
+  await page.getByTestId("factor-add").click();
+  await expect(page.getByTestId("factor-enrolling")).toBeVisible({ timeout: 15_000 });
+  // leave WITHOUT cancelling — the way people actually abandon things
+  await page.goto("/settings/account");
+  await gotoSecurity(page);
+
+  const rows = page.locator('[data-testid="factor-row"]');
+  await expect(rows, "the abandoned start is there to see").toHaveCount(before + 1, { timeout: 15_000 });
+  const stray = rows.last();
+  await expect(stray.getByTestId("factor-pending-mark"), "…named as unfinished, not as a factor").toBeVisible();
+
+  // …and it goes without a code, because it guards nothing (#660)
+  await stray.getByTestId("factor-remove").click();
+  await expect(rows, "and it can be cleared").toHaveCount(before, { timeout: 15_000 });
+});
+
+test("#653: reaching the cap says so, permanently, instead of \"try again\"", async ({ page }) => {
+  test.setTimeout(180_000);
+  // ②: the 409 was swallowed into the generic start failure, so a state that lasts until
+  // something is REMOVED was reported as one that might work on the next press. Stubbed at the network
+  // because filling the account for real costs ten round trips to say one thing about the screen.
+  await page.route("**/api/me/factors/totp", (r) => r.request().method() === "POST"
+    ? r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "full", code: "factor_limit_reached" }) })
+    : r.fallback());
+  await gotoSecurity(page);
+
+  await page.getByTestId("factor-add").click();
+  await expect(page.getByTestId("factor-limit-note"), "the screen says what happened").toBeVisible({ timeout: 15_000 });
+  // …and the button stops offering something that cannot work
+  await expect(page.getByTestId("factor-add"), "the affordance is withdrawn").toBeDisabled();
 });
 
 test("#653: the enrolment key is shown once, in the box that says so", async ({ page }) => {

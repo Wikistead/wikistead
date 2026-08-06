@@ -4,6 +4,7 @@ import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/outbox.js'
 import {
   startTotpEnrolment, totpSecretFor, confirmFactor, listFactors, markFactorUsed, deleteFactor,
+  discardPendingFactors,
 } from '../auth/second-factors.js'
 import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
 import { spendTotpCounter } from '../auth/second-factors.js'
@@ -113,6 +114,10 @@ export async function secondFactorPlugin(app: FastifyInstance) {
    * own list does not show it — an abandoned start is invisible rather than a half-factor.
    */
   app.post<{ Body: { label?: string } }>('/me/factors/totp', async (req, reply) => {
+    // First, throw away this member's own abandoned starts. Leaving them was how three closed tabs
+    // became an account that could never enrol again: the cap counts pending rows, so they accumulated
+    // silently until the eighth real enrolment was refused.
+    await discardPendingFactors(req.db, req.user.sub)
     // Counting PENDING rows too: otherwise starting enrolments without confirming them is an unbounded
     // write, and the cap would only bound what the member can see rather than what they can create.
     const [held] = await req.db.sql<[{ n: number }?]>`
