@@ -84,8 +84,9 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'auth.ts:/auth/login-options': { kind: 'debt', why: '#623 A: one row per login connection; grows with IdP configuration, not with usage.' },
 
   // ── surfaced by slice 12's SECOND instrument fix: a bound marker that belonged to a scalar subquery,
-  // or to a lower-case variable. Five routes, each read by hand.
-  'spaces.ts:/spaces': { kind: 'debt', why: '#623: one row per space, ORDER BY created_at, no LIMIT — measured at 253 rows in one response on the dev tenant, on the path the sidebar takes at startup. The bound is owed a decision first: the sidebar switcher AND #661’s space picker both assume the response is complete, so a page here turns their filter into "filter this page" unless the filtering moves to the server with it. That is acceptance 1 and 2, not the instrument.' },
+  // or to a lower-case variable. Five routes, each read by hand. `GET /spaces` was one of them and
+  // has no line: it got the bound instead (slice 12b), which is what a ledger line is supposed to
+  // turn into.
   'share-links.ts:/spaces/:spaceId/share-links': { kind: 'debt', why: '#623 B: one row per link on a space — the twin of the page route above, and green until now only because its window ran to the end of the file and borrowed a DELETE handler’s `limit`.' },
   'spaces.ts:/spaces/:spaceId/delete-mode': { kind: 'bounded', why: 'one delete-mode setting for one space — a settings record. Its only LIMIT takes the tenant default as a scalar.' },
   'auth-local.ts:/auth/invite-kind': { kind: 'bounded', why: 'one invitation, addressed by the hash of the token in the link — a row, not a list.' },

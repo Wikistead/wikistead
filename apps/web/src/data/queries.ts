@@ -78,9 +78,27 @@ export function useSpaces(enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["spaces"],
-    queryFn: () => apiFetch<Space[]>("/spaces", token).then((r) =>
-      (r ?? []).map((s) => ({ ...s, iconImageUrl: s.iconImageUrl ? assetUrl(s.iconImageUrl) : null })),
-    ),
+    // #623 slice 12b: the route pages now, so this walks it and hands its callers the same complete
+    // array they had before. The sidebar switcher and the API-key space picker both filter on the
+    // client and both say how many are hidden — paging THEM would turn "filter" into "filter this
+    // page" and make the hidden count a lie, which is acceptance 1 and 2 and needs its own slice.
+    //
+    // What this does fix is the payload: a tenant with 253 spaces no longer receives all of them in one
+    // response. The walk keeps going while `nextCursor` is non-null, INCLUDING over pages that came
+    // back empty — the server filters by authorization after the SQL, so an empty page does not mean
+    // the end (see `listSpaces`). Stopping early would silently shorten somebody's space list.
+    queryFn: async () => {
+      const out: Space[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: { spaces: Space[]; nextCursor: string | null } | null = await apiFetch(
+          `/spaces${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, token,
+        );
+        out.push(...(page?.spaces ?? []));
+        cursor = page?.nextCursor ?? null;
+      } while (cursor);
+      return out.map((s) => ({ ...s, iconImageUrl: s.iconImageUrl ? assetUrl(s.iconImageUrl) : null }));
+    },
     enabled,
   });
 }

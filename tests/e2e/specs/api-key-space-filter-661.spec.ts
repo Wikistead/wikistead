@@ -24,7 +24,9 @@ async function openNarrow(page: import("@playwright/test").Page) {
   // tree out from under the app is a different test with a different (broken) subject.
   await page.route((url) => url.pathname === "/api/spaces", (route) =>
     route.request().method() === "GET"
-      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SPACES) })
+      // #623 slice 12b: the route pages now — `{ spaces, nextCursor }`. One page, no cursor: this test
+      // is about the FORM in front of forty spaces, not about the walk.
+      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ spaces: SPACES, nextCursor: null }) })
       : route.fallback());
   await openDemo(page);
   await page.goto("/admin/api");
