@@ -11,7 +11,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { withTenantTx } from './db/index.js' // #382
 
-interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null; expires_at: Date | null; capabilities: string[] | null; space_ids: string[] | null; deactivated_at: Date | null }
+interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null; expires_at: Date | null; capabilities: string[] | null; space_ids: string[] | null; permission_model: number | null; permissions: Record<string, string> | string | null; deactivated_at: Date | null }
 
 // #476 / ADR-178: the two ways a valid key can be answered. `deactivated` is the owner being frozen —
 // a state the tenant can undo by upgrading — so the caller says so rather than returning the generic
@@ -29,6 +29,15 @@ export type ApiKeyPrincipal = {
   // column first would mean a window in which a space-confined key counted as unconfined. The lookup
   // that fills this is the next slice (the column is EE-owned data, ADR-216 §7 / sub-task 5).
   spaces?: ReadonlySet<string>
+  // #667 / ADR-221 §3: which rule reads this key, and the resource-type matrix when it carries one.
+  //
+  // `permissions` is SELECTed and set HERE and not only in the gate, which is the whole point of the
+  // field existing on the principal: `isNarrowedKey` can only see what the row-reader put here, so
+  // adding the column and teaching the gate about it while leaving this SELECT alone would reinstate
+  // exactly the fail-open it was widened to close — one layer lower, and invisible to every unit test
+  // that builds a principal by hand.
+  permissionModel: 1 | 2
+  permissions?: Readonly<Record<string, string>>
 }
 export type ApiKeyDeactivated = { deactivated: true }
 // #628 / ADR-215 §5: an EXPIRED key answers the caller exactly as an unknown one does — the same 401,
@@ -39,6 +48,15 @@ export type ApiKeyDeactivated = { deactivated: true }
 // working: an expired key is not a frozen owner, and saying so costs one field.
 export type ApiKeyExpired = { expired: true; deactivated: false }
 export type ApiKeyResult = ApiKeyPrincipal | ApiKeyDeactivated | ApiKeyExpired
+
+/** `jsonb` arrives as text from this driver; an unparseable value confines to nothing rather than to everything. */
+function parsePermissions(raw: Record<string, string> | string): Readonly<Record<string, string>> {
+  if (typeof raw !== 'string') return raw
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, string>) : {}
+  } catch { return {} }
+}
 
 // Verify an API key and return the owner's user ID + scope, or null if invalid/
 // revoked. Called from onRequest ONLY when token starts with 'wks_' — no OIDC
@@ -63,7 +81,8 @@ export async function verifyApiKey(
   // and the deactivation would be indistinguishable from an unknown key.
   const row = await (withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<ApiKeyRow[]>`
-      SELECT k.id, k.owner_user_id, k.key_hash, k.scope, k.expires_at, k.capabilities, k.space_ids, m.deactivated_at
+      SELECT k.id, k.owner_user_id, k.key_hash, k.scope, k.expires_at, k.capabilities, k.space_ids,
+             k.permission_model, k.permissions, m.deactivated_at
       FROM api_keys k
       LEFT JOIN members m ON m.sub = k.owner_user_id
       WHERE k.key_prefix    = ${keyPrefix}
@@ -102,7 +121,14 @@ export async function verifyApiKey(
   // keyId enables per-key rate limiting (#175) without re-querying on the hot path.
   return {
     sub: row.owner_user_id, scope: row.scope === 'read' ? 'read' : 'write', keyId: row.id, deactivated: false,
+    // #667: default 1 rather than trusting the column to be there. A row written before migration 121,
+    // or read by a build that predates it, is a v1 key — the reading that changes nothing.
+    permissionModel: row.permission_model === 2 ? 2 : 1,
     ...(row.capabilities ? { capabilities: row.capabilities } : {}),
     ...(row.space_ids ? { spaces: new Set(row.space_ids) } : {}),
+    // …parsed here, because this driver hands `jsonb` back as TEXT. Measured: the column came out as
+    // '{"pages":"read"}' and every reader downstream would have asked a string for its keys and got
+    // none — a matrix that confines to nothing, which fails CLOSED but silently and wrongly.
+    ...(row.permissions ? { permissions: parsePermissions(row.permissions) } : {}),
   }
 }
