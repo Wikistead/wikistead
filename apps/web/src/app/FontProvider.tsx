@@ -1,59 +1,73 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
-// #190 / ADR-090: personal BODY-font override (device-local, mirrors ThemeProvider). Resolution order
-// is user > locale-default: this inline override on <html> beats the :root / :lang(en) locale defaults
-// (tokens.css). "locale" (default) clears the override so the locale default applies (JP=UDEV Gothic,
-// EN=Wikistead Mono). The other choices force a face regardless of locale. Token-driven: only the
-// --font-body CSS variable changes; no view rebuild. (The code face is a single vendored font, so
-// there is no per-user code picker in v1; --font-code stays fixed.)
-// "udev"/"mono" are MONOSPACE (vim column-grid); "sans" is a PROPORTIONAL option (#190 comment 614)
-// for non-vim users — nicer titles/prose — reusing the already-vendored UI faces (Inter + Noto Sans
-// JP, #173), so it adds NO new font dependency.
-export type FontBody = "locale" | "udev" | "mono" | "sans";
-const KEY = "wks.fontBody";
+// #633 / ADR-217: the font picker is gone, and one toggle stands where it was.
+//
+// It used to offer four faces by NAME (`udev` / `mono` / `sans` / `locale`). A name is a promise about
+// glyphs, and it becomes a lie the day this product grows Korean or Chinese: the chosen face has none,
+// the browser substitutes silently, and the setting says something untrue about what is on screen. So
+// the names go, and what remains is the only question a reader can actually answer for themselves —
+// whether turning vim on should also switch the prose to the monospace column grid.
+//
+// Default ON (user ruling,): somebody who turns vim on gets the grid without being asked. The
+// toggle exists for the reader who wants vim's keys and not its typography.
+//
+// The mechanism is one attribute on <html>, not a face: `data-vim-mono` is present when vim is on AND
+// this is kept. tokens.css decides what that MEANS (which surfaces, and which fallback), so the rule
+// about print and public pages lives beside the rule about the editor rather than in two languages.
+const KEY = "wks.vimMono";
+// #190's key, now unread. Left in place rather than deleted: a reader who once chose a face has that
+// choice in their browser, and clearing it from here would be this code reaching into storage it no
+// longer owns to erase something nobody asked it to. It is inert — nothing reads it.
+export const RETIRED_FONT_KEY = "wks.fontBody";
 
-// The literal stacks a forced choice writes to --font-body (kept in sync with tokens.css defaults).
-const STACKS: Record<Exclude<FontBody, "locale">, string> = {
-  udev: '"UDEV Gothic", ui-monospace, SFMono-Regular, Menlo, monospace',
-  mono: '"Wikistead Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-  sans: '"Inter", "Noto Sans JP", system-ui, sans-serif', // proportional; reuses the vendored UI faces
-};
-
-function load(): FontBody {
+function load(): boolean {
   try {
     const v = localStorage.getItem(KEY);
-    return v === "udev" || v === "mono" || v === "sans" || v === "locale" ? v : "locale";
+    return v === null ? true : v === "1"; // absent = never chosen = the default, which is on
   } catch {
-    return "locale";
+    return true; // private mode: the default, not an error state
   }
 }
 
-// Apply a body-font choice to <html>: a forced face writes an inline --font-body (beating the locale
-// default); "locale" clears it so the :root / :lang default applies. Exported for unit testing.
-export function applyFontBody(pref: FontBody) {
+/**
+ * Put (or remove) the marker that makes vim's typography apply. Exported for tests and for the editor,
+ * which knows whether vim is on.
+ */
+export function applyVimMono(on: boolean): void {
   const root = document.documentElement;
-  if (pref === "locale") root.style.removeProperty("--font-body"); // fall back to the locale default
-  else root.style.setProperty("--font-body", STACKS[pref]);
+  if (on) root.setAttribute("data-vim-mono", "");
+  else root.removeAttribute("data-vim-mono");
 }
 
-const FontContext = createContext<{ fontBody: FontBody; setFontBody: (f: FontBody) => void }>({
-  fontBody: "locale",
-  setFontBody: () => {},
+const FontContext = createContext<{ vimMono: boolean; setVimMono: (v: boolean) => void }>({
+  vimMono: true,
+  setVimMono: () => {},
 });
 
 export function FontProvider({ children }: { children: ReactNode }) {
-  const [fontBody, setState] = useState<FontBody>(load);
+  const [vimMono, setState] = useState<boolean>(load);
 
-  useEffect(() => { applyFontBody(fontBody); }, [fontBody]);
+  // The attribute is only half the condition — the editor adds the other half (is vim on) by calling
+  // `applyVimMono` when it toggles. Here it is mirrored so a change in settings takes effect at once
+  // for a reader who already has vim on.
+  useEffect(() => {
+    if (!vimMono) applyVimMono(false);
+    else if (document.documentElement.hasAttribute("data-vim-on")) applyVimMono(true);
+  }, [vimMono]);
 
-  const setFontBody = (f: FontBody) => {
-    setState(f);
-    try { localStorage.setItem(KEY, f); } catch { /* private mode — choice just won't persist */ }
+  const setVimMono = (v: boolean) => {
+    setState(v);
+    try { localStorage.setItem(KEY, v ? "1" : "0"); } catch { /* private mode — it just won't persist */ }
   };
 
-  return <FontContext.Provider value={{ fontBody, setFontBody }}>{children}</FontContext.Provider>;
+  return <FontContext.Provider value={{ vimMono, setVimMono }}>{children}</FontContext.Provider>;
 }
 
-export function useFontBody() {
+export function useVimMono() {
   return useContext(FontContext);
+}
+
+/** Whether the reader has kept the toggle. Read outside React (the editor's vim toggle). */
+export function vimMonoEnabled(): boolean {
+  return load();
 }

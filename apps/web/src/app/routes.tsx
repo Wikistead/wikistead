@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
+import { applyVimMono, vimMonoEnabled } from "./FontProvider"; // #633: vim decides the prose grid
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate, Link as RouterLink } from "react-router-dom";
@@ -48,11 +49,23 @@ const KEYMAP_LS = "wks.editorVim";
 const readLocalVim = () => { try { return localStorage.getItem(KEYMAP_LS) === "1"; } catch { return false; } };
 const writeLocalVim = (on: boolean) => { try { localStorage.setItem(KEYMAP_LS, on ? "1" : "0"); } catch { /* no storage */ } };
 
+// #633 / ADR-217: vim's typography is "vim is on AND the reader kept the toggle". The two inputs live
+// in different places (the keymap here, the toggle in FontProvider), so they meet on <html>: this marks
+// that vim is on, and `applyVimMono` adds the marker tokens.css actually reads. Both hooks below call
+// it, because a guest and a member both have vim and both deserve the same typography.
+function reflectVim(on: boolean): void {
+  const root = document.documentElement;
+  if (on) root.setAttribute("data-vim-on", "");
+  else root.removeAttribute("data-vim-on");
+  applyVimMono(on && vimMonoEnabled());
+}
+
 // Guest editor keymap (share-link, no member row): localStorage only — there is no
 // server profile to sync to.
 function useVimPref(): [boolean, () => void] {
   const [vim, setVim] = useState(readLocalVim);
   const toggle = useCallback(() => setVim((v) => { writeLocalVim(!v); return !v; }), []);
+  useEffect(() => { reflectVim(vim); return () => reflectVim(false); }, [vim]);
   return [vim, toggle];
 }
 
@@ -71,6 +84,7 @@ function useEditorKeymap(): [boolean, () => void] {
     else if (mode === "default") setVim(false);
     else setVim(readLocalVim()); // 'local'
   }, [mode]);
+  useEffect(() => { reflectVim(vim); return () => reflectVim(false); }, [vim]);
   const toggle = useCallback(() => setVim((v) => { writeLocalVim(!v); return !v; }), []);
   return [vim, toggle];
 }

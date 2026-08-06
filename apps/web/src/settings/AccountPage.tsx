@@ -6,7 +6,7 @@ import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useSession } from "../session/SessionProvider";
 import { useTheme, type Theme } from "../app/ThemeProvider";
-import { useFontBody, type FontBody } from "../app/FontProvider";
+import { useVimMono } from "../app/FontProvider"; // #633: one toggle, not a face picker
 import { useTocPref } from "../toc/useTocPref";
 import { AccentPicker } from "./AccentPicker";
 import { Avatar } from "../ui/Avatar";
@@ -257,7 +257,7 @@ function EditorTab() {
   const mode = settings.data?.editorKeymap ?? "local";
   const dmode = settings.data?.editorDisplayMode ?? "local"; // ADR-056 / #164 startup display mode
   const kb = settings.data?.keybindings ?? {};
-  const { fontBody, setFontBody } = useFontBody(); // #190 / ADR-090: device-local body-font override
+  const { vimMono, setVimMono } = useVimMono(); // #633: does vim bring its column grid (device-local)
   const { on: tocOn, setOn: setTocOn, depth: tocDepth, setDepth: setTocDepth } = useTocPref(); // #192: TOC on/off + depth moved here from the rail
   // Startup-mode preference (cross-device, server). 'local' follows this device's last
   // toolbar toggle; 'vim'/'default' force the startup state. The toolbar toggle
@@ -359,16 +359,18 @@ function EditorTab() {
       </SettingsCard>
 
       <SettingsCard>
-        {/* #190 / ADR-090: personal body-font override (device-local). "locale" follows the UI
-            language default (JP=UDEV Gothic, EN=Wikistead Mono); the others force a face. */}
-        <label className="mb-1 block text-sm font-medium">{t("account.bodyFont")}</label>
-        <p className="mb-2 text-xs text-fg-dim">{t("account.bodyFontHint")}</p>
-        <RadioGroup
-          value={fontBody}
-          onChange={(v) => setFontBody(v as FontBody)}
-          ariaLabel={t("account.bodyFont")}
-          testId="account-bodyfont"
-          options={(["locale", "udev", "mono", "sans"] as const).map((f) => ({ value: f, label: t(`account.bodyFont_${f}`) }))}
+        {/* #633 / ADR-217: the four faces by NAME are gone. A face name is a promise about glyphs, and
+            it becomes untrue the day this product grows a language that face does not cover — the
+            browser substitutes silently and the setting describes something that is not on screen.
+            What is left is the one question a reader can answer about their own typing: should vim
+            bring its column grid with it. Default on (user ruling). */}
+        <label className="mb-1 block text-sm font-medium">{t("account.vimMono")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.vimMonoHint")}</p>
+        <SwitchRow
+          checked={vimMono}
+          onChange={setVimMono}
+          testId="account-vim-mono"
+          label={t(vimMono ? "account.vimMonoOn" : "account.vimMonoOff")}
         />
       </SettingsCard>
 
