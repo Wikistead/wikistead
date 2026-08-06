@@ -325,14 +325,61 @@ test("#85the downloaded file, opened with the app closed, IS the document", asyn
   // pixel comparison would fail for a reason that is not a defect; dropping it silently is what the
   // ruling forbade. So it asks the question the old numbers stood for: the saved file must draw prose in
   // the same FACE the screen does, and (below) that face must not be a monospace one.
+  //
+  // Break-check established (#633asked; a first attempt could not and said so): forcing
+  // `.wks-export-doc, .wks-export-doc p { font-family: ui-monospace… }` into the export's own stylesheet
+  // fails both with "screen Inter, …sans-serif vs file ui-monospace, …". The earlier attempts injected at
+  // a BARE `p`, which `prose.css`'s own `.wks-prose` rules outrank — the rule never reached the paragraph,
+  // so nothing was proved either way. An injection that does not change what you are measuring is not a
+  // break, and a green under one is worth nothing.
   expect(fileBody!.family, `body face differs: screen ${appBody!.family} vs file ${fileBody!.family}`)
     .toBe(appBody!.family);
   expect(fileBody!.family.toLowerCase(), `the saved file set prose in a monospace face :: ${fileBody!.family}`)
     .not.toMatch(/monospace|menlo|sfmono|courier/);
-  // HONESTLY: the break-check for this pair is not established. Injecting a monospace rule into the
-  // export stylesheet (at `p`, at `.cm-line`, with `!important`) left both assertions green, which means
-  // the element these read is not the one that rule reaches and the pin may be measuring less than it
-  // appears to. Reported on #85 rather than left as a green nobody has challenged.
+
+  // 1e. the callout icons ARRIVED and are DRAWN. The screen showed a warning triangle and the saved file
+  // showed a filled block in the same place: the icon is a CSS mask whose value is a `data:image/svg+xml`
+  // URL, and the export's CSS sanitizer drops that scheme on purpose (ADR-194 addendum A). The drawing
+  // travels as an element instead, so the security line is untouched.
+  //
+  // Discovery, not a list of five: every icon holder the file contains is required to carry a drawing and
+  // to paint ink. A sixth callout type tomorrow is covered by existing here.
+  //
+  // #633this block was deleted in the same commit that re-aimed the width check above, and that
+  // commit's message spoke only of the width. It is the guard on the defect the reject before it found
+  // the product is fine, but with the guard gone nobody would learn of the next one. Restored unchanged;
+  // it was never in conflict with the face check, they simply shared a commit.
+  const icons = await opened.evaluate(() => [...document.querySelectorAll<HTMLElement>("[data-icon]")].map((el) => {
+    const svg = el.querySelector("svg");
+    const r = el.getBoundingClientRect();
+    return {
+      icon: el.getAttribute("data-icon"),
+      shapes: svg ? svg.querySelectorAll("path,circle,line,polyline,polygon,rect,ellipse").length : 0,
+      // the mask painted with background-color; as an element the svg strokes with the inherited colour,
+      // and a holder still painting its own background would be the filled block the reject reported
+      background: getComputedStyle(el).backgroundColor,
+      colour: getComputedStyle(el).color,
+      box: { x: r.x, y: r.y, w: r.width, h: r.height },
+    };
+  }));
+  expect(icons.length, "the document really contains callout icons to check").toBeGreaterThanOrEqual(5);
+  expect(icons.filter((i) => i.shapes === 0), `an icon holder arrived with no drawing :: ${JSON.stringify(icons)}`).toEqual([]);
+  const painted = icons.filter((i) => !/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(i.background));
+  expect(painted, `an icon holder still paints its own block behind the drawing :: ${JSON.stringify(painted)}`).toEqual([]);
+  // …and the types kept their palette: five callouts, five different stroke colours
+  expect(new Set(icons.map((i) => i.colour)).size, `the icons all drew in one colour :: ${JSON.stringify(icons.map((i) => [i.icon, i.colour]))}`)
+    .toBeGreaterThanOrEqual(4);
+  // INK, not markup: a screenshot of each holder must contain pixels that are not its background.
+  //
+  // Taken from the ELEMENT, not from a clip rectangle. A rect is viewport-relative and a clip is
+  // page-relative, so the third icon down came back 28x3 — the part of it that was still above the fold
+  // and read as "no ink" while it was drawing perfectly (measured: 18 foreground of 84, against 210 of 784
+  // for the one above it). Playwright scrolls the element into view for an element screenshot.
+  const holders = opened.locator("[data-export-icon]");
+  for (const [i, icon] of icons.entries()) {
+    const { foreground, total } = countForegroundPixels(await holders.nth(i).screenshot());
+    expect(foreground, `the ${icon.icon} icon drew no ink in the saved file (${foreground} of ${total})`).toBeGreaterThan(20);
+  }
 
   // 2. parity: the same computed properties, read off the app and off the OPENED FILE
   const appProbes = (await page.evaluate(

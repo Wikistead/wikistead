@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
-import { applyVimMono, vimMonoEnabled } from "./FontProvider"; // #633: vim decides the prose grid
+import { refreshVimMono, reflectEditing } from "./FontProvider"; // #633: vim decides the prose grid, while editing
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate, Link as RouterLink } from "react-router-dom";
@@ -57,7 +57,7 @@ function reflectVim(on: boolean): void {
   const root = document.documentElement;
   if (on) root.setAttribute("data-vim-on", "");
   else root.removeAttribute("data-vim-on");
-  applyVimMono(on && vimMonoEnabled());
+  refreshVimMono();
 }
 
 // Guest editor keymap (share-link, no member row): localStorage only — there is no
@@ -526,6 +526,9 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   }, [pageId, editing, token]);
   const [vim, toggleVim] = useEditorKeymap(); // member: startup-mode pref + device-local toggle
   const keybindings = useAccountSettings().data?.keybindings; // ADR-021 overrides ({} default)
+  // #633the grid follows the edit surface, not the page. Cleared on unmount so navigating away
+  // mid-edit does not leave the marker behind on a page nobody is editing.
+  useEffect(() => { reflectEditing(editing); return () => reflectEditing(false); }, [editing]);
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", keybindings)); // (#2)
   const { showVimToggle, visibleModes } = useEditorChrome(); // #289 / ADR-115: per-user chrome visibility
   const [displayMode, cycleDisplayMode, setDisplayMode] = useMemberDisplayMode(visibleModes); // ADR-056 / #164 (startup pref + device-local)
@@ -1157,6 +1160,9 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   //a page the guest just created opens straight in edit mode (member new-page parity).
   const [editing, setEditing] = useState(startEditing && capability === "edit");
   const [vim, toggleVim] = useVimPref();
+  // #633the guest surface answers the same way — a share link is where most anonymous editing
+  // happens, and vim is device-local there because a guest has no profile to read one from.
+  useEffect(() => { reflectEditing(editing); return () => reflectEditing(false); }, [editing]);
   useVimToggleShortcut(toggleVim, editing, resolveKey("editor.toggleVim", undefined)); // guest: default chord
   const [displayMode, cycleDisplayMode, setDisplayMode] = useDisplayMode(); // ADR-056 / #164 (device-local; guests have no server profile)
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", undefined));
