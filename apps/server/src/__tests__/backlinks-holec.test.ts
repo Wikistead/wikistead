@@ -9,9 +9,13 @@ import { getBacklinks, getListResults } from '../routes/pages.js'
 
 const DISPLAY_N = 200
 
-// A fake fga whose `check` says a `page:<id>` is viewable iff `viewable(id)`; it counts calls so we can assert
-// the per-item loop early-exits at DISPLAY_N (does not scan the whole over-fetch). The FIRST check is the target
-// / parent gate (always allowed here).
+// A fake fga whose `check` says a `page:<id>` is viewable iff `viewable(id)`. It counts ROUND-TRIPS, which
+// is the thing the boundary design is spending: `calls` gets one entry per single check and one per batch.
+// The FIRST check is the target / parent gate (always allowed here).
+//
+// #623: getBacklinks confirms in ONE batched question now instead of one per candidate, so this stub grew a
+// `batchCheck` — the claims below (top-N viewable by rank, no boundary drop) are unchanged, and the cost
+// claim got stronger: it used to be "at most DISPLAY_N round-trips", it is now a handful.
 function fakeFga(viewable: (id: string) => boolean) {
   const calls: string[] = []
   const fga = {
@@ -19,6 +23,10 @@ function fakeFga(viewable: (id: string) => boolean) {
       const id = req.object.replace(/^page:/, '')
       calls.push(id)
       return { allowed: viewable(id) }
+    },
+    batchCheck: async ({ checks }: { checks: { object: string; correlationId: string }[] }) => {
+      calls.push(`batch:${checks.length}`)
+      return { result: checks.map((c) => ({ correlationId: c.correlationId, allowed: viewable(c.object.replace(/^page:/, '')) })) }
     },
   } as never
   return { fga, calls }
@@ -40,8 +48,11 @@ describe('getBacklinks Hole C: over-fetch + rank-drop + top-N (#353 / ADR-027)',
     expect(out.length).toBe(DISPLAY_N)
     expect(out[0]!.id).toBe('p0') // rank order preserved (top of the list)
     expect(out[DISPLAY_N - 1]!.id).toBe(`p${DISPLAY_N - 1}`)
-    // early-exit: 1 target gate + DISPLAY_N per-item checks — NOT all 250 candidates.
-    expect(calls.length).toBe(1 + DISPLAY_N)
+    // #623: 1 target gate + a handful of BATCHES for 250 candidates — not 250 round-trips, and not the
+    // 200 the early-exiting loop cost before. The panel's wait stopped scaling with the neighbourhood.
+    expect(calls.filter((c) => !c.startsWith('batch:')).length, 'one single check: the target gate').toBe(1)
+    expect(calls.length, 'and a few batches, not one question per candidate').toBeLessThan(10)
+    expect(calls.some((c) => c.startsWith('batch:')), 'the confirm really was batched').toBe(true)
   })
 
   it('does NOT drop viewable hits at the boundary: 60 non-viewable ahead of 200 viewable still yields 200', async () => {
