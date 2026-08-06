@@ -110,9 +110,16 @@ export function AdminSignInMethodsSection() {
   const [deleting, setDeleting] = useState<AdminConnectionDTO | null>(null);
   // #504: revoking an exemption removes somebody's break-glass — confirm first, like every removal here
   const [revokingExemption, setRevokingExemption] = useState<string | null>(null);
-  // #652turning the second-factor requirement ON is the one direction that changes what
-  // happens to people already signed in, so it asks first. OFF never does.
-  const [enablingFactorPolicy, setEnablingFactorPolicy] = useState(false);
+  // #674: a STANCE change asks first — in both directions, and for both stances.
+  //
+  // #652 shipped the question on the ON direction only, reasoning from the sign-out it causes. That
+  // reasoning was one-sided: turning the requirement OFF lowers the bar for the whole tenant and
+  // cannot be undone for whoever signs in meanwhile, which is exactly what #504 says to confirm. The
+  // SSO stance beside it asked in neither direction, and it decides which doors exist at all.
+  //
+  // Confirming is not refusing: the escape route stays open (a tenant whose last enrolled admin left
+  // can still lift the requirement — `canEnable` gates only the ON direction).
+  const [confirming, setConfirming] = useState<{ stance: "factor" | "sso"; to: boolean } | null>(null);
 
   const rows = connections.data ?? [];
   // #652the two write-time refusals the server can still raise even when the row looked
@@ -128,6 +135,24 @@ export function AdminSignInMethodsSection() {
         : t("adminAuth.methodsSaveFailed"),
       );
     },
+  });
+  const saveSsoStance = (on: boolean) => ssoRequired.mutate(on, {
+    onSuccess: () => notify.success(t("toast.saved")),
+    onError: (e) => {
+      const code = e instanceof ApiError ? e.code : undefined;
+      notify.error(
+        code === "own_idp_required" ? t("adminAuth.ssoNeedsIdp")
+        : code === "sso_exemption_required" ? t("adminAuth.ssoNeedsExemption")
+        : t("adminAuth.methodsSaveFailed"),
+      );
+    },
+  });
+  /** What the question says, per stance and direction. Four sentences, none of them "are you sure". */
+  const stanceQuestion = (c: { stance: "factor" | "sso"; to: boolean }) => ({
+    title: t(c.stance === "factor" ? "adminAuth.secondFactorRequired" : "adminAuth.ssoRequired"),
+    message: t(c.stance === "factor"
+      ? (c.to ? "adminAuth.secondFactorEnableConfirm" : "adminAuth.secondFactorDisableConfirm")
+      : (c.to ? "adminAuth.ssoRequiredEnableConfirm" : "adminAuth.ssoRequiredDisableConfirm")),
   });
   const m = methods.data?.methods;
   const onError = (e: unknown) => {
@@ -531,17 +556,7 @@ export function AdminSignInMethodsSection() {
               )}
               <Switch checked={!!methods.data?.ssoRequired?.selected} testId="sso-required-toggle" ariaLabel={t("adminAuth.ssoRequired")}
                 disabled={!canManageStance}
-                onChange={(on: boolean) => ssoRequired.mutate(on, {
-                  onSuccess: () => notify.success(t("toast.saved")),
-                  onError: (e) => {
-                    const code = e instanceof ApiError ? e.code : undefined;
-                    notify.error(
-                      code === "own_idp_required" ? t("adminAuth.ssoNeedsIdp")
-                      : code === "sso_exemption_required" ? t("adminAuth.ssoNeedsExemption")
-                      : t("adminAuth.methodsSaveFailed"),
-                    );
-                  },
-                })} />
+                onChange={(on: boolean) => setConfirming({ stance: "sso", to: on })} />
             </div>
             {canManageStance && (
             <div className="flex flex-col gap-1 border-t border-border pt-1.5" data-testid="sso-exemptions">
@@ -620,7 +635,7 @@ export function AdminSignInMethodsSection() {
                 ariaLabel={t("adminAuth.secondFactorRequired")}
                 disabled={!canManageStance || !methods.data.secondFactorRequired.entitled
                   || (!methods.data.secondFactorRequired.selected && !methods.data.secondFactorRequired.canEnable)}
-                onChange={(on: boolean) => (on ? setEnablingFactorPolicy(true) : saveFactorPolicy(false))} />
+                onChange={(on: boolean) => setConfirming({ stance: "factor", to: on })} />
             </div>
           </div>
         )}
@@ -710,17 +725,21 @@ export function AdminSignInMethodsSection() {
           setRevokingExemption(null);
         }}
       />
-      {/* The warning the reject asked for. It is not "are you sure" theatre: people already signed in
-          with a password and no factor become subject to this the moment it is written, and the row
-          above cannot say that in the space it has. */}
+      {/* Not "are you sure" theatre: each of the four sentences says what CHANGES — who gets signed
+          out, who can get in afterwards, which doors close. The testid stays keyed to the stance
+          rather than to the direction, so a spec cannot accidentally confirm the other one. */}
       <ConfirmDialog
-        open={enablingFactorPolicy}
-        title={t("adminAuth.secondFactorRequired")}
-        message={t("adminAuth.secondFactorEnableConfirm")}
-        confirmTestId="second-factor-required-confirm"
+        open={confirming !== null}
+        title={confirming ? stanceQuestion(confirming).title : ""}
+        message={confirming ? stanceQuestion(confirming).message : ""}
+        confirmTestId={confirming?.stance === "sso" ? "sso-required-confirm" : "second-factor-required-confirm"}
         confirmLabel={t("common.confirm")}
-        onClose={() => setEnablingFactorPolicy(false)}
-        onConfirm={() => { saveFactorPolicy(true); setEnablingFactorPolicy(false); }}
+        onClose={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming?.stance === "factor") saveFactorPolicy(confirming.to);
+          else if (confirming) saveSsoStance(confirming.to);
+          setConfirming(null);
+        }}
       />
       <ConfirmDialog
         open={deleting !== null}

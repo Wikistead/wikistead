@@ -41,10 +41,13 @@ describe("#652: the policy is writable from the product", () => {
     expect(/selected/.test(disabled), `the OFF direction stays open :: ${disabled.trim()}`).toBe(true);
   });
 
-  it("asks before turning it on", () => {
-    // Turning it on signs people out (ADR-219 §2). A switch that did that silently would be the same
-    // click as every other toggle on the screen.
-    expect(/setEnablingFactorPolicy\(true\)/.test(row), "ON opens the question").toBe(true);
+  it("asks before either direction", () => {
+    // Turning it on signs people out (ADR-219 §2); turning it off lowers the bar for the whole tenant
+    // and cannot be undone for whoever signs in meanwhile (#674). Neither is the same click as an
+    // ordinary toggle, so the switch never writes straight from `onChange`.
+    const onChange = row.slice(row.indexOf("onChange="), row.indexOf("/>", row.indexOf("onChange=")));
+    expect(/setConfirming\(/.test(onChange), `the switch opens the question :: ${onChange.trim()}`).toBe(true);
+    expect(/mutate|saveFactorPolicy/.test(onChange), "…and writes nothing itself").toBe(false);
     expect(/second-factor-required-confirm/.test(code), "…and there is something to confirm with").toBe(true);
   });
 });

@@ -164,9 +164,25 @@ test("#652: an admin turns the requirement on from the screen, and it bites", as
     "…the one that offers enrolment, since they hold nothing yet").toBeVisible({ timeout: 10_000 });
   await ctx.close();
 
-  // ── and OFF is never blocked, so the switch is not a one-way door ────────────────────────────────
+  // ── OFF asks too, and is never BLOCKED — the switch is not a one-way door (#674) ─────────────────
+  //
+  // #652 asked only on the way up, reasoning from the sign-out. Turning the requirement off lowers the
+  // bar for the whole tenant and cannot be undone for whoever signs in meanwhile, so it asks as well;
+  // asking is not refusing, and the tenant whose last enrolled admin left can still get out.
   await page.getByTestId("second-factor-required-toggle").click();
-  await expect.poll(stanceInDb, { timeout: 20_000, message: "turning it off writes too" }).toBe(false);
+  const offConfirm = page.getByTestId("second-factor-required-confirm");
+  await expect(offConfirm, "turning it OFF asks first").toBeVisible({ timeout: 10_000 });
+  expect(await stanceInDb(), "…and writes nothing while the question is open").toBe(true);
+
+  // cancelling leaves the requirement standing — the half that makes the question real
+  await page.keyboard.press("Escape");
+  await expect(offConfirm).toBeHidden({ timeout: 10_000 });
+  await sleep(1200);
+  expect(await stanceInDb(), "a cancelled question changes nothing").toBe(true);
+
+  await page.getByTestId("second-factor-required-toggle").click();
+  await page.getByTestId("second-factor-required-confirm").click();
+  await expect.poll(stanceInDb, { timeout: 20_000, message: "confirming turns it off" }).toBe(false);
 });
 
 test("#652: with no enrolled admin the switch is off-limits, and says why", async ({ page }) => {
