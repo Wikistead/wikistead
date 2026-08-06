@@ -270,7 +270,11 @@
     "factorKeyFailed": "その鍵では確認できませんでした。",
     "factorAddPasskey": "パスキーを追加",
     "factorRemoveCancelled": "削除を取り消しました。",
-    "factorRemoveFailed": "削除できませんでした。しばらくしてからお試しください。"
+    "factorRemoveFailed": "削除できませんでした。しばらくしてからお試しください。",
+    "factorKeyUnsupported": "このブラウザはパスキーに対応していません。別のブラウザでお試しください。",
+    "factorKeyCancelled": "登録を取り消しました。",
+    "factorKeyAlready": "このパスキーはすでに登録されています。上の一覧にあります。",
+    "factorKeyDomainNote": "パスキーは、登録したときのドメインでのみ使えます。ワークスペースを独自ドメインへ移すと、登録し直しが必要です。"
   },
   "settings": {
     "back": "アプリに戻る",

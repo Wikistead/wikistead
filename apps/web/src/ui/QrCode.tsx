@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import QrCreator from "qr-creator";
 
 // #653 (user ruling, 2026-08-06): the QR an authenticator app reads.
 //
@@ -15,14 +14,24 @@ import QrCreator from "qr-creator";
 export function QrCode({ value, size = 168, testId }: { value: string; size?: number; testId?: string }) {
   const host = useRef<HTMLDivElement>(null);
 
+  // The encoder is fetched WHEN A CODE IS DRAWN, not when this module is imported. `qr-creator` ships a
+  // UMD bundle that touches `self` at load, so a static import puts a browser global in the import graph
+  // of everything that transitively reaches this file — which took out two pure-function tests of
+  // `LoginScreen` running under Node, neither of them about QR codes. It also keeps 126 KB out of the
+  // initial chunk for the two screens in the product that ever draw one.
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    el.replaceChildren();
-    QrCreator.render(
-      { text: value, radius: 0, ecLevel: "M", fill: "#000000", background: "#ffffff", size },
-      el,
-    );
+    let live = true;
+    void import("qr-creator").then(({ default: QrCreator }) => {
+      if (!live || !host.current) return;
+      host.current.replaceChildren();
+      QrCreator.render(
+        { text: value, radius: 0, ecLevel: "M", fill: "#000000", background: "#ffffff", size },
+        host.current,
+      );
+    });
+    return () => { live = false; };
   }, [value, size]);
 
   return (

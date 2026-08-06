@@ -37,3 +37,36 @@ export function classifyRemovalFailure(e: unknown): RemovalFailure {
   if (name === "NotAllowedError" || name === "AbortError") return "cancelled";
   return "other";
 }
+
+/**
+ * Why a passkey ENROLMENT did not happen (#653③).
+ *
+ * Kept beside its removal counterpart because the vocabulary is the same one — a browser's DOM
+ * exceptions and the server's codes — and splitting it across two files is how the same knowledge ends
+ * up spelt two ways. The OUTCOMES differ, which is why this is a second function and not a flag: an
+ * enrolment can be refused for being a duplicate of a key already held, and a removal cannot.
+ *
+ * "Unsupported" is absent on purpose: it is answered BEFORE anything starts, so that a browser which
+ * cannot run the ceremony is never issued a challenge, which would cost a slot against the cap.
+ */
+export type EnrolmentFailure =
+  /** the person dismissed the browser's prompt */
+  | "cancelled"
+  /** this authenticator already holds a credential for this account — it is in the list already */
+  | "already"
+  /** the cap; the server said so */
+  | "limit"
+  /** anything else */
+  | "other";
+
+export function classifyEnrolmentFailure(e: unknown): EnrolmentFailure {
+  if (e instanceof ApiError) return e.code === "factor_limit_reached" ? "limit" : "other";
+  // SimpleWebAuthn's own code for `excludeCredentials` matching. It is checked before the DOM names
+  // because the library reports it as an InvalidStateError underneath, which says nothing on its own.
+  if (typeof e === "object" && e !== null && "code" in e
+    && (e as { code: unknown }).code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") return "already";
+  // Matched on the NAME rather than `instanceof DOMException`: SimpleWebAuthn wraps and re-throws, and
+  // the wrapper carries the name while the prototype does not survive.
+  const name = typeof e === "object" && e !== null && "name" in e ? String((e as { name: unknown }).name) : "";
+  return name === "NotAllowedError" || name === "AbortError" ? "cancelled" : "other";
+}

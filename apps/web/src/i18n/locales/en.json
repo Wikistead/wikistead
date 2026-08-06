@@ -270,7 +270,11 @@
     "factorKeyFailed": "That key did not confirm it.",
     "factorAddPasskey": "Add a passkey",
     "factorRemoveCancelled": "Removal cancelled.",
-    "factorRemoveFailed": "Could not remove it. Try again in a moment."
+    "factorRemoveFailed": "Could not remove it. Try again in a moment.",
+    "factorKeyUnsupported": "This browser cannot use passkeys. Try another browser.",
+    "factorKeyCancelled": "Registration cancelled.",
+    "factorKeyAlready": "This passkey is already registered. It is in the list above.",
+    "factorKeyDomainNote": "A passkey only works on the host it was created for. Moving this workspace to its own domain means enrolling every passkey again."
   },
   "settings": {
     "back": "Back to app",
