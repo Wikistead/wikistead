@@ -143,3 +143,63 @@ test.describe("#652: the sign-in screen's second step", () => {
     await expect(page.getByTestId("login-factor-code")).toBeVisible();
   });
 });
+
+// #672 ruling ③: stranding a browser that cannot do WebAuthn is ACCEPTED — there is no per-member
+// exemption, because a permanent TOTP hole in a passkey-only stance is not a passkey-only stance.
+// What the ruling asks for instead is that the lockout be LEGIBLE, and it named the pin: the specific
+// sentence appears, and folding it back into the generic failure goes red.
+//
+// The screen is where this has to be measured. `browserSupportsWebAuthn` reads a global that only a
+// browser has, and the three cases below differ by what the tenant accepts — which is a decision made
+// on the server and carried in the sign-in answer.
+test.describe("#672 ③: a browser that cannot do this is told so, on the door", () => {
+  const enrolmentRequired = (kinds: string[]) => async (page: import("@playwright/test").Page) => {
+    await page.route("**/api/auth/local/login", (r) =>
+      r.fulfill(json({ ok: false, factor: "enrolment-required", kinds })));
+    await page.goto(RECOVERY);
+    await page.getByTestId("login-local-identifier").fill("nowebauthn@example.test");
+    await page.getByTestId("login-local-password").fill("hunter2");
+    await page.getByTestId("login-local-submit").click();
+    await expect(page.getByTestId("login-factor-step")).toBeVisible({ timeout: 20_000 });
+  };
+
+  test("passkey-only + no WebAuthn: the sentence names the situation and what to do", async ({ page }) => {
+    await page.addInitScript(() => { Reflect.deleteProperty(window, "PublicKeyCredential"); });
+    await enrolmentRequired(["passkey"])(page);
+
+    const said = page.getByTestId("login-factor-unsupported");
+    await expect(said, "a reader with no WebAuthn is left with no explanation").toBeVisible({ timeout: 10_000 });
+    const text = (await said.innerText()).trim();
+    // Not "an element exists": the ruling is about what it SAYS. It has to name the cause (this
+    // browser) and a way forward, or it is the generic failure wearing a different testid.
+    expect(text.length, "the message is empty").toBeGreaterThan(20);
+    expect(text, "…and it does not say what to try instead").toMatch(/ブラウザ|browser/i);
+
+    // …and nothing is offered that cannot work. A start button here would be a prompt that can only
+    // end in the failure the sentence just explained.
+    await expect(page.getByTestId("login-factor-enrol-passkey"), "a key button was offered anyway").toHaveCount(0);
+    await expect(page.getByTestId("login-factor-enrol-start"), "…or an authenticator one the tenant refuses")
+      .toHaveCount(0);
+  });
+
+  test("…but not when the tenant also accepts an authenticator app", async ({ page }) => {
+    // The control. This reader is not stranded — the other door is open — and telling them their
+    // browser is the problem would send them looking for a different browser they do not need.
+    await page.addInitScript(() => { Reflect.deleteProperty(window, "PublicKeyCredential"); });
+    await enrolmentRequired(["totp", "passkey"])(page);
+
+    await expect(page.getByTestId("login-factor-unsupported"),
+      "told somebody they are stuck while the authenticator door was open").toHaveCount(0);
+    await expect(page.getByTestId("login-factor-enrol-start"), "…and the door they can use is offered")
+      .toBeVisible({ timeout: 10_000 });
+  });
+
+  test("…nor when the browser can do it", async ({ page }) => {
+    // The other control: with WebAuthn present the sentence must not appear, or it would be shown to
+    // everybody and mean nothing. Both controls together are what stop "always render it" passing.
+    await enrolmentRequired(["passkey"])(page);
+    await expect(page.getByTestId("login-factor-unsupported")).toHaveCount(0);
+    await expect(page.getByTestId("login-factor-enrol-passkey"), "the key door is offered instead")
+      .toBeVisible({ timeout: 10_000 });
+  });
+});
