@@ -83,6 +83,42 @@ export function monthGrid(year: number, month: number): number[] {
   return cells;
 }
 
+/**
+ * #649: what one click on a day does, given what is already chosen.
+ *
+ * Pure and exported because the interesting part is not the pixels: it is that a range leaving here is
+ * never backwards. A reader who picks the 20th and then the 14th has expressed the same fortnight as one
+ * who picks them the other way round, and the shorter route is to say so — the earlier version restarted
+ * the selection instead, which reads as the calendar refusing an answer it understood.
+ *
+ * The order is fixed HERE rather than at the caller, because a backwards range is not a display quirk:
+ * the server answers `from > to` with an empty result, so a picker that let one out would produce a chart
+ * of nothing with no way to tell why. Swapping is allowed inside the interaction; nothing backwards
+ * leaves it.
+ */
+export function nextRange(
+  current: { from?: string; to?: string },
+  clickedT: number,
+): { from?: string; to?: string } {
+  const fromT = parseISODate(current.from);
+  const toT = parseISODate(current.to);
+  const iso = toISODate(clickedT);
+  // no start yet, or a complete range being replaced → this click starts a new one
+  if (fromT == null || toT != null) return { from: iso, to: undefined };
+  const [lo, hi] = clickedT < fromT ? [clickedT, fromT] : [fromT, clickedT];
+  return { from: toISODate(lo), to: toISODate(hi) };
+}
+
+/** The span a tentative second endpoint would produce — the faint band drawn while choosing. */
+export function tentativeSpan(
+  fromT: number | null,
+  toT: number | null,
+  previewT: number | null,
+): { lo: number; hi: number } | null {
+  if (fromT == null || toT != null || previewT == null) return null;
+  return previewT < fromT ? { lo: previewT, hi: fromT } : { lo: fromT, hi: previewT };
+}
+
 export interface DateRangePickerProps {
   from?: string;
   to?: string;
@@ -98,6 +134,10 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
   const [open, setOpen] = useState(false);
   // which month the grid is showing — the range's start, or today when there is none
   const [cursor, setCursor] = useState(() => parseISODate(from) ?? Date.now());
+  // #649: the day the reader is CONSIDERING — pointed at or focused. One piece of state for both,
+  // because a preview only the mouse can see is a preview keyboard readers do not have, and this grid
+  // was built for the keyboard (#587/#588).
+  const [previewT, setPreviewT] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
   const fromT = parseISODate(from);
@@ -105,6 +145,7 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
   const year = new Date(cursor).getUTCFullYear();
   const month = new Date(cursor).getUTCMonth();
   const cells = useMemo(() => monthGrid(year, month), [year, month]);
+  const tentative = tentativeSpan(fromT, toT, previewT);
 
   // Month and weekday names come from the browser for whatever language the app is in — no table of
   // names here, so a language added tomorrow reads correctly without this file changing.
@@ -119,11 +160,10 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
   }, [i18n.language]);
 
   const pick = (t: number) => {
-    const iso = toISODate(t);
-    // First click starts a range; the second closes it. Clicking before the start restarts rather than
-    // producing a backwards range the server would answer with nothing.
-    if (fromT == null || toT != null || t < fromT) onChange({ from: iso, to: undefined });
-    else { onChange({ from, to: iso }); setOpen(false); }
+    const next = nextRange({ from, to }, t);
+    onChange(next);
+    // the panel closes when a range is complete — a start on its own is still a question
+    if (next.to != null) { setPreviewT(null); setOpen(false); }
   };
 
   // Arrow keys move by a day and a week; the grid is one tab stop and the focused cell carries it
@@ -215,12 +255,17 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
             <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] text-fg-dim" aria-hidden>
               {weekdays.map((w) => <span key={w}>{w}</span>)}
             </div>
-            <div ref={gridRef} role="grid" className="grid grid-cols-7 gap-0.5" data-testid={`${testId}-grid`}>
+            <div ref={gridRef} role="grid" className="grid grid-cols-7 gap-0.5" data-testid={`${testId}-grid`}
+              onMouseLeave={() => setPreviewT(null)}>
               {cells.map((cellT) => {
                 const iso = toISODate(cellT);
                 const outside = new Date(cellT).getUTCMonth() !== month;
                 const selected = iso === from || iso === to;
                 const inRange = fromT != null && toT != null && cellT > fromT && cellT < toT;
+                // the band drawn while a second endpoint is being considered. Inclusive at both ends so
+                // the day under the pointer is part of what it is promising; `selected` still wins the
+                // class chain, so the committed start keeps its solid fill.
+                const inTentative = tentative != null && cellT >= tentative.lo && cellT <= tentative.hi;
                 return (
                   <button
                     key={iso}
@@ -233,11 +278,14 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
                     tabIndex={selected || (!from && !to && new Date(cellT).getUTCDate() === 1 && !outside) ? 0 : -1}
                     onKeyDown={(e) => onGridKey(e, cellT)}
                     onClick={() => pick(cellT)}
+                    onMouseEnter={() => setPreviewT(cellT)}
+                    onFocus={() => setPreviewT(cellT)}
+                    data-tentative={inTentative && !selected ? "true" : undefined}
                     className={[
                       "rounded-sm py-1 text-xs",
                       outside ? "text-fg-dim/50" : "text-foreground",
                       selected ? "bg-[var(--accent)] text-[var(--accent-fg,#fff)]"
-                        : inRange ? "bg-[color-mix(in_srgb,var(--accent)_18%,transparent)]"
+                        : inRange || inTentative ? "bg-[color-mix(in_srgb,var(--accent)_18%,transparent)]"
                         : "hover:bg-panel-2",
                     ].join(" ")}
                   >{new Date(cellT).getUTCDate()}</button>
