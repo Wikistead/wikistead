@@ -431,7 +431,30 @@ export async function buildApp(): Promise<FastifyInstance> {
         // #637 / ADR-216 §1: the container the outermost hook opened gets its contents here, at the one
         // moment the answer is known. Everything after this — every handler, every primitive — is inside
         // it. Set before the gate below, so a request refused there was still carrying its confinement.
-        if (apiUser.spaces) setAuthzRestriction({ spaces: apiUser.spaces })
+        // …and with it, HOW to place a page in a space. ADR-216 §3 put this resolver here rather than in
+        // the rule because `packages/authz` has no database and must not learn about one — but the first
+        // implementation let the rule read the pages table itself, on the shared pool, with no tenant in
+        // the session. RLS then dropped every row and every page came back "unresolvable", which CE reads
+        // as no: a key confined to a space reached NOTHING in it. The reads have to happen on a handle
+        // that is already tenant-bound, and `req.db.sql` is exactly that (a reserved connection carrying
+        // `app.tenant_id` for the life of the request — not `db.tx`, whose separate pool connection is
+        // what the deadlock warning was about).
+        //
+        // Memoised per request: a page tree asks about hundreds of ids and their spaces do not change
+        // while one request runs. A page created inside an uncommitted transaction elsewhere in the same
+        // request resolves to null and is refused — fail-closed, and the FGA check has to agree anyway.
+        if (apiUser.spaces) {
+          const spaceOf = new Map<string, Promise<string | null>>()
+          setAuthzRestriction({ spaces: apiUser.spaces }, (pageId: string) => {
+            let hit = spaceOf.get(pageId)
+            if (!hit) {
+              hit = req.db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${pageId}`
+                .then((rows) => rows[0]?.space_id ?? null)
+              spaceOf.set(pageId, hit)
+            }
+            return hit
+          })
+        }
         if (isNarrowedKey(apiUser)) {
           const pattern = req.routeOptions?.url
           if (pattern && CREDENTIAL_MINTING_ROUTES.has(`${req.method} ${pattern}`)) {
