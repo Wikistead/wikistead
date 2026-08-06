@@ -2039,7 +2039,9 @@ export interface LoginMethodsDTO {
   // (the edition) arrive apart because they are different sentences to read: one is "nobody could
   // satisfy this yet", the other "your plan does not include it". A screen that collapsed them into
   // one greyed switch would tell a tenant to upgrade when the fix is to enrol a factor.
-  secondFactorRequired?: { selected: boolean; canEnable: boolean; entitled: boolean }
+  // `stance` (#676) is which kinds are accepted: "off" | "any" | "passkey" | "totp". `selected` stays
+  // as "is anything required" — the switch #652 drew — and the picker that reads `stance` is #679.
+  secondFactorRequired?: { selected: boolean; canEnable: boolean; entitled: boolean; stance?: string }
   // #604-B: whether the CALLER may write the stance / platform / password selections and the
   // SSO exemptions. The read opened to `manage_connections`; those writes stayed on the admin tier,
   // so the server names the line instead of the screen inferring it from a tier flag.

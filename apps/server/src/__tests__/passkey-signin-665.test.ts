@@ -62,9 +62,13 @@ async function givePasskey(sub: string, credentialId: string, rpId = 'dev.localh
 
 const setStance = (on: boolean) =>
   adminPool`
-    INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, local_login_enabled)
-    VALUES (${TENANT}, ${on}, TRUE)
-    ON CONFLICT (tenant_id) DO UPDATE SET second_factor_required = ${on}, local_login_enabled = TRUE`
+    INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds, local_login_enabled)
+    VALUES (${TENANT}, ${on}, ${on ? 'any' : 'off'}, TRUE)
+    ON CONFLICT (tenant_id) DO UPDATE
+      SET second_factor_required = ${on}, second_factor_kinds = ${on ? 'any' : 'off'}, local_login_enabled = TRUE`
+    // #676: the stance is now WHICH kinds (migration 120), and the runtime reads that column. The
+    // boolean is written too so the row stays coherent for anything still reading it — `any` is the
+    // value this fixture always meant: a factor is required and either kind will do.
 
 const cookie = (res: { cookies: { name: string; value: string }[] }, name: string) =>
   res.cookies.find((c) => c.name === name)?.value
