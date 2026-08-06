@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
-import { requireTenantAdmin, isTenantAdmin, isApiKeyIssuer } from '@wikistead/authz'
+import { requireTenantAdmin, isTenantAdmin, isApiKeyIssuer, filterAuthorized } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { auditIfEntitled } from '../audit/outbox.js' // #495: admin revoke writes an in-tx tamper-evident audit row
@@ -22,6 +22,8 @@ interface ApiKeyRow {
   id: string; tenant_id: string; owner_user_id: string; name: string
   key_prefix: string; scope: string | null; created_at: Date; last_used_at: Date | null; revoked_at: Date | null
   expires_at?: Date | null
+  capabilities?: string[] | null
+  space_ids?: string[] | null
 }
 export interface ApiKeySummary {
   id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: Date; lastUsedAt: Date | null
@@ -33,6 +35,17 @@ export interface ApiKeySummary {
   // them. ownerName follows #486 (override ?? display_name; null → null, never an email fallback). The
   // key_hash / plaintext are NEVER surfaced (unchanged).
   ownerUserId?: string; ownerName?: string | null
+  // #658: what this key is confined to, so the ledger can be read. Absent when the key is not confined
+  // in that dimension — an unconfined key carries no marking at all, because the common case should not
+  // look like the exception.
+  //
+  // `spaces` reports HOW MANY, and names only the ones THIS READER may view. Being handed a key does not
+  // entitle anyone to a directory of space names, and neither does being an admin: #637 checks the
+  // ISSUER can see a space before writing it onto a key, and the same question has to be asked on the
+  // way out. A space the reader cannot view is counted and left unnamed rather than hidden entirely —
+  // "confined to two spaces" is the fact an inventory needs; "which two" is a different question.
+  capabilities?: readonly string[]
+  spaces?: { count: number; named: { id: string; name: string }[] }
 }
 
 // The tenant policy cap on what scope keys may be issued with (admin-set). NULL =
@@ -165,29 +178,62 @@ export async function createApiKey(
 // bound is stable; no OFFSET anywhere in this ticket's work.
 export const API_KEYS_PAGE_LIMIT = 100
 
-export async function listApiKeys(db: TenantDb, args: { ownerUserId?: string; limit?: number } = {}): Promise<ApiKeySummary[]> {
+export async function listApiKeys(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  readerSub: string,
+  args: { ownerUserId?: string; limit?: number } = {},
+): Promise<ApiKeySummary[]> {
   const owner = args.ownerUserId
   const limit = Math.min(500, Math.max(1, args.limit ?? API_KEYS_PAGE_LIMIT))
   // #495: the ADMIN view (no owner filter) also selects owner_user_id so it can disclose ownership;
   // the self view keeps its minimal columns. Both stay RLS-tenant-bound.
   const rows = owner
     ? await db.sql<ApiKeyRow[]>`
-        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at
+        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at,
+               capabilities, space_ids
         FROM api_keys WHERE revoked_at IS NULL AND owner_user_id = ${owner}
         ORDER BY created_at DESC, id DESC LIMIT ${limit}`
     : await db.sql<ApiKeyRow[]>`
-        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at
+        SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at,
+               capabilities, space_ids
         FROM api_keys WHERE revoked_at IS NULL
         ORDER BY created_at DESC, id DESC LIMIT ${limit}`
   // #495 / ADR-182 (Q1): resolve owner names on the ADMIN view only — the canonical #486 helper on the
   // RLS handle (no bare pool), so null-name → null (no email fallback). The self view never discloses.
   const names = owner ? new Map<string, { displayName: string | null }>()
     : await resolveAuthorIdentities(db, rows.map((r) => r.owner_user_id))
+  // #658: resolve the names ONCE for every space mentioned by any key, filtered to what the reader may
+  // view. `filterAuthorized` is the same primitive the listing surfaces use, so a space the reader has
+  // lost access to stops being named the moment that is true.
+  const mentioned = [...new Set(rows.flatMap((r) => r.space_ids ?? []))]
+  const visible = mentioned.length
+    ? await filterAuthorized(fga, `user:${readerSub}`, 'view', mentioned, undefined, 'space')
+    : new Set<string>()
+  const spaceNames = new Map<string, string>()
+  if (visible.size) {
+    const named = await db.sql<{ id: string; name: string }[]>`
+      SELECT id, name FROM spaces WHERE id = ANY(${[...visible]})`
+    for (const s of named) spaceNames.set(s.id, s.name)
+  }
+
   return rows.map(r => ({
     id: r.id, name: r.name, keyPrefix: r.key_prefix,
     scope: r.scope === 'read' ? 'read' : 'write',
     createdAt: r.created_at, lastUsedAt: r.last_used_at, expiresAt: r.expires_at ?? null,
     ...(owner ? {} : { ownerUserId: r.owner_user_id, ownerName: names.get(r.owner_user_id)?.displayName ?? null }),
+    ...(r.capabilities ? { capabilities: r.capabilities } : {}),
+    ...(r.space_ids
+      ? {
+          spaces: {
+            count: r.space_ids.length,
+            named: r.space_ids.flatMap((id) => {
+              const name = spaceNames.get(id)
+              return name ? [{ id, name }] : []
+            }),
+          },
+        }
+      : {}),
   }))
 }
 
@@ -278,13 +324,13 @@ export async function apiKeysPlugin(app: FastifyInstance) {
   })
 
   // The caller's OWN keys — the member self-serve surface (#462).
-  app.get('/api-keys/mine', async (req) => listApiKeys(req.db, { ownerUserId: req.user.sub }))
+  app.get('/api-keys/mine', async (req) => listApiKeys(req.db, app.fga, req.user.sub, { ownerUserId: req.user.sub }))
 
   // Every key in the tenant: an ADMIN view. It was open to any member, which handed out a map of
   // who automates what (#462).
   app.get('/api-keys', async (req) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
-    return listApiKeys(req.db)
+    return listApiKeys(req.db, app.fga, req.user.sub)
   })
 
   app.delete<{ Params: { id: string } }>('/api-keys/:id', async (req, reply) => {
