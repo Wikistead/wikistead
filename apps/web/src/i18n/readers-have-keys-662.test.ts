@@ -182,11 +182,33 @@ describe("#662: every t() names something the locales actually have", () => {
     // defect under a different invented namespace and was found by the scan rather than by looking.
     expect(panel, "the API key panel invented its own capability namespace again")
       .not.toMatch(/roleCaps\.|adminApi\.cap_/);
-    expect(panel.match(/adminRoles\.cap\./g) ?? [], "both the list and the form read the real one")
-      .toHaveLength(2);
+    // #667: the FORM stopped reading this vocabulary — it offers resource types now, not role verbs.
+    // What still reads it is the listing's tooltip, describing keys issued under the old model, which
+    // ADR-221 §3 keeps working unchanged. One reader, and it must not become zero: a v1 key whose verbs
+    // rendered as raw wire words would be #662 again on the surface that survived the change.
+    expect(panel.match(/adminRoles\.cap\./g) ?? [], "the older keys' verbs still read the real vocabulary")
+      .toHaveLength(1);
     for (const cap of ["view", "edit", "publish", "delete", "comment", "manage"]) {
       expect(resolves(ja, `adminRoles.cap.${cap}`, false), `ja is missing adminRoles.cap.${cap}`).toBe(true);
       expect(resolves(en, `adminRoles.cap.${cap}`, false), `en is missing adminRoles.cap.${cap}`).toBe(true);
+    }
+  });
+
+  it("#667: every resource type the picker offers has words in both locales", () => {
+    // The same defect one vocabulary later. The types are interpolated (`adminApi.type.${o.id}`), so the
+    // prefix scan above can only reach the parent — a type added to the picker without a translation
+    // would render its own path, or worse be given a fallback. Read the list and check each leaf.
+    const picker = readFileSync(resolve(SRC, "settings/api-key-permissions.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const ids = [...picker.matchAll(/\{\s*id:\s*"([a-z_]+)"/g)].map((m) => m[1]!);
+    expect(ids.length, "the picker's list was found").toBeGreaterThan(10);
+    for (const id of ids) {
+      expect(resolves(ja, `adminApi.type.${id}`, false), `ja is missing adminApi.type.${id}`).toBe(true);
+      expect(resolves(en, `adminApi.type.${id}`, false), `en is missing adminApi.type.${id}`).toBe(true);
+    }
+    for (const a of ["none", "read", "write"]) {
+      expect(resolves(ja, `adminApi.action_${a}`, false), `ja is missing adminApi.action_${a}`).toBe(true);
+      expect(resolves(en, `adminApi.action_${a}`, false), `en is missing adminApi.action_${a}`).toBe(true);
     }
   });
 });

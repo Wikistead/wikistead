@@ -3,6 +3,7 @@ import { ListRow, ListBox } from "../ui/list-rows";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import type { TFunction } from "i18next";
 import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
+import { RESOURCE_TYPE_OPTIONS, derivedScope, touchesAdmin, adminDefaultExpiry, type Matrix } from "./api-key-permissions";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2, ChevronRight } from "lucide-react"; // #544: an icon component, never a text glyph
 import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpaces, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
@@ -19,7 +20,6 @@ import { relTime } from "../ui/relative-time";
 // #637: the verbs a narrowed key may carry. The EE route table is the authority and the server checks
 // against it; this mirrors it for the picker, and the pin below asserts the two agree rather than
 // trusting that somebody remembered to update both.
-const NARROW_CAPS = ["view", "edit", "publish", "delete", "comment", "manage"] as const;
 
 // #461: when a key was last authenticated with — the signal that tells you which keys are dead
 // weight and safe to revoke. The server has always returned lastUsedAt (and #428 made the write
@@ -54,6 +54,9 @@ function confinementLabel(k: ApiKeySummary, t: TFunction): string {
   const parts: string[] = [];
   if (k.spaces) parts.push(t("adminApi.confinedSpaces", { count: k.spaces.count }));
   if (k.capabilities) parts.push(t("adminApi.confinedCaps", { count: k.capabilities.length }));
+  // #667: a v2 key counts its resource types the same way. The two never appear together — the issuing
+  // route refuses a key carrying both vocabularies.
+  if (k.permissions) parts.push(t("adminApi.confinedTypes", { count: Object.keys(k.permissions).length }));
   return parts.join(" · ");
 }
 
@@ -64,11 +67,16 @@ function confinementTip(k: ApiKeySummary, t: TFunction): string {
     const hidden = k.spaces.count - named.length;
     lines.push([...named, hidden > 0 ? t("adminApi.confinedHidden", { count: hidden }) : null].filter(Boolean).join(", "));
   }
-  // #662: the LIST had the same defect as the form, under a different invented namespace —
+  // #662: the LIST had the same defect as the form, under a different invented namespace
   // `adminApi.cap_*` exists in neither locale either, and `defaultValue: c` painted the wire verb. Both
   // now read the one vocabulary that exists. Found by the scan, not by looking: the form was the
   // reported symptom and this line renders the same capabilities two panels down.
   if (k.capabilities) lines.push(k.capabilities.map((c) => t(`adminRoles.cap.${c}`)).join(", "));
+  // #667: type and action, because "pages" alone does not say whether the integration can write.
+  if (k.permissions) {
+    lines.push(Object.entries(k.permissions)
+      .map(([type, action]) => `${t(`adminApi.type.${type}`)}: ${t(`adminApi.scope_${action}`)}`).join(", "));
+  }
   return lines.join(" · ");
 }
 
@@ -92,7 +100,7 @@ export function ApiKeysPanel({
   const revoke = admin ? revokeAdmin : revokeOwn;
   const [name, setName] = useState("");
   const [scope, setScope] = useState<ApiScope>("read");
-  // #628: how long the key should live. "" = no expiry, which the server refuses when the tenant has a
+  // #628: how long the key should live. = no expiry, which the server refuses when the tenant has a
   // ceiling — the choice is offered rather than pre-decided, so somebody who wants a permanent key on a
   // tenant that forbids them is told, instead of quietly getting a short one.
   // Starts on the longest lifetime the tenant permits, which is always a value that EXISTS in the list.
@@ -111,16 +119,26 @@ export function ApiKeysPanel({
   const allSpaces = spacesQ.data ?? [];
   const shownSpaces = filterSpaceOptions(allSpaces, spaceFilter, pickedSpaces);
   const hidden = hiddenCount(allSpaces, shownSpaces);
-  const [pickedCaps, setPickedCaps] = useState<string[]>([]);
+  // #667 / ADR-221 §1: the resource-type matrix replaces the six borrowed role verbs AND the scope
+  // Select. The reader picks once; `scope` falls out of what they picked (§5), and the METHOD CEILING
+  // stays a separate mechanism in the server so an all-read key cannot write even when the route map is
+  // wrong. Keys issued before this keep their verbs and their old rule — §3 freezes them rather than
+  // remapping, because no mapping exists that does not widen.
+  const [matrix, setMatrix] = useState<Matrix>({});
+  const matrixPicked = Object.keys(matrix).length > 0;
   // #504: a revoked key never authenticates again (the member issues a new one) — confirm, by name.
   const [revoking, setRevoking] = useState<{ id: string; name: string } | null>(null);
 
   // Under a read cap, write isn't offerable.
   const scopeOptions = (maxScope === "read" ? (["read"] as ApiScope[]) : (["read", "write"] as ApiScope[]))
     .map((s) => ({ value: s, label: t(`adminApi.scope_${s}`) }));
-  const effScope: ApiScope = maxScope === "read" ? "read" : scope;
+  // #667 §5: with a matrix the scope is DERIVED, not asked — one control, not two. Without one (an
+  // unnarrowed key, or a CE deployment with no overlay) the old Select is still the only choice there
+  // is, which is what requirement 2 ruled.
+  const effScope: ApiScope = maxScope === "read" ? "read"
+    : matrixPicked ? derivedScope(matrix) : scope;
   // #628the choices are DERIVED from the ceiling, not a fixed ladder filtered by it. Filtering
-  // left a 3-day policy with nothing to offer, so the form refused what the API would have granted —
+  // left a 3-day policy with nothing to offer, so the form refused what the API would have granted
   // see `key-expiry-choices`.
   const expiryOptions = expiryChoices(maxAgeDays).map((c) => ({
     value: c.value,
@@ -132,24 +150,37 @@ export function ApiKeysPanel({
   useEffect(() => {
     if (!expiryOptions.some((o) => o.value === expiry)) setExpiry(defaultExpiry(maxAgeDays));
   }, [maxAgeDays]);
+  // #667 / ADR-221 §10: choosing an administrative type moves the DEFAULT lifetime down the ladder the
+  // tenant already offers. A default and not a cap — "never" stays selectable, because the ceiling
+  // belongs to the tenant (#628) and a second one visible only to some type combinations would make the
+  // form refuse what the API grants. It follows the selection while the reader has not overridden it.
+  const adminPicked = touchesAdmin(matrix);
+  const [expiryTouched, setExpiryTouched] = useState(false);
+  useEffect(() => {
+    if (expiryTouched) return;
+    setExpiry(adminPicked ? adminDefaultExpiry(expiryChoices(maxAgeDays)) : defaultExpiry(maxAgeDays));
+  }, [adminPicked, maxAgeDays, expiryTouched]);
 
   const onCreate = () => {
     if (!name.trim()) return;
     const done = (k: ApiKeyCreated | null) => {
       if (!k) return;
       setCreated(k); setName(""); setExpiry(defaultExpiry(maxAgeDays));
-      setPickedSpaces([]); setPickedCaps([]); setNarrowing(false);
+      setPickedSpaces([]); setMatrix({}); setNarrowing(false); setExpiryTouched(false);
       notify.success(t("toast.saved"));
     };
     const base = { name: name.trim(), scope: effScope, expiresInDays: expiry === "" ? null : Number(expiry) };
     // #637: the narrowed route is a DIFFERENT one, because narrowing is EE. On a deployment without the
     // overlay it is simply not there, and a 404 is the honest answer — better than a form that appears to
     // confine a key and hands back one that reaches everything.
-    if (narrowing && (pickedSpaces.length > 0 || pickedCaps.length > 0)) {
+    if (narrowing && (pickedSpaces.length > 0 || matrixPicked)) {
       narrowedCreate.mutate({
         ...base,
         ...(pickedSpaces.length > 0 ? { spaces: pickedSpaces } : {}),
-        ...(pickedCaps.length > 0 ? { capabilities: pickedCaps } : {}),
+        // #667: the matrix, never the old verbs. The server refuses a key carrying both
+        // (`mixed_permission_model`) — a row read by one rule with the other half sitting there looking
+        // like it meant something is a ledger that lies.
+        ...(matrixPicked ? { permissions: matrix } : {}),
       }, { onSuccess: done, onError: () => notify.error(t("toast.actionFailed")) });
       return;
     }
@@ -166,8 +197,13 @@ export function ApiKeysPanel({
           {/* #535: the row carries the scale, so no control here states its own. */}
           <FormRow>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} aria-label={t("adminApi.name")} data-testid="api-key-name" />
-            <Select value={effScope} onChange={(v) => setScope(v as ApiScope)} ariaLabel={t("adminApi.scope")} testId="api-key-scope" options={scopeOptions} />
-            <Select value={expiry} onChange={setExpiry} ariaLabel={t("adminApi.expiry")} testId="api-key-expiry" options={expiryOptions} />
+            {/* #667 §5: two controls became one. With a matrix picked the scope is derived and the
+                Select goes away rather than sitting there showing a value nobody chose — the
+                the ruling named. It returns the moment the matrix is empty again. */}
+            {!matrixPicked && (
+              <Select value={effScope} onChange={(v) => setScope(v as ApiScope)} ariaLabel={t("adminApi.scope")} testId="api-key-scope" options={scopeOptions} />
+            )}
+            <Select value={expiry} onChange={(v) => { setExpiryTouched(true); setExpiry(v); }} ariaLabel={t("adminApi.expiry")} testId="api-key-expiry" options={expiryOptions} />
             <Button variant="primary" disabled={!name.trim() || create.isPending || narrowedCreate.isPending} onClick={onCreate} data-testid="api-key-create">{t("adminApi.create")}</Button>
           </FormRow>
           {/* #637 / ADR-216: what the key may REACH, beside how long it lives and whether it may write.
@@ -226,23 +262,56 @@ export function ApiKeysPanel({
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-fg-dim">{t("adminApi.narrowCaps")}</span>
-                {/* The verbs the route table actually offers. The server validates against the same set,
-                    so a list invented here would go stale the day a verb is added there. */}
-                <div className="flex flex-wrap gap-2" data-testid="api-key-cap-list">
-                  {NARROW_CAPS.map((c) => (
-                    <label key={c} className="flex items-center gap-1 text-sm" data-testid="api-key-cap-option">
-                      <input type="checkbox" checked={pickedCaps.includes(c)}
-                        onChange={() => toggle(pickedCaps, setPickedCaps, c)} data-testid={`api-key-cap-${c}`} />
-                      {/* #662: this read `roleCaps.${c}`, a namespace that exists in neither locale, and
-                          the fallback `c` painted the raw wire verb — so a Japanese reader was offered
-                          "view edit publish". The vocabulary already exists at `adminRoles.cap.*`, on the
-                          surface that EDITS a role definition, which is what choosing what a key may do
-                          is. No fallback: a missing key should render its own path and be seen, not
-                          impersonate a translation. */}
-                      <span>{t(`adminRoles.cap.${c}`)}</span>
-                    </label>
+                {/* #667 / ADR-221 §1: resource type × read/write, which is the shape a GitHub fine-grained
+                    PAT and a Stripe restricted key both take, and the shape the ruling asked for. It
+                    replaced six borrowed role verbs that could not name a resource at all — "read pages
+                    but never the member roster" was unsayable.
+
+                    Three radios per row rather than a checkbox and a second control: `none` is a real
+                    state and the default, and a two-control row would let somebody pick `write` while
+                    leaving the type unticked. The server declares the same vocabulary and refuses
+                    anything else (`unknown_type` / `unknown_action` / `unreachable_permission`), so this
+                    list going stale is a refusal rather than a silent acceptance. */}
+                <div className="flex flex-col gap-1" data-testid="api-key-perm-list">
+                  {RESOURCE_TYPE_OPTIONS.map((o) => (
+                    <div key={o.id} className="flex items-center gap-2 text-sm" data-testid="api-key-perm-row">
+                      <span className="min-w-0 flex-1 truncate">{t(`adminApi.type.${o.id}`)}</span>
+                      {(["none", "read", "write"] as const).map((a) => {
+                        // a type no route requires `write` on is a cell the server refuses — offering it
+                        // would be the #642 defect in a new place: a choice that reaches nothing
+                        if (a === "write" && !o.writable) return null;
+                        const on = a === "none" ? matrix[o.id] === undefined : matrix[o.id] === a;
+                        return (
+                          <label key={a} className="flex flex-none items-center gap-1 text-xs text-fg-dim">
+                            <input type="radio" name={`api-key-perm-${o.id}`} checked={on}
+                              onChange={() => setMatrix((m) => {
+                                const next = { ...m };
+                                if (a === "none") delete next[o.id]; else next[o.id] = a;
+                                return next;
+                              })}
+                              data-testid={`api-key-perm-${o.id}-${a}`} />
+                            <span>{t(`adminApi.action_${a}`)}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   ))}
                 </div>
+                {/* #667 §5: the scope Select is gone while a matrix is picked, so this is where the
+                    reader learns what it became. Saying it rather than leaving them to work out that one
+                    write cell makes the whole key a write key. */}
+                {matrixPicked && (
+                  <span className="text-xs text-fg-dim" data-testid="api-key-derived-scope">
+                    {t("adminApi.derivedScope", { scope: t(`adminApi.scope_${derivedScope(matrix)}`) })}
+                  </span>
+                )}
+                {/* §10: an administrative type shortens the default lifetime. Said out loud, because a
+                    default that moves under somebody without explanation reads as a bug. */}
+                {adminPicked && !expiryTouched && (
+                  <span className="text-xs text-fg-dim" data-testid="api-key-admin-expiry-note">
+                    {t("adminApi.adminExpiryNote")}
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -264,12 +333,23 @@ export function ApiKeysPanel({
                 that these rows do not grow taller, and a list of spaces and verbs would do exactly that.
                 The detail lives in the tooltip. An unconfined key carries nothing at all: most keys are
                 unconfined, and marking them would make the exception look ordinary. */}
-            {(k.spaces || k.capabilities) && (
+            {(k.spaces || k.capabilities || k.permissions) && (
               <span
                 className="flex-none rounded-full border border-border px-2 py-px text-[11px] text-fg-dim"
                 data-testid="api-key-confinement"
                 data-tip={confinementTip(k, t)}
               >{confinementLabel(k, t)}</span>
+            )}
+            {/* #667 / ADR-221 §3: a key issued under the old model keeps behaving exactly as it did
+                the mapping onto resource types cannot exist without widening, so v1 keys are frozen
+                rather than remapped. Marked so somebody taking inventory can see WHICH keys still read
+                by the old rule, and re-issue when they choose to. Never automatic: silently upgrading a
+                credential handed to an outside service is what §3 exists to prevent. */}
+            {k.permissionModel === 1 && (k.capabilities || k.spaces) && (
+              <span className="flex-none rounded-full border border-border px-2 py-px text-[11px] text-fg-dim"
+                data-testid="api-key-legacy-model" data-tip={t("adminApi.legacyModelTip")}>
+                {t("adminApi.legacyModel")}
+              </span>
             )}
             <code className="flex-none font-mono text-xs text-fg-dim">{k.keyPrefix}…</code>
             <LastUsed at={k.lastUsedAt} />

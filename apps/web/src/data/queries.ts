@@ -1610,7 +1610,12 @@ export interface ApiKeySummary { id: string; name: string; keyPrefix: string; sc
   // stands out. `spaces.count` is every space on the key; `spaces.named` only the ones this reader may
   // view, which is why the two can differ.
   capabilities?: string[];
-  spaces?: { count: number; named: { id: string; name: string }[] } }
+  spaces?: { count: number; named: { id: string; name: string }[] };
+  // #667 / ADR-221 §3: which rule reads this key — 1 is the six borrowed verbs against the frozen route
+  // table, 2 the resource-type matrix. Always present, so the panel can mark the older ones without
+  // guessing from the absence of a field.
+  permissionModel?: 1 | 2;
+  permissions?: Record<string, string> }
 export interface ApiKeyCreated extends ApiKeySummary { plaintext: string }
 // #462: two lists, because they answer different questions. `useApiKeys` is the tenant-wide ADMIN
 // view (it used to be readable by any member, which laid out who automates what); `useMyApiKeys` is
@@ -1647,7 +1652,7 @@ export function useCreateNarrowedApiKey() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { name: string; scope: ApiScope; expiresInDays?: number | null; capabilities?: string[] | null; spaces?: string[] | null }) =>
+    mutationFn: (args: { name: string; scope: ApiScope; expiresInDays?: number | null; capabilities?: string[] | null; spaces?: string[] | null; permissions?: Record<string, string> | null }) =>
       apiFetch<ApiKeyCreated>("/admin/api-keys/narrowed", token, { method: "POST", body: JSON.stringify(args) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
   });
