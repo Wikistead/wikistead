@@ -87,7 +87,12 @@
     "sortLeast": "ビュー数が少ない順",
     "unique": "ユニーク閲覧者",
     "uniqueCaveat": "ユニークはスペース内の distinct なメンバー数です。ゲスト・匿名はページ横断の識別子を持たないため、日次のセッション概算であり実人数ではありません。",
-    "pages": "管理している {{n}} ページを集計"
+    "pages": "管理している {{n}} ページを集計",
+    "pickRange": "日付を選ぶ",
+    "period": "期間",
+    "prevMonth": "前の月",
+    "nextMonth": "次の月",
+    "clearRange": "クリア"
   },
   "tenantAnalytics": {
     "title": "ワークスペース アナリティクス",

@@ -48,10 +48,14 @@ export function PageViewsChart({ daily, height = H }: { daily: DailyPoint[]; hei
   const { t, i18n } = useTranslation();
   const [hover, setHover] = useState<number | null>(null);
   const { days, byDay } = useMemo(() => pivot(daily), [daily]);
-  const fmtDay = useMemo(() => new Intl.DateTimeFormat(i18n.language, { month: "short", day: "numeric" }), [i18n.language]);
+  // #641 / ADR-218: UTC, because the value being formatted is a DAY and not an instant. `new Date("2026-08-06")`
+  // is midnight UTC, and formatting that in local time reads as the 5th anywhere west of Greenwich —
+  // measured under `TZ=America/Los_Angeles`. The server buckets these by UTC day (`rollup.ts`), so the
+  // axis has to name the bucket rather than what that instant happened to be locally.
+  const fmtDay = useMemo(() => new Intl.DateTimeFormat(i18n.language, { month: "short", day: "numeric", timeZone: "UTC" }), [i18n.language]);
   // Over a long range the day number is noise and the labels crowd; switch to month/year past ~4 months.
   // Same Intl formatter family as everywhere else — no new date-formatting implementation (#533).
-  const fmtMonth = useMemo(() => new Intl.DateTimeFormat(i18n.language, { month: "short", year: "2-digit" }), [i18n.language]);
+  const fmtMonth = useMemo(() => new Intl.DateTimeFormat(i18n.language, { month: "short", year: "2-digit", timeZone: "UTC" }), [i18n.language]);
 
   const max = Math.max(1, ...daily.map((d) => d.views));
   const plotW = W - PAD_L - PAD_R, plotH = height - PAD_T - PAD_B;
