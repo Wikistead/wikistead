@@ -14,15 +14,37 @@ import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wiki
 import { verifyApiKey } from './api-key-auth.js'
 import { isNarrowedKey, getNarrowedKeyGate } from '@wikistead/hooks'
 
-// #628 / ADR-215 §2: routes that hand out a SECOND credential. Shut to a narrowed key whatever it
-// carries — see the note at the call site. Keyed by "METHOD pattern", where the pattern is the one the
-// route was registered with, because a raw URL never matches a path parameter.
+// #628 / ADR-215 §2: routes that hand out a SECOND credential, or take one away. Shut to a narrowed key
+// whatever it carries — see the note at the call site. Keyed by "METHOD pattern", where the pattern is
+// the one the route was registered with, because a raw URL never matches a path parameter.
+//
+// #667 / ADR-221 §0: this list was INCOMPLETE, and the omissions were only harmless because
+// deny-by-default kept a narrowed key off the 223 routes nobody had classified — the cover ADR-221's
+// classification work removes. Closed before any of that work begins.
+//
+// Two of the entries name EE routes. A deny list may name a route a given build does not register: the
+// string simply never matches, and naming it is the fail-closed direction. CE holding the name is a
+// slightly wider CE/EE line than ADR-215 drew, taken deliberately rather than by omission.
 const CREDENTIAL_MINTING_ROUTES = new Set([
   'POST /api-keys',
   'DELETE /api-keys/:id',
   'DELETE /admin/api-keys/:id',
   'POST /auth/collab-token',
   'POST /share-links',
+  // …mints a plaintext API key of its own. A `view`-only key could ask for a `manage` one.
+  'POST /admin/api-keys/narrowed',
+  // …mints a plaintext `scm_` token, which reaches SCIM user and group creation and deletion.
+  'POST /admin/scim-tokens',
+  // Revocation sits beside minting, which is why `DELETE /api-keys/:id` was already here. The SCIM
+  // twin was missing for no reason anybody wrote down.
+  'DELETE /admin/scim-tokens/:id',
+  // These two RETURN share-link ids, and an id is exchangeable for a guest token at
+  // `POST /public/share-links/:id/token` with no authentication at all (`share-links.ts:514`). For a
+  // link with no password the id IS the credential, so listing them is a credential read, not a page
+  // read — and a key narrowed to `view` would otherwise be a collection point for them.
+  'GET /pages/:pageId/share-links',
+  'GET /spaces/:spaceId/share-links',
+  'DELETE /share-links/:id',
 ])
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from './rate-limit.js'
