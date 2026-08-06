@@ -31,6 +31,15 @@ async function countEnrolments(): Promise<number> {
   return row?.n ?? 0
 }
 
+/** How many factor REMOVALS the ledger holds. A delta, for the reason `countEnrolments` gives. */
+async function countRemovals(): Promise<number> {
+  await drainAuditFor(adminPool, TENANT)
+  const [row] = await adminPool<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM audit_log
+    WHERE tenant_id = ${TENANT} AND action = 'member.factor_removed'`
+  return row?.n ?? 0
+}
+
 const post = (url: string, body?: unknown) =>
   app.inject({ method: 'POST', url, headers: H, payload: JSON.stringify(body ?? {}) })
 
@@ -247,5 +256,81 @@ describe('#657: the list is bounded by a cap, not by a page', () => {
     expect(res.statusCode, res.body).toBe(409)
     expect((res.json() as { code: string }).code).toBe('factor_limit_reached')
     await wipe()
+  }, 180_000)
+})
+
+// #660: giving a factor up. Added to this file rather than a new one because it shares the fixture and
+// the limiter key, and because "you can add one and never remove it" is a statement about the pair.
+describe('#660: removing a factor', () => {
+  const del = (id: string, code?: string) =>
+    app.inject({ method: 'DELETE', url: `/me/factors/${id}${code ? `?code=${code}` : ''}`, headers: AUTH })
+
+  it('refuses without a code from the factor being removed', async () => {
+    // ADR-219 §8's re-authentication. A stolen session must not be able to strip the factor in one
+    // request — which is the whole point of the policy the factor exists to satisfy.
+    const { factorId, secret } = await start()
+    expect((await post(`/me/factors/${factorId}/confirm`, { code: totpCode(secret, Date.now()) })).statusCode).toBe(200)
+
+    expect((await del(factorId)).statusCode, 'no code at all').toBe(400)
+    expect((await del(factorId, '000000')).statusCode, 'a wrong code').toBe(400)
+    const still = (await app.inject({ method: 'GET', url: '/me/factors', headers: AUTH })).json() as { factors: { id: string }[] }
+    expect(still.factors.map((f) => f.id), 'and it is still there').toContain(factorId)
+  }, 120_000)
+
+  it('removes it when the code proves possession', async () => {
+    const { factorId, secret } = await start()
+    expect((await post(`/me/factors/${factorId}/confirm`, { code: totpCode(secret, Date.now()) })).statusCode).toBe(200)
+    // a code from the NEXT step, since the confirming one is spent
+    const res = await del(factorId, totpCode(secret, Date.now() + TOTP_STEP_SECONDS * 1000))
+    expect(res.statusCode, res.body).toBe(204)
+
+    const after = (await app.inject({ method: 'GET', url: '/me/factors', headers: AUTH })).json() as { factors: { id: string }[] }
+    expect(after.factors.map((f) => f.id)).not.toContain(factorId)
+    const [row] = await adminPool`SELECT 1 FROM member_totp_secrets WHERE factor_id = ${factorId}`
+    expect(row, 'the secret went with it').toBeUndefined()
+  }, 120_000)
+
+  it('lets an abandoned enrolment be thrown away without one', async () => {
+    // It guards nothing yet. Demanding possession here would make a half-finished enrolment permanent:
+    // a row the member can neither use nor clear, which is worse than the problem this route fixes.
+    const { factorId } = await start()
+    expect((await del(factorId)).statusCode, 'nothing to prove').toBe(204)
+  }, 120_000)
+
+  it('will not remove somebody else\'s, and says nothing about whether it exists', async () => {
+    const otherSub = `f657-del-${STAMP}`
+    await adminPool`
+      INSERT INTO members (tenant_id, sub, email, role)
+      VALUES (${TENANT}, ${otherSub}, ${`${otherSub}@e2e.test`}, 'member') ON CONFLICT DO NOTHING`
+    const [row] = await adminPool<{ id: string }[]>`
+      INSERT INTO member_factors (tenant_id, member_sub, kind, confirmed_at)
+      VALUES (${TENANT}, ${otherSub}, 'totp', now()) RETURNING id`
+
+    const theirs = await del(row!.id)
+    expect(theirs.statusCode).toBe(404)
+    const missing = await del('00000000-0000-0000-0000-000000000000')
+    expect(missing.statusCode).toBe(404)
+    expect((theirs.json() as { code: string }).code).toBe((missing.json() as { code: string }).code)
+    expect(await adminPool`SELECT 1 FROM member_factors WHERE id = ${row!.id}`, 'untouched').toHaveLength(1)
+
+    await adminPool`DELETE FROM member_factors WHERE member_sub = ${otherSub}`
+    await adminPool`DELETE FROM members WHERE sub = ${otherSub}`
+  }, 120_000)
+
+  it('records the loss in the ledger — but only of a real factor', async () => {
+    const before = await countRemovals()
+    // an abandoned enrolment first: tidying is not an event in the account's security history
+    const pending = await start()
+    expect((await del(pending.factorId)).statusCode).toBe(204)
+    expect(await countRemovals(), 'clearing a pending row is not a removal').toBe(before)
+
+    const { factorId, secret } = await start()
+    expect((await post(`/me/factors/${factorId}/confirm`, { code: totpCode(secret, Date.now()) })).statusCode).toBe(200)
+    expect((await del(factorId, totpCode(secret, Date.now() + TOTP_STEP_SECONDS * 1000))).statusCode).toBe(204)
+
+    expect(await countRemovals(), 'giving up a real one is').toBe(before + 1)
+    const rows = await adminPool<{ actor: string }[]>`
+      SELECT actor FROM audit_log WHERE tenant_id = ${TENANT} AND action = 'member.factor_removed' ORDER BY seq`
+    expect(rows.at(-1)!.actor).toBe('user:dev-user')
   }, 180_000)
 })

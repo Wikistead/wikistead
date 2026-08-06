@@ -55,7 +55,7 @@ const EXCLUDED_PATHS = new Set([
   // the three below it — the secret is shown once to a phone in front of the person, which is not a
   // shape an integrator drives. If passkeys or the policy ever need a documented surface, that is a
   // decision to make then, not a line to grow quietly here.
-  '/me/factors', '/me/factors/totp', '/me/factors/:id/confirm',
+  '/me/factors', '/me/factors/totp', '/me/factors/:id/confirm', '/me/factors/:id',
   '/me/settings', '/me/capabilities', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', '/members/invites/:id/reissue', // account/invite UI plumbing (#638: handing a pending invitation over again is the same console surface)
   '/ai/ask', '/ai/capability',     // AI feature surface (own contract)
   '/pages/:pageId/mentionable',    // comment @-mention candidates (UI-shaped)
