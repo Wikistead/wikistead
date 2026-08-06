@@ -125,6 +125,26 @@ export const acceptedKinds = (stance: FactorStance): FactorKind[] =>
 export const floorFor = (stance: FactorStance): number => (stance === 'passkey' ? 2 : 1)
 
 /**
+ * Can a member who holds NOTHING enrol something this stance accepts, without a session?
+ *
+ * ADR-222 §6, and the reason it is a capability question rather than a banned value. The policy denies
+ * a session to anybody with nothing enrolled, so the session-less doors — the ones on the factor
+ * receipt — are the only way out of that circle. A stance whose accepted kinds none of them can mint is
+ * a state nobody can leave, and the switch has to refuse it.
+ *
+ * rev0 wrote this as "refuse the value `passkey` until the interstitial learns passkeys, then delete
+ * the refusal", which is a named-value ban plus a debt to remember. As a predicate it goes true by
+ * itself the day a door is added — and a third kind is covered without anybody editing this.
+ *
+ * The list is what those doors ACTUALLY mint, so it is maintained beside them
+ * (`interstitial-doors-678.test.ts` is the walk that says the routes and this list agree).
+ */
+export const INTERSTITIAL_MINTS: FactorKind[] = ['totp', 'passkey']
+
+export const interstitialCanMint = (stance: FactorStance): boolean =>
+  acceptedKinds(stance).some((k) => INTERSTITIAL_MINTS.includes(k))
+
+/**
  * ⚠️ THE EDITION SEAM, and it is deliberately one function.
  *
  * ADR-219 §10 was ruled EE for the tenant policy (#644 ruling 2), and the independent review of

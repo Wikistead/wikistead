@@ -685,7 +685,9 @@
     "factorEnrolPrompt": "This workspace requires two-factor authentication. Set up an authenticator app to continue.",
     "factorEnrolStart": "Set up an authenticator",
     "factorEnrolHint": "Enter this key in your authenticator app, then type the code it shows.",
-    "factorSecretNote": "This key is shown once. Enter it now."
+    "factorSecretNote": "This key is shown once. Enter it now.",
+    "factorEnrolPasskey": "Set up a passkey",
+    "factorNoWebauthn": "This workspace asks for a security key, and this browser cannot register one. Try another browser, or ask an administrator."
   },
   "share": {
     "invalid": "This share link is invalid, expired, or revoked.",

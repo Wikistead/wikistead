@@ -24,6 +24,10 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
   // and installing one are different things to be asked to do, and a member with no authenticator
   // sent to a code box cannot fill it.
   const [stage, setStage] = useState<"required" | "enrolment-required" | null>(null);
+  // #678 / ADR-222 §7: WHICH kinds the tenant accepts. The receipt holder has no session, so the screen
+  // cannot ask `/me/factors` — the sign-in response is the only place this can arrive. Without it a
+  // member sent to enrol under a passkey stance meets a form offering an authenticator app.
+  const [kinds, setKinds] = useState<string[]>([]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,11 +42,12 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
         body: JSON.stringify({ identifier, password, returnTo }),
       });
       if (!res.ok) { setFailed("credentials"); setBusy(false); return; }
-      const body = (await res.json().catch(() => null)) as { returnTo?: string; factor?: "required" | "enrolment-required" } | null;
+      const body = (await res.json().catch(() => null)) as
+        { returnTo?: string; factor?: "required" | "enrolment-required"; kinds?: string[] } | null;
       // #652 / ADR-219 §6: the password was right and there is still one thing to prove. The server
       // set a receipt cookie and NO session, so there is nothing to navigate to yet — the same screen
       // asks for the next thing rather than sending the reader somewhere that would bounce them back.
-      if (body?.factor) { setStage(body.factor); setBusy(false); return; }
+      if (body?.factor) { setStage(body.factor); setKinds(body.kinds ?? []); setBusy(false); return; }
       // A full navigation, not a router push: the session cookie is new, and every query in the app
       // was made by whoever was here before.
       window.location.href = body?.returnTo || returnTo || "/";
@@ -52,7 +57,7 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
     }
   };
 
-  if (stage) return <FactorStep stage={stage} returnTo={returnTo} />;
+  if (stage) return <FactorStep stage={stage} kinds={kinds} returnTo={returnTo} />;
 
   return (
     <form className="flex flex-col gap-2" onSubmit={submit} data-testid="login-local">
