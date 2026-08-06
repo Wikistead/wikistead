@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
 import { openDemo, sleep } from "../helpers";
+import { decodePng } from "../paint";
 
 // #653 / ADR-219: enrolling and giving up a second factor, from the screen.
 //
@@ -68,6 +69,28 @@ test("#653: a factor can be enrolled from the screen, and only given up by provi
   expect(await qr.evaluate((el) => getComputedStyle(el).backgroundColor), "white quiet zone")
     .toBe("rgb(255, 255, 255)");
   expect(await qr.evaluate((el) => el.querySelector("canvas") !== null), "something was drawn").toBe(true);
+
+  // …and what was drawn DEPENDS ON THE VALUE. `data-qr-value` says what the encoder was handed; these
+  // pixels say what a camera would see, and the two are different claims — a component that drew a
+  // fixed placeholder would satisfy the first and fail nobody until a phone was pointed at it.
+  //
+  // Measured by ink rather than by decoding: a decoder is a dependency, and this answers the question
+  // that matters without one. The "different value draws different pixels" half is in the test below,
+  // where two enrolments can be started; here it is the shape of what was drawn.
+  const ink = async () => {
+    const png = decodePng(await qr.screenshot());
+    let dark = 0;
+    for (let i = 0; i < png.data.length; i += 4) if (png.data[i]! < 128) dark++;
+    return { dark, total: png.data.length / 4, bytes: Buffer.from(png.data).toString("base64") };
+  };
+  const drawn = await ink();
+  // A QR is roughly a third dark. Far outside that and something is wrong in a way "a canvas exists"
+  // cannot see — a blank box, or a solid one.
+  expect(drawn.dark / drawn.total, "it looks like a code, not a blank or a block").toBeGreaterThan(0.1);
+  expect(drawn.dark / drawn.total, "…and not a solid square").toBeLessThan(0.6);
+  expect(await qr.evaluate((el) => el.getBoundingClientRect().width), "big enough for a camera")
+    .toBeGreaterThanOrEqual(120);
+
 
   // a wrong code is refused, and the enrolment stays open
   await page.getByTestId("factor-confirm-code").fill("000000");
@@ -154,6 +177,22 @@ test("#653: the enrolment key is shown once, in the box that says so", async ({ 
   // the hard way: without it, each run of this spec left a row behind, and after ten the account had
   // hit MAX_FACTORS_PER_MEMBER and could not enrol at all — a leak in the product that showed up first
   // as this pin going red for no visible reason.
+  // …and the QR's PIXELS come from the key, not from a fixture. Two enrolments have different secrets,
+  // so two QRs must differ; a component drawing a fixed placeholder would pass every assertion about
+  // `data-qr-value` and fail nobody until a phone was pointed at it.
+  const shot = () => page.getByTestId("factor-qr").screenshot();
+  const firstQr = await shot();
+  const firstKey = (await page.getByTestId("factor-secret-value").innerText()).replace(/\s/g, "");
+
+  await page.getByTestId("factor-cancel").click();
+  await expect(page.getByTestId("factor-enrolling")).toBeHidden({ timeout: 10_000 });
+
+  await page.getByTestId("factor-add").click();
+  await expect(page.getByTestId("factor-enrolling")).toBeVisible({ timeout: 15_000 });
+  const secondKey = (await page.getByTestId("factor-secret-value").innerText()).replace(/\s/g, "");
+  expect(secondKey, "the premise: a new enrolment is a new key").not.toBe(firstKey);
+  expect(Buffer.compare(await shot(), firstQr), "a different key draws a different code").not.toBe(0);
+
   await page.getByTestId("factor-cancel").click();
   await expect(page.getByTestId("factor-enrolling")).toBeHidden({ timeout: 10_000 });
 });
