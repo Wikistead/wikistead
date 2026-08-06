@@ -33,7 +33,7 @@
    The frame stays round; the strip is a rectangle that ignores it.
    `padding-left` carries the 3px the border used to occupy, so nothing inside moves. */
 .cm-lp-callout-panel{border-radius:4px;background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 10%,transparent)}
-.cm-lp-callout-panel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--wks-bar-w, 3px);background:var(--cb-color,var(--callout-note,#6e7781));pointer-events:none}
+.cm-lp-callout-panel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--wks-bar-w, 3px);background:var(--cb-color,var(--callout-note,#6e7781));pointer-events:none;border-radius:inherit} /* #632 follow the box's corners — see .wks-left-bar */
 .cm-lp-callout-panel.cm-lp-callout-note{background:color-mix(in srgb,var(--callout-note,#57606a) 8%,transparent)}
 .cm-lp-callout-panel.cm-lp-callout-warning{background:color-mix(in srgb,var(--callout-warning,#d29922) 13%,transparent)}
 /* #267: the diagram/media alignment classes (#255) also live only in the .cm-editor baseTheme, so a
@@ -280,4 +280,14 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
    A class rather than five copies of the same utilities: the fifth box written next month gets it by
    asking for it, not by somebody remembering the trick. */
 .wks-left-bar{position:relative;padding-left:calc(var(--wks-left-bar-pad,0.875rem) + var(--wks-bar-w, 3px))}
-.wks-left-bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--wks-bar-w, 3px);background:var(--wks-left-bar-color,var(--accent));pointer-events:none}
+/* #632 (review rejection): the strip is a positioned pseudo-element, and `border-radius` clips the
+   BACKGROUND of a box, not its absolutely-positioned children. So a square strip drawn to the very edge
+   pokes out at the rounded corners — invisible in light, obvious in dark against the warning yellow.
+   Straightening the bar had removed the bend and left this in its place, which is the same complaint
+   wearing different clothes.
+
+   `inherit` is what makes one rule enough: the strip takes the radius of whatever box it is drawn in,
+   so the callout's 4px, the notice's 8px and the login band's 6px each get a strip that follows their
+   own silhouette. Clipping the BOX instead (`overflow: hidden`) would have worked for the corners and
+   cut every tooltip and menu that opens out of these boxes. */
+.wks-left-bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--wks-bar-w, 3px);background:var(--wks-left-bar-color,var(--accent));pointer-events:none;border-radius:inherit}
