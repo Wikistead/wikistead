@@ -93,7 +93,10 @@
     "period": "Period",
     "prevMonth": "Previous month",
     "nextMonth": "Next month",
-    "clearRange": "Clear"
+    "clearRange": "Clear",
+    "preset_7d": "Last 7 days",
+    "preset_30d": "Last 30 days",
+    "preset_month": "This month"
   },
   "tenantAnalytics": {
     "title": "Workspace analytics",
