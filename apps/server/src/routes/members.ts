@@ -394,6 +394,10 @@ export async function membersPlugin(app: FastifyInstance) {
       // (3) and the tokens that would put it back. A setup token whose UPDATE matches no row INSERTS the
       // credential (password-reset.ts) — so a link minted in the last hour silently undoes this removal.
       await tx`DELETE FROM password_resets WHERE member_sub = ${sub}`
+      // #654 / ADR-219 §7: and the second factors, which guarded the door being removed. Left behind
+      // they would attach to whoever holds this `sub` next — the same reason the credential goes — and
+      // in the meantime they would be an authenticator for a password that no longer exists.
+      await tx`DELETE FROM member_factors WHERE member_sub = ${sub}`
       await auditIfEntitled(tx, req.tenant, {
         actor: `user:${req.user.sub}`, action: 'member.password_removed', target: `member:${sub}`,
       })
@@ -468,6 +472,11 @@ export async function membersPlugin(app: FastifyInstance) {
       // namespaced tenant does not replicate it, and a link that outlived its member would be a
       // credential-setting capability pointing at nobody.
       await tx`DELETE FROM password_resets WHERE member_sub = ${req.params.sub}`
+      // #654 / ADR-219 §7. The composite FK cascades this in the logical schema — written out for the
+      // same reason `password_resets` is one line up: a namespaced tenant does not replicate it, and a
+      // deletion that depends on which isolation strategy a tenant happens to be on is one that works
+      // until somebody is promoted.
+      await tx`DELETE FROM member_factors WHERE member_sub = ${req.params.sub}`
       await tx`DELETE FROM page_view_roster WHERE member_sub = ${req.params.sub}`
       await tx`DELETE FROM analytics_outbox WHERE tenant_id = ${req.tenant.id} AND viewer_class = 'member' AND member_sub = ${req.params.sub}`
       // #474: the member's API keys go too. Removal already strips every other credential — sessions
