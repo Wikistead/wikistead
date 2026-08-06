@@ -671,9 +671,12 @@ export async function authLocalPlugin(app: FastifyInstance) {
       if (await overLimit(app.valkey, idKey, LOCAL_LOGIN_ID_MAX)) {
         return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
       }
+      // `kind = 'totp'`, for the reason #666 records: a route that does not ask which proof a factor
+      // takes reports the mismatch as the member's mistake ("that code did not match" about a thing
+      // with no code). This door only ever mints TOTP enrolments, so the filter is belt to that brace.
       const [own] = await req.db.sql<[{ id: string }?]>`
         SELECT id FROM member_factors
-        WHERE id = ${req.params.id} AND member_sub = ${held.pending.sub} AND confirmed_at IS NULL`
+        WHERE id = ${req.params.id} AND member_sub = ${held.pending.sub} AND kind = 'totp' AND confirmed_at IS NULL`
       if (!own) return reply.code(404).send({ error: 'no pending enrolment', code: 'factor_not_pending' })
 
       const secret = await totpSecretFor(req.db, req.params.id)
