@@ -150,12 +150,22 @@ export function ConfirmDialog({
 // A modal is what the ruling suggested, and it is the one presentation that does not depend on where the
 // action was taken. What it contains is the SHARED box (`OneTimeSecret`) rather than a third spelling of
 // it, so a link that can only be shown once looks the same whichever of the three made it.
-export function SecretDialog({ open, title, secret, note, onClose, testId }: {
+//
+// #638 it also opens BEFORE there is a secret. A row that re-issued on click meant a reader who
+// wanted to look at an invitation destroyed the link somebody was already holding — and the two buttons
+// that did it were labelled "new link" and "resend", which called the same endpoint, so "resend" was a
+// lie. Opening is now free and minting is a deliberate second step: give `warn` and `actions` and the
+// dialog shows those until `secret` arrives, then shows the secret.
+export function SecretDialog({ open, title, secret, note, warn, actions, onClose, testId }: {
   open: boolean;
   /** what kind of secret this is — an invitation and a password entrance are not interchangeable (#606) */
   title: string;
   secret: string;
   note?: ReactNode;
+  /** shown while there is no secret yet — what pressing one of the actions will cost */
+  warn?: ReactNode;
+  /** the ways to produce it; absent means the caller already had one */
+  actions?: ReactNode;
   onClose: () => void;
   testId?: string;
 }) {
@@ -166,7 +176,14 @@ export function SecretDialog({ open, title, secret, note, onClose, testId }: {
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <OneTimeSecret title={t("members.copyOnce")} value={secret} note={note} testId={testId} />
+        {secret
+          ? <OneTimeSecret value={secret} note={note} testId={testId} />
+          : (
+            <div className="flex flex-col gap-3">
+              {warn && <p className="text-sm text-fg-dim" data-testid={testId ? `${testId}-warn` : undefined}>{warn}</p>}
+              {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+            </div>
+          )}
         <DialogFooter>
           <Button variant="primary" data-testid="secret-dialog-done" onClick={onClose}>{t("common.close")}</Button>
         </DialogFooter>

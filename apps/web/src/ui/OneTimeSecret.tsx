@@ -16,11 +16,13 @@ import { notify } from "./toast";
 // appear, and the two that were bare are the ones that strand people: an API key can be re-issued from
 // its own row, while a lost invite link used to mean revoking and inviting again.
 //
-// `title` carries what KIND of secret this is, because they are not interchangeable — a password entrance
-// is not an invitation (#606), and a re-issued link is not a new one. `note` is where a caller says the
-// thing only it knows, such as whether the mail went.
-export function OneTimeSecret({ title, value, note, testId }: {
-  title: string;
+// #638 the sentence lives HERE, not in each caller. Sharing the box while every caller passed its
+// own wording left two different Japanese sentences saying the same thing in the same box — one of them
+// badly — which is half the point of a shared component thrown away. WHAT kind of secret this is belongs
+// to the dialog's title above it (a password entrance is not an invitation, #606); how long the reader
+// has to copy it is the same fact everywhere, so it is said the same way everywhere.
+// `note` remains for what only a caller knows, such as whether the mail went.
+export function OneTimeSecret({ value, note, testId }: {
   value: string;
   note?: React.ReactNode;
   testId?: string;
@@ -31,7 +33,7 @@ export function OneTimeSecret({ title, value, note, testId }: {
       className="my-3.5 rounded-lg border border-[color-mix(in_srgb,var(--accent)_40%,var(--border))] px-3 py-2.5"
       data-testid={testId ?? "one-time-secret"}
     >
-      <p className="text-xs text-fg-dim">{title}</p>
+      <p className="text-xs text-fg-dim">{t("common.copyOnce")}</p>
       <div className="flex items-center gap-2">
         {/* the secret wraps rather than overflowing: these are long, and a link the reader cannot see the
             end of is one they cannot check before handing it over */}

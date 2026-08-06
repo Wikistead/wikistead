@@ -58,6 +58,10 @@ export function MembersPage() {
   // already here — the review found the second reusing the first's toast, which resurrects exactly
   // the misreading (#606: "an invite = a new person") this ticket exists to remove.
   const [lastLink, setLastLink] = useState<{ url: string; emailed: boolean; kind: "invite" | "password" } | null>(null);
+  // #638 the invitation-link dialog is opened by a row and holds NO secret until the reader asks
+  // for one. Opening it used to mint — so looking at an invitation invalidated the link its recipient
+  // already had.
+  const [linkFor, setLinkFor] = useState<{ id: string; email: string; url?: string; emailed?: boolean } | null>(null);
   // #504: every irreversible action here goes through one ConfirmDialog — removal (access + keys +
   // sessions die), DSAR erasure (the reading history is gone for good), invite revoke (the sent link
   // stops working). The pending action carries its own message + handler.
@@ -513,7 +517,10 @@ export function MembersPage() {
       )}
       </div>
 
-      <h3>{t("members.inviteTitle")}</h3>
+      {/* #638 ②: sections on this page are separated the way #579 separated them above — the same
+          heading class, the same rule and gap. Inviting somebody and looking over who has not answered
+          yet are different acts, and pressed together they read as one block. */}
+      <h3 className="mb-2 mt-8 border-t border-border pt-6 text-sm font-medium">{t("members.inviteTitle")}</h3>
       <FormRow>
         <Input className="max-w-xs" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("members.emailPlaceholder")} aria-label={t("members.inviteEmail")} type="email" />
         {/* One dropdown here too (#579, same ruling): the tiers and the tenant custom roles in one list.
@@ -537,6 +544,33 @@ export function MembersPage() {
           — and a result rendered in one fixed spot is in the wrong place for at least one of them.
           #606 stays honoured: a password-setup link is not an invite, so it wears its own title, and the
           emailed/not-emailed note is the invite flow's fact and renders only there. */}
+      {/* #638/ opening is free; minting is the second press. */}
+      <SecretDialog
+        open={linkFor !== null}
+        onClose={() => setLinkFor(null)}
+        testId="invite-link"
+        title={t("members.inviteLinkOpen")}
+        secret={linkFor?.url ?? ""}
+        note={linkFor?.url ? (linkFor.emailed ? t("members.emailed") : t("members.notEmailed")) : undefined}
+        warn={t("members.inviteLinkWarn")}
+        actions={linkFor && (
+          <>
+            <Button variant="primary" size="sm" data-testid="invite-link-mint"
+              onClick={() => void guarded(async () => {
+                const r = await reissueInvite(token, linkFor.id);
+                setLinkFor((s) => (s ? { ...s, url: r.inviteUrl, emailed: r.emailed } : s));
+              })()}>{t("members.inviteLinkMint")}</Button>
+            {linkFor.email !== t("members.noEmail") && (
+              <Button variant="ghost" size="sm" data-testid="invite-link-mint-mail"
+                onClick={() => void guarded(async () => {
+                  const r = await reissueInvite(token, linkFor.id, { email: true });
+                  setLinkFor((s) => (s ? { ...s, url: r.inviteUrl, emailed: r.emailed } : s));
+                })()}>{t("members.inviteLinkMintMail")}</Button>
+            )}
+          </>
+        )}
+      />
+
       <SecretDialog
         open={lastLink !== null}
         onClose={() => setLastLink(null)}
@@ -548,7 +582,7 @@ export function MembersPage() {
 
       {invites.length > 0 && (
         <>
-          <h3>{t("members.pendingTitle")}</h3>
+          <h3 className="mb-2 mt-8 border-t border-border pt-6 text-sm font-medium">{t("members.pendingTitle")}</h3>
           {/* #638 ③: the shared list box from #639 — it grows with the invitations and scrolls only once
               it is tall, so twenty of them no longer push the page down forever. */}
           <ListBox data-testid="invite-list">
@@ -560,35 +594,17 @@ export function MembersPage() {
                     truncates; everything after it is fixed-width and lines up down the list. */}
                 <span className="min-w-0 flex-1 truncate" data-testid="invite-email">{i.email || t("members.noEmail")}</span>
                 <span className="flex-none text-xs text-fg-dim" data-testid="invite-role-label">{i.role}</span>
-                {/* #638 3: which of these has anybody actually received. Sending has always
-                    been best-effort, and its outcome was reported once — on the response to the call that
-                    created the invite — and then forgotten. */}
-                <span className="flex-none text-xs text-fg-dim" data-testid="invite-mailed" data-mailed={i.last_emailed_at ? "yes" : "no"}>
-                  {i.last_emailed_at ? t("members.inviteMailed") : t("members.inviteNotMailed")}
-                </span>
-                {/* #638 the invitation could be neither re-sent nor read back, and it is the one
-                    that strands people — a tenant with no mail configured has only the link that appeared
-                    once on the screen that made it. Two deliveries of ONE act: the token is hashed at
-                    rest, so both mint a new link and the old one stops working. The confirm says that
-                    outright rather than leaving an admin to hand out a link they just invalidated. */}
-                <Button variant="ghost" size="sm" className="flex-none" data-testid="invite-reissue"
-                  onClick={() => setConfirming({
-                    message: t("members.reissueConfirm", { email: i.email || t("members.noEmail") }),
-                    run: () => void guarded(async () => {
-                      const r = await reissueInvite(token, i.id);
-                      setLastLink({ url: r.inviteUrl, emailed: r.emailed, kind: "invite" });
-                    })(),
-                  })}>{t("members.reissue")}</Button>
-                {i.email && (
-                  <Button variant="ghost" size="sm" className="flex-none" data-testid="invite-resend"
-                    onClick={() => setConfirming({
-                      message: t("members.resendConfirm", { email: i.email }),
-                      run: () => void guarded(async () => {
-                        const r = await reissueInvite(token, i.id, { email: true });
-                        setLastLink({ url: r.inviteUrl, emailed: r.emailed, kind: "invite" });
-                      })(),
-                    })}>{t("members.resend")}</Button>
-                )}
+                {/* #638 one button, and it is a NOUN. Two lived here — "new link" and "resend"
+                    calling the same endpoint, so "resend" re-issued and quietly killed the link the
+                    recipient was holding. Issuing is now a second, deliberate press inside the dialog.
+                    (The row also carried "emailed / not emailed", which said the same thing on every row
+                    — mail is configured for the tenant or it is not — so it said nothing. Removed from
+                    the screen; `last_emailed_at` stays in the table so a future "this one failed" mark
+                    has something to read, and NOTHING reads it today.) */}
+                <Button variant="ghost" size="sm" className="flex-none" data-testid="invite-link-open"
+                  onClick={() => setLinkFor({ id: i.id, email: i.email || t("members.noEmail") })}>
+                  {t("members.inviteLinkOpen")}
+                </Button>
                 {/* #504: revoking kills the sent link for good — confirm first. */}
                 <Button variant="dangerGhost" size="sm" className="flex-none" data-testid="invite-revoke"
                   onClick={() => setConfirming({ message: t("members.revokeConfirm", { email: i.email || t("members.noEmail") }), run: () => void guarded(() => revokeInvite(token, i.id))() })}>{t("members.revoke")}</Button>

@@ -33,22 +33,36 @@ test("#638: a pending invitation can be handed over again from its own row", asy
   const row = page.locator('[data-testid="invite-row"]').filter({ hasText: addr });
   await expect(row, "the invitation is listed as pending").toBeVisible({ timeout: 20_000 });
 
-  // …and it says whether anybody has been mailed. Sending is best-effort, so "invited" and "reached"
-  // are different facts — .
-  await expect(row.getByTestId("invite-mailed"), "the row reports its delivery").toBeVisible();
+  // #638 the hand-off is a dialog opened from the row, and OPENING IT COSTS NOTHING. Two buttons
+  // used to sit here — "new link" and "resend" — calling the same endpoint, so a reader who pressed the
+  // one that sounded harmless invalidated the link its recipient was already holding.
+  await expect(row.getByTestId("invite-reissue"), "the two-button row is gone").toHaveCount(0);
+  await expect(row.getByTestId("invite-resend")).toHaveCount(0);
+  //
+  // Measured at the NETWORK, not by looking for the link. A first version asserted the link was hidden
+  // right after the dialog opened, and a build that minted ON OPEN still passed it — the request had not
+  // come back yet, so "not there" and "not asked for" looked identical. Counting calls cannot be early.
+  const minted: string[] = [];
+  page.on("request", (r) => { if (/\/invites\/[^/]+\/reissue/.test(r.url())) minted.push(r.url()); });
 
-  // the hand-off itself: from the row, not from somewhere else on the page
-  await row.getByTestId("invite-reissue").click();
-  const confirm = page.getByTestId("members-confirm");
-  await expect(confirm, "the confirm appears").toBeVisible({ timeout: 10_000 });
-  // and it says the previous link dies — an admin who is not told will hand out a link they have just
-  // invalidated for the person they already mailed
-  const warning = (await page.locator('[role="dialog"], [data-testid*="confirm"]').first().textContent()) ?? "";
-  expect(warning, `the confirm warns that the old link stops working: ${warning.slice(0, 200)}`)
-    .toMatch(/stop working|使えなくなります/);
-  await confirm.click();
+  await row.getByTestId("invite-link-open").click();
+  await expect(page.getByTestId("invite-link-dialog"), "the dialog opens").toBeVisible({ timeout: 10_000 });
+  await sleep(1200); // long enough for a mint-on-open to have travelled
+  expect(minted.length, `opening it issued a link :: ${JSON.stringify(minted)}`).toBe(0);
+  await expect(link, "…and there is nothing to copy yet").toBeHidden();
+  const warning = (await page.getByTestId("invite-link-warn").textContent()) ?? "";
+  expect(warning, `it says what issuing will cost: ${warning.slice(0, 200)}`)
+    .toMatch(/stops the previous one|使えなくなります/);
+
+  // …and the invitation the recipient holds is still the one from before
+  await page.getByTestId("secret-dialog-done").click();
+  await sleep(400);
+  await row.getByTestId("invite-link-open").click();
+  await expect(page.getByTestId("invite-link-mint"), "the deliberate second press").toBeVisible();
+  await page.getByTestId("invite-link-mint").click();
 
   await expect(link, "the new link arrives in the same modal").toBeVisible({ timeout: 20_000 });
+  expect(minted.length, "…and exactly one deliberate press produced it").toBe(1);
   const after = (await link.textContent())!.trim();
   expect(after, "a usable link, not a confirmation message").toMatch(/\/invite\?token=/);
   expect(after, "and it is a DIFFERENT link — the old one has been replaced").not.toBe(before);
@@ -98,7 +112,11 @@ test("#638: the pending list is a column of rows, and its controls line up", asy
     return {
       rows: rows.length,
       revokeX: [...new Set(rows.map((r) => xOf(r, "invite-revoke")))],
-      mailed: rows.map((r) => r.querySelector('[data-testid="invite-mailed"]')?.getAttribute("data-mailed")),
+      // ③ the row has exactly two controls now: the link, and revoking it
+      controls: [...new Set(rows.map((r) => r.querySelectorAll("button").length))],
+      // #638 ⑤: the delivery column is gone. It said the same thing on every row — the tenant has
+      // mail configured or it does not — so it was a column that carried no information.
+      mailed: rows.filter((r) => r.querySelector('[data-testid="invite-mailed"]')).length,
       // ⑤ nothing in this list styles itself inline any more
       inlineStyled: [...box.querySelectorAll("*")].filter((el) => el.getAttribute("style")).length,
       scrolls: box.scrollHeight > box.clientHeight + 1,
@@ -108,8 +126,8 @@ test("#638: the pending list is a column of rows, and its controls line up", asy
   expect(m.rows, "the stub filled the list").toBe(3);
   // ④ the control is in one place regardless of how long the address is
   expect(m.revokeX.length, `revoke sits at ${JSON.stringify(m.revokeX)} across rows of different widths`).toBe(1);
-  // ⑩ (slice 1) still reported, per row
-  expect(new Set(m.mailed), "the rows still say who has been mailed").toEqual(new Set(["yes", "no"]));
+  expect(m.mailed, "no row carries the delivery column any more (⑤)").toBe(0);
+  expect(m.controls, `each row carries two controls :: ${JSON.stringify(m.controls)}`).toEqual([2]);
   expect(m.inlineStyled, "no element in the list styles itself inline").toBe(0);
   expect(m.scrolls, "three invitations do not need a scrollbar").toBe(false);
 });
