@@ -150,7 +150,8 @@
     "theme": "Theme",
     "data": "Data",
     "notifications": "Notifications",
-    "apiKeys": "API keys"
+    "apiKeys": "API keys",
+    "security": "Security"
   },
   "account": {
     "activityTitle": "Activity",
@@ -236,7 +237,25 @@
     "vimMono": "Monospace while vim is on",
     "vimMonoHint": "Vim aligns by column, so the editor switches to a monospace face while it is on. Turn this off to keep the reading face with vim's keys.",
     "vimMonoOn": "On",
-    "vimMonoOff": "Off"
+    "vimMonoOff": "Off",
+    "factorsTitle": "Two-step sign-in",
+    "factorsDesc": "An authenticator app asks for a six-digit code after your password.",
+    "factorsHint": "Add the app on your phone, then confirm with a code so we know it works.",
+    "factorAdd": "Add authenticator",
+    "factorLabel": "Name",
+    "factorLabelPlaceholder": "Work phone",
+    "factorUnnamed": "Authenticator",
+    "factorScanHint": "Enter this key in your authenticator app, then type the code it shows.",
+    "factorSecretNote": "This key is shown once. Enter it now.",
+    "factorCode": "Code",
+    "factorCodePlaceholder": "123456",
+    "factorConfirm": "Confirm",
+    "factorAdded": "Authenticator added.",
+    "factorRemove": "Remove",
+    "factorRemoved": "Authenticator removed.",
+    "factorCodeWrong": "That code did not match.",
+    "factorStartFailed": "Could not start. Try again.",
+    "factorLimit": "You already have the maximum number. Remove one first."
   },
   "settings": {
     "back": "Back to app",
