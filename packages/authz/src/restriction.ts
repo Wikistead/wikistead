@@ -17,7 +17,8 @@ import { authzScopeForCheck, type AuthzScope } from './scope.js'
 // a space, what the key's list actually contains — is governance, and it is registered from the EE
 // composition root.
 //
-// This is the SECOND layer, not the guarantee. Eleven raw FGA calls and one raw `listObjects` never pass
+// This is the SECOND layer, not the guarantee. Nineteen raw FGA calls (measured 2026-08-06; ADR-216
+// says twelve, and the scan in `raw-fga-calls-637` is the authority) never pass
 // through the primitives, so completeness rides the allow-list of routes a narrowed key may enter. Said
 // in this order on purpose: the other order invites adding a route and trusting this to catch what it
 // does.
