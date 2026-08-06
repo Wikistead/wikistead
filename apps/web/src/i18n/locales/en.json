@@ -382,7 +382,10 @@
     "narrowCaps": "What it may do",
     "confinedSpaces": "Spaces: {{count}}",
     "confinedCaps": "Actions: {{count}}",
-    "confinedHidden": "and {{count}} you cannot see"
+    "confinedHidden": "and {{count}} you cannot see",
+    "spaceFilter": "Filter spaces",
+    "spaceFilterHidden_one": "{{count}} more, hidden by the filter",
+    "spaceFilterHidden_other": "{{count}} more, hidden by the filter"
   },
   "adminAuth": {
     "title": "Authentication",

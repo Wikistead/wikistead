@@ -7,6 +7,7 @@ import { Copy, Trash2, ChevronRight } from "lucide-react"; // #544: an icon comp
 import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpaces, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
+import { filterSpaceOptions, hiddenCount } from "./space-filter";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: revoking a key is irreversible — confirm first
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
@@ -102,8 +103,13 @@ export function ApiKeysPanel({
   // narrowing precisely because a page picker means handling a tree, and a space picker does not.
   const narrowedCreate = useCreateNarrowedApiKey();
   const spacesQ = useSpaces();
+  const [spaceFilter, setSpaceFilter] = useState("");
   const [narrowing, setNarrowing] = useState(false);
   const [pickedSpaces, setPickedSpaces] = useState<string[]>([]);
+  // Derived, not stored: a stale filtered copy is how a picker starts disagreeing with its source.
+  const allSpaces = spacesQ.data ?? [];
+  const shownSpaces = filterSpaceOptions(allSpaces, spaceFilter, pickedSpaces);
+  const hidden = hiddenCount(allSpaces, shownSpaces);
   const [pickedCaps, setPickedCaps] = useState<string[]>([]);
   // #504: a revoked key never authenticates again (the member issues a new one) — confirm, by name.
   const [revoking, setRevoking] = useState<{ id: string; name: string } | null>(null);
@@ -186,8 +192,15 @@ export function ApiKeysPanel({
               <p className="text-xs text-fg-dim">{t("adminApi.narrowHint")}</p>
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-fg-dim">{t("adminApi.narrowSpaces")}</span>
+                {/* #661: a tenant's spaces are not few — `GET /spaces` has no bound and this form was
+                    built after #623 swept the other fourteen lists, so it inherited none of that work.
+                    The filter is the shared `Input`; the list stays checkboxes because this is a
+                    MULTI-select, which the member typeahead (#617, one pick) does not model. */}
+                <Input value={spaceFilter} onChange={(e) => setSpaceFilter(e.target.value)}
+                  placeholder={t("adminApi.spaceFilter")} aria-label={t("adminApi.spaceFilter")}
+                  data-testid="api-key-space-filter" />
                 <ListBox className="flex flex-col gap-1" data-testid="api-key-space-list">
-                  {(spacesQ.data ?? []).map((sp) => (
+                  {shownSpaces.map((sp) => (
                     <label key={sp.id} className="flex items-center gap-2 text-sm" data-testid="api-key-space-option">
                       <input type="checkbox" checked={pickedSpaces.includes(sp.id)}
                         onChange={() => toggle(pickedSpaces, setPickedSpaces, sp.id)}
@@ -196,6 +209,13 @@ export function ApiKeysPanel({
                     </label>
                   ))}
                 </ListBox>
+                {/* A narrowed list must not read as a short one. Without this, "3 spaces" looks like the
+                    whole tenant and a key gets issued against a roster the reader thinks is complete. */}
+                {hidden > 0 && (
+                  <span className="text-xs text-fg-dim" data-testid="api-key-space-hidden">
+                    {t("adminApi.spaceFilterHidden", { count: hidden })}
+                  </span>
+                )}
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-fg-dim">{t("adminApi.narrowCaps")}</span>
