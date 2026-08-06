@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays, ArrowRight } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "../components/ui/popover";
 import { Input } from "./Input";
 import { Button } from "../components/ui/button";
@@ -32,6 +32,38 @@ export function toISODate(t: number): string {
   const d = new Date(t);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+/**
+ * #641the windows a reader actually asks for.
+ *
+ * Exported and pure so they can be checked without a browser: a preset is arithmetic, and the way it goes
+ * wrong is off-by-one at the ends. `now` is a parameter for the same reason — a range that reads the
+ * clock cannot be asserted, only observed.
+ *
+ * UTC throughout, like the rest of this file: the server's day buckets are UTC, and a preset that
+ * computed "today" locally would ask for a different day than the one the chart draws.
+ */
+export const PRESETS: { key: string; range: (now?: number) => { from: string; to: string } }[] = [
+  { key: "7d", range: (now = Date.now()) => lastDays(now, 6) },
+  { key: "30d", range: (now = Date.now()) => lastDays(now, 29) },
+  {
+    key: "month",
+    range: (now = Date.now()) => {
+      const d = new Date(now);
+      return { from: toISODate(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), to: toISODate(now) };
+    },
+  },
+];
+
+/** A window of `back + 1` days ending today — inclusive at both ends, which is what the server reads.
+ *
+ *  NOT named `window`: a module-scope function by that name shadows the global for the whole module, and
+ *  anything in here that touches `window.*` then reads a function instead. Measured — the app stopped
+ *  rendering entirely and eight unrelated specs went red with it. */
+function lastDays(now: number, back: number): { from: string; to: string } {
+  const end = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
+  return { from: toISODate(end - back * DAY), to: toISODate(end) };
 }
 
 /**
@@ -116,24 +148,13 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
     <div className="flex flex-col gap-1 text-xs text-fg-dim">
       {t("spaceAnalytics.period")}
       <div className="flex items-center gap-2">
-        {/* The typed path stays. A calendar is faster for "last week", and a text field is faster for a
-            date you already know — removing it would trade one capability for another. */}
-        <Input
-          inputSize={size}
-          type="date"
-          value={from ?? ""}
-          onChange={(e) => onChange({ from: e.target.value || undefined, to })}
-          data-testid={`${testId}-from`}
-          aria-label={t("spaceAnalytics.from")}
-        />
-        <Input
-          inputSize={size}
-          type="date"
-          value={to ?? ""}
-          onChange={(e) => onChange({ from, to: e.target.value || undefined })}
-          data-testid={`${testId}-to`}
-          aria-label={t("spaceAnalytics.to")}
-        />
+        {/* #641/ONE entrance on the row.
+            The two fields were `type="date"`, so the row carried three ways into a calendar and two of
+            them opened Chrome's own — square corners, white frame, the thing the reject called .
+            Hiding `::-webkit-calendar-picker-indicator` would not have done it: F4 and Alt+Down still
+            open it, and the browser keeps formatting the value. The `type` itself had to change.
+            The typed path is not lost, only moved: the fields live inside the panel now (below), so
+            "keyboard-only must still work" holds and the row has one control. */}
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline" size={size} data-testid={`${testId}-trigger`} aria-label={t("spaceAnalytics.pickRange")}>
@@ -142,6 +163,46 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
             </Button>
           </PopoverTrigger>
           <PopoverContent data-testid={`${testId}-panel`} className="w-[17rem]">
+            {/* the typed path, where the calendar is. `type="text"` rather than `date`: this is what
+                keeps the browser's own picker out of the product. `YYYY-MM-DD` is what the server takes
+                and what the grid writes, so the two halves of this panel speak one language. */}
+            <div className="mb-2 flex items-center gap-1.5">
+              <Input
+                inputSize="sm"
+                type="text"
+                inputMode="numeric"
+                placeholder="YYYY-MM-DD"
+                value={from ?? ""}
+                onChange={(e) => onChange({ from: e.target.value || undefined, to })}
+                data-testid={`${testId}-from`}
+                aria-label={t("spaceAnalytics.from")}
+              />
+              <ArrowRight size={12} className="flex-none text-fg-dim" aria-hidden />
+              <Input
+                inputSize="sm"
+                type="text"
+                inputMode="numeric"
+                placeholder="YYYY-MM-DD"
+                value={to ?? ""}
+                onChange={(e) => onChange({ from, to: e.target.value || undefined })}
+                data-testid={`${testId}-to`}
+                aria-label={t("spaceAnalytics.to")}
+              />
+            </div>
+            {/* #641the presets are what a reader reaches for most — a window ending today, which
+                otherwise costs two clicks in two different months. Computed in UTC like everything else
+                here, because the server's day buckets are UTC. */}
+            <div className="mb-2 flex flex-wrap gap-1" data-testid={`${testId}-presets`}>
+              {PRESETS.map((p) => (
+                <Button
+                  key={p.key}
+                  variant="ghost"
+                  size="sm"
+                  data-testid={`${testId}-preset-${p.key}`}
+                  onClick={() => { onChange(p.range()); setOpen(false); }}
+                >{t(`spaceAnalytics.preset_${p.key}`)}</Button>
+              ))}
+            </div>
             <div className="mb-2 flex items-center justify-between">
               <Button variant="ghost" size="sm" aria-label={t("spaceAnalytics.prevMonth")}
                 data-testid={`${testId}-prev`}

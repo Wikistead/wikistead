@@ -93,7 +93,10 @@
     "period": "期間",
     "prevMonth": "前の月",
     "nextMonth": "次の月",
-    "clearRange": "クリア"
+    "clearRange": "クリア",
+    "preset_7d": "過去 7 日",
+    "preset_30d": "過去 30 日",
+    "preset_month": "今月"
   },
   "tenantAnalytics": {
     "title": "ワークスペース アナリティクス",

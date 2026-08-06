@@ -91,6 +91,11 @@ test("#641: a range is two clicks in one open panel", async ({ page }) => {
   await sleep(800);
   await expect(page.locator(PANEL), "…and the second click closes it").toBeHidden({ timeout: 4_000 });
 
+  // #641the typed fields moved INSIDE the panel (the row now has one entrance, and the two
+  // `type="date"` boxes that opened Chrome's own picker are gone). The panel is closed at this point, so
+  // reading them means opening it again — the range they hold is the assertion, not where they live.
+  await trigger.click();
+  await expect(page.locator(PANEL)).toBeVisible({ timeout: 8_000 });
   const [from, to] = await Promise.all([
     page.locator("[data-testid$=-from]").first().inputValue(),
     page.locator("[data-testid$=-to]").first().inputValue(),
