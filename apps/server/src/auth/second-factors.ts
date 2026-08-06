@@ -1,0 +1,160 @@
+// Storage for second factors (#656 / ADR-219 §7). Migration 117.
+//
+// The read/write layer only — no endpoints, no policy, no enrolment flow. Those are #657 and #652, and
+// putting any of them here would add branches nothing can reach yet.
+//
+// Two rules this file exists to hold, both of which are easy to get wrong at a call site:
+//
+//   1. The TOTP secret is ENCRYPTED, never hashed. Verification recomputes the code from it, so it has
+//      to come back — which is the opposite of the password rule next door in `password-hash.ts`, and
+//      the reason both live behind functions instead of raw SQL scattered through routes.
+//   2. An UNCONFIRMED factor is not a factor. `confirmed_at` is NULL until somebody proves they can
+//      produce a code from it, and every question of the form "does this member have a factor" reads
+//      only confirmed rows. Counting an abandoned enrolment would let a policy be satisfied by starting
+//      one and walking away, and would let the last admin "hold" a factor they cannot use.
+import type { TenantDb } from '../db/index.js'
+import { encryptSecret, decryptSecret } from './secret-crypto.js'
+
+export type FactorKind = 'totp' | 'passkey'
+
+/** A factor as the member's own list shows it. Deliberately carries no secret. */
+export type MemberFactor = {
+  id: string
+  kind: FactorKind
+  label: string
+  createdAt: Date
+  confirmedAt: Date | null
+  lastUsedAt: Date | null
+}
+
+type FactorRow = {
+  id: string
+  kind: FactorKind
+  label: string
+  created_at: Date
+  confirmed_at: Date | null
+  last_used_at: Date | null
+}
+
+const toFactor = (r: FactorRow): MemberFactor => ({
+  id: r.id,
+  kind: r.kind,
+  label: r.label,
+  createdAt: r.created_at,
+  confirmedAt: r.confirmed_at,
+  lastUsedAt: r.last_used_at,
+})
+
+/**
+ * Begin a TOTP enrolment: a factor row and its encrypted secret, UNCONFIRMED.
+ *
+ * Both rows in one transaction. A header with no secret is a factor that can never be confirmed and
+ * shows up in the member's list as something they cannot use or explain; a secret with no header is
+ * unreachable. Neither is recoverable by the code that reads them, so neither is allowed to exist.
+ */
+export async function startTotpEnrolment(
+  db: TenantDb,
+  args: { tenantId: string; memberSub: string; secret: string; label?: string },
+): Promise<{ factorId: string }> {
+  // `db.tx`, not `db.sql.begin`: the driver owns the isolation dispatch (tenant-db.ts), and a
+  // namespace-promoted tenant needs its search_path set on the transaction's own connection. Reaching
+  // past the interface here would work on a logical tenant and read `public.*` on a promoted one.
+  return db.tx(async (sql) => {
+    const [row] = await sql<{ id: string }[]>`
+      INSERT INTO member_factors (tenant_id, member_sub, kind, label)
+      VALUES (${args.tenantId}, ${args.memberSub}, 'totp', ${args.label ?? ''})
+      RETURNING id`
+    const factorId = row!.id
+    await sql`
+      INSERT INTO member_totp_secrets (factor_id, tenant_id, secret_enc)
+      VALUES (${factorId}, ${args.tenantId}, ${encryptSecret(args.secret)})`
+    return { factorId }
+  })
+}
+
+/**
+ * The secret, decrypted, for a factor that exists.
+ *
+ * Returns null rather than throwing on a missing row: the caller's next line is "then the code is
+ * wrong", and a factor that vanished between two requests is not an exceptional condition.
+ */
+export async function totpSecretFor(db: TenantDb, factorId: string): Promise<string | null> {
+  const [row] = await db.sql<{ secret_enc: string }[]>`
+    SELECT secret_enc FROM member_totp_secrets WHERE factor_id = ${factorId}`
+  return row ? decryptSecret(row.secret_enc) : null
+}
+
+/**
+ * Confirm an enrolment. Returns false when there was nothing pending to confirm.
+ *
+ * `confirmed_at IS NULL` is in the WHERE on purpose: confirming twice would move the timestamp, which
+ * is the one thing the audit ledger reads to answer "when did this account get its factor".
+ */
+export async function confirmFactor(db: TenantDb, factorId: string): Promise<boolean> {
+  const rows = await db.sql`
+    UPDATE member_factors SET confirmed_at = now()
+    WHERE id = ${factorId} AND confirmed_at IS NULL
+    RETURNING id`
+  return rows.length > 0
+}
+
+/** What the member's own list shows — confirmed factors, oldest first. */
+export async function listFactors(db: TenantDb, memberSub: string): Promise<MemberFactor[]> {
+  const rows = await db.sql<FactorRow[]>`
+    SELECT id, kind, label, created_at, confirmed_at, last_used_at
+    FROM member_factors
+    WHERE member_sub = ${memberSub} AND confirmed_at IS NOT NULL
+    ORDER BY created_at`
+  return rows.map(toFactor)
+}
+
+/** Whether this member can actually present a factor. The question every policy check asks. */
+export async function hasConfirmedFactor(db: TenantDb, memberSub: string): Promise<boolean> {
+  const [row] = await db.sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM member_factors
+    WHERE member_sub = ${memberSub} AND confirmed_at IS NOT NULL`
+  return (row?.n ?? 0) > 0
+}
+
+/**
+ * Spend a counter, refusing one already spent.
+ *
+ * The comparison and the write are ONE statement. Reading `last_counter` and then updating it would
+ * let two requests carrying the same code both read the old value and both proceed — which is exactly
+ * the replay this exists to refuse, arriving as a race instead of as a retry.
+ *
+ * `>` and not `>=`: the same step may be spent once. `IS NULL` covers the first use.
+ */
+export async function spendTotpCounter(db: TenantDb, factorId: string, counter: number): Promise<boolean> {
+  const rows = await db.sql`
+    UPDATE member_totp_secrets SET last_counter = ${counter}
+    WHERE factor_id = ${factorId} AND (last_counter IS NULL OR last_counter < ${counter})
+    RETURNING factor_id`
+  return rows.length > 0
+}
+
+/** Note that a factor was used. Best-effort display data, never a gate. */
+export async function markFactorUsed(db: TenantDb, factorId: string): Promise<void> {
+  await db.sql`UPDATE member_factors SET last_used_at = now() WHERE id = ${factorId}`
+}
+
+/**
+ * Remove one factor. The detail row goes with it through ON DELETE CASCADE.
+ *
+ * Scoped by `member_sub` as well as by id: an id is a bearer token for a row otherwise, and the caller
+ * that removes "my factor" must not be able to remove somebody else's by guessing one.
+ */
+export async function deleteFactor(db: TenantDb, memberSub: string, factorId: string): Promise<boolean> {
+  const rows = await db.sql`
+    DELETE FROM member_factors WHERE id = ${factorId} AND member_sub = ${memberSub} RETURNING id`
+  return rows.length > 0
+}
+
+/**
+ * Remove every factor a member holds. This is what a member deletion and an administrator reset
+ * (ADR-219 §4) both do; #654 wires it to the paths that already remove credentials.
+ */
+export async function deleteAllFactors(db: TenantDb, memberSub: string): Promise<number> {
+  const rows = await db.sql`DELETE FROM member_factors WHERE member_sub = ${memberSub} RETURNING id`
+  return rows.length
+}
