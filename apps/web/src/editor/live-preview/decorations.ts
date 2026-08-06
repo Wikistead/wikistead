@@ -5847,6 +5847,11 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     width: "var(--wks-bar-w, 3px)",
     background: "var(--cb-bar, var(--callout-note, #6e7781))",
     pointerEvents: "none",
+    // #632an absolutely-positioned child is not clipped by its box's `border-radius`, so a square
+    // strip pokes out at the rounded corners of the first and last line. `inherit` gives it the same
+    // radius the line has — 4px at the ends of a todo, 0 in the middle, which is exactly the shape the
+    // continuous rule should take.
+    borderRadius: "inherit",
   },
   // Per-type accents (#150 → #158-C5 tokens; #199). Every type rides its FIXED semantic --callout-*
   // token (tokens.css, light/dark only) — never the tenant --accent, so a callout's colour keeps its

@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import { AdminEnrollmentSection } from "./AdminEnrollmentSection";
 import { AdminSignInMethodsSection } from "./AdminSignInMethodsSection";
@@ -28,7 +29,14 @@ export function AdminAuthTab() {
       <p className="mt-0 text-sm text-fg-dim">{t("adminAuth.body")}</p>
       {/* True of every row, not just OIDC: turning a method off can take away someone's way in, and
           the session you are holding survives the change so a mistake is recoverable. */}
-      <div className="mb-5 rounded-lg border border-l-[3px] border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] border-l-[var(--danger)] px-3 py-2.5 text-xs text-fg-dim" data-testid="sign-in-warning">{t("adminAuth.warning")}</div>
+      {/* #632the seventh box with this shape, and the one the original sweep missed — it spells
+          its border `border-[color-mix(…)]` rather than `border-border`, so a grep for the other spelling
+          never saw it. Same shared class as the other six now. */}
+      <div
+        className="wks-left-bar mb-5 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] px-3 py-2.5 text-xs text-fg-dim"
+        style={{ "--wks-left-bar-color": "var(--danger)", "--wks-left-bar-pad": "0.75rem" } as React.CSSProperties}
+        data-testid="sign-in-warning"
+      >{t("adminAuth.warning")}</div>
 
       <AdminSignInMethodsSection />
 
