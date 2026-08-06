@@ -35,6 +35,26 @@ const IDLE_TTL_S = 7 * 24 * 3600 // sliding idle window (Valkey key TTL)
 const ABSOLUTE_TTL_S = 30 * 24 * 3600 // hard cap from login; NEVER extended
 const IDLE_REFRESH_THROTTLE_S = 3600 // re-slide at most once/hour so reads stay read-mostly
 
+/**
+ * #655 / ADR-219 §2: which door this session came through.
+ *
+ * NOT a two-valued "second factor: yes / no". The ruling that federated logins are out of scope cannot
+ * be said in two values — an implementer reading `satisfied: false` about an OIDC session would send it
+ * to an interstitial, which reverses the decision without anyone editing it. Naming the door instead
+ * makes "not asked" and "asked and not answered" different facts.
+ *
+ * NOT called `amr` either: this product does not receive the id_token's `amr` (`oidc.ts` discards it),
+ * and borrowing the name would claim a provenance nothing here established.
+ *
+ * ABSENT reads as `local` — see `doorOf`. Nothing enforces any of this yet; the value is recorded and
+ * unread, which is the whole of this slice.
+ */
+export type SessionDoor =
+  | 'local'         // the product's own password door, with no second factor behind it
+  | 'local+factor'  // …and a second factor was answered
+  | 'federated'     // an IdP said who this is (OIDC or SAML) — out of the policy's scope by ADR-219 §3
+  | 'operator'      // the break-glass path, which crosses requirements on purpose
+
 export interface SessionData {
   tenantId: string
   sub: string
@@ -43,6 +63,19 @@ export interface SessionData {
   groups: string[]
   createdAt: number // epoch ms
   absExpiry: number // epoch ms = createdAt + ABSOLUTE_TTL; checked on every read
+  /** Absent on every session written before #655; read it through `doorOf`, never directly. */
+  door?: SessionDoor
+}
+
+/**
+ * The door a session came through, for sessions that predate the field.
+ *
+ * An old cookie reads as `local` — the value that will one day be asked for a factor — rather than as
+ * anything satisfied. Grandfathering would have made "hold a cookie from last week" the way around a
+ * requirement introduced this week, which is the shape of a bypass rather than of a migration.
+ */
+export function doorOf(s: Pick<SessionData, 'door'>): SessionDoor {
+  return s.door ?? 'local'
 }
 
 const key = (sid: string) => `sess:${sid}`
@@ -82,7 +115,7 @@ function newSid(): string {
 
 export async function createSession(
   valkey: IORedis,
-  m: { tenantId: string; sub: string; email?: string | null; role?: string; groups?: string[] },
+  m: { tenantId: string; sub: string; email?: string | null; role?: string; groups?: string[]; door?: SessionDoor },
 ): Promise<string> {
   const now = Date.now()
   const data: SessionData = {
@@ -93,6 +126,9 @@ export async function createSession(
     groups: m.groups ?? [],
     createdAt: now,
     absExpiry: now + ABSOLUTE_TTL_S * 1000,
+    // Omitted rather than defaulted here: a caller that does not say reads back as `local` through
+    // `doorOf`, and writing a default at this depth would hide which callers had been wired.
+    ...(m.door ? { door: m.door } : {}),
   }
   const sid = newSid()
   await valkey.set(key(sid), JSON.stringify(data), 'EX', IDLE_TTL_S)
@@ -184,6 +220,10 @@ export async function establishMemberSession(
     // the PROFILE from claims (there are no claims — an OIDC login refreshes name/picture/groups
     // from the IdP at every sign-in; a local member's profile is their own to edit, ADR-190).
     localIdentity?: boolean
+    // #655 / ADR-219 §2: which door the caller opened. Left optional because an absent value reads as
+    // `local` — the unsatisfied end — so a path that forgets is answered conservatively rather than
+    // handed a pass. All five product callers name it; a pin holds them to that.
+    door?: SessionDoor
   },
 ): Promise<string> {
   // #554 / ADR-197 §5 (S0): the reserved internal sub space — an externally-asserted subject that
@@ -298,5 +338,6 @@ export async function establishMemberSession(
     email: claims.email ?? null,
     role,
     groups: row.groups,
+    ...(opts?.door ? { door: opts.door } : {}),
   })
 }

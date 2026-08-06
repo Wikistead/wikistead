@@ -152,7 +152,9 @@ export async function authLocalPlugin(app: FastifyInstance) {
         { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
         req.tenant,
         { sub: outcome.sub },
-        { localIdentity: true },
+        // #655: the product's own door. `local` rather than `local+factor` — nothing asks for a factor
+        // yet, and claiming one was answered would be the first lie the enforcement slice reads.
+        { localIdentity: true, door: 'local' },
       )
       reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
       return reply.code(201).send({ ok: true })
@@ -436,7 +438,9 @@ export async function authLocalPlugin(app: FastifyInstance) {
           { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
           req.tenant,
           { sub: row.member_sub },
-          { localIdentity: true },
+          // #655: the product's own door. `local` rather than `local+factor` — nothing asks for a factor
+        // yet, and claiming one was answered would be the first lie the enforcement slice reads.
+        { localIdentity: true, door: 'local' },
         )
       } catch (err) {
         // Only an AUTHORIZATION refusal becomes the uniform 401. A Valkey outage, an FGA timeout or

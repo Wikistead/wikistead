@@ -278,7 +278,7 @@ export async function authPlugin(app: FastifyInstance) {
       const deps = { db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver }
       let sid: string | null = null
       try {
-        sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally }) // existing member → session
+        sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated' }) // existing member → session
       } catch (e) {
         // Not a member yet. Identity is proven but membership is NOT — login alone
         // never grants it (the identity≠membership invariant). Membership appears
@@ -296,7 +296,7 @@ export async function authPlugin(app: FastifyInstance) {
       if (!sid && st.inviteToken) {
         try {
           if (await acceptInvite({ db, fga: app.fga }, tenant, st.inviteToken, claims, { subMintedInternally })) {
-            sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally })
+            sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated' })
           }
         } catch (e) {
           // A seat-cap hit (402) is surfaced distinctly so the user learns the tenant is
