@@ -1053,7 +1053,9 @@
     "inviteLinkOpen": "Invitation link",
     "inviteLinkWarn": "Issuing a new link stops the previous one from working.",
     "inviteLinkMint": "Issue a new link",
-    "inviteLinkMintMail": "Issue and send by email"
+    "inviteLinkMintMail": "Issue and send by email",
+    "groupUnassign": "Remove role",
+    "groupUnassignConfirm": "Remove the role granted to {{group}}? Everyone in that group loses what it confers."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",

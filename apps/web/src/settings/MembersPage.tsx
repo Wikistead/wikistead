@@ -20,7 +20,7 @@ import { X } from "lucide-react"; // #544: icon component, not a text glyph
 import { useRoles, useRoleAssignments, useAssignRole, useAssignTenantTier, useUnassignRole, useTenantGroupNames, useTenantRoleDefaults } from "../data/queries";
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
-import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, groupConferredRoles, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
+import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, revocableGroupGrants, groupConferredRoles, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
 import { GroupRolesMark } from "./GroupRolesMark"; // #603: what the member's GROUPS confer, folded into one mark
 import { RowLead, ROW_LEAD_PX } from "../ui/RowLead"; // #625: one box, so both row kinds start their name at one x
 import { tenantTierCaps } from "./role-nouns";
@@ -328,21 +328,18 @@ export function MembersPage() {
                   ariaLabel={t("members.roleFor", { sub: row.label })}
                   testId="member-role-select"
                   options={[
-                    { value: "", label: t("adminRoles.rolePlaceholder") },
+                    // #643: the placeholder is a label, not an action. It USED to be the revocation
+                    // "choose a role" quietly took one away — which nobody reads it as, and which put a
+                    // destructive act in the list of ordinary choices. Revoking moved to the row's ⋯,
+                    // where this screen keeps every other destructive action (#591's shape: the dropdown
+                    // changes a role, adding and removing are elsewhere).
+                    { value: "", label: t("adminRoles.rolePlaceholder"), disabled: true },
                     ...withRoleTips(roleOptions(roles.data?.custom ?? [], tierCaps), "tenant"),
                   ]}
                   onChange={(value) => {
                     const choice = resolveRoleChoice(value, tenantCustom);
-                    const held = row.group?.held ?? [];
                     const saved = { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("toast.actionFailed")) };
-                    if (choice.kind === "none") {
-                      // choosing the placeholder is the revocation (#579: the group row's third cell is
-                      // empty — this Select is where a grant is taken away). Built-in rows revoke through
-                      // the same reference-counted core as custom ones (#603: the DELETE route reads
-                      // built-in rows now, and revoking is never entitlement-gated).
-                      for (const h of held) if (!h.managed) unassignRole.mutate(h.assignmentId, { onSuccess: (data) => notifyRevokeOutcome(t, data), onError: (err) => notifyRevokeError(t, err) });
-                      return;
-                    }
+                    if (choice.kind === "none") return; // unreachable: the placeholder is disabled above
                     // both paths converge on the server (#579 / a71d8100): the new grant is written and
                     // the principal's other manual tenant assignments fold — a replacement, not a stack
                     if (choice.kind === "tier") assignTier.mutate({ capability: choice.role, principal: row.key }, saved);
@@ -350,7 +347,30 @@ export function MembersPage() {
                   }}
                 />
               </td>
-              <td />
+              <td style={{ textAlign: "right" }}>
+                {/* #643: the same ⋯ a person's row wears, so the two rows read alike and destructive
+                    actions live in one place on this screen. One item today; it is a menu rather than a
+                    bare button because the affordance is what a reader has learned to look for here, and
+                    a second group action would otherwise arrive as a different-looking control. */}
+                {revocableGroupGrants(row.group).length > 0 && (
+                  <OverflowMenu
+                    testId="group-actions"
+                    label={t("members.rowActions", { name: row.label })}
+                    items={[{ value: "unassign", label: t("members.groupUnassign"), danger: true, testId: "group-unassign" }]}
+                    onSelect={() => setConfirming({
+                      message: t("members.groupUnassignConfirm", { group: row.label }),
+                      run: () => {
+                        // the same call the placeholder used to make, and the same skip: a machine-held
+                        // row (ADR-183 §1) is not this console's to take away. Moved, not rewritten — a
+                        // fresh implementation is where that skip goes missing.
+                        for (const h of revocableGroupGrants(row.group)) {
+                          unassignRole.mutate(h.assignmentId, { onSuccess: (data) => notifyRevokeOutcome(t, data), onError: (err) => notifyRevokeError(t, err) });
+                        }
+                      },
+                    })}
+                  />
+                )}
+              </td>
             </tr>
           ) : (
             (() => {

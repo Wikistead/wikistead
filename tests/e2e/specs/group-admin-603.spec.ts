@@ -61,9 +61,13 @@ test("#603: a group is offered the tiers, granted admin, shown holding it — an
   // back as "unknown group" and vanished from this very filter)
   await expect(rowAfter.getByTestId("member-role-select"), "the pick replaced the tier").toContainText(roleName, { timeout: 10_000 });
 
-  // choosing the placeholder is the revocation. A group's row exists BECAUSE of its assignments
-  // (#579: no member row to hang it on), so with the last grant gone the row leaves the table.
-  await rowAfter.getByTestId("member-role-select").click();
-  await page.getByRole("option", { name: "Select role" }).click();
+  // #643: the revocation moved OUT of the picker. Choosing the placeholder used to perform it, which is
+  // what this step used to drive — a destructive act wearing a label that only invites, in the list of
+  // ordinary choices. It lives in the row's ⋯ now, behind a confirm, like every other destructive action
+  // on this screen. What is asserted is unchanged: a group's row exists BECAUSE of its assignments
+  // (#579: there is no member row to hang it on), so with the last grant gone the row leaves the table.
+  await rowAfter.getByTestId("group-actions-trigger").click();
+  await page.getByTestId("group-unassign").click();
+  await page.getByTestId("members-confirm").click();
   await expect(rowAfter, "with no grant left, the group leaves the table").toHaveCount(0, { timeout: 10_000 });
 });

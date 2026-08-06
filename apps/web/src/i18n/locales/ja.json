@@ -1052,7 +1052,9 @@
     "inviteLinkOpen": "招待リンク",
     "inviteLinkWarn": "新しいリンクを発行すると、前のリンクは使えなくなります。",
     "inviteLinkMint": "新しいリンクを発行",
-    "inviteLinkMintMail": "発行してメールで送る"
+    "inviteLinkMintMail": "発行してメールで送る",
+    "groupUnassign": "ロールを外す",
+    "groupUnassignConfirm": "{{group}} に渡したロールを外しますか？ そのグループの全員が、このロールで得ていた権限を失います。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

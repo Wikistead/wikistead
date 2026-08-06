@@ -184,6 +184,19 @@ export function groupRoleValue(row: GroupRoleRow | undefined): string {
   return held.builtin ? `tier:${held.builtin}` : `role:${held.roleId}`;
 }
 
+/** The grants on a group row this console may take away.
+ *
+ *  #643: the revocation moved out of the role picker (where choosing the placeholder quietly performed
+ *  it) and into the row's ⋯ menu. It is a function rather than an inline filter so the skip travels with
+ *  it: a MACHINE-held grant is not this console's to remove (ADR-183 §1 — what a directory writes, the
+ *  directory takes back), and that condition is the part a rewrite at the new call site would drop.
+ *
+ *  It also decides whether the menu appears at all: a group with nothing revocable gets no ⋯, rather
+ *  than a menu whose only item could not work (#606's always-failing button). */
+export function revocableGroupGrants(row: GroupRoleRow | undefined): GroupRoleRow["held"] {
+  return (row?.held ?? []).filter((h) => !h.managed);
+}
+
 /**
  * #603 (review rejection 2026-08-05): what each GROUP confers, by name — the member rows join against this
  * to say "<role> (via <group>)".
