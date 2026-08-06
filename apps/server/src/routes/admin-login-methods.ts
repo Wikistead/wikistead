@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireTenantAdmin, requireConnectionManager, isTenantAdmin } from '@wikistead/authz'
 import {
-  mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersWithoutConfirmedFactor,
+  mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersUnsatisfiedBy,
   secondFactorStance, floorMet, interstitialCanMint, type FactorStance,
 } from '../auth/factor-policy.js' // #652 / ADR-219 §4, #676 / ADR-222
 import { resolveEntitlements } from '@wikistead/entitlements'
@@ -9,7 +9,7 @@ import { emit } from '@wikistead/events'
 import { loginMethodCeiling, setPlatformLoginDisabled } from '../auth/login-methods.js'
 import { federatedWayInCount, resolveSsoStance } from '../auth/sso-stance.js'
 import { auditIfEntitled } from '../audit/outbox.js'
-import { destroyUnsatisfiedSessions } from '../auth/session.js' // #652 / ADR-219 §2
+import { destroyUnsatisfiedSessions, countSweptSessions } from '../auth/session.js' // #652 / ADR-219 §2, #679
 import { loadPlatformOidc } from '../auth/oidc.js'
 import { resolveLogin } from './auth.js'
 
@@ -126,6 +126,32 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     }
   })
 
+  /**
+   * How many members a stance would sign out, asked BEFORE it is written (#679 / ADR-222 §4).
+   *
+   * The switch's confirmation says what changes, and "N members will be signed out and asked to enrol a
+   * passkey" is the part a tenant cannot work out for itself. The same query the write path runs, so
+   * the number and the act cannot disagree — a count computed a second way is a number that is right
+   * until somebody edits one of them.
+   *
+   * A GET, and idempotent: it writes nothing and answers the same thing twice.
+   */
+  app.get<{ Querystring: { kinds?: string } }>('/admin/login-methods/impact', async (req, reply) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    const asked = req.query?.kinds
+    if (!asked || !['off', 'any', 'passkey', 'totp'].includes(asked)) {
+      return reply.code(400).send({ error: 'unknown second-factor stance', code: 'bad_stance' })
+    }
+    const stance = asked as FactorStance
+    const subs = stance === 'off' ? [] : await membersUnsatisfiedBy(req.db, stance, req.headers.host)
+    // Members, not sessions: a person signed in twice is one person being asked to enrol, and the
+    // sentence is about people. `signedOut` counts only those who actually hold a session the sweep
+    // would take, because "12 will be signed out" about eight people who were not signed in anyway is
+    // a number that overstates what is happening.
+    const signedOut = await countSweptSessions(app.valkey, req.tenant.id, subs)
+    return { stance, unsatisfied: subs.length, signedOut }
+  })
+
   app.patch<{ Body: { platformLoginEnabled?: boolean; localLoginEnabled?: boolean; ssoRequired?: boolean; secondFactorRequired?: boolean; secondFactorKinds?: string } }>('/admin/login-methods', async (req, reply) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
     // #605 / ADR-210: the STANCE switch. ON has write-time preconditions (§R5-4, own_idp_required's
@@ -212,7 +238,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         // Outside the transaction on purpose — a stance that was written must not roll back because a
         // revocation failed, and the door refuses these sessions either way.
         const revoked = await destroyUnsatisfiedSessions(
-          app.valkey, req.tenant.id, await membersWithoutConfirmedFactor(req.db, req.headers.host))
+          app.valkey, req.tenant.id, await membersUnsatisfiedBy(req.db, stance, req.headers.host))
         req.log.info({ tenantId: req.tenant.id, revoked }, 'second-factor policy on: revoked unsatisfied sessions')
       }
       // Additive (#228): `required` stays, derived, so an existing subscriber is not broken by a field
