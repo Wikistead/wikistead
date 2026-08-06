@@ -196,3 +196,45 @@ test("#653: the enrolment key is shown once, in the box that says so", async ({ 
   await page.getByTestId("factor-cancel").click();
   await expect(page.getByTestId("factor-enrolling")).toBeHidden({ timeout: 10_000 });
 });
+
+test("#652: the last admin is told WHY, not that their code was wrong", async ({ page }) => {
+  test.setTimeout(120_000);
+  // The floor (ADR-219 §4) refuses the last admin's factor while the policy is on, and the code they
+  // typed is RIGHT. Reporting "that code did not match" sends them back to the authenticator for
+  // another one, which is refused for the same unstated reason — a loop with no exit in it.
+  //
+  // Stubbed at the network: reaching this state for real means being the last admin of a tenant with
+  // the stance on, which the server suite already measures. What is under test is what the SCREEN
+  // says when the server says this.
+  await page.route("**/api/me/factors", (r) => r.request().method() === "GET"
+    ? r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ factors: [
+        { id: "f-last", kind: "totp", label: "only one", createdAt: new Date().toISOString(),
+          confirmedAt: new Date().toISOString(), lastUsedAt: null },
+      ] }) })
+    : r.fallback());
+  await page.route("**/api/me/factors/f-last**", (r) => r.request().method() === "DELETE"
+    ? r.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({
+        error: "you are the last admin who can sign in under this tenant's second-factor requirement — enrol another authenticator, or turn the requirement off, before removing this one",
+        code: "last_admin_factor",
+      }) })
+    : r.fallback());
+
+  await gotoSecurity(page);
+  const row = page.locator('[data-testid="factor-row"]').filter({ hasText: "only one" }).first();
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await row.getByTestId("factor-remove").click();
+  await row.getByTestId("factor-remove-code").fill("123456");
+  await row.getByTestId("factor-remove-confirm").click();
+
+  // The message names the two ways out, and does NOT blame the code.
+  const toast = page.locator('[data-sonner-toast], [role="status"], [role="alert"]').first();
+  await expect(toast).toBeVisible({ timeout: 15_000 });
+  const said = (await toast.innerText()).toLowerCase();
+  // The screen's own sentence, translated — the server's prose never reaches the client (ApiError's
+  // message is built from the status and the path), and it is English only besides.
+  expect(said, `it explains rather than blaming the code: "${said}"`).toContain("last admin");
+  expect(said, "…and it does not say the code was wrong").not.toMatch(/did not match|一致しません/);
+
+  // …and the factor is still there, which is the point of the refusal
+  await expect(row).toBeVisible();
+});
