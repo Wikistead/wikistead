@@ -53,3 +53,7 @@ export { requireAuthzScope } from '@wikistead/authz'
 // #637 / ADR-216 §7: the EE composition root registers what a restriction MEANS; CE owns the refusal.
 export { registerAuthzRestrictionEvaluator } from '@wikistead/authz'
 export type { AuthzRestrictionEvaluator } from '@wikistead/authz'
+// #637 / ADR-216: the EE issuing route reuses CE's issuance gate and the space view check rather than
+// inventing a second permission for a smaller credential.
+export { isApiKeyIssuer, checkRelation, fgaClient } from '@wikistead/authz'
+export { resetAuthzRestrictionEvaluator } from '@wikistead/authz'
