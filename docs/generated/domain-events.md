@@ -78,6 +78,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `member.password_enabled` | An admin gave an existing member a password entrance (the account had none before). |
 | `member.factor_enrolled` | A member enrolled a second factor (TOTP) on their own account (#657 / ADR-219). |
 | `member.factor_removed` | A member removed a second factor from their own account, proving possession of it first (#660 / ADR-219 §8). |
+| `member.factors_reset` | An admin cleared a member's second factors so they could enrol again after losing the device; their sessions were ended with it (#644 / ADR-219 §4). |
 | `tenant.second_factor_policy_changed` | A tenant changed which second factors it requires: off, any, passkeys only or authenticator apps only (#652 / ADR-219 §4, #676 / ADR-222). |
 | `member.password_removed` | An admin removed a member's password entrance; their sessions were ended with it. |
 | `member.password_reset_requested` | A password reset link was requested for a member. |

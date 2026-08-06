@@ -1093,7 +1093,11 @@
     "groupUnassign": "ロールを外す",
     "groupUnassignConfirm": "{{group}} に渡したロールを外しますか？ そのグループの全員が、このロールで得ていた権限を失います。",
     "passwordLinkTitle": "パスワード設定リンク",
-    "passwordLinkNote": "メールでは届きません。本人に直接お渡しください。"
+    "passwordLinkNote": "メールでは届きません。本人に直接お渡しください。",
+    "resetFactors": "2 要素認証をリセット",
+    "resetFactorsConfirm": "{{name}} さんの 2 要素認証を解除します。次のサインインで登録し直してもらってください。",
+    "resetFactorsDone": "2 要素認証をリセットしました。",
+    "resetFactorsSelf": "自分の要素はアカウント設定から削除してください（その要素のコードで確認します）。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

@@ -135,6 +135,11 @@ export type DomainEvent =
   // #660: and giving one up. Emitted only for a CONFIRMED factor — clearing an abandoned enrolment is
   // tidying, not a change to who can authenticate this account.
   | { type: 'member.factor_removed'; tenantId: string; actorId: string; targetSub: string }
+  // #644an admin cleared somebody's second factors so they could get back in after losing the
+  // device. Separate from `member.factor_removed` because the ACTOR is a different person from the
+  // target — that is the whole security interest of it. An investigator asking "who took this account's
+  // second factor away" must not have to infer it from a self-service verb.
+  | { type: 'member.factors_reset'; tenantId: string; actorId: string; targetSub: string; count: number }
   // #652: the tenant's stance on second factors. A change to who may get in at all, which is why it is
   // an event rather than a settings write nobody hears about.
   // #676 / ADR-222: `kinds` is which factors the tenant now accepts ('off' | 'any' | 'passkey' |

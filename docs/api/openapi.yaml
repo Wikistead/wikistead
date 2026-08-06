@@ -587,6 +587,25 @@ paths:
         "403": { description: Permitted to see the resource but not to perform this action }
         "404": { description: Not viewable or absent (uniform — existence hiding) }
         default: { $ref: "#/components/responses/Error" }
+  /members/{sub}/factors:
+    # #644ruling 2 / ADR-219 §10a: an admin clears a member's second factors so they can enrol
+    # again after losing the device. It HANDS NOTHING BACK — no link, no token — because a recovery URL
+    # minted for a second factor would be a way past the second factor, which is what ADR-210 §2(b)
+    # refused. The member signs in the ordinary way and meets the enrolment step (#652). Sessions end
+    # with the factors (#474): the device they were satisfied on may be in somebody else's hands.
+    delete:
+      operationId: resetMemberFactors
+      tags: [members]
+      summary: Clear a member's second factors so they can enrol again (admin only)
+      parameters:
+        - { name: sub, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: "{ removed } — the count, and nothing else" }
+        "401": { description: Missing or invalid credentials }
+        "403": { description: Permitted to see the resource but not to perform this action }
+        "404": { description: Not viewable or absent (uniform — existence hiding) }
+        "409": { description: "Aimed at yourself (`reset_self`) — your own factor proves itself first (§8)" }
+        default: { $ref: "#/components/responses/Error" }
   /members/{sub}/suspend:
     # #627 / ADR-213: an admin suspends a member. Sign-in is blocked, tenant and group grants are
     # stripped, API keys are revoked and sessions end. The row, the external id and the SEAT stay

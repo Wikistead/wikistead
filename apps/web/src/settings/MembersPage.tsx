@@ -9,11 +9,11 @@ import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import {
-  listMembers, listInvites, createInvite, revokeInvite, reissueInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword, removePassword,
+  listMembers, listInvites, createInvite, revokeInvite, reissueInvite, changeRole, removeMember, eraseMemberAnalytics, enablePassword, removePassword, resetFactors,
   suspendMember, reactivateMember,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
-import { User, Users, KeyRound, Eraser, UserMinus, Ban, Undo2 } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
+import { User, Users, KeyRound, Eraser, UserMinus, Ban, Undo2, ShieldOff } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
 import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
@@ -464,6 +464,10 @@ export function MembersPage() {
                     },
                     // #626: only offered when the server would accept it — see memberMenuValues.
                     { value: "passwordRemove", label: t("members.removePassword"), icon: <KeyRound size={14} />, testId: "member-remove-password", danger: true },
+                    // #644only for a member who holds one — see memberMenuValues. Not `danger`
+                    // the other red items take something away, and this one gives a locked-out person
+                    // their account back. Colouring it as destruction would describe the wrong act.
+                    { value: "factorReset", label: t("members.resetFactors"), icon: <ShieldOff size={14} />, testId: "member-reset-factors" },
                     // #627: one of these at a time — see memberMenuValues.
                     { value: "suspend", label: t("members.suspend"), icon: <Ban size={14} />, testId: "member-suspend", danger: true },
                     { value: "reactivate", label: t("members.reactivate"), icon: <Undo2 size={14} />, testId: "member-reactivate" },
@@ -504,6 +508,29 @@ export function MembersPage() {
                             const code = e instanceof ApiError ? e.code : undefined;
                             notify.error(code === "last_way_in" ? t("members.removePasswordLastWayIn")
                               : code === "sso_exemption_required" ? t("members.removePasswordSsoFloor")
+                              : t("toast.actionFailed"));
+                          }
+                        })(),
+                      });
+                      return;
+                    }
+                    if (v === "factorReset") {
+                      // Confirmed like every other consequential item (#504), and the confirmation says
+                      // what the member will have to do afterwards — enrol again. Somebody reading it
+                      // is usually on the phone with the person it affects.
+                      setConfirming({
+                        message: t("members.resetFactorsConfirm", { name: m.display_name || m.email || m.sub }),
+                        run: () => void (async () => {
+                          try {
+                            await resetFactors(token, m.sub);
+                            await refresh();
+                            notify.success(t("members.resetFactorsDone"));
+                          } catch (e) {
+                            // The one named refusal: aiming it at yourself. Your own factor proves itself
+                            // first (#660), and folding that into "Action failed" would leave an admin
+                            // pressing a button that cannot work without saying why (#596/#606).
+                            notify.error(e instanceof ApiError && e.code === "reset_self"
+                              ? t("members.resetFactorsSelf")
                               : t("toast.actionFailed"));
                           }
                         })(),
