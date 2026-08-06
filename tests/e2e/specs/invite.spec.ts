@@ -43,7 +43,10 @@ test("admin invites a member; a fresh identity accepts in the browser and is sea
   await admin.getByLabel("invite email").fill(inviteEmail);
   await admin.getByRole("button", { name: "Send invite" }).click();
 
-  const link = await admin.getByTestId("invite-link").textContent();
+  // #638: the link is shown once, in a modal — read the value inside the box, then dismiss it so the
+  // console behind is usable again.
+  const link = await admin.getByTestId("invite-link-value").textContent();
+  await admin.getByTestId("secret-dialog-done").click();
   expect(link).toMatch(/\/invite\?token=inv_/);
   // Real SMTP: the invite email reached Mailpit.
   expect(await mailpitReceived(request, inviteEmail), "invite email delivered to Mailpit").toBe(true);
@@ -77,7 +80,10 @@ test("the same invite link cannot be accepted twice (consume-once)", async ({ br
   await admin.goto(`${WEB}/settings/members`);
   await admin.getByLabel("invite email").fill(`once${Date.now()}@e2e.test`);
   await admin.getByRole("button", { name: "Send invite" }).click();
-  const link = await admin.getByTestId("invite-link").textContent();
+  // #638: the link is shown once, in a modal — read the value inside the box, then dismiss it so the
+  // console behind is usable again.
+  const link = await admin.getByTestId("invite-link-value").textContent();
+  await admin.getByTestId("secret-dialog-done").click();
   await adminCtx.close();
 
   // First identity accepts → seated.

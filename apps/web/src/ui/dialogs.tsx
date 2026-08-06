@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { OneTimeSecret } from "./OneTimeSecret";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { Button } from "./Button";
 import { Input } from "./Input";
@@ -134,6 +135,40 @@ export function ConfirmDialog({
           <Button variant={tone === "primary" ? "primary" : "danger"} type="button" data-testid={confirmTestId} disabled={!typedOk} onClick={onConfirm}>
             {confirmLabel ?? t("common.delete")}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+//
+// The password-setup link was produced by a row's ⋯ menu and rendered under the invite FORM, most of a
+// screen away — because it shared `lastLink` with the invite flow, where "operate the form, read the
+// result beneath it" is the natural shape. From a row it is not: the reader looks at the row, and the
+// answer appears somewhere they are not.
+//
+// A modal is what the ruling suggested, and it is the one presentation that does not depend on where the
+// action was taken. What it contains is the SHARED box (`OneTimeSecret`) rather than a third spelling of
+// it, so a link that can only be shown once looks the same whichever of the three made it.
+export function SecretDialog({ open, title, secret, note, onClose, testId }: {
+  open: boolean;
+  /** what kind of secret this is — an invitation and a password entrance are not interchangeable (#606) */
+  title: string;
+  secret: string;
+  note?: ReactNode;
+  onClose: () => void;
+  testId?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent data-testid={testId ? `${testId}-dialog` : "secret-dialog"} className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <OneTimeSecret title={t("members.copyOnce")} value={secret} note={note} testId={testId} />
+        <DialogFooter>
+          <Button variant="primary" data-testid="secret-dialog-done" onClick={onClose}>{t("common.close")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

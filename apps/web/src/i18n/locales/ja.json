@@ -1051,7 +1051,8 @@
     "reissue": "新しいリンク",
     "resend": "再送",
     "reissueConfirm": "{{email}} に新しいリンクを作りますか？ 以前に渡したリンクは使えなくなります。",
-    "resendConfirm": "{{email}} に新しいリンクを送りますか？ 以前に送ったリンクは使えなくなります。"
+    "resendConfirm": "{{email}} に新しいリンクを送りますか？ 以前に送ったリンクは使えなくなります。",
+    "copyOnce": "いま控えてください。もう一度は表示できません。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",

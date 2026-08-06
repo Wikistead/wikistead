@@ -19,7 +19,7 @@ const HOOK = (i: number) => ({ id: `h${i}`, url: `https://example.test/hook/${i}
 
 const LISTS = [
   { path: "/admin/api", box: "api-key-list", row: "api-key-item", url: "**/api/api-keys", body: () => [KEY(0), KEY(1), KEY(2)] },
-  { path: "/admin/webhooks", box: "webhook-list", row: "webhook-item", url: "**/api/webhooks", body: () => [HOOK(0), HOOK(1), HOOK(2)] },
+  { path: "/admin/webhooks", box: "webhook-list", row: "webhook-item", url: "**/api/webhooks", body: () => ({ webhooks: [HOOK(0), HOOK(1), HOOK(2)], nextCursor: null }) },
 ] as const;
 
 for (const l of LISTS) {

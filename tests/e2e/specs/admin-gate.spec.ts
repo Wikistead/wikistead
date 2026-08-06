@@ -146,8 +146,12 @@ test("non-admin member is denied: admin → 403 (no menu entry); unviewable spac
   const inviteEmail = `gate${Date.now()}@e2e.test`;
   await admin.getByLabel("invite email").fill(inviteEmail);
   await admin.getByRole("button", { name: "Send invite" }).click();
-  const link = await admin.getByTestId("invite-link").textContent();
+  // #638: the link arrives in a modal now (it is shown once and the two links on this screen are made
+  // from different places), so it is read from the value inside the box and the modal is dismissed —
+  // the overlay covers the console behind it, which is the point.
+  const link = await admin.getByTestId("invite-link-value").textContent();
   expect(link).toMatch(/\/invite\?token=inv_/);
+  await admin.getByTestId("secret-dialog-done").click();
 
   // A fresh, non-member identity accepts → seated as a plain member (not admin,
   // not a manager of any space).
