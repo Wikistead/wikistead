@@ -947,7 +947,6 @@
     "inviteRole": "招待ロール",
     "roleFor": "{{sub}} のロール",
     "sendInvite": "招待を送信",
-    "inviteLinkLabel": "招待リンク（メールが無効な場合は共有）:",
     "emailed": "受信者に送信しました。",
     "notEmailed": "メール未送信。上のリンクをコピーしてください。",
     "pendingTitle": "保留中の招待",
@@ -966,7 +965,6 @@
     "reissuePasswordDone": "再設定リンクを作成しました",
     "enablePasswordDone": "パスワード設定リンクを作成しました",
     "rowActions": "{{name}} の操作",
-    "passwordLinkLabel": "パスワード設定リンク（本人に渡してください）:",
     "passwordSetupUnavailable": "このメンバーにはパスワードの入口を追加できません。",
     "status": {
       "idp": "IdP でサインインします",
@@ -991,7 +989,10 @@
     "inviteLinkMint": "新しいリンクを発行",
     "inviteLinkMintMail": "発行してメールで送る",
     "groupUnassign": "ロールを外す",
-    "groupUnassignConfirm": "{{group}} に渡したロールを外しますか？ そのグループの全員が、このロールで得ていた権限を失います。"
+    "groupUnassignConfirm": "{{group}} に渡したロールを外しますか？ そのグループの全員が、このロールで得ていた権限を失います。",
+    "passwordLinkTitle": "パスワード設定リンク",
+    "passwordLinkNote": "メールでは届きません。本人に直接お渡しください。",
+    "inviteLinkNote": "メールが無効なテナントでは、これを手渡ししてください。"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",
