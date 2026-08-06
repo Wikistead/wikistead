@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ListBox } from "../ui/list-rows";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSpaceTrash, useRestorePage, usePurgePage, type TrashEntry } from "../data/queries";
@@ -35,34 +36,39 @@ export function SpaceTrashTab() {
       )}
 
       {(trash.data?.length ?? 0) > 0 && (
-        <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
-          <thead>
-            <tr>
-              <th>{t("spaceTrash.page")}</th>
-              <th className="w-[160px]">{t("spaceTrash.deletedAt")}</th>
-              <th className="w-[200px]"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {trash.data!.map((e) => (
-              <tr key={e.id} data-testid="space-trash-row">
-                <td>
-                  {e.title || t("common.untitled")}
-                  {e.descendants > 0 && (
-                    <span className="ml-2 text-xs text-fg-dim">{t("spaceTrash.withDescendants", { count: e.descendants })}</span>
-                  )}
-                </td>
-                <td className="text-fg-dim">{new Date(e.deletedAt).toLocaleDateString()}</td>
-                <td className="text-right">
-                  <Button variant="default" size="sm" className="mr-2" disabled={restore.isPending} data-testid={`trash-restore-${e.id}`}
-                    onClick={() => onRestore(e)}>{t("spaceTrash.restore")}</Button>
-                  <Button variant="dangerGhost" size="sm" disabled={purge.isPending} data-testid={`trash-purge-${e.id}`}
-                    onClick={() => setPurging(e)}>{t("spaceTrash.purge")}</Button>
-                </td>
+        <ListBox>
+          {/* #623 slice 10: the shared box from #639 — the same 26rem everywhere, so a long list
+              scrolls inside itself instead of growing the page. The server bound landed in slice 4; the
+              container waited until #639 settled, so this did not become a second one. */}
+          <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-border [&_td]:p-2 [&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[11px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.03em] [&_th]:text-fg-dim">
+            <thead>
+              <tr>
+                <th>{t("spaceTrash.page")}</th>
+                <th className="w-[160px]">{t("spaceTrash.deletedAt")}</th>
+                <th className="w-[200px]"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {trash.data!.map((e) => (
+                <tr key={e.id} data-testid="space-trash-row">
+                  <td>
+                    {e.title || t("common.untitled")}
+                    {e.descendants > 0 && (
+                      <span className="ml-2 text-xs text-fg-dim">{t("spaceTrash.withDescendants", { count: e.descendants })}</span>
+                    )}
+                  </td>
+                  <td className="text-fg-dim">{new Date(e.deletedAt).toLocaleDateString()}</td>
+                  <td className="text-right">
+                    <Button variant="default" size="sm" className="mr-2" disabled={restore.isPending} data-testid={`trash-restore-${e.id}`}
+                      onClick={() => onRestore(e)}>{t("spaceTrash.restore")}</Button>
+                    <Button variant="dangerGhost" size="sm" disabled={purge.isPending} data-testid={`trash-purge-${e.id}`}
+                      onClick={() => setPurging(e)}>{t("spaceTrash.purge")}</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ListBox>
       )}
 
       <ConfirmDialog
