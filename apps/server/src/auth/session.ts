@@ -199,6 +199,46 @@ export async function destroyMemberSessions(
   }
 }
 
+/**
+ * Revoke the sessions a newly-enabled second-factor requirement would refuse at the door.
+ *
+ * ADR-219 §2: "Turning the policy on destroys the sessions of members with no factor enrolled. They
+ * sign in again and land in the interstitial. Leaving them alive would be a policy that starts applying
+ * tomorrow." Enforcement lives at the door (`auth-local.ts`), so without this the switch changes nothing
+ * for anybody currently signed in — which is exactly the shape of a policy that looks on and is not.
+ *
+ * Filtered by DOOR rather than by member, deliberately. The ADR names members with no factor, and §3
+ * puts federated sign-ins outside the policy altogether: revoking those would sign out every OIDC member
+ * in the tenant to no end — they would sign back in through the same door and be admitted. A session
+ * with no recorded door reads as `local` (§2's "never grandfathered"), so deployments predating the
+ * field are swept, not spared.
+ *
+ * Best-effort per session and never in the caller's transaction: a stance that was written must not be
+ * rolled back because one revocation failed, and the door refuses these sessions from now on regardless.
+ */
+export async function destroyUnsatisfiedSessions(
+  valkey: IORedis, tenantId: string, subs: string[],
+): Promise<number> {
+  let revoked = 0
+  for (const sub of subs) {
+    const sids = await valkey.smembers(memberKey(tenantId, sub)).catch(() => [] as string[])
+    for (const sid of sids) {
+      const raw = await valkey.get(key(sid)).catch(() => null)
+      if (!raw) {
+        await valkey.srem(memberKey(tenantId, sub), sid).catch(() => {}) // expired: tidy the index
+        continue
+      }
+      try {
+        if (doorOf(JSON.parse(raw) as SessionData) !== 'local') continue
+      } catch { /* malformed: treat as unsatisfied, below */ }
+      await valkey.del(key(sid)).catch(() => {})
+      await valkey.srem(memberKey(tenantId, sub), sid).catch(() => {})
+      revoked++
+    }
+  }
+  return revoked
+}
+
 // Turn already-verified identity claims into a membership-checked session.
 // IDENTITY (the claims) is proven by the IdP upstream; AUTHORIZATION to enter the
 // tenant is enforced HERE: throws 403 unless the subject is a provisioned member

@@ -4,7 +4,8 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   useAdminConnections, useCreateConnection, useUpdateConnection, useDeleteConnection, useReorderConnections,
   useLoginMethods, useUpdatePlatformLogin, useUpdateLocalLogin, useTenantSaml, useUpdateTenantSaml, useTestTenantOidc,
-  useUpdateSsoRequired, useSsoExemptions, useGrantSsoExemption, useRevokeSsoExemption, useTenantMemberCandidates, useTenantMemberNames,
+  useUpdateSsoRequired, useUpdateSecondFactorRequired, useSsoExemptions, useGrantSsoExemption, useRevokeSsoExemption,
+  useTenantMemberCandidates, useTenantMemberNames,
   type AdminConnectionDTO, type LoginMethodState,
 } from "../data/queries";
 import { ApiError } from "../data/apiClient";
@@ -85,6 +86,7 @@ export function AdminSignInMethodsSection() {
   const test = useTestTenantOidc();
 
   const ssoRequired = useUpdateSsoRequired();
+  const secondFactorRequired = useUpdateSecondFactorRequired();
   const exemptions = useSsoExemptions(canManageStance);
   const grantExemption = useGrantSsoExemption();
   const revokeExemption = useRevokeSsoExemption();
@@ -108,8 +110,25 @@ export function AdminSignInMethodsSection() {
   const [deleting, setDeleting] = useState<AdminConnectionDTO | null>(null);
   // #504: revoking an exemption removes somebody's break-glass — confirm first, like every removal here
   const [revokingExemption, setRevokingExemption] = useState<string | null>(null);
+  // #652turning the second-factor requirement ON is the one direction that changes what
+  // happens to people already signed in, so it asks first. OFF never does.
+  const [enablingFactorPolicy, setEnablingFactorPolicy] = useState(false);
 
   const rows = connections.data ?? [];
+  // #652the two write-time refusals the server can still raise even when the row looked
+  // writable (the last enrolled admin cleared their factor between the read and the click). Reported
+  // with the sentence that names the fix, not a generic failure.
+  const saveFactorPolicy = (on: boolean) => secondFactorRequired.mutate(on, {
+    onSuccess: () => notify.success(t("toast.saved")),
+    onError: (e) => {
+      const code = e instanceof ApiError ? e.code : undefined;
+      notify.error(
+        code === "admin_factor_required" ? t("adminAuth.secondFactorNoAdmin")
+        : code === "mfa_policy_not_entitled" ? t("adminAuth.method_unentitled")
+        : t("adminAuth.methodsSaveFailed"),
+      );
+    },
+  });
   const m = methods.data?.methods;
   const onError = (e: unknown) => {
     // the server names the refusal by CODE — never sniff English message text. review F7: an
@@ -573,6 +592,39 @@ export function AdminSignInMethodsSection() {
           </div>
         )}
 
+        {/* #652/ ADR-219 §4: the SECOND-FACTOR stance, beside the SSO one because it is the same
+            kind of fact — what this tenant demands of the people signing in. It has been writable over
+            the API since slice 2 and had no switch, which is the whole of the reject: a policy nobody
+            can turn on is a policy the product does not have.
+
+            The two refusals are drawn APART on purpose. `entitled: false` is "your plan", `canEnable:
+            false` is "no admin has enrolled a factor yet" — the second is the one an admin can fix in
+            the next minute, and folding them into one grey switch would send them to a pricing page
+            instead. Both are TEXT on the row, not only a tooltip: a disabled switch with a hover-only
+            reason reads as broken (the desktop-first rule is about extras, not about why something is
+            off). Turning it OFF is never blocked, so a tenant whose last enrolled admin left can still
+            lift the requirement — `canEnable` gates the ON direction alone. */}
+        {m && methods.data?.secondFactorRequired && (
+          <div className={METHOD_ROW} data-method-row data-testid="sign-in-method-second-factor-required">
+            <div className={METHOD_ROW_HEAD}>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">{t("adminAuth.secondFactorRequired")}</div>
+                <div className="text-xs text-fg-dim">{t("adminAuth.secondFactorRequiredBody")}</div>
+              </div>
+              {!methods.data.secondFactorRequired.entitled ? (
+                <span className="text-xs text-fg-dim" data-testid="second-factor-unentitled">{t("adminAuth.method_unentitled")}</span>
+              ) : !methods.data.secondFactorRequired.canEnable && !methods.data.secondFactorRequired.selected ? (
+                <span className="text-xs text-[var(--warning,#b45309)]" data-testid="second-factor-no-admin">{t("adminAuth.secondFactorNoAdmin")}</span>
+              ) : null}
+              <Switch checked={!!methods.data.secondFactorRequired.selected} testId="second-factor-required-toggle"
+                ariaLabel={t("adminAuth.secondFactorRequired")}
+                disabled={!canManageStance || !methods.data.secondFactorRequired.entitled
+                  || (!methods.data.secondFactorRequired.selected && !methods.data.secondFactorRequired.canEnable)}
+                onChange={(on: boolean) => (on ? setEnablingFactorPolicy(true) : saveFactorPolicy(false))} />
+            </div>
+          </div>
+        )}
+
         {/* #589 bounce ②: adding a connection grows a ROW in the list, with the row's own padding — it
             used to be a card below the list with different spacing, so "add a sign-in method" looked
             like leaving the list rather than extending it. */}
@@ -657,6 +709,18 @@ export function AdminSignInMethodsSection() {
           });
           setRevokingExemption(null);
         }}
+      />
+      {/* The warning the reject asked for. It is not "are you sure" theatre: people already signed in
+          with a password and no factor become subject to this the moment it is written, and the row
+          above cannot say that in the space it has. */}
+      <ConfirmDialog
+        open={enablingFactorPolicy}
+        title={t("adminAuth.secondFactorRequired")}
+        message={t("adminAuth.secondFactorEnableConfirm")}
+        confirmTestId="second-factor-required-confirm"
+        confirmLabel={t("common.confirm")}
+        onClose={() => setEnablingFactorPolicy(false)}
+        onConfirm={() => { saveFactorPolicy(true); setEnablingFactorPolicy(false); }}
       />
       <ConfirmDialog
         open={deleting !== null}

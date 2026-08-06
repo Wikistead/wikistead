@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { requireTenantAdmin, requireConnectionManager, isTenantAdmin } from '@wikistead/authz'
-import { mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired } from '../auth/factor-policy.js' // #652 / ADR-219 §4
+import { mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersWithoutConfirmedFactor } from '../auth/factor-policy.js' // #652 / ADR-219 §4
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { loginMethodCeiling, setPlatformLoginDisabled } from '../auth/login-methods.js'
 import { federatedWayInCount, resolveSsoStance } from '../auth/sso-stance.js'
 import { auditIfEntitled } from '../audit/outbox.js'
+import { destroyUnsatisfiedSessions } from '../auth/session.js' // #652 / ADR-219 §2
 import { loadPlatformOidc } from '../auth/oidc.js'
 import { resolveLogin } from './auth.js'
 
@@ -152,6 +153,16 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
           target: `tenant:${req.tenant.id}`,
         })
       })
+      if (on) {
+        // ADR-219 §2's consequence, and the reason the field exists at all: enforcement is at the DOOR,
+        // so without this the requirement applies to nobody until they happen to sign in again. The
+        // house rule this follows is the one every credential change already obeys (members.ts:403).
+        // Outside the transaction on purpose — a stance that was written must not roll back because a
+        // revocation failed, and the door refuses these sessions either way.
+        const revoked = await destroyUnsatisfiedSessions(
+          app.valkey, req.tenant.id, await membersWithoutConfirmedFactor(req.db))
+        req.log.info({ tenantId: req.tenant.id, revoked }, 'second-factor policy on: revoked unsatisfied sessions')
+      }
       emit({ type: 'tenant.second_factor_policy_changed', tenantId: req.tenant.id, actorId: req.user.sub, required: on })
       return reply.code(204).send()
     }

@@ -2017,6 +2017,11 @@ export interface LoginMethodsDTO {
   }
   // #605 / ADR-210: the SSO-required stance. selected && !biting is the LAPSE — shown, never silent.
   ssoRequired: { selected: boolean; biting: boolean }
+  // #652 / ADR-219 §4: the second-factor stance. `canEnable` (an admin has enrolled) and `entitled`
+  // (the edition) arrive apart because they are different sentences to read: one is "nobody could
+  // satisfy this yet", the other "your plan does not include it". A screen that collapsed them into
+  // one greyed switch would tell a tenant to upgrade when the fix is to enrol a factor.
+  secondFactorRequired?: { selected: boolean; canEnable: boolean; entitled: boolean }
   // #604-B: whether the CALLER may write the stance / platform / password selections and the
   // SSO exemptions. The read opened to `manage_connections`; those writes stayed on the admin tier,
   // so the server names the line instead of the screen inferring it from a tier flag.
@@ -2051,6 +2056,18 @@ export function useUpdateSsoRequired() {
   return useMutation({
     mutationFn: (ssoRequired: boolean) =>
       apiFetch<null>("/admin/login-methods", token, { method: "PATCH", body: JSON.stringify({ ssoRequired }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
+  });
+}
+// #652 / ADR-219 §4: the second-factor stance rides the same PATCH as the others (one switchboard),
+// and gets its own hook for the same reason `useUpdateSsoRequired` has one: a different decision, with
+// its own refusals to report (`admin_factor_required`, `mfa_policy_not_entitled`).
+export function useUpdateSecondFactorRequired() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (secondFactorRequired: boolean) =>
+      apiFetch<null>("/admin/login-methods", token, { method: "PATCH", body: JSON.stringify({ secondFactorRequired }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
   });
 }
