@@ -76,17 +76,10 @@ export function AnalyticsDashboard({
                 ]}
                 onChange={(v) => onParams({ viewerClass: v === "all" ? undefined : v })} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-fg-dim">
-              {t("spaceAnalytics.sort")}
-              <Select size="sm" value={`${params.sort ?? "day"}:${params.dir ?? "desc"}`} testId={`${testId}-sort`} ariaLabel={t("spaceAnalytics.sort")}
-                options={[
-                  { value: "day:desc", label: t("spaceAnalytics.sortNewest") },
-                  { value: "day:asc", label: t("spaceAnalytics.sortOldest") },
-                  { value: "views:desc", label: t("spaceAnalytics.sortMost") },
-                  { value: "views:asc", label: t("spaceAnalytics.sortLeast") },
-                ]}
-                onChange={(v) => { const [sort, dir] = v.split(":"); onParams({ sort, dir }); }} />
-            </label>
+            {/* #648: a sort control used to sit here. It changed the request and never the picture —
+                the server reordered its rows and the chart put them back in date order, because a
+                time series has one order and the axis already is it. An ordering only means something
+                where rows are listed, and this surface lists none. */}
             <label className="flex items-center gap-2 text-xs text-fg-dim">
               <Switch checked={!!params.unique} onChange={(v) => onParams({ unique: v })} testId={`${testId}-unique`} ariaLabel={t("spaceAnalytics.unique")} />
               {t("spaceAnalytics.unique")}

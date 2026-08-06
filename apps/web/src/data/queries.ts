@@ -1167,7 +1167,7 @@ export interface SpaceAnalytics {
   // because it is the one holding the roster. Present in unique mode only.
   memberUnique?: number;
 }
-export interface SpaceAnalyticsParams { from?: string; to?: string; viewerClass?: string; sort?: string; dir?: string; unique?: boolean }
+export interface SpaceAnalyticsParams { from?: string; to?: string; viewerClass?: string; unique?: boolean }
 // The server-facing query string for the shaping params. Only NON-empty params are sent (so an untouched
 // control never over-constrains); `unique` maps to the literal 'true' the endpoint checks for.
 export function spaceAnalyticsQuery(params: SpaceAnalyticsParams): string {
@@ -1175,8 +1175,6 @@ export function spaceAnalyticsQuery(params: SpaceAnalyticsParams): string {
   if (params.from) qs.set("from", params.from);
   if (params.to) qs.set("to", params.to);
   if (params.viewerClass) qs.set("viewerClass", params.viewerClass);
-  if (params.sort) qs.set("sort", params.sort);
-  if (params.dir) qs.set("dir", params.dir);
   if (params.unique) qs.set("unique", "true");
   return qs.toString();
 }

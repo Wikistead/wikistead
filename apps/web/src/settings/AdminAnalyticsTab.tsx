@@ -10,7 +10,7 @@ import { AnalyticsDashboard } from "./AnalyticsDashboard";
 // number labelled "the whole workspace" that silently omits private pages would be misleading.
 export function AdminAnalyticsTab() {
   const { t } = useTranslation();
-  const [params, setParams] = useState<SpaceAnalyticsParams>({ sort: "day", dir: "desc" });
+  const [params, setParams] = useState<SpaceAnalyticsParams>({});
   const { data, isLoading } = useTenantAnalytics(params);
   return (
     <AnalyticsDashboard

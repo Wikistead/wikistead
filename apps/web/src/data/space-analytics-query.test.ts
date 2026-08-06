@@ -7,7 +7,10 @@ import { spaceAnalyticsQuery } from "./queries";
 describe("spaceAnalyticsQuery (#520 slice 4)", () => {
   it("omits every empty param (a fresh dashboard sends no query)", () => {
     expect(spaceAnalyticsQuery({})).toBe("");
-    expect(spaceAnalyticsQuery({ sort: "day", dir: "desc" })).toBe("sort=day&dir=desc");
+    // #648: the second case here used to serialise `sort`/`dir`. Those params are gone — the control
+    // that sent them changed the request and never the picture — so the claim is re-aimed at a param
+    // that still exists rather than deleted: a set value is carried, an unset one is not.
+    expect(spaceAnalyticsQuery({ viewerClass: "member" })).toBe("viewerClass=member");
   });
 
   it("serialises period / class filters and encodes values", () => {
