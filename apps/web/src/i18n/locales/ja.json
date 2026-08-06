@@ -127,10 +127,15 @@
     "spaceCreateDenied": "スペースを作成する権限がありません。"
   },
   "theme": {
+    "light": "ライト",
+    "dark": "ダーク",
+    "system": "システム",
     "label": "テーマ"
   },
   "language": {
-    "label": "言語"
+    "label": "言語",
+    "en": "English",
+    "ja": "日本語"
   },
   "nav": {
     "toggleSidebar": "サイドバーを切り替え",
@@ -853,6 +858,14 @@
     "logoSize": "画像が大きすぎます（最大 512 KB）。"
   },
   "accent": {
+    "blue": "ブルー",
+    "indigo": "インディゴ",
+    "violet": "バイオレット",
+    "green": "グリーン",
+    "teal": "ティール",
+    "amber": "アンバー",
+    "rose": "ローズ",
+    "slate": "スレート",
     "label": "アクセントカラー"
   },
   "history": {

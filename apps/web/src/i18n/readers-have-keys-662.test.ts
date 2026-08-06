@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { LANGS } from "./index";
+import { ACCENT_PRESETS } from "../app/branding";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -136,6 +138,33 @@ describe("#662: every t() names something the locales actually have", () => {
         `these read a key ${name}.json does not have. With a fallback the screen shows something ` +
         `plausible and nobody notices — which is exactly how #662 shipped`,
       ).toEqual([]);
+    });
+  }
+
+  // #669: the interpolated readers whose candidate set is a CONSTANT, checked key by key.
+  //
+  // Above, an interpolated reader is satisfied by its static prefix existing — `t(\`language.${l}\`)`
+  // passes as long as `language` has any key at all. That is the right reading when the suffix comes
+  // from data nobody can enumerate, and it is why #645's cleanup could delete `language.en` and
+  // `language.ja` while every gate stayed green: the toggle then listed its own keys as the menu, in
+  // both languages, on every screen in the product.
+  //
+  // Where the suffixes ARE enumerable the concrete keys can be checked, and the list is imported from
+  // the source rather than copied — a third language added to `LANGS` is covered the day it is added,
+  // which a copy here would not be.
+  const ENUMERABLE: { what: string; keys: string[] }[] = [
+    { what: "the language menu (LANGS)", keys: LANGS.map((l) => `language.${l}`) },
+    // The same cleanup took these too, and for the same reason — all three readers interpolate. The
+    // theme menu and the accent picker were listing `theme.light` and `accent.blue` at people.
+    { what: "the theme menu", keys: ["light", "dark", "system"].map((t) => `theme.${t}`) },
+    { what: "the accent picker (ACCENT_PRESETS)", keys: ACCENT_PRESETS.map((a) => `accent.${a}`) },
+  ];
+
+  for (const [name, loc] of [["ja", ja], ["en", en]] as const) {
+    it(`${name}: an interpolated reader over a known list has every key it will ask for`, () => {
+      const missing = ENUMERABLE.flatMap(({ what, keys }) =>
+        keys.filter((k) => !resolves(loc as Record<string, unknown>, k, false)).map((k) => `${what}: ${k}`));
+      expect(missing, `${name}.json is missing keys this reader will certainly ask for`).toEqual([]);
     });
   }
 
