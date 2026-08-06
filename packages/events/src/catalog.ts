@@ -89,6 +89,7 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'member.password_enabled': 'An admin gave an existing member a password entrance (the account had none before).',
   'member.factor_enrolled': 'A member enrolled a second factor (TOTP) on their own account (#657 / ADR-219).',
   'member.factor_removed': 'A member removed a second factor from their own account, proving possession of it first (#660 / ADR-219 §8).',
+  'tenant.second_factor_policy_changed': 'A tenant turned its second-factor requirement on or off (#652 / ADR-219 §4).',
   'member.password_removed': 'An admin removed a member\'s password entrance; their sessions were ended with it.',
   'member.password_reset_requested': 'A password reset link was requested for a member.',
   'member.password_reset_completed': 'A member completed a password reset (all their sessions were signed out).',

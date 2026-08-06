@@ -135,6 +135,9 @@ export type DomainEvent =
   // #660: and giving one up. Emitted only for a CONFIRMED factor — clearing an abandoned enrolment is
   // tidying, not a change to who can authenticate this account.
   | { type: 'member.factor_removed'; tenantId: string; actorId: string; targetSub: string }
+  // #652: the tenant's stance on second factors. A change to who may get in at all, which is why it is
+  // an event rather than a settings write nobody hears about.
+  | { type: 'tenant.second_factor_policy_changed'; tenantId: string; actorId: string; required: boolean }
   // #568 / ADR-198 §6 (OQ7): a reset was ASKED FOR, and later COMPLETED. Both are named by sub and
   // both matter to an account-takeover investigation — the request says when someone started, the
   // completion says whether they finished, and the gap between them is where a stolen link lives.
