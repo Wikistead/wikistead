@@ -98,8 +98,13 @@ describe("#645: no locale key without a reader", () => {
     // `startsWith` on the DOTTED path, so a one-namespace prefix reaches a key nested two deep
     // `t(\`eventTypes.${type}\`)` is fed `page.published`, and the key really is `eventTypes.page.published`.
     // Matched at a boundary (the next character is `.` or `_`) so `members` cannot claim `membersFoo`.
-    const orphans = en.filter((k) =>
+    // #661: a plural key is READ under its base name — `t("x.y", { count })` resolves `x.y_one` /
+    // `x.y_other`, and neither suffixed form ever appears in the source. Without this, adding the first
+    // plural key to a namespace reports both halves as dead and invites deleting the live one. (The
+    // parity check in `no-dash-copy-585` already strips these; this sweep did not.)
+    const orphans = en.filter((k) => k.replace(/_(one|other)$/, "")).filter((k) =>
       !code.includes(k)
+      && !code.includes(k.replace(/_(one|other)$/, ""))
       && ![...interpolated].some((p) => k === p || (k.startsWith(p) && /[._]/.test(k[p.length] ?? "")))
       && !openEnded.some((p) => k.startsWith(p))
       // …and a prefix that ends mid-word claims what continues it: `contextMenu.align` covers

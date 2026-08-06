@@ -382,7 +382,9 @@
     "narrowCaps": "許可する操作",
     "confinedSpaces": "スペース {{count}}",
     "confinedCaps": "操作 {{count}}",
-    "confinedHidden": "見えないもの {{count}} 件"
+    "confinedHidden": "見えないもの {{count}} 件",
+    "spaceFilter": "スペースを絞り込む",
+    "spaceFilterHidden_other": "他に {{count}} 件（絞り込み中）"
   },
   "adminAuth": {
     "title": "認証",
