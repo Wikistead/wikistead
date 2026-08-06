@@ -1,6 +1,7 @@
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { Capability, ResourceRef } from '@wikistead/types'
 import { authzScopeForCheck } from './scope.js'
+import { restrictionAllows } from './restriction.js'
 import { getAuthzHooks } from '@wikistead/hooks'
 import { fgaModelId } from './client.js' // #500: batchCheck needs the model id passed explicitly
 
@@ -81,6 +82,10 @@ export async function check(
   // slice — but the teeth come first: a restriction added to a mechanism that silently tolerates its
   // own absence is a restriction that will be forgotten somewhere and never noticed.
   authzScopeForCheck()
+  // #637 / ADR-216 §5: the restriction ANDs with the answer — it never replaces it. A key confined to a
+  // space still cannot reach what its owner cannot, and its owner's rights do not extend it past the
+  // confinement. Asked first because it is the cheaper of the two and the one that can say no on its own.
+  if (!(await restrictionAllows(resource))) return false
   const hooks = getAuthzHooks()
   const relation = resolveRelation(capability, resource)
   const ctx = { user, relation, resource, tenantId: '' }  // tenantId enriched by caller if needed
@@ -113,6 +118,9 @@ export async function checkRelation(
   resource: ResourceRef,
   context?: CheckContext,
 ): Promise<boolean> {
+  // #637: the same AND. `check` alone would leave every listing surface open — the tree, the space
+  // roster and the public walk all ask through this one, not through `check`.
+  if (!(await restrictionAllows(resource))) return false
   const { allowed } = await fga.check({
     user,
     relation,
@@ -173,6 +181,12 @@ export async function filterAuthorized(
   //    enter the batch. Common case (no EE hooks): beforeCheck is undefined, so this is a cheap pass.
   const toBatch: string[] = []
   for (const id of ids) {
+    // #637 / ADR-216 §5: the restriction is applied BEFORE the hooks and before the batch. Filtering
+    // afterwards would be the same answer at ten times the cost — and it would send the confined ids to
+    // FGA and to any EE hook, which is a list of what the caller asked about that it had no business
+    // asking. This is also the primitive the listing surfaces use, so leaving it out here would leave
+    // the tree, search stage 2 and the space roster unconfined while `check` looked correct.
+    if (!(await restrictionAllows({ type: resourceType, id }))) continue
     if (hooks.beforeCheck) {
       const before = await hooks.beforeCheck({ user, relation, resource: { type: resourceType, id }, tenantId: '' })
       if (before !== undefined) { if (before) out.add(id); continue }
