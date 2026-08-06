@@ -10,7 +10,7 @@ import { AnalyticsDashboard } from "./AnalyticsDashboard";
 export function SpaceAnalyticsTab() {
   const { t } = useTranslation();
   const { spaceId } = useOutletContext<{ spaceId: string }>();
-  const [params, setParams] = useState<SpaceAnalyticsParams>({ sort: "day", dir: "desc" });
+  const [params, setParams] = useState<SpaceAnalyticsParams>({});
   const { data, isLoading } = useSpaceAnalytics(spaceId, params);
   return (
     <AnalyticsDashboard
