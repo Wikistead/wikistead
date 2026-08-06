@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
+import { SpaceIcon } from "../ui/SpaceIcon";
 import type { TFunction } from "i18next";
 import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
 import { useTranslation } from "react-i18next";
@@ -205,6 +206,12 @@ export function ApiKeysPanel({
                       <input type="checkbox" checked={pickedSpaces.includes(sp.id)}
                         onChange={() => toggle(pickedSpaces, setPickedSpaces, sp.id)}
                         data-testid={`api-key-space-${sp.id}`} />
+                      {/* #661 the same component the switcher and the sidebar draw a space with,
+                          at the size the switcher's list uses. Drawing it here by hand would be a second
+                          rendering of the same thing, and one of the two would go stale — which is the
+                          whole reason SpaceIcon exists. The data was already on the wire (`/spaces`
+                          carries `iconImageUrl`); nothing was fetched to make this appear. */}
+                      <SpaceIcon id={sp.id} name={sp.name} image={sp.iconImageUrl} size={18} />
                       <span className="min-w-0 truncate">{sp.name}</span>
                     </label>
                   ))}

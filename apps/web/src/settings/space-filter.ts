@@ -11,6 +11,10 @@
 export interface SpaceOption {
   id: string;
   name: string;
+  // #661 carried so the row can wear the space's own icon. Optional because the filtering rule
+  // above does not read it — a picker fed from somewhere that has no icon still filters correctly, and
+  // requiring it would make this pure function care about presentation.
+  iconImageUrl?: string | null;
 }
 
 /**
