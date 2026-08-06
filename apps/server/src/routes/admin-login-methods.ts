@@ -82,7 +82,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
       ssoRequired: { selected: !!pref?.sso_required, biting: stance.biting },
       secondFactorRequired: {
         selected: await secondFactorRequired(req.db),
-        canEnable: (await adminWithFactorCount(req.db)) > 0,
+        canEnable: (await adminWithFactorCount(req.db, req.headers.host)) > 0,
         entitled: mfaPolicyEntitled(req.tenant),
       },
       methods: {
@@ -136,7 +136,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         throw Object.assign(new Error('a second-factor requirement is not available on this plan'),
           { statusCode: 402, code: 'mfa_policy_not_entitled' })
       }
-      if (on && (await adminWithFactorCount(req.db)) === 0) {
+      if (on && (await adminWithFactorCount(req.db, req.headers.host)) === 0) {
         // #605's precondition, mirrored. Turning it on while nobody can satisfy it is a lock-out
         // wearing a success response — and the person who would have to undo it is the one shut out.
         throw Object.assign(
@@ -160,7 +160,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         // Outside the transaction on purpose — a stance that was written must not roll back because a
         // revocation failed, and the door refuses these sessions either way.
         const revoked = await destroyUnsatisfiedSessions(
-          app.valkey, req.tenant.id, await membersWithoutConfirmedFactor(req.db))
+          app.valkey, req.tenant.id, await membersWithoutConfirmedFactor(req.db, req.headers.host))
         req.log.info({ tenantId: req.tenant.id, revoked }, 'second-factor policy on: revoked unsatisfied sessions')
       }
       emit({ type: 'tenant.second_factor_policy_changed', tenantId: req.tenant.id, actorId: req.user.sub, required: on })
