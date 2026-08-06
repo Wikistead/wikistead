@@ -15,7 +15,7 @@ import { buildApp } from '../app.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { startPasskeyEnrolment, startTotpEnrolment, confirmFactor, listFactors } from '../auth/second-factors.js'
-import { storePasskey, putChallenge } from '../auth/passkeys.js'
+import { storePasskey, takeChallenge } from '../auth/passkeys.js'
 import { generateTotpSecret, totpCode } from '../auth/totp.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -150,8 +150,35 @@ describe('#666: a confirmed passkey can be removed', () => {
     expect(res.json<{ code: string }>().code, 'not "your code was wrong"').toBe('factor_not_pending')
   }, 120_000)
 
-  it('the challenge helper is the same one registration uses', () => {
-    // Named so the wiring cannot drift into a second store with its own lifetime.
-    expect(typeof putChallenge).toBe('function')
-  })
+  it('the challenge the removal banks is the one registration would spend', async () => {
+    // The old version of this case asserted `typeof putChallenge === 'function'` — true of an import
+    // that nothing calls, and true of a build where removal banks its challenge in a different store.
+    // What makes it a fact is OBSERVING the store: ask for a removal challenge, then take it from the
+    // registration side and find the same string.
+    const factorId = await givePasskey('cred-challenge-store')
+
+    const issued = await app.inject({ method: 'POST', url: `/me/factors/${factorId}/remove-challenge`, headers: H, payload: '{}' })
+    expect(issued.statusCode, issued.body).toBe(200)
+    const offered = issued.json<{ options: { challenge: string } }>().options.challenge
+
+    const banked = await takeChallenge(app.valkey, TENANT, 'dev-user')
+    expect(banked, 'the same store, the same challenge').toBe(offered)
+    // …and it is now gone, which is what makes the challenge one-shot rather than merely short-lived.
+    expect(await takeChallenge(app.valkey, TENANT, 'dev-user'), 'taken once').toBeNull()
+  }, 120_000)
+
+  it('the options name the credential in the shape WebAuthn accepts', async () => {
+    // The defect the browser found and no endpoint test could: the options were rebuilt by hand from
+    // three of the library's fields, which dropped `type: 'public-key'` from each allowed credential.
+    // `navigator.credentials.get` refuses the whole call for that ("Failed to read the 'type' property")
+    // — so removal was impossible in the product while every case in this file stayed green, because a
+    // test that POSTs the assertion itself never has to read the options.
+    const factorId = await givePasskey('cred-options-shape')
+
+    const issued = await app.inject({ method: 'POST', url: `/me/factors/${factorId}/remove-challenge`, headers: H, payload: '{}' })
+    const options = issued.json<{ options: { rpId?: string; allowCredentials?: { id: string; type?: string }[] } }>().options
+    expect(options.allowCredentials?.length, 'the one key being given up').toBe(1)
+    expect(options.allowCredentials?.[0]?.type, "every allowed credential says what it is").toBe('public-key')
+    expect(options.rpId, 'and the RP the browser will check against').toBe('dev.localhost')
+  }, 120_000)
 })

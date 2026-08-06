@@ -2386,6 +2386,35 @@ export function useConfirmFactor() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "factors"] }),
   });
 }
+/**
+ * #663 / #666: enrol a PASSKEY. Two calls, because a WebAuthn registration is two halves with the
+ * browser's own prompt between them — the server issues options and banks a challenge, the key answers,
+ * and the answer comes back to be checked and stored.
+ *
+ * The endpoints shipped with #663 and nothing called them: the panel offered "add an authenticator app"
+ * and no way to add a key, which made #666's removal unreachable from the product for a member who had
+ * never been given a way to register one.
+ */
+export function useStartPasskeyEnrolment() {
+  const { token } = useSession();
+  return useMutation({
+    mutationFn: (args: { label?: string }) =>
+      apiFetch<{ factorId: string; options: Record<string, unknown> }>("/me/factors/passkey", token, {
+        method: "POST", body: JSON.stringify(args),
+      }),
+  });
+}
+export function useConfirmPasskey() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { factorId: string; response: unknown }) =>
+      apiFetch<{ confirmed: boolean }>(`/me/factors/${encodeURIComponent(args.factorId)}/passkey`, token, {
+        method: "POST", body: JSON.stringify({ response: args.response }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "factors"] }),
+  });
+}
 /** #666: the challenge for proving possession of the PASSKEY being given up. */
 export function useRemovePasskeyChallenge() {
   const { token } = useSession();

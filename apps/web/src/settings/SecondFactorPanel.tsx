@@ -8,8 +8,11 @@ import { ListRow, ListBox } from "../ui/list-rows"; // #639: the one list shape 
 import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { QrCode } from "../ui/QrCode"; // #653 (ruling): qr-creator, MIT, no dependencies
 import { notify } from "../ui/toast";
-import { useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor, useRemovePasskeyChallenge, useRenameFactor } from "../data/queries";
-import { startAuthentication } from "@simplewebauthn/browser"; // #666: the key proves itself
+import {
+  useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor, useRemovePasskeyChallenge,
+  useRenameFactor, useStartPasskeyEnrolment, useConfirmPasskey,
+} from "../data/queries";
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser"; // #666: the key proves itself
 import { ApiError } from "../data/apiClient";
 
 // #653 / ADR-219: a member's own second factors. SELF-SCOPE — every call is keyed to the session's
@@ -30,6 +33,8 @@ export function SecondFactorPanel() {
   const confirm = useConfirmFactor();
   const remove = useRemoveFactor();
   const removeChallenge = useRemovePasskeyChallenge();
+  const startPasskey = useStartPasskeyEnrolment();
+  const confirmPasskey = useConfirmPasskey();
   const rename = useRenameFactor();
   // #653④: inline, because this product edits rows in the row (no extra dialog).
   const [renaming, setRenaming] = useState<{ id: string; label: string } | null>(null);
@@ -72,6 +77,37 @@ export function SecondFactorPanel() {
       notify.success(t("account.factorAdded"));
     } catch {
       notify.error(t("account.factorCodeWrong"));
+    }
+  };
+
+  /**
+   * Enrol a passkey (#663's endpoints, which had no caller).
+   *
+   * One button, not a mode: the browser's prompt is the whole of the middle step, so there is nothing
+   * for this screen to draw between starting and finishing — unlike a TOTP, where the secret has to be
+   * readable while the member types a code back.
+   *
+   * The pending row is discarded when the prompt is dismissed. Leaving it would put an unconfirmed
+   * factor in the list for a key that was never created, and the next attempt would meet the limit
+   * (`discardPendingFactors` only runs on the way IN, so a cancel that leaves a row costs a slot).
+   */
+  const onAddPasskey = async () => {
+    let started: { factorId: string; options: Record<string, unknown> } | null = null;
+    try {
+      started = await startPasskey.mutateAsync({ label: label.trim() });
+      if (!started) throw new Error("no options");
+      const attestation = await startRegistration({ optionsJSON: started.options as never });
+      await confirmPasskey.mutateAsync({ factorId: started.factorId, response: attestation });
+      setLabel("");
+      notify.success(t("account.factorAdded"));
+    } catch (e) {
+      if (started) await remove.mutateAsync({ factorId: started.factorId }).catch(() => {});
+      if (e instanceof ApiError && e.code === "factor_limit_reached") {
+        setAtLimit(true);
+        notify.error(t("account.factorLimit"));
+      } else {
+        notify.error(t("account.factorKeyFailed"));
+      }
     }
   };
 
@@ -251,6 +287,10 @@ export function SecondFactorPanel() {
             data-testid="factor-label-input" />
           <Button variant="primary" disabled={startEnrolment.isPending || atLimit}
             onClick={() => void onStart()} data-testid="factor-add">{t("account.factorAdd")}</Button>
+          {/* #666 review: each label names the KIND, because what separates the two buttons is not the
+              verb — one asks for an authenticator app, the other for a key this device holds. */}
+          <Button disabled={startPasskey.isPending || confirmPasskey.isPending || atLimit}
+            onClick={() => void onAddPasskey()} data-testid="factor-add-passkey">{t("account.factorAddPasskey")}</Button>
         </FormRow>
       )}
     </div>

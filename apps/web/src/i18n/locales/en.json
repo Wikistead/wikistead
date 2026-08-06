@@ -268,7 +268,8 @@
     "factorRenamed": "Name changed.",
     "factorRenameFailed": "Could not change the name.",
     "factorRemoveWithKey": "Remove with this key",
-    "factorKeyFailed": "That key did not confirm it."
+    "factorKeyFailed": "That key did not confirm it.",
+    "factorAddPasskey": "Add a passkey"
   },
   "settings": {
     "back": "Back to app",
