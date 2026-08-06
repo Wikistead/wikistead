@@ -303,6 +303,37 @@ export async function secondFactorPlugin(app: FastifyInstance) {
    * member would hold a row they cannot use and cannot clear, which is a worse version of the problem
    * this route exists to fix.
    */
+  /**
+   * Rename one. #653 ④: the label could be set at enrolment and never again, so a phone that was
+   * "iPhone" stayed "iPhone" after it became the old one — and with several authenticators the list is
+   * only useful if the names can be corrected.
+   *
+   * NO possession proof, deliberately. #660 asks for a current code before REMOVAL because removal
+   * takes a door away; a label touches no secret and grants nothing, and demanding the device to fix a
+   * typo would push people to keep the wrong name. The line: possession guards what a factor CAN DO,
+   * not what it is called.
+   *
+   * Unconfirmed rows may be renamed too — they are shown (①), so they can be acted on.
+   */
+  app.patch<{ Params: { id: string }; Body: { label?: string } }>('/me/factors/:id', async (req, reply) => {
+    if (typeof req.body?.label !== 'string') {
+      return reply.code(400).send({ error: 'label is required', code: 'factor_label_required' })
+    }
+    // Same slice as enrolment (`:133`), so a name cannot arrive here that could not have been set there.
+    const label = req.body.label.slice(0, 100)
+    // Scoped to the caller, and the same single answer as DELETE for "no such factor" and "not yours".
+    const [own] = await req.db.sql<[{ id: string }?]>`
+      UPDATE member_factors SET label = ${label}
+      WHERE id = ${req.params.id} AND member_sub = ${req.user.sub} RETURNING id`
+    if (!own) return reply.code(404).send({ error: 'no such factor', code: 'factor_not_found' })
+
+    // NOT audited, and that is a decision rather than an omission. ADR-219 §7's ledger answers "when did
+    // this account gain or lose a way in"; renaming changes neither. Recording it would put noise
+    // between the entries that do — the same reason an abandoned enrolment's tidy-up is not recorded
+    // just below.
+    return reply.code(204).send()
+  })
+
   app.delete<{ Params: { id: string }; Querystring: { code?: string; passkey?: string } }>('/me/factors/:id', async (req, reply) => {
     const { id } = req.params
     if (await locked(app.valkey, req.tenant.id, req.user.sub)) {

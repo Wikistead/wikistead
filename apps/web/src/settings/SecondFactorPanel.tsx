@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ShieldCheck, Trash2 } from "lucide-react"; // #544: an icon component, never a text glyph
+import { ShieldCheck, Trash2, Pencil } from "lucide-react"; // #544: an icon component, never a text glyph
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { Input } from "../ui/Input";
@@ -8,7 +8,7 @@ import { ListRow, ListBox } from "../ui/list-rows"; // #639: the one list shape 
 import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { QrCode } from "../ui/QrCode"; // #653 (ruling): qr-creator, MIT, no dependencies
 import { notify } from "../ui/toast";
-import { useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor, useRemovePasskeyChallenge } from "../data/queries";
+import { useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor, useRemovePasskeyChallenge, useRenameFactor } from "../data/queries";
 import { startAuthentication } from "@simplewebauthn/browser"; // #666: the key proves itself
 import { ApiError } from "../data/apiClient";
 
@@ -30,6 +30,9 @@ export function SecondFactorPanel() {
   const confirm = useConfirmFactor();
   const remove = useRemoveFactor();
   const removeChallenge = useRemovePasskeyChallenge();
+  const rename = useRenameFactor();
+  // #653 ④: inline, because this product edits rows in the row (no extra dialog).
+  const [renaming, setRenaming] = useState<{ id: string; label: string } | null>(null);
 
   const [label, setLabel] = useState("");
   const [pending, setPending] = useState<{ factorId: string; secret: string; uri: string } | null>(null);
@@ -112,6 +115,17 @@ export function SecondFactorPanel() {
     }
   };
 
+  const onRename = async () => {
+    if (!renaming) return;
+    try {
+      await rename.mutateAsync({ factorId: renaming.id, label: renaming.label.trim() });
+      setRenaming(null);
+      notify.success(t("account.factorRenamed"));
+    } catch {
+      notify.error(t("account.factorRenameFailed"));
+    }
+  };
+
   const list = factors.data ?? [];
 
   return (
@@ -122,7 +136,23 @@ export function SecondFactorPanel() {
         <ListBox className="mb-3" data-testid="factor-list">
           {list.map((f) => (
             <ListRow key={f.id} data-testid="factor-row">
-              <ShieldCheck size={16} aria-hidden className="text-fg-dim" />
+              {/* #653 ②: `flex-none`. Without it the icon is a flex ITEM that shrinks, and opening
+                  the remove-confirm state puts an Input and two Buttons in this same row — so the shield
+                  quietly got narrower the moment you pressed delete. An `size={16}` on an svg is a
+                  width ATTRIBUTE, which flex is free to override; only the class stops it. */}
+              <ShieldCheck size={16} aria-hidden className="flex-none text-fg-dim" />
+              {renaming?.id === f.id ? (
+                <>
+                  <Input value={renaming.label} onChange={(e) => setRenaming({ id: f.id, label: e.target.value })}
+                    aria-label={t("account.factorRename")} data-testid="factor-rename-input"
+                    onKeyDown={(e) => { if (e.key === "Enter") void onRename(); if (e.key === "Escape") setRenaming(null); }} />
+                  <Button variant="primary" size="sm" data-testid="factor-rename-save"
+                    disabled={rename.isPending} onClick={() => void onRename()}>
+                    {t("account.factorRenameSave")}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setRenaming(null)}>{t("common.cancel")}</Button>
+                </>
+              ) : (
               <span className="min-w-0 flex-1 truncate" data-testid="factor-label">
                 {f.label || t("account.factorUnnamed")}
                 {/* #653 ①: an unconfirmed row IS shown, and says what it is. The cap counts these,
@@ -135,6 +165,13 @@ export function SecondFactorPanel() {
                   </span>
                 )}
               </span>
+              )}
+              {renaming?.id !== f.id && removing?.id !== f.id && (
+                <IconButton aria-label={t("account.factorRename")} data-testid="factor-rename"
+                  className="flex-none" onClick={() => setRenaming({ id: f.id, label: f.label ?? "" })}>
+                  <Pencil size={14} aria-hidden />
+                </IconButton>
+              )}
               {f.kind === "passkey" && f.confirmedAt ? (
                 // #666: a passkey has no code to type. It proves itself, which is the same rule the
                 // code is — possession of the thing being given up — in the only form this factor has.
@@ -156,8 +193,8 @@ export function SecondFactorPanel() {
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setRemoving(null)}>{t("common.cancel")}</Button>
                 </>
-              ) : (
-                <IconButton aria-label={t("account.factorRemove")} data-testid="factor-remove"
+              ) : renaming?.id === f.id ? null : (
+                <IconButton aria-label={t("account.factorRemove")} data-testid="factor-remove" className="flex-none"
                   onClick={() => (f.confirmedAt
                     // possession is only asked for something that guards anything (#660)
                     ? setRemoving({ id: f.id, code: "" })
