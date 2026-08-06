@@ -294,7 +294,7 @@ export async function acceptLocalInvite(
   tenant: { id: string; plan: string },
   token: string,
   password: string,
-): Promise<{ ok: true; sub: string } | { ok: false }> {
+): Promise<{ ok: true; sub: string; operatorIssued: boolean } | { ok: false }> {
   const { localLoginEnabled } = await import('./login-methods.js')
   if (!(await localLoginEnabled(deps.db))) return { ok: false }
   // #605 / ADR-210 §4 row 9: the sub does not exist until acceptance mints it, so there is nobody to
@@ -353,7 +353,12 @@ export async function acceptLocalInvite(
     await tx`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
              VALUES (${tenant.id}, ${sub}, ${identifier}, ${passwordHash})`
     await applyInviteRole(tx, deps.fga, tenant, sub, invite, 'created')
-    return { ok: true as const, sub }
+    // #655 review reject: the caller needs to know WHICH door this was. An operator break-glass
+    // invite is the one #616 exempted from the SSO stance, and ADR-219 §4 says the same exemption
+    // crosses the second-factor requirement — otherwise the way back in when everything else is shut
+    // gets shut by the thing it exists to get around. The row is already read above for the stance, so
+    // this is one field on the way out rather than a second look at a single-use token.
+    return { ok: true as const, sub, operatorIssued: operatorRow?.operator_issued === true }
   })
 }
 
