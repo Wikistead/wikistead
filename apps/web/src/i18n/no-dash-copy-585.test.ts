@@ -124,8 +124,10 @@ describe("#585: no dash punctuation in UI copy", () => {
 
   it("both locales carry the same keys, so a rewrite cannot land in one and not the other", () => {
     // i18next plural forms are per-language: Japanese has ONE form, so `foo_one` legitimately exists
-    // only in English (`delete.backlinkWarning_one` is the live example). Compare the singular-stripped
-    // sets so the parity check stays about MISSING TRANSLATIONS and not about grammar.
+    // only in English. `delete.backlinkWarning_one` is the live example — and it only became one in
+    // #668; when this comment was written the key it named did not exist in either locale, which is
+    // exactly the hole #662's scan went looking for. Compare the singular-stripped sets so the parity
+    // check stays about MISSING TRANSLATIONS and not about grammar.
     const keysOf = (t: Tree) => [...new Set(flatten(t).map(([k]) => k.replace(/_(one|other)$/, "")))].sort();
     const [e, j] = [keysOf(en as Tree), keysOf(ja as Tree)];
     expect(e.filter((k) => !j.includes(k)), "English keys with no Japanese").toEqual([]);

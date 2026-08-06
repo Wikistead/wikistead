@@ -965,7 +965,11 @@
     "alignCenter": "中央揃え",
     "alignRight": "右揃え"
   },
+  "delete": {
+    "backlinkWarning_other": "このページには他の {{count}} ページからリンクがあります。そのリンクは切れます。"
+  },
   "members": {
+    "groupRolesMark_other": "グループ由来のロールを {{count}} 件持っています。ポイントすると内訳が出ます。",
     "title": "メンバー",
     "grantTitle": "ロールを割り当てる",
     "listTitle": "メンバーとグループ",
