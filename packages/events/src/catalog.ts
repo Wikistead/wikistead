@@ -88,6 +88,7 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'member.reactivated': 'An admin brought a suspended member back. Group-derived roles are not restored — the directory re-adds those.',
   'member.password_enabled': 'An admin gave an existing member a password entrance (the account had none before).',
   'member.factor_enrolled': 'A member enrolled a second factor (TOTP) on their own account (#657 / ADR-219).',
+  'member.factor_removed': 'A member removed a second factor from their own account, proving possession of it first (#660 / ADR-219 §8).',
   'member.password_removed': 'An admin removed a member\'s password entrance; their sessions were ended with it.',
   'member.password_reset_requested': 'A password reset link was requested for a member.',
   'member.password_reset_completed': 'A member completed a password reset (all their sessions were signed out).',

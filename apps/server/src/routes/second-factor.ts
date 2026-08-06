@@ -3,7 +3,7 @@ import type IORedis from 'ioredis'
 import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/outbox.js'
 import {
-  startTotpEnrolment, totpSecretFor, confirmFactor, listFactors, markFactorUsed,
+  startTotpEnrolment, totpSecretFor, confirmFactor, listFactors, markFactorUsed, deleteFactor,
 } from '../auth/second-factors.js'
 import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
 import { spendTotpCounter } from '../auth/second-factors.js'
@@ -16,10 +16,19 @@ import { productName } from '../product-name.js'
 // NOT here, deliberately:
 //   - The tenant POLICY and its enforcement (#652). Nothing in this file asks whether a factor is
 //     required; it only lets somebody get one.
-//   - Removing a factor. ADR-219 §8 requires re-authentication for that, and §4 requires refusing the
-//     last admin's removal while the policy is on — the second of which cannot even be written before
-//     the policy exists, and would be a guard whose counterfactual is unreachable (a pin that passes
-//     because the case cannot occur). Reported on #657 so it is scheduled rather than forgotten.
+//
+// REMOVING a factor is here as of #660, with ADR-219 §8's re-authentication taking the form of a code
+// FROM THE FACTOR BEING REMOVED. Re-authenticating with a password would only work for members who have
+// one, so removal would exist for some doors and not others — the shape #613 and #605 both had to undo.
+// Possession of the thing being given up is the same proof for everybody, it is what a stolen session
+// cannot supply, and it leaves the lost-phone case where the design already put it: an administrator
+// reset (#644).
+//
+// ⚠️ WHAT #652 MUST ADD HERE: while the tenant policy is on, the LAST admin holding a factor may not
+// remove it (ADR-219 §4 — the outbound half of #605's two-sided guard, without which the switch's own
+// precondition dies one delete later). It cannot be written now: with no policy, nobody can be locked
+// out, so the guard's counterfactual is unreachable and its pin would pass because the case cannot
+// occur. Scheduled on #660, not forgotten.
 //
 // WHO MAY ENROL: anybody with a member row, including a member who signs in through the IdP today.
 // ADR-219 §3 says a federated door is never asked for a product-side factor, which is a fact about
@@ -176,5 +185,52 @@ export async function secondFactorPlugin(app: FastifyInstance) {
     // authenticate this account, which is the same reason `member.password_enabled` is emitted.
     emit({ type: 'member.factor_enrolled', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.user.sub })
     return reply.code(200).send({ confirmed: true })
+  })
+
+  /**
+   * Give one up. #660 — the operation #626 named as the one that must exist beside adding.
+   *
+   * A CONFIRMED factor needs a current code from it (see the header). A PENDING one does not: it guards
+   * nothing yet, and demanding possession there would make an abandoned enrolment permanent — the
+   * member would hold a row they cannot use and cannot clear, which is a worse version of the problem
+   * this route exists to fix.
+   */
+  app.delete<{ Params: { id: string }; Querystring: { code?: string } }>('/me/factors/:id', async (req, reply) => {
+    const { id } = req.params
+    if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
+      return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
+    }
+    // Scoped to the caller, and one answer for "no such factor" and "not yours": distinguishing them
+    // would make this an oracle for which ids exist.
+    const [own] = await req.db.sql<[{ id: string; confirmed_at: Date | null }?]>`
+      SELECT id, confirmed_at FROM member_factors WHERE id = ${id} AND member_sub = ${req.user.sub}`
+    if (!own) return reply.code(404).send({ error: 'no such factor', code: 'factor_not_found' })
+
+    if (own.confirmed_at) {
+      const secret = await totpSecretFor(req.db, id)
+      const code = typeof req.query?.code === 'string' ? req.query.code : ''
+      if (secret === null || verifyTotp(secret, code, Date.now()) === null) {
+        await countFailure(app.valkey, req.tenant.id, req.user.sub)
+        return reply.code(400).send({
+          error: 'enter a current code from this authenticator to remove it',
+          code: 'factor_code_invalid',
+        })
+      }
+    }
+
+    if (!(await deleteFactor(req.db, req.user.sub, id))) {
+      return reply.code(404).send({ error: 'no such factor', code: 'factor_not_found' })
+    }
+    await clearFailures(app.valkey, req.tenant.id, req.user.sub)
+    // Only a CONFIRMED factor is a thing the ledger cares about losing. An abandoned enrolment being
+    // tidied away is not an event in the account's security history, and recording it would put noise
+    // between the entries that matter.
+    if (own.confirmed_at) {
+      await req.db.tx(async (tx) => auditIfEntitled(tx, req.tenant, {
+        actor: `user:${req.user.sub}`, action: 'member.factor_removed', target: `member:${req.user.sub}`,
+      })).catch((err: unknown) => req.log.warn({ err }, 'factor removal audit failed'))
+      emit({ type: 'member.factor_removed', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.user.sub })
+    }
+    return reply.code(204).send()
   })
 }
