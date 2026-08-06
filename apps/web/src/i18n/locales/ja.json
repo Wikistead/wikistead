@@ -650,7 +650,16 @@
     "noMethods": "現在サインインできません。管理者に連絡してください。",
     "recoveryLink": "別の方法でサインインする",
     "recoveryTitle": "復旧用サインイン",
-    "recoveryBody": "SSO 必須の間、例外に指名されたメンバー用の入り口です。メールアドレスとパスワードでサインインしてください。"
+    "recoveryBody": "SSO 必須の間、例外に指名されたメンバー用の入り口です。メールアドレスとパスワードでサインインしてください。",
+    "factorPrompt": "認証アプリのコードを入力してください。",
+    "factorCode": "コード",
+    "factorCodePlaceholder": "123456",
+    "factorContinue": "続ける",
+    "factorFailed": "うまくいきませんでした。もう一度お試しください。",
+    "factorEnrolPrompt": "このワークスペースは 2 段階目を求めています。認証アプリを設定すると続けられます。",
+    "factorEnrolStart": "認証アプリを設定する",
+    "factorEnrolHint": "このキーを認証アプリに入力し、表示されたコードを入れてください。",
+    "factorSecretNote": "このキーは一度しか表示されません。いま入力してください。"
   },
   "share": {
     "invalid": "この共有リンクは無効・期限切れ・取り消し済みです。",

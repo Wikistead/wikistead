@@ -651,7 +651,16 @@
     "noMethods": "Sign-in is not available right now. Contact your administrator.",
     "recoveryLink": "Sign in another way",
     "recoveryTitle": "Recovery sign-in",
-    "recoveryBody": "For members named as exceptions while SSO is required. Sign in with your email address and password."
+    "recoveryBody": "For members named as exceptions while SSO is required. Sign in with your email address and password.",
+    "factorPrompt": "Enter the code from your authenticator app.",
+    "factorCode": "Code",
+    "factorCodePlaceholder": "123456",
+    "factorContinue": "Continue",
+    "factorFailed": "That did not work. Try again.",
+    "factorEnrolPrompt": "This workspace asks for a second step. Set up an authenticator app to continue.",
+    "factorEnrolStart": "Set up an authenticator",
+    "factorEnrolHint": "Enter this key in your authenticator app, then type the code it shows.",
+    "factorSecretNote": "This key is shown once. Enter it now."
   },
   "share": {
     "invalid": "This share link is invalid, expired, or revoked.",

@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { assetUrl } from "../data/apiClient";
+import { FactorStep } from "./FactorStep"; // #652 / ADR-219 §6: the half-authenticated step
 
 // #568 / ADR-198 §3: the password sign-in form. Every other method on this screen is a button that
 // hands the browser to somebody else; this one is the only place the product itself asks for a
@@ -19,6 +20,10 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<"credentials" | "needsAddress" | null>(null);
   const [sent, setSent] = useState(false);
+  // Which half-authenticated step is on screen, if any. Two values and not one: presenting a factor
+  // and installing one are different things to be asked to do, and a member with no authenticator
+  // sent to a code box cannot fill it.
+  const [stage, setStage] = useState<"required" | "enrolment-required" | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +38,11 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
         body: JSON.stringify({ identifier, password, returnTo }),
       });
       if (!res.ok) { setFailed("credentials"); setBusy(false); return; }
-      const body = (await res.json().catch(() => null)) as { returnTo?: string } | null;
+      const body = (await res.json().catch(() => null)) as { returnTo?: string; factor?: "required" | "enrolment-required" } | null;
+      // #652 / ADR-219 §6: the password was right and there is still one thing to prove. The server
+      // set a receipt cookie and NO session, so there is nothing to navigate to yet — the same screen
+      // asks for the next thing rather than sending the reader somewhere that would bounce them back.
+      if (body?.factor) { setStage(body.factor); setBusy(false); return; }
       // A full navigation, not a router push: the session cookie is new, and every query in the app
       // was made by whoever was here before.
       window.location.href = body?.returnTo || returnTo || "/";
@@ -42,6 +51,8 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
       setBusy(false);
     }
   };
+
+  if (stage) return <FactorStep stage={stage} returnTo={returnTo} />;
 
   return (
     <form className="flex flex-col gap-2" onSubmit={submit} data-testid="login-local">
