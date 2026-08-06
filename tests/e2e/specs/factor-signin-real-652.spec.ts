@@ -64,6 +64,8 @@ const sql = postgres(dbUrl);
 
 type Prefs = { second_factor_required: boolean; local_login_enabled: boolean; sso_required: boolean };
 let priorPrefs: Prefs | null = null;
+/** Every address this file seats, so afterAll can take the SEATS back — they outlive everything else. */
+const strays: string[] = [];
 
 /** Set the stance, keeping the password door open. */
 const setPrefs = (secondFactor: boolean) => sql`
@@ -83,11 +85,13 @@ test.afterAll(async () => {
   // The sub is minted by the acceptance, so this file's litter is found by its ADDRESS. The SEAT is the
   // one that matters: left behind it pushes the tenant past its cap and reddens whatever measures the
   // tenant's size next.
-  const mine = sql`SELECT sub FROM members WHERE tenant_id = ${TENANT} AND email = ${EMAIL}`;
-  await sql`DELETE FROM member_factors WHERE member_sub IN (${mine})`.catch(() => {});
-  await sql`DELETE FROM local_credentials WHERE member_sub IN (${mine})`.catch(() => {});
-  await sql`DELETE FROM invites WHERE tenant_id = ${TENANT} AND email = ${EMAIL}`.catch(() => {});
-  await sql`DELETE FROM members WHERE tenant_id = ${TENANT} AND email = ${EMAIL}`.catch(() => {});
+  for (const addr of [EMAIL, ...strays]) {
+    const mine = sql`SELECT sub FROM members WHERE tenant_id = ${TENANT} AND email = ${addr}`;
+    await sql`DELETE FROM member_factors WHERE member_sub IN (${mine})`.catch(() => {});
+    await sql`DELETE FROM local_credentials WHERE member_sub IN (${mine})`.catch(() => {});
+    await sql`DELETE FROM invites WHERE tenant_id = ${TENANT} AND email = ${addr}`.catch(() => {});
+    await sql`DELETE FROM members WHERE tenant_id = ${TENANT} AND email = ${addr}`.catch(() => {});
+  }
   // Put the tenant back exactly as it was: forcing the password door open, or leaving the stance on,
   // changes what every other spec in this run measures.
   if (priorPrefs) {
@@ -202,4 +206,55 @@ test("#652: password, then a real code, and you are in", async ({ page, request 
   // and the session is a real one: a member-only screen answers
   await page.goto("/settings/account/security");
   await expect(page.getByTestId("second-factor-panel"), "signed in, not bounced").toBeVisible({ timeout: 20_000 });
+});
+
+test("#652: somebody who never enrolled can still get in — §6's circle", async ({ page, request }) => {
+  test.setTimeout(180_000);
+  // The case a policy without a way out makes UNRECOVERABLE: the stance is turned on, and a member who
+  // had not enrolled before it went on cannot get a session, cannot reach settings, and can never
+  // enrol. Driven end to end because that is the only way to know the loop actually closes — every
+  // piece of it passed its own test while the loop was still open.
+  const email = `factor-circle-${STAMP}@e2e.test`;
+  await setPrefs(false);
+  const invited = await request.post("/api/members/invites", {
+    data: { email, role: "member", kind: "local" },
+    headers: { authorization: "Bearer dev-token", "sec-fetch-site": "same-origin" },
+  });
+  expect(invited.ok(), `invited (${invited.status()})`).toBe(true);
+  const token = new URL((await invited.json() as { inviteUrl: string }).inviteUrl).searchParams.get("token")!;
+  const accepted = await request.post("/api/auth/local/accept", {
+    data: { token, password: PASSWORD }, headers: { "sec-fetch-site": "same-origin" },
+  });
+  expect(accepted.ok(), `accepted (${accepted.status()})`).toBe(true);
+  strays.push(email);
+
+  // The stance goes on while they hold NOTHING. This is the state an administrator creates by turning
+  // the switch on, and the one the interstitial exists for.
+  await setPrefs(true);
+
+  await page.context().clearCookies();
+  await page.goto(RECOVERY);
+  await page.getByTestId("login-local-identifier").fill(email);
+  await page.getByTestId("login-local-password").fill(PASSWORD);
+  await page.getByTestId("login-local-submit").click();
+
+  // No code box: asking somebody with no authenticator for a code is a question they cannot answer.
+  await expect(page.getByTestId("login-factor-enrol-start"), "offered a way to set one up")
+    .toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("login-factor-code"), "and nothing to type into yet").toHaveCount(0);
+
+  await page.getByTestId("login-factor-enrol-start").click();
+  const key = (await page.getByTestId("login-factor-secret-value").innerText()).replace(/\s/g, "");
+  expect(key, "a key to put in an app").toMatch(/^[A-Z2-7]+$/);
+
+  await page.getByTestId("login-factor-enrol-code").fill(totp(key));
+  await page.getByTestId("login-factor-enrol-submit").click();
+  // Enrolling IS answering — they produced a code from the thing they just registered, in front of us.
+  await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 20_000 });
+
+  await page.goto("/settings/account/security");
+  await dismissOverlays(page);
+  await expect(page.getByTestId("second-factor-panel"), "in, on the first try").toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('[data-testid="factor-row"]'), "…holding the factor they just made")
+    .toHaveCount(1, { timeout: 15_000 });
 });
