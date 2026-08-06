@@ -39,7 +39,6 @@
     "off": "OFF",
     "yes": "はい",
     "no": "いいえ",
-    "edit": "編集",
     "confirm": "実行",
     "memberSearch": "メンバーを検索…",
     "granteeSearch": "メンバーまたはグループを検索…",
@@ -58,7 +57,6 @@
   "toc": {
     "copyAnchor": "見出しへのリンクをコピー",
     "title": "このページの目次",
-    "empty": "見出しがありません",
     "toggle": "目次"
   },
   "collab": {
@@ -134,15 +132,10 @@
     "spaceCreateDenied": "スペースを作成する権限がありません。"
   },
   "theme": {
-    "label": "テーマ",
-    "light": "ライト",
-    "dark": "ダーク",
-    "system": "システム"
+    "label": "テーマ"
   },
   "language": {
-    "label": "言語",
-    "en": "English",
-    "ja": "日本語"
+    "label": "言語"
   },
   "nav": {
     "toggleSidebar": "サイドバーを切り替え",
@@ -171,10 +164,6 @@
     "activityLess": "少",
     "activityMore": "多",
     "activityAria": "アクティビティのヒートマップ。直近 1 年で {{count}} 件",
-    "activityNone": "{{date}} は活動なし",
-    "activityCount": "{{date}}：{{count}} 件",
-    "activityCount_one": "{{date}}：{{count}} 件",
-    "activityCount_other": "{{date}}：{{count}} 件",
     "profileHint": "共同編集者からのあなたの見え方です。",
     "editorHint": "エディタの挙動：キーマップ・起動モード・フォント・ショートカット。",
     "displayName": "表示名",
@@ -287,8 +276,7 @@
     "shrinkHint": "新しい本文が公開済み本文のこの割合より小さい公開を拒否します（0〜1・例 0.2 = 20% 未満）。空欄でオフ。",
     "off": "オフ",
     "wordsLabel": "禁止語",
-    "wordsHint": "1 行に 1 語。リストの語が新たに追加された公開のみ拒否します。空欄でオフ。",
-    "saved": "保存しました"
+    "wordsHint": "1 行に 1 語。リストの語が新たに追加された公開のみ拒否します。空欄でオフ。"
   },
   "spaceModeration": {
     "abuseTitle": "スペースのモデレーションポリシー",
@@ -373,9 +361,7 @@
     "revokeConfirm": "API キー「{{name}}」を失効しますか？以後この認証は使えません。",
     "expiry": "有効期限",
     "expiryNever": "無期限",
-    "expiryDays": "{{count}} 日後",
-    "expiryLabel": "{{when}} に失効",
-    "expiryNone": "無期限"
+    "expiryDays": "{{count}} 日後"
   },
   "adminAuth": {
     "title": "認証",
@@ -475,7 +461,6 @@
     "pages": "ページ",
     "analytics": "アナリティクス",
     "trash": "ゴミ箱",
-    "theme": "テーマ",
     "nameLabel": "スペース名",
     "iconLabel": "スペースアイコン",
     "iconHint": "画像をアップロードできます。未設定の場合はスペース名からイニシャルを自動生成します。",
@@ -565,14 +550,7 @@
   "spaceMembers": {
     "title": "メンバーと権限",
     "body": "このスペースへのアクセスをメンバーに付与します。配下のすべての公開ページに波及します。",
-    "customRolesTitle": "カスタムロール",
-    "customRolesBody": "このスペースで割り当てられているカスタムロールです。ロールの定義はテナント設定 → ロール、割り当ては上の選択肢から行います。権限はスペース全体に適用されます。",
-    "customRolesEmpty": "このスペースにはまだカスタムロールの割当がありません。",
-    "selectRole": "ロールを選択",
     "capability": "権限",
-    "view": "閲覧可",
-    "edit": "編集可",
-    "moderate": "モデレーター",
     "manage": "管理可",
     "add": "追加",
     "revoke": "取り消し",
@@ -584,13 +562,10 @@
     "granteeType": "付与先",
     "typeUser": "メンバー",
     "typeGroup": "グループ",
-    "selectGroup": "グループを選択",
-    "noGroups": "グループがありません（IdP から取り込み）",
     "commentAudienceTitle": "コメント",
     "commentAudienceBody": "このトグルは、閲覧できる人全員とリンクを持つゲストにコメントを開放します。特定の人だけに許可するには、comment を含むカスタムロールを割り当てるか、そのページの権限ダイアログで comment を付与します。トグルをオフにしても、付与したコメント権は外れません。",
     "commentGuests": "リンク（閲覧・編集）のゲストがコメント可",
     "commentMembers": "閲覧できる全員（公開）がコメント可",
-    "mappingBody": "IdP グループのメンバー全員に、**このスペース**のロールを付与します。メンバーシップは ID プロバイダから随時解決されます（メンバー追加や課金は発生しません）。",
     "commentMembersOn": "ON：閲覧のみのメンバーもコメント可（明示的な comment 付与に加えて）。",
     "commentMembersOff": "OFF：閲覧のみのメンバーはコメント不可（明示的な comment 付与は引き続き可・manager / moderator は常に可）。",
     "commentGuestsOn": "ON：ページを閲覧できるゲスト全員がコメント可（閲覧・編集リンクとも）。",
@@ -655,7 +630,6 @@
     "recoveryBody": "SSO 必須の間、例外に指名されたメンバー用の入り口です。メールアドレスとパスワードでサインインしてください。"
   },
   "share": {
-    "opening": "共有ページを開いています…",
     "invalid": "この共有リンクは無効・期限切れ・取り消し済みです。",
     "spaceTitle": "共有スペース",
     "treeError": "ページ一覧を読み込めませんでした。",
@@ -679,8 +653,6 @@
     "publish": "公開",
     "vimMode": "Vim モード",
     "vimTouchDisabled": "タッチデバイスでは Vim は使えません（ソフトキーボード入力のため）",
-    "split": "Vim モード",
-    "single": "通常モード",
     "comments": "コメント",
     "draft": "下書き",
     "unpublishedChanges": "未公開の変更",
@@ -714,14 +686,12 @@
     "movePinUp": "ピンを上へ",
     "movePinDown": "ピンを下へ",
     "noSpacesMatch": "一致するスペースがありません。",
-    "moreSpacesHint": "他 {{count}} スペース。検索で絞り込み",
     "showAllSpaces": "すべてのスペースを表示（他 {{count}} 件）",
     "newSpace": "新しいスペース",
     "renameSpace": "スペース名を変更",
     "spaceName": "スペース名",
     "createSpace": "作成",
     "spaceSettings": "スペース設定",
-    "deleteSpace": "スペースを削除",
     "deletePageConfirm": "ページ「{{name}}」とそのサブページをゴミ箱に移動しますか？ 30 日以内ならスペース設定から復元できます。",
     "newPage": "新しいページ",
     "addSubpage": "サブページを追加",
@@ -782,11 +752,7 @@
     "body": "このページへのアクセスをメンバーに付与します。未公開ページはここに記載された人だけが閲覧できます。",
     "member": "メンバー",
     "relation": "権限",
-    "view": "閲覧",
     "comment": "コメント",
-    "edit": "編集",
-    "manage": "管理",
-    "moderate": "モデレート",
     "add": "追加",
     "revoke": "取り消し",
     "empty": "直接付与はまだありません。",
@@ -795,7 +761,6 @@
     "typeUser": "メンバー",
     "typeGroup": "グループ",
     "selectGroup": "グループを選択",
-    "noGroups": "グループがありません（IdP から取り込み）",
     "privateTitle": "このページを非公開にする",
     "privateHint": "下に挙げた人だけが閲覧・編集できます。スペースのメンバーはアクセスを継承しなくなり、公開もされません。子ページは自動では非公開になりません。",
     "privateOnHint": "このページは非公開です。下の許可リストの人だけがアクセスできます。スペースメンバーはアクセスを継承しません。",
@@ -803,7 +768,6 @@
     "freezeHint": "本文の編集をロックします。管理者は常に編集でき、閲覧者のコメントは引き続き可能です。",
     "freezeGuestsHint": "共有リンクのゲストのみ凍結中です。メンバーは編集できます（管理者は常に編集可）。",
     "freezeFullHint": "管理者以外の全員が凍結中です。メンバー・ゲストとも閲覧のみになります（管理者は常に編集可）。",
-    "freezeOff": "なし",
     "freezeGuests": "ゲストのみ",
     "freezeFull": "全員",
     "publicTitle": "このページを公開する",
@@ -833,11 +797,6 @@
     "tabRestrictions": "制限",
     "tabAdvanced": "詳細"
   },
-  "spaceTheme": {
-    "title": "テーマ",
-    "body": "このスペースのアクセントカラーを選びます。閲覧する全員に対してワークスペースのアクセントを上書きします。ライト/ダークは各自の設定です。",
-    "inherit": "継承"
-  },
   "branding": {
     "upgradeTitle": "ブランディングは Pro 機能です",
     "upgradeBody": "プランをアップグレードすると、独自のアクセントとロゴを設定できます。"
@@ -860,23 +819,7 @@
     "logoSize": "画像が大きすぎます（最大 512 KB）。"
   },
   "accent": {
-    "label": "アクセントカラー",
-    "blue": "ブルー",
-    "indigo": "インディゴ",
-    "violet": "バイオレット",
-    "green": "グリーン",
-    "teal": "ティール",
-    "amber": "アンバー",
-    "rose": "ローズ",
-    "slate": "スレート"
-  },
-  "comments": {
-    "title": "コメント",
-    "addOnSelection": "選択範囲にコメント",
-    "placeholder": "コメントを追加…",
-    "pagePlaceholder": "ページにコメント…",
-    "submit": "コメント",
-    "empty": "コメントはまだありません。"
+    "label": "アクセントカラー"
   },
   "history": {
     "title": "履歴",
@@ -889,7 +832,6 @@
     "diffTitle": "{{when}} からの変更",
     "diffHint": "現在の公開バージョンとの比較です。",
     "noChanges": "このバージョンからの変更はありません。",
-    "backToList": "履歴に戻る",
     "revertRun": "一括差し戻し",
     "revertRunLabel": "このゲストの編集: {{author}}（{{count}} 件）",
     "revertRunConfirmTitle": "このゲストの編集を差し戻す",
@@ -916,11 +858,8 @@
   },
   "lpToolbar": {
     "bold": "太字",
-    "heading": "見出し",
-    "bulletList": "箇条書き",
     "inlineCode": "インラインコード",
-    "link": "リンク",
-    "image": "画像を挿入"
+    "link": "リンク"
   },
   "palette": {
     "italic": "斜体",
@@ -956,7 +895,6 @@
     "link": "リンク",
     "insertTemplate": "テンプレートを挿入",
     "pageLink": "ページリンク",
-    "backlinks": "バックリンク（このページへのリンク）",
     "highlight": "マーカー",
     "tagged": "タグのページ一覧（動的）",
     "children": "子ページ一覧（動的）",
@@ -986,12 +924,12 @@
     "clearFormat": "書式をクリア",
     "insert": "挿入…",
     "copyBlockRef": "ブロック参照をコピー",
-    "alignLeft": "左揃え",
-    "alignCenter": "中央揃え",
-    "alignRight": "右揃え",
     "codeSettingsWithKey": "コードブロックの設定（Ctrl+Alt+↵）",
     "codeSettings": "コードブロックの設定",
-    "copyBlock": "ブロックをコピー"
+    "copyBlock": "ブロックをコピー",
+    "alignLeft": "左揃え",
+    "alignCenter": "中央揃え",
+    "alignRight": "右揃え"
   },
   "members": {
     "title": "メンバー",
@@ -1022,9 +960,6 @@
     "filterLabel": "メンバーの絞り込み",
     "seatLimit": "座席数の上限に達しました。メンバーを増やすにはアップグレードしてください。",
     "inviteFailed": "招待を作成できませんでした。",
-    "pendingRow": "{{email}} · {{role}}",
-    "inviteRoleOptional": "カスタムロール（任意）",
-    "inviteRoleNone": "カスタムロールなし",
     "inviteAlreadyMember": "そのアドレスは既にメンバーのものです。もう一度招待すると、その人のアカウントがもう 1 つできてしまいます。",
     "enablePassword": "パスワードの入口を追加",
     "reissuePassword": "パスワード再設定リンクを発行",
@@ -1041,7 +976,6 @@
     },
     "lastAdmin": "最後の管理者は変更できません。",
     "lastDirectAdmin": "グループが admin を持っていますが、グループ経由の管理者は IdP 側の変更で失われ得るため、直接付与の管理者を最低 1 人残す必要があります。",
-    "groupRolesMark_other": "グループ由来のロール {{count}} 件",
     "groupRolesTitle": "グループ由来",
     "removePassword": "パスワードの入口を外す",
     "removePasswordConfirm": "{{name}} のパスワードの入口を外しますか？セッションも終了し、以後は ID プロバイダ経由でのサインインになります。",
@@ -1079,7 +1013,6 @@
     "notFound": "ページが見つかりません"
   },
   "backlinks": {
-    "title": "リンク元",
     "untitled": "(無題)",
     "empty": "このページにリンクしているページはまだありません。"
   },
@@ -1124,9 +1057,6 @@
     },
     "needsPublish": "テンプレートとして保存するには、先にページを公開してください。"
   },
-  "delete": {
-    "backlinkWarning_other": "このページは {{count}} ページから参照されています。削除するとリンク切れになります。"
-  },
   "macro": {
     "placeholder": "{{name}}：{{detail}}",
     "placeholderEmpty": "空の{{name}}：{{detail}}",
@@ -1163,17 +1093,6 @@
     "empty": "テンプレートはまだありません。ページの ⋯ メニューから「テンプレートとして保存」できます。",
     "selectPrompt": "テンプレートを選ぶとプレビューが表示されます。",
     "use": "このテンプレートを使う"
-  },
-  "layoutEdit": {
-    "tabN": "タブ {{n}}",
-    "columnN": "カラム {{n}}",
-    "addTab": "タブを追加",
-    "addColumn": "カラムを追加",
-    "removeTab": "タブを削除",
-    "removeColumn": "カラムを削除",
-    "tabName": "タブ名",
-    "moveLeft": "左へ移動",
-    "moveRight": "右へ移動"
   },
   "adminWebhooks": {
     "title": "Webhook",
@@ -1335,7 +1254,6 @@
     "title": "ロール",
     "rename": "名前を変更",
     "lastCap": "ロールには最低 1 つの権限が必要です。",
-    "builtInTitle": "組込ロール",
     "builtIn": "組込",
     "customEmpty": "カスタムロールはまだありません。",
     "create": "新しいロール",
@@ -1344,17 +1262,7 @@
     "namePlaceholder": "例: recycler",
     "conflict": "名前が重複しているか、割当が残っています(先に割当を解除してください)。",
     "notEntitled": "カスタムロールはこのプランでは利用できません(エンタープライズ機能)。",
-    "assignTitle": "割当",
-    "assignBody": "カスタムロールをスペース単位でメンバーに割り当てます。権限は実際の付与として展開され、解除するとロールが追加した分だけが取り除かれます。",
-    "roleLabel": "ロール",
     "rolePlaceholder": "ロールを選択",
-    "spaceLabel": "スペース",
-    "spacePlaceholder": "スペースを選択",
-    "subLabel": "メンバー",
-    "subPlaceholder": "名前で検索",
-    "assign": "割り当て",
-    "unassign": "割当を解除",
-    "assignEmpty": "このスペースへの割当はありません。",
     "cap": {
       "view": "閲覧",
       "comment": "コメント",
@@ -1377,17 +1285,11 @@
     "deleteConfirm": "ロール「{{name}}」を削除しますか？割り当ても一緒に削除され、元に戻せません。",
     "tenantAssignTitle": "テナントロールの割り当て",
     "tenantAssignBody": "テナントロール（スペースの作成など）はメンバーの属性なので、ここで割り当てます。スペースのロールは各スペースの「メンバー」タブで付与します。",
-    "memberLabel": "メンバー",
-    "mixedScopeHint": "ロールはスペース/ページ用かテナント用のどちらかです。片方のチェックを外すと保存できます。",
     "sectionTenant": "テナント",
     "sectionResource": "スペース / ページ",
     "memberDefaultsTitle": "メンバー既定",
     "memberDefaultsBody": "このテナントのメンバー全員ができること（どのロールを持っていても）。",
-    "groupAssignTitle": "グループのロール",
     "groupAssignBody": "IdP のグループにテナントロールを割り当てます。グループのメンバー全員に効き、グループを抜けると外れます。",
-    "groupAssignEmpty": "テナントロールを持つグループはありません。",
-    "groupLabel": "グループ",
-    "groupPlaceholder": "グループを選択…",
     "scopeQuestion": "どちらのロールを作りますか？",
     "impliedBy": "（{{cap}} に含まれます）",
     "editCaps": "できることを編集"
