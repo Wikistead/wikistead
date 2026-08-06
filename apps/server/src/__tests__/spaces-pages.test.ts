@@ -9,7 +9,7 @@ import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, check, checkRelation, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
-import { createSpace, listSpaces, deleteSpace, updateSpace, setSpaceIconImage, clearSpaceIconImage } from '../routes/spaces.js'
+import { createSpace, listAllSpaces, deleteSpace, updateSpace, setSpaceIconImage, clearSpaceIconImage } from '../routes/spaces.js'
 import { createPage, listPages, getPage, deletePage, movePage } from '../routes/pages.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { Tenant } from '@wikistead/types'
@@ -137,15 +137,15 @@ describe('space lifecycle', () => {
     expect(await check(fgaClient, 'user:dev-user', 'manage', { type: 'space', id: spaceId })).toBe(false)
   })
 
-  it('setSpaceIconImage: manage-gated, sniffs type (SVG rejected), caps size; listSpaces exposes the URL', async () => {
+  it('setSpaceIconImage: manage-gated, sniffs type (SVG rejected), caps size; listAllSpaces exposes the URL', async () => {
     const { storage, deleted } = fakeStorage()
     const space = await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'img-space' })
     // default: no image → null
-    let mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    let mine = (await listAllSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
     expect(mine?.iconImageUrl ?? null).toBeNull()
     // a manager uploads a PNG → stored + URL exposed (relative API path)
     await setSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', dataBase64: PNG })
-    mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    mine = (await listAllSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
     expect(mine?.iconImageUrl).toBe(`/spaces/${space.id}/icon-image`)
     // a non-manager is rejected (the fortress)
     await expect(setSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'space-rando', dataBase64: PNG })).rejects.toMatchObject({ statusCode: 403 })
@@ -158,7 +158,7 @@ describe('space lifecycle', () => {
     await expect(setSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user', dataBase64: huge })).rejects.toMatchObject({ statusCode: 413 })
     // clear → URL null + the stored object is deleted
     await clearSpaceIconImage(db, fgaClient, storage, { spaceId: space.id, tenantId: tenant.id, userId: 'dev-user' })
-    mine = (await listSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
+    mine = (await listAllSpaces(db, fgaClient, 'dev-user')).find((s) => s.id === space.id)
     expect(mine?.iconImageUrl ?? null).toBeNull()
     expect(deleted.length).toBeGreaterThanOrEqual(1)
     // a non-manager cannot clear either
@@ -508,14 +508,14 @@ describe('tree listing is FGA-filtered (security)', () => {
     await dropLocked(locked.spaceId, locked.pageId)
   })
 
-  it('listSpaces excludes a space the user cannot view', async () => {
+  it('listAllSpaces excludes a space the user cannot view', async () => {
     const locked = await seedLocked('spaces')
 
     const rls = await db.sql<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${locked.spaceId}`
     expect(rls).toHaveLength(1)
     expect(await check(fgaClient, 'user:dev-user', 'view', { type: 'space', id: locked.spaceId })).toBe(false)
 
-    const spaces = await listSpaces(db, fgaClient, 'dev-user')
+    const spaces = await listAllSpaces(db, fgaClient, 'dev-user')
     expect(spaces.map((s) => s.id)).not.toContain(locked.spaceId)
 
     await dropLocked(locked.spaceId, locked.pageId)

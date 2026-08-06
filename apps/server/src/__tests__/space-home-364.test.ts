@@ -1,6 +1,6 @@
 // #364 / ADR-157: the space HOMEPAGE — a pointer at a regular page. The design-review anti-tests
 // atomic create (edit gate, 409 on second), the pointer existence-ORACLE guard (a viewer who cannot
-// see the home gets a listSpaces row byte-identical to "no home set"), the root-listing exclusion
+// see the home gets a listAllSpaces row byte-identical to "no home set"), the root-listing exclusion
 // (listPages skips the home; pins-class surfaces deliberately include it), the LEAF guards
 // (createPage under home / movePage onto or under home → 400), deletePage(home) clearing the pointer
 // via the FK, the export `_home.md` + manifest mapping with the import round-trip, and the public
@@ -15,7 +15,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples, deleteObjectTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
-import { createSpace, deleteSpace, createSpaceHome, listSpaces, updateSpace } from '../routes/spaces.js'
+import { createSpace, deleteSpace, createSpaceHome, listAllSpaces, updateSpace } from '../routes/spaces.js'
 import { createPage, deletePage, listPages, movePage, publishPage, updatePage } from '../routes/pages.js'
 import { buildSpaceExport } from '../export/index.js'
 import { importArchive } from '../import/index.js'
@@ -81,17 +81,17 @@ describe('#364 space home — create / gates / oracle', () => {
 
   it('ORACLE guard: a space viewer who cannot view the (draft) home sees homePageId null — byte-identical to unset', async () => {
     // the fresh home is an UNPUBLISHED draft → creator-only (Phase-4 gate); the viewer can't view it
-    const forViewer = await listSpaces(db, fgaClient, VIEWER)
+    const forViewer = await listAllSpaces(db, fgaClient, VIEWER)
     const mine = forViewer.find((s) => s.id === spaceId)
     expect(mine, 'the space itself is visible to the viewer').toBeTruthy()
     expect(mine!.homePageId ?? null, 'the pointer is OMITTED for a non-viewer of the home').toBeNull()
     // the creator sees it
-    const forCreator = await listSpaces(db, fgaClient, 'dev-user')
+    const forCreator = await listAllSpaces(db, fgaClient, 'dev-user')
     expect(forCreator.find((s) => s.id === spaceId)!.homePageId).toBe(homeId)
     // publish → space members inherit view → the viewer NOW gets the pointer
     await admin`UPDATE pages SET ydoc = NULL WHERE id = ${homeId}` // keep the doc empty; publish snapshots ''
     await publishPage(db, fgaClient, driver, storage, { pageId: homeId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
-    const after = await listSpaces(db, fgaClient, VIEWER)
+    const after = await listAllSpaces(db, fgaClient, VIEWER)
     expect(after.find((s) => s.id === spaceId)!.homePageId).toBe(homeId)
   })
 

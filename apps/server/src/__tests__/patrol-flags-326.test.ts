@@ -19,7 +19,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples, check } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
-import { createSpace, deleteSpace, listSpaces } from '../routes/spaces.js'
+import { createSpace, deleteSpace, listAllSpaces } from '../routes/spaces.js'
 import { createPage, publishPage } from '../routes/pages.js'
 import { recordAbuseFlag, listPatrol, listFeed } from '../routes/notifications.js'
 import { buildApp } from '../app.js'
@@ -296,10 +296,10 @@ describe('the patrol route and the 422 wiring, over HTTP', () => {
 
   it('a space moderator is reported as such, without being handed manage', async () => {
     // The web settings shell admits a moderator so they can reach their queue; it must not mistake
-    // them for a manager, or a moderator would get rename and delete along with it. listSpaces is the
+    // them for a manager, or a moderator would get rename and delete along with it. listAllSpaces is the
     // exact source the shell reads — called directly here, since the value, not the transport, is the
     // invariant. (OUTSIDER became a moderator in the gate test above.)
-    const mine = (await listSpaces(db, fgaClient, OUTSIDER)).find((s) => s.id === spaceId)
+    const mine = (await listAllSpaces(db, fgaClient, OUTSIDER)).find((s) => s.id === spaceId)
     expect(mine, 'the space is visible to the moderator').toBeTruthy()
     expect(mine!.canModerate, 'reported as a moderator').toBe(true)
     expect(mine!.capability, 'but NOT as a manager').not.toBe('manage')

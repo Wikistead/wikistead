@@ -1,11 +1,11 @@
 // #330 / ADR-141 §1b (user-approved option 1 2026-07-15): moderator DISCOVERABILITY.
-//   A: viewer_member gains `or moderator` → a pure space moderator's space appears in listSpaces
+//   A: viewer_member gains `or moderator` → a pure space moderator's space appears in listAllSpaces
 //      (space#view = viewer ⊇ viewer_member ⊇ moderator) and they can READ + SAVE the space's
 //      templates (deliberate widening; the #258 guest boundary is untouched — moderator has no
 //      share_link type).
 //   B: the doc-builder space read ADDs 'moderator' (withdrawing the defer) → the space's
 //      non-private published pages reach the moderator's stage-1 denorm; revoke takes them out.
-// Anti-tests per the approval comment: (1) listSpaces shows the space, (2) the #258 template
+// Anti-tests per the approval comment: (1) listAllSpaces shows the space, (2) the #258 template
 // boundary re-pin (moderator can read/save; a share-link guest can do neither), (3) private stays
 // hidden from the moderator on BOTH the view and the search face, (4) revoke removes the denorm
 // entry, (5) the original moderator-330 matrix stays green (separate suite).
@@ -18,7 +18,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteObjectTuples } from '@wikistead/authz'
 import { mintGuestToken } from '@wikistead/auth'
 import { provisionTenant } from '../auth/provisioning.js'
-import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listSpaces } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listAllSpaces } from '../routes/spaces.js'
 import { createPage, publishPage, setPagePrivate } from '../routes/pages.js'
 import { saveTemplate, getTemplate } from '../routes/templates.js'
 import { createShareLink } from '../routes/share-links.js'
@@ -72,12 +72,12 @@ afterAll(async () => {
 }, 30_000)
 
 describe('#330 §1b A — the pure moderator can REACH their space', () => {
-  it('listSpaces includes the space (capability floor = view); a stranger still sees nothing', async () => {
-    const mine = await listSpaces(db, fgaClient, MOD)
+  it('listAllSpaces includes the space (capability floor = view); a stranger still sees nothing', async () => {
+    const mine = await listAllSpaces(db, fgaClient, MOD)
     const row = mine.find((s) => s.id === spaceId)
     expect(row).toBeTruthy()
     expect(row!.capability).toBe('view') // moderate is not edit/manage — the view floor
-    const stranger = await listSpaces(db, fgaClient, 'mod330b-nobody')
+    const stranger = await listAllSpaces(db, fgaClient, 'mod330b-nobody')
     expect(stranger.find((s) => s.id === spaceId)).toBeUndefined()
   })
 
@@ -121,7 +121,7 @@ describe('#330 §1b B — the search denorm follows the appointment', () => {
       const doc = await buildSearchDoc(pool, fgaClient, pageId, tenantId)
       expect(doc?.viewerUsers ?? []).not.toContain(`user:${MOD}`)
       // and the space is gone from their list again
-      expect((await listSpaces(db, fgaClient, MOD)).find((s) => s.id === spaceId)).toBeUndefined()
+      expect((await listAllSpaces(db, fgaClient, MOD)).find((s) => s.id === spaceId)).toBeUndefined()
     } finally {
       await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId, userId: OWNER, grantee: `user:${MOD}`, capability: 'moderate' })
     }

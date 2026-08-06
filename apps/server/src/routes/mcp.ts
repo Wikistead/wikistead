@@ -4,7 +4,7 @@ import { renderMcpSyntaxSections } from '@wikistead/macro-render'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { docName } from '@wikistead/types'
 import { getPublished, listPages, getBacklinks, createPage, publishPage } from './pages.js'
-import { listSpaces } from './spaces.js'
+import { listAllSpaces } from './spaces.js'
 import { createPageComment } from './comments.js'
 import { mcpEditDraft, CollabUnavailableError } from '../collab-mcpedit.js'
 import { fillAuthorizedPage, SEARCH_CANDIDATE_LIMIT } from '../search/paginate.js'
@@ -96,8 +96,11 @@ const TOOLS: McpTool[] = [
     scope: 'read',
     inputSchema: { type: 'object', properties: {} },
     async run(req, app, principal) {
-      // Thin broker: listSpaces returns only the view-authorized spaces for this member.
-      const spaces = await listSpaces(req.db, app.fga, principal.sub)
+      // Thin broker: listAllSpaces returns only the view-authorized spaces for this member.
+      //
+      // #623 slice 12b: the listing pages now, and this tool answers "what spaces are there", so it
+      // walks all of them through the shared helper rather than writing the loop a second time.
+      const spaces = await listAllSpaces(req.db, app.fga, principal.sub)
       if (!spaces.length) return 'no accessible spaces'
       return spaces.map((s) => `- ${s.name} (${s.id})`).join('\n')
     },

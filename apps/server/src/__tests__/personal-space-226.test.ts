@@ -10,7 +10,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
-import { ensurePersonalSpace, listSpaces, grantSpaceAccess } from '../routes/spaces.js'
+import { ensurePersonalSpace, listAllSpaces, grantSpaceAccess } from '../routes/spaces.js'
 import { createPage, deletePage } from '../routes/pages.js'
 import { TenantRegistry } from '../db/registry.js'
 import type { Tenant } from '@wikistead/types'
@@ -59,9 +59,9 @@ describe('#226 default personal space', () => {
   })
 
   it('is visible to the owner, HIDDEN from an ordinary member, VISIBLE to the tenant admin', async () => {
-    const ownerSees = (await listSpaces(db, fgaClient, OWNER)).map((s) => s.id)
-    const strangerSees = (await listSpaces(db, fgaClient, STRANGER)).map((s) => s.id)
-    const adminSees = (await listSpaces(db, fgaClient, ADMIN)).map((s) => s.id)
+    const ownerSees = (await listAllSpaces(db, fgaClient, OWNER)).map((s) => s.id)
+    const strangerSees = (await listAllSpaces(db, fgaClient, STRANGER)).map((s) => s.id)
+    const adminSees = (await listAllSpaces(db, fgaClient, ADMIN)).map((s) => s.id)
     expect(ownerSees).toContain(personalSpaceId)
     expect(strangerSees).not.toContain(personalSpaceId) // existence-hidden from ordinary members
     expect(adminSees).toContain(personalSpaceId)        // decision 1(a): admin can see it
@@ -89,7 +89,7 @@ describe('#226 default personal space', () => {
 
   it('sharing with a real member grant makes the space visible to them (owner can share)', async () => {
     await grantSpaceAccess(db, fgaClient, driver, { spaceId: personalSpaceId, tenantId: T, userId: OWNER, grantee: `user:${STRANGER}`, capability: 'view' })
-    const strangerSees = (await listSpaces(db, fgaClient, STRANGER)).map((s) => s.id)
+    const strangerSees = (await listAllSpaces(db, fgaClient, STRANGER)).map((s) => s.id)
     expect(strangerSees).toContain(personalSpaceId) // now shared → visible
   })
 })
