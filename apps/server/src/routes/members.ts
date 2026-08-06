@@ -14,6 +14,8 @@ import { groupFgaId } from '../auth/group-sync.js'
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
+import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
+import { holdsAConfirmedFactor } from '../auth/factor-policy.js' // #644 / #675: the condition, named once
 
 // #623: how many members one answer carries. Small enough that the screen paints at once, large enough
 // that a normal tenant is one request.
@@ -179,10 +181,18 @@ export async function membersPlugin(app: FastifyInstance) {
         sub: string; email: string | null; display_name: string | null; picture_url: string | null
         role: string; groups: string[] | null; created_at: Date
         identity_source: string; deactivated_at: Date | null; deactivation_reason: string | null; has_password: boolean
+        has_factor: boolean
       }[]
     >`SELECT m.sub, m.email, m.display_name, m.picture_url, m.role, m.groups, m.created_at,
              -- #627: WHOSE suspension it is decides whether the console may offer to undo it
-             m.identity_source, m.deactivated_at, m.deactivation_reason, (lc.member_sub IS NOT NULL) AS has_password
+             m.identity_source, m.deactivated_at, m.deactivation_reason, (lc.member_sub IS NOT NULL) AS has_password,
+             -- #644 existence only, the same shape as has_password one line up — nothing about
+             -- the factor itself rides this SELECT. It exists so the console does not offer to reset
+             -- somebody who holds nothing: that call SUCCEEDS with a count of zero, which is worse than
+             -- a button that fails, because it reports having done something.
+             -- The condition is NOT spelled here (#675): it is a named fragment, and the comment on it
+             -- says why this question takes the confirmed half of the rule and not the host half.
+             ${holdsAConfirmedFactor(req.db)} AS has_factor
       FROM members m
       LEFT JOIN local_credentials lc ON lc.tenant_id = m.tenant_id AND lc.member_sub = m.sub
       WHERE TRUE
@@ -407,6 +417,61 @@ export async function membersPlugin(app: FastifyInstance) {
     await destroyMemberSessions(app.valkey, req.tenant.id, sub)
     emit({ type: 'member.password_removed', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: sub })
     return reply.code(200).send({ removed: true })
+  })
+
+  /**
+   * Clear a member's second factors so they can enrol again (#644 ruling 2 / ADR-219 §4).
+   *
+   * This is the ONLY way back for somebody who lost the device holding their factor, and it is the
+   * shape ADR-210 §2(b) left standing: the administrator reset that borrows #626's PLACE and not its
+   * mechanism. #626 mints a URL carrying a token, which is precisely the "time-boxed recovery URL"
+   * §2(b) refused — a link that, minted for a second factor, would BE a way past the second factor.
+   * So this route hands nothing out. It deletes rows, and the member proves who they are the ordinary
+   * way and enrols again at the door (#652's interstitial exists for exactly the member who holds
+   * nothing).
+   *
+   * CE, with no entitlement gate, per the same ruling: #626's reissue and take-away have none either,
+   * and a deployment whose members can lock themselves out permanently is not "the same product without
+   * the governance features".
+   */
+  app.delete<{ Params: { sub: string } }>('/members/:sub/factors', async (req, reply) => {
+    if (!(await requireTenantAdmin(req, reply))) return
+    const sub = req.params.sub
+    const [member] = await req.db.sql<[{ sub: string }?]>`SELECT sub FROM members WHERE sub = ${sub}`
+    if (!member) return reply.code(404).send({ error: 'member not found' })
+
+    // NOT on yourself. `DELETE /me/factors/:id` asks for the factor's own code first (#660 / ADR-219
+    // §8) — possession of the thing being given up. An admin who could aim this at themselves would
+    // have a route that skips that proof, which makes the possession requirement optional for exactly
+    // the accounts it matters most for. Somebody who has genuinely lost their device cannot sign in to
+    // reach this anyway; another admin resets them.
+    if (sub === req.user.sub) {
+      return reply.code(409).send({
+        error: 'remove your own factors from your account settings, where the factor is asked to prove itself',
+        code: 'reset_self',
+      })
+    }
+
+    const removed = await req.db.tx(async (tx) => {
+      // The shared verb rather than the DELETE written out again: a member deletion, the password
+      // take-away and this reset must clear the SAME set, and the two-copies failure is this
+      // repository's standing lesson (#605's guard). The cast adapts a tx to the helper's `db.sql`
+      // shape, as `email/outbox.ts:118` already does.
+      const n = await deleteAllFactors({ sql: tx } as never, sub)
+      // Audited in the SAME transaction, and audited even when it removed nothing: "an admin aimed a
+      // factor reset at this account" is the fact an investigation wants, and it is equally true of an
+      // account that turned out to hold none.
+      await auditIfEntitled(tx, req.tenant, {
+        actor: `user:${req.user.sub}`, action: 'member.factors_reset', target: `member:${sub}`,
+      })
+      return n
+    })
+    // #474's house rule, which this repository applies to every credential removal: a live session was
+    // opened by satisfying a factor that no longer exists, and leaving it up would let the old device —
+    // if it is in somebody else's hands, which is why a reset was asked for — keep the account.
+    await destroyMemberSessions(app.valkey, req.tenant.id, sub)
+    emit({ type: 'member.factors_reset', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: sub, count: removed })
+    return reply.code(200).send({ removed })
   })
 
   app.post<{ Params: { sub: string } }>('/members/:sub/password-setup', async (req, reply) => {

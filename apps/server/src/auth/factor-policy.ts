@@ -145,21 +145,20 @@ export const interstitialCanMint = (stance: FactorStance): boolean =>
   acceptedKinds(stance).some((k) => INTERSTITIAL_MINTS.includes(k))
 
 /**
- * ⚠️ THE EDITION SEAM, and it is deliberately one function.
+ * ⚠️ THE EDITION SEAM, and it is deliberately one function that permanently answers true.
  *
- * ADR-219 §10 was ruled EE for the tenant policy (#644 ruling 2), and the independent review of
- * rev3 found that ruling collides head-on with ADR-210 §8, which ruled the SAME shape — a tenant-wide
- * constraint on how everybody signs in — CE on 2026-08-04, with the reason "charging for it would mean
- * the cheaper plan is the one that cannot hold a security position". Sharper still: ADR-219 §3
- * identifies this feature's population as tenants on `platform-oidc`, which is exactly the set that
- * CANNOT turn SSO required on, so pricing the factor policy would price out the population §3 named.
- * Raised on #644 and awaiting the ruling.
+ * RULED CE (#644 / ADR-219 §10a, 2026-08-06). ADR-210 §8 decides it: "requiring SSO" is the same
+ * shape — a tenant-wide constraint on how everybody signs in — and it was ruled CE on 2026-08-04 with
+ * the reason "charging for it would mean the cheaper plan is the one that cannot hold a security
+ * position". Sharper: ADR-219 §3 identifies this feature's population as tenants on `platform-oidc`,
+ * exactly the set that CANNOT turn SSO required on, so pricing the factor policy would have priced out
+ * the population §3 named.
  *
- * Until it lands this returns true — the CE reading, which is the recommendation and the one that
- * matches ADR-210 §8's precedent. If the ruling goes the other way, THIS FUNCTION consults
- * `resolveEntitlements(tenant.plan)` and nothing else changes: the seam exists so the answer is in one
- * place rather than as an `if (plan === …)` beside every check, which is the constraint this repository
- * already holds (packages/entitlements/src/index.ts:2).
+ * So why keep it? Because it is the one PLACE the question would be asked if it were ever asked. Delete
+ * it and the next edition question about factors arrives as an `if (plan === …)` beside each of the four
+ * policy checks — which is the shape this repository forbids, and forbids for a reason: an entitlement
+ * decided in four places is eventually decided differently in four places. The constraint was never
+ * about which answer this returns.
  */
 export function mfaPolicyEntitled(_tenant: { plan: string }): boolean {
   return true
@@ -188,6 +187,24 @@ export function presentableHere(db: TenantDb, host: string | undefined) {
     f.confirmed_at IS NOT NULL AND (
       f.kind <> 'passkey'
       OR EXISTS (SELECT 1 FROM member_passkeys p WHERE p.factor_id = f.id AND p.rp_id = ${rpId}))`
+}
+
+/**
+ * A DIFFERENT question, deliberately: does this member hold anything a reset would clear (#644)?
+ *
+ * Same file as `presentableHere` because #675's walk is right to insist that `confirmed_at IS NOT NULL`
+ * is spelt in one place — but this one does NOT take the host half, and the reason matters. A member
+ * whose only passkeys were made on the tenant's old host holds keys that cannot answer at any door
+ * (#664). They are the person who most needs the reset. Asking `presentableHere` would answer "nothing
+ * to clear" for exactly them, and the console would withhold the one item that helps.
+ *
+ * CONFIRMED is kept: an abandoned enrolment is discarded when the next one starts (ADR-219 §7), so
+ * offering to "reset" one would name a device the member never finished setting up.
+ */
+export function holdsAConfirmedFactor(db: TenantDb) {
+  return db.sql`
+    EXISTS (SELECT 1 FROM member_factors f
+            WHERE f.member_sub = m.sub AND f.confirmed_at IS NOT NULL)`
 }
 
 /**

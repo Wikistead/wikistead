@@ -17,6 +17,10 @@ export interface Member {
   identity_source?: "oidc" | "local";
   /** #614: a password entrance exists (existence only — the credential itself never leaves the server). */
   has_password?: boolean;
+  /** #644: a CONFIRMED second factor exists (existence only, like `has_password`). The console reads it
+   *  so it does not offer a reset to somebody holding nothing — that call succeeds with a count of zero,
+   *  which reports having done something. */
+  has_factor?: boolean;
   /** #614: SCIM/downgrade freeze timestamp; null/absent = active. The row stays listed either way. */
   deactivated_at?: string | null;
   /** #627: whose suspension this is — only an `admin` one is the console's to undo. */
@@ -87,6 +91,20 @@ export { ApiError };
  *  (`last_way_in`, `sso_exemption_required`) — they are two different reasons and neither is a failure. */
 export async function removePassword(token: string, sub: string): Promise<void> {
   await apiFetch<{ removed: boolean } | null>(`/members/${encodeURIComponent(sub)}/password-setup`, token, { method: "DELETE" });
+}
+
+/**
+ * #644 ruling 2 / ADR-219 §4: clear a member's second factors so they can enrol again.
+ *
+ * The only way back for somebody whose factor was on a device they no longer have. It HANDS NOTHING
+ * BACK — no link, no token — because a recovery URL minted for a second factor would be a way past the
+ * second factor, which is what ADR-210 §2(b) refused. The member signs in the ordinary way and meets
+ * the enrolment step (#652).
+ */
+export async function resetFactors(token: string, sub: string): Promise<number> {
+  const res = await apiFetch<{ removed: number } | null>(
+    `/members/${encodeURIComponent(sub)}/factors`, token, { method: "DELETE" });
+  return res?.removed ?? 0;
 }
 
 /** #627 / ADR-213: suspend a member (sign-in blocked, grants stripped, keys revoked, sessions ended). */

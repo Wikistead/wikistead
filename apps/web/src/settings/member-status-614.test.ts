@@ -121,3 +121,34 @@ describe("#627: the suspension items", () => {
     }
   });
 });
+
+describe("#644: the factor reset is offered only to somebody who holds one", () => {
+  // The reset SUCCEEDS on a member with no factors: it deletes nothing and answers 200. So an item
+  // shown to everybody is not the always-failing button of #596/#606 — it is worse. It reports having
+  // helped a person who is still locked out for some other reason, and the admin stops looking.
+  it("a member with a confirmed factor is offered it", () => {
+    expect(memberMenuValues({ has_password: false, has_factor: true })).toContain("factorReset");
+  });
+
+  it("a member with none is not", () => {
+    expect(memberMenuValues({ has_password: false, has_factor: false })).not.toContain("factorReset");
+    // Absent, not false: a list endpoint that predates the field must not light the item up.
+    expect(memberMenuValues({ has_password: false })).not.toContain("factorReset");
+  });
+
+  it("it does not displace the password items", () => {
+    // #614's lesson, in its own shape: an item added here took another away, and the one it took was
+    // the last route into a tenant with no working mail. A member can hold both a password and a
+    // factor, and both errands stay available.
+    const m = { has_password: true, identity_source: "oidc" as const, has_factor: true };
+    expect(memberMenuValues(m)).toEqual(
+      expect.arrayContaining(["password", "passwordRemove", "factorReset"]));
+  });
+
+  it("a suspended member still shows it, because a reset is not a way in", () => {
+    // Clearing a factor grants nothing on its own — sign-in stays shut while the suspension holds. The
+    // useful case is preparing somebody's return before reactivating them.
+    const m = { has_password: false, has_factor: true, deactivated_at: "2026-01-01T00:00:00Z", deactivation_reason: "admin" as const };
+    expect(memberMenuValues(m)).toContain("factorReset");
+  });
+});

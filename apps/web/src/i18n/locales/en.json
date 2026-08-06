@@ -1096,7 +1096,11 @@
     "groupUnassign": "Remove role",
     "groupUnassignConfirm": "Remove the role granted to {{group}}? Everyone in that group loses what it confers.",
     "passwordLinkTitle": "Password setup link",
-    "passwordLinkNote": "Hand this to the member yourself; it is not emailed."
+    "passwordLinkNote": "Hand this to the member yourself; it is not emailed.",
+    "resetFactors": "Reset two-factor authentication",
+    "resetFactorsConfirm": "This clears {{name}}'s second factors. They will set one up again the next time they sign in.",
+    "resetFactorsDone": "Two-factor authentication reset.",
+    "resetFactorsSelf": "Remove your own factors from your account settings, where the factor is asked for its code."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",

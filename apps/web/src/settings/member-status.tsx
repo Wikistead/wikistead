@@ -32,7 +32,7 @@ export function memberStatusKeys(m: Pick<Member, "identity_source" | "has_passwo
 // So the item stays for everyone and its MEANING changes: give an entrance to somebody with none, or
 // re-issue a link for somebody who has one. Same server route, same `pwr_` token; the page picks the
 // words from `passwordAction` so the two are never one sentence.
-export function memberMenuValues(m: Pick<Member, "has_password" | "identity_source" | "deactivated_at" | "deactivation_reason">): MemberMenuValue[] {
+export function memberMenuValues(m: Pick<Member, "has_password" | "identity_source" | "deactivated_at" | "deactivation_reason" | "has_factor">): MemberMenuValue[] {
   // #626 / ADR-214: removing the entrance is an ADDITIONAL item, never a replacement for the one above it.
   // #614 settled that "they already have a password" must not take the grant/reissue item away — the reset
   // link is the only route left for a tenant with no working mail, which is exactly #605's break-glass
@@ -47,9 +47,13 @@ export function memberMenuValues(m: Pick<Member, "has_password" | "identity_sour
   const suspension = m.deactivated_at
     ? (m.deactivation_reason === "admin" ? (["reactivate"] as const) : ([] as const))
     : (["suspend"] as const);
-  return ["password", ...(removable ? (["passwordRemove"] as const) : []), ...suspension, "erase", "remove"];
+  // #644 only for somebody who HOLDS one. The reset succeeds on a member with no factors — it
+  // deletes nothing and answers 200 — so an always-offered item would report having helped when it did
+  // not, which is worse than the always-failing button #596/#606 are about.
+  const factorReset = m.has_factor ? (["factorReset"] as const) : ([] as const);
+  return ["password", ...(removable ? (["passwordRemove"] as const) : []), ...factorReset, ...suspension, "erase", "remove"];
 }
-export type MemberMenuValue = "password" | "passwordRemove" | "suspend" | "reactivate" | "erase" | "remove";
+export type MemberMenuValue = "password" | "passwordRemove" | "factorReset" | "suspend" | "reactivate" | "erase" | "remove";
 
 /** Which of the two the password item is for this member — the label, the toast and the audit differ. */
 export function passwordAction(m: Pick<Member, "has_password">): "grant" | "reissue" {
