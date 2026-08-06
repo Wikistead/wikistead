@@ -5,7 +5,18 @@
 // emit() is fire-and-forget: handlers run asynchronously and must never block
 // the API response. A failed handler logs to stderr but does NOT fail the request.
 
-export type DomainEvent =
+/**
+ * #667 / ADR-221 §9: every event that names an actor may also name the KEY that actor arrived on.
+ *
+ * Written as a distributive conditional over the union rather than a field added to thirty-one members:
+ * a list of thirty-one is a list that gains a thirty-second without it, which is the same failure mode
+ * the audit substitution avoids by living in one place.
+ */
+type WithActorKey<E> = E extends { actorId: string } ? E & { actorKeyId?: string } : E
+
+export type DomainEvent = WithActorKey<RawDomainEvent>
+
+type RawDomainEvent =
   // ── Pages ────────────────────────────────────────────────────────────
   | { type: 'page.created';   tenantId: string; pageId: string; spaceId: string; actorId: string }
   | { type: 'page.updated';   tenantId: string; pageId: string; actorId: string }
@@ -180,7 +191,34 @@ export function onDomainEvent(handler: Handler): () => void {
 // TODO(phase: ee-audit): replace console.error with a structured logger
 // or a dead-letter queue so EE can distinguish "event fired but handler
 // failed" from "event never fired" in compliance forensics.
+/**
+ * #667 / ADR-221 §9: how an event learns that a key, not a person, caused it.
+ *
+ * The audit ledger REPLACES its actor with the key (`api_key:<id>`), because a ledger's whole job is
+ * telling one actor from another after an incident. A webhook payload cannot do the same thing:
+ * `actorId` is a member sub in a published contract (#228), and subscribers look it up as one — turning
+ * it into a key id would break every consumer that resolves it to a person, silently and at the far end
+ * of a network call.
+ *
+ * So the fact is ADDED rather than substituted. `actorId` keeps meaning what it says (the key acts with
+ * its owner's rights, so the owner really is the member behind it) and `actorKeyId` names the credential
+ * beside it. A subscriber that never heard of keys is unaffected; one that cares can tell the two apart,
+ * which is the information the ruling asked for.
+ *
+ * The resolver is a SEAM rather than an import: this package has no dependencies at all, and reaching
+ * into the authorization scope from here would give it one. The server registers it once.
+ */
+type ActorKeyResolver = () => string | undefined
+let _actorKey: ActorKeyResolver | null = null
+
+export function registerActorKeyResolver(fn: ActorKeyResolver): void { _actorKey = fn }
+export function resetActorKeyResolver(): void { _actorKey = null }
+
 export function emit(event: DomainEvent): void {
+  // One place, for the same reason the audit substitution has one: forty-one call sites build an
+  // `actorId`, and a list of corrected sites grows a forty-second next week.
+  const keyId = _actorKey?.()
+  if (keyId && 'actorId' in event) event = { ...event, actorKeyId: keyId } as DomainEvent
   for (const h of _handlers) {
     void Promise.resolve(h(event)).catch((err) => {
       console.error('[events:handler-error]', event.type, err)

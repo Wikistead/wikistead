@@ -31,6 +31,20 @@ export interface AuthzScope {
   restriction: { spaces: ReadonlySet<string> } | null // mutable: filled in by authentication (see openAuthzScope)
   /** How to learn which space a page belongs to, when a restriction needs it. */
   spaceOfPage?: (pageId: string) => Promise<string | null>
+  /**
+   * #667 / ADR-221 §9: the API key this request arrived on, when it arrived on one.
+   *
+   * The audit ledger records WHO acted, and forty-nine call sites build that from the member's sub —
+   * so every action a key took was filed as though its owner did it by hand, and after an incident
+   * nothing separated the two. Correcting forty-nine sites is a list that grows a fiftieth, so the
+   * substitution happens once, where the row is written (`enqueueAudit`), and this is how that one
+   * place learns which requests are a key's.
+   *
+   * It rides the authz scope rather than a second ambient because the scope is already opened around
+   * every request and filled by the same authentication step. A second mechanism would be a second
+   * thing to forget.
+   */
+  apiKeyId?: string
 }
 
 /**
@@ -74,6 +88,19 @@ export function setAuthzRestriction(restriction: AuthzScope['restriction'], spac
   if (!scope) throw new Error('setAuthzRestriction outside an authorization scope — the outermost hook must open one first')
   scope.restriction = restriction
   if (spaceOfPage) scope.spaceOfPage = spaceOfPage
+}
+
+/**
+ * #667 / ADR-221 §9: record that this request arrived on an API key.
+ *
+ * Called once, by authentication, beside `setAuthzRestriction` — the same step that already knows what
+ * the credential is. Everything downstream reads it through `currentAuthzScope()`; nothing has to be
+ * threaded through a call chain, which is what kept the audit actor wrong across forty-nine sites.
+ */
+export function setAuthzApiKey(keyId: string): void {
+  const scope = storage.getStore()
+  if (!scope) throw new Error('setAuthzApiKey outside an authorization scope — the outermost hook must open one first')
+  scope.apiKeyId = keyId
 }
 
 /** The scope in effect, or null outside one. Callers that MUST have one use `requireAuthzScope`. */
