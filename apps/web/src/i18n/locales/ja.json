@@ -621,7 +621,6 @@
     "localPassword": "パスワード",
     "localFailed": "このメールアドレスとパスワードの組み合わせでは、サインインできません。",
     "signInTitle": "{{product}} にサインイン",
-    "signInBody": "組織の ID プロバイダーで続行します。",
     "signIn": "サインイン",
     "continueWith": "{{provider}} で続行",
     "errorAccess": "サインインを完了できませんでした。もう一度お試しいただくか、ワークスペース管理者にお問い合わせください。",
