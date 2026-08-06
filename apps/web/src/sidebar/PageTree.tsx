@@ -261,7 +261,7 @@ export function PageTree({
     // drag preview clones a row into a position:fixed FULL-WIDTH overlay (still inside this DOM subtree, so the
     // var cascades) where the row's `w-full` would otherwise stretch to the viewport — a selected row (its menu
     // force-expanded) then produced a viewport-wide ghost. Capping to --tree-w keeps the preview sidebar-width.
-    <div ref={treeBox} className="min-h-0 min-w-0 flex-1" data-testid="page-tree" style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}>
+    <div ref={treeBox} className="min-h-0 min-w-0 flex-1 overflow-y-auto" data-testid="page-tree" style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}>
       <Tree<PageTreeNode>
         ref={treeRef}
         className="!overflow-x-hidden"
