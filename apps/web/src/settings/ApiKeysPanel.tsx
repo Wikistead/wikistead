@@ -108,7 +108,7 @@ export function ApiKeysPanel({
 
       {/* #638: the box this invented is now shared — the invite and password-setup links were the two
           that had neither the warning nor the copy button, and they are the ones that strand people. */}
-      {created && <OneTimeSecret title={t("adminApi.copyOnce")} value={created.plaintext} testId="api-key-plaintext" />}
+      {created && <OneTimeSecret value={created.plaintext} testId="api-key-plaintext" />}
 
       <ListBox className="mt-5" data-testid="api-key-list">
         {keys.map((k) => (

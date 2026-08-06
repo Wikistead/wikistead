@@ -42,7 +42,8 @@
     "edit": "Edit",
     "confirm": "Confirm",
     "memberSearch": "Search members…",
-    "granteeSearch": "Search members or groups…"
+    "granteeSearch": "Search members or groups…",
+    "copyOnce": "Shown only once. Copy it now."
   },
   "embedPicker": {
     "title": "Embed a page",
@@ -360,7 +361,6 @@
     "scope_read": "Read",
     "scope_write": "Write",
     "create": "Create",
-    "copyOnce": "Copy this key now. It won't be shown again.",
     "copy": "Copy",
     "revoke": "Revoke",
     "empty": "No API keys yet.",
@@ -1050,13 +1050,10 @@
     "reactivate": "Bring back",
     "suspendConfirm": "Suspend {{name}}? They cannot sign in, their grants and API keys are revoked, and their sessions end. The seat stays theirs and nothing is deleted.",
     "reactivateConfirm": "Bring {{name}} back? Roles they had through a group do NOT return. The identity provider re-adds those on their next sign-in, and a member without one keeps none of them.",
-    "inviteMailed": "· mailed",
-    "inviteNotMailed": "· not mailed",
-    "reissue": "New link",
-    "resend": "Send again",
-    "reissueConfirm": "Make a new link for {{email}}? The link you handed out before will stop working.",
-    "resendConfirm": "Send a new link to {{email}}? The link you sent before will stop working.",
-    "copyOnce": "Copy this now. It cannot be shown again."
+    "inviteLinkOpen": "Invitation link",
+    "inviteLinkWarn": "Issuing a new link stops the previous one from working.",
+    "inviteLinkMint": "Issue a new link",
+    "inviteLinkMintMail": "Issue and send by email"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",

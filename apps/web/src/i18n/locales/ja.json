@@ -42,7 +42,8 @@
     "edit": "編集",
     "confirm": "実行",
     "memberSearch": "メンバーを検索…",
-    "granteeSearch": "メンバーまたはグループを検索…"
+    "granteeSearch": "メンバーまたはグループを検索…",
+    "copyOnce": "一度しか表示されません。いま控えてください。"
   },
   "embedPicker": {
     "title": "ページを埋め込む",
@@ -360,7 +361,6 @@
     "scope_read": "読み取り",
     "scope_write": "書き込み",
     "create": "作成",
-    "copyOnce": "このキーを今コピーしてください。再表示されません。",
     "copy": "コピー",
     "revoke": "取り消し",
     "empty": "API キーはまだありません。",
@@ -1049,13 +1049,10 @@
     "reactivate": "再開",
     "suspendConfirm": "{{name}} を停止しますか？サインインできなくなり、権限と API キーは失効し、セッションも終了します。座席は保持され、何も削除されません。",
     "reactivateConfirm": "{{name}} を再開しますか？グループ由来のロールは戻りません。次回のサインインで ID プロバイダが入れ直します（IdP を持たないメンバーには戻りません）。",
-    "inviteMailed": "· メール送信済み",
-    "inviteNotMailed": "· メール未送信",
-    "reissue": "新しいリンク",
-    "resend": "再送",
-    "reissueConfirm": "{{email}} に新しいリンクを作りますか？ 以前に渡したリンクは使えなくなります。",
-    "resendConfirm": "{{email}} に新しいリンクを送りますか？ 以前に送ったリンクは使えなくなります。",
-    "copyOnce": "いま控えてください。もう一度は表示できません。"
+    "inviteLinkOpen": "招待リンク",
+    "inviteLinkWarn": "新しいリンクを発行すると、前のリンクは使えなくなります。",
+    "inviteLinkMint": "新しいリンクを発行",
+    "inviteLinkMintMail": "発行してメールで送る"
   },
   "commentsPanel": {
     "readOnlyReason": "このページではコメントできません。",
