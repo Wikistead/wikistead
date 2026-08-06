@@ -9,7 +9,7 @@ import { acquireTenantDb } from './db/index.js'
 import { pool } from './db/pool.js'
 import { checkReadiness } from './readiness.js'
 import type { TenantDb } from './db/index.js'
-import { fgaClient, isTenantMember, openAuthzScope, setAuthzRestriction } from '@wikistead/authz'
+import { fgaClient, isTenantMember, openAuthzScope, setAuthzRestriction, setAuthzApiKey, currentAuthzScope } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
 import { isNarrowedKey, getNarrowedKeyGate } from '@wikistead/hooks'
@@ -50,7 +50,7 @@ import { resolveEntitlements } from '@wikistead/entitlements'
 import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from './rate-limit.js'
 import { getAuthProviders, getSearchDriver, getEmailDriver, getEeFeatures, type EmailDriver } from '@wikistead/hooks'
 import { resolveEmailDriver } from './email/index.js'
-import { emit, onDomainEvent } from '@wikistead/events'
+import { emit, onDomainEvent, registerActorKeyResolver } from '@wikistead/events'
 import { publishRevoke } from './collab-revoke.js'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
@@ -294,6 +294,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // it (measured on a real server, which is why `enterWith` was rejected — it does not work here, as
   // opposed to working leakily). Authentication fills the container in once it knows what the
   // credential is confined to.
+  // #667 / ADR-221 §9: events learn which key they came from through the same ambient scope the audit
+  // ledger reads, registered once here rather than threaded through forty-one `emit` call sites.
+  registerActorKeyResolver(() => currentAuthzScope()?.apiKeyId)
   app.addHook('onRequest', (_req, _reply, done) => { openAuthzScope(done) })
 
   app.addHook('onRequest', async (req, reply) => {
@@ -536,6 +539,10 @@ export async function buildApp(): Promise<FastifyInstance> {
         }
         req.user = { sub: apiUser.sub, groups: [] }
         req.apiScope = apiUser.scope
+        // #667 / ADR-221 §9: the audit ledger records the KEY, not its owner. Recorded here, where the
+        // credential is known, and read once where the row is written — correcting the forty-nine sites
+        // that build an actor from the sub would be a list that grows a fiftieth next week.
+        setAuthzApiKey(apiUser.keyId)
         emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: apiUser.sub, method: 'apikey' })
         return
       }
