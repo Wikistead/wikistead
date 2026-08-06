@@ -332,6 +332,69 @@ describe("#85: inert measured on the parsed output, not on the DOM that produced
   });
 });
 
+// #85 (review rejection 2026-08-06): a `data:image/svg+xml` reached a SAVED FILE. The CSS guard had been
+// patched twice already and each patch fixed one spelling:
+//
+//   `[^)]*`        stopped at the `)` inside `url("data:…,<svg onload=steal()>")`
+//   `"([^"]*)"`    stopped at the first `\"` of `url("data:…,<svg width=\"200\">")` — so the match never
+//                  formed and the value was never examined at all. THIS is the one that shipped.
+//   `/^data:/i`    did not recognise `\64 ata:`, which is `data:` to every CSS parser (found here)
+//
+// So this pins the FAMILY rather than the three spellings: the sanitiser must judge the value a parser
+// would see. Deliberately NOT written against today's CodeMirror tab rule — naming the rule that happened
+// to carry it would go quiet the next time a different rule carries the same shape.
+//
+// Measured on the SERIALISED OUTPUT, because measuring inside the app is exactly how this ticket got four
+// reviews: the bytes are what somebody opens.
+describe("#85: the CSS guard reads values, not spellings", () => {
+  const fileFor = (css: string): string =>
+    buildExportDocument({ title: "t", body: surface("<p>doc</p>"), css });
+
+  const SMUGGLED: Record<string, string> = {
+    "plain quoted": `a{background:url("data:image/svg+xml,<svg onload='steal()'></svg>")}`,
+    "escaped inner quotes — the form that reached a saved file":
+      `a{background-image:url("data:image/svg+xml,<svg xmlns=\\"http://www.w3.org/2000/svg\\" onload=\\"steal()\\"></svg>")}`,
+    "escaped inner single quotes":
+      `a{background:url('data:image/svg+xml,<svg onload=\\'steal()\\'></svg>')}`,
+    "hex-escaped scheme (\\64 ata: is data: to a parser)":
+      `a{background:url("\\64 ata:image/svg+xml,<svg onload=steal()></svg>")}`,
+    "unquoted with an escaped paren":
+      `a{background:url(data:image/svg+xml,<svg onload=steal\\(\\)></svg>)}`,
+    "a whole html document": `a{background:url("data:text/html,<script>steal()</script>")}`,
+  };
+
+  for (const [shape, css] of Object.entries(SMUGGLED)) {
+    it(`drops a smuggled document: ${shape}`, () => {
+      const file = fileFor(css);
+      expect(file, "the saved bytes still carry a document that has a script surface")
+        .not.toMatch(/<svg|<script|onload/i);
+      expect(file, "…and the scheme is gone from the file, not merely neutralised in place")
+        .not.toMatch(/data:image\/svg\+xml|data:text\/html/i);
+    });
+  }
+
+  // The other direction, and it is not decoration: over-tightening this guard has already killed the code
+  // face once and the callout icons once. A guard that drops everything passes the paragraph above.
+  const CARRIED: Record<string, string> = {
+    "png raster": `a{background:url("data:image/png;base64,iVBORw0KGgo=")}`,
+    "webp raster": `a{background:url('data:image/webp;base64,UklGRg==')}`,
+    "woff2 font": `@font-face{src:url("data:font/woff2;base64,d09GMg==")}`,
+    "application/font-woff2": `@font-face{src:url(data:application/font-woff2;base64,d09GMg==)}`,
+  };
+
+  for (const [shape, css] of Object.entries(CARRIED)) {
+    it(`still carries what the file needs: ${shape}`, () => {
+      expect(fileFor(css), "a raster or a font is what makes the saved file look like the app")
+        .toContain("base64,");
+    });
+  }
+
+  it("an ordinary relative URL is left exactly as written", () => {
+    // The guard rewrites only data: URLs. A rewrite here would be a silent change to somebody's sheet.
+    expect(fileFor(`a{background:url("./pic.png")}`)).toContain(`url("./pic.png")`);
+  });
+});
+
 // #85 (review rejection 2026-08-05): the icon is a `data:image/svg+xml` mask, and `sanitizeCss` drops that
 // scheme on purpose. The drawing travels as an ELEMENT instead — which means the export now has a second
 // door that an svg comes through, and the CSS door being shut says nothing about this one.

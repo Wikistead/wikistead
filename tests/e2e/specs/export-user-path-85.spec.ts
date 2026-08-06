@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { inflateSync } from "node:zlib";
 import { openScratch, enterEdit, sleep, API } from "../helpers";
 
@@ -230,6 +231,13 @@ test("#85 the downloaded file, opened with the app closed, IS the document", asy
   expect(bytes, "no image points at a blob: handle that died with the session").not.toContain('src="blob:');
   expect(bytes, "the plantuml figure is baked in as bytes").toContain("data:image/png");
   expect(bytes, "no live script travels in the file").not.toContain("<script");
+  // #85 (review rejection 2026-08-06): one `data:image/svg+xml` reached a saved file, inside a CodeMirror
+  // rule whose url had ESCAPED inner quotes — so `sanitizeCss`'s `"([^"]*)"` never matched and the
+  // value was never examined. The unit tests pin the sanitiser against that whole family of spellings;
+  // this pins the thing the ruling actually asks for, which is the BYTES. A guard that holds in a unit
+  // test and not in the file is how this ticket collected four reviews.
+  expect(bytes.match(/data:image\/svg\+xml/gi) ?? [], "an svg document rode into the file inside the CSS")
+    .toEqual([]);
   // `data-print-root` carries the app's "hidden on screen" contract; the exported document's own
   // root must not wear it (it is identified by its export marker instead).
   expect(bytes, "the root does not wear the app's print-portal marker").not.toMatch(/<main[^>]*data-print-root/);
@@ -237,7 +245,12 @@ test("#85 the downloaded file, opened with the app closed, IS the document", asy
   // ---- open the saved file from file:// in a FRESH context: no app, no dev server, just the bytes ----
   const ctx = await browser.newContext();
   const opened = await ctx.newPage();
-  await opened.goto(`file://${savedPath}`);
+  // `pathToFileURL`, not string concatenation. The product names the download after the page title, and a
+  // title starting with `#` turns everything after it into a FRAGMENT — the browser then opens the
+  // DIRECTORY and returns no body and no images, which is indistinguishable from the "saved file is
+  // blank" defect `7cf3acc8` fixed. That near-misdiagnosis is recorded in this ticket (review
+  // 2026-08-06); the encoding is cheap and the confusion is not.
+  await opened.goto(pathToFileURL(savedPath).href);
   await sleep(500);
 
   // 1a. the root is really there: computed display + real dimensions (measured 0×0, display:none)
