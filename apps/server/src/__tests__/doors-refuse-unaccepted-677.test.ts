@@ -17,9 +17,10 @@ import { pool } from '../db/pool.js'
 import { buildApp } from '../app.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { FACTOR_COOKIE } from '../auth/factor-session.js'
+import { SESSION_COOKIE } from '../auth/session.js'
 import { startPasskeyEnrolment, startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
 import { storePasskey } from '../auth/passkeys.js'
-import { generateTotpSecret } from '../auth/totp.js'
+import { generateTotpSecret, totpCode } from '../auth/totp.js'
 import { hashPassword } from '../auth/password-hash.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -258,5 +259,73 @@ describe('#677 / ADR-222 §3: there is no dead end', () => {
     })
     expect(enrol.statusCode).toBe(409)
     expect(enrol.json<{ code: string }>().code).toBe('factor_required')
+  }, 180_000)
+})
+
+// #677 review: the START refused an unaccepted kind and the CONFIRM did not — and the confirm is where
+// the enrolment becomes real and, at the interstitial, where a session is handed out.
+//
+// Not a race. A pending row has no TTL and is only discarded when the same member starts another
+// enrolment, so the window is "begin one while the tenant accepts your kind, finish it whenever" —
+// which under a passkey stance is a full `local+factor` session obtained with an authenticator app.
+// Measured by an independent review before this was written; it is the same shape as the branch/
+// challenge split above, one layer deeper.
+describe('#677 review: the confirm side asks too', () => {
+  it('a pending TOTP begun under `any` cannot be confirmed once the stance is `passkey`', async () => {
+    const { sub, email } = await memberWithPassword('late-confirm')
+    await setStance('any')
+    const started = await app.inject({
+      method: 'POST', url: '/auth/local/factor/enrol',
+      headers: { ...H, cookie: `${FACTOR_COOKIE}=${cookieOf(await signIn(email))!}` }, payload: '{}',
+    })
+    expect(started.statusCode, started.body).toBe(201)
+    const { factorId, secret } = started.json<{ factorId: string; secret: string }>()
+
+    await setStance('passkey')
+    const fsid = cookieOf(await signIn(email))!
+    const res = await app.inject({
+      method: 'POST', url: `/auth/local/factor/enrol/${factorId}/confirm`,
+      headers: { ...H, cookie: `${FACTOR_COOKIE}=${fsid}` },
+      payload: JSON.stringify({ code: totpCode(secret, Date.now()) }),
+    })
+    expect(res.statusCode, `a correct code for an unaccepted kind :: ${res.body}`).toBe(409)
+    expect(res.json<{ code: string }>().code).toBe('factor_kind_not_accepted')
+    // The half that matters: no session came out of it.
+    expect(res.cookies.find((c) => c.name === SESSION_COOKIE), 'and no session was handed over').toBeUndefined()
+    void sub
+  }, 180_000)
+
+  it('…and the session-side confirm refuses it as well', async () => {
+    // Same window, the settings door. `dev-user` has a session, so this is the ordinary enrolment path.
+    await setStance('any')
+    const started = await app.inject({ method: 'POST', url: '/me/factors/totp', headers: AUTH, payload: '{}' })
+    expect(started.statusCode).toBe(201)
+    const { factorId, secret } = started.json<{ factorId: string; secret: string }>()
+
+    await setStance('passkey')
+    const res = await app.inject({
+      method: 'POST', url: `/me/factors/${factorId}/confirm`, headers: AUTH,
+      payload: JSON.stringify({ code: totpCode(secret, Date.now()) }),
+    })
+    expect(res.statusCode, res.body).toBe(409)
+
+    const [row] = await admin<{ confirmed: boolean }[]>`
+      SELECT confirmed_at IS NOT NULL AS confirmed FROM member_factors WHERE id = ${factorId}`
+    expect(row?.confirmed, 'the row is still pending — nothing became real').toBe(false)
+    await admin`DELETE FROM member_factors WHERE id = ${factorId}`.catch(() => {})
+  }, 180_000)
+
+  it('…and under `any` the same confirm still works', async () => {
+    // The control. Without it a build that refused every confirm would satisfy both cases above — and
+    // nobody could ever enrol anything.
+    await setStance('any')
+    const started = await app.inject({ method: 'POST', url: '/me/factors/totp', headers: AUTH, payload: '{}' })
+    const { factorId, secret } = started.json<{ factorId: string; secret: string }>()
+    const res = await app.inject({
+      method: 'POST', url: `/me/factors/${factorId}/confirm`, headers: AUTH,
+      payload: JSON.stringify({ code: totpCode(secret, Date.now()) }),
+    })
+    expect(res.statusCode, res.body).toBe(200)
+    await admin`DELETE FROM member_factors WHERE id = ${factorId}`.catch(() => {})
   }, 180_000)
 })

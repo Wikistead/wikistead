@@ -15,7 +15,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { buildApp } from '../app.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { secondFactorStance, secondFactorRequired, floorFor, acceptedKinds } from '../auth/factor-policy.js'
+import { secondFactorStance, secondFactorRequired, floorFor, acceptedKinds, wouldStrandTenant } from '../auth/factor-policy.js'
 import { startPasskeyEnrolment, startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
 import { storePasskey } from '../auth/passkeys.js'
 import { generateTotpSecret } from '../auth/totp.js'
@@ -219,5 +219,54 @@ describe('#676: the old spelling still works', () => {
     const res = await setStance('sometimes')
     expect(res.statusCode, res.body).toBe(400)
     expect(await secondFactorStance(db)).toBe('off')
+  }, 180_000)
+})
+
+// #677 review: the floor was one-sided. `wouldStrandTenant` asked "is any factor left" while the stance
+// may accept only one KIND and may ask for TWO of them — so a tenant could go from two admin passkeys
+// to none by deleting them one at a time, each delete answering "somebody else still holds one" about
+// an authenticator app the door refuses. The floor #676 sets on the way in was dismantled on the way
+// out, which is precisely what #605's two-sided guard exists to prevent.
+describe('#676: the floor holds on the way out too', () => {
+  it('the LAST passkey above the floor cannot be given up while `passkey` is selected', async () => {
+    const a = await seatAdmin('out-a')
+    const b = await seatAdmin('out-b')
+    await givePasskey(a, 'out-a')
+    await givePasskey(b, 'out-b')
+    await giveTotp(a) // …and an authenticator app, which under `passkey` protects nobody
+    expect((await setStance('passkey')).statusCode).toBe(204)
+
+    const [row] = await admin<{ id: string }[]>`
+      SELECT id FROM member_factors WHERE member_sub = ${a} AND kind = 'passkey'`
+    expect(await wouldStrandTenant(db, { memberSub: a, factorId: row!.id, host: HOST }),
+      'two keys is the floor, so giving one up takes the tenant below it').toBe(true)
+  }, 180_000)
+
+  it('…and a third key makes the same delete safe', async () => {
+    // The control. Without it a guard that refused every passkey removal would pass the case above and
+    // trap a tenant that has plenty.
+    const a = await seatAdmin('out3-a')
+    const b = await seatAdmin('out3-b')
+    await givePasskey(a, 'out3-a')
+    await givePasskey(a, 'out3-a2')
+    await givePasskey(b, 'out3-b')
+    expect((await setStance('passkey')).statusCode).toBe(204)
+
+    const [row] = await admin<{ id: string }[]>`
+      SELECT id FROM member_factors WHERE member_sub = ${a} AND label = ${'out3-a'}`
+    expect(await wouldStrandTenant(db, { memberSub: a, factorId: row!.id, host: HOST }),
+      'three keys, one given up, two remain — the floor still stands').toBe(false)
+  }, 180_000)
+
+  it('an authenticator app is freely removable under `passkey` — it protects nobody', async () => {
+    const a = await seatAdmin('out-app')
+    await givePasskey(a, 'out-app-key')
+    await givePasskey(a, 'out-app-key2')
+    await giveTotp(a)
+    expect((await setStance('passkey')).statusCode).toBe(204)
+
+    const [row] = await admin<{ id: string }[]>`
+      SELECT id FROM member_factors WHERE member_sub = ${a} AND kind = 'totp'`
+    expect(await wouldStrandTenant(db, { memberSub: a, factorId: row!.id, host: HOST })).toBe(false)
   }, 180_000)
 })

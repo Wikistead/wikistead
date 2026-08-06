@@ -25,7 +25,7 @@ import {
 } from '../auth/passkeys.js' // #665, #678
 import { secondFactorRequired, presentableHere, secondFactorStance, presentableKinds, acceptedKinds } from '../auth/factor-policy.js'
 import {
-  hasConfirmedFactor, totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor,
+  totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor,
   startPasskeyEnrolment, discardPendingFactors, type FactorKind,
 } from '../auth/second-factors.js'
 import { MAX_FACTORS_PER_MEMBER } from './second-factor.js' // #678: one cap, not a second copy of it
@@ -799,6 +799,11 @@ export async function authLocalPlugin(app: FastifyInstance) {
       if (await overLimit(app.valkey, idKey, LOCAL_LOGIN_ID_MAX)) {
         return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
       }
+      if (!acceptedKinds(await secondFactorStance(req.db)).includes('passkey')) {
+        return reply.code(409).send({
+          error: 'this workspace asks for a code from an authenticator app.', code: 'factor_kind_not_accepted',
+        })
+      }
       const [own] = await req.db.sql<[{ id: string }?]>`
         SELECT id FROM member_factors
         WHERE id = ${req.params.id} AND member_sub = ${held.pending.sub} AND kind = 'passkey' AND confirmed_at IS NULL`
@@ -845,6 +850,16 @@ export async function authLocalPlugin(app: FastifyInstance) {
       const idKey = `authlocal:id:${held.pending.sub}`
       if (await overLimit(app.valkey, idKey, LOCAL_LOGIN_ID_MAX)) {
         return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
+      }
+      // #677 review: the START refuses an unaccepted kind, and this — where the enrolment becomes real
+      // and a SESSION is handed out — did not. A pending row survives indefinitely, so somebody who
+      // began an enrolment while the tenant took authenticator apps could finish it after it stopped
+      // and sign in with the kind the door refuses.
+      if (!acceptedKinds(await secondFactorStance(req.db)).includes('totp')) {
+        return reply.code(409).send({
+          error: 'this workspace asks for a passkey — use the key option instead.',
+          code: 'factor_kind_not_accepted',
+        })
       }
       // `kind = 'totp'`, for the reason #666 records: a route that does not ask which proof a factor
       // takes reports the mismatch as the member's mistake ("that code did not match" about a thing

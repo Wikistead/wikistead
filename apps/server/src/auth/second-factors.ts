@@ -151,7 +151,19 @@ export async function discardPendingFactors(db: TenantDb, memberSub: string): Pr
   return rows.length
 }
 
-/** Whether this member can actually present a factor. The question every policy check asks. */
+/**
+ * Whether this member holds ANY confirmed factor — no kind, no host.
+ *
+ * ⚠️ NOT the question a policy check asks, and its docstring used to say it was. ADR-222 §3 names this
+ * function as the one that built a dead end: burnt into the factor receipt as `enrolled`, it told a
+ * member holding only an authenticator app under a passkey stance to present the factor they held, and
+ * then refused them enrolment for holding it. What a door wants is `presentableKinds` — could they
+ * offer something THIS TENANT ACCEPTS, at THIS HOST.
+ *
+ * Kept because "do they have anything at all" is still a real question for surfaces that are not about
+ * getting in (the members list's has-a-factor mark). A caller reaching for it to decide access is the
+ * mistake, and this comment is the sign on it.
+ */
 export async function hasConfirmedFactor(db: TenantDb, memberSub: string): Promise<boolean> {
   const [row] = await db.sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM member_factors
