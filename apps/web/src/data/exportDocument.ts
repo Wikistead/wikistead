@@ -341,15 +341,46 @@ const escapeHtml = (s: string): string =>
 // - no `</style` sequence, which ends the block early and hands the rest of the sheet to the HTML parser.
 // Values are dropped rather than rewritten, for the same reason makeInert drops attributes.
 const CSS_SAFE_DATA_URL = /^data:(?:image\/(?:png|jpeg|gif|webp)|font\/[\w.+-]+|application\/font-woff2?)[;,]/i;
+
+/**
+ * Decode CSS escapes the way the parser does, so the guard judges the value the BROWSER will see.
+ *
+ * This is the whole lesson of #85's third pass at this function. Twice now the check has been defeated by
+ * reading the source text instead of the value:
+ *   - `[^)]*` stopped at the `)` inside `url("data:image/svg+xml,<svg onload=steal()>")`;
+ *   - `"([^"]*)"` stopped at the first `\"` of `url("data:image/svg+xml,<svg width=\"200\">")`, so the
+ *     match never formed and the URL was never examined at all — that is the form that reached a saved
+ *     file (review 2026-08-06).
+ * And a third door was open behind them: `url("\64 ata:image/svg+xml,…")` is `data:` to a parser and is
+ * not `^data:` to a regex, so it sailed past as an ordinary URL (measured before this change).
+ *
+ * Each was patched as its own case. They are one case: the sanitiser was comparing spellings while the
+ * parser compares values. Decoding first is what makes the family finite.
+ *
+ * Per CSS Syntax §4.3.7: `\` + up to six hex digits, optionally followed by one whitespace, is that code
+ * point; a code point of zero, a surrogate, or one out of range becomes U+FFFD; `\` + any other character
+ * is that character.
+ */
+function decodeCssEscapes(s: string): string {
+  return s.replace(/\\(?:([0-9a-fA-F]{1,6})[ \t\n\f\r]?|([\s\S]))/g, (_m, hex?: string, ch?: string) => {
+    if (ch !== undefined) return ch;
+    const cp = parseInt(hex!, 16);
+    return cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) ? "�" : String.fromCodePoint(cp);
+  });
+}
+
 export function sanitizeCss(css: string): string {
   return css
     .replace(/@import[^;]*;?/gi, "")
-    // Quoted first, and the quoted forms may CONTAIN `)` — `url("data:image/svg+xml,<svg onload=steal>")`
-    // is the case that slipped through a `[^)]*` body (measured: the smuggled svg survived).
-    .replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi, (whole, dq?: string, sq?: string, bare?: string) => {
-      const url = (dq ?? sq ?? bare ?? "").trim()
-      return /^data:/i.test(url) && !CSS_SAFE_DATA_URL.test(url) ? "url()" : whole
-    })
+    // Quoted first, and a quoted body may contain BOTH `)` and an escaped quote, so the body is
+    // "an escape sequence, or a character that is neither the closing quote nor a backslash".
+    .replace(
+      /url\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\[\s\S]|[^)\\])*))\s*\)/gi,
+      (whole, dq?: string, sq?: string, bare?: string) => {
+        const url = decodeCssEscapes((dq ?? sq ?? bare ?? "").trim())
+        return /^data:/i.test(url) && !CSS_SAFE_DATA_URL.test(url) ? "url()" : whole
+      },
+    )
     // case-insensitive, and any whitespace the parser would tolerate between the name and `>`
     .replace(/<\s*\/\s*style/gi, "<\\/style");
 }
