@@ -61,6 +61,7 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'templates.ts:/templates/:id': { kind: 'bounded', why: 'one template by id — a row, not a list.' },
   'spaces.ts:/spaces/:spaceId/icon-image': { kind: 'bounded', why: 'one image for one space — a settings record.' },
   'spaces.ts:/spaces/:spaceId/page-creation-policy': { kind: 'bounded', why: 'one policy for one space — a settings record.' },
+  'second-factor.ts:/me/factors': { kind: 'bounded', why: 'MAX_FACTORS_PER_MEMBER refuses the enrolment past 10, so the list cannot grow (#657). A cap and not a page: paging authenticators would let somebody hold more than they can see.' },
   // …single-resource routes surfaced by the tighter window: each returns ONE record by id.
   'pages.ts:/pages/:pageId': { kind: 'bounded', why: 'one page by id — a row, not a list.' },
   'pages.ts:/pages/:pageId/published': { kind: 'bounded', why: 'one published page by id — a row, not a list.' },

@@ -60,6 +60,7 @@ import { webhooksPlugin } from './routes/webhooks.js'
 import { authPlugin } from './routes/auth.js'
 import { authLocalPlugin } from './routes/auth-local.js'
 import { accountPlugin } from './routes/account.js'
+import { secondFactorPlugin } from './routes/second-factor.js' // #657: enrolling a second factor (self-scope, like /me)
 import { signupPlugin } from './routes/signup.js'
 import { membersPlugin } from './routes/members.js'
 import { commentsPlugin } from './routes/comments.js'
@@ -566,6 +567,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(authPlugin)
   await app.register(authLocalPlugin) // #568: password sign-in (public route, host-resolved tenant)
   await app.register(accountPlugin)
+  await app.register(secondFactorPlugin) // #657 / ADR-219 §7
   await app.register(signupPlugin)
   await app.register(membersPlugin)
   await app.register(commentsPlugin)

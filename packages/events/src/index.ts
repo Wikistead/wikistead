@@ -128,6 +128,10 @@ export type DomainEvent =
   | { type: 'member.reactivated'; tenantId: string; actorId: string; targetSub: string }
   // #626 / ADR-214: the pair to the one above — an admin took the password entrance back.
   | { type: 'member.password_removed'; tenantId: string; actorId: string; targetSub: string }
+  // #657 / ADR-219: a member added a second factor to their own account. The actor and the target are
+  // the same person by construction — enrolment is self-scope — and it is emitted for the same reason
+  // `member.password_enabled` is: something changed about who can authenticate this account.
+  | { type: 'member.factor_enrolled'; tenantId: string; actorId: string; targetSub: string }
   // #568 / ADR-198 §6 (OQ7): a reset was ASKED FOR, and later COMPLETED. Both are named by sub and
   // both matter to an account-takeover investigation — the request says when someone started, the
   // completion says whether they finished, and the gap between them is where a stolen link lives.
