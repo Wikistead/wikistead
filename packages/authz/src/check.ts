@@ -1,5 +1,6 @@
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { Capability, ResourceRef } from '@wikistead/types'
+import { authzScopeForCheck } from './scope.js'
 import { getAuthzHooks } from '@wikistead/hooks'
 import { fgaModelId } from './client.js' // #500: batchCheck needs the model id passed explicitly
 
@@ -75,6 +76,11 @@ export async function check(
   resource: ResourceRef,
   context?: CheckContext,
 ): Promise<boolean> {
+  // #637 / ADR-216 §1: in a process that declared `requireAuthzScope()`, a check outside a scope is a
+  // programming error and throws here. Nothing is evaluated against the scope yet — that is the next
+  // slice — but the teeth come first: a restriction added to a mechanism that silently tolerates its
+  // own absence is a restriction that will be forgotten somewhere and never noticed.
+  authzScopeForCheck()
   const hooks = getAuthzHooks()
   const relation = resolveRelation(capability, resource)
   const ctx = { user, relation, resource, tenantId: '' }  // tenantId enriched by caller if needed

@@ -48,3 +48,5 @@ export { appendOperatorEntry, type OperatorAction } from './audit/operator-ledge
 // carrying its own copy, so there is one meaning of "suspended" for the console and the directory alike.
 export { suspendMember, reactivateMember, isScimSuspension, grantsShouldBeRebuilt, LastAdminSuspensionError } from './auth/member-suspension.js'
 export type { SuspensionReason, SuspendOutcome, ReactivateOutcome } from './auth/member-suspension.js'
+// #637 / ADR-216 §2: the EE composition root declares the same request-path rule as the CE one.
+export { requireAuthzScope } from '@wikistead/authz'

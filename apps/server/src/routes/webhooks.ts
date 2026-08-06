@@ -1,3 +1,4 @@
+import { runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
 import { createHmac, randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { Sql } from 'postgres'
@@ -192,7 +193,10 @@ export function startWebhookDrainWorker(fga: OpenFgaClient, intervalMs = 5000): 
   const tick = async () => {
     if (running || stopped) return
     running = true
-    try { while ((await drainWebhookOutbox(fga)) > 0 && !stopped) { /* keep draining */ } }
+    // #637 / ADR-216 §2: not on behalf of a request, and it SAYS so. An explicit unrestricted scope,
+    // rather than arriving with none — which in a process that declared the requirement is a crash, and
+    // in one that has not is indistinguishable from a request path where somebody forgot.
+    try { await runInAuthzScope(SYSTEM_SCOPE, async () => { while ((await drainWebhookOutbox(fga)) > 0 && !stopped) { /* keep draining */ } }) }
     catch (err) { console.error('[webhooks:drain]', err) }
     finally { running = false }
   }

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { Sql } from 'postgres'
-import { requireTenantAdmin } from '@wikistead/authz' // #383
+import { requireTenantAdmin, runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
@@ -314,7 +314,10 @@ export function startCustomDomainRecheckWorker(intervalMs = DEFAULT_RECHECK_MS):
     if (running) return
     running = true
     try {
-      await recheckCustomDomains()
+      // #637 / ADR-216 §2: not on behalf of a request, and it SAYS so. An explicit unrestricted scope,
+      // rather than arriving with none — which in a process that declared the requirement is a crash, and
+      // in one that has not is indistinguishable from a request path where somebody forgot.
+      await runInAuthzScope(SYSTEM_SCOPE, () => recheckCustomDomains())
     } catch {
       /* a sweep that fails retries next tick */
     } finally {

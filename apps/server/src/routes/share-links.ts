@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, writeTuples, deleteTuples, isAlreadyConverged } from '@wikistead/authz'
+import { check, writeTuples, deleteTuples, isAlreadyConverged, runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
 import { mintGuestToken } from '@wikistead/auth'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
@@ -377,7 +377,10 @@ export function startShareLinkSweepWorker(fga: OpenFgaClient, intervalMs = 60000
     if (running) return
     running = true
     try {
-      await sweepShareLinkRevokeFailures(fga)
+      // #637 / ADR-216 §2: not on behalf of a request, and it SAYS so. An explicit unrestricted scope,
+      // rather than arriving with none — which in a process that declared the requirement is a crash, and
+      // in one that has not is indistinguishable from a request path where somebody forgot.
+      await runInAuthzScope(SYSTEM_SCOPE, () => sweepShareLinkRevokeFailures(fga))
     } catch {
       /* next tick retries */
     } finally {

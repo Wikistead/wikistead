@@ -4,3 +4,6 @@ export { isTenantAdmin, requireTenantAdmin, requireTenantAdminOr404, isSpaceCrea
 export type { CheckContext, MemberAccess } from './check.js'
 export { writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, FGA_WRITE_CHUNK, isAlreadyConverged } from './tuples.js' // #578: convergence is asked by code, never by matching the store's prose
 export type { TupleInput } from './tuples.js'
+// #637 / ADR-216 §1: the ambient authorization scope (see scope.ts for why it is ambient).
+export { runInAuthzScope, openAuthzScope, setAuthzRestriction, currentAuthzScope, requireAuthzScope, resetAuthzScopeRequirement, authzScopeForCheck, SYSTEM_SCOPE } from './scope.js'
+export type { AuthzScope } from './scope.js'
