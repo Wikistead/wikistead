@@ -114,7 +114,21 @@ describe('#637: a key confined to a space cannot mint a credential that is not',
 })
 
 describe('#637: the confinement reaches the primitives, through the request', () => {
-  /** The real rule's shape: a page is reachable when its space is on the key's list. */
+  /**
+   * A stand-in rule, and it is one deliberately: CE may not import the EE package (`lint:no-ee-imports`),
+   * so what this file can measure is the SEAM — that a restriction set during authentication reaches the
+   * primitives and narrows what a request sees.
+   *
+   * It is not evidence about the shipped rule, and saying so is the point. The review found the
+   * real evaluator resolving every page to "unresolvable" — it read `pages` on the pooled connection with
+   * no tenant in the session, so row-level security returned nothing — while this file stayed green,
+   * because this stand-in reads over the admin connection instead. One different line, and it was the
+   * broken one. The rule the product registers is exercised in
+   * `packages/ee-server/src/__tests__/space-restriction-shipped-637.test.ts`, against a real request.
+   *
+   * Kept reading over `admin` on purpose: this stand-in has no scope resolver to consult and inventing
+   * one here would make the file look like it were testing the real thing again.
+   */
   const registerSpaceRule = () => registerAuthzRestrictionEvaluator(async (restriction, resource) => {
     if (resource.type === 'space') return restriction.spaces.has(resource.id) ? 'allow' : 'deny'
     if (resource.type !== 'page') return 'allow'

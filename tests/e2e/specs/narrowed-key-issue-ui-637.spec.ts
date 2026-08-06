@@ -34,12 +34,37 @@ test("#637: an admin can confine a key to a space, and the key says so", async (
   const plaintext = (await page.getByTestId("api-key-plaintext-value").textContent())!.trim();
   expect(plaintext, "a usable key").toMatch(/^wks_/);
 
-  // …and it really is confined: asking for a space it does not carry is refused, while its own answers.
-  const probe = await page.evaluate(async (token) => {
-    const one = await fetch("/api/spaces/demo_space/pages", { headers: { authorization: `Bearer ${token}` } });
-    return { own: one.status };
-  }, plaintext);
-  expect(probe.own, "its own space answers").toBeLessThan(400);
+  // …and it really is confined. Measured at the CONTENTS with an unconfined control beside it: this
+  // route answers 200 either way, so the status said nothing — the review found a confinement
+  // that let through zero pages while this line stayed green. An empty list can mean an empty space,
+  // which is why the control has to see something for the number to mean anything.
+  // The control comes from the same form with nothing ticked, rather than from a fetch: the app's own
+  // requests carry a token this page holds, and a bare fetch from the console does not — it answers 401
+  // and would read as "the control could not be issued" rather than as a test making a wrong call.
+  await page.getByTestId("api-key-name").fill(`ui637-control-${stamp}`);
+  await page.getByTestId("api-key-create").click();
+  // Waited on the VALUE CHANGING, not on the box being visible: the box is already showing the first
+  // key, so "visible" is true before the second request has answered and the read would hand back the
+  // secret from a moment ago. (Caught by the inequality below, which is why it is there.)
+  await expect
+    .poll(async () => (await page.getByTestId("api-key-plaintext-value").textContent())?.trim(), { timeout: 20_000 })
+    .not.toBe(plaintext);
+  const control = (await page.getByTestId("api-key-plaintext-value").textContent())!.trim();
+  expect(control, `a control key was issued :: ${control}`).toMatch(/^wks_/);
+  expect(control, "…and it is a different key from the confined one").not.toBe(plaintext);
+
+  const probe = await page.evaluate(async ([confined, plain]) => {
+    const count = async (token: string) => {
+      const r = await fetch("/api/spaces/demo_space/pages", { headers: { authorization: `Bearer ${token}` } });
+      const body: unknown = r.ok ? await r.json() : null;
+      const rows = Array.isArray(body) ? body : ((body as { items?: unknown[] })?.items ?? []);
+      return { status: r.status, n: rows.length };
+    };
+    return { own: await count(confined), control: await count(plain!) };
+  }, [plaintext, control] as const);
+
+  expect(probe.control.n, `the control sees pages, so there is something to lose :: ${JSON.stringify(probe)}`).toBeGreaterThan(0);
+  expect(probe.own.n, `the confined key sees its own space :: ${JSON.stringify(probe)}`).toBe(probe.control.n);
 
   // the row it produced is listed
   await expect(page.getByTestId("api-key-list")).toContainText(`ui637-${stamp}`);
