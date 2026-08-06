@@ -83,6 +83,14 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'roles.ts:/spaces/:spaceId/assignable-roles': { kind: 'debt', why: '#623 B: every resource-scoped role, same table as /admin/roles.' },
   'auth.ts:/auth/login-options': { kind: 'debt', why: '#623 A: one row per login connection; grows with IdP configuration, not with usage.' },
 
+  // ── surfaced by slice 12's SECOND instrument fix: a bound marker that belonged to a scalar subquery,
+  // or to a lower-case variable. Five routes, each read by hand.
+  'spaces.ts:/spaces': { kind: 'debt', why: '#623: one row per space, ORDER BY created_at, no LIMIT — measured at 253 rows in one response on the dev tenant, on the path the sidebar takes at startup. The bound is owed a decision first: the sidebar switcher AND #661’s space picker both assume the response is complete, so a page here turns their filter into "filter this page" unless the filtering moves to the server with it. That is acceptance 1 and 2, not the instrument.' },
+  'share-links.ts:/spaces/:spaceId/share-links': { kind: 'debt', why: '#623 B: one row per link on a space — the twin of the page route above, and green until now only because its window ran to the end of the file and borrowed a DELETE handler’s `limit`.' },
+  'spaces.ts:/spaces/:spaceId/delete-mode': { kind: 'bounded', why: 'one delete-mode setting for one space — a settings record. Its only LIMIT takes the tenant default as a scalar.' },
+  'auth-local.ts:/auth/invite-kind': { kind: 'bounded', why: 'one invitation, addressed by the hash of the token in the link — a row, not a list.' },
+  'public.ts:/public/attachments/:id/inline': { kind: 'bounded', why: 'one attachment by id — a row, not a list. The download twin was already here; this one was not.' },
+
   // ── the two trees: ADR-220. Both were invisible to this scan until slice 12 — see NOT_REALLY_BOUNDED.
   'pages.ts:/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: the whole space, one row per page, plus a per-page confirm.' },
   'public.ts:/public/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: 200 children per node to depth 6 — each step bounded, the product is not.' },
@@ -92,14 +100,54 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
 }
 
 /**
+ * A scalar or derived subquery, removed before the bound is looked for.
+ *
+ * #623 slice 12 (/, re-measured here): `listSpaces` reads
+ * `(SELECT delete_mode FROM tenant_settings LIMIT 1)` as one column of a query over every space in the
+ * tenant. That `LIMIT 1` takes one SCALAR and holds back no rows at all — and it made `GET /spaces`
+ * read as bounded while it returned **253 rows in one response** on the dev tenant, on the path the
+ * sidebar takes at startup. A token cannot see which statement a keyword belongs to, so the keyword is
+ * removed from the ones it cannot belong to.
+ *
+ * The direction of the error matters. A route whose only bound genuinely lives inside a derived table
+ * (`FROM (SELECT … LIMIT 50) t`) now reads as unbounded and lands in the ledger, where a person reads
+ * it. The opposite mistake is the one this slice exists to stop: silently green.
+ */
+function withoutSubqueries(sql: string): string {
+  let out = '', i = 0
+  while (i < sql.length) {
+    if (sql[i] === '(' && /^\(\s*SELECT\b/i.test(sql.slice(i, i + 20))) {
+      let depth = 0, j = i
+      for (; j < sql.length; j++) {
+        if (sql[j] === '(') depth++
+        else if (sql[j] === ')') { depth--; if (depth === 0) break }
+      }
+      out += ' '; i = j + 1
+    } else { out += sql[i]; i++ }
+  }
+  return out
+}
+
+/**
  * A handler that reads rows and never says how many. The markers a bound leaves behind.
  *
  * `firstN` used to be in here and never belonged: it is the page tree's PARTIAL FIRST PAINT (#541 —
  * the first N rows in DFS order, drawn while the full response is still in flight), and the same
  * handler goes on to return the entire space. It bought the member tree a green line in this ledger
  * for ten slices while being, by its own ADR's description, not a bound. Removed.
+ *
+ * `limit` (lower case) went the same way in slice 12. The suite at the bottom of this file learned in
+ * slice 3 that `const limit = …` satisfies a case-insensitive search while the query it was meant to
+ * bound has none, and made itself case-sensitive; this half had not caught up. Measured: it was the
+ * only thing holding `GET /spaces/:spaceId/share-links` green, whose window runs to the end of the file
+ * and picks up a `limit` belonging to a DELETE handler two routes later.
+ *
+ * `cursor` STAYS, and not for symmetry: `/search` is keyset-paged through Meilisearch and has no SQL at
+ * all, so `LIMIT` is not a word it will ever contain. Dropping `cursor` would have put the one route in
+ * the product that already does paging properly into the ledger — measured before deciding.
  */
-const BOUNDED = /\bLIMIT\b|\blimit\b|\bcursor\b/
+const BOUNDED_MARKER = /\bLIMIT\b|\bcursor\b/
+const isBounded = (body: string): boolean => BOUNDED_MARKER.test(withoutSubqueries(body))
 
 /**
  * Routes where a bound MARKER is present and does not bound the RESPONSE.
@@ -198,7 +246,7 @@ describe('#623: no list route grows without saying so', () => {
   it('every list-shaped GET route is either bounded or in the ledger with a reason', () => {
     const missing: string[] = []
     for (const r of listShapedRoutes()) {
-      if (BOUNDED.test(r.body) && !NOT_REALLY_BOUNDED[r.key]) continue
+      if (isBounded(r.body) && !NOT_REALLY_BOUNDED[r.key]) continue
       if (!LEDGER[r.key]) missing.push(r.key)
     }
     expect(
@@ -217,7 +265,7 @@ describe('#623: no list route grows without saying so', () => {
     const orphans = Object.keys(LEDGER).filter((k) => !live.has(k))
     expect(orphans, `ledger lines for routes that do not exist: ${orphans.join(', ')}`).toEqual([])
     const bounded = listShapedRoutes()
-      .filter((r) => BOUNDED.test(r.body) && !NOT_REALLY_BOUNDED[r.key] && LEDGER[r.key])
+      .filter((r) => isBounded(r.body) && !NOT_REALLY_BOUNDED[r.key] && LEDGER[r.key])
     expect(bounded.map((r) => r.key), 'these routes are bounded now — delete their ledger lines').toEqual([])
   })
 
@@ -243,7 +291,7 @@ describe('#623: no list route grows without saying so', () => {
     for (const key of ['pages.ts:/spaces/:spaceId/pages', 'public.ts:/public/spaces/:spaceId/pages']) {
       const r = byKey.get(key)
       expect(r, `${key}: the scan does not see this route as list-shaped`).toBeDefined()
-      const counted = !BOUNDED.test(r!.body) || Boolean(NOT_REALLY_BOUNDED[key])
+      const counted = !isBounded(r!.body) || Boolean(NOT_REALLY_BOUNDED[key])
       expect(counted, `${key}: counted as bounded, so bounding it would change nothing here`).toBe(true)
       expect(LEDGER[key], `${key}: …and it is owed a bound, out loud`).toBeDefined()
     }
