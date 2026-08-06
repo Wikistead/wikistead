@@ -106,7 +106,15 @@ export interface ApiKeyCreated extends ApiKeySummary {
 // Which plans get apiAccess is a business placeholder; self-host (UNLIMITED) is always on.
 export async function createApiKey(
   db: TenantDb,
-  args: { tenantId: string; plan: string; ownerUserId: string; name: string; scope?: ApiScope; expiresInDays?: number | null },
+  args: {
+    tenantId: string; plan: string; ownerUserId: string; name: string; scope?: ApiScope; expiresInDays?: number | null
+    // #637 / ADR-216: the narrowing dimensions. NULL is "not narrowed that way"; an empty list is
+    // "narrowed to nothing". CE writes them and never decides what they MEAN — the rule and the issuing
+    // route are EE, and the column is here for the reason migration 114 gives: the row has to outlive
+    // the overlay, or a key issued while EE was present would widen when it is removed.
+    capabilities?: readonly string[] | null
+    spaces?: readonly string[] | null
+  },
 ): Promise<ApiKeyCreated> {
   if (!resolveEntitlements(args.plan).apiAccess) {
     throw entitlementDenied('api', 'API keys are not available on this plan') // 403 api_not_entitled + upgrade
@@ -134,9 +142,11 @@ export async function createApiKey(
   const keyHash   = createHash('sha256').update(plaintext).digest('hex')
 
   const [row] = await db.sql<ApiKeyRow[]>`
-    INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash, scope, expires_at)
+    INSERT INTO api_keys (tenant_id, owner_user_id, name, key_prefix, key_hash, scope, expires_at, capabilities, space_ids)
     VALUES (${args.tenantId}, ${args.ownerUserId}, ${args.name}, ${keyPrefix}, ${keyHash}, ${scope},
-            ${days === null ? null : new Date(Date.now() + days * 86_400_000)})
+            ${days === null ? null : new Date(Date.now() + days * 86_400_000)},
+            ${args.capabilities ? db.sql.array([...args.capabilities]) : null},
+            ${args.spaces ? db.sql.array([...args.spaces]) : null})
     RETURNING id, tenant_id, owner_user_id, name, key_prefix, scope, created_at, last_used_at, revoked_at, expires_at
   `
   const result: ApiKeyCreated = { id: row.id, name: row.name, keyPrefix: row.key_prefix, scope, createdAt: row.created_at, lastUsedAt: null, expiresAt: row.expires_at ?? null, plaintext }
