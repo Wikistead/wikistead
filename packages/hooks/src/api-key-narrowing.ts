@@ -14,6 +14,33 @@ export interface NarrowedKeyRequest {
   method: string
   /** Fastify's `req.routeOptions.url` — the registered pattern, not the raw URL. */
   routePattern: string | undefined
+  /**
+   * #637 / ADR-216 §4: the spaces this key is confined to, when it is confined by space at all. Null is
+   * "not confined that way" — it is NOT "confined to nothing", which an empty set means, exactly as an
+   * empty capability list does.
+   */
+  spaces?: ReadonlySet<string> | null
+}
+
+/**
+ * Whether a key is narrowed AT ALL — in any dimension.
+ *
+ * #637 / ADR-216 §4. The gate used to ask this by testing `capabilities` for truthiness at its call site,
+ * which answered "no" for a key narrowed only by space. Everything narrowing buys hangs off that answer:
+ * the refusal on credential-minting routes, and the route table itself. So a key confined to one space
+ * would have been treated as unconfined, and `POST /auth/collab-token` mints a token carrying the OWNER's
+ * identity — the live-editing surface derives authority from OpenFGA for that subject and has never heard
+ * of API keys. One space in, every space out.
+ *
+ * It lives here, beside the seam, rather than at the call site: the whole point is that there is one
+ * answer to "is this key narrowed", and a second dimension added next month must not need the call site
+ * to be found again.
+ */
+export function isNarrowedKey(key: {
+  capabilities?: readonly string[] | null
+  spaces?: ReadonlySet<string> | readonly string[] | null
+}): boolean {
+  return key.capabilities != null || key.spaces != null
 }
 
 /** True when the request is allowed. A route the table does not know MUST answer false. */

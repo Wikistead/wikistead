@@ -12,7 +12,7 @@ import type { TenantDb } from './db/index.js'
 import { fgaClient, isTenantMember } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
-import { getNarrowedKeyGate } from '@wikistead/hooks'
+import { isNarrowedKey, getNarrowedKeyGate } from '@wikistead/hooks'
 
 // #628 / ADR-215 §2: routes that hand out a SECOND credential. Shut to a narrowed key whatever it
 // carries — see the note at the call site. Keyed by "METHOD pattern", where the pattern is the one the
@@ -413,7 +413,14 @@ export async function buildApp(): Promise<FastifyInstance> {
         // outright rather than guessed at: CE cannot mint one, so the only way to be holding one on a
         // CE deployment is that the EE overlay was removed after it was issued, and widening it back to
         // the owner's full rights is the one answer that must never happen.
-        if (apiUser.capabilities) {
+        //
+        // #637 / ADR-216 §4: "is this key narrowed" is ONE question, asked of `isNarrowedKey`, and it
+        // answers for every dimension there is. It used to be a truthiness test on `capabilities` right
+        // here, which said "not narrowed" about a key confined only by space — and everything above hangs
+        // off that answer, including the refusal to mint. A key confined to one space would have been
+        // handed a collab token carrying the OWNER's identity, which the live-editing process honours in
+        // full. One space in, every space out.
+        if (isNarrowedKey(apiUser)) {
           const pattern = req.routeOptions?.url
           if (pattern && CREDENTIAL_MINTING_ROUTES.has(`${req.method} ${pattern}`)) {
             emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: 'narrowed key on a credential-minting route' })
@@ -421,7 +428,7 @@ export async function buildApp(): Promise<FastifyInstance> {
             return
           }
           const gate = getNarrowedKeyGate()
-          if (!gate || !gate({ capabilities: apiUser.capabilities, method: req.method, routePattern: pattern })) {
+          if (!gate || !gate({ capabilities: apiUser.capabilities ?? [], method: req.method, routePattern: pattern, spaces: apiUser.spaces ?? null })) {
             emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: gate ? 'narrowed key outside its capabilities' : 'narrowed key with no gate registered' })
             await reply.code(403).send({ error: 'this API key is not permitted here', code: 'narrowed_key' })
             return
