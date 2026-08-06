@@ -101,9 +101,13 @@ test("#632: no container macro's bar bends around its frame", async ({ page }) =
       // …and a bar drawn the RIGHT way: a narrow strip pinned to the left edge. Counted so the premise
       // below survives the fix — after it, no bar is a border at all, and a premise that only knew about
       // borders would report "nothing rendered" on a correct page.
+      // …counted so the premise below survives the fix, whatever the bar is drawn WITH. It has been a
+      // border, then a `::before` strip, and is now a background layer; a counter that knew only one of
+      // those reports "nothing rendered" on a correct page, and the assertion passes on emptiness.
       const b = getComputedStyle(el, "::before");
-      const strip = b.position === "absolute" && px(b.width) >= 2 && px(b.width) <= 6 && b.left === "0px";
-      if (strip) barsSeen++;
+      const pseudo = b.position === "absolute" && px(b.width) >= 2 && px(b.width) <= 12 && b.left === "0px";
+      const grad = /linear-gradient\(\s*to right/.test(cs.backgroundImage || "");
+      if (pseudo || grad) barsSeen++;
       if (!thicker && !leftOnlyColour) continue;
       barsSeen++;
       const rounded = px(cs.borderTopLeftRadius) > 0 || px(cs.borderBottomLeftRadius) > 0;
@@ -147,11 +151,22 @@ test("#632: a strip does not eat into the space the border used to hold", async 
     const bars = () => {
       const out = new Map<HTMLElement, { strip: number; padLeft: number }>();
       for (const el of [...document.querySelectorAll<HTMLElement>("[data-pane=preview] *")]) {
+        const cs = getComputedStyle(el);
         const b = getComputedStyle(el, "::before");
-        if (b.position !== "absolute" || b.left !== "0px") continue;
-        const w = px(b.width);
+        // the bar's own painted width, whichever mechanism draws it. It was a `::before` strip when this
+        // pin was written and is a background layer now; reading only the strip made every element
+        // invisible here, which shows up as "the fixture rendered nothing" rather than as a wrong answer.
+        let w = 0;
+        if (b.position === "absolute" && b.left === "0px") w = px(b.width);
+        else {
+          // the first NON-ZERO px in the gradient is the band's edge — Chrome expands the shorthand into
+          // two stops and writes a leading `0px`, so "the first px" reads zero and the bar disappears.
+          if (/linear-gradient\(\s*to right/.test(cs.backgroundImage || "")) {
+            w = ((cs.backgroundImage.match(/(\d+(?:\.\d+)?)px/g) || []).map(parseFloat).find((v) => v > 0)) ?? 0;
+          }
+        }
         if (w < 2 || w > 6 + grow) continue;
-        out.set(el, { strip: w, padLeft: px(getComputedStyle(el).paddingLeft) });
+        out.set(el, { strip: w, padLeft: px(cs.paddingLeft) });
       }
       return out;
     };
@@ -196,9 +211,15 @@ test("#632: what the padding cannot move is placed from the bar's width too", as
     const placed = () => {
       const out: { key: string; dx: number }[] = [];
       for (const el of [...document.querySelectorAll<HTMLElement>("[data-pane=preview] *")]) {
+        // "a box that draws a strip", whichever mechanism draws it — a `::before` when this was written,
+        // a background band now. The first NON-ZERO stop of the gradient is the band's edge.
         const b = getComputedStyle(el, "::before");
-        if (b.position !== "absolute" || b.left !== "0px") continue;
-        const w = parseFloat(b.width) || 0;
+        const img = getComputedStyle(el).backgroundImage || "";
+        let w = 0;
+        if (b.position === "absolute" && b.left === "0px") w = parseFloat(b.width) || 0;
+        else if (/linear-gradient\(\s*to right/.test(img)) {
+          w = ((img.match(/(\d+(?:\.\d+)?)px/g) || []).map(parseFloat).find((v) => v > 0)) ?? 0;
+        }
         if (w < 2 || w > 6 + grow) continue;
         const box = el.getBoundingClientRect();
         for (const kid of [...el.querySelectorAll<HTMLElement>("*")]) {
@@ -246,13 +267,26 @@ test("#632: the bar is still there, still 3px, still the type's colour", async (
 
   const strips = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>("[data-pane=preview] .cm-lp-callout")].slice(0, 4).map((el) => {
-      const before = getComputedStyle(el, "::before");
-      return { cls: el.className.slice(0, 40), w: before.width, bg: before.backgroundColor, pos: before.position };
+      const cs = getComputedStyle(el);
+      // #632the bar is a background band now, so it is measured off the gradient — the first
+      // NON-ZERO stop is its edge (Chrome expands the shorthand and writes a leading `0px`), and the
+      // colour is the first rgb in it. Reading `::before` here measured a pseudo-element that no longer
+      // exists, which reports "no bar" on a page where the bar is plainly visible.
+      const img = cs.backgroundImage || "";
+      const band = (img.match(/(\d+(?:\.\d+)?)px/g) || []).map(parseFloat).find((v) => v > 0) ?? 0;
+      return {
+        cls: el.className.slice(0, 40),
+        w: band,
+        bg: (img.match(/rgba?\([^)]*\)/) || ["none"])[0],
+        clipped: cs.backgroundClip,
+      };
     }));
   expect(strips.length, "callout containers rendered").toBeGreaterThan(0);
   for (const s of strips) {
-    expect(parseFloat(s.w), `${s.cls}: the bar is still 3px`).toBeCloseTo(3, 0);
-    expect(s.bg, `${s.cls}: and still carries a colour`).not.toBe("rgba(0, 0, 0, 0)");
-    expect(s.pos, `${s.cls}: drawn absolutely, so the frame's radius cannot bend it`).toBe("absolute");
+    expect(s.w, `${s.cls}: the bar is still 3px`).toBeCloseTo(3, 0);
+    expect(s.bg, `${s.cls}: and still carries a colour`).not.toBe("none");
+    expect(s.bg, `${s.cls}: …a real one, not transparent`).not.toMatch(/rgba\(0, 0, 0, 0\)/);
+    // painted as part of the box, which is what makes the frame's radius clip it rather than bend it
+    expect(s.clipped, `${s.cls}: drawn inside the box, so its corners cut the bar`).toBe("border-box");
   }
 });

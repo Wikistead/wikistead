@@ -5822,7 +5822,15 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     // the strip is a rectangle that ignores it. `--cb-color` is what every type already overrides, so
     // the per-type rules below keep working by setting that variable rather than a border colour.
     "--cb-bar": "var(--callout-note, #6e7781)",
-    background: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)",
+    // #632 (review rejection): the bar is a BACKGROUND LAYER, not a child. A strip given
+    // `border-radius: inherit` has its radius clamped to half its own width, so a 3px bar asking for 4px
+    // was drawn at 1.5px while the box's background kept the full 4px — the two top corners of one box
+    // cut by different arcs. A background is always clipped to the box's radius, so both corners take the
+    // same curve by construction, at any radius and any bar width. Every per-type rule below sets
+    // `backgroundColor`, never `background`: the shorthand resets `background-image` and the bar with it.
+    backgroundColor: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)",
+    backgroundImage: "linear-gradient(to right, var(--cb-bar, var(--callout-note, #6e7781)) 0 var(--wks-bar-w, 3px), rgba(0,0,0,0) var(--wks-bar-w, 3px))",
+    backgroundRepeat: "no-repeat",
     // #170 panel layout: a left gutter (position:relative anchors the absolutely-positioned icon into
     // it) so the icon reads as a large panel column and the body text aligns to its right, not crammed
     // beside a tiny glyph. NOTE: CM renders each callout line as a separate .cm-line, so pure CSS
@@ -5838,29 +5846,14 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   },
   // The strip itself. Absolutely positioned, so the rounded first/last lines do not bend it. Drawn on
   // every line of the container, which reads as one continuous rule down the left edge.
-  ".cm-lp-callout::before": {
-    content: '""',
-    position: "absolute",
-    left: "0",
-    top: "0",
-    bottom: "0",
-    width: "var(--wks-bar-w, 3px)",
-    background: "var(--cb-bar, var(--callout-note, #6e7781))",
-    pointerEvents: "none",
-    // #632an absolutely-positioned child is not clipped by its box's `border-radius`, so a square
-    // strip pokes out at the rounded corners of the first and last line. `inherit` gives it the same
-    // radius the line has — 4px at the ends of a todo, 0 in the middle, which is exactly the shape the
-    // continuous rule should take.
-    borderRadius: "inherit",
-  },
   // Per-type accents (#150 → #158-C5 tokens; #199). Every type rides its FIXED semantic --callout-*
   // token (tokens.css, light/dark only) — never the tenant --accent, so a callout's colour keeps its
   // meaning (info=blue, note=grey, tip=green, warning=yellow, danger=red).
-  ".cm-lp-callout-note": { "--cb-bar": "var(--callout-note, #6e7781)", background: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)" },
-  ".cm-lp-callout-info": { "--cb-bar": "var(--callout-info, #0969da)", background: "color-mix(in srgb, var(--callout-info, #0969da) 10%, transparent)" },
-  ".cm-lp-callout-tip": { "--cb-bar": "var(--callout-tip, #2ea043)", background: "color-mix(in srgb, var(--callout-tip, #2ea043) 10%, transparent)" },
-  ".cm-lp-callout-warning": { "--cb-bar": "var(--callout-warning, #d29922)", background: "color-mix(in srgb, var(--callout-warning, #d29922) 13%, transparent)" },
-  ".cm-lp-callout-danger": { "--cb-bar": "var(--callout-danger, #cf222e)", background: "color-mix(in srgb, var(--callout-danger, #cf222e) 10%, transparent)" },
+  ".cm-lp-callout-note": { "--cb-bar": "var(--callout-note, #6e7781)", backgroundColor: "color-mix(in srgb, var(--callout-note, #6e7781) 8%, transparent)" },
+  ".cm-lp-callout-info": { "--cb-bar": "var(--callout-info, #0969da)", backgroundColor: "color-mix(in srgb, var(--callout-info, #0969da) 10%, transparent)" },
+  ".cm-lp-callout-tip": { "--cb-bar": "var(--callout-tip, #2ea043)", backgroundColor: "color-mix(in srgb, var(--callout-tip, #2ea043) 10%, transparent)" },
+  ".cm-lp-callout-warning": { "--cb-bar": "var(--callout-warning, #d29922)", backgroundColor: "color-mix(in srgb, var(--callout-warning, #d29922) 13%, transparent)" },
+  ".cm-lp-callout-danger": { "--cb-bar": "var(--callout-danger, #cf222e)", backgroundColor: "color-mix(in srgb, var(--callout-danger, #cf222e) 10%, transparent)" },
   // Header (#94 label + #158-C4 icon): the masked Lucide icon (::before) + the label text
   // (::after) live in callout-icons.css (long mask-image data URIs + per-type colour tokens),
   // global CSS so the data URIs stay out of this baseTheme. Display-only; reveal-on-cursor edits

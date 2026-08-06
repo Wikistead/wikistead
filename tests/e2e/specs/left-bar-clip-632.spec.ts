@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { openDemo, openScratch, enterEdit, sleep } from "../helpers";
+import { HAS_LEFT_BAR } from "../left-bar";
 
 // #632 (review rejection): every coloured left strip goes through the shared part, and none of them
 // escapes the silhouette of the box it belongs to.
@@ -20,26 +21,31 @@ const SCREENS = [
   { name: "roles", url: "/admin/roles" },
 ];
 
-/** Every element wearing a coloured left strip, however it is drawn, with what it would take to be wrong. */
+/** Every element wearing a coloured left bar, however it is drawn, with what it would take to be wrong.
+ *
+ *  The predicate itself is shared (`../left-bar`) because the bar's MECHANISM has changed three times in
+ *  this ticket and each change blinded the pins that hard-coded one — a pin that cannot see the bar
+ *  reports an empty page and goes green on a defect. What is asked here is unchanged: whatever draws it,
+ *  a bar must not be a border on a rounded box.
+ */
 const STRIPS = `[...document.querySelectorAll('*')].map((el) => {
   const cs = getComputedStyle(el);
   const before = getComputedStyle(el, '::before');
   const w = (v) => parseFloat(v) || 0;
-  // a strip is either a left border thicker than the other sides, or a ::before pinned to the left edge
-  const borderStrip = w(cs.borderLeftWidth) >= 2 && w(cs.borderLeftWidth) > w(cs.borderRightWidth);
-  const pseudoStrip = before.content !== 'none' && before.position === 'absolute'
-    && w(before.left) === 0 && w(before.width) > 0 && w(before.width) <= 6
-    && (w(before.top) === 0 || before.inset?.startsWith('0px'));
-  if (!borderStrip && !pseudoStrip) return null;
+  const kind = ${HAS_LEFT_BAR}(el);
+  if (!kind) return null;
   const radius = Math.max(w(cs.borderTopLeftRadius), w(cs.borderBottomLeftRadius));
   return {
     cls: (el.className?.toString?.() ?? '').slice(0, 60),
     testid: el.getAttribute('data-testid'),
-    kind: borderStrip ? 'border' : 'pseudo',
+    kind,
     radius,
-    // does the strip follow the box's corners? a pseudo strip must inherit them; a BORDER strip on a
-    // rounded box is the original defect and cannot follow anything
-    stripRadius: pseudoStrip ? Math.max(w(before.borderTopLeftRadius), w(before.borderBottomLeftRadius)) : 0,
+    // does the bar follow the box's corners? a pseudo strip has to inherit them; a BACKGROUND is clipped
+    // by them whatever it says; a BORDER on a rounded box is the original defect and cannot follow
+    // anything. A background reports the box's own radius because that is literally what clips it.
+    stripRadius: kind === 'pseudo'
+      ? Math.max(w(before.borderTopLeftRadius), w(before.borderBottomLeftRadius))
+      : kind === 'background' ? radius : 0,
     shared: el.classList.contains('wks-left-bar'),
   };
 }).filter(Boolean)`;

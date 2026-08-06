@@ -32,10 +32,16 @@
    ends — the shape the ruling calls . The first attempt squared off the left corners, which
    The frame stays round; the strip is a rectangle that ignores it.
    `padding-left` carries the 3px the border used to occupy, so nothing inside moves. */
-.cm-lp-callout-panel{border-radius:4px;background:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 10%,transparent)}
-.cm-lp-callout-panel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--wks-bar-w, 3px);background:var(--cb-color,var(--callout-note,#6e7781));pointer-events:none;border-radius:inherit} /* #632follow the box's corners — see .wks-left-bar */
-.cm-lp-callout-panel.cm-lp-callout-note{background:color-mix(in srgb,var(--callout-note,#57606a) 8%,transparent)}
-.cm-lp-callout-panel.cm-lp-callout-warning{background:color-mix(in srgb,var(--callout-warning,#d29922) 13%,transparent)}
+/* #632 (review rejection): the bar is a BACKGROUND LAYER, not a child.
+   `border-radius: inherit` on a 3px-wide strip is clamped to half its width (1.5px), while the box's
+   own background is still cut at the full 4px — so the two top corners of one box were cut by
+   different arcs, which is what saw. A background is ALWAYS clipped to the
+   box's radius, so both corners take the same curve by construction, whatever the radius and whatever
+   the bar's width. Per-type rules below must set `background-color`, never the `background` shorthand:
+   the shorthand resets `background-image` and takes the bar away with it. */
+.cm-lp-callout-panel{border-radius:4px;background-color:color-mix(in srgb,var(--cb-color,var(--callout-note,#6e7781)) 10%,transparent);background-image:linear-gradient(to right, var(--cb-color,var(--callout-note,#6e7781)) 0 var(--wks-bar-w, 3px), rgba(0,0,0,0) var(--wks-bar-w, 3px));background-repeat:no-repeat}
+.cm-lp-callout-panel.cm-lp-callout-note{background-color:color-mix(in srgb,var(--callout-note,#57606a) 8%,transparent)}
+.cm-lp-callout-panel.cm-lp-callout-warning{background-color:color-mix(in srgb,var(--callout-warning,#d29922) 13%,transparent)}
 /* #267: the diagram/media alignment classes (#255) also live only in the .cm-editor baseTheme, so a
    mermaid/plantuml diagram in the preview/public reader lost its default centering and sat left. Mirror
    the align flex GLOBALLY for the out-of-editor render path (md-render tags diagrams with these). */
@@ -296,4 +302,4 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
    so the callout's 4px, the notice's 8px and the login band's 6px each get a strip that follows their
    own silhouette. Clipping the BOX instead (`overflow: hidden`) would have worked for the corners and
    cut every tooltip and menu that opens out of these boxes. */
-.wks-left-bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--wks-bar-w, 3px);background:var(--wks-left-bar-color,var(--accent));pointer-events:none;border-radius:inherit}
+.wks-left-bar{background-image:linear-gradient(to right, var(--wks-left-bar-color,var(--accent)) 0 var(--wks-bar-w, 3px), rgba(0,0,0,0) var(--wks-bar-w, 3px));background-repeat:no-repeat}
