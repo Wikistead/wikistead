@@ -1188,6 +1188,10 @@ export function useSpaceAnalytics(spaceId: string | null, params: SpaceAnalytics
     queryFn: () => apiFetch<SpaceAnalytics>(`/spaces/${encodeURIComponent(spaceId!)}/analytics${q ? `?${q}` : ""}`, token),
     enabled: enabled && !!spaceId,
     staleTime: 60_000,
+    // #641the params are in the key, so every date the reader picks is a NEW query — and without
+    // this the row of controls unmounted while it resolved, taking the open calendar with it. Keeping the
+    // previous answer means the surface stays put and only the numbers catch up.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -1202,6 +1206,10 @@ export function useTenantAnalytics(params: SpaceAnalyticsParams = {}, enabled = 
     queryFn: () => apiFetch<SpaceAnalytics>(`/admin/analytics${q ? `?${q}` : ""}`, token),
     enabled,
     staleTime: 60_000,
+    // #641the params are in the key, so every date the reader picks is a NEW query — and without
+    // this the row of controls unmounted while it resolved, taking the open calendar with it. Keeping the
+    // previous answer means the surface stays put and only the numbers catch up.
+    placeholderData: keepPreviousData,
   });
 }
 

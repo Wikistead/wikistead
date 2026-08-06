@@ -41,7 +41,13 @@ export function AnalyticsDashboard({
       <h2 style={{ marginTop: 0 }}>{title}</h2>
       <p style={{ color: "var(--fg-dim)", fontSize: 13, marginTop: 0 }}>{hint}</p>
 
-      {isLoading || !data ? (
+      {/* #641the FIRST load has nothing to show; a later one has last time's answer and must not
+          take the controls down with it. The row used to live inside `isLoading || !data`, so picking a
+          date — which changes the query key — unmounted the calendar the reader had just clicked in, one
+          click into a two-click range. The panel was not at fault; it was standing on a row that vanished
+          every hundred milliseconds. That row has always flickered (the old two date boxes were in the
+          same branch); a popover is what made it a visible break rather than a blink. */}
+      {!data ? (
         <div className="text-sm text-fg-dim">{t("common.loading")}</div>
       ) : !data.entitled ? (
         <div className="rounded-md border border-border p-3 text-sm text-fg-dim" data-testid={`${testId}-upsell`}>
@@ -87,6 +93,9 @@ export function AnalyticsDashboard({
             </label>
           </div>
 
+          {/* The body is what waits, and it says so by fading rather than by leaving — a hole where the
+              chart was is how the reader loses their place in a surface they are still using. */}
+          <div className={isLoading ? "opacity-60 transition-opacity" : "transition-opacity"} data-testid={`${testId}-body`} aria-busy={isLoading}>
           <div className="text-xs text-fg-dim" data-testid={`${testId}-pages`}>{t("spaceAnalytics.pages", { n: data.pages })}</div>
           <div className="mt-2">
             <PageViewsChart daily={data.daily} />
@@ -101,6 +110,7 @@ export function AnalyticsDashboard({
           {params.unique && (
             <p className="mt-2 text-xs text-fg-dim" data-testid={`${testId}-unique-caveat`}>{t("spaceAnalytics.uniqueCaveat")}</p>
           )}
+          </div>
         </>
       )}
     </div>
