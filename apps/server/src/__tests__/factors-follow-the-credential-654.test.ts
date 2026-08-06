@@ -12,6 +12,8 @@
 // into "suspend and reset their authenticator" — a different act, done under a name that does not say so.
 // A pin on the KEEPING side is the only thing that stops the next reader "fixing" the asymmetry.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
@@ -96,4 +98,69 @@ describe("#654: SCIM's suspension does NOT — and that is the decision", () => 
     await reactivateMember({ db, fga: fgaClient }, { id: T, plan: 'business' }, sub, { allow: ['scim'], actor: 'system' })
     expect(await factorCount(sub), 'the same person comes back to the same authenticator').toBe(1)
   }, 180_000)
+})
+
+// #654, as a RULE rather than as the two paths that existed when it was written.
+//
+// The cases above name them: removing a password, removing a member. Both hold. What neither can do is
+// notice a THIRD — a bulk purge, an EE deprovision, a future "reset this account" — that deletes the
+// credential and leaves the factors behind. The reason that matters is concrete and stated in this
+// file: `sub`s are reused, so a row left behind attaches to whoever holds that `sub` next, and in the
+// meantime it is an authenticator for a password that no longer exists.
+//
+// So this reads the source instead of the database: wherever `local_credentials` is deleted, the same
+// span must delete `member_factors`. A discovery walk — the shape #675 gave `presentableHere` and #677
+// its doors.
+describe('#654: the rule, not the two paths that existed when it was written', () => {
+  const ROOT = resolve(import.meta.dirname, '..')
+
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const full = resolve(dir, e.name)
+      if (e.isDirectory()) return e.name === '__tests__' || e.name === 'node_modules' ? [] : walk(full)
+      return e.name.endsWith('.ts') ? [full] : []
+    })
+
+  /**
+   * The spans that delete a credential, and what else each deletes.
+   *
+   * A span is the HANDLER the deletion sits in, bounded on both sides by the route registrations
+   * around it. Bounding matters and the first version of this did not: it read a fixed window forward,
+   * which reached into the NEXT route and found that handler's factor deletion. A planted third path
+   * that orphaned factors passed — measured. A window that can borrow its evidence from a neighbour is
+   * not measuring the span it names.
+   */
+  function credentialDeletions(): { where: string; clearsFactors: boolean }[] {
+    const out: { where: string; clearsFactors: boolean }[] = []
+    const REGISTRATION = /\bapp\.(get|post|put|patch|delete)\s*(?:<|\()/g
+    for (const file of walk(ROOT)) {
+      const src = readFileSync(file, 'utf8')
+      const bounds = [...src.matchAll(REGISTRATION)].map((r) => r.index!)
+      for (const m of src.matchAll(/DELETE FROM local_credentials/g)) {
+        const at = m.index!
+        const before = src.slice(0, at)
+        const start = bounds.filter((b) => b <= at).at(-1) ?? 0
+        const end = bounds.find((b) => b > at) ?? src.length
+        const span = src.slice(start, end)
+        out.push({
+          where: `${file.slice(ROOT.length + 1)}:${before.split('\n').length}`,
+          clearsFactors: /DELETE FROM member_factors|deleteAllFactors\(/.test(span),
+        })
+      }
+    }
+    return out
+  }
+
+  it('finds the deletions it is meant to check', () => {
+    // Without this the case below passes over an empty list — a renamed table, a query builder, a move
+    // into a helper, and the rule goes quietly green.
+    const found = credentialDeletions()
+    expect(found.length, 'no credential deletions were found at all — has the table been renamed?')
+      .toBeGreaterThanOrEqual(2)
+  })
+
+  it('every span that deletes a credential clears the factors with it', () => {
+    const orphaning = credentialDeletions().filter((d) => !d.clearsFactors).map((d) => d.where)
+    expect(orphaning, `these leave factors behind:\n  ${orphaning.join('\n  ')}`).toEqual([])
+  })
 })
