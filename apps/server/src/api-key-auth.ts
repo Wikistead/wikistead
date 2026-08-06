@@ -22,6 +22,13 @@ export type ApiKeyPrincipal = {
   // Undefined and empty are different states: undefined is "this key was never narrowed", empty is
   // "narrowed to nothing", and reading them the same way would open every route to the second.
   capabilities?: readonly string[]
+  // #637 / ADR-216 §4: the spaces a key is confined to, when it is confined that way. Same three states
+  // as above and for the same reason — undefined is "not confined by space", empty is "confined to no
+  // space at all". The carrier is here BEFORE the dimension exists, deliberately: `isNarrowedKey` is
+  // what decides whether the credential-minting refusal and the route table apply, and shipping the
+  // column first would mean a window in which a space-confined key counted as unconfined. The lookup
+  // that fills this is the next slice (the column is EE-owned data, ADR-216 §7 / sub-task 5).
+  spaces?: ReadonlySet<string>
 }
 export type ApiKeyDeactivated = { deactivated: true }
 // #628 / ADR-215 §5: an EXPIRED key answers the caller exactly as an unknown one does — the same 401,
