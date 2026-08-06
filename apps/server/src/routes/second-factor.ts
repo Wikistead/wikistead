@@ -162,8 +162,13 @@ export async function secondFactorPlugin(app: FastifyInstance) {
     }
     // The factor must be THIS member's. An id is a bearer token for a row otherwise, and confirming
     // somebody else's enrolment would hand them a factor they never proved.
+    // `kind = 'totp'` for the reason #666 found the hard way: without it a PASSKEY enrolment reaches
+    // this route, `totpSecretFor` answers null, and the member is told "that code did not match" about
+    // a factor that has no code. Which proof a factor takes is a fact about the factor; a route that
+    // does not ask reports the mismatch as the member's mistake.
     const [own] = await req.db.sql<[{ id: string }?]>`
-      SELECT id FROM member_factors WHERE id = ${id} AND member_sub = ${req.user.sub} AND confirmed_at IS NULL`
+      SELECT id FROM member_factors
+      WHERE id = ${id} AND member_sub = ${req.user.sub} AND kind = 'totp' AND confirmed_at IS NULL`
     // One answer for two cases a caller may not distinguish: no such factor, and not yours. Saying
     // which would make this an oracle for whether an id exists.
     if (!own) return reply.code(404).send({ error: 'no pending enrolment', code: 'factor_not_pending' })

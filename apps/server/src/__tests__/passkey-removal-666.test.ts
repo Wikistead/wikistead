@@ -138,6 +138,18 @@ describe('#666: a confirmed passkey can be removed', () => {
     await adminPool`DELETE FROM members WHERE sub = ${otherSub}`
   }, 120_000)
 
+  it('a pending PASSKEY is not confirmable through the code route', async () => {
+    // Same family as the removal bug: the confirm route filtered only on "pending", so a passkey
+    // reached it, `totpSecretFor` answered null, and the member was told their CODE was wrong about a
+    // factor that has none. Which proof a factor takes belongs to the factor.
+    const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
+    const res = await app.inject({
+      method: 'POST', url: `/me/factors/${factorId}/confirm`, headers: H, payload: JSON.stringify({ code: '123456' }),
+    })
+    expect(res.statusCode, res.body).toBe(404)
+    expect(res.json<{ code: string }>().code, 'not "your code was wrong"').toBe('factor_not_pending')
+  }, 120_000)
+
   it('the challenge helper is the same one registration uses', () => {
     // Named so the wiring cannot drift into a second store with its own lifetime.
     expect(typeof putChallenge).toBe('function')
