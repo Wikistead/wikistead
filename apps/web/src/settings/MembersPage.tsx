@@ -591,13 +591,22 @@ export function MembersPage() {
         )}
       />
 
+      {/* #646: the title belongs to the SECRET, not to the door it came through. `inviteLinkLabel` and
+          `passwordLinkLabel` were labels printed above a value, and #638 promoted them to dialog headings
+          without rewriting them — hence the trailing colon, and hence the same invite link being called
+          two different things depending on whether the row or the form produced it. One name each, shared
+          with the dialog above; what the label used to add is a note under the value. */}
       <SecretDialog
         open={lastLink !== null}
         onClose={() => setLastLink(null)}
         testId={lastLink?.kind === "password" ? "password-setup-link" : "invite-link"}
-        title={lastLink?.kind === "password" ? t("members.passwordLinkLabel") : t("members.inviteLinkLabel")}
+        title={lastLink?.kind === "password" ? t("members.passwordLinkTitle") : t("members.inviteLinkOpen")}
         secret={lastLink?.url ?? ""}
-        note={lastLink?.kind === "invite" ? (lastLink.emailed ? t("members.emailed") : t("members.notEmailed")) : undefined}
+        note={lastLink?.kind === "password"
+          // what the old title carried in brackets: who this is for. It is guidance about the secret,
+          // which is what the note under the value is, rather than part of its name.
+          ? t("members.passwordLinkNote")
+          : <>{lastLink?.emailed ? t("members.emailed") : t("members.notEmailed")}{" "}{t("members.inviteLinkNote")}</>}
       />
 
       {invites.length > 0 && (

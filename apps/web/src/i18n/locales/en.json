@@ -947,7 +947,6 @@
     "inviteRole": "invite role",
     "roleFor": "role for {{sub}}",
     "sendInvite": "Send invite",
-    "inviteLinkLabel": "Invite link (share if email is off):",
     "emailed": "Emailed to recipient.",
     "notEmailed": "Email not sent. Copy the link above.",
     "pendingTitle": "Pending invites",
@@ -966,7 +965,6 @@
     "reissuePasswordDone": "Reset link created",
     "enablePasswordDone": "Password link created",
     "rowActions": "Actions for {{name}}",
-    "passwordLinkLabel": "Password setup link (hand it to the member):",
     "passwordSetupUnavailable": "A password entrance cannot be added for this member.",
     "status": {
       "idp": "Signs in through the identity provider",
@@ -991,7 +989,10 @@
     "inviteLinkMint": "Issue a new link",
     "inviteLinkMintMail": "Issue and send by email",
     "groupUnassign": "Remove role",
-    "groupUnassignConfirm": "Remove the role granted to {{group}}? Everyone in that group loses what it confers."
+    "groupUnassignConfirm": "Remove the role granted to {{group}}? Everyone in that group loses what it confers.",
+    "passwordLinkTitle": "Password setup link",
+    "passwordLinkNote": "Hand this to the member yourself; it is not emailed.",
+    "inviteLinkNote": "Share it yourself if email is off."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",
