@@ -9,7 +9,7 @@ import { acquireTenantDb } from './db/index.js'
 import { pool } from './db/pool.js'
 import { checkReadiness } from './readiness.js'
 import type { TenantDb } from './db/index.js'
-import { fgaClient, isTenantMember, openAuthzScope } from '@wikistead/authz'
+import { fgaClient, isTenantMember, openAuthzScope, setAuthzRestriction } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
 import { isNarrowedKey, getNarrowedKeyGate } from '@wikistead/hooks'
@@ -428,6 +428,10 @@ export async function buildApp(): Promise<FastifyInstance> {
         // off that answer, including the refusal to mint. A key confined to one space would have been
         // handed a collab token carrying the OWNER's identity, which the live-editing process honours in
         // full. One space in, every space out.
+        // #637 / ADR-216 §1: the container the outermost hook opened gets its contents here, at the one
+        // moment the answer is known. Everything after this — every handler, every primitive — is inside
+        // it. Set before the gate below, so a request refused there was still carrying its confinement.
+        if (apiUser.spaces) setAuthzRestriction({ spaces: apiUser.spaces })
         if (isNarrowedKey(apiUser)) {
           const pattern = req.routeOptions?.url
           if (pattern && CREDENTIAL_MINTING_ROUTES.has(`${req.method} ${pattern}`)) {

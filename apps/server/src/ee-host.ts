@@ -50,3 +50,6 @@ export { suspendMember, reactivateMember, isScimSuspension, grantsShouldBeRebuil
 export type { SuspensionReason, SuspendOutcome, ReactivateOutcome } from './auth/member-suspension.js'
 // #637 / ADR-216 §2: the EE composition root declares the same request-path rule as the CE one.
 export { requireAuthzScope } from '@wikistead/authz'
+// #637 / ADR-216 §7: the EE composition root registers what a restriction MEANS; CE owns the refusal.
+export { registerAuthzRestrictionEvaluator } from '@wikistead/authz'
+export type { AuthzRestrictionEvaluator } from '@wikistead/authz'
