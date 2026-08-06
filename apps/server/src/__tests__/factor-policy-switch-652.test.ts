@@ -231,11 +231,14 @@ describe('#652: turning it on ends the sessions the door would now refuse', () =
     // …and one that HAS answered: the same door, satisfied. Without it "revoke every local session"
     // would pass, and the day somebody signs in with a factor they would be thrown out by the next
     // admin who toggles the switch.
-    const held = `p652-sess-held-${STAMP}`
-    subs.push(held)
-    await adminPool`
-      INSERT INTO members (tenant_id, sub, email, role) VALUES (${TENANT}, ${held}, ${`${held}@e2e.test`}, 'member')
-      ON CONFLICT (tenant_id, sub) DO UPDATE SET role = 'member'`
+    //
+    // #679: this member now holds a REAL factor, where the first version relied on the door alone.
+    // That worked while the stance was a single bit — `local+factor` was a reliable stand-in for "holds
+    // one". It stopped being one when the stance learned about KINDS: somebody can have answered
+    // yesterday's stance and hold nothing today's accepts, and they are exactly who a narrowing must
+    // sign out. So the door is no longer what spares them; holding an accepted factor is. The property
+    // this case defends is unchanged — it is now defended for the reason it was always about.
+    const held = await memberWithFactor('sess-held', 'member')
     const heldSid = await createSession(app.valkey, { tenantId: TENANT, sub: held, door: 'local+factor' })
 
     expect((await setStance(true)).statusCode).toBe(204)
