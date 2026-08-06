@@ -97,7 +97,7 @@ export function FactorStep({ stage, returnTo }: { stage: "required" | "enrolment
           {/* The key goes to a phone standing in front of the reader, so it is the same one-time box a
               password link uses — shown once, copyable, and saying so. */}
           <p className="m-0 text-sm text-fg-dim">{t("auth.factorEnrolHint")}</p>
-          <OneTimeSecret value={enrolling.secret} testId="login-factor-secret"
+          <OneTimeSecret value={enrolling.secret} testId="login-factor-secret" grouped
             note={t("auth.factorSecretNote")} />
           {codeBox(confirmEnrolment, "login-factor-enrol")}
         </>

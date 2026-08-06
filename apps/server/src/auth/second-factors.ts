@@ -98,14 +98,39 @@ export async function confirmFactor(db: TenantDb, factorId: string): Promise<boo
   return rows.length > 0
 }
 
-/** What the member's own list shows — confirmed factors, oldest first. */
+/**
+ * What the member's own list shows — EVERY row of theirs, confirmed or not, oldest first.
+ *
+ * It used to return confirmed rows only, and that read as the right answer: an abandoned enrolment is
+ * not a factor, and showing it as one would be a lie. But the cap counts pending rows (deliberately —
+ * an uncapped start is an unbounded write), so hiding them made "you can create it, you cannot see it,
+ * and because you cannot see it you cannot delete it". Measured on the review: three abandoned
+ * starts, a list showing nothing, and the eighth CONFIRMED enrolment refused with the cap reached.
+ *
+ * Two rules were each right and their conjunction was a trap. What the cap counts and what the reader
+ * can remove now agree; `confirmedAt` is null on the ones that are not factors yet, and the screen says
+ * so rather than pretending they are.
+ */
 export async function listFactors(db: TenantDb, memberSub: string): Promise<MemberFactor[]> {
   const rows = await db.sql<FactorRow[]>`
     SELECT id, kind, label, created_at, confirmed_at, last_used_at
     FROM member_factors
-    WHERE member_sub = ${memberSub} AND confirmed_at IS NOT NULL
+    WHERE member_sub = ${memberSub}
     ORDER BY created_at`
   return rows.map(toFactor)
+}
+
+/**
+ * Drop this member's UNCONFIRMED rows. Called when a new enrolment starts.
+ *
+ * Belt to the list's braces: a reader who abandons an enrolment and comes back to try again should not
+ * have to tidy up after themselves before they are allowed to. Only pending rows, so nothing anybody
+ * has ever proved is touched.
+ */
+export async function discardPendingFactors(db: TenantDb, memberSub: string): Promise<number> {
+  const rows = await db.sql`
+    DELETE FROM member_factors WHERE member_sub = ${memberSub} AND confirmed_at IS NULL RETURNING id`
+  return rows.length
 }
 
 /** Whether this member can actually present a factor. The question every policy check asks. */

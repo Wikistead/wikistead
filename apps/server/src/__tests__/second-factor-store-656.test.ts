@@ -99,11 +99,17 @@ describe('#656: the secret is encrypted at rest', () => {
 })
 
 describe('#656: an unconfirmed enrolment is not a factor', () => {
-  it('is invisible to the list and to the question a policy asks', async () => {
+  it('is listed as unfinished, and counts for nothing a policy asks', async () => {
+    // REWRITTEN by #653's review. This asserted the row was INVISIBLE, which was half of a trap:
+    // the enrolment cap counts pending rows, so hiding them produced "you can create it, you cannot see
+    // it, and because you cannot see it you cannot delete it" — three closed tabs and the account could
+    // never enrol again. The property worth keeping is the one about POLICY, not about visibility.
     const sub = await member(TENANT, 'pending')
-    await startTotpEnrolment(db, { tenantId: TENANT, memberSub: sub, secret: generateTotpSecret() })
+    const { factorId } = await startTotpEnrolment(db, { tenantId: TENANT, memberSub: sub, secret: generateTotpSecret() })
 
-    expect(await listFactors(db, sub), 'nothing to show yet').toEqual([])
+    const listed = await listFactors(db, sub)
+    expect(listed.map((f) => f.id), 'visible, so it can be cleared').toEqual([factorId])
+    expect(listed[0]!.confirmedAt, '…and marked as unfinished').toBeNull()
     expect(await hasConfirmedFactor(db, sub), 'and nothing a policy may count').toBe(false)
   }, 120_000)
 

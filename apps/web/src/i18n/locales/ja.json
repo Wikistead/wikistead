@@ -246,7 +246,7 @@
     "factorLabelPlaceholder": "仕事用のスマホ",
     "factorUnnamed": "認証アプリ",
     "factorScanHint": "このキーを認証アプリに入力し、表示されたコードを入れてください。",
-    "factorSecretNote": "このキーは一度しか表示されません。いま入力してください。",
+    "factorSecretNote": "認証アプリに入力してください。",
     "factorCode": "コード",
     "factorCodePlaceholder": "123456",
     "factorConfirm": "確認",
@@ -255,7 +255,8 @@
     "factorRemoved": "認証アプリを外しました。",
     "factorCodeWrong": "コードが一致しませんでした。",
     "factorStartFailed": "開始できませんでした。もう一度お試しください。",
-    "factorLimit": "すでに上限まで登録されています。1 つ外してから追加してください。"
+    "factorLimit": "すでに上限まで登録されています。1 つ外してから追加してください。",
+    "factorUnfinished": "未完了"
   },
   "settings": {
     "back": "アプリに戻る",

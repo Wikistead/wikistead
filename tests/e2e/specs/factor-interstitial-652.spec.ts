@@ -92,7 +92,10 @@ test.describe("#652: the sign-in screen's second step", () => {
     await expect(page.getByTestId("login-factor-code"), "nothing to type into yet").toHaveCount(0);
 
     await page.getByTestId("login-factor-enrol-start").click();
-    const key = (await page.getByTestId("login-factor-secret-value").innerText()).trim();
+    // #653④: the key is DISPLAYED in groups of four so it can be typed off the screen. The
+  // spaces are presentation — the value the server sent has none, and everything that consumes it
+  // (the copy button, the phone) gets that one.
+  const key = (await page.getByTestId("login-factor-secret-value").innerText()).replace(/\s/g, "");
     expect(key, "the key the phone needs").toBe(SECRET);
     await expect(page.getByTestId("login-factor-secret-copy"), "copyable rather than retyped").toBeVisible();
 

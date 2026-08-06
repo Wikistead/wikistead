@@ -22,10 +22,12 @@ import { notify } from "./toast";
 // to the dialog's title above it (a password entrance is not an invitation, #606); how long the reader
 // has to copy it is the same fact everywhere, so it is said the same way everywhere.
 // `note` remains for what only a caller knows, such as whether the mail went.
-export function OneTimeSecret({ value, note, testId }: {
+export function OneTimeSecret({ value, note, testId, grouped }: {
   value: string;
   note?: React.ReactNode;
   testId?: string;
+  /** display the value in groups of four, larger — for a secret meant to be typed rather than pasted */
+  grouped?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -37,7 +39,13 @@ export function OneTimeSecret({ value, note, testId }: {
       <div className="flex items-center gap-2">
         {/* the secret wraps rather than overflowing: these are long, and a link the reader cannot see the
             end of is one they cannot check before handing it over */}
-        <code className="flex-1 font-mono text-xs [overflow-wrap:anywhere]" data-testid={testId ? `${testId}-value` : undefined}>{value}</code>
+        {/* #653④: a key meant to be TYPED, in groups of four and a size a person can read off a
+          screen while holding a phone. `grouped` is display only — `data-testid`'s text is the raw
+          value, so a test (and a copy) still gets exactly what the server sent. */}
+      <code
+        className={`flex-1 font-mono [overflow-wrap:anywhere] ${grouped ? "text-sm tracking-wider" : "text-xs"}`}
+        data-testid={testId ? `${testId}-value` : undefined}
+      >{grouped ? value.replace(/(.{4})/g, "$1 ").trim() : value}</code>
         <IconButton
           aria-label={t("adminApi.copy")}
           data-tip={t("adminApi.copy")}
