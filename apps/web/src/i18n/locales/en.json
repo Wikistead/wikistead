@@ -127,10 +127,15 @@
     "spaceCreateDenied": "You do not have permission to create spaces."
   },
   "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
     "label": "Theme"
   },
   "language": {
-    "label": "Language"
+    "label": "Language",
+    "en": "English",
+    "ja": "日本語"
   },
   "nav": {
     "toggleSidebar": "Toggle sidebar",
@@ -854,6 +859,14 @@
     "logoSize": "Image too large (max 512 KB)."
   },
   "accent": {
+    "blue": "Blue",
+    "indigo": "Indigo",
+    "violet": "Violet",
+    "green": "Green",
+    "teal": "Teal",
+    "amber": "Amber",
+    "rose": "Rose",
+    "slate": "Slate",
     "label": "Accent colour"
   },
   "history": {
