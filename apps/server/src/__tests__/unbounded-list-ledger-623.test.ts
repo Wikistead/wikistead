@@ -32,81 +32,103 @@ const ROUTES = resolve(import.meta.dirname, '../routes')
  * wrong the fix is a bound, not an edit to the reason.
  */
 const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: string }> = {
-  // ── A group (the ticket's own list): the page grows with the tenant ────────────────────────────
-  'members.ts': { kind: 'debt', why: '#623 A: every member, every invite. The motivating case.' },
-  'spaces.ts': { kind: 'debt', why: '#623 A: pages per space, spaces per tenant, the space roster.' },
-  // #623 slice 6: the flat lists in this file are bounded now (overview, trash, attachments, related,
-  // backlinks). What is left is the TREE — which is why the line stays: a keyset does not page a tree.
-  'pages.ts': { kind: 'debt', why: '#623 A: the page TREE (firstN, the Sidebar shape) and per-page grants.' },
-  'api-keys.ts': { kind: 'debt', why: '#623 A: one row per key; grows with integrations.' },
-  'notifications.ts': { kind: 'debt', why: '#623 A/B: watches and the feed both grow without limit.' },
-  'webhooks.ts': { kind: 'debt', why: '#623 A: one row per subscription.' },
-  'templates.ts': { kind: 'debt', why: '#623 A: one row per template.' },
-  'orphan-drafts.ts': { kind: 'debt', why: '#623 A: grows with abandoned drafts; nothing prunes it.' },
-  'admin-connections.ts': { kind: 'debt', why: '#623 A: connections and custom domains per tenant.' },
-  'custom-domains.ts': { kind: 'debt', why: '#623 A: one row per domain.' },
-  'roles.ts': { kind: 'debt', why: '#623 B: assignments grow as principal × resource — the fastest of all.' },
-  'share-links.ts': { kind: 'debt', why: '#623 B: one row per link; a busy page accumulates them.' },
-  'pins.ts': { kind: 'debt', why: '#623 B: one row per pin.' },
-  'revisions.ts': { kind: 'debt', why: '#623 B: one row per published version of a page.' },
-  'comments.ts': { kind: 'debt', why: '#623 B: the comment list is bounded, the patrol list is not.' },
-  'attachments.ts': { kind: 'debt', why: '#623 A: one row per attachment.' },
-  'account.ts': { kind: 'debt', why: '#623 B: the identity/session lists grow with the person.' },
-  'admin-surfaces.ts': { kind: 'bounded', why: 'one entry per admin surface — a fixed registry, not data.' },
-  'branding.ts': { kind: 'bounded', why: 'one branding row per tenant — a settings record, not a list.' },
-  'abuse-config.ts': { kind: 'bounded', why: 'one abuse-filter row per tenant — a settings record, not a list.' },
-  'billing.ts': { kind: 'bounded', why: 'one subscription per tenant; the plan table is a constant.' },
-  // #623 slice 6: the flat listing is a keyset window now, on BOTH branches. The public space TREE is
-  // capped per node (200) and by depth (6), which bounds each STEP but not the product — 200⁶ nodes is
-  // a bound the way "eventually" is a deadline. Same shape as the Sidebar, waiting on the same design.
-  'public.ts': { kind: 'debt', why: '#623: the public space TREE is capped per node but not in total; the listing is windowed.' },
-  'public-shell.ts': { kind: 'bounded', why: 'renders one page shell for one request — never a collection.' },
-  'export.ts': { kind: 'debt', why: '#623 B: an export walks a whole space by design; the bound is a stream.' },
-  'ai.ts': { kind: 'bounded', why: 'one completion per request — the model bounds it, not a query.' },
-  'mcp.ts': { kind: 'debt', why: '#623 B: tool listings are fixed, resource listings are not.' },
-  'audit.ts': { kind: 'bounded', why: 'already bounded — kept here only because the scan sees a list shape.' },
-  'search.ts': { kind: 'bounded', why: 'already bounded by the search driver.' },
-  'admin-login-methods.ts': { kind: 'bounded', why: 'already bounded; the exemption list is small by design.' },
-  'auth.ts': { kind: 'internal', why: 'sign-in flow, not a list surface.' },
-  'auth-local.ts': { kind: 'internal', why: 'sign-in flow, not a list surface.' },
-  'mcp-oauth-authorize.ts': { kind: 'internal', why: 'OAuth flow, not a list surface.' },
-  'mcp-oauth-flow.ts': { kind: 'internal', why: 'OAuth flow, not a list surface.' },
-  'mcp-oauth-metadata.ts': { kind: 'internal', why: 'a fixed metadata document.' },
-  'mcp-oauth-register.ts': { kind: 'internal', why: 'OAuth flow, not a list surface.' },
-  'mcp-oauth-token.ts': { kind: 'internal', why: 'OAuth flow, not a list surface.' },
-  'email-unsubscribe.ts': { kind: 'internal', why: 'one unsubscribe link resolves to one member — no listing.' },
+  // ── debt: genuinely grows with a tenant's data, and #623 owes it a bound ───────────────────────
+  'account.ts:/me/activity': { kind: 'debt', why: '#623 B: one row per thing the person did; grows for ever.' },
+  'members.ts:/admin/analytics': { kind: 'debt', why: '#623 B: a row per day per page; grows with the tenant and with time.' },
+  'members.ts:/members/invites': { kind: 'debt', why: '#623 A: one row per pending invitation (#638 boxed the UI, not the payload).' },
+  'notifications.ts:/notifications/unread-count': { kind: 'debt', why: '#623 B: counts rows without a bound; a very old account pays for every one.' },
+  'pins.ts:/pins': { kind: 'debt', why: '#623 B: one row per pin; nothing prunes them.' },
+  'revisions.ts:/pages/:pageId/revisions': { kind: 'debt', why: '#623 B: one row per published version — a long-lived page has hundreds.' },
+  'share-links.ts:/pages/:pageId/share-links': { kind: 'debt', why: '#623 B: one row per link; a busy page accumulates them.' },
+  'spaces.ts:/spaces/:spaceId/access': { kind: 'debt', why: '#623 B: principal × space; the roster the permissions dialog reads.' },
+  'spaces.ts:/spaces/:spaceId/analytics': { kind: 'debt', why: '#623 B: a row per day per page, same shape as the tenant roll-up.' },
+  'spaces.ts:/spaces/:spaceId/groups': { kind: 'debt', why: '#623 A: one row per directory group; grows with the IdP, not with us.' },
+
+  // ── bounded: the result cannot grow, and the reason is stated rather than assumed ──────────────
+  'attachments.ts:/attachments/:id/download': { kind: 'bounded', why: 'one attachment by id — a row, not a list.' },
+  'attachments.ts:/attachments/:id/inline': { kind: 'bounded', why: 'one attachment by id — a row, not a list.' },
+  'revisions.ts:/pages/:pageId/revisions/:revId/content': { kind: 'bounded', why: 'one revision by id — a row, not a list.' },
+  'templates.ts:/templates/:id': { kind: 'bounded', why: 'one template by id — a row, not a list.' },
+  'spaces.ts:/spaces/:spaceId/icon-image': { kind: 'bounded', why: 'one image for one space — a settings record.' },
+  'spaces.ts:/spaces/:spaceId/comment-open': { kind: 'bounded', why: 'one flag for one space — a settings record.' },
+  'spaces.ts:/spaces/:spaceId/page-creation-policy': { kind: 'bounded', why: 'one policy for one space — a settings record.' },
+
+  // ── internal: not a list surface at all ───────────────────────────────────────────────────────
+  'email-unsubscribe.ts:/email/unsubscribe': { kind: 'internal', why: 'one unsubscribe link resolves to one member — no listing.' },
 }
 
 /** A handler that reads rows and never says how many. The two markers a bound leaves behind. */
 const BOUNDED = /\bLIMIT\b|\blimit\b|\bfirstN\b|\bcursor\b/
 
-function listShapedGetFiles(): string[] {
+/**
+ * #623 slice 11: one entry per ROUTE, not per file.
+ *
+ * The ledger was keyed by file, and that had two consequences the acceptance criterion cared about.
+ * Fourteen routes were given bounds across ten slices and not one line could be removed — `pages.ts`
+ * hands out attachments, trash, related, backlinks and per-page grants, so its line stays until every
+ * one of them is done. "The ledger shrinks a line at a time" was unmeasurable.
+ *
+ * The second consequence was worse and nobody had noticed: a file counted as bounded if the word LIMIT
+ * appeared ANYWHERE in it. Measured before changing anything — adding a brand-new unbounded route to
+ * `webhooks.ts`, which already has a bounded one, left this file green. A ledger that cannot see a new
+ * unbounded list in a file it already covers is not covering that file.
+ *
+ * Route-level fixes both. It is the option this ticket's own report recommended; the alternative
+ * (slice by file) contradicts the ordering ruling, which is to start with the surfaces that grow fastest.
+ */
+function routesIn(file: string): { key: string; body: string }[] {
+  const src = readFileSync(resolve(ROUTES, file), 'utf8')
+  const out: { key: string; body: string }[] = []
+  // each `app.get(...)` registration, cut at the next one — the same window shape the "still bounded"
+  // suite below uses, and the same reason: a route's bound lives in its own handler, not in its
+  // neighbour's.
+  const re = /app\.get(?:<[^>]*>)?\(\s*(['"`])([^'"`]+)\1/g
+  let m: RegExpExecArray | null
+  const starts: { at: number; path: string }[] = []
+  while ((m = re.exec(src)) !== null) starts.push({ at: m.index, path: m[2]! })
+  for (const [i, r] of starts.entries()) {
+    const end = i + 1 < starts.length ? starts[i + 1]!.at : src.length
+    let body = src.slice(r.at, end)
+    // …plus the helpers it delegates to, IN THE SAME FILE. Several routes are two lines that call a
+    // named function, and the bound lives there (`listWatchesResolved`, `listApiKeys`). A window that
+    // stopped at the registration would report those as unbounded and teach the next reader to move
+    // their LIMIT inline to satisfy a test.
+    for (const name of new Set([...body.matchAll(/\b([a-z][A-Za-z0-9_]*)\s*\(/g)].map((m) => m[1]!))) {
+      const at = src.indexOf(`export async function ${name}`)
+      if (at < 0) continue
+      const rest = src.slice(at)
+      const stop = rest.indexOf('\nexport ', 1)
+      body += stop > 0 ? rest.slice(0, stop) : rest
+    }
+    out.push({ key: `${file}:${r.path}`, body })
+  }
+  return out
+}
+
+/** Every GET route that reads rows — the shape a growing page is drawn from. */
+function listShapedRoutes(): { key: string; body: string }[] {
   return readdirSync(ROUTES)
     .filter((f) => f.endsWith('.ts'))
-    .filter((f) => {
-      const src = readFileSync(resolve(ROUTES, f), 'utf8')
-      // a GET route that runs a query returning rows — the shape a growing page is drawn from
-      return /app\.get</.test(src) && /db\.sql<|sql<|\.sql`/.test(src)
-    })
+    .flatMap((f) => routesIn(f))
+    .filter((r) => /db\.sql<|sql<|\.sql`|listObjects|filterAuthorized/.test(r.body))
 }
 
 describe('#623: no list route grows without saying so', () => {
-  it('the scan finds route files (a broken pattern must not pass vacuously)', () => {
-    const files = listShapedGetFiles()
-    expect(files.length, 'the routes directory was read').toBeGreaterThan(10)
-    expect(files, 'the motivating case is in scope').toContain('members.ts')
+  it('the scan finds routes (a broken pattern must not pass vacuously)', () => {
+    const routes = listShapedRoutes().map((r) => r.key)
+    expect(routes.length, 'the routes directory was read, route by route').toBeGreaterThan(30)
+    expect(routes, 'the motivating case is in scope').toContain('members.ts:/members')
   })
 
   it('every list-shaped GET route is either bounded or in the ledger with a reason', () => {
     const missing: string[] = []
-    for (const f of listShapedGetFiles()) {
-      const src = readFileSync(resolve(ROUTES, f), 'utf8')
-      if (BOUNDED.test(src)) continue
-      if (!LEDGER[f]) missing.push(f)
+    for (const r of listShapedRoutes()) {
+      if (BOUNDED.test(r.body)) continue
+      if (!LEDGER[r.key]) missing.push(r.key)
     }
     expect(
       missing,
-      `these route files return a list with no bound and no ledger entry (#623). Add the bound, or add a ` +
+      `these ROUTES return a list with no bound and no ledger entry (#623). Add the bound, or add a ` +
       `line to LEDGER saying why it may grow: ${missing.join(', ')}`,
     ).toEqual([])
   })
@@ -114,9 +136,13 @@ describe('#623: no list route grows without saying so', () => {
   it('the ledger has no stale lines — every entry names a real route file', () => {
     // The other direction, and the one that lets the ledger shrink honestly: a line for a file that no
     // longer exists (or was renamed) is a reason nobody can check.
-    const files = new Set(readdirSync(ROUTES).filter((f) => f.endsWith('.ts')))
-    const orphans = Object.keys(LEDGER).filter((f) => !files.has(f))
+    // …and now it can also see a line that is no longer NEEDED: a route that got its bound must lose
+    // its line, which is the acceptance criterion this ticket could not measure while the key was a file.
+    const live = new Set(listShapedRoutes().map((r) => r.key))
+    const orphans = Object.keys(LEDGER).filter((k) => !live.has(k))
     expect(orphans, `ledger lines for routes that do not exist: ${orphans.join(', ')}`).toEqual([])
+    const bounded = listShapedRoutes().filter((r) => BOUNDED.test(r.body) && LEDGER[r.key])
+    expect(bounded.map((r) => r.key), 'these routes are bounded now — delete their ledger lines').toEqual([])
   })
 
   it('every ledger line carries a reason a reader can act on', () => {
@@ -132,7 +158,7 @@ describe('#623: no list route grows without saying so', () => {
   it('the ledger is smaller than the routes it covers — it is a record, not a rubber stamp', () => {
     // If every route file ended up in the ledger, the pin would assert nothing. Some routes ARE bounded
     // already, and that is what makes the ledger meaningful.
-    const all = readdirSync(ROUTES).filter((f) => f.endsWith('.ts')).length
+    const all = listShapedRoutes().length
     expect(Object.keys(LEDGER).length, 'some routes bound their lists without a ledger line').toBeLessThan(all)
   })
 })
