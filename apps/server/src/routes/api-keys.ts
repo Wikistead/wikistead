@@ -24,6 +24,8 @@ interface ApiKeyRow {
   expires_at?: Date | null
   capabilities?: string[] | null
   space_ids?: string[] | null
+  permission_model?: number | null
+  permissions?: Record<string, string> | string | null
 }
 export interface ApiKeySummary {
   id: string; name: string; keyPrefix: string; scope: ApiScope; createdAt: Date; lastUsedAt: Date | null
@@ -46,6 +48,11 @@ export interface ApiKeySummary {
   // "confined to two spaces" is the fact an inventory needs; "which two" is a different question.
   capabilities?: readonly string[]
   spaces?: { count: number; named: { id: string; name: string }[] }
+  // #667 / ADR-221 §3: which rule reads this key. `1` is the six borrowed verbs against the frozen route
+  // table, `2` the resource-type matrix. Always present, because "which model" is a fact about every key
+  // and a field that appears only sometimes gets read as "no model" by whoever forgets the default.
+  permissionModel: 1 | 2
+  permissions?: Readonly<Record<string, string>>
 }
 
 // The tenant policy cap on what scope keys may be issued with (admin-set). NULL =
@@ -176,7 +183,12 @@ export async function createApiKey(
             ${args.permissions ? db.sql.json(args.permissions as Record<string, string>) : null})
     RETURNING id, tenant_id, owner_user_id, name, key_prefix, scope, created_at, last_used_at, revoked_at, expires_at
   `
-  const result: ApiKeyCreated = { id: row.id, name: row.name, keyPrefix: row.key_prefix, scope, createdAt: row.created_at, lastUsedAt: null, expiresAt: row.expires_at ?? null, plaintext }
+  const result: ApiKeyCreated = {
+    id: row.id, name: row.name, keyPrefix: row.key_prefix, scope, createdAt: row.created_at,
+    lastUsedAt: null, expiresAt: row.expires_at ?? null, plaintext,
+    permissionModel: args.permissions ? 2 : 1,
+    ...(args.permissions ? { permissions: args.permissions } : {}),
+  }
   emit({ type: 'api_key.created', tenantId: args.tenantId, keyId: row.id, actorId: args.ownerUserId })
   return result
 }
@@ -205,12 +217,12 @@ export async function listApiKeys(
   const rows = owner
     ? await db.sql<ApiKeyRow[]>`
         SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at,
-               capabilities, space_ids
+               capabilities, space_ids, permission_model, permissions
         FROM api_keys WHERE revoked_at IS NULL AND owner_user_id = ${owner}
         ORDER BY created_at DESC, id DESC LIMIT ${limit}`
     : await db.sql<ApiKeyRow[]>`
         SELECT id, name, key_prefix, scope, created_at, last_used_at, owner_user_id, expires_at,
-               capabilities, space_ids
+               capabilities, space_ids, permission_model, permissions
         FROM api_keys WHERE revoked_at IS NULL
         ORDER BY created_at DESC, id DESC LIMIT ${limit}`
   // #495 / ADR-182 (Q1): resolve owner names on the ADMIN view only — the canonical #486 helper on the
@@ -236,6 +248,11 @@ export async function listApiKeys(
     scope: r.scope === 'read' ? 'read' : 'write',
     createdAt: r.created_at, lastUsedAt: r.last_used_at, expiresAt: r.expires_at ?? null,
     ...(owner ? {} : { ownerUserId: r.owner_user_id, ownerName: names.get(r.owner_user_id)?.displayName ?? null }),
+    // #667 / ADR-221 §3: which rule reads this key, so the panel can mark the ones issued under the old
+    // model and offer a replacement. Never automatic — silently upgrading a credential somebody handed
+    // to an outside service is what §3 exists to prevent.
+    permissionModel: r.permission_model === 2 ? 2 : 1,
+    ...(r.permissions ? { permissions: typeof r.permissions === 'string' ? JSON.parse(r.permissions) as Record<string, string> : r.permissions } : {}),
     ...(r.capabilities ? { capabilities: r.capabilities } : {}),
     ...(r.space_ids
       ? {
