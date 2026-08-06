@@ -128,10 +128,16 @@ describe('#655: every path that opens a session says which door it opened', () =
     expect(/door:[^,)}]*'operator'/.test(src), 'nothing writes the operator door').toBe(true)
   })
 
-  it('nothing enforces it yet — this slice lands inert', () => {
-    // The ticket asks for the field and only the field. A `doorOf` consulted by a guard in the same
-    // commit would change the value's meaning and the refusal behaviour at once, which is the one
-    // thing this slice was split out to avoid.
+  it('the door is read in ONE place, and that place decides nothing by itself', () => {
+    // This began as "nothing enforces it yet — this slice lands inert", which was right for #655: a
+    // `doorOf` consulted by a guard in the same commit would have changed the value's meaning and the
+    // refusal behaviour at once, and splitting them is exactly what that slice was for.
+    //
+    // #652 slice 1 landed the first reader, so the assertion has been narrowed rather than deleted —
+    // deleting it would give up the property it was protecting. What it protects now is that the door
+    // is interpreted in ONE place (`factor-policy.ts`, a pure table with no request, no database and no
+    // refusal in it). A second reader would be a second interpretation, which is how "federated is out
+    // of scope" gets quietly reversed in one call site while the ADR still says otherwise.
     const readers: string[] = []
     for (const root of ROOTS) {
       for (const file of walk(root)) {
@@ -139,6 +145,9 @@ describe('#655: every path that opens a session says which door it opened', () =
         if (/\bdoorOf\s*\(/.test(readFileSync(file, 'utf8'))) readers.push(file.split('/').slice(-2).join('/'))
       }
     }
-    expect(readers, 'something already reads the door — enforcement belongs to its own slice').toEqual([])
+    // The walk must be able to SEE a reader, or this passes on a broken walk saying nothing at all.
+    expect(readers.length, 'the walk found the one reader it expects').toBe(1)
+    expect(readers, 'the door has more than one interpreter (#652: keep the table in factor-policy.ts)')
+      .toEqual(['auth/factor-policy.ts'])
   })
 })
