@@ -258,11 +258,21 @@ test("#666: a passkey is given up with the key, not with a code", async ({ page 
   const app_ = page.locator('[data-testid="factor-row"]').filter({ hasText: "phone" }).first();
   await expect(key, "both kinds are listed").toBeVisible({ timeout: 15_000 });
 
-  // the passkey asks for the KEY…
-  await expect(key.getByTestId("factor-remove-passkey"), "a key confirms itself").toBeVisible();
-  await expect(key.getByTestId("factor-remove"), "…and is not offered a code box").toHaveCount(0);
+  // #673 ① reverses what this used to pin. The kinds no longer differ in the ROW: same act, same
+  // control, same weight — every row is removed through one entry point, and the kind decides only what
+  // is asked for after the click. Measured over whatever kinds the list holds, rather than naming them,
+  // so a third kind is covered by the same walk.
+  const entries = await page.locator('[data-testid="factor-row"]').evaluateAll((rows) =>
+    rows.map((r) => [...r.querySelectorAll("[data-testid]")]
+      .map((el) => el.getAttribute("data-testid"))
+      .filter((id) => id?.startsWith("factor-remove"))
+      .sort().join(",")));
+  expect(new Set(entries).size, `every row offers the same way out :: ${JSON.stringify(entries)}`).toBe(1);
+  expect(entries[0], "…and it is the shared one").toBe("factor-remove");
 
-  // …and the TOTP still asks for a code, which is the other half of "the proof belongs to the factor"
-  await expect(app_.getByTestId("factor-remove"), "the app still asks for a code").toBeVisible();
-  await expect(app_.getByTestId("factor-remove-passkey")).toHaveCount(0);
+  // …and the proof still belongs to the factor, which is what happens NEXT: the app opens a code box,
+  // the key does not (it goes straight to the browser's prompt).
+  await app_.getByTestId("factor-remove").click();
+  await expect(app_.getByTestId("factor-remove-code"), "the app asks for a code").toBeVisible();
+  await expect(key.getByTestId("factor-remove-code"), "the key was not asked for one").toHaveCount(0);
 });
