@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, requireTenantAdmin, isAlreadyConverged } from '@wikistead/authz'
+import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, requireTenantAdmin, isAlreadyConverged, runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration, beginTitleDictFill, endTitleDictFill } from '../title-dict-cache.js' // #534
 import { getTreeConfirm, setTreeConfirm, getCachedBadge, setCachedBadge, invalidatePageBadge } from '../tree-confirm-cache.js' // #541
@@ -2820,7 +2820,10 @@ export function startTrashRetentionWorker(fga: OpenFgaClient, driver: SearchDriv
     if (running) return
     running = true
     try {
-      await sweepExpiredTrash(fga, driver)
+      // #637 / ADR-216 §2: not on behalf of a request, and it SAYS so. An explicit unrestricted scope,
+      // rather than arriving with none — which in a process that declared the requirement is a crash, and
+      // in one that has not is indistinguishable from a request path where somebody forgot.
+      await runInAuthzScope(SYSTEM_SCOPE, () => sweepExpiredTrash(fga, driver))
     } catch {
       /* next tick retries */
     } finally {

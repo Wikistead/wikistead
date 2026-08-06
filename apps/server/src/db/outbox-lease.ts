@@ -1,3 +1,4 @@
+import { runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
 import type { PendingQuery, Row } from 'postgres'
 import { pool } from './pool.js'
 
@@ -61,7 +62,12 @@ export function startOutboxDrainWorker(drain: () => Promise<number>, intervalMs:
     if (running) return
     running = true
     try {
-      for (let i = 0; i < 20 && (await drain()) > 0; i++) { /* clear backlog, capped */ }
+      // #637 / ADR-216 §2: not on behalf of a request, and it SAYS so. An explicit unrestricted scope,
+      // rather than arriving with none — which in a process that declared the requirement is a crash, and
+      // in one that has not is indistinguishable from a request path where somebody forgot.
+      await runInAuthzScope(SYSTEM_SCOPE, async () => {
+        for (let i = 0; i < 20 && (await drain()) > 0; i++) { /* clear backlog, capped */ }
+      })
     } catch {
       /* next tick retries */
     } finally {

@@ -9,7 +9,7 @@ import { acquireTenantDb } from './db/index.js'
 import { pool } from './db/pool.js'
 import { checkReadiness } from './readiness.js'
 import type { TenantDb } from './db/index.js'
-import { fgaClient, isTenantMember } from '@wikistead/authz'
+import { fgaClient, isTenantMember, openAuthzScope } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
 import { isNarrowedKey, getNarrowedKeyGate } from '@wikistead/hooks'
@@ -264,6 +264,14 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
     return payload
   })
+
+  // #637 / ADR-216 §1-2: the outermost hook opens an EMPTY authorization scope for the rest of the
+  // request. Callback style on purpose — `done` is called from inside the storage context, which is
+  // how every later hook and the handler inherit it; an async hook's context does not propagate out of
+  // it (measured on a real server, which is why `enterWith` was rejected — it does not work here, as
+  // opposed to working leakily). Authentication fills the container in once it knows what the
+  // credential is confined to.
+  app.addHook('onRequest', (_req, _reply, done) => { openAuthzScope(done) })
 
   app.addHook('onRequest', async (req, reply) => {
     // Public / pre-session routes resolve their own tenant; no auth required.
