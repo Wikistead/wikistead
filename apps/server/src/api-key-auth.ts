@@ -11,7 +11,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { withTenantTx } from './db/index.js' // #382
 
-interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null; expires_at: Date | null; capabilities: string[] | null; deactivated_at: Date | null }
+interface ApiKeyRow { id: string; owner_user_id: string; key_hash: string; scope: string | null; expires_at: Date | null; capabilities: string[] | null; space_ids: string[] | null; deactivated_at: Date | null }
 
 // #476 / ADR-178: the two ways a valid key can be answered. `deactivated` is the owner being frozen —
 // a state the tenant can undo by upgrading — so the caller says so rather than returning the generic
@@ -63,7 +63,7 @@ export async function verifyApiKey(
   // and the deactivation would be indistinguishable from an unknown key.
   const row = await (withTenantTx(tenantId, async (tx) => {
     const [r] = await tx<ApiKeyRow[]>`
-      SELECT k.id, k.owner_user_id, k.key_hash, k.scope, k.expires_at, k.capabilities, m.deactivated_at
+      SELECT k.id, k.owner_user_id, k.key_hash, k.scope, k.expires_at, k.capabilities, k.space_ids, m.deactivated_at
       FROM api_keys k
       LEFT JOIN members m ON m.sub = k.owner_user_id
       WHERE k.key_prefix    = ${keyPrefix}
@@ -103,5 +103,6 @@ export async function verifyApiKey(
   return {
     sub: row.owner_user_id, scope: row.scope === 'read' ? 'read' : 'write', keyId: row.id, deactivated: false,
     ...(row.capabilities ? { capabilities: row.capabilities } : {}),
+    ...(row.space_ids ? { spaces: new Set(row.space_ids) } : {}),
   }
 }

@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, requireTenantAdmin, isAlreadyConverged, runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
+import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, requireTenantAdmin, isAlreadyConverged, runInAuthzScope, SYSTEM_SCOPE, currentAuthzScope } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration, beginTitleDictFill, endTitleDictFill } from '../title-dict-cache.js' // #534
 import { getTreeConfirm, setTreeConfirm, getCachedBadge, setCachedBadge, invalidatePageBadge } from '../tree-confirm-cache.js' // #541
@@ -479,7 +479,14 @@ export async function listPages(
   // carries no current_time, so an expiring link could outlive its clock. Members are covered — their
   // permission changes ride reindex (revoke/restrict/private/member-removal all enqueue), which fires
   // the invalidation below.
+  // #637 / ADR-216 §6: NOR DOES A CONFINED PRINCIPAL. This entry is keyed by tenant and subject, and an
+  // API key's subject is its OWNER — so a key confined to one space would be handed the answer the owner
+  // warmed for the whole tenant, before any primitive is consulted. The same reasoning as the guest line
+  // above: a cache that answers "what this principal may see" has to be keyed by everything that changes
+  // the answer, and the confinement is not in the key. Not caching is the cheap correct move — a confined
+  // key is an integration, not a person clicking around a sidebar.
   const cacheable = !!tenantId && !args.subject.startsWith('share_link:') && !args.context
+    && currentAuthzScope()?.restriction == null
   const cached = cacheable ? getTreeConfirm(tenantId!, args.subject, args.spaceId) : undefined
   // #541(user ruling): the sidebar must not wait for ALL confirms before painting — the cold
   // cost is count-proportional (~7ms × pages) and no supply-side lever moves it. `firstN` asks for a
@@ -4182,7 +4189,9 @@ export async function pagesPlugin(app: FastifyInstance) {
       // dictionary IS "what this principal may see", and dropped for the whole tenant the moment the
       // dictionary invalidation fires, so the disclosure window is no wider than the one that already
       // existed. A miss computes; nothing is ever served stale in place of a fresh answer.
-      const cached = getCachedTitleDict(req.tenant.id, subject)
+      // #637 / ADR-216 §6: same shape, same fix. The dictionary IS "what this principal may see", the key
+      // is tenant + subject, and a confined key's subject is its owner's.
+      const cached = currentAuthzScope()?.restriction == null ? getCachedTitleDict(req.tenant.id, subject) : undefined
       if (cached) return cached
       // #534(user ruling): a MISS answers EMPTY IMMEDIATELY (degraded — links render as plain
       // text and fill in moments later) instead of holding this request, and with it the whole
