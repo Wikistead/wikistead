@@ -10,6 +10,7 @@ import { ConfirmDialog } from "../ui/dialogs"; // #504: revoking a key is irreve
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
+import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { relTime } from "../ui/relative-time";
 
 // #461: when a key was last authenticated with — the signal that tells you which keys are dead
@@ -105,17 +106,9 @@ export function ApiKeysPanel({
         </>
       )}
 
-      {created && (
-        <div className="my-3.5 rounded-lg border border-[color-mix(in_srgb,var(--accent)_40%,var(--border))] px-3 py-2.5" data-testid="api-key-plaintext">
-          <p className="text-xs text-fg-dim">{t("adminApi.copyOnce")}</p>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 font-mono text-xs [overflow-wrap:anywhere]">{created.plaintext}</code>
-            <IconButton aria-label={t("adminApi.copy")} data-tip={t("adminApi.copy")} onClick={() => { navigator.clipboard?.writeText(created.plaintext); notify.success(t("toast.copied")); }}>
-              <Copy size={14} />
-            </IconButton>
-          </div>
-        </div>
-      )}
+      {/* #638: the box this invented is now shared — the invite and password-setup links were the two
+          that had neither the warning nor the copy button, and they are the ones that strand people. */}
+      {created && <OneTimeSecret title={t("adminApi.copyOnce")} value={created.plaintext} testId="api-key-plaintext" />}
 
       <ListBox className="mt-5" data-testid="api-key-list">
         {keys.map((k) => (

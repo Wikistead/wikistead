@@ -1052,7 +1052,8 @@
     "reissue": "New link",
     "resend": "Send again",
     "reissueConfirm": "Make a new link for {{email}}? The link you handed out before will stop working.",
-    "resendConfirm": "Send a new link to {{email}}? The link you sent before will stop working."
+    "resendConfirm": "Send a new link to {{email}}? The link you sent before will stop working.",
+    "copyOnce": "Copy this now. It cannot be shown again."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenting is off for you on this page.",

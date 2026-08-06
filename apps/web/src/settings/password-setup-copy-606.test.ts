@@ -17,7 +17,10 @@ const locales = ["en", "ja"].map((l) => ({
 describe("#606: the password-setup path does not wear the invite's words", () => {
   it("the setup link renders under its own label, not the invite's", () => {
     // the password branch shows passwordLinkLabel; the invite branch keeps inviteLinkLabel
-    expect(src).toMatch(/lastLink\.kind === "invite"/);
+    // #638 moved the link into a modal, so the branch is on the dialog's title rather than inside a
+    // paragraph. What #606 is about is unchanged and still asserted below: the two are told apart, and
+    // the password one wears its own words.
+    expect(src, "the two kinds are still told apart").toMatch(/lastLink\?\.kind === "password"/);
     expect(src).toMatch(/passwordLinkLabel/);
     expect(src, "the setup link has its own testid").toMatch(/password-setup-link/);
   });

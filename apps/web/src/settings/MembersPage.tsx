@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
+import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
 import { Button } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
-import { ConfirmDialog } from "../ui/dialogs"; // #504: removal / DSAR erasure / invite revoke confirm first
+import { ConfirmDialog, SecretDialog } from "../ui/dialogs"; // #504: removal / DSAR erasure / invite revoke confirm first
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
@@ -531,46 +532,55 @@ export function MembersPage() {
         />
         <Button variant="primary" disabled={!email.trim()} onClick={() => void onInvite()}>{t("members.sendInvite")}</Button>
       </FormRow>
-      {lastLink && (
-        <p style={{ marginTop: 12 }}>
-          {/* #606 (review rejection): a password-setup link is NOT an invite — nobody new is minted — so it
-              does not wear the invite's words. The emailed/not-emailed note is the invite flow's fact
-              (a setup link is always handed over in person) and only renders there. */}
-          {lastLink.kind === "invite"
-            ? <>{t("members.inviteLinkLabel")} <code data-testid="invite-link">{lastLink.url}</code>
-                <br /><span style={{ color: "var(--fg-dim)" }}>{lastLink.emailed ? t("members.emailed") : t("members.notEmailed")}</span></>
-            : <>{t("members.passwordLinkLabel")} <code data-testid="password-setup-link">{lastLink.url}</code></>}
-        </p>
-      )}
+      {/* #638 (user ruling): a modal, because the two links are produced from DIFFERENT places
+          the invite from the form above, the password entrance from a row's ⋯ menu most of a screen away
+          — and a result rendered in one fixed spot is in the wrong place for at least one of them.
+          #606 stays honoured: a password-setup link is not an invite, so it wears its own title, and the
+          emailed/not-emailed note is the invite flow's fact and renders only there. */}
+      <SecretDialog
+        open={lastLink !== null}
+        onClose={() => setLastLink(null)}
+        testId={lastLink?.kind === "password" ? "password-setup-link" : "invite-link"}
+        title={lastLink?.kind === "password" ? t("members.passwordLinkLabel") : t("members.inviteLinkLabel")}
+        secret={lastLink?.url ?? ""}
+        note={lastLink?.kind === "invite" ? (lastLink.emailed ? t("members.emailed") : t("members.notEmailed")) : undefined}
+      />
 
       {invites.length > 0 && (
         <>
           <h3>{t("members.pendingTitle")}</h3>
-          <ul>
+          {/* #638 ③: the shared list box from #639 — it grows with the invitations and scrolls only once
+              it is tall, so twenty of them no longer push the page down forever. */}
+          <ListBox data-testid="invite-list">
             {invites.map((i) => (
-              <li key={i.id} style={{ marginBottom: 4 }} data-testid="invite-row" data-invite={i.id}>
-                {t("members.pendingRow", { email: i.email || t("members.noEmail"), role: i.role })}{" "}
+              <ListRow key={i.id} data-testid="invite-row" data-invite={i.id}>
+                {/* #638 ④: columns, not one sentence. " · " as a single string moved the
+                    buttons left and right with the length of the address, so the control a reader was
+                    reaching for was never in the same place twice. The address takes the free space and
+                    truncates; everything after it is fixed-width and lines up down the list. */}
+                <span className="min-w-0 flex-1 truncate" data-testid="invite-email">{i.email || t("members.noEmail")}</span>
+                <span className="flex-none text-xs text-fg-dim" data-testid="invite-role-label">{i.role}</span>
                 {/* #638 3: which of these has anybody actually received. Sending has always
                     been best-effort, and its outcome was reported once — on the response to the call that
                     created the invite — and then forgotten. */}
-                <span style={{ color: "var(--fg-dim)" }} data-testid="invite-mailed" data-mailed={i.last_emailed_at ? "yes" : "no"}>
+                <span className="flex-none text-xs text-fg-dim" data-testid="invite-mailed" data-mailed={i.last_emailed_at ? "yes" : "no"}>
                   {i.last_emailed_at ? t("members.inviteMailed") : t("members.inviteNotMailed")}
-                </span>{" "}
+                </span>
                 {/* #638the invitation could be neither re-sent nor read back, and it is the one
                     that strands people — a tenant with no mail configured has only the link that appeared
                     once on the screen that made it. Two deliveries of ONE act: the token is hashed at
                     rest, so both mint a new link and the old one stops working. The confirm says that
                     outright rather than leaving an admin to hand out a link they just invalidated. */}
-                <Button variant="ghost" size="sm" data-testid="invite-reissue"
+                <Button variant="ghost" size="sm" className="flex-none" data-testid="invite-reissue"
                   onClick={() => setConfirming({
                     message: t("members.reissueConfirm", { email: i.email || t("members.noEmail") }),
                     run: () => void guarded(async () => {
                       const r = await reissueInvite(token, i.id);
                       setLastLink({ url: r.inviteUrl, emailed: r.emailed, kind: "invite" });
                     })(),
-                  })}>{t("members.reissue")}</Button>{" "}
+                  })}>{t("members.reissue")}</Button>
                 {i.email && (
-                  <Button variant="ghost" size="sm" data-testid="invite-resend"
+                  <Button variant="ghost" size="sm" className="flex-none" data-testid="invite-resend"
                     onClick={() => setConfirming({
                       message: t("members.resendConfirm", { email: i.email }),
                       run: () => void guarded(async () => {
@@ -578,13 +588,13 @@ export function MembersPage() {
                         setLastLink({ url: r.inviteUrl, emailed: r.emailed, kind: "invite" });
                       })(),
                     })}>{t("members.resend")}</Button>
-                )}{" "}
+                )}
                 {/* #504: revoking kills the sent link for good — confirm first. */}
-                <Button variant="dangerGhost" size="sm" data-testid="invite-revoke"
+                <Button variant="dangerGhost" size="sm" className="flex-none" data-testid="invite-revoke"
                   onClick={() => setConfirming({ message: t("members.revokeConfirm", { email: i.email || t("members.noEmail") }), run: () => void guarded(() => revokeInvite(token, i.id))() })}>{t("members.revoke")}</Button>
-              </li>
+              </ListRow>
             ))}
-          </ul>
+          </ListBox>
         </>
       )}
       {/* #504: the shared confirm for this page's irreversible actions. */}

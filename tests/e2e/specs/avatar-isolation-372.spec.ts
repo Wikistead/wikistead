@@ -28,7 +28,10 @@ async function makeInvite(admin: Page): Promise<string> {
   await admin.goto(`${WEB}/settings/members`);
   await admin.getByLabel("invite email").fill(`avatar372-${Date.now()}@e2e.test`);
   await admin.getByRole("button", { name: "Send invite" }).click();
-  const link = await admin.getByTestId("invite-link").textContent();
+  // #638: the link is shown once, in a modal — read the value inside the box, then dismiss it so the
+  // console behind is usable again.
+  const link = await admin.getByTestId("invite-link-value").textContent();
+  await admin.getByTestId("secret-dialog-done").click();
   expect(link).toMatch(/\/invite\?token=inv_/);
   return link!;
 }
