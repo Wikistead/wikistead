@@ -42,12 +42,21 @@ export interface NarrowedKeyRequest {
  * It lives here, beside the seam, rather than at the call site: the whole point is that there is one
  * answer to "is this key narrowed", and a second dimension added next month must not need the call site
  * to be found again.
+ *
+ * #667 / ADR-221 §3: that month arrived, and the prediction was exact. A v2 key carries a resource-type
+ * matrix and NEITHER of the first two fields — so this function would have answered "not narrowed", and
+ * the key would have been handed its owner's whole tenant, past the credential-minting refusal and past
+ * the route table both. The same fail-open as #637, in the same function, for the third dimension.
+ *
+ * The reason the prediction held is worth keeping: every dimension is optional on its own, so "is it
+ * narrowed" can only ever be a disjunction, and a disjunction silently loses a term that nobody adds.
  */
 export function isNarrowedKey(key: {
   capabilities?: readonly string[] | null
   spaces?: ReadonlySet<string> | readonly string[] | null
+  permissions?: Readonly<Record<string, string>> | null
 }): boolean {
-  return key.capabilities != null || key.spaces != null
+  return key.capabilities != null || key.spaces != null || key.permissions != null
 }
 
 /** True when the request is allowed. A route the table does not know MUST answer false. */
