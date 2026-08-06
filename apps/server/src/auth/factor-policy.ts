@@ -13,6 +13,8 @@
 // now be wrong about how to call this, but not about what it decides.
 import type { TenantDb } from '../db/index.js'
 import { doorOf, type SessionData, type SessionDoor } from './session.js'
+import { rpIdFromHost } from './passkeys.js' // #672: a passkey answers only at the host it was made on
+import type { FactorKind } from './second-factors.js'
 
 /** What a request may do about a session, once the policy is on. */
 export type FactorVerdict =
@@ -110,6 +112,46 @@ export function mfaPolicyEntitled(_tenant: { plan: string }): boolean {
 }
 
 /**
+ * THE condition, written once: a factor this member could actually offer AT THIS HOST.
+ *
+ * Two halves, and the second is the one a reader does not expect. CONFIRMED is ADR-219 §7's rule — an
+ * abandoned enrolment has proved nothing, and counting it would let the switch be satisfied by starting
+ * one and walking away. HOST is #664's: a passkey's RP ID is the host it was made on, and the sign-in
+ * lookup filters by it (`passkeys.ts:211`), so after a domain move every key is still a row and not one
+ * of them can answer. A floor that counted rows would be satisfied by keys nobody can present, the
+ * switch would accept the setting, and the tenant would be locked out of its own product.
+ *
+ * A FRAGMENT rather than four similar queries, because #605's two-sided guard is this repository's
+ * standing lesson about what happens when the same rule is written twice: one side is updated and the
+ * other keeps the old answer. Everything that asks "does this count" embeds this; `factor-kinds.test.ts`
+ * is the walk that says nothing else asks the question its own way.
+ *
+ * TOTP has no host: the secret is the product's, and it verifies wherever the product is served.
+ */
+export function presentableHere(db: TenantDb, host: string | undefined) {
+  const rpId = rpIdFromHost(host)
+  return db.sql`
+    f.confirmed_at IS NOT NULL AND (
+      f.kind <> 'passkey'
+      OR EXISTS (SELECT 1 FROM member_passkeys p WHERE p.factor_id = f.id AND p.rp_id = ${rpId}))`
+}
+
+/**
+ * What this member could present here, as kinds. The answer #672's later slices ask of every door.
+ *
+ * Returned as the distinct KINDS rather than the rows: every caller's question is "would an accepted
+ * kind be available", and handing back rows invites each of them to re-derive that differently.
+ */
+export async function presentableKinds(
+  db: TenantDb, memberSub: string, host: string | undefined,
+): Promise<FactorKind[]> {
+  const rows = await db.sql<{ kind: FactorKind }[]>`
+    SELECT DISTINCT f.kind FROM member_factors f
+    WHERE f.member_sub = ${memberSub} AND ${presentableHere(db, host)}`
+  return rows.map((r) => r.kind)
+}
+
+/**
  * Whether this tenant has an admin who can actually present a factor.
  *
  * The write-time precondition ADR-219 §4 mirrors from #605: turning the policy on while nobody can
@@ -121,11 +163,11 @@ export function mfaPolicyEntitled(_tenant: { plan: string }): boolean {
  * carrying admin capabilities is a different question and is not one this precondition can ask without
  * an FGA round trip per member.
  */
-export async function adminWithFactorCount(db: TenantDb): Promise<number> {
+export async function adminWithFactorCount(db: TenantDb, host: string | undefined): Promise<number> {
   const [row] = await db.sql<[{ n: number }?]>`
     SELECT count(DISTINCT m.sub)::int AS n
     FROM members m
-    JOIN member_factors f ON f.member_sub = m.sub AND f.confirmed_at IS NOT NULL
+    JOIN member_factors f ON f.member_sub = m.sub AND ${presentableHere(db, host)}
     WHERE m.role = 'admin' AND m.deactivated_at IS NULL`
   return row?.n ?? 0
 }
@@ -138,11 +180,11 @@ export async function adminWithFactorCount(db: TenantDb): Promise<number> {
  * sweep that trusts that has to be right about it. Which of these sessions actually goes is decided by
  * the DOOR at `destroyUnsatisfiedSessions` (§3) — this half only answers "holds nothing".
  */
-export async function membersWithoutConfirmedFactor(db: TenantDb): Promise<string[]> {
+export async function membersWithoutConfirmedFactor(db: TenantDb, host: string | undefined): Promise<string[]> {
   const rows = await db.sql<{ sub: string }[]>`
     SELECT m.sub FROM members m
     WHERE NOT EXISTS (
-      SELECT 1 FROM member_factors f WHERE f.member_sub = m.sub AND f.confirmed_at IS NOT NULL)`
+      SELECT 1 FROM member_factors f WHERE f.member_sub = m.sub AND ${presentableHere(db, host)})`
   return rows.map((r) => r.sub)
 }
 
@@ -159,14 +201,14 @@ export async function membersWithoutConfirmedFactor(db: TenantDb): Promise<strin
  */
 export async function wouldStrandTenant(
   db: TenantDb,
-  args: { memberSub: string; factorId: string },
+  args: { memberSub: string; factorId: string; host: string | undefined },
 ): Promise<boolean> {
   const [row] = await db.sql<[{ mine: number; others: number }?]>`
     SELECT
-      (SELECT count(*)::int FROM member_factors
-        WHERE member_sub = ${args.memberSub} AND confirmed_at IS NOT NULL AND id <> ${args.factorId}) AS mine,
+      (SELECT count(*)::int FROM member_factors f
+        WHERE f.member_sub = ${args.memberSub} AND ${presentableHere(db, args.host)} AND f.id <> ${args.factorId}) AS mine,
       (SELECT count(DISTINCT m.sub)::int FROM members m
-        JOIN member_factors f ON f.member_sub = m.sub AND f.confirmed_at IS NOT NULL
+        JOIN member_factors f ON f.member_sub = m.sub AND ${presentableHere(db, args.host)}
         WHERE m.role = 'admin' AND m.deactivated_at IS NULL AND m.sub <> ${args.memberSub}) AS others`
   if (!row) return false
   // Somebody else can still get in, or this member keeps another factor: nothing is stranded.

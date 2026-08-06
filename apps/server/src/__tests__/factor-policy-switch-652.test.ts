@@ -20,7 +20,8 @@ const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
 const STAMP = Date.now().toString(36)
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
-const AUTH = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
+const HOST = 'dev.localhost' // the same host the injected requests carry, so the floor asks the same question
+const AUTH = { host: HOST, authorization: 'Bearer dev-token' }
 const H = { ...AUTH, 'content-type': 'application/json' }
 
 let app: FastifyInstance
@@ -72,7 +73,7 @@ afterAll(async () => {
 describe('#652: turning the requirement on', () => {
   it('is refused while no admin holds a factor', async () => {
     // The lock-out wearing a success response: the person who would have to undo it is the one shut out.
-    expect(await adminWithFactorCount(db), 'the premise: nobody is enrolled').toBe(0)
+    expect(await adminWithFactorCount(db, HOST), 'the premise: nobody is enrolled').toBe(0)
     const res = await setStance(true)
     expect(res.statusCode, res.body).toBe(409)
     expect(res.json<{ code: string }>().code).toBe('admin_factor_required')
@@ -95,7 +96,7 @@ describe('#652: turning the requirement on', () => {
       ON CONFLICT (tenant_id, sub) DO UPDATE SET role = 'admin'`
     await startTotpEnrolment(db, { tenantId: TENANT, memberSub: strayAdmin, secret: generateTotpSecret() }) // not confirmed
 
-    expect(await adminWithFactorCount(db), 'a member and a pending row count for nothing').toBe(0)
+    expect(await adminWithFactorCount(db, HOST), 'a member and a pending row count for nothing').toBe(0)
     expect((await setStance(true)).statusCode).toBe(409)
   }, 120_000)
 
@@ -136,7 +137,7 @@ describe('#652: the floor on the way out', () => {
     })
     expect(res.statusCode, res.body).toBe(409)
     expect(res.json<{ code: string }>().code).toBe('last_admin_factor')
-    expect(await adminWithFactorCount(db), 'and it is still there').toBe(1)
+    expect(await adminWithFactorCount(db, HOST), 'and it is still there').toBe(1)
   }, 120_000)
 
   it('allows it when another admin holds one', async () => {
@@ -190,7 +191,7 @@ describe('#652: the floor on the way out', () => {
     const sub = await memberWithFactor('lone-member', 'member')
     const [row] = await adminPool<{ id: string }[]>`
       SELECT id FROM member_factors WHERE member_sub = ${sub} AND confirmed_at IS NOT NULL`
-    expect(await wouldStrandTenant(db, { memberSub: sub, factorId: row!.id }), 'only an admin can strand a tenant')
+    expect(await wouldStrandTenant(db, { memberSub: sub, factorId: row!.id, host: HOST }), 'only an admin can strand a tenant')
       .toBe(false)
   }, 120_000)
 })

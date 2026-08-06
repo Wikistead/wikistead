@@ -20,7 +20,7 @@ import { auditIfEntitled } from '../audit/outbox.js'
 import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
 import { FACTOR_COOKIE, createFactorSession, readFactorSession, destroyFactorSession, factorCookieOptions } from '../auth/factor-session.js' // #652 / ADR-219 §6
 import { passkeyAuthenticationOptions, verifyPasskeyAssertion } from '../auth/passkeys.js' // #665
-import { secondFactorRequired } from '../auth/factor-policy.js'
+import { secondFactorRequired, presentableHere } from '../auth/factor-policy.js'
 import { hasConfirmedFactor, totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
 import { verifyTotp, generateTotpSecret, totpUri } from '../auth/totp.js'
 import { localLoginEnabled, loginMethodCeiling } from '../auth/login-methods.js'
@@ -563,9 +563,12 @@ export async function authLocalPlugin(app: FastifyInstance) {
     }
 
     const code = typeof req.body?.code === 'string' ? req.body.code : ''
+    // #675: the same condition the floor and the sweep ask, so "this counts" cannot mean two things.
+    // The host half is a no-op for a TOTP and is asked anyway — the day a third kind arrives, a query
+    // that spelled the rule itself is the one that keeps the old answer.
     const rows = await req.db.sql<{ id: string }[]>`
-      SELECT id FROM member_factors
-      WHERE member_sub = ${pending.sub} AND kind = 'totp' AND confirmed_at IS NOT NULL`
+      SELECT f.id FROM member_factors f
+      WHERE f.member_sub = ${pending.sub} AND f.kind = 'totp' AND ${presentableHere(req.db, req.headers.host)}`
     let matched: { id: string; counter: number } | null = null
     for (const r of rows) {
       const secret = await totpSecretFor(req.db, r.id)

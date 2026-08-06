@@ -346,7 +346,7 @@ export async function secondFactorPlugin(app: FastifyInstance) {
     if (!own) return reply.code(404).send({ error: 'no such factor', code: 'factor_not_found' })
 
     if (own.confirmed_at && await secondFactorRequired(req.db)
-        && await wouldStrandTenant(req.db, { memberSub: req.user.sub, factorId: id })) {
+        && await wouldStrandTenant(req.db, { memberSub: req.user.sub, factorId: id, host: req.headers.host })) {
       // The floor. Refused with a reason, and the reason names the two ways out — because a member who
       // is told only "no" will try again rather than enrol a second one or turn the policy off.
       return reply.code(409).send({
