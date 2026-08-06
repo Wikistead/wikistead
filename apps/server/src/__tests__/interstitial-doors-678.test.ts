@@ -191,10 +191,35 @@ describe('#678: the switch guard resolves itself', () => {
   })
 
   it('…and it is false for a stance whose kinds no door mints', () => {
-    // The control the predicate exists for. Without it "always true" would satisfy the case above and
-    // the guard would be decoration — which is exactly what a deleted named-value ban leaves behind.
-    const NONE: typeof INTERSTITIAL_MINTS = []
-    expect(NONE.some((k) => ['passkey'].includes(k)), 'the shape of the question').toBe(false)
+    // The control the predicate exists for, and it has to run THE FUNCTION. The first version of this
+    // case built a local empty array and asserted `[].some(...)` is false — a true statement about
+    // Array.prototype, not about `interstitialCanMint`. Measured: replacing the whole predicate with
+    // `() => true` left all twenty-one assertions in this file and #676's green. A guard nothing
+    // observes is the decoration a deleted named-value ban leaves behind, which is the exact failure
+    // ADR-222 §6 chose a predicate to avoid.
+    //
+    // Driven by emptying what the doors mint, because that is the real way this goes false: a door is
+    // removed, or a stance is added whose kinds no door can make. The list is restored afterwards —
+    // it is module state shared with every other case here.
+    const real = [...INTERSTITIAL_MINTS]
+    try {
+      INTERSTITIAL_MINTS.length = 0
+      for (const stance of ['any', 'passkey', 'totp'] as const) {
+        expect(interstitialCanMint(stance), `${stance} claims to be reachable with no doors at all`).toBe(false)
+      }
+      // `off` too: it accepts every kind, so with nothing mintable it is equally unreachable. (The
+      // switch never asks about `off` — turning the requirement off strands nobody — but the predicate
+      // must not answer from the stance NAME.)
+      expect(interstitialCanMint('off'), 'answered from the name rather than from the doors').toBe(false)
+
+      // …and one door is enough for the stance that accepts it, but not for the other.
+      INTERSTITIAL_MINTS.push('totp')
+      expect(interstitialCanMint('totp'), 'a TOTP door makes a TOTP stance reachable').toBe(true)
+      expect(interstitialCanMint('passkey'), 'a TOTP door does not make a passkey stance reachable').toBe(false)
+    } finally {
+      INTERSTITIAL_MINTS.length = 0
+      INTERSTITIAL_MINTS.push(...real)
+    }
   })
 
   it('the list matches the doors that actually exist', () => {
