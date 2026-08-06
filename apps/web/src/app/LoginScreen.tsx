@@ -155,8 +155,11 @@ export function LoginScreen() {
             {/* #442: the shared TenantBrand lockup (same component as the app header). */}
             <TenantBrand logoUrl={logoUrl} name={name} size="login" logoTestId="login-brand-logo" nameTestId="login-brand" />
           </div>
-          <h1 className="mb-1 text-xl font-semibold">{t("auth.signInTitle", { product })}</h1>
-          <p className="mb-5 text-sm text-fg-dim">{t("auth.signInBody")}</p>
+          {/* #670: a line used to sit under this heading saying the reader would continue with their
+              organisation's identity provider. It said nothing the screen was not already showing — the
+              buttons below wear the connection names, a password entrance shows its own fields — and on
+              a tenant with only a password it was untrue. The title keeps the spacing the pair had. */}
+          <h1 className="mb-5 text-xl font-semibold">{t("auth.signInTitle", { product })}</h1>
           {error && (
             <div
               className="wks-left-bar mb-4 rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"

@@ -622,7 +622,6 @@
     "localPassword": "Password",
     "localFailed": "That email address and password do not match an account here.",
     "signInTitle": "Sign in to {{product}}",
-    "signInBody": "Continue with your organization's identity provider.",
     "signIn": "Sign in",
     "continueWith": "Continue with {{provider}}",
     "errorAccess": "Sign-in couldn't be completed. Please try again or contact your workspace administrator.",
