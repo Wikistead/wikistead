@@ -305,16 +305,27 @@ export async function wouldStrandTenant(
   db: TenantDb,
   args: { memberSub: string; factorId: string; host: string | undefined },
 ): Promise<boolean> {
+  // #677 review: this asked "is any factor left" while the stance may accept only one KIND, and may
+  // ask for TWO of them. So under `passkey` a tenant could take itself from two admin passkeys to none
+  // by deleting them one at a time, each delete answering "somebody else still holds one" about a
+  // TOTP the door refuses — the floor #676 set on the way in, dismantled on the way out. #605's guard
+  // is two-sided for this exact reason, and ADR-222 §2 names this function as one of the five.
+  const stance = await secondFactorStance(db)
+  if (stance === 'off') return false // nothing is required, so nothing can be stranded
+  const kinds = acceptedKinds(stance)
   const [row] = await db.sql<[{ mine: number; others: number }?]>`
     SELECT
       (SELECT count(*)::int FROM member_factors f
-        WHERE f.member_sub = ${args.memberSub} AND ${presentableHere(db, args.host)} AND f.id <> ${args.factorId}) AS mine,
-      (SELECT count(DISTINCT m.sub)::int FROM members m
-        JOIN member_factors f ON f.member_sub = m.sub AND ${presentableHere(db, args.host)}
+        WHERE f.member_sub = ${args.memberSub} AND f.kind = ANY(${kinds}) AND ${presentableHere(db, args.host)}
+          AND f.id <> ${args.factorId}) AS mine,
+      (SELECT count(*)::int FROM members m
+        JOIN member_factors f ON f.member_sub = m.sub AND f.kind = ANY(${kinds}) AND ${presentableHere(db, args.host)}
         WHERE m.role = 'admin' AND m.deactivated_at IS NULL AND m.sub <> ${args.memberSub}) AS others`
   if (!row) return false
-  // Somebody else can still get in, or this member keeps another factor: nothing is stranded.
-  if (row.others > 0 || row.mine > 0) return false
+  // Counted in FACTORS, not admins, because the floor is: `passkey` asks for two keys, and two on one
+  // person is as safe from a single loss as one each on two (#672 ruling ②-1). What has to survive the
+  // delete is the floor itself, so the question is whether enough remain — not whether anybody remains.
+  if (row.others + row.mine >= floorFor(stance)) return false
   // …and only an ADMIN can strand a tenant. A member losing their last factor locks nobody else out.
   const [me] = await db.sql<[{ role: string }?]>`SELECT role FROM members WHERE sub = ${args.memberSub}`
   return me?.role === 'admin'

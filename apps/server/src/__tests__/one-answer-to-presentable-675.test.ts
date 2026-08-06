@@ -55,6 +55,9 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
+  await admin`
+    UPDATE tenant_login_prefs SET second_factor_required = FALSE, second_factor_kinds = 'off'
+    WHERE tenant_id = ${T}`.catch(() => {})
   for (const sub of subs) {
     await admin`DELETE FROM member_factors WHERE member_sub = ${sub}`.catch(() => {})
     await admin`DELETE FROM members WHERE tenant_id = ${T} AND sub = ${sub}`.catch(() => {})
@@ -96,6 +99,13 @@ describe('#675: a key from the old host cannot be presented here', () => {
   }, 180_000)
 
   it('the outbound guard asks the same question', async () => {
+    // #677 review: the guard now answers "is the FLOOR still met" and a stance of `off` has no floor,
+    // so the tenant has to be requiring something for the question to mean anything. `any` is what this
+    // file's other cases assume — anything presentable will do.
+    await admin`
+      INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds)
+      VALUES (${T}, TRUE, 'any')
+      ON CONFLICT (tenant_id) DO UPDATE SET second_factor_required = TRUE, second_factor_kinds = 'any'`
     // A tenant whose only admin key belongs to the old host is already stranded; giving up a factor
     // that could never answer must not be refused on the grounds that it was protecting anybody.
     const sub = subs.find((s) => s.includes('moved'))!
@@ -119,10 +129,12 @@ describe('#675: nothing asks the question its own way', () => {
     // A discovery walk, not a list of the four that were wrong: a fifth place added next month is
     // caught here rather than by the review that finds two guards disagreeing.
     //
-    // Two files are allowed to name it for reasons that are not counting: `second-factors.ts` LISTS a
-    // member's factors (a display question, no policy in it), and `passkeys.ts` answers "which keys
-    // would a domain move strand" (#664), which is about the move rather than about whether anybody
-    // may sign in.
+    // Two files are allowed to name it, and the review of #677 corrected what that buys. In
+    // `second-factors.ts` the ONE line matching is `hasConfirmedFactor` — the function ADR-222 §3 names
+    // as the builder of the dead end, not the harmless list this comment used to claim. It is excluded
+    // because "does this member have anything at all" is a real question for surfaces that are not
+    // about getting in; its own docstring now carries the warning. `passkeys.ts` answers "which keys
+    // would a domain move strand" (#664), which is about the move rather than about who may sign in.
     const ALLOWED = new Set(['auth/factor-policy.ts', 'auth/second-factors.ts', 'auth/passkeys.ts'])
     // `routes/auth-local.ts` used to be here too: its sign-in query spelled the rule itself. It now
     // embeds the fragment, which is why this walk found it and why the list did not simply grow.

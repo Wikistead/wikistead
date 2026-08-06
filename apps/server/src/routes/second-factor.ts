@@ -199,6 +199,12 @@ export async function secondFactorPlugin(app: FastifyInstance) {
    */
   app.post<{ Params: { id: string }; Body: { code?: string } }>('/me/factors/:id/confirm', async (req, reply) => {
     const { id } = req.params
+    // #677 review: the START refused an unaccepted kind and this did not, which left a way round it —
+    // a pending row created while the tenant accepted the kind can be confirmed after it stopped, and
+    // this route is where the enrolment becomes real. Pending rows have no TTL, so the window is not
+    // a race: it is "start one now, finish it whenever".
+    const refusedConfirm = await kindRefusal(req.db, 'totp')
+    if (refusedConfirm) return reply.code(refusedConfirm.statusCode).send(refusedConfirm.body)
     if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
       return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
     }
@@ -284,6 +290,8 @@ export async function secondFactorPlugin(app: FastifyInstance) {
   /** Finish it: the browser's credential, checked, stored, and the factor confirmed. */
   app.post<{ Params: { id: string }; Body: { response?: unknown } }>('/me/factors/:id/passkey', async (req, reply) => {
     const { id } = req.params
+    const refusedConfirm = await kindRefusal(req.db, 'passkey')
+    if (refusedConfirm) return reply.code(refusedConfirm.statusCode).send(refusedConfirm.body)
     if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
       return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
     }

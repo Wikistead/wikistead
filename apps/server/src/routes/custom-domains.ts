@@ -387,17 +387,25 @@ export async function customDomainsPlugin(app: FastifyInstance) {
       // skipped by not reading it, and the ruling asks for one that appears BEFORE it commits. The
       // acknowledgement is the same shape #605 uses: a refusal with a reason and a named way through,
       // which a future screen turns into a checkbox rather than into a surprise.
-      // #680 / ADR-222 §2: under a `passkey` stance the acknowledgement is not enough, because what it
-      // acknowledges is not what happens. Its own sentence — "they will each have to enrol again" — is
-      // untrue here: the keys stop working, and the door then refuses the only kind anybody could
-      // present, so nobody signs in TO enrol again. That is the whole tenant locked out, recoverable
-      // only through the operator break-glass, which a Cloud tenant does not have.
+      // #680 / ADR-222 §2: under a `passkey` stance the acknowledgement is not enough.
       //
-      // Refused rather than warned, and the sentence names the way through: widen the stance first,
-      // move, and narrow it again once everybody has a key on the new host.
+      // ⚠️ The first version of this comment said the tenant would be locked out — nobody able to sign
+      // in, not even to enrol again. An independent review measured that and it is FALSE since #678
+      // landed: the interstitial mints passkeys now, so each member can sign in with their password
+      // and register a key for the new host. The refusal stands, for the reason that survives the
+      // measurement and is worse:
+      //
+      // the moment the host changes, every account that held only a passkey drops to being guarded by
+      // a PASSWORD ALONE — anybody who knows it enrols their own key and is in. ADR-219 §6 accepted
+      // that trade for one member at a time, as the way out of the enrolment circle; here it happens
+      // to the whole tenant at once, silently, as a side effect of a DNS change. That is not something
+      // an acknowledgement about "losing passkeys" describes.
+      //
+      // The sentence names the way through: widen the stance first, move, and narrow it again once
+      // everybody has a key on the new host.
       if ((await secondFactorStance(req.db)) === 'passkey') {
         return reply.code(409).send({
-          error: 'this workspace requires passkeys, and every passkey stops working when the domain changes — nobody would be able to sign in, including to enrol a new one. Set "a passkey or an authenticator app" first, move, then require passkeys again.',
+          error: 'this workspace requires passkeys, and every passkey stops working when the domain changes — until each member enrols a new key, their account is guarded by its password alone. Set "a passkey or an authenticator app" first, move, then require passkeys again.',
           code: 'passkey_stance_blocks_move',
         })
       }
