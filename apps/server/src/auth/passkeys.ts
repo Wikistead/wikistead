@@ -14,7 +14,10 @@ import { randomBytes } from 'node:crypto'
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse,
   type RegistrationResponseJSON,
+  type AuthenticationResponseJSON,
 } from '@simplewebauthn/server'
 import type { TenantDb } from '../db/index.js'
 import { productName } from '../product-name.js'
@@ -178,4 +181,101 @@ export async function passkeysStrandedBy(db: TenantDb, newRpId: string): Promise
     FROM member_passkeys p JOIN member_factors f ON f.id = p.factor_id
     WHERE f.confirmed_at IS NOT NULL AND p.rp_id <> ${newRpId}`
   return row?.n ?? 0
+}
+
+// ── signing in with one (#665 / ADR-219 §1) ──────────────────────────────────────────────────────
+
+/**
+ * The challenge for an ASSERTION, keyed by the sign-in receipt rather than by a subject.
+ *
+ * At this point in the flow there is no session and no `req.user`: the password step produced a receipt
+ * and nothing else. Keying by the receipt is what makes "whose challenge is this" answerable without
+ * trusting anything the request body says about who it is.
+ */
+const authKey = (sid: string) => `passkeyauth:${sid}`
+
+export async function putAuthChallenge(valkey: IORedis, receiptSid: string, challenge: string): Promise<void> {
+  await valkey.set(authKey(receiptSid), challenge, 'EX', CHALLENGE_TTL_S)
+}
+
+/** One-shot, for the reason `takeChallenge` gives. */
+export async function takeAuthChallenge(valkey: IORedis, receiptSid: string): Promise<string | null> {
+  return valkey.getdel(authKey(receiptSid))
+}
+
+/** The options a browser needs to sign an assertion, naming the credentials this member actually holds. */
+export async function passkeyAuthenticationOptions(
+  deps: { db: TenantDb; valkey: IORedis },
+  args: { memberSub: string; host: string | undefined; receiptSid: string },
+) {
+  const held = (await passkeysFor(deps.db, args.memberSub)).filter((p) => p.rpId === rpIdFromHost(args.host))
+  const options = await generateAuthenticationOptions({
+    rpID: rpIdFromHost(args.host),
+    // Only the credentials made for THIS RP ID. One created under the old host after a domain move
+    // cannot answer here, and offering it produces a prompt that can only fail (ADR-219 §1, #664).
+    allowCredentials: held.map((p) => ({ id: p.credentialId, transports: p.transports as never })),
+    userVerification: 'preferred',
+  })
+  await putAuthChallenge(deps.valkey, args.receiptSid, options.challenge)
+  return options
+}
+
+/**
+ * May a counter of `next` follow a stored `stored`?
+ *
+ * Its own function so the rule can be measured. Forging a valid assertion to reach it through
+ * `verifyPasskeyAssertion` would mean re-deriving the signature the library exists to check, which is
+ * the thing ADR-219 §9 said not to do — so the branch is lifted out instead of tested through crypto.
+ *
+ * BACKWARDS is refused: that is the signal the spec exists to give, two devices answering for one
+ * credential. EQUAL is not: most platform authenticators report 0 forever, and treating "did not
+ * increase" as an anomaly would shut out every phone in circulation.
+ */
+export const counterAcceptable = (stored: number, next: number): boolean => next >= stored
+
+/**
+ * Check an assertion. Returns the factor it proved, or null.
+ *
+ * The SIGN COUNTER is the one interesting rule. A counter that goes BACKWARDS is the signal the spec
+ * exists to give — two devices answering for one credential, i.e. a clone — and is refused. A counter
+ * that does not move is NOT: most platform authenticators report 0 forever, and treating "did not
+ * increase" as an anomaly would shut out every phone in circulation.
+ */
+export async function verifyPasskeyAssertion(
+  deps: { db: TenantDb; valkey: IORedis },
+  args: { memberSub: string; host: string | undefined; receiptSid: string; response: AuthenticationResponseJSON },
+): Promise<{ factorId: string } | null> {
+  const expectedChallenge = await takeAuthChallenge(deps.valkey, args.receiptSid)
+  if (!expectedChallenge) return null
+  const held = await passkeysFor(deps.db, args.memberSub)
+  // By credential id, and only among THIS member's: an assertion naming somebody else's credential is
+  // not a different error, it is the same "that did not work".
+  const stored = held.find((p) => p.credentialId === args.response.id)
+  if (!stored) return null
+
+  try {
+    const verified = await verifyAuthenticationResponse({
+      response: args.response,
+      expectedChallenge,
+      expectedOrigin: originFromHost(args.host),
+      expectedRPID: rpIdFromHost(args.host),
+      credential: {
+        id: stored.credentialId,
+        publicKey: Buffer.from(stored.publicKey, 'base64url'),
+        counter: stored.signCount,
+        transports: stored.transports as never,
+      },
+      requireUserVerification: false,
+    })
+    if (!verified.verified) return null
+    const next = verified.authenticationInfo.newCounter
+    if (!counterAcceptable(stored.signCount, next)) return null // went backwards: a clone, not a sign-in
+    if (next > stored.signCount) {
+      await deps.db.sql`
+        UPDATE member_passkeys SET sign_count = ${next} WHERE factor_id = ${stored.factorId}`
+    }
+    return { factorId: stored.factorId }
+  } catch {
+    return null
+  }
 }
