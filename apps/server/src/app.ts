@@ -440,7 +440,7 @@ export async function buildApp(): Promise<FastifyInstance> {
             return
           }
           const gate = getNarrowedKeyGate()
-          if (!gate || !gate({ capabilities: apiUser.capabilities ?? [], method: req.method, routePattern: pattern, spaces: apiUser.spaces ?? null })) {
+          if (!gate || !gate({ capabilities: apiUser.capabilities, method: req.method, routePattern: pattern, spaces: apiUser.spaces ?? null })) {
             emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'apikey', reason: gate ? 'narrowed key outside its capabilities' : 'narrowed key with no gate registered' })
             await reply.code(403).send({ error: 'this API key is not permitted here', code: 'narrowed_key' })
             return

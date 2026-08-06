@@ -361,7 +361,12 @@
     "revokeConfirm": "Revoke the API key \"{{name}}\"? It never authenticates again.",
     "expiry": "Expires",
     "expiryNever": "Never expires",
-    "expiryDays": "In {{count}} days"
+    "expiryDays": "In {{count}} days",
+    "narrowShow": "Narrow what it reaches",
+    "narrowHide": "Close",
+    "narrowHint": "Choose nothing and the key reaches everything its owner can.",
+    "narrowSpaces": "Spaces it reaches",
+    "narrowCaps": "What it may do"
   },
   "adminAuth": {
     "title": "Authentication",
