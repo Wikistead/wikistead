@@ -61,6 +61,17 @@ describe('#655: every path that opens a session says which door it opened', () =
     readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
       e.isDirectory() ? walk(resolve(dir, e.name)) : /\.ts$/.test(e.name) ? [resolve(dir, e.name)] : [])
 
+  // Which door each path is expected to name. The scan alone answered "some door" and stayed green
+  // when SAML claimed `local` — measured by the review, and it is the exact failure this ticket
+  // named: a federated member would be sent to an interstitial that ADR-219 §3 says they must never
+  // see, and could never satisfy. The scan stays, because it is what catches a SIXTH path; the table
+  // is what catches a path naming the wrong thing.
+  const EXPECTED: { file: RegExp; doors: string[] }[] = [
+    { file: /routes\/auth\.ts$/, doors: ['federated'] },                 // OIDC callback
+    { file: /saml\/saml-auth\.ts$/, doors: ['federated'] },              // SAML, in the other package
+    { file: /routes\/auth-local\.ts$/, doors: ['local', 'operator'] },   // password, and break-glass acceptance
+  ]
+
   it('names a door at every product call site', () => {
     const unnamed: string[] = []
     let sites = 0
@@ -68,16 +79,19 @@ describe('#655: every path that opens a session says which door it opened', () =
       for (const file of walk(root)) {
         if (/__tests__|\.test\.ts$/.test(file)) continue
         const src = readFileSync(file, 'utf8')
-        // The call spans lines at some sites, so the window is the call and what follows it up to the
-        // closing paren — matching on one line would report the multi-line callers as unnamed.
+        // The call spans lines at some sites, so the window is the call and a generous slice after it.
+        // Generous on purpose: these call sites carry the comment explaining WHICH door they name, and
+        // a 600-character window ended inside that comment and reported the caller as unnamed.
         for (const m of src.matchAll(/establishMemberSession\(/g)) {
           // Skip the DEFINITION: `export async function establishMemberSession(` matches the same
           // text, and counting it reported the file that provides the parameter as a caller that
           // forgot to pass it.
           if (/function\s+$/.test(src.slice(Math.max(0, m.index! - 40), m.index!))) continue
           sites += 1
-          const window = src.slice(m.index!, m.index! + 600)
-          if (!/door:\s*'(local|local\+factor|federated|operator)'/.test(window)) {
+          const window = src.slice(m.index!, m.index! + 1400)
+          // Matched through an expression, not only a literal: the invite path chooses between two
+          // doors on the spot, and a pattern that only read `door: 'x'` called it unnamed.
+          if (!/door:[^,)}]*'(local\+factor|local|federated|operator)'/.test(window)) {
             unnamed.push(`${file.split('/').slice(-2).join('/')} @${m.index}`)
           }
         }
@@ -85,6 +99,33 @@ describe('#655: every path that opens a session says which door it opened', () =
     }
     expect(sites, 'the scan found the call sites at all').toBeGreaterThanOrEqual(5)
     expect(unnamed, 'these open a session without saying which door').toEqual([])
+  })
+
+  it('names the RIGHT door — a federated path may not claim a local one', () => {
+    const wrong: string[] = []
+    for (const rule of EXPECTED) {
+      const files = ROOTS.flatMap(walk).filter((f) => rule.file.test(f) && !/__tests__|\.test\.ts$/.test(f))
+      expect(files.length, `the path this rule is about still exists :: ${rule.file}`).toBeGreaterThan(0)
+      for (const file of files) {
+        const src = readFileSync(file, 'utf8')
+        for (const m of src.matchAll(/establishMemberSession\(/g)) {
+          if (/function\s+$/.test(src.slice(Math.max(0, m.index! - 40), m.index!))) continue
+          const window = src.slice(m.index!, m.index! + 1400)
+          const named = [...window.matchAll(/door:[^,)}]*'(local\+factor|local|federated|operator)'/g)].map((d) => d[1]!)
+          const off = named.filter((d) => !rule.doors.includes(d))
+          if (off.length) wrong.push(`${file.split('/').slice(-2).join('/')} says ${off.join(',')} — expected ${rule.doors.join(' or ')}`)
+        }
+      }
+    }
+    expect(wrong, 'a path is naming a door that is not its own').toEqual([])
+  })
+
+  it('the break-glass acceptance can reach `operator` at all', () => {
+    // The reject found `operator` existing only in the type. A door nothing can write is a value the
+    // enforcement slice will read as impossible, and the break-glass invite — the way back in when
+    // every other entrance is shut (#616) — would be sent to the interstitial it exists to bypass.
+    const src = ROOTS.flatMap(walk).filter((f) => /routes\/auth-local\.ts$/.test(f)).map((f) => readFileSync(f, 'utf8')).join('\n')
+    expect(/door:[^,)}]*'operator'/.test(src), 'nothing writes the operator door').toBe(true)
   })
 
   it('nothing enforces it yet — this slice lands inert', () => {

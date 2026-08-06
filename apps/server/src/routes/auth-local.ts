@@ -137,7 +137,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       await countFailure(app.valkey, `rl:local:accept:${req.tenant.id}:${req.ip}`, LOCAL_LOGIN_WINDOW_S)
 
       const { acceptLocalInvite } = await import('../auth/invites.js')
-      let outcome: { ok: true; sub: string } | { ok: false }
+      let outcome: Awaited<ReturnType<typeof acceptLocalInvite>>
       try {
         outcome = await acceptLocalInvite({ db: req.db, fga: app.fga }, req.tenant, token, password)
       } catch (e) {
@@ -152,9 +152,13 @@ export async function authLocalPlugin(app: FastifyInstance) {
         { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
         req.tenant,
         { sub: outcome.sub },
-        // #655: the product's own door. `local` rather than `local+factor` — nothing asks for a factor
-        // yet, and claiming one was answered would be the first lie the enforcement slice reads.
-        { localIdentity: true, door: 'local' },
+        // #655: which door this was. An operator break-glass invite is the one #616 exempted from the
+        // SSO stance, and ADR-219 §4 gives it the same standing against the second-factor requirement:
+        // the way back in when everything else is shut must not be shut by the thing it exists to get
+        // around. Every other acceptance is the product's own password door — `local` rather than
+        // `local+factor`, because nothing has asked for a factor and claiming one was answered would
+        // be the first lie the enforcement slice reads.
+        { localIdentity: true, door: outcome.operatorIssued ? 'operator' : 'local' },
       )
       reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
       return reply.code(201).send({ ok: true })
