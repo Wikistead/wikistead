@@ -216,6 +216,17 @@ export async function destroyMemberSessions(
  * Best-effort per session and never in the caller's transaction: a stance that was written must not be
  * rolled back because one revocation failed, and the door refuses these sessions from now on regardless.
  */
+/**
+ * The doors a second-factor stance may close (#679).
+ *
+ * An allowlist, not "everything except the federated one". `federated` is out of scope by ADR-219 §3 —
+ * an identity provider said who this is and the product does not add to that — and `operator` is the
+ * break-glass path (#605), which crosses requirements on purpose and is the way back in when a policy
+ * has locked somebody out. Both are exclusions this policy must never reach; naming what it DOES reach
+ * means a fourth door has to be thought about rather than swept by default.
+ */
+const SWEEPABLE_DOORS: SessionDoor[] = ['local', 'local+factor']
+
 export async function destroyUnsatisfiedSessions(
   valkey: IORedis, tenantId: string, subs: string[],
 ): Promise<number> {
@@ -229,7 +240,22 @@ export async function destroyUnsatisfiedSessions(
         continue
       }
       try {
-        if (doorOf(JSON.parse(raw) as SessionData) !== 'local') continue
+        // #679: the doors this policy reaches, named rather than described as "not federated".
+        //
+        // `local+factor` is the fix. It means the member answered the stance in force when they signed
+        // in — which, on a NARROWING, is precisely the person the new stance refuses. Skipping them was
+        // right while the stance was a single bit (somebody who had answered could not be in the
+        // unsatisfied set at all), and #679 widened the set to ask about KINDS without widening this.
+        // Half a widening: the set names them, the filter drops them, and they keep a live session
+        // under a stance the door will now refuse — the policy-that-starts-tomorrow ADR-219 §2
+        // rejected, and what ruling ④ (immediate sign-out) is about.
+        //
+        // The other two doors stay, and an ALLOWLIST is why this comment can say so. Written as "not
+        // federated" it swept `operator` as well — the break-glass path, which crosses requirements on
+        // purpose (#605) and is somebody's way back in when the policy has gone wrong. #652's pin
+        // caught that within a minute; a fourth door added next year would not be so lucky, and would
+        // silently join the sweep by default. Naming the set means a new door has to be considered.
+        if (!SWEEPABLE_DOORS.includes(doorOf(JSON.parse(raw) as SessionData))) continue
       } catch { /* malformed: treat as unsatisfied, below */ }
       await valkey.del(key(sid)).catch(() => {})
       await valkey.srem(memberKey(tenantId, sub), sid).catch(() => {})
@@ -257,7 +283,10 @@ export async function countSweptSessions(
       const raw = await valkey.get(key(sid)).catch(() => null)
       if (!raw) continue
       try {
-        if (doorOf(JSON.parse(raw) as SessionData) === 'local') { n++; break }
+        // The same list as the sweep, and it has to STAY the same list: this number is shown to an
+        // admin deciding whether to narrow, and a count drawn from a different question is a promise
+        // about a different act.
+        if (SWEEPABLE_DOORS.includes(doorOf(JSON.parse(raw) as SessionData))) { n++; break }
       } catch { n++; break } // malformed reads as unsatisfied, exactly as the sweep treats it
     }
   }
