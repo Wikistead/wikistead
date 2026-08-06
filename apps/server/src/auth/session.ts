@@ -239,6 +239,31 @@ export async function destroyUnsatisfiedSessions(
   return revoked
 }
 
+/**
+ * How many of these members hold a session the sweep would take (#679).
+ *
+ * The same rule `destroyUnsatisfiedSessions` applies, asked without taking anything: only `local`-door
+ * sessions count, because the others are not the policy's business (ADR-219 §3, §4). Counting members
+ * rather than sessions would say "12 will be signed out" about eight people, and counting every member
+ * without a factor would say it about people who were not signed in at all.
+ */
+export async function countSweptSessions(
+  valkey: IORedis, tenantId: string, subs: string[],
+): Promise<number> {
+  let n = 0
+  for (const sub of subs) {
+    const sids = await valkey.smembers(memberKey(tenantId, sub)).catch(() => [] as string[])
+    for (const sid of sids) {
+      const raw = await valkey.get(key(sid)).catch(() => null)
+      if (!raw) continue
+      try {
+        if (doorOf(JSON.parse(raw) as SessionData) === 'local') { n++; break }
+      } catch { n++; break } // malformed reads as unsatisfied, exactly as the sweep treats it
+    }
+  }
+  return n
+}
+
 // Turn already-verified identity claims into a membership-checked session.
 // IDENTITY (the claims) is proven by the IdP upstream; AUTHORIZATION to enter the
 // tenant is enforced HERE: throws 403 unless the subject is a provisioned member

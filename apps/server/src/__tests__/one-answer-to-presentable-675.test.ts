@@ -16,7 +16,7 @@ import { resolve } from 'node:path'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
-import { adminWithFactorCount, membersWithoutConfirmedFactor, wouldStrandTenant, presentableKinds } from '../auth/factor-policy.js'
+import { adminWithFactorCount, membersUnsatisfiedBy, wouldStrandTenant, presentableKinds } from '../auth/factor-policy.js'
 import { startPasskeyEnrolment, startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
 import { storePasskey } from '../auth/passkeys.js'
 import { generateTotpSecret } from '../auth/totp.js'
@@ -68,7 +68,9 @@ describe('#675: a key from the old host cannot be presented here', () => {
 
     expect(await presentableKinds(db, moved, HERE), 'the key exists and cannot answer here').toEqual([])
     expect(await adminWithFactorCount(db, HERE), 'so the tenant has no admin who can present one').toBe(0)
-    expect(await membersWithoutConfirmedFactor(db, HERE), 'and the sweep counts them as unprotected')
+    // #679 renamed this and widened its question to "unsatisfied BY THIS STANCE"; `any` is what it
+    // always asked — anything presentable will do.
+    expect(await membersUnsatisfiedBy(db, 'any', HERE), 'and the sweep counts them as unprotected')
       .toContain(moved)
   }, 180_000)
 

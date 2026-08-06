@@ -274,7 +274,9 @@
     "factorKeyUnsupported": "This browser cannot use passkeys. Try another browser.",
     "factorKeyCancelled": "Registration cancelled.",
     "factorKeyAlready": "This passkey is already registered. It is in the list above.",
-    "factorKeyDomainNote": "A passkey only works on the host it was created for. Moving this workspace to its own domain means enrolling every passkey again."
+    "factorKeyDomainNote": "A passkey only works on the host it was created for. Moving this workspace to its own domain means enrolling every passkey again.",
+    "factorNotCounted": "Not accepted",
+    "factorNotCountedTip": "This workspace no longer accepts this kind of factor, so it will not get you in. It is kept in case the setting changes back."
   },
   "settings": {
     "back": "Back to app",
@@ -498,7 +500,17 @@
     "secondFactorEnableConfirm": "Members who sign in with a password and have no second factor yet are signed out now, and are asked to set one up the next time they sign in. Members who sign in through your IdP are not affected. Require two-factor authentication?",
     "secondFactorDisableConfirm": "Members who sign in with a password will be able to get in with the password alone, including anyone who has not enrolled anything. Sessions already open are unaffected. Stop requiring two-factor authentication?",
     "ssoRequiredEnableConfirm": "Every other way in closes: passwords and the shared sign-in stop working for this workspace, and only your IdP and the people you have exempted can get in. Require SSO?",
-    "ssoRequiredDisableConfirm": "The other ways in open again, so anyone holding a password for this workspace can use it. Stop requiring SSO?"
+    "ssoRequiredDisableConfirm": "The other ways in open again, so anyone holding a password for this workspace can use it. Stop requiring SSO?",
+    "secondFactorKindsLead": "Which kinds count",
+    "stanceAny": "A passkey or an authenticator app",
+    "stancePasskey": "Passkeys only",
+    "stanceTotp": "Authenticator apps only",
+    "stanceConfirmSweep_one": "One member cannot satisfy this and will be signed out now, and asked to enrol next time they sign in.",
+    "stanceConfirmSweep_other": "{{count}} members cannot satisfy this and will be signed out now, and asked to enrol next time they sign in.",
+    "stancePasskeyWarning": "Passkeys cannot be exported: if the keys are lost, getting back in means contacting the operator.",
+    "stanceConfirmTail": "Change what counts?",
+    "passkeyNeedsSecondMember": "Requiring passkeys needs a second person in the workspace: losing the only key would leave nobody able to sign in.",
+    "stanceUnreachable": "Nobody could enrol what this asks for: a member with nothing enrolled would have no way to add one."
   },
   "adminEnroll": {
     "title": "Auto-enrolment",

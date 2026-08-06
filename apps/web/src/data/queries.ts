@@ -2046,7 +2046,7 @@ export interface LoginMethodsDTO {
   // one greyed switch would tell a tenant to upgrade when the fix is to enrol a factor.
   // `stance` (#676) is which kinds are accepted: "off" | "any" | "passkey" | "totp". `selected` stays
   // as "is anything required" — the switch #652 drew — and the picker that reads `stance` is #679.
-  secondFactorRequired?: { selected: boolean; canEnable: boolean; entitled: boolean; stance?: string }
+  secondFactorRequired?: { selected: boolean; canEnable: boolean; entitled: boolean; stance?: FactorStance }
   // #604-B: whether the CALLER may write the stance / platform / password selections and the
   // SSO exemptions. The read opened to `manage_connections`; those writes stayed on the admin tier,
   // so the server names the line instead of the screen inferring it from a tier flag.
@@ -2074,6 +2074,29 @@ export function useUpdatePlatformLogin() {
 // #568 / ADR-198 §3: the local switch. Its own hook rather than a parameter on the platform one —
 // they are different decisions, and the server refuses to close the last door in either case.
 // #605 / ADR-210: the stance switch and its exemptions.
+export type FactorStance = "off" | "any" | "passkey" | "totp";
+
+/** #679: what a stance would cost, asked before writing it. */
+export function useStanceImpact(kinds: FactorStance | null) {
+  const { token } = useSession();
+  return useQuery({
+    enabled: kinds !== null && kinds !== "off",
+    queryKey: ["login-methods-impact", kinds],
+    queryFn: () => apiFetch<{ unsatisfied: number; signedOut: number }>(
+      `/admin/login-methods/impact?kinds=${encodeURIComponent(kinds!)}`, token),
+    staleTime: 0, // the answer is about right now, and the question is asked at the moment of deciding
+    retry: false,
+  });
+}
+export function useUpdateSecondFactorStance() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (secondFactorKinds: FactorStance) =>
+      apiFetch<null>("/admin/login-methods", token, { method: "PATCH", body: JSON.stringify({ secondFactorKinds }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
+  });
+}
 export interface SsoExemptionDTO { memberSub: string; createdAt: string; hasCredential: boolean }
 export function useUpdateSsoRequired() {
   const { token } = useSession();
@@ -2382,12 +2405,19 @@ export interface MemberFactor {
   createdAt: string;
   confirmedAt: string | null;
   lastUsedAt: string | null;
+  /**
+   * #679: does this factor satisfy the workspace's current requirement? Answered by the SERVER, because
+   * it needs the tenant's stance and the host both — a passkey made before a domain move is a row that
+   * cannot be presented — and re-deriving it here would be a second place holding the same rule.
+   */
+  counts?: boolean;
 }
 export function useMyFactors() {
   const { token } = useSession();
   return useQuery({
     queryKey: ["me", "factors"],
-    queryFn: () => apiFetch<{ factors: MemberFactor[] }>("/me/factors", token).then((r) => r?.factors ?? []),
+    queryFn: () => apiFetch<{ factors: MemberFactor[]; stance?: string }>("/me/factors", token)
+      .then((r) => r?.factors ?? []),
   });
 }
 /** Begin an enrolment. The secret comes back ONCE, in this response — there is no way to ask again. */

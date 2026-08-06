@@ -266,18 +266,27 @@ export async function adminWithFactorCount(db: TenantDb, host: string | undefine
 }
 
 /**
- * Everyone in the tenant holding no confirmed factor — whose sessions ADR-219 §2 revokes when the
- * requirement is switched on.
+ * Everyone this stance would refuse — whose sessions ADR-219 §2 revokes when it is written.
+ *
+ * #679 widened the question from "holds nothing" to "holds nothing THIS STANCE ACCEPTS". Narrowing from
+ * `any` to `passkey` is the case: everyone with only an authenticator app stops being able to sign in,
+ * and a sweep asking the old question would leave them holding a session the door would now refuse —
+ * the "policy that starts tomorrow" ADR-219 §2 rejected, arriving by the new axis.
  *
  * Deactivated members are included rather than skipped: their sessions should already be gone, and a
  * sweep that trusts that has to be right about it. Which of these sessions actually goes is decided by
  * the DOOR at `destroyUnsatisfiedSessions` (§3) — this half only answers "holds nothing".
  */
-export async function membersWithoutConfirmedFactor(db: TenantDb, host: string | undefined): Promise<string[]> {
+export async function membersUnsatisfiedBy(
+  db: TenantDb, stance: FactorStance, host: string | undefined,
+): Promise<string[]> {
+  if (stance === 'off') return [] // a stance that asks for nothing leaves nobody unsatisfied
+  const kinds = acceptedKinds(stance)
   const rows = await db.sql<{ sub: string }[]>`
     SELECT m.sub FROM members m
     WHERE NOT EXISTS (
-      SELECT 1 FROM member_factors f WHERE f.member_sub = m.sub AND ${presentableHere(db, host)})`
+      SELECT 1 FROM member_factors f
+      WHERE f.member_sub = m.sub AND f.kind = ANY(${kinds}) AND ${presentableHere(db, host)})`
   return rows.map((r) => r.sub)
 }
 

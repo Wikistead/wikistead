@@ -4,8 +4,9 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   useAdminConnections, useCreateConnection, useUpdateConnection, useDeleteConnection, useReorderConnections,
   useLoginMethods, useUpdatePlatformLogin, useUpdateLocalLogin, useTenantSaml, useUpdateTenantSaml, useTestTenantOidc,
-  useUpdateSsoRequired, useUpdateSecondFactorRequired, useSsoExemptions, useGrantSsoExemption, useRevokeSsoExemption,
-  useTenantMemberCandidates, useTenantMemberNames,
+  useUpdateSsoRequired, useUpdateSecondFactorRequired, useUpdateSecondFactorStance, useStanceImpact,
+  useSsoExemptions, useGrantSsoExemption, useRevokeSsoExemption,
+  useTenantMemberCandidates, useTenantMemberNames, type FactorStance,
   type AdminConnectionDTO, type LoginMethodState,
 } from "../data/queries";
 import { ApiError } from "../data/apiClient";
@@ -87,6 +88,11 @@ export function AdminSignInMethodsSection() {
 
   const ssoRequired = useUpdateSsoRequired();
   const secondFactorRequired = useUpdateSecondFactorRequired();
+  const secondFactorStance = useUpdateSecondFactorStance();
+  // #679: which kinds is a SECOND question, asked only once something is required. Nested under the
+  // switch rather than a fifth value inside it: "off" is not a kind, and a picker that carried it would
+  // make turning the requirement off look like choosing a flavour of having it.
+  const [pickingStance, setPickingStance] = useState<FactorStance | null>(null);
   const exemptions = useSsoExemptions(canManageStance);
   const grantExemption = useGrantSsoExemption();
   const revokeExemption = useRevokeSsoExemption();
@@ -125,6 +131,20 @@ export function AdminSignInMethodsSection() {
   // #652 the two write-time refusals the server can still raise even when the row looked
   // writable (the last enrolled admin cleared their factor between the read and the click). Reported
   // with the sentence that names the fix, not a generic failure.
+  const stanceError = (e: unknown) => {
+    const code = e instanceof ApiError ? e.code : undefined;
+    notify.error(
+      code === "admin_factor_required" ? t("adminAuth.secondFactorNoAdmin")
+      : code === "passkey_needs_second_member" ? t("adminAuth.passkeyNeedsSecondMember")
+      : code === "stance_unreachable" ? t("adminAuth.stanceUnreachable")
+      : code === "mfa_policy_not_entitled" ? t("adminAuth.method_unentitled")
+      : t("adminAuth.methodsSaveFailed"),
+    );
+  };
+  const saveStance = (kinds: FactorStance) => secondFactorStance.mutate(kinds, {
+    onSuccess: () => notify.success(t("toast.saved")),
+    onError: stanceError,
+  });
   const saveFactorPolicy = (on: boolean) => secondFactorRequired.mutate(on, {
     onSuccess: () => notify.success(t("toast.saved")),
     onError: (e) => {
@@ -637,6 +657,23 @@ export function AdminSignInMethodsSection() {
                   || (!methods.data.secondFactorRequired.selected && !methods.data.secondFactorRequired.canEnable)}
                 onChange={(on: boolean) => setConfirming({ stance: "factor", to: on })} />
             </div>
+            {/* #679 / ADR-222 §1: WHICH kinds, once something is required. The two are not
+                interchangeable — a passkey resists phishing and dies when the host changes (#664), a
+                code does neither — so a workspace that has decided to require one still has a decision
+                to make. Hidden while nothing is required, because there is no question then. */}
+            {methods.data.secondFactorRequired.selected && canManageStance && (
+              <div className="flex flex-col gap-1 border-t border-border pt-1.5" data-testid="second-factor-kinds">
+                <div className="text-xs text-fg-dim">{t("adminAuth.secondFactorKindsLead")}</div>
+                <Select size="sm" value={methods.data.secondFactorRequired.stance ?? "any"}
+                  ariaLabel={t("adminAuth.secondFactorKindsLead")} testId="second-factor-kinds-select"
+                  options={[
+                    { value: "any", label: t("adminAuth.stanceAny") },
+                    { value: "passkey", label: t("adminAuth.stancePasskey") },
+                    { value: "totp", label: t("adminAuth.stanceTotp") },
+                  ]}
+                  onChange={(v) => setPickingStance(v as FactorStance)} />
+              </div>
+            )}
           </div>
         )}
 
@@ -741,6 +778,14 @@ export function AdminSignInMethodsSection() {
           setConfirming(null);
         }}
       />
+      {/* #679: narrowing signs people out immediately (ruling ④), so the question carries the NUMBER
+          the one thing a tenant cannot work out for itself — and, for passkeys, the sentence ruling
+          ②-3 asked for. `StanceConfirm` fetches while open; the dialog does not appear until it has an
+          answer, because "N members" with N unknown is worse than a moment's wait. */}
+      {pickingStance !== null && (
+        <StanceConfirm stance={pickingStance} onClose={() => setPickingStance(null)}
+          onConfirm={() => { saveStance(pickingStance); setPickingStance(null); }} />
+      )}
       <ConfirmDialog
         open={deleting !== null}
         title={t("adminConnections.deleteTitle")}
@@ -753,5 +798,38 @@ export function AdminSignInMethodsSection() {
         }}
       />
     </div>
+  );
+}
+
+/**
+ * The question asked before a stance is written (#679 / ADR-222 §4).
+ *
+ * Its own component so the impact query is mounted only while the question is open: asking on every
+ * render of the screen would poll a count nobody has asked for, and asking after the click would show a
+ * dialog that changes its own sentence a moment later.
+ */
+function StanceConfirm(
+  { stance, onClose, onConfirm }: { stance: FactorStance; onClose: () => void; onConfirm: () => void },
+) {
+  const { t } = useTranslation();
+  const impact = useStanceImpact(stance);
+  const n = impact.data?.signedOut ?? 0;
+  return (
+    <ConfirmDialog
+      open
+      title={t("adminAuth.secondFactorRequired")}
+      message={[
+        // Plural-aware, and count-first: the number is the reason this question exists.
+        t("adminAuth.stanceConfirmSweep", { count: n }),
+        // ruling ②-3: a passkey cannot be exported, and losing it means talking to the operator. Said
+        // before the write, in the same standing as #664's domain-move warning.
+        stance === "passkey" ? t("adminAuth.stancePasskeyWarning") : "",
+        t("adminAuth.stanceConfirmTail"),
+      ].filter(Boolean).join(" ")}
+      confirmTestId="second-factor-kinds-confirm"
+      confirmLabel={t("common.confirm")}
+      onClose={onClose}
+      onConfirm={onConfirm}
+    />
   );
 }

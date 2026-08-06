@@ -216,6 +216,19 @@ export function SecondFactorPanel() {
                     {t("account.factorUnfinished")}
                   </span>
                 )}
+                {/* #679 / ADR-222 §3: a factor the workspace stopped accepting is KEPT — deleting it
+                    would make a setting change a factor reset (ADR-219 §7) — and says it does not
+                    count. Without the mark, a member who sees their authenticator listed and is
+                    nevertheless asked to enrol something at sign-in has been told nothing.
+
+                    The server decides: the answer needs the tenant's stance and the host both, and
+                    reading `kind` here would be a second place holding the rule. */}
+                {f.confirmedAt && f.counts === false && (
+                  <span className="ml-2 rounded bg-panel-2 px-1.5 py-px text-[10px] text-[var(--warning,#b45309)]"
+                    data-testid="factor-not-counted" data-tip={t("account.factorNotCountedTip")}>
+                    {t("account.factorNotCounted")}
+                  </span>
+                )}
               </span>
               )}
               {renaming?.id !== f.id && removing?.id !== f.id && (

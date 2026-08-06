@@ -9,7 +9,9 @@ import {
 import type { TenantDb } from '../db/index.js'
 import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
 import { spendTotpCounter } from '../auth/second-factors.js'
-import { secondFactorRequired, wouldStrandTenant, secondFactorStance, acceptedKinds } from '../auth/factor-policy.js' // #652: the floor, #677: the kinds
+import {
+  secondFactorRequired, wouldStrandTenant, secondFactorStance, acceptedKinds, presentableKinds,
+} from '../auth/factor-policy.js' // #652: the floor, #677: the kinds, #679: the row mark
 import { passkeyRegistrationOptions, verifyPasskeyRegistration, storePasskey } from '../auth/passkeys.js' // #663
 import { passkeyRemovalOptions, verifyPasskeyForRemoval } from '../auth/passkeys.js' // #666
 
@@ -112,7 +114,22 @@ async function clearFailures(valkey: IORedis, tenantId: string, sub: string): Pr
 
 export async function secondFactorPlugin(app: FastifyInstance) {
   /** The member's own factors. Never carries a secret — the list is for naming and removing. */
-  app.get('/me/factors', async (req) => ({ factors: await listFactors(req.db, req.user.sub) }))
+  app.get('/me/factors', async (req) => {
+    // #679 / ADR-222 §3: each row says whether it SATISFIES the tenant's current stance. Answered here
+    // rather than derived on the screen: the answer needs the stance AND the host (a passkey made
+    // before a domain move is a row that cannot be presented), and a screen given both to re-interpret
+    // is a second place deciding the same rule — the drift #675 spent a slice removing.
+    const stance = await secondFactorStance(req.db)
+    const usable = new Set(await presentableKinds(req.db, req.user.sub, req.headers.host))
+    const accepted = acceptedKinds(stance)
+    const factors = (await listFactors(req.db, req.user.sub)).map((f) => ({
+      ...f,
+      // `off` accepts everything, so nothing is marked — a workspace asking for nothing has no
+      // "does not count" to report, and marking every row there would be noise with no action in it.
+      counts: stance === 'off' ? true : accepted.includes(f.kind) && usable.has(f.kind),
+    }))
+    return { factors, stance }
+  })
 
   /**
    * Begin a TOTP enrolment. Returns the secret ONCE, in the response that created it: the phone has
