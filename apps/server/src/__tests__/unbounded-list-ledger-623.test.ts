@@ -16,6 +16,16 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+// KNOWN BLIND SPOT, measured 2026-08-06 (slice 12) and NOT fixed here.
+//
+// This scan is same-file: a route's window covers its registration and the helpers declared beside it.
+// 45 GET routes delegate to an IMPORTED function instead, and following those imports two levels deep
+// finds 13 that read rows with no bound — including `/export` (a whole tenant), `/spaces/:id/export`,
+// `/audit/verify` (the whole hash chain) and `/billing/usage`. None of them can fail this test today.
+//
+// It is recorded rather than fixed because each of the 13 needs its own line and its own reason, which
+// is a judgement per route, not a regex; and because widening the scan is a change to the instrument
+// that should land on its own rather than inside the page-tree slice. Reported on #623.
 const ROUTES = resolve(import.meta.dirname, '../routes')
 
 /**
@@ -50,15 +60,62 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'revisions.ts:/pages/:pageId/revisions/:revId/content': { kind: 'bounded', why: 'one revision by id — a row, not a list.' },
   'templates.ts:/templates/:id': { kind: 'bounded', why: 'one template by id — a row, not a list.' },
   'spaces.ts:/spaces/:spaceId/icon-image': { kind: 'bounded', why: 'one image for one space — a settings record.' },
-  'spaces.ts:/spaces/:spaceId/comment-open': { kind: 'bounded', why: 'one flag for one space — a settings record.' },
   'spaces.ts:/spaces/:spaceId/page-creation-policy': { kind: 'bounded', why: 'one policy for one space — a settings record.' },
+  // …single-resource routes surfaced by the tighter window: each returns ONE record by id.
+  'pages.ts:/pages/:pageId': { kind: 'bounded', why: 'one page by id — a row, not a list.' },
+  'pages.ts:/pages/:pageId/published': { kind: 'bounded', why: 'one published page by id — a row, not a list.' },
+  'pages.ts:/pages/:pageId/excerpt': { kind: 'bounded', why: 'one excerpt for one page — a row, not a list.' },
+  'pages.ts:/pages/:pageId/comment-audience': { kind: 'bounded', why: 'one audience setting for one page — a settings record.' },
+  'pages.ts:/pages/:pageId/member-candidates': { kind: 'bounded', why: 'searchMemberCandidates carries LIMIT 10 (spaces.ts) — the bound is real, it just lives in another file.' },
+  // …the public single-resource routes, visible to this scan for the first time in slice 12.
+  'public.ts:/public/pages/:pageId': { kind: 'bounded', why: 'one public page by id — a row, not a list.' },
+  'public.ts:/public/attachments/:id/download': { kind: 'bounded', why: 'one attachment by id — a row, not a list.' },
+  'public.ts:/public/pages/:pageId/transclude/:refId': { kind: 'bounded', why: 'one transcluded fragment by id — a row, not a list.' },
+
+  // ── surfaced by slice 12's tighter helper window. Each of these read green only because the window
+  // over-ran into a NEIGHBOURING helper that happened to contain a LIMIT — the bound belonged to
+  // somebody else. They are not new routes and not new debt; they are debt that was being counted
+  // as paid. Classified one at a time, by reading each handler.
+  'comments.ts:/pages/:pageId/mentionable': { kind: 'debt', why: '#623 B: SELECT … FROM members with no bound, then an FGA batchCheck over EVERY member — the mention autocomplete pays for the whole roster.' },
+  'pages.ts:/pages/:pageId/access': { kind: 'debt', why: '#623 B: principal × page, the roster the page permissions dialog reads — the /spaces/:spaceId/access shape.' },
+  'roles.ts:/admin/roles': { kind: 'debt', why: '#623 B: one row per custom role; grows with tenant configuration, nothing prunes it.' },
+  'roles.ts:/spaces/:spaceId/assignable-roles': { kind: 'debt', why: '#623 B: every resource-scoped role, same table as /admin/roles.' },
+  'auth.ts:/auth/login-options': { kind: 'debt', why: '#623 A: one row per login connection; grows with IdP configuration, not with usage.' },
+
+  // ── the two trees: ADR-220. Both were invisible to this scan until slice 12 — see NOT_REALLY_BOUNDED.
+  'pages.ts:/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: the whole space, one row per page, plus a per-page confirm.' },
+  'public.ts:/public/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: 200 children per node to depth 6 — each step bounded, the product is not.' },
 
   // ── internal: not a list surface at all ───────────────────────────────────────────────────────
   'email-unsubscribe.ts:/email/unsubscribe': { kind: 'internal', why: 'one unsubscribe link resolves to one member — no listing.' },
 }
 
-/** A handler that reads rows and never says how many. The two markers a bound leaves behind. */
-const BOUNDED = /\bLIMIT\b|\blimit\b|\bfirstN\b|\bcursor\b/
+/**
+ * A handler that reads rows and never says how many. The markers a bound leaves behind.
+ *
+ * `firstN` used to be in here and never belonged: it is the page tree's PARTIAL FIRST PAINT (#541 —
+ * the first N rows in DFS order, drawn while the full response is still in flight), and the same
+ * handler goes on to return the entire space. It bought the member tree a green line in this ledger
+ * for ten slices while being, by its own ADR's description, not a bound. Removed.
+ */
+const BOUNDED = /\bLIMIT\b|\blimit\b|\bcursor\b/
+
+/**
+ * Routes where a bound MARKER is present and does not bound the RESPONSE.
+ *
+ * The scan is a token heuristic, which is what makes it a discovery pin rather than a hand-copied
+ * list — but a token cannot see composition. `/public/spaces/:id/pages` does carry a `LIMIT 200`, in
+ * the helper that fetches ONE node's children; the route then walks the tree to depth 6, so the
+ * response is bounded by 200^6. Every step is bounded and the product is not.
+ *
+ * This escape hatch is deliberately narrow and deliberately noisy: a route named here still has to be
+ * in the LEDGER with a reason (pinned below), so it cannot be used to make a route disappear — only to
+ * move it from "silently green" to "owed a bound".
+ */
+const NOT_REALLY_BOUNDED: Record<string, string> = {
+  'public.ts:/public/spaces/:spaceId/pages':
+    'the LIMIT bounds ONE node’s children (200); the walk is depth 6, so the response is bounded by 200^6.',
+}
 
 /**
  * #623 slice 11: one entry per ROUTE, not per file.
@@ -93,24 +150,41 @@ function routesIn(file: string): { key: string; body: string }[] {
     // named function, and the bound lives there (`listWatchesResolved`, `listApiKeys`). A window that
     // stopped at the registration would report those as unbounded and teach the next reader to move
     // their LIMIT inline to satisfy a test.
+    //
+    // EXPORTED and not: the window used to look only for `export async function`, and that is why the
+    // public space tree was not list-shaped to this scan at all — its SQL lives in `loadDirectChildren`
+    // and `loadPublicSpaceRoots`, both module-private. Whether a helper is exported says nothing about
+    // whether the route's rows come from it.
     for (const name of new Set([...body.matchAll(/\b([a-z][A-Za-z0-9_]*)\s*\(/g)].map((m) => m[1]!))) {
-      const at = src.indexOf(`export async function ${name}`)
-      if (at < 0) continue
-      const rest = src.slice(at)
-      const stop = rest.indexOf('\nexport ', 1)
-      body += stop > 0 ? rest.slice(0, stop) : rest
+      const decl = new RegExp(`^(?:export )?(?:async )?function ${name}\\b`, 'm')
+      const found = decl.exec(src)
+      if (!found) continue
+      const rest = src.slice(found.index)
+      // stop at the next TOP-LEVEL declaration (column 0), not at the next `export` — a private helper
+      // is followed by whatever comes next, exported or not.
+      const stop = /\n(?:export |(?:async )?function |const |class )/.exec(rest.slice(1))
+      body += stop ? rest.slice(0, stop.index + 1) : rest
     }
     out.push({ key: `${file}:${r.path}`, body })
   }
   return out
 }
 
-/** Every GET route that reads rows — the shape a growing page is drawn from. */
+/**
+ * Every GET route that reads rows — the shape a growing page is drawn from.
+ *
+ * The `tx` alternative is not a tidy-up. Routes that read inside `withTenantTx(id, (tx) => tx`…`)`
+ * were not list-shaped to this scan at ALL, and that is the whole `/public/*` read surface: seven
+ * routes, measured, including the public space tree this slice is about. The scan has been claiming
+ * coverage of the least-authenticated surface in the product while never looking at it.
+ */
+const LIST_SHAPED = /db\.sql<|sql<|\.sql`|listObjects|filterAuthorized|\btx\s*(?:<[^>]*>)?\s*`/
+
 function listShapedRoutes(): { key: string; body: string }[] {
   return readdirSync(ROUTES)
     .filter((f) => f.endsWith('.ts'))
     .flatMap((f) => routesIn(f))
-    .filter((r) => /db\.sql<|sql<|\.sql`|listObjects|filterAuthorized/.test(r.body))
+    .filter((r) => LIST_SHAPED.test(r.body))
 }
 
 describe('#623: no list route grows without saying so', () => {
@@ -123,7 +197,7 @@ describe('#623: no list route grows without saying so', () => {
   it('every list-shaped GET route is either bounded or in the ledger with a reason', () => {
     const missing: string[] = []
     for (const r of listShapedRoutes()) {
-      if (BOUNDED.test(r.body)) continue
+      if (BOUNDED.test(r.body) && !NOT_REALLY_BOUNDED[r.key]) continue
       if (!LEDGER[r.key]) missing.push(r.key)
     }
     expect(
@@ -141,8 +215,37 @@ describe('#623: no list route grows without saying so', () => {
     const live = new Set(listShapedRoutes().map((r) => r.key))
     const orphans = Object.keys(LEDGER).filter((k) => !live.has(k))
     expect(orphans, `ledger lines for routes that do not exist: ${orphans.join(', ')}`).toEqual([])
-    const bounded = listShapedRoutes().filter((r) => BOUNDED.test(r.body) && LEDGER[r.key])
+    const bounded = listShapedRoutes()
+      .filter((r) => BOUNDED.test(r.body) && !NOT_REALLY_BOUNDED[r.key] && LEDGER[r.key])
     expect(bounded.map((r) => r.key), 'these routes are bounded now — delete their ledger lines').toEqual([])
+  })
+
+  it('the “not really bounded” hatch cannot hide a route', () => {
+    // The hatch exists because a token cannot see composition (200 children × depth 6). What it must
+    // never become is a way to make a route stop being counted. So each entry has to name a LIVE route,
+    // and that route still has to be in the ledger with a reason — the hatch moves a route from
+    // silently-green to owed-a-bound, and nowhere else.
+    const live = new Set(listShapedRoutes().map((r) => r.key))
+    for (const [key, why] of Object.entries(NOT_REALLY_BOUNDED)) {
+      expect(live.has(key), `${key}: the hatch names a route the scan no longer finds`).toBe(true)
+      expect(LEDGER[key], `${key}: a route whose bound does not bound must still be in the ledger`).toBeDefined()
+      expect(why.length, `${key}: say WHY the marker does not bound the response`).toBeGreaterThan(20)
+    }
+  })
+
+  it('both page trees are visible to this scan, and neither counts as bounded', () => {
+    // ADR-220's premise, measured rather than asserted. Until slice 12 the member tree was green on the
+    // word `firstN` (a partial first paint, not a bound) and the public tree was not list-shaped at all
+    // (its SQL is in module-private helpers). An instrument that cannot see the two surfaces the slice
+    // is about cannot show the slice worked.
+    const byKey = new Map(listShapedRoutes().map((r) => [r.key, r]))
+    for (const key of ['pages.ts:/spaces/:spaceId/pages', 'public.ts:/public/spaces/:spaceId/pages']) {
+      const r = byKey.get(key)
+      expect(r, `${key}: the scan does not see this route as list-shaped`).toBeDefined()
+      const counted = !BOUNDED.test(r!.body) || Boolean(NOT_REALLY_BOUNDED[key])
+      expect(counted, `${key}: counted as bounded, so bounding it would change nothing here`).toBe(true)
+      expect(LEDGER[key], `${key}: …and it is owed a bound, out loud`).toBeDefined()
+    }
   })
 
   it('every ledger line carries a reason a reader can act on', () => {
