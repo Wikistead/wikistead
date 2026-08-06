@@ -14,6 +14,7 @@ import {
 } from "../data/queries";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser"; // #666: the key proves itself
 import { ApiError } from "../data/apiClient";
+import { classifyRemovalFailure } from "./factor-removal-failure"; // #673 ②
 
 // #653 / ADR-219: a member's own second factors. SELF-SCOPE — every call is keyed to the session's
 // subject by the server, so no other member's factor is addressable from this screen.
@@ -124,8 +125,15 @@ export function SecondFactorPanel() {
       await remove.mutateAsync({ factorId: id, passkey: assertion });
       notify.success(t("account.factorRemoved"));
     } catch (e) {
-      if (e instanceof ApiError && e.code === "last_admin_factor") notify.error(t("account.factorLastAdmin"));
-      else notify.error(t("account.factorKeyFailed"));
+      // #673 ②: four situations used to share one sentence, including the two where the key was never
+      // asked for. Telling somebody their key failed when the challenge route 404'd sends them looking
+      // for a different key.
+      switch (classifyRemovalFailure(e)) {
+        case "cancelled": return notify.info(t("account.factorRemoveCancelled"));
+        case "lastAdmin": return notify.error(t("account.factorLastAdmin"));
+        case "key": return notify.error(t("account.factorKeyFailed"));
+        default: return notify.error(t("account.factorRemoveFailed"));
+      }
     }
   };
 
@@ -208,15 +216,7 @@ export function SecondFactorPanel() {
                   <Pencil size={14} aria-hidden />
                 </IconButton>
               )}
-              {f.kind === "passkey" && f.confirmedAt ? (
-                // #666: a passkey has no code to type. It proves itself, which is the same rule the
-                // code is — possession of the thing being given up — in the only form this factor has.
-                <Button variant="danger" size="sm" data-testid="factor-remove-passkey"
-                  disabled={remove.isPending || removeChallenge.isPending}
-                  onClick={() => void onRemovePasskey(f.id)}>
-                  {t("account.factorRemoveWithKey")}
-                </Button>
-              ) : removing?.id === f.id ? (
+              {removing?.id === f.id ? (
                 <>
                   {/* The code is asked for HERE rather than in a dialog, because #660 wants possession
                       and the reader has to fetch it from the device they are giving up. */}
@@ -230,11 +230,20 @@ export function SecondFactorPanel() {
                   <Button variant="ghost" size="sm" onClick={() => setRemoving(null)}>{t("common.cancel")}</Button>
                 </>
               ) : renaming?.id === f.id ? null : (
+                /* #673 ①: ONE way in, whatever the row holds. Removing an authenticator app and
+                   removing a key are the same act with the same consequence, and the kind decides only
+                   what is asked for AFTER the click — a code to type, or the key itself. Drawing that
+                   difference in the row gave one kind a small grey icon and the other a large red
+                   button for the same danger, and put the method of proof ("remove with this key") in
+                   the place where the ACTION belongs. Same act, same shape; the branch is below. */
                 <IconButton aria-label={t("account.factorRemove")} data-testid="factor-remove" className="flex-none"
-                  onClick={() => (f.confirmedAt
+                  disabled={remove.isPending || removeChallenge.isPending}
+                  onClick={() => {
                     // possession is only asked for something that guards anything (#660)
-                    ? setRemoving({ id: f.id, code: "" })
-                    : void onRemove(f.id, false))}>
+                    if (!f.confirmedAt) return void onRemove(f.id, false);
+                    if (f.kind === "passkey") return void onRemovePasskey(f.id);
+                    setRemoving({ id: f.id, code: "" });
+                  }}>
                   <Trash2 size={14} aria-hidden />
                 </IconButton>
               )}

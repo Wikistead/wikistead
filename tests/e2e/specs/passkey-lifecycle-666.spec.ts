@@ -93,9 +93,10 @@ test("#666: a passkey registered from the screen comes off by signing with itsel
 
   // ── and off again, by signing ──────────────────────────────────────────────────────────────────
   const row = rowFor(page, label);
-  await expect(row.getByTestId("factor-remove-passkey"), "a passkey is given up with the key").toBeVisible();
+  // #673 ①: one entry point for every kind; the key is asked for after the click, not before it.
+  await expect(row.getByTestId("factor-remove"), "the row is removed the way every row is").toBeVisible();
+  await row.getByTestId("factor-remove").click();
   await expect(row.getByTestId("factor-remove-code"), "…and never with a typed code").toHaveCount(0);
-  await row.getByTestId("factor-remove-passkey").click();
 
   await expect(rowFor(page, label), "the key is gone").toHaveCount(0, { timeout: 30_000 });
   // The row could vanish because the list was refetched into an error state. Reload and ask the server
@@ -121,7 +122,7 @@ test("#666: without the key, the removal is refused and the factor stays", async
   // for anybody who asked.
   await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
 
-  await rowFor(page, label).getByTestId("factor-remove-passkey").click();
+  await rowFor(page, label).getByTestId("factor-remove").click();
   await sleep(2500);
   await expect(rowFor(page, label), "no key, no removal").toBeVisible();
   await page.reload();
