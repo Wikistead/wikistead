@@ -361,7 +361,12 @@
     "revokeConfirm": "API キー「{{name}}」を失効しますか？以後この認証は使えません。",
     "expiry": "有効期限",
     "expiryNever": "無期限",
-    "expiryDays": "{{count}} 日後"
+    "expiryDays": "{{count}} 日後",
+    "narrowShow": "届く先を絞る",
+    "narrowHide": "絞りを閉じる",
+    "narrowHint": "選ばなければ、このキーは持ち主に見えるものすべてに届きます。",
+    "narrowSpaces": "届くスペース",
+    "narrowCaps": "できること"
   },
   "adminAuth": {
     "title": "認証",

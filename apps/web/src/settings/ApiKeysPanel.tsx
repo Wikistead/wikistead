@@ -3,7 +3,7 @@ import { ListRow, ListBox } from "../ui/list-rows";
 import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2 } from "lucide-react";
-import { useCreateApiKey, useRevokeApiKey, useAdminRevokeApiKey, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
+import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpaces, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: revoking a key is irreversible — confirm first
@@ -12,6 +12,11 @@ import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { relTime } from "../ui/relative-time";
+
+// #637: the verbs a narrowed key may carry. The EE route table is the authority and the server checks
+// against it; this mirrors it for the picker, and the pin below asserts the two agree rather than
+// trusting that somebody remembered to update both.
+const NARROW_CAPS = ["view", "edit", "publish", "delete", "comment", "manage"] as const;
 
 // #461: when a key was last authenticated with — the signal that tells you which keys are dead
 // weight and safe to revoke. The server has always returned lastUsedAt (and #428 made the write
@@ -62,6 +67,14 @@ export function ApiKeysPanel({
   // A Select whose value matches no option renders as a bare chevron with no width (#603).
   const [expiry, setExpiry] = useState<string>(() => defaultExpiry(maxAgeDays));
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
+  // #637 / ADR-216: narrowing. Off by default and opened deliberately — an unnarrowed key is the common
+  // case and the one the form should stay simple for. Spaces are a FLAT list: ADR-215 declined per-page
+  // narrowing precisely because a page picker means handling a tree, and a space picker does not.
+  const narrowedCreate = useCreateNarrowedApiKey();
+  const spacesQ = useSpaces();
+  const [narrowing, setNarrowing] = useState(false);
+  const [pickedSpaces, setPickedSpaces] = useState<string[]>([]);
+  const [pickedCaps, setPickedCaps] = useState<string[]>([]);
   // #504: a revoked key never authenticates again (the member issues a new one) — confirm, by name.
   const [revoking, setRevoking] = useState<{ id: string; name: string } | null>(null);
 
@@ -85,11 +98,28 @@ export function ApiKeysPanel({
 
   const onCreate = () => {
     if (!name.trim()) return;
-    create.mutate({ name: name.trim(), scope: effScope, expiresInDays: expiry === "" ? null : Number(expiry) }, {
-      onSuccess: (k) => { setCreated(k); setName(""); setExpiry(defaultExpiry(maxAgeDays)); notify.success(t("toast.saved")); },
-      onError: () => notify.error(t("toast.actionFailed")),
-    });
+    const done = (k: ApiKeyCreated | null) => {
+      if (!k) return;
+      setCreated(k); setName(""); setExpiry(defaultExpiry(maxAgeDays));
+      setPickedSpaces([]); setPickedCaps([]); setNarrowing(false);
+      notify.success(t("toast.saved"));
+    };
+    const base = { name: name.trim(), scope: effScope, expiresInDays: expiry === "" ? null : Number(expiry) };
+    // #637: the narrowed route is a DIFFERENT one, because narrowing is EE. On a deployment without the
+    // overlay it is simply not there, and a 404 is the honest answer — better than a form that appears to
+    // confine a key and hands back one that reaches everything.
+    if (narrowing && (pickedSpaces.length > 0 || pickedCaps.length > 0)) {
+      narrowedCreate.mutate({
+        ...base,
+        ...(pickedSpaces.length > 0 ? { spaces: pickedSpaces } : {}),
+        ...(pickedCaps.length > 0 ? { capabilities: pickedCaps } : {}),
+      }, { onSuccess: done, onError: () => notify.error(t("toast.actionFailed")) });
+      return;
+    }
+    create.mutate(base, { onSuccess: done, onError: () => notify.error(t("toast.actionFailed")) });
   };
+  const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
+    set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
   return (
     <>
@@ -101,8 +131,47 @@ export function ApiKeysPanel({
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} aria-label={t("adminApi.name")} data-testid="api-key-name" />
             <Select value={effScope} onChange={(v) => setScope(v as ApiScope)} ariaLabel={t("adminApi.scope")} testId="api-key-scope" options={scopeOptions} />
             <Select value={expiry} onChange={setExpiry} ariaLabel={t("adminApi.expiry")} testId="api-key-expiry" options={expiryOptions} />
-            <Button variant="primary" disabled={!name.trim() || create.isPending} onClick={onCreate} data-testid="api-key-create">{t("adminApi.create")}</Button>
+            <Button variant="primary" disabled={!name.trim() || create.isPending || narrowedCreate.isPending} onClick={onCreate} data-testid="api-key-create">{t("adminApi.create")}</Button>
           </FormRow>
+          {/* #637 / ADR-216: what the key may REACH, beside how long it lives and whether it may write.
+              Collapsed by default: most keys are not narrowed, and a form that asks every question at once
+              makes the common case harder to answer. */}
+          <Button variant="ghost" size="sm" className="mt-1" data-testid="api-key-narrow-toggle"
+            onClick={() => setNarrowing((v) => !v)}>
+            {narrowing ? t("adminApi.narrowHide") : t("adminApi.narrowShow")}
+          </Button>
+          {narrowing && (
+            <div className="mt-2 flex flex-col gap-2 rounded-md border border-border p-3" data-testid="api-key-narrow">
+              <p className="text-xs text-fg-dim">{t("adminApi.narrowHint")}</p>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-fg-dim">{t("adminApi.narrowSpaces")}</span>
+                <ListBox className="flex flex-col gap-1" data-testid="api-key-space-list">
+                  {(spacesQ.data ?? []).map((sp) => (
+                    <label key={sp.id} className="flex items-center gap-2 text-sm" data-testid="api-key-space-option">
+                      <input type="checkbox" checked={pickedSpaces.includes(sp.id)}
+                        onChange={() => toggle(pickedSpaces, setPickedSpaces, sp.id)}
+                        data-testid={`api-key-space-${sp.id}`} />
+                      <span className="min-w-0 truncate">{sp.name}</span>
+                    </label>
+                  ))}
+                </ListBox>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-fg-dim">{t("adminApi.narrowCaps")}</span>
+                {/* The verbs the route table actually offers. The server validates against the same set,
+                    so a list invented here would go stale the day a verb is added there. */}
+                <div className="flex flex-wrap gap-2">
+                  {NARROW_CAPS.map((c) => (
+                    <label key={c} className="flex items-center gap-1 text-sm" data-testid="api-key-cap-option">
+                      <input type="checkbox" checked={pickedCaps.includes(c)}
+                        onChange={() => toggle(pickedCaps, setPickedCaps, c)} data-testid={`api-key-cap-${c}`} />
+                      <span>{t(`roleCaps.${c}`, c)}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 

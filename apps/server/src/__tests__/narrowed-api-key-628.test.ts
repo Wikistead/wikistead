@@ -88,7 +88,7 @@ describe('#628 §2: with no EE gate registered, a narrowed key is refused rather
 describe('#628 §2: the gate decides, and it is asked about the REGISTERED route', () => {
   it('a route the gate allows is reached; one it refuses is not', async () => {
     const seen: { method: string; routePattern: string | undefined }[] = []
-    registerNarrowedKeyGate((r) => { seen.push({ method: r.method, routePattern: r.routePattern }); return r.capabilities.includes('view') && r.method === 'GET' })
+    registerNarrowedKeyGate((r) => { seen.push({ method: r.method, routePattern: r.routePattern }); return !!r.capabilities?.includes('view') && r.method === 'GET' })
     const token = await mintKey('gate', ['view'])
     expect((await call(token, 'GET', '/spaces')).statusCode, 'allowed').toBe(200)
     const refused = await call(token, 'POST', '/spaces', { name: `nar628-space-${STAMP}` })
@@ -100,7 +100,10 @@ describe('#628 §2: the gate decides, and it is asked about the REGISTERED route
   }, 120_000)
 
   it('a key narrowed to NOTHING reaches nothing — [] is not the same as un-narrowed', async () => {
-    registerNarrowedKeyGate((r) => r.capabilities.includes('view'))
+    // #637 slice 7: `capabilities` is optional now — undefined is "not narrowed that way" and an empty
+    // list is "narrowed to nothing". The `?? []` this used to be given collapsed the two, which is the
+    // very distinction this test exists to hold.
+    registerNarrowedKeyGate((r) => !!r.capabilities?.includes('view'))
     const token = await mintKey('empty', [])
     expect((await call(token, 'GET', '/spaces')).statusCode).toBe(403)
   }, 120_000)

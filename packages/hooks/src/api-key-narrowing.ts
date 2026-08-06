@@ -9,8 +9,15 @@
 // route PATTERN rather than the raw URL: a raw URL never matches a path parameter, and a table keyed by
 // one would silently miss every `/pages/:id` in the product.
 export interface NarrowedKeyRequest {
-  /** The capabilities this key carries. An empty list is still a narrowed key — it may reach nothing. */
-  capabilities: readonly string[]
+  /**
+   * The capabilities this key carries, or undefined when it is not narrowed that way.
+   *
+   * #637 slice 7: this was `readonly string[]`, and the call site passed `capabilities ?? []` — which
+   * turned "not narrowed by capability" into "narrowed to nothing" and made a key confined only by SPACE
+   * reach nothing at all. The whole distinction this file argues for, collapsed by a default value. An
+   * empty list is still a key that may reach nothing; undefined is a key with no capability confinement.
+   */
+  capabilities?: readonly string[]
   method: string
   /** Fastify's `req.routeOptions.url` — the registered pattern, not the raw URL. */
   routePattern: string | undefined

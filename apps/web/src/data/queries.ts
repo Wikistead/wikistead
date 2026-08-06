@@ -1618,6 +1618,19 @@ export function useCreateApiKey() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }), // refreshes both lists (shared key prefix)
   });
 }
+// #637 / ADR-216: issuing a NARROWED key. A separate mutation rather than optional fields on the one
+// above, because it is a separate ROUTE — narrowing is EE, so a deployment without the overlay does not
+// have it, and a 404 is the honest answer there rather than a key that quietly comes back unnarrowed.
+export function useCreateNarrowedApiKey() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { name: string; scope: ApiScope; expiresInDays?: number | null; capabilities?: string[] | null; spaces?: string[] | null }) =>
+      apiFetch<ApiKeyCreated>("/admin/api-keys/narrowed", token, { method: "POST", body: JSON.stringify(args) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
+  });
+}
+
 export function useRevokeApiKey() {
   const { token } = useSession();
   const qc = useQueryClient();
