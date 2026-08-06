@@ -20,8 +20,8 @@ import { auditIfEntitled } from '../audit/outbox.js'
 import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
 import { FACTOR_COOKIE, createFactorSession, readFactorSession, destroyFactorSession, factorCookieOptions } from '../auth/factor-session.js' // #652 / ADR-219 §6
 import { passkeyAuthenticationOptions, verifyPasskeyAssertion } from '../auth/passkeys.js' // #665
-import { secondFactorRequired, presentableHere } from '../auth/factor-policy.js'
-import { hasConfirmedFactor, totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
+import { secondFactorRequired, presentableHere, secondFactorStance, presentableKinds, acceptedKinds } from '../auth/factor-policy.js'
+import { hasConfirmedFactor, totpSecretFor, spendTotpCounter, markFactorUsed, startTotpEnrolment, confirmFactor, type FactorKind } from '../auth/second-factors.js'
 import { verifyTotp, generateTotpSecret, totpUri } from '../auth/totp.js'
 import { localLoginEnabled, loginMethodCeiling } from '../auth/login-methods.js'
 import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/password-hash.js'
@@ -448,8 +448,18 @@ export async function authLocalPlugin(app: FastifyInstance) {
       //
       // The FEDERATED doors do not pass through here at all, which is how ADR-219 §3's ruling holds
       // without a branch: this file is the product's own door and the only one the policy is about.
-      if (await secondFactorRequired(req.db)) {
-        const enrolled = await hasConfirmedFactor(req.db, row.member_sub)
+      // NOT `stance`: this function already has one, and it is the SSO stance (#605). Two different
+      // policies with the same variable name in one scope is how a later edit reads the wrong one.
+      const factorStance = await secondFactorStance(req.db)
+      if (factorStance !== 'off') {
+        // #677 / ADR-222 §3: "do they hold one" is really "could they present one THAT THIS TENANT
+        // ACCEPTS, here". The old reading (any confirmed row, any kind, any host) is what made the
+        // dead end: a member holding only an authenticator app under a passkey stance was told to
+        // present the factor they hold, refused for its kind, and then refused enrolment for holding
+        // one. The interstitial exists for exactly the person who can present nothing.
+        const kinds = await presentableKinds(req.db, row.member_sub, req.headers.host)
+        const usable = kinds.filter((k) => acceptedKinds(factorStance).includes(k))
+        const enrolled = usable.length > 0
         const fsid = await createFactorSession(app.valkey, {
           tenantId: req.tenant.id, sub: row.member_sub, enrolled,
         })
@@ -460,7 +470,10 @@ export async function authLocalPlugin(app: FastifyInstance) {
         // Two different situations for the screen, not one: presenting a factor and installing one are
         // different things to be asked to do, and a single "factor required" would send somebody with
         // no authenticator to a code box they cannot fill.
-        return { ok: false, factor: enrolled ? 'required' : 'enrolment-required' as const }
+        // #679 will draw the kinds; the value is here now because the screen cannot ask for it later
+        // (the receipt holder has no session, so `/me/factors` is closed to them) and because a member
+        // sent to enrol under `passkey` must not meet a form offering an authenticator app.
+        return { ok: false, factor: enrolled ? 'required' : 'enrolment-required' as const, kinds: acceptedKinds(factorStance) }
       }
 
       let sid: string
@@ -534,11 +547,25 @@ export async function authLocalPlugin(app: FastifyInstance) {
       return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
     }
 
+    // #677 / ADR-222 §5: which kinds may be PRESENTED here. Asked once, above both branches, because
+    // the two are reached by the shape of the body and a gate written inside one of them leaves the
+    // other open — the failure a reader is most likely to ship, since the code branch already filters
+    // by kind and looks done.
+    const accepted = acceptedKinds(await secondFactorStance(req.db))
+    const refuseKind = (kind: FactorKind) =>
+      reply.code(409).send({
+        error: kind === 'passkey'
+          ? 'this workspace asks for a code from an authenticator app'
+          : 'this workspace asks for a passkey',
+        code: 'factor_kind_not_accepted',
+      })
+
     // #665: a passkey answers the same question a code does, so it arrives at the same door. The
     // session's `door` stays `local+factor` either way — WHICH kind of factor was presented is a fact
     // about the row, not about the entrance, and adding a value would grow both #655's table and #652's
     // decision for nothing.
     if (req.body?.passkey) {
+      if (!accepted.includes('passkey')) return refuseKind('passkey')
       const proved = await verifyPasskeyAssertion(
         { db: req.db, valkey: app.valkey },
         { memberSub: pending.sub, host: req.headers.host, receiptSid: fsid!, response: req.body.passkey as never },
@@ -562,6 +589,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
     }
 
+    if (!accepted.includes('totp')) return refuseKind('totp')
     const code = typeof req.body?.code === 'string' ? req.body.code : ''
     // #675: the same condition the floor and the sweep ask, so "this counts" cannot mean two things.
     // The host half is a no-op for a TOTP and is asked anyway — the day a third kind arrives, a query
@@ -619,6 +647,13 @@ export async function authLocalPlugin(app: FastifyInstance) {
   app.post('/auth/local/factor/passkey/options', { config: { public: true } }, async (req, reply) => {
     const held = await receipt(req as never)
     if (!held) return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
+    // #677: the third place. Gating only the two branches above leaves a challenge issuable under a
+    // stance that will not accept the assertion it is for — a prompt that can only end in a refusal.
+    if (!acceptedKinds(await secondFactorStance(req.db)).includes('passkey')) {
+      return reply.code(409).send({
+        error: 'this workspace asks for a code from an authenticator app', code: 'factor_kind_not_accepted',
+      })
+    }
     const options = await passkeyAuthenticationOptions(
       { db: req.db, valkey: app.valkey },
       { memberSub: held.pending.sub, host: req.headers.host, receiptSid: held.sid! },
@@ -645,12 +680,25 @@ export async function authLocalPlugin(app: FastifyInstance) {
   app.post('/auth/local/factor/enrol', { config: { public: true } }, async (req, reply) => {
     const held = await receipt(req as never)
     if (!held) return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
-    // Only somebody who has NOTHING enrolled may take this door. A member who holds a factor and wants
-    // another one has a session to do it from, and letting them through here would turn "I know a
-    // password" into "I can add an authenticator" — which is the re-authentication ADR-219 §8 asks for,
-    // skipped.
+    // Only somebody who can present NOTHING the tenant accepts may take this door. A member who can
+    // present one has a session to add another from, and letting them through here would turn "I know a
+    // password" into "I can add an authenticator" — the re-authentication ADR-219 §8 asks for, skipped.
+    //
+    // `enrolled` now means "could present an accepted kind, here" (#677, above). Under the old reading
+    // — any confirmed row — this line WAS the dead end ADR-222 §3 describes: somebody holding only an
+    // authenticator app under a passkey stance was refused presentation for its kind and then refused
+    // enrolment for holding it. Nothing else about the guard changed; it just asks the right question.
     if (held.pending.enrolled) {
       return reply.code(409).send({ error: 'present your existing factor first', code: 'factor_required' })
+    }
+    // …and this door mints TOTP and only TOTP (see the confirm below). Under a passkey stance it would
+    // hand somebody a factor their own tenant will not accept — a dead end with a 201 on it. #678 is
+    // the slice that gives this door a passkey; until then the honest answer is that it cannot help.
+    if (!acceptedKinds(await secondFactorStance(req.db)).includes('totp')) {
+      return reply.code(409).send({
+        error: 'this workspace asks for a passkey; ask an administrator to enrol one for you.',
+        code: 'factor_kind_not_accepted',
+      })
     }
     const secret = generateTotpSecret()
     const { factorId } = await startTotpEnrolment(req.db, {

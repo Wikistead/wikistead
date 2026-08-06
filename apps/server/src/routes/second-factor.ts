@@ -4,11 +4,12 @@ import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/outbox.js'
 import {
   startTotpEnrolment, totpSecretFor, confirmFactor, listFactors, markFactorUsed, deleteFactor,
-  discardPendingFactors, startPasskeyEnrolment,
+  discardPendingFactors, startPasskeyEnrolment, type FactorKind,
 } from '../auth/second-factors.js'
+import type { TenantDb } from '../db/index.js'
 import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
 import { spendTotpCounter } from '../auth/second-factors.js'
-import { secondFactorRequired, wouldStrandTenant } from '../auth/factor-policy.js' // #652: the floor
+import { secondFactorRequired, wouldStrandTenant, secondFactorStance, acceptedKinds } from '../auth/factor-policy.js' // #652: the floor, #677: the kinds
 import { passkeyRegistrationOptions, verifyPasskeyRegistration, storePasskey } from '../auth/passkeys.js' // #663
 import { passkeyRemovalOptions, verifyPasskeyForRemoval } from '../auth/passkeys.js' // #666
 
@@ -121,7 +122,31 @@ export async function secondFactorPlugin(app: FastifyInstance) {
    * Starting does not enrol anything. The row is unconfirmed, so no policy counts it and the member's
    * own list does not show it — an abandoned start is invisible rather than a half-factor.
    */
+  /**
+   * #677 / ADR-222 §5: enrolling a kind the tenant does not accept is refused HERE, not hidden on the
+   * screen. #613 is the lesson — the sign-in form was hidden while the POST kept authenticating.
+   *
+   * `off` accepts everything (ADR-222 §1). Reading it as "accepts nothing" would close both doors, and
+   * then the floor could never be met and the stance could never be turned on again.
+   */
+  const kindRefusal = async (db: TenantDb, kind: FactorKind) => {
+    const accepted = acceptedKinds(await secondFactorStance(db))
+    return accepted.includes(kind)
+      ? null
+      : {
+          statusCode: 409,
+          body: {
+            error: kind === 'passkey'
+              ? 'this workspace asks for an authenticator app, not a passkey'
+              : 'this workspace asks for a passkey, not an authenticator app',
+            code: 'factor_kind_not_accepted',
+          },
+        }
+  }
+
   app.post<{ Body: { label?: string } }>('/me/factors/totp', async (req, reply) => {
+    const refused = await kindRefusal(req.db, 'totp')
+    if (refused) return reply.code(refused.statusCode).send(refused.body)
     // First, throw away this member's own abandoned starts. Leaving them was how three closed tabs
     // became an account that could never enrol again: the cap counts pending rows, so they accumulated
     // silently until the eighth real enrolment was refused.
@@ -215,6 +240,8 @@ export async function secondFactorPlugin(app: FastifyInstance) {
    * to show once, which is why this returns options rather than a key.
    */
   app.post<{ Body: { label?: string } }>('/me/factors/passkey', async (req, reply) => {
+    const refused = await kindRefusal(req.db, 'passkey')
+    if (refused) return reply.code(refused.statusCode).send(refused.body)
     await discardPendingFactors(req.db, req.user.sub)
     const [held] = await req.db.sql<[{ n: number }?]>`
       SELECT count(*)::int AS n FROM member_factors WHERE member_sub = ${req.user.sub}`

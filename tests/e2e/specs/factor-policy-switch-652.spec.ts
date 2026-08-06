@@ -40,12 +40,14 @@ const sql = postgres(dbUrl);
 // with nobody enrolled" is the state the product ships in and deserves to be readable on its own.
 test.describe.configure({ mode: "serial" });
 
-type Prefs = { second_factor_required: boolean; local_login_enabled: boolean; sso_required: boolean };
+type Prefs = { second_factor_required: boolean; second_factor_kinds: string; local_login_enabled: boolean; sso_required: boolean };
 let priorPrefs: Prefs | null = null;
 
 const stanceInDb = async (): Promise<boolean> => {
   const [row] = await sql<{ v: boolean }[]>`
-    SELECT second_factor_required AS v FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`;
+    SELECT second_factor_kinds <> 'off' AS v FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`;
+  // #676: the runtime reads the KINDS column now, so "is anything required" is derived from it. Reading
+  // the old boolean would report a stance this build no longer enforces.
   return row?.v ?? false;
 };
 
@@ -64,14 +66,15 @@ const unenrolAdmin = () => sql`DELETE FROM member_factors WHERE id = ${`f652-${S
 
 test.beforeAll(async () => {
   const [pref] = await sql<Prefs[]>`
-    SELECT second_factor_required, local_login_enabled, sso_required
+    SELECT second_factor_required, second_factor_kinds, local_login_enabled, sso_required
     FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`;
   priorPrefs = pref ?? null;
   // start from OFF with the password door open: the switch has to be the thing that turns it on
   await sql`
-    INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, local_login_enabled)
-    VALUES (${TENANT}, FALSE, TRUE)
-    ON CONFLICT (tenant_id) DO UPDATE SET second_factor_required = FALSE, local_login_enabled = TRUE`;
+    INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds, local_login_enabled)
+    VALUES (${TENANT}, FALSE, 'off', TRUE)
+    ON CONFLICT (tenant_id) DO UPDATE
+      SET second_factor_required = FALSE, second_factor_kinds = 'off', local_login_enabled = TRUE`;
 });
 
 test.afterAll(async () => {
@@ -87,6 +90,7 @@ test.afterAll(async () => {
     await sql`
       UPDATE tenant_login_prefs
       SET second_factor_required = ${priorPrefs.second_factor_required},
+          second_factor_kinds = ${priorPrefs.second_factor_kinds},
           local_login_enabled = ${priorPrefs.local_login_enabled},
           sso_required = ${priorPrefs.sso_required}
       WHERE tenant_id = ${TENANT}`.catch(() => {});

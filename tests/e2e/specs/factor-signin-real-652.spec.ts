@@ -62,21 +62,26 @@ const dbUrl = (() => {
 })();
 const sql = postgres(dbUrl);
 
-type Prefs = { second_factor_required: boolean; local_login_enabled: boolean; sso_required: boolean };
+type Prefs = { second_factor_required: boolean; second_factor_kinds: string; local_login_enabled: boolean; sso_required: boolean };
 let priorPrefs: Prefs | null = null;
 /** Every address this file seats, so afterAll can take the SEATS back — they outlive everything else. */
 const strays: string[] = [];
 
 /** Set the stance, keeping the password door open. */
 const setPrefs = (secondFactor: boolean) => sql`
-  INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, local_login_enabled, sso_required)
-  VALUES (${TENANT}, ${secondFactor}, TRUE, FALSE)
+  INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds, local_login_enabled, sso_required)
+  VALUES (${TENANT}, ${secondFactor}, ${secondFactor ? "any" : "off"}, TRUE, FALSE)
   ON CONFLICT (tenant_id) DO UPDATE
-    SET second_factor_required = ${secondFactor}, local_login_enabled = TRUE, sso_required = FALSE`;
+    SET second_factor_required = ${secondFactor}, second_factor_kinds = ${secondFactor ? "any" : "off"},
+        local_login_enabled = TRUE, sso_required = FALSE`;
+// #676: the stance is WHICH kinds now (migration 120), and the runtime reads that column — writing only
+// the boolean left the tenant reading `off` while this file believed it had turned the policy on, and
+// every case failed at the step that expects to be asked for a factor. `any` is what this fixture always
+// meant: a factor is required and either kind will do.
 
 test.beforeAll(async () => {
   const [pref] = await sql<Prefs[]>`
-    SELECT second_factor_required, local_login_enabled, sso_required
+    SELECT second_factor_required, second_factor_kinds, local_login_enabled, sso_required
     FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`;
   priorPrefs = pref ?? null;
 });
@@ -98,6 +103,7 @@ test.afterAll(async () => {
     await sql`
       UPDATE tenant_login_prefs
       SET second_factor_required = ${priorPrefs.second_factor_required},
+          second_factor_kinds = ${priorPrefs.second_factor_kinds},
           local_login_enabled = ${priorPrefs.local_login_enabled},
           sso_required = ${priorPrefs.sso_required}
       WHERE tenant_id = ${TENANT}`.catch(() => {});
