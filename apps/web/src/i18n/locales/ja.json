@@ -268,7 +268,8 @@
     "factorRenamed": "名前を変更しました。",
     "factorRenameFailed": "名前を変更できませんでした。",
     "factorRemoveWithKey": "この鍵で削除",
-    "factorKeyFailed": "その鍵では確認できませんでした。"
+    "factorKeyFailed": "その鍵では確認できませんでした。",
+    "factorAddPasskey": "パスキーを追加"
   },
   "settings": {
     "back": "アプリに戻る",

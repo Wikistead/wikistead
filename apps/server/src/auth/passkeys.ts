@@ -247,7 +247,7 @@ export const counterAcceptable = (stored: number, next: number): boolean => next
 export async function passkeyRemovalOptions(
   deps: { db: TenantDb; valkey: IORedis },
   args: { tenantId: string; memberSub: string; factorId: string; host: string | undefined },
-): Promise<{ challenge: string; rpId: string; allowCredentials: { id: string; transports: string[] }[] } | null> {
+) {
   const stored = (await passkeysFor(deps.db, args.memberSub)).find((p) => p.factorId === args.factorId)
   if (!stored) return null
   const options = await generateAuthenticationOptions({
@@ -256,11 +256,12 @@ export async function passkeyRemovalOptions(
     userVerification: 'preferred',
   })
   await putChallenge(deps.valkey, args.tenantId, args.memberSub, options.challenge)
-  return {
-    challenge: options.challenge,
-    rpId: options.rpId ?? rpIdFromHost(args.host),
-    allowCredentials: [{ id: stored.credentialId, transports: stored.transports }],
-  }
+  // The library's options, WHOLE — the same thing the sign-in path returns. Copying three fields out of
+  // them and rebuilding the rest by hand dropped `type: 'public-key'` from each allowed credential, and
+  // WebAuthn refuses the whole call for it: `Failed to read the 'type' property`. So the browser threw
+  // before any key was touched, and removal was impossible in the product while every server pin stayed
+  // green — they all speak to the endpoint directly, where the shape of the OPTIONS never comes up.
+  return options
 }
 
 /**
