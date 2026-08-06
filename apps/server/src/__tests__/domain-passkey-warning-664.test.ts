@@ -114,3 +114,55 @@ describe('#664: the list carries the count too', () => {
     expect(mine?.passkeysStranded, 'the same number the refusal would give').toBe(1)
   }, 120_000)
 })
+
+// #680 / ADR-222 §2: while the workspace REQUIRES passkeys, the acknowledgement above is not enough —
+// what it acknowledges is not what happens.
+//
+// Its own sentence says "they will each have to enrol again". Under `passkey` that is untrue: the keys
+// stop working, the door then refuses the only kind anybody could present, and nobody signs in TO enrol
+// again. The whole tenant is locked out, and the way back is the operator break-glass a Cloud tenant
+// does not have. So the move is REFUSED, and the refusal names the order that works.
+describe('#680: a move that would strand everybody is refused, not acknowledged', () => {
+  const setStance = (kinds: string) => adminPool`
+    INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds)
+    VALUES (${TENANT}, ${kinds !== 'off'}, ${kinds})
+    ON CONFLICT (tenant_id) DO UPDATE
+      SET second_factor_required = ${kinds !== 'off'}, second_factor_kinds = ${kinds}`
+
+  afterAll(async () => {
+    await adminPool`
+      UPDATE tenant_login_prefs SET second_factor_required = FALSE, second_factor_kinds = 'off'
+      WHERE tenant_id = ${TENANT}`.catch(() => {})
+  })
+
+  it('the acknowledgement does not get through it', async () => {
+    // Sent WITH the flag on purpose: a guard placed after the acknowledgement check would let this
+    // through, and the flag is exactly what an admin who read the old warning would send.
+    await givePasskey(`cred-680-${STAMP}`)
+    await setStance('passkey')
+    const res = await verify({ acknowledgePasskeyLoss: true })
+    expect(res.statusCode, res.body).toBe(409)
+    expect(res.json<{ code: string }>().code).toBe('passkey_stance_blocks_move')
+
+    const [row] = await adminPool<{ status: string }[]>`SELECT status FROM custom_domains WHERE domain = ${DOMAIN}`
+    expect(row?.status, 'and the domain is still pending').toBe('pending')
+  }, 120_000)
+
+  it('…and the same move goes through once the workspace accepts either kind', async () => {
+    // The control, and the way out the refusal names. Without it a tenant simply unable to verify any
+    // domain — a broken fixture, a stale row — would satisfy the case above.
+    // Asserts the GATE was passed, the idiom this file already uses: the domain is made up, so what
+    // stops it next is DNS. Asserting 204 would be asserting that a fictional domain resolves.
+    await givePasskey(`cred-680b-${STAMP}`)
+    await setStance('any')
+    const res = await verify({ acknowledgePasskeyLoss: true })
+    expect(res.statusCode, `${res.statusCode}: past the stance question :: ${res.body}`).not.toBe(409)
+    expect(res.statusCode, 'and what stops it is DNS, which is the next step').toBe(400)
+  }, 120_000)
+
+  it('`totp` does not block it either — the stance is about passkeys', async () => {
+    await givePasskey(`cred-680c-${STAMP}`)
+    await setStance('totp')
+    expect((await verify({ acknowledgePasskeyLoss: true })).statusCode).not.toBe(409)
+  }, 120_000)
+})

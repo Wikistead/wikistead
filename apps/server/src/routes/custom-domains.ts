@@ -3,7 +3,8 @@ import type { Sql } from 'postgres'
 import { requireTenantAdmin, runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz' // #383
 import type { FastifyInstance } from 'fastify'
 import { resolveEntitlements } from '@wikistead/entitlements'
-import { passkeysStrandedBy } from '../auth/passkeys.js' // #664 / ADR-219 §1
+import { passkeysStrandedBy } from '../auth/passkeys.js'
+import { secondFactorStance } from '../auth/factor-policy.js' // #680 / ADR-222 §2
 import { emit } from '@wikistead/events'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { pool } from '../db/pool.js'
@@ -386,6 +387,20 @@ export async function customDomainsPlugin(app: FastifyInstance) {
       // skipped by not reading it, and the ruling asks for one that appears BEFORE it commits. The
       // acknowledgement is the same shape #605 uses: a refusal with a reason and a named way through,
       // which a future screen turns into a checkbox rather than into a surprise.
+      // #680 / ADR-222 §2: under a `passkey` stance the acknowledgement is not enough, because what it
+      // acknowledges is not what happens. Its own sentence — "they will each have to enrol again" — is
+      // untrue here: the keys stop working, and the door then refuses the only kind anybody could
+      // present, so nobody signs in TO enrol again. That is the whole tenant locked out, recoverable
+      // only through the operator break-glass, which a Cloud tenant does not have.
+      //
+      // Refused rather than warned, and the sentence names the way through: widen the stance first,
+      // move, and narrow it again once everybody has a key on the new host.
+      if ((await secondFactorStance(req.db)) === 'passkey') {
+        return reply.code(409).send({
+          error: 'this workspace requires passkeys, and every passkey stops working when the domain changes — nobody would be able to sign in, including to enrol a new one. Set "a passkey or an authenticator app" first, move, then require passkeys again.',
+          code: 'passkey_stance_blocks_move',
+        })
+      }
       const stranded = await passkeysStrandedBy(req.db, req.params.domain)
       if (stranded > 0 && req.body?.acknowledgePasskeyLoss !== true) {
         return reply.code(409).send({
