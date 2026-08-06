@@ -966,7 +966,13 @@
     "alignCenter": "Align center",
     "alignRight": "Align right"
   },
+  "delete": {
+    "backlinkWarning_one": "One other page links here. That link will stop working.",
+    "backlinkWarning_other": "{{count}} other pages link here. Those links will stop working."
+  },
   "members": {
+    "groupRolesMark_one": "Holds one role through a group. Point at this to see which.",
+    "groupRolesMark_other": "Holds {{count}} roles through groups. Point at this to see which.",
     "title": "Members",
     "grantTitle": "Assign a role",
     "listTitle": "Members and groups",

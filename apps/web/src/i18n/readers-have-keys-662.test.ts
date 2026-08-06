@@ -91,10 +91,9 @@ function resolves(obj: Record<string, unknown>, path: string, interpolated: bool
  * the key went and the comment and the reader both stayed.
  */
 const KNOWN_MISSING: Record<string, string> = {
-  "src/app/DeleteBacklinkWarning.tsx → delete.backlinkWarning":
-    "#662: absent from both locales in every form; needs ja/en copy with a count. The reader prints the key.",
-  "src/settings/GroupRolesMark.tsx → members.groupRolesMark":
-    "#662: absent from both; only `members.groupRolesTitle` exists. It is an aria-label, so it is read aloud.",
+  // #668 emptied this. Both entries were real defects rather than exemptions — one printed the key into
+  // a warning box, the other handed it to a screen reader — so the ledger shrank when they were fixed,
+  // which is the only way a ledger of known holes can show that anything was done about them.
 };
 
 /** Every `t("…")` / `t(\`…\`)` in the source, as {path, interpolated}. */
