@@ -24,26 +24,41 @@ test("manager grants and revokes page access via the Permissions dialog", async 
   // the creator's own grant is listed
   await expect(page.locator("[data-testid=grant-list]")).toContainText("dev-user");
 
-  // grant alice-perm view → appears in the list
-  await page.fill("[data-testid=grant-sub]", "alice-perm");
+  // Grant a member view → a row appears.
+  //
+  // PICKED from the suggestions, not typed. This spec used to fill `alice-perm` — a sub belonging to
+  // nobody — and press Add, and #624 closed that from both ends: the server answers 400 `not_a_member`
+  // (a grant to a stranger leaves a tuple no one can ever hold), and this dialog now sends
+  // `pickedGrant?.grantee ?? null` — "chosen candidate only". Typing alone picks nobody, so Add sent
+  // nothing and the list never grew. The fixture was driving a field that had stopped being an input.
+  //
+  // COUNTED, not matched by text: the row is labelled by whatever the server could resolve for that
+  // sub, and failing that "unknown member", because #578 keeps the subject id off this screen. There is
+  // no string to know in advance — what there is, is one more row than before.
+  const rows = page.locator("[data-testid=grant-item]");
+  const before = await rows.count();
+  const serverGrants = async () => page.evaluate(async ({ api, pageId }) =>
+    ((await (await fetch(`${api}/pages/${pageId}/access`, { headers: { Authorization: "Bearer dev-token" } })).json()) as { grantee: string }[]).length,
+    { api: API, pageId });
+  const grantsBefore = await serverGrants();
+
+  await page.fill("[data-testid=grant-sub]", "d"); // the seeded subs the picker can offer for this page
+  await expect(page.getByTestId("grant-candidates")).toBeVisible({ timeout: 8000 });
+  await page.getByTestId("grant-candidate").first().click();
   await page.getByTestId("grant-relation").click();
   // #582: the picker's values carry their MECHANISM as a prefix (`builtin:` vs `role:`), so a custom
   // role named `edit` can never be taken for the capability. The option id follows the value.
   await page.getByTestId("grant-relation-builtin:view").click();
   await page.click("[data-testid=grant-add]");
-  const row = page.locator("[data-testid=grant-item]", { hasText: "alice-perm" });
-  await expect(row).toBeVisible();
+  await expect(rows).toHaveCount(before + 1);
+  // …and the SERVER holds it — the half a row count cannot show
+  await expect.poll(serverGrants, { timeout: 8000 }).toBe(grantsBefore + 1);
 
-  // revoke → disappears
-  await row.locator("[data-testid=grant-revoke]").click();
-  await expect(page.locator("[data-testid=grant-item]", { hasText: "alice-perm" })).toHaveCount(0);
-
-  // server reflects the revoke (no alice-perm grant remains)
+  // revoke → the row goes, and so does the tuple
+  await rows.nth(before).locator("[data-testid=grant-revoke]").click();
+  await expect(rows).toHaveCount(before);
   await sleep(200);
-  const grants = await page.evaluate(async ({ api, pageId }) => {
-    return (await (await fetch(`${api}/pages/${pageId}/access`, { headers: { Authorization: "Bearer dev-token" } })).json()) as { grantee: string }[];
-  }, { api: API, pageId });
-  expect(grants.some((g) => g.grantee === "user:alice-perm")).toBe(false);
+  expect(await serverGrants()).toBe(grantsBefore);
 });
 
 // #109 / ADR-098: the PRIVATE (allowlist) toggle in the Permissions dialog. Turning it on makes the
