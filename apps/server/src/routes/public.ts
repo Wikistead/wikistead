@@ -126,6 +126,101 @@ async function loadPublicSpaceRoots(tenantId: string, spaceId: string): Promise<
   }) as Promise<{ id: string; title: string }[]>
 }
 
+/** #623 / ADR-220 §10: how many children one public branch response may carry. */
+export const PUBLIC_BRANCH_LIMIT = 100
+
+/**
+ * ONE branch of the PUBLIC tree — the children of one parent, bounded and keyset-paged.
+ *
+ * ADR-220 §10. The whole-tree route walks to depth 6 with 200 children per node, so every step is
+ * bounded and the product is not; and the depth bound SILENTLY DROPS the seventh level today. Per-branch
+ * fetching removes that truncation — a deep page becomes reachable by expanding — which is an
+ * observable change and a better one.
+ *
+ * ⚠️ §2's parent confirmation is load-bearing here rather than defensive: the caller is ANONYMOUS and
+ * supplies the parent id. Without it, #110's ruling — no path through a hidden node, even to a public
+ * grandchild — would be broken structurally, because the caller could simply name the hidden node. On
+ * the whole-tree route that guarantee is a property of the top-down walk; here it has to be a check.
+ *
+ * Every refusal is one 404: absent, another tenant's, another space's, unpublished, not public.
+ *
+ * The anchor is a ROW ID whose position is resolved per request (§8), for the reason the member branch
+ * gives: `position` is user-controlled and a sibling renumber crosses a literal cursor in both
+ * directions, so rows can be skipped.
+ */
+export async function listPublicBranch(
+  tenantId: string,
+  args: { spaceId: string; parentId: string | null; cursor?: string; limit?: number },
+): Promise<{ pages: { id: string; title: string }[]; nextCursor: string | null; restarted: boolean }> {
+  const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
+  const limit = Math.min(500, Math.max(1, args.limit ?? PUBLIC_BRANCH_LIMIT))
+
+  if (args.parentId !== null) {
+    // The parent must be IN this space, published, and publicly viewable. One answer for every miss.
+    const parentId = args.parentId
+    const row = (await withTenantTx(tenantId, async (tx) => {
+      const [r] = await tx<{ id: string }[]>`
+        SELECT p.id FROM pages p
+         WHERE p.id = ${parentId} AND p.space_id = ${args.spaceId}
+           AND p.published_at IS NOT NULL AND p.deleted_at IS NULL`
+      return r ?? null
+    })) as { id: string } | null
+    if (!row) throw notFound()
+    if (!(await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: parentId }))) throw notFound()
+  }
+
+  // §8: resolve the anchor to its current place. A vanished anchor restarts the branch and says so.
+  //
+  // The instant travels as an EPOCH. A timestamp handed to the driver loses its microseconds, and
+  // pages created in one action are microseconds apart — the defect this ticket found in five routes,
+  // and made once more on the member branch before its pin caught it.
+  let anchor: { position: number; at: string } | null = null
+  let restarted = false
+  if (args.cursor) {
+    const cursor = args.cursor
+    const row = (await withTenantTx(tenantId, async (tx) => {
+      const [r] = await tx<{ position: number; at: string }[]>`
+        SELECT position, extract(epoch from created_at)::text AS at FROM pages
+         WHERE id = ${cursor} AND space_id = ${args.spaceId} AND deleted_at IS NULL`
+      return r ?? null
+    })) as { position: number; at: string } | null
+    if (row) anchor = row
+    else restarted = true
+  }
+
+  const parent = args.parentId
+  const rows = (await withTenantTx(tenantId, async (tx) => {
+    return tx<{ id: string; title: string }[]>`
+      SELECT p.id, p.title FROM pages p JOIN spaces s ON s.id = p.space_id
+       WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL
+         AND p.published_at IS NOT NULL
+         -- #364 / ADR-157 §4: the home renders at the public space root — never inside the tree. A
+         -- predicate on every row, not a root-only filter.
+         AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+         AND ${parent === null ? tx`p.parent_id IS NULL` : tx`p.parent_id = ${parent}`}
+         ${anchor ? tx`AND (p.position, p.created_at) > (${anchor.position}, to_timestamp(${anchor.at}::numeric))` : tx``}
+       ORDER BY p.position, p.created_at
+       LIMIT ${limit + 1}
+    `
+  })) as { id: string; title: string }[]
+
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  // The anchor comes from the last SQL row, not the last VISIBLE one: the anon confirm below removes
+  // rows, so a full page can yield none the caller may see — and resuming from the filtered result
+  // would make everything after it unreachable.
+  const lastRow = page[page.length - 1]
+  const nextCursor = hasMore && lastRow ? lastRow.id : null
+
+  // Every node individually, as the whole-tree walk does. A child that is not public is ABSENT, and the
+  // gap is not observable (no index, no count).
+  const out: { id: string; title: string }[] = []
+  for (const r of page) {
+    if (await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: r.id })) out.push(r)
+  }
+  return { pages: out, nextCursor, restarted }
+}
+
 // ── #376 / ADR-149 §2: public resource gates ─────────────────────────────
 //
 // Every /public/* RESOURCE route runs the SAME ordered gate before touching bytes
@@ -383,6 +478,39 @@ export async function publicPlugin(app: FastifyInstance) {
       : null
     return reply.send({ home, tree })
   })
+
+  // #623 / ADR-220 §10: ONE BRANCH of the public tree. Additive — the whole-tree route above is
+  // unchanged, and moving the public shell onto branches is the next slice.
+  //
+  // ⚠️ The caller is ANONYMOUS and names the parent, so the parent confirmation in `listPublicBranch`
+  // is the load-bearing part, not a defensive extra.
+  app.get<{ Params: { spaceId: string }; Querystring: { parent?: string; cursor?: string; limit?: string } }>(
+    '/public/spaces/:spaceId/pages/branch', async (req, reply) => {
+      const tenant = await resolveTenantForRequest(req.headers.host ?? '')
+      if (!tenant) return reply.code(404).send({ error: 'not found' })
+      // #253: the tenant's parent switch OFF hides the whole public surface.
+      if (!(await tenantPublicEnabled(tenant.id))) return reply.code(404).send({ error: 'not found' })
+      if (!(await checkRelation(fgaClient, ANON, 'viewer', { type: 'space', id: req.params.spaceId }))) {
+        return reply.code(404).send({ error: 'not found' })
+      }
+      // The FGA viewer check is GLOBAL across the shared store, so the space must also belong to THIS
+      // tenant — otherwise a cross-tenant public-space id answers 200-with-nothing, which confirms it.
+      const spaceRow = (await withTenantTx(tenant.id, async (tx) => {
+        const [r] = await tx<{ id: string; noindex: boolean }[]>`SELECT id, noindex FROM spaces WHERE id = ${req.params.spaceId}`
+        return r ?? null
+      })) as { id: string; noindex: boolean } | null
+      if (!spaceRow) return reply.code(404).send({ error: 'not found' })
+      // #277 / ADR-116 guardrail 4: same authoritative header the whole-tree route emits.
+      if (spaceRow.noindex) reply.header('X-Robots-Tag', 'noindex')
+      const asked = Number.parseInt(req.query.limit ?? '', 10)
+      const parentRaw = req.query.parent
+      return listPublicBranch(tenant.id, {
+        spaceId: req.params.spaceId,
+        parentId: !parentRaw || parentRaw === 'root' ? null : parentRaw,
+        ...(Number.isFinite(asked) ? { limit: asked } : {}),
+        ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+      })
+    })
 
   // GET /public/pages/:pageId — single public page read-only render
   app.get<{ Params: { pageId: string } }>('/public/pages/:pageId', async (req, reply) => {
