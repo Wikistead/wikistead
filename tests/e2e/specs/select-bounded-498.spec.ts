@@ -1,40 +1,40 @@
 import { test, expect } from "@playwright/test";
-import { sleep, API } from "../helpers";
+import { sleep } from "../helpers";
 
 // #498: the DS Select must open a BOUNDED popper below its trigger. Radix's "item-aligned" mode (the old
 // default) overlays the trigger and EXPANDS as you wheel-scroll, so a long option list grew until it
-// filled the viewport. Pinned on a real long list (30 spaces in the assign-space select): the popup is
+// filled the viewport. Pinned on a long list in a short window (the member role picker): the popup is
 // anchored under the trigger, never taller than the viewport, and wheel-scrolling scrolls INSIDE it
 // without growing the box.
-const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
 
 test("#498: the select dropdown stays bounded and scrolls inside, instead of growing to the viewport", async ({ browser }) => {
-  const page = await (await browser.newContext()).newPage();
-  await page.goto("/p/demo");
-  await page.waitForSelector("[data-pane=preview] .cm-content");
+  // A SHORT window, and a picker that is already long.
+  //
+  // This used to create thirty spaces per run to guarantee a long list, then drive `assign-role` /
+  // `assign-space` on /admin/roles. Those controls are gone — #514/#579 moved granting to the Members
+  // page and the space settings — so the click waited out the sixty-second timeout, the run never
+  // reached its cleanup, and the thirty spaces stayed. Measured: thirty of this tenant's thirty-two
+  // spaces were this one test's litter.
+  //
+  // The subject does not need a huge list, only a list taller than the window. Shrinking the window
+  // does that without adding anything to a tenant every session shares.
+  const page = await (await browser.newContext({ viewport: { width: 1000, height: 400 } })).newPage();
+  await page.goto("/admin/members");
+  await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
+  await sleep(600);
 
-  // guarantee a LONG list: 30 spaces + a resource role to unlock the assign-space select
-  const roleName = `sel498-${Date.now().toString(36)}`;
-  await page.evaluate(async ({ api, roleName }) => {
-    const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
-    for (let i = 0; i < 30; i++) {
-      await fetch(`${api}/spaces`, { method: "POST", headers: H, body: JSON.stringify({ name: `sel498-sp${String(i).padStart(2, "0")}` }) });
-    }
-    await fetch(`${api}/admin/roles`, { method: "POST", headers: H, body: JSON.stringify({ name: roleName, capabilities: ["view"], scope: "resource" }) });
-  }, { api: API, roleName });
-
-  await page.goto("/admin/roles");
-  await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10000 });
-  await page.getByTestId("assign-role").click();
-  await page.getByRole("option", { name: roleName }).click();
-  const trigger = page.getByTestId("assign-space");
+  // a PERSON's row — since #579 folded groups into this table, the first row can be a group, and the
+  // subject here is an ordinary long picker rather than any particular principal's vocabulary
+  const trigger = page.locator("tr:not([data-testid='member-row-group'])")
+    .locator("[data-testid=member-role-select]").first();
   await expect(trigger).toBeEnabled({ timeout: 8000 });
   await trigger.click();
 
-  const content = page.locator("[data-slot=select-content]");
-  await expect(content).toBeVisible({ timeout: 8000 });
   const viewport = page.viewportSize()!;
   const trigBox = (await trigger.boundingBox())!;
+
+  const content = page.locator("[data-slot=select-content]");
+  await expect(content).toBeVisible({ timeout: 8000 });
   const before = (await content.boundingBox())!;
 
   // bounded: inside the viewport, and anchored to a SIDE of the trigger (popper — below, or flipped above
