@@ -115,9 +115,14 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
 
   // the audit chains: both read every entry, and both must, because a hash chain is verified from its
   // start. Bounding these is a design (checkpoints), not a LIMIT — which is exactly what a debt line is.
-  'audit.ts:/audit/verify': { kind: 'debt', why: '#623: recomputes the chain over EVERY audit row in the tenant. The verdict needs the whole chain, so the bound has to be a checkpoint design, not a page.' },
-  'audit.ts:/admin/transparency': { kind: 'debt', why: '#623: returns every transparency entry IN THE RESPONSE — the growing-page shape, not just a growing read.' },
-  'audit.ts:/admin/transparency/verify': { kind: 'debt', why: '#623: reads the whole transparency chain to verify it; same checkpoint question as /audit/verify.' },
+  // ⚠️ All three audit lines were written as 'debt' this morning from the HELPERS, without reading the
+  // routes. Measured: every one of them answers a fixed shape. The reads are unbounded — a chain is
+  // verified from its start — and that is the axis /billing/usage sits on, not the one this ticket is
+  // about. The correction is the classification, and audit-shape-623 checks it instead of asserting it.
+  'audit.ts:/audit/verify': { kind: 'bounded', why: 'answers a VERDICT — {valid, count, brokenAt?, brokenSeq?, reason?} — never the entries it recomputed over. A hash chain has to be verified from its start, so the read is unbounded by construction and the response shape is fixed; that is the /billing/usage axis, not the one this ticket is about. Checked in audit-shape-623.' },
+  // `audit.ts:/admin/transparency` has NO LINE: the scan sees its bound now that the route takes a
+  // `before` marker, which is what a ledger line turning into a real bound looks like.
+  'audit.ts:/admin/transparency/verify': { kind: 'bounded', why: 'answers {total, ...verdict} — a count and a judgement, never the chain. Same axis as /audit/verify. Checked in audit-shape-623.' },
 
   // admin rosters: each grows with how the tenant is configured rather than with how it is used, which
   // makes them slower to notice and no less unbounded.

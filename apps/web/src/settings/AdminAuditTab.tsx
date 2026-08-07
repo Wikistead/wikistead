@@ -154,7 +154,23 @@ function VendorAccessSection() {
   const { token } = useSession();
   const q = useQuery({
     queryKey: ["transparency"],
-    queryFn: () => apiFetch<TransparencyRow[]>("/admin/transparency", token),
+    // #623: the ledger is paged BACKWARDS by seq now. The screen keeps showing the whole thing it can
+    // reach — an audit surface that silently starts at the hundredth-newest entry reads like a ledger
+    // that begins there.
+    queryFn: async () => {
+      const all: TransparencyRow[] = [];
+      let before: number | null = null;
+      // the loop condition is the MARKER, never "the page came back short"
+      do {
+        const q: string = before == null ? "" : `?before=${before}`;
+        const r: { entries: TransparencyRow[]; nextBefore: number | null } | null =
+          await apiFetch(`/admin/transparency${q}`, token);
+        if (!r) break;
+        all.push(...(r.entries ?? []));
+        before = r.nextBefore;
+      } while (before != null);
+      return all;
+    },
     staleTime: 30_000,
     retry: false,
   });
