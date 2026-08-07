@@ -95,7 +95,12 @@ async function walkPanels(page: Page, where: string): Promise<Panel[]> {
 // spilled (a sub, a token, a machine-made name), because every role name on this tenant breaks at a hyphen
 // and the wrap rule could be deleted with the suite still green. Made and removed per test: a leftover
 // tenant role piles into every picker on this shared dev tenant (the #582 sweep drowned in that debris).
-const LONG_ROLE = `e2e582${"0123456789abcdef".repeat(3)}0123`.slice(0, 60);
+// Unique per run, and still 60 unbroken characters — which is the property under test.
+//
+// It used to be a constant, and role names are unique per tenant: one run that died before its
+// cleanup took the name for good, and every run after it got a 409 at the fixture. Permanently red,
+// in a shared tenant, from a single interrupted run. (Measured: that is exactly what had happened.)
+const LONG_ROLE = `e2e582${Date.now().toString(36)}${"0123456789abcdef".repeat(3)}0123`.slice(0, 60);
 const GROUP = "wiki Editors"; // the group the e2e fixture's dev-user carries
 
 async function grantGroupRole(page: Page): Promise<string | null> {
@@ -106,9 +111,11 @@ async function grantGroupRole(page: Page): Promise<string | null> {
       headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
       body: JSON.stringify({ name, capabilities: ["createSpaces"], scope: "tenant" }),
     });
-    return r.ok ? ((await r.json()) as { id: string }).id : null;
+    return r.ok ? ((await r.json()) as { id: string }).id : `ERR ${r.status} ${(await r.text()).slice(0, 200)}`;
   }, { api: API, name: LONG_ROLE });
-  expect(roleId, "the fixture role was created").toBeTruthy();
+  // The reason, not just the absence. This asserted `toBeTruthy()` on a discarded response, so a 409
+  // read as "the fixture role was created: null" — which says nothing about a name already being taken.
+  expect(roleId ?? "", "the fixture role was created").not.toMatch(/^ERR/);
   const granted = await page.evaluate(async ({ api, id, group }) => {
     const me = await fetch(`${api}/auth/me`, { headers: { Authorization: "Bearer dev-token" } });
     const tid = me.ok ? ((await me.json()) as { tenantId?: string }).tenantId ?? "tenant_dev" : "tenant_dev";
