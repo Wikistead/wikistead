@@ -1346,18 +1346,31 @@ export function useUpdateSpaceAbuseFilterConfig(spaceId: string | undefined) {
 // #579: the TENANT-scope group name source, for assigning a tenant role to a group from the admin
 // console. The space-scoped list above is gated on that space's `manage` and needs a space id, which
 // the console does not have; this one is tenant-admin gated. Names only — the id stays server-derived.
+export interface GroupNamesPage { groups: string[]; nextCursor: string | null }
+
+/** `?cursor=…`, or nothing on the first request. */
+export const cursorQuery = (cursor: string | null) => (cursor ? `?cursor=${encodeURIComponent(cursor)}` : "");
+
+/** #623: both group-name lists walk, and they walk the same way. */
+export const walkGroupNames = (fetchPage: (cursor: string | null) => Promise<GroupNamesPage | null>) =>
+  walkPages(fetchPage, (p: GroupNamesPage) => p.groups);
+
 export function useTenantGroupNames() {
   const { token } = useSession();
   return useQuery({
     queryKey: ["tenant-group-names"],
-    queryFn: () => apiFetch<string[]>("/admin/groups", token).then((r) => r ?? []),
+    // #623: paged. The picker completes a grantee out of this list, so a short one silently makes some
+    // groups un-grantable — it walks to the end.
+    queryFn: () => walkGroupNames((c) => apiFetch<GroupNamesPage>(`/admin/groups${cursorQuery(c)}`, token)),
   });
 }
 export function useTenantGroups(spaceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["tenant-groups", spaceId],
-    queryFn: () => apiFetch<string[]>(`/spaces/${encodeURIComponent(spaceId)}/groups`, token).then((r) => r ?? []),
+    queryFn: () =>
+      walkGroupNames((c) =>
+        apiFetch<GroupNamesPage>(`/spaces/${encodeURIComponent(spaceId)}/groups${cursorQuery(c)}`, token)),
     enabled: enabled && spaceId.length > 0,
   });
 }

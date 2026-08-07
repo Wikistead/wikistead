@@ -144,7 +144,9 @@ describe('#163 grant access to a group by name', () => {
   })
 
   it('the group source is manage-gated and tenant-scoped (no cross-tenant leak)', async () => {
-    const groups = await listTenantGroups(db, fgaClient, { spaceId, userId: MANAGER })
+    // #623: the response is a page now. This tenant's groups fit in one, and the walk itself is pinned
+    // in group-names-paged-623 — what this case is about is the gate and the tenant scope.
+    const { groups } = await listTenantGroups(db, fgaClient, { spaceId, userId: MANAGER })
     expect(groups).toContain('Engineering')
     expect(groups).toContain('Sales')
     expect(groups).not.toContain('AcmeSecretTeam') // RLS: another tenant's group never leaks

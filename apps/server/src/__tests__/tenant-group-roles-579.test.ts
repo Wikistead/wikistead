@@ -47,7 +47,8 @@ describe('#579: tenant roles can be given to a group, from the admin console', (
   it('GET /admin/groups answers the tenant\'s group names to an admin', async () => {
     const res = await app.inject({ method: 'GET', url: '/admin/groups', headers: dev })
     expect(res.statusCode).toBe(200)
-    expect(res.json() as string[]).toContain(GROUP)
+    // #623: paged response — the names live under `groups`.
+    expect((res.json() as { groups: string[] }).groups).toContain(GROUP)
   })
 
   it('a non-admin member gets nothing — group names are not member-visible', async () => {
