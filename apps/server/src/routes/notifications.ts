@@ -580,9 +580,33 @@ export async function sweepUnviewableWatches(
 
 // The bell badge count. RAW per-member unread count (a bare number names no resource → not a leak; correction
 // 3b). It may briefly exceed the gated list after a revocation; the list self-corrects when opened.
+/**
+ * #623: the badge stops counting here.
+ *
+ * The screen already stops at this number — `NotificationBell` renders `99+` above it and has since
+ * #320. So every row past the hundredth was scanned to produce a figure nobody is ever shown, and an
+ * account that has been open for years pays for all of them on every poll.
+ *
+ * The cap is the DISPLAY's cap, deliberately: raising one without the other would either put a number
+ * on screen the server refuses to reach, or go back to counting rows the badge will not print.
+ */
+export const UNREAD_BADGE_CAP = 99
+
 export async function unreadCount(db: TenantDb, args: { memberSub: string }): Promise<number> {
+  // The cap sits inside a derived table because that is where it belongs — it holds back ROWS, and the
+  // aggregate counts what survives.
+  //
+  // ⚠️ No bare bound keyword in this prose. The ledger's scan strips derived subqueries before looking
+  // for one, so this route is meant to read as unbounded and carry a ledger line saying why that is
+  // fine — and it did not, because an earlier draft of this very comment named the keyword and the scan
+  // counted the sentence as the bound. `unbounded-list-ledger-623` warns about exactly this shape.
+  // The bound itself is held by that file's still-bounded list, which reads the SQL.
   const [row] = await db.sql<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM notifications WHERE member_sub = ${args.memberSub} AND read_at IS NULL`
+    SELECT count(*)::int AS n FROM (
+      SELECT 1 FROM notifications
+       WHERE member_sub = ${args.memberSub} AND read_at IS NULL
+       LIMIT ${UNREAD_BADGE_CAP + 1}
+    ) capped`
   return row?.n ?? 0
 }
 
