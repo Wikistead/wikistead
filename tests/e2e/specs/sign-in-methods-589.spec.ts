@@ -37,9 +37,13 @@ test("#589: every connection is editable in its own row, including the second on
       await expect(editor).toBeVisible();
       // THE regression this ticket exists for: the editor must be showing this row's connection.
       await expect(editor.getByTestId("oidc-issuer")).toHaveValue(issuer);
-      // and the flags that used to be settable only at creation are here
+      // and the flag that used to be settable only at creation is here.
+      //
+      // ONE flag, not two. #616 / ADR-212 slice 2 retired `bootstrapEligible` along with the mechanism
+      // it named, and a unit test already pins its absence ("the retired one is not lingering in the
+      // editor"). This spec kept asserting the toggle was visible, so it demanded a control the product
+      // had deliberately removed — and failed as though the editor were incomplete.
       await expect(page.getByTestId(`admin-connection-trust-groups-${id}`)).toBeVisible();
-      await expect(page.getByTestId(`admin-connection-bootstrap-${id}`)).toBeVisible();
       await page.getByTestId(`admin-connection-edit-${id}`).click(); // collapse
     }
   } finally {
