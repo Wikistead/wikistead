@@ -1997,6 +1997,57 @@ export async function paintTree(
   return { branches }
 }
 
+/** #623 / ADR-220 §6.1: how many pages one FLAT listing may carry. */
+export const FLAT_PAGES_LIMIT = 200
+
+/**
+ * The space's pages as a FLAT list, bounded and keyset-paged.
+ *
+ * ADR-220 §6.1. The MCP `list_pages` tool reads the tree as a flat full listing, and branch paging is
+ * meaningless to it — a bound bolted onto that shape would be exactly the silent truncation this ticket
+ * exists to remove. So it keeps the flat contract and gets an explicit bound WITH a cursor, and the
+ * tool's answer says when there is more.
+ *
+ * The anchor is a ROW ID whose `(position, created_at)` is resolved per request, for §8's reason:
+ * `position` is user-controlled and a sibling renumber crosses a literal cursor in both directions.
+ */
+export async function listPagesFlat(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { spaceId: string; subject: string; context?: { current_time: string }; limit?: number; cursor?: string },
+): Promise<{ pages: Page[]; nextCursor: string | null }> {
+  const limit = Math.min(1000, Math.max(1, args.limit ?? FLAT_PAGES_LIMIT))
+  let anchor: { position: number; at: string } | null = null
+  if (args.cursor) {
+    const cursor = args.cursor
+    const [row] = await db.sql<[{ position: number; at: string }?]>`
+      SELECT position, extract(epoch from created_at)::text AS at FROM pages
+       WHERE id = ${cursor} AND space_id = ${args.spaceId} AND deleted_at IS NULL`
+    if (row) anchor = row
+  }
+  const rows = await db.sql<PageRow[]>`
+    SELECT p.id, p.tenant_id, p.space_id, p.parent_id, p.title, p.position, p.created_at, p.updated_at,
+           p.has_unpublished_changes, (p.published_at IS NOT NULL) AS published, p.task_done, p.task_total
+    FROM pages p JOIN spaces s ON s.id = p.space_id
+    WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL
+      AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+      ${anchor ? db.sql`AND (p.position, p.created_at) > (${anchor.position}, to_timestamp(${anchor.at}::numeric))` : db.sql``}
+    ORDER BY p.position, p.created_at
+    LIMIT ${limit + 1}
+  `
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  // The anchor comes from the last SQL row, not the last VISIBLE one: the confirm below removes rows,
+  // so a full page can yield none the caller may see — and resuming from the filtered result would
+  // leave everything after it unreachable.
+  const lastRow = page[page.length - 1]
+  const visible = new Set(await filterAuthorized(fga, args.subject, 'view', page.map((r) => r.id), args.context))
+  return {
+    pages: page.filter((r) => visible.has(r.id)).map(toPage),
+    nextCursor: hasMore && lastRow ? lastRow.id : null,
+  }
+}
+
 export async function listSpacePagesOverview(
   db: TenantDb,
   fga: OpenFgaClient,
