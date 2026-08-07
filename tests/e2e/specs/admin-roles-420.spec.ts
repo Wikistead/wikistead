@@ -157,9 +157,21 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
   // member search) is gone; finding the person is a filter over the table.
   await page.goto("/admin/members");
   await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
+  // #623 slice 2 (63665f68) turned this filter into a DEBOUNCED SERVER query — 250ms, then a fetch,
+  // then the table re-renders with what the SERVER matched. Everything below acts on a ROW, so none of
+  // it may start before that lands. Typing and reading straight away reads the PRE-filter page and is
+  // then re-rendered out from under the locator, which broke this test twice on clean master with two
+  // different symptoms of the one race: the `<option>` node detaching mid-click, and `.first` having
+  // become a different member by the time the assertion read it back.
+  const filtered = page.waitForResponse((r) => r.url().includes("q=dev"), { timeout: 15_000 });
   await page.getByTestId("members-filter").fill("dev");
+  await filtered;
   const roleCell = page.getByTestId("member-roles").first();
   await expect(roleCell).toBeVisible({ timeout: 8000 });
+  // …and the re-render the response triggers has to have happened too: the control carries a value, so
+  // waiting for it to be non-empty is waiting for the row to exist in its settled form. Without this
+  // the response can land between `await filtered` and the click, which is the same race one step later.
+  await expect(roleCell.getByTestId("member-role-select")).toHaveText(/\S/, { timeout: 8000 });
   // remember what this member IS: the cleanup below puts them back, and it must be their own tier
   // dev-user is the tenant's admin, and "demote the last admin" is refused by the server (correctly)
   const originalRole = (await roleCell.getByTestId("member-role-select").innerText()).trim();
