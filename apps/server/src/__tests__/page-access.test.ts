@@ -11,7 +11,7 @@ import { fgaClient, check, deleteObjectTuples, writeTuples, deleteTuples } from 
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage, getPublished } from '../routes/pages.js'
-import { createShareLink, listShareLinks, revokeShareLink, revokeResourceShareLinks } from '../routes/share-links.js'
+import { createShareLink, listAllShareLinks, revokeShareLink, revokeResourceShareLinks } from '../routes/share-links.js'
 import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -215,7 +215,7 @@ describe('per-page private (ADR-098 allowlist)', () => {
 
     // revoked: FGA tuple gone (view=false) AND DB row revoked (not in the active list → no zombie in linkCount).
     expect(await check(fgaClient, `share_link:${link.id}`, 'view', { type: 'page', id: pageId })).toBe(false)
-    const active = await listShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'page', id: pageId } })
+    const active = await listAllShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'page', id: pageId } })
     expect(active.find((l) => l.id === link.id)).toBeUndefined()
 
     // one-way: private OFF restores space inheritance but does NOT resurrect the revoked link.
@@ -232,7 +232,7 @@ describe('per-page private (ADR-098 allowlist)', () => {
     await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user' })
 
     // The space link stays ACTIVE (its space viewer tuple, and thus every non-private page, is unaffected).
-    const spaceLinks = await listShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'space', id: spaceId } })
+    const spaceLinks = await listAllShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'space', id: spaceId } })
     expect(spaceLinks.find((l) => l.id === spaceLink.id)).toBeDefined()
     await revokeShareLink(db, fgaClient, { id: spaceLink.id, userId: 'dev-user', tenantId: TENANT }).catch(() => {})
   })
@@ -273,7 +273,7 @@ describe('per-page private (ADR-098 allowlist)', () => {
     // linkB's FGA delete FAILED → it is still live on FGA (edit) AND left revoked_at IS NULL (recoverable),
     // NOT a half-state: the DB revoke is atomic per link (only the FGA-cleared ones are marked revoked).
     expect(await check(fgaClient, `share_link:${linkB.id}`, 'edit', { type: 'page', id: pageId })).toBe(true)
-    const active = await listShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'page', id: pageId } })
+    const active = await listAllShareLinks(db, fgaClient, { userId: 'dev-user', resource: { type: 'page', id: pageId } })
     expect(active.find((l) => l.id === linkB.id)).toBeDefined() // still active (recoverable)
     expect(active.find((l) => l.id === linkA.id)).toBeUndefined()
 
