@@ -9,6 +9,19 @@ import { openScratch, createScratchPage, enterEdit, sleep, publishAndWait, API }
 // a rename/privatise/delete makes stale colored links disappear WITHOUT a reload (anti-test 4).
 const RUN = Date.now().toString(36);
 
+// #541 sets this file's waiting budget. The title dictionary — the thing that decides an auto link —
+// is deliberately HELD BACK at page open: it yields to the space-list and page-tree queries, with a
+// 700ms floor and a HARD CAP OF 8 SECONDS. Then it fetches, then a batch authorization check runs over
+// its ids, and only then can a link render. `useTitleDictionary` says so plainly: "Links simply fill in
+// a moment later, which they already did anyway (the dictionary is best-effort by design)."
+//
+// So a 10s budget sat about two seconds above an 8s worst case, which is not a margin — and #623 made
+// `/spaces` paginated, lengthening the very window the dictionary yields to. The result was a file that
+// changed its mind between runs about which tests passed. Waiting longer here is not papering over a
+// slow product: it is matching the test's budget to a deferral the product documents and intends.
+const LINK_WAIT = 25_000;
+
+
 async function renamePage(p: Page, pageId: string, title: string) {
   await p.evaluate(async ({ api, pageId, title }) => {
     await fetch(`${api}/pages/${pageId}`, {
@@ -34,7 +47,7 @@ test("#224 go-live: body text matching a page title renders the auto link; click
   await page.getByText("bot").click();
 
   const link = page.locator(`[data-pane=preview] .cm-lp-title-link[data-title-link="${targetId}"]`);
-  await expect(link.first()).toBeVisible({ timeout: 10000 });
+  await expect(link.first()).toBeVisible({ timeout: LINK_WAIT });
 
   // the SOURCE is untouched (display-only mark — no markdown link was written).
   await page.getByTestId("displaymode-source").click();
@@ -102,7 +115,7 @@ test("#224 hover card: the excerpt card appears in the tooltip layer (view-re-co
   await sleep(600);
   await page.getByText("bot").click();
   const link = page.locator(`[data-pane=preview] .cm-lp-title-link[data-title-link="${targetId}"]`).first();
-  await expect(link).toBeVisible({ timeout: 10000 });
+  await expect(link).toBeVisible({ timeout: LINK_WAIT });
   await link.hover();
   const card = page.getByTestId("title-link-card");
   await expect(card).toBeVisible({ timeout: 5000 });
@@ -139,7 +152,7 @@ test("#224 anti-test 4 (security-timing): a RENAME makes the stale colored link 
   await sleep(600);
   await page.getByText("bot").click();
   const link = page.locator(`[data-pane=preview] .cm-lp-title-link[data-title-link="${targetId}"]`);
-  await expect(link.first()).toBeVisible({ timeout: 10000 });
+  await expect(link.first()).toBeVisible({ timeout: LINK_WAIT });
 
   // rename the target via the API (enqueues the trusted outbox → Valkey wks:dict → collab stateless
   // ping → the OPEN editor refetches its dictionary and redecorates). NO reload happens here.
@@ -211,8 +224,10 @@ test("#351 static card: a macro-heavy excerpt renders placeholder chips — no w
   await sleep(600);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("```mermaid\ngraph TD; A-->B\n```\n\n:::embed-page\ndemo\n:::\n\nplain **bold351** tail\n");
-  // See the note in the guest test: wait for the text to be in the doc rather than betting on the sync.
-  await expect(page.locator("[data-pane=preview] .cm-content")).toContainText("bold351", { timeout: 10_000 });
+  // No editor-text check here, unlike the guest test above: this body is a mermaid fence and an
+  // `:::embed-page`, which become atom widgets, and CM virtualises what is left — so `.cm-content` can
+  // legitimately read as empty while the doc is full. (Measured: that assertion, added for the plain-text
+  // case, reported "" here on content that had landed.) The publish poll is the check that fits.
   await publishAndWait(page, targetId, "bold351");
 
   await openScratch(page, "title-links-static-card");
@@ -222,7 +237,7 @@ test("#351 static card: a macro-heavy excerpt renders placeholder chips — no w
   await sleep(600);
   await page.getByText("bot").click();
   const link = page.locator(`[data-pane=preview] .cm-lp-title-link[data-title-link="${targetId}"]`).first();
-  await expect(link).toBeVisible({ timeout: 10000 });
+  await expect(link).toBeVisible({ timeout: LINK_WAIT });
 
   // Watch every request from hover onward: exactly ONE excerpt fetch is allowed; nothing else may be
   // triggered by the card render (no page-body/embed/diagram resolution from inside the card).
