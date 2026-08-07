@@ -13,7 +13,7 @@ import { fgaClient } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, deletePage } from '../routes/pages.js'
-import { listRevisions } from '../routes/revisions.js'
+import { listAllRevisions } from '../routes/revisions.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -57,7 +57,7 @@ afterAll(async () => {
 
 describe('listRevisions author identity (#486 slice 3)', () => {
   it('resolves member author names (stripping user:); cross-tenant & guest are null', async () => {
-    const revs = await listRevisions(db, fgaClient, { pageId, userId: 'dev-user', plan: tenant.plan })
+    const revs = await listAllRevisions(db, fgaClient, { pageId, userId: 'dev-user', plan: tenant.plan })
     const byTitle = (t: string) => revs.find((r) => r.title === t)!
     expect(byTitle('by member').createdByName).toBe('Member 486r')
     expect(byTitle('by member').createdByHasAvatar).toBe(true)

@@ -69,30 +69,83 @@ function retentionCutoff(plan: string): Date {
   return isFinite(days) ? new Date(Date.now() - days * 86_400_000) : new Date(0)
 }
 
+/** #623: how many revisions one response may carry. */
+export const REVISIONS_PAGE_LIMIT = 100
+
+export interface RevisionsPage { revisions: RevisionSummary[]; nextCursor: string | null }
+
 export async function listRevisions(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; userId: string; plan: string },
-): Promise<RevisionSummary[]> {
+  args: { pageId: string; userId: string; plan: string; limit?: number; cursor?: string },
+): Promise<RevisionsPage> {
   const canView = await check(fga, `user:${args.userId}`, 'view', { type: 'page', id: args.pageId })
   if (!canView) throw Object.assign(new Error('not found'), { statusCode: 404 }) // #262: existence-hiding on the read path (history is a display of the page)
 
+  // #623: one row per published version, and a long-lived page has hundreds. The whole history used to
+  // arrive in one response.
+  //
+  // The cursor's timestamp travels as an EPOCH rather than a formatted date, for the reason measured on
+  // `/spaces` and again on `/members`: a parameter carrying microseconds comes back out of ::timestamptz
+  // rounded to milliseconds, because the driver parses it into a JS Date on the way in. This list walks
+  // DESC, which is the direction that SKIPS rather than repeats — a revision between the truncated
+  // instant and the true one appears on no page at all, and a missing version in a history nobody can
+  // see the end of is not something a reader can notice.
+  //
+  // `id` joins the ORDER BY as the tiebreaker: a restore writes a fresh revision, and a bulk revert can
+  // stamp two in the same instant.
+  const limit = Math.min(500, Math.max(1, args.limit ?? REVISIONS_PAGE_LIMIT))
+  const bar = args.cursor?.indexOf('|') ?? -1
+  const after = args.cursor && bar > 0 ? { at: args.cursor.slice(0, bar), id: args.cursor.slice(bar + 1) } : null
   // Plan-gated retention: free tiers only expose recent history.
-  const rows = await db.sql<RevisionRow[]>`
-    SELECT id, tenant_id, page_id, title, created_by, created_at
+  const rows = await db.sql<(RevisionRow & { cursor_at: string })[]>`
+    SELECT id, tenant_id, page_id, title, created_by, created_at,
+           extract(epoch from created_at)::text AS cursor_at
     FROM revisions WHERE page_id = ${args.pageId} AND created_at >= ${retentionCutoff(args.plan)}
-    ORDER BY created_at DESC
+      ${after ? db.sql`AND (created_at, id) < (to_timestamp(${after.at}::numeric), ${after.id})` : db.sql``}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${limit + 1}
   `
   // #486 / ADR-150 Addendum 2: resolve the revision author names AFTER the view gate, on the caller's
   // RLS handle (cross-tenant → null), over the surviving rows only. override ?? OIDC name; guest dropped.
   // NOTE: unlike page-meta/comments (bare sub), a revision's created_by is the FGA-principal form
   // `user:<sub>` (or guest:/anon:) — strip the `user:` prefix so it matches members.sub.
   const bareSub = (s: string | null): string | null => (s == null ? null : s.startsWith('user:') ? s.slice(5) : s)
-  const authorIds = await resolveAuthorIdentities(db, rows.map(r => bareSub(r.created_by)).filter((s): s is string => s != null))
-  return rows.map(r => {
-    const by = authorFields(authorIds, bareSub(r.created_by))
-    return { id: r.id, pageId: r.page_id, title: r.title, createdBy: r.created_by, createdByName: by.name, createdByHasAvatar: by.hasAvatar, createdAt: r.created_at }
-  })
+  // one row past the limit answers "is there more" without a second count query, and it is dropped
+  // BEFORE the author resolution below so an over-fetched row never costs a name lookup.
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const last = page[page.length - 1]
+  const authorIds = await resolveAuthorIdentities(db, page.map(r => bareSub(r.created_by)).filter((s): s is string => s != null))
+  return {
+    revisions: page.map(r => {
+      const by = authorFields(authorIds, bareSub(r.created_by))
+      return { id: r.id, pageId: r.page_id, title: r.title, createdBy: r.created_by, createdByName: by.name, createdByHasAvatar: by.hasAvatar, createdAt: r.created_at }
+    }),
+    nextCursor: hasMore && last ? `${last.cursor_at}|${last.id}` : null,
+  }
+}
+
+/**
+ * The whole history, by walking the pages.
+ *
+ * For callers that genuinely need every revision — the tests, and any reader that has to reason about
+ * the list as a whole. It exists so the walk is written ONCE: the loop condition is `nextCursor`, never
+ * "the page came back empty".
+ */
+export async function listAllRevisions(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { pageId: string; userId: string; plan: string },
+): Promise<RevisionSummary[]> {
+  const out: RevisionSummary[] = []
+  let cursor: string | undefined
+  do {
+    const page: RevisionsPage = await listRevisions(db, fga, { ...args, ...(cursor ? { cursor } : {}) })
+    out.push(...page.revisions)
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
+  return out
 }
 
 // #109 / ADR-072: does this page have revisions HIDDEN by the plan's history-retention window?
@@ -291,8 +344,13 @@ export async function revertActorRun(
 // ── Fastify plugin ────────────────────────────────────────────────────────
 
 export async function revisionsPlugin(app: FastifyInstance) {
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/revisions', async (req, reply) => {
-    const list = await listRevisions(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub, plan: req.tenant.plan })
+  app.get<{ Params: { pageId: string }; Querystring: { limit?: string; cursor?: string } }>('/pages/:pageId/revisions', async (req, reply) => {
+    const limit = Number.parseInt(req.query.limit ?? '', 10)
+    const list = await listRevisions(req.db, app.fga, {
+      pageId: req.params.pageId, userId: req.user.sub, plan: req.tenant.plan,
+      ...(Number.isFinite(limit) ? { limit } : {}),
+      ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+    })
     // #109/ADR-072: disclose plan-hidden history (non-destructive entitlement loss) so the UI can
     // show "upgrade to see the full timeline" rather than silently implying there is no older history.
     reply.header('X-Retention-Limited', String(await hasHiddenRevisions(req.db, { pageId: req.params.pageId, plan: req.tenant.plan })))

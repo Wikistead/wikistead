@@ -14,7 +14,9 @@ const publishedMd = (p: Page, id: string) =>
 const revisionCount = (p: Page, id: string) =>
   p.evaluate(async ({ api, id }) => {
     const r = await fetch(`${api}/pages/${id}/revisions`, { headers: { Authorization: "Bearer dev-token" } });
-    return ((await r.json()) as unknown[]).length;
+    // #623: the history is paged; this spec compares counts across a publish, and both readings come
+    // from the same first page of 100.
+    return ((await r.json()) as { revisions: unknown[] }).revisions.length;
   }, { api: API, id });
 const publish = (p: Page, id: string) =>
   p.evaluate(async ({ api, id }) => {

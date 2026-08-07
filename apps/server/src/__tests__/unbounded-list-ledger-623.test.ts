@@ -60,7 +60,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'members.ts:/members/invites': { kind: 'debt', why: '#623 A: one row per pending invitation (#638 boxed the UI, not the payload).' },
   'notifications.ts:/notifications/unread-count': { kind: 'debt', why: '#623 B: counts rows without a bound; a very old account pays for every one.' },
   'pins.ts:/pins': { kind: 'debt', why: '#623 B: one row per pin; nothing prunes them.' },
-  'revisions.ts:/pages/:pageId/revisions': { kind: 'debt', why: '#623 B: one row per published version — a long-lived page has hundreds.' },
   'share-links.ts:/pages/:pageId/share-links': { kind: 'debt', why: '#623 B: one row per link; a busy page accumulates them.' },
   'spaces.ts:/spaces/:spaceId/access': { kind: 'debt', why: '#623 B: principal × space; the roster the permissions dialog reads.' },
   'spaces.ts:/spaces/:spaceId/analytics': { kind: 'debt', why: '#623 B: a row per day per page, same shape as the tenant roll-up.' },
@@ -479,6 +478,11 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // way rather than because it was changed.
     { file: 'routes/pages.ts', fn: 'getRelatedPages' },
     { file: 'routes/pages.ts', fn: 'getBacklinks' },             // slice 6
+    // #623: the page history. Listed here and not only in the walk pin, because the walk cannot see
+    // this: `hasMore`/`slice` cap the RESPONSE in JS, so deleting the SQL LIMIT leaves every behavioural
+    // assertion green while the query goes back to reading the whole history. Measured — that break was
+    // green until this line existed.
+    { file: 'routes/revisions.ts', fn: 'listRevisions' },
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {
