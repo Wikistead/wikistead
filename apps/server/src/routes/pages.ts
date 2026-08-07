@@ -1925,6 +1925,78 @@ export async function listBranch(
   }
 }
 
+export interface PaintedBranch { parentId: string | null; pages: Page[]; nextCursor: string | null }
+
+/**
+ * The FIRST PAINT: the root branch, plus the branches along the path to the page the reader has open.
+ *
+ * ADR-220 §5. Opening a page deep in a tree must not require walking down to it, and no mechanism for
+ * this existed — there are ancestor CTEs for watches and for depth, but no "path to page" tree read.
+ *
+ * ⚠️ `open` is a HINT, never an argument. The sidebar knows the open page id, but the space it pairs it
+ * with comes from localStorage and can disagree until the page loads. A page in another space, a page
+ * that is gone, a page the reader cannot see — all yield THE ROOT BRANCH ALONE. Never an error, never a
+ * different shape: a hint that 404s is an oracle for page ids.
+ *
+ * Every branch here is the same bounded, individually-confirmed read as §1's, so the response grows with
+ * the DEPTH of the open page (bounded by MAX_PAGE_DEPTH) rather than with the size of the space.
+ */
+export async function paintTree(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: {
+    spaceId: string
+    subject: string
+    context?: { current_time: string }
+    open?: string | undefined
+    limit?: number
+  },
+): Promise<{ branches: PaintedBranch[] }> {
+  const one = async (parentId: string | null): Promise<PaintedBranch> => {
+    const b = await listBranch(db, fga, {
+      spaceId: args.spaceId, parentId, subject: args.subject,
+      ...(args.context ? { context: args.context } : {}),
+      ...(args.limit != null ? { limit: args.limit } : {}),
+    })
+    return { parentId, pages: b.pages, nextCursor: b.nextCursor }
+  }
+
+  const branches: PaintedBranch[] = [await one(null)]
+  if (!args.open) return { branches }
+
+  // The ancestors of the open page, nearest-first, INSIDE this space.
+  //
+  // ⚠️ The space predicates here are the SECOND layer and cannot be broken to red on their own
+  // measured. Remove both and a cross-space ancestor still never reaches the answer, because `one`
+  // goes through `listBranch`, whose §2 parent check refuses a page in another space with the same 404
+  // every other refusal gets. They stay because the walk should not travel outside the space it was
+  // asked about even for a row it will then discard; the guarantee itself is pinned one layer down, on
+  // the branch route.
+  const rows = await db.sql<{ id: string }[]>`
+    WITH RECURSIVE anc AS (
+      SELECT id, parent_id, 0 AS depth FROM pages
+       WHERE id = ${args.open} AND space_id = ${args.spaceId} AND deleted_at IS NULL
+      UNION ALL
+      SELECT p.id, p.parent_id, anc.depth + 1 FROM pages p
+        JOIN anc ON p.id = anc.parent_id
+       WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL AND anc.depth < ${MAX_PAGE_DEPTH}
+    )
+    SELECT id FROM anc WHERE depth > 0 ORDER BY depth DESC
+  `
+  // Each ancestor's OWN branch — the reader needs its siblings to see where they are. The open page's
+  // own children are not painted: it may be a leaf, and expanding it is a branch request like any other.
+  for (const r of rows) {
+    // §2 lives inside listBranch: an ancestor the reader cannot view throws, and a hint must not. So a
+    // refusal here truncates the painted path rather than failing the paint.
+    try {
+      branches.push(await one(r.id))
+    } catch {
+      break
+    }
+  }
+  return { branches }
+}
+
 export async function listSpacePagesOverview(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -4001,6 +4073,31 @@ export async function pagesPlugin(app: FastifyInstance) {
     const firstN = firstRaw != null ? Math.min(100, Math.max(1, Number.parseInt(firstRaw, 10) || 0)) || undefined : undefined
     return listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context, firstN })
   })
+
+  // #623 / ADR-220 §5: the first paint — the root branch plus the path to the open page.
+  app.get<{ Params: { spaceId: string }; Querystring: { open?: string; limit?: string } }>(
+    '/spaces/:spaceId/pages/paint', { config: { guest: 'view' } }, async (req, reply) => {
+      let subject: string
+      let context: { current_time: string } | undefined
+      if (req.user) {
+        subject = `user:${req.user.sub}`
+      } else if (req.guest) {
+        if (req.guest.resource.type !== 'space' || req.guest.resource.id !== req.params.spaceId) {
+          return reply.code(403).send({ error: 'forbidden' })
+        }
+        subject = `share_link:${req.guest.shareLinkId}`
+        context = { current_time: new Date().toISOString() }
+      } else {
+        return reply.code(401).send({ error: 'unauthorized' })
+      }
+      const asked = Number.parseInt(req.query.limit ?? '', 10)
+      return paintTree(req.db, app.fga, {
+        spaceId: req.params.spaceId, subject,
+        ...(context ? { context } : {}),
+        ...(req.query.open ? { open: req.query.open } : {}),
+        ...(Number.isFinite(asked) ? { limit: asked } : {}),
+      })
+    })
 
   // #623 / ADR-220 §1-§3: ONE BRANCH of the tree — the children of one parent, bounded and keyset-paged.
   //

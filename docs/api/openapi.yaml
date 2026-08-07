@@ -355,6 +355,25 @@ paths:
       parameters: [ { name: commentId, in: path, required: true, schema: { type: string } } ]
       responses: { "204": { description: Deleted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   # ── Attachments ──────────────────────────────────────────────────────────
+  /spaces/{spaceId}/pages/paint:
+    get:
+      operationId: paintSpacePageTree
+      tags: [spaces]
+      summary: The tree's first paint — the root branch plus the path to the open page
+      description: >-
+        ADR-220 §5. Opening a page deep in a tree must not require walking down to it, so this answers
+        the root branch and each ancestor's own branch (the reader needs the siblings to see where they
+        are). `open` is a HINT, never an argument: a page in another space, one that is gone, or one the
+        reader cannot see all yield the root branch alone — never an error and never a different shape,
+        because a hint that 404s is an oracle for page ids. Each branch is the same bounded,
+        individually-confirmed read as the branch route, so the response grows with the DEPTH of the open
+        page rather than with the size of the space.
+      parameters:
+        - { $ref: "#/components/parameters/spaceId" }
+        - { name: open, in: query, required: false, schema: { type: string }, description: "The page the reader has open. A hint — an unusable value narrows the answer, never fails it." }
+        - { name: limit, in: query, required: false, schema: { type: integer }, description: "Rows per branch (clamped)." }
+      responses: { "200": { description: The root branch and the path to the open page }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
+
   /spaces/{spaceId}/pages/branch:
     get:
       operationId: listSpacePageBranch
