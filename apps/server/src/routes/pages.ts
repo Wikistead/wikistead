@@ -35,6 +35,7 @@ function abuseActor(req: { guest?: { shareLinkId: string; anonId?: string | null
 }
 import { guestPublishRateAllowed, guestCreatePageRateAllowed } from '../abuse-rate.js' // #328 / #274: guest publish + create caps
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
+import { listAllGroupNames } from './spaces.js' // #623: the one bounded group-name query
 import { auditIfEntitled } from '../audit/outbox.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
 import { resolveTranscludeRef } from '../transclude-resolve.js'
@@ -1685,17 +1686,36 @@ export async function isPagePrivate(
   return (tuples ?? []).some(({ key }) => key?.relation === 'private' && key.user === 'user:*')
 }
 
+/** #623: how many of a page's tuples one access read may take. */
+export const PAGE_ACCESS_PAGE_SIZE = 100
+
+export interface PageAccessPage {
+  grants: { grantee: string; relation: PageRelation; groupName?: string; displayName?: string | null }[]
+  nextCursor: string | null
+}
+
 export async function listPageAccess(
   fga: OpenFgaClient,
   db: TenantDb,
-  args: { pageId: string; tenantId: string; userId: string },
-): Promise<{ grantee: string; relation: PageRelation; groupName?: string; displayName?: string | null }[]> {
+  args: { pageId: string; tenantId: string; userId: string; cursor?: string; pageSize?: number },
+): Promise<PageAccessPage> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  const tuples = await readObjectTuples(fga, `page:${args.pageId}`) // #574: paginated — a truncated read under-lists who has access
+  // #574: paginated — a truncated read under-lists who has access.
+  // #623: and it then returned everyone at once. The bound is a page of tuples and the marker is the
+  // store's continuation token; there is no timestamp to order these by.
+  //
+  // ⚠️ The filters below run AFTER the read (relation, principal shape, custom-role expansion), and a
+  // page object carries share links and markers too, so a page can hold ZERO grants while more follow.
+  // The caller walks on the marker, never on emptiness — `listAllPageAccess` is that walk.
+  const { tuples, nextCursor } = await readObjectTuplesPage(fga, `page:${args.pageId}`, {
+    pageSize: args.pageSize ?? PAGE_ACCESS_PAGE_SIZE,
+    ...(args.cursor ? { cursor: args.cursor } : {}),
+  })
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
-  const names = (await db.sql<{ g: string }[]>`SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL`).map((r) => r.g)
-  const byId = groupNameByFgaId(args.tenantId, names)
+  // #623: this used to carry its own copy of the group-name query — the fourth in the product. It reads
+  // the shared bounded one now, which walks its own pages.
+  const byId = groupNameByFgaId(args.tenantId, await listAllGroupNames(db))
   // #582 / ADR-202 §1: a CUSTOM-role assignment expands into the same per-capability tuples a manual
   // grant writes, so without this filter one role renders as several anonymous capability rows for the
   // same principal — the defect #536 (5) was bounced for on the space screen, which fixed it
@@ -1738,6 +1758,28 @@ export async function listPageAccess(
       if (g.grantee.startsWith('user:') && !g.groupName) g.displayName = ids.get(g.grantee.slice('user:'.length))?.displayName ?? null
     }
   }
+  return { grants: out, nextCursor }
+}
+
+/**
+ * Everyone with a grant on a page, by walking.
+ *
+ * The permissions dialog is where a grant is taken away, so a short list is access nobody can revoke.
+ * `pageSize` is a seam for the pin, not a caller knob: the empty-page shape this walk exists to survive
+ * only happens when the pages are small enough for the filters to empty one.
+ */
+export async function listAllPageAccess(
+  fga: OpenFgaClient,
+  db: TenantDb,
+  args: { pageId: string; tenantId: string; userId: string; pageSize?: number },
+): Promise<PageAccessPage['grants']> {
+  const out: PageAccessPage['grants'] = []
+  let cursor: string | undefined
+  do {
+    const page: PageAccessPage = await listPageAccess(fga, db, { ...args, ...(cursor ? { cursor } : {}) })
+    out.push(...page.grants)
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
   return out
 }
 
@@ -4378,8 +4420,11 @@ export async function pagesPlugin(app: FastifyInstance) {
   })
 
   // ── per-page access (manage-gated; member-only, no guest config) ──────────
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/access', async (req) => {
-    return listPageAccess(app.fga, req.db, { pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub })
+  app.get<{ Params: { pageId: string }; Querystring: { cursor?: string } }>('/pages/:pageId/access', async (req) => {
+    return listPageAccess(app.fga, req.db, {
+      pageId: req.params.pageId, tenantId: req.tenant.id, userId: req.user.sub,
+      ...(req.query?.cursor ? { cursor: req.query.cursor } : {}),
+    })
   })
 
   // grantee = user:<sub> | group:<id>#member (raw), OR groupName (#163: server resolves to

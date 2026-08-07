@@ -91,7 +91,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // somebody else. They are not new routes and not new debt; they are debt that was being counted
   // as paid. Classified one at a time, by reading each handler.
   'comments.ts:/pages/:pageId/mentionable': { kind: 'debt', why: '#623 B: SELECT … FROM members with no bound, then an FGA batchCheck over EVERY member — the mention autocomplete pays for the whole roster.' },
-  'pages.ts:/pages/:pageId/access': { kind: 'debt', why: '#623 B: principal × page, the roster the page permissions dialog reads — the /spaces/:spaceId/access shape.' },
   'auth.ts:/auth/login-options': { kind: 'debt', why: '#623 A: one row per login connection; grows with IdP configuration, not with usage.' },
 
   // ── surfaced by slice 12's SECOND instrument fix: a bound marker that belonged to a scalar subquery,

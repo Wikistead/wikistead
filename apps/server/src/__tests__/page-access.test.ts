@@ -10,7 +10,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteObjectTuples, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listAllPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage, getPublished } from '../routes/pages.js'
+import { createPage, grantPageAccess, revokePageAccess, listAllPageAccess, restrictPageAccess, unrestrictPageAccess, listAllPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage, getPublished } from '../routes/pages.js'
 import { createShareLink, listAllShareLinks, revokeShareLink, revokeResourceShareLinks } from '../routes/share-links.js'
 import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
@@ -72,7 +72,7 @@ describe('per-page access (grant/revoke/list)', () => {
   })
 
   it('list returns direct grantees for a manager; a non-manager is rejected (403)', async () => {
-    const list = await listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: 'dev-user' })
+    const list = await listAllPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: 'dev-user' })
     // #578: the row now carries the name to show for the grantee (null when it cannot be resolved), the
     // same half /spaces/:id/access has had since #523 — matched per-field so this pin is about WHO is in
     // the list rather than about the exact shape of the row.
@@ -84,7 +84,7 @@ describe('per-page access (grant/revoke/list)', () => {
     // has no name, which is exactly the case the dialog labels as unknown). That names ARE shown when
     // there is one is measured where it can be — in the dialog (permissions-dialog-names-578).
     expect(list.find((g) => g.grantee === 'user:dev-user')).toHaveProperty('displayName')
-    await expect(listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
+    await expect(listAllPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('revoke removes FGA view and drops the grantee from search', async () => {

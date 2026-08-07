@@ -24,7 +24,7 @@ import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace, grantSpaceAccess, listSpaceAccess } from '../routes/spaces.js'
-import { createPage, deletePage, getPage, grantPageAccess, listPageAccess, setPageFrozen, unsetPageFrozen } from '../routes/pages.js'
+import { createPage, deletePage, getPage, grantPageAccess, listAllPageAccess, setPageFrozen, unsetPageFrozen } from '../routes/pages.js'
 import { markPatrolled, unmarkPatrolled } from '../routes/notifications.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -175,7 +175,7 @@ describe('#330 moderator — product write paths (real PG + OpenFGA)', () => {
 
   it('the page grant vocabulary gained `moderate` (the private-page appointment path); the list surfaces it', async () => {
     await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: 'dev-user', grantee: 'user:mod330-pagemod', relation: 'moderate', plan: tenant.plan })
-    const grants = await listPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: 'dev-user' })
+    const grants = await listAllPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: 'dev-user' })
     expect(grants.some((g) => g.grantee === 'user:mod330-pagemod' && g.relation === 'moderate')).toBe(true)
     expect(await can('user:mod330-pagemod', 'moderate', pageId)).toBe(true)
     expect(await can('user:mod330-pagemod', 'manage', pageId)).toBe(false)
