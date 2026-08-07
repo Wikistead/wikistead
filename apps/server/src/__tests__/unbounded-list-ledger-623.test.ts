@@ -58,7 +58,7 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'account.ts:/me/activity': { kind: 'debt', why: '#623 B: one row per thing the person did; grows for ever.' },
   'members.ts:/admin/analytics': { kind: 'debt', why: '#623 B: a row per day per page; grows with the tenant and with time.' },
   'members.ts:/members/invites': { kind: 'debt', why: '#623 A: one row per pending invitation (#638 boxed the UI, not the payload).' },
-  'notifications.ts:/notifications/unread-count': { kind: 'debt', why: '#623 B: counts rows without a bound; a very old account pays for every one.' },
+  'notifications.ts:/notifications/unread-count': { kind: 'bounded', why: 'the count stops at UNREAD_BADGE_CAP + 1 — the number the bell already refuses to print past (it renders 99+). The LIMIT lives in a derived table, which withoutSubqueries strips before looking for a bound, so this line states what the scan cannot see rather than the scan being loosened to see it.' },
   'pins.ts:/pins': { kind: 'debt', why: '#623 B: one row per pin; nothing prunes them.' },
   'share-links.ts:/pages/:pageId/share-links': { kind: 'debt', why: '#623 B: one row per link; a busy page accumulates them.' },
   'spaces.ts:/spaces/:spaceId/access': { kind: 'debt', why: '#623 B: principal × space; the roster the permissions dialog reads.' },
@@ -483,6 +483,10 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // assertion green while the query goes back to reading the whole history. Measured — that break was
     // green until this line existed.
     { file: 'routes/revisions.ts', fn: 'listRevisions' },
+    // #623: the unread badge. Its cap is inside a derived table, which the ledger scan strips before
+    // looking for a bound — so the ledger keeps a line saying why the route may read as unbounded, and
+    // THIS is where the bound is actually held.
+    { file: 'routes/notifications.ts', fn: 'unreadCount' },
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {
