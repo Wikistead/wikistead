@@ -31,11 +31,24 @@ type Panel = {
 
 /** Hover each `cursor: help` trigger on the page and report every panel that appears. */
 async function walkPanels(page: Page, where: string): Promise<Panel[]> {
-  const triggers = page.locator("css=[class*=cursor-help], [data-testid=group-role-name]");
-  const n = Math.min(await triggers.count(), 8);
+  // `group-roles-mark` is the ANCHOR — the thing on the row a reader hovers. `group-role-name` was
+  // named here instead, and that is a name INSIDE the panel: it does not exist until the panel is
+  // already open, so the walk had no way to open the `placed` implementation and met only `radix`.
+  // Measured: the row's props were right all along (`groupRoles` arrives populated); the trigger this
+  // walk reached for was the one the panel renders, not the one that raises it.
+  // The GROUP marks first, then the rest up to the cap.
+  //
+  // The cap exists because hovering is slow, and it used to apply to one flat list in DOM order. The
+  // members screen carries 36 `cursor-help` triggers, so eight hovers were spent before reaching the
+  // one row that raises a `placed` panel — the walk met only `radix` and the premise assertion said so.
+  const marks = page.locator("[data-testid=group-roles-mark]");
+  const rest = page.locator("css=[class*=cursor-help]");
+  const triggers = [
+    ...Array.from({ length: await marks.count() }, (_, i) => marks.nth(i)),
+    ...Array.from({ length: Math.min(await rest.count(), 8) }, (_, i) => rest.nth(i)),
+  ];
   const seen: Panel[] = [];
-  for (let i = 0; i < n; i++) {
-    const t = triggers.nth(i);
+  for (const t of triggers) {
     if (!(await t.isVisible().catch(() => false))) continue;
     // in a short window most rows start below the fold, and a pointer moved to a coordinate outside the
     // viewport hovers nothing — the walk came back with only the first screen's panels and every check
