@@ -14,12 +14,21 @@ test("#416 the dialog stays inside the viewport with 12 grants; Close reachable;
     });
     const id = (await r.json()).id as string;
     // 12 grants straight through the API — the dialog must absorb them without growing past the viewport.
+    //
+    // GROUPS, not invented users. This used to grant to `user:layout-grantee-0..11`, subs belonging to
+    // nobody, and #624 closed exactly that: `assertGranteeIsMember` answers 400 `not_a_member`, because a
+    // grant to a non-member left a tuple no one could ever hold. So the seeding silently produced ZERO
+    // grants and the dialog had nothing to overflow with — the fixture depended on the bug that was fixed.
+    // Groups pass the check untouched (an IdP names them; the tenant does not enrol them), and what this
+    // test is about is a dozen ROWS, not who is in them.
     for (let i = 0; i < 12; i++) {
-      await fetch(`${api}/pages/${id}/access`, {
+      const res = await fetch(`${api}/pages/${id}/access`, {
         method: "POST",
         headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-        body: JSON.stringify({ grantee: `user:layout-grantee-${i}`, relation: "view" }),
+        body: JSON.stringify({ grantee: `group:layout-grantee-${i}#member`, relation: "view" }),
       });
+      // assert the seeding, so a future refusal fails HERE instead of as "the dialog is the wrong height"
+      if (!res.ok) throw new Error(`seed grant ${i} failed: ${res.status} ${await res.text()}`);
     }
     return id;
   }, API);
@@ -75,11 +84,16 @@ test("#460: the Access tab reports the restriction count without the Restriction
   const pageId = await createScratchPage(page, "perm-tabs-460");
   await page.goto(`/p/${pageId}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
-  // restrict somebody through the API, so the dialog opens against a page that already has one
+  // Restrict somebody through the API, so the dialog opens against a page that already has one.
+  //
+  // A GROUP, for the same reason the grants above are groups: #624 put `assertGranteeIsMember` on this
+  // route too — "a restriction names somebody too — subtracting a stranger writes permanent litter"
+  // so `user:restricted-460`, a sub belonging to nobody, is now a 400. Not dev-user either: restricting
+  // the account this test is signed in as would take away the page it is about to open.
   const status = await page.evaluate(async (id) => {
     const r = await fetch(`/api/pages/${id}/restrict`, {
       method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-      body: JSON.stringify({ principal: "user:restricted-460" }),
+      body: JSON.stringify({ principal: "group:restricted-460#member" }),
     });
     return r.status;
   }, pageId);
