@@ -33,7 +33,7 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
   // plus the arrows (Ctrl-n / Ctrl-p are browser-reserved, which is why the palette chose j/k), Enter
   // confirms, Esc closes.
   const [active, setActive] = useState(0);
-  const dir = useRef<Mentionable[] | null>(null);
+  const suggestSeq = useRef(0);
   const picked = useRef<Map<string, string>>(new Map()); // "@name" → sub
 
   const onChange = async (v: string) => {
@@ -42,9 +42,18 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
     // the suggestion list at all — the same names the server now matches out of the text.
     const m = /@([\p{L}\p{N}._-]*)$/u.exec(v);
     if (!m) return setSuggest([]);
-    if (!dir.current) dir.current = await fetchMentionable(token, pageId);
-    const q = m[1]!.toLowerCase();
-    setSuggest(dir.current.filter((x) => (x.displayName ?? x.sub).toLowerCase().includes(q)).slice(0, 5));
+    // #623: the directory is filtered by the SERVER now. It used to fetch every member who can view
+    // this page and filter here, which meant the whole roster crossed the wire — and an FGA batchCheck
+    // over every member ran to build it.
+    //
+    // ⚠️ A response can land after a later keystroke has already been typed. The sequence number drops
+    // a stale answer instead of letting it overwrite the list — the same race a server-side filter
+    // created on the members screen, where three specs went red for three different-looking reasons.
+    const q = m[1]!;
+    const seq = ++suggestSeq.current;
+    const found = await fetchMentionable(token, pageId, q);
+    if (seq !== suggestSeq.current) return;
+    setSuggest(found.slice(0, 5));
     setActive(0); // a new query starts at the top (the same rule the embed picker follows)
   };
 

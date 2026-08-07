@@ -89,7 +89,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // over-ran into a NEIGHBOURING helper that happened to contain a LIMIT — the bound belonged to
   // somebody else. They are not new routes and not new debt; they are debt that was being counted
   // as paid. Classified one at a time, by reading each handler.
-  'comments.ts:/pages/:pageId/mentionable': { kind: 'debt', why: '#623 B: SELECT … FROM members with no bound, then an FGA batchCheck over EVERY member — the mention autocomplete pays for the whole roster.' },
   'auth.ts:/auth/login-options': { kind: 'debt', why: '#623 A: one row per login connection; grows with IdP configuration, not with usage.' },
 
   // ── surfaced by slice 12's SECOND instrument fix: a bound marker that belonged to a scalar subquery,
@@ -502,6 +501,9 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // `slice` caps the response in JS, so deleting the SQL bound is invisible from outside, and a paged
     // handler satisfies BOUNDED_MARKER on the word `cursor` alone.
     { file: 'routes/pages.ts', fn: 'listBranch' },
+    // #623: the mention directory. `slice` caps the answer in JS, so the SQL bound is invisible from
+    // outside — this is where it is read.
+    { file: 'routes/comments.ts', fn: 'mentionableViewers' },
     // #623: the custom-role list, serving all THREE role routes. Here for the reasons that keep
     // recurring: `slice` caps the response in JS, and a paged handler satisfies BOUNDED_MARKER on the
     // word `cursor` alone — so the sweep can no longer fail it, and this is where the SQL is read.
