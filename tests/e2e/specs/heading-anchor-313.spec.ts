@@ -148,7 +148,14 @@ test("#313 TOC click reflects the heading in the URL hash (replaceState, no hist
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   const id = await authorAndPublish(page, "anchor-toc-hash");
-  await page.setViewportSize({ width: 1360, height: 800 }); // wide → TOC rail
+  // Wide enough for the RAIL, which is the variant with clickable items. 1360 was not: the rail's fit
+  // is decided by the CONTAINER, not the viewport (`railFitsIn` — `w/2 - 370 - 32 >= 210`, so ≥1224px
+  // of container), and with the sidebar open a 1360px window leaves 1100. Below that the OVERLAY shows
+  // instead, and the overlay is `opacity: 0` until the reader scrolls — it peeks, it does not sit there.
+  // Measured: the item was present, `fixed z-30`, and `elementFromPoint` at its centre returned
+  // `.cm-scroller`, so the click retried for the full 60s against something nobody can see. 1900 is the
+  // width `toc-rail-fit-593` uses for the same reason.
+  await page.setViewportSize({ width: 1900, height: 900 });
   await page.goto(`/p/${id}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
   await page.getByTestId("toc-item").filter({ hasText: "対象見出し" }).first().click();
