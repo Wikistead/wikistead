@@ -181,10 +181,18 @@ test("#219: truncated sidebar page titles get a hover tooltip; fully-visible one
 
   const longSpan = page.locator("[data-testid=tree-page-name]", { hasText: "A very very long" });
   const shortSpan = page.locator("[data-testid=tree-page-name]", { hasText: /^short$/ });
+  // Measured by what APPEARS, not by an attribute. #630/#530 replaced the native `title` with one
+  // tooltip host: the row carries `data-tip-if-truncated` whether or not the name is clipped, and the
+  // host decides at hover time by measuring. So the attribute is present in BOTH cases and asserting it
+  // would say a fully-visible title has a tooltip too — the distinction this test exists for.
+  const tip = page.locator(".wks-tip");
   await longSpan.hover();
-  await sleep(120);
-  await expect(longSpan, "a truncated title shows its full text as a tooltip").toHaveAttribute("title", long);
+  await expect(tip, "a truncated title shows its full text as a tooltip").toHaveText(long, { timeout: 3000 });
+  // …and gone for one that fits. HIDDEN, not absent: #630 keeps the panel mounted through its exit so
+  // it fades rather than blinking off, so counting elements would fail on a tooltip nobody can see.
+  await page.mouse.move(4, 4);
+  await expect(tip).toBeHidden({ timeout: 3000 });
   await shortSpan.hover();
-  await sleep(120);
-  expect(await shortSpan.getAttribute("title"), "a fully-visible title gets no tooltip").toBe("");
+  await sleep(600);
+  await expect(tip, "a fully-visible title gets no tooltip").toBeHidden();
 });

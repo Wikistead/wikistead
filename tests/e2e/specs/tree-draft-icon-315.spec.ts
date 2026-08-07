@@ -20,7 +20,9 @@ test("#315 draft row: FilePen icon + tooltip + dimmed title, no text pill, no do
 
   const draftIcon = row.locator("[data-testid=tree-draft-icon]");
   await expect(draftIcon).toBeVisible();
-  await expect(draftIcon).toHaveAttribute("title", /.+/); // discoverability tooltip survives the pill removal
+  // #630/#530: one mechanism for every floating explanation — `data-tip`, read by the shared tooltip
+  // host. The native `title` this used to assert is set by nothing any more.
+  await expect(draftIcon).toHaveAttribute("data-tip", /.+/); // discoverability tooltip survives the pill removal
   await expect(row.locator("[data-testid=tree-draft-badge]")).toHaveCount(0); // the pill is gone
   await expect(row.locator("[data-testid=unpublished-dot]")).toHaveCount(0); // draft ≠ dirty
 

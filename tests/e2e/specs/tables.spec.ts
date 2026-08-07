@@ -68,7 +68,10 @@ test("#216 comment 874: the RichUI-entry pill shows on the RAW-editing state (ca
   expect(await content.innerText()).toContain("| Name | Age |"); // raw source visible (caret-in)
   const btn = page.getByTestId("table-richui-enter");
   await expect(btn).toHaveCount(1);
-  await expect(btn).toHaveAttribute("title", /Ctrl\+Enter/);
+  // #630/#530: the hover explanation is `data-tip`, not the native `title` — this repo moved every
+  // floating explanation onto one mechanism, and the pill went with it. Reading `title` read an attribute
+  // nothing sets any more and got "".
+  await expect(btn).toHaveAttribute("data-tip", /Ctrl\+Enter/);
   await expect(btn).toContainText("Ctrl+↵"); // comment 860/874: visible key hint (not a tooltip)
   // Always visible without any hover (the show/no-show regression was hover-dependency).
   const opacityNoHover = Number(await btn.evaluate((el) => getComputedStyle(el).opacity));
