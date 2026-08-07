@@ -1817,6 +1817,114 @@ const decodeCursor = (c: string | undefined): { position: number; id: string } |
   return Number.isFinite(position) ? { position, id: c!.slice(at + 1) } : null
 }
 
+/** #623 / ADR-220 §1: how many children one branch response may carry. */
+export const BRANCH_PAGE_LIMIT = 100
+
+export interface BranchPage { pages: Page[]; nextCursor: string | null }
+
+/**
+ * One BRANCH of the page tree: the children of one parent, ordered `position, created_at`.
+ *
+ * ADR-220 §1. The unit is a branch rather than a window over the whole space, because a DFS cursor
+ * would encode a position in a traversal that changes whenever the reader opens a node — a cursor that
+ * means something different on each request, which is the shape #574 called silent truncation.
+ *
+ * §8 — THE CURSOR NAMES THE ANCHOR ROW BY ID, and this resolves its `(position, created_at)` here.
+ * `position` is user-controlled, not monotonic and NOT unique, and `rebalanceSiblings` rewrites every
+ * sibling's position when a gap collapses; a renumber moves rows across a literal cursor value in both
+ * directions, so rows can be SKIPPED — the direction that hides. A rebalance preserves visible order,
+ * so an anchor resolved after one lands in the same place. An anchor that no longer exists restarts the
+ * branch from the top rather than guessing, and the caller is told which it got.
+ *
+ * §2 — the caller NAMES the parent, which is new attack surface. `view` is confirmed on the parent
+ * itself, and absent / another tenant's / another space's / invisible all answer ONE identical 404. Four
+ * different answers would make the tree a membership oracle for page ids.
+ *
+ * §3 — parent visibility implies nothing about a child: a direct grant cascades down but a public grant
+ * does not, and `private` propagates independently. Every row is confirmed on its own, and a row the
+ * reader cannot see is ABSENT with no gap to infer it from.
+ */
+export async function listBranch(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: {
+    spaceId: string
+    parentId: string | null
+    subject: string
+    context?: { current_time: string }
+    limit?: number
+    cursor?: string
+  },
+): Promise<BranchPage & { restarted: boolean }> {
+  const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
+  const limit = Math.min(500, Math.max(1, args.limit ?? BRANCH_PAGE_LIMIT))
+
+  // §2. The ROOT branch is gated on the space; a named parent is gated on itself, and every refusal
+  // below answers the same 404 — including "this page is in a different space", which a caller could
+  // otherwise use to test whether an id belongs here.
+  if (args.parentId === null) {
+    // `space#viewer` is the model's read relation (there is no `space#view`) — and it is the one the
+    // guest arm needs too: a share_link is a direct type on `viewer`, so this one predicate answers for
+    // members and for a space link alike.
+    if (!(await checkRelation(fga, args.subject, 'viewer', { type: 'space', id: args.spaceId }, args.context))) {
+      throw notFound()
+    }
+  } else {
+    const [row] = await db.sql<[{ space_id: string; deleted_at: Date | null }?]>`
+      SELECT space_id, deleted_at FROM pages WHERE id = ${args.parentId}`
+    // absent, trashed, or in another space — one answer, and the tenant boundary is the RLS handle's
+    if (!row || row.deleted_at || row.space_id !== args.spaceId) throw notFound()
+    if (!(await checkRelation(fga, args.subject, 'view', { type: 'page', id: args.parentId }, args.context))) {
+      throw notFound()
+    }
+  }
+
+  // §8: resolve the anchor. A cursor naming a row that is gone restarts the branch — said out loud in
+  // the answer, because the caller has to REPLACE what it holds rather than append to it.
+  // ⚠️ The anchor's instant comes back as an EPOCH, not a Date. Handing the driver a timestamp loses
+  // its microseconds, and pages created in one action are microseconds apart — measured right here: the
+  // walk returned three children twice before this line said `extract(epoch …)`. Same defect this
+  // ticket found in five other routes, made once more while fixing them.
+  let anchor: { position: number; at: string } | null = null
+  let restarted = false
+  if (args.cursor) {
+    const [row] = await db.sql<[{ position: number; at: string }?]>`
+      SELECT position, extract(epoch from created_at)::text AS at FROM pages
+       WHERE id = ${args.cursor} AND space_id = ${args.spaceId} AND deleted_at IS NULL`
+    if (row) anchor = row
+    else restarted = true
+  }
+
+  // §1: the home-page exclusion is a predicate on EVERY row, not a root-only filter — an implementer
+  // reading an abridged version of this query would re-introduce the space home into the tree.
+  const rows = await db.sql<PageRow[]>`
+    SELECT p.id, p.tenant_id, p.space_id, p.parent_id, p.title, p.position, p.created_at, p.updated_at,
+           p.has_unpublished_changes, (p.published_at IS NOT NULL) AS published, p.task_done, p.task_total
+    FROM pages p JOIN spaces s ON s.id = p.space_id
+    WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL
+      AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+      AND ${args.parentId === null ? db.sql`p.parent_id IS NULL` : db.sql`p.parent_id = ${args.parentId}`}
+      ${anchor ? db.sql`AND (p.position, p.created_at) > (${anchor.position}, to_timestamp(${anchor.at}::numeric))` : db.sql``}
+    ORDER BY p.position, p.created_at
+    LIMIT ${limit + 1}
+  `
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  // THE CURSOR COMES FROM THE LAST SQL ROW, NOT THE LAST VISIBLE ONE. The confirm below removes rows,
+  // so a full page can yield none the reader may see; taking the anchor from the filtered result would
+  // leave the walk with nothing to resume from and every child after it unreachable.
+  const lastRow = page[page.length - 1]
+  const nextCursor = hasMore && lastRow ? lastRow.id : null
+
+  // §3: every row on its own. `filterAuthorized` keeps the bounded lanes #541 established.
+  const visible = new Set(await filterAuthorized(fga, args.subject, 'view', page.map((r) => r.id), args.context))
+  return {
+    pages: page.filter((r) => visible.has(r.id)).map(toPage),
+    nextCursor,
+    restarted,
+  }
+}
+
 export async function listSpacePagesOverview(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -3893,6 +4001,41 @@ export async function pagesPlugin(app: FastifyInstance) {
     const firstN = firstRaw != null ? Math.min(100, Math.max(1, Number.parseInt(firstRaw, 10) || 0)) || undefined : undefined
     return listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context, firstN })
   })
+
+  // #623 / ADR-220 §1-§3: ONE BRANCH of the tree — the children of one parent, bounded and keyset-paged.
+  //
+  // Additive: `/spaces/:spaceId/pages` still answers the whole space, and the sidebar still reads it.
+  // Moving the client onto branches is the next slice; landing the surface first means its refusals can
+  // be pinned before anything depends on them.
+  //
+  // ⚠️ The caller NAMES the parent here, which the whole-space route never allowed. Every refusal is one
+  // 404 — see listBranch. The guest arm is bound to its own space exactly as the whole-space route is.
+  app.get<{ Params: { spaceId: string }; Querystring: { parent?: string; cursor?: string; limit?: string } }>(
+    '/spaces/:spaceId/pages/branch', { config: { guest: 'view' } }, async (req, reply) => {
+      let subject: string
+      let context: { current_time: string } | undefined
+      if (req.user) {
+        subject = `user:${req.user.sub}`
+      } else if (req.guest) {
+        if (req.guest.resource.type !== 'space' || req.guest.resource.id !== req.params.spaceId) {
+          return reply.code(403).send({ error: 'forbidden' })
+        }
+        subject = `share_link:${req.guest.shareLinkId}`
+        context = { current_time: new Date().toISOString() }
+      } else {
+        return reply.code(401).send({ error: 'unauthorized' })
+      }
+      const asked = Number.parseInt(req.query.limit ?? '', 10)
+      // `parent` absent (or the literal "root") means the space's root branch.
+      const parentRaw = req.query.parent
+      const parentId = !parentRaw || parentRaw === 'root' ? null : parentRaw
+      return listBranch(req.db, app.fga, {
+        spaceId: req.params.spaceId, parentId, subject,
+        ...(context ? { context } : {}),
+        ...(Number.isFinite(asked) ? { limit: asked } : {}),
+        ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+      })
+    })
 
   // #270: the guest reader-chrome's space HEADER (name + public icon only). Guest-capable + resource-bound
   // (same guard as /pages): a member sees any space they can view; a space-link guest ONLY its bound space.

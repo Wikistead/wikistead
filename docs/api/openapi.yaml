@@ -355,6 +355,27 @@ paths:
       parameters: [ { name: commentId, in: path, required: true, schema: { type: string } } ]
       responses: { "204": { description: Deleted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   # ── Attachments ──────────────────────────────────────────────────────────
+  /spaces/{spaceId}/pages/branch:
+    get:
+      operationId: listSpacePageBranch
+      tags: [spaces]
+      summary: One branch of the page tree — the children of one parent, bounded and keyset-paged
+      description: >-
+        ADR-220. The unit is a branch, not a window over the space: a cursor into a depth-first walk
+        would mean something different once the reader opens a node. The caller names the parent, so
+        `view` is confirmed on the parent itself and every refusal — absent, another tenant's, another
+        space's, not viewable — answers one identical 404. Each row is confirmed on its own; a row the
+        caller cannot see is absent, with no gap. `cursor` names the ANCHOR ROW BY ID and the server
+        resolves its position per request, because a sibling renumber moves rows across a literal
+        position in both directions; when the anchor is gone the branch restarts and says so
+        (`restarted`), which means the caller must replace what it holds rather than append to it.
+      parameters:
+        - { $ref: "#/components/parameters/spaceId" }
+        - { name: parent, in: query, required: false, schema: { type: string }, description: "The parent page id; absent or `root` means the space's top level." }
+        - { name: cursor, in: query, required: false, schema: { type: string }, description: "The id of the last row already held." }
+        - { name: limit, in: query, required: false, schema: { type: integer }, description: "Rows per response (clamped)." }
+      responses: { "200": { description: One page of the branch }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
+
   /spaces/{spaceId}/pages/{pageId}/attachments/presign:
     post:
       operationId: createAttachmentPresign
