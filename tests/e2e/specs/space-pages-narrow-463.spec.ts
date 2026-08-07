@@ -10,7 +10,8 @@ async function openPagesTab(page: import("@playwright/test").Page) {
   await openDemo(page);
   const spaceId = await page.evaluate(async (api) => {
     const r = await fetch(`${api}/spaces`, { headers: { Authorization: "Bearer dev-token" } });
-    const spaces = (await r.json()) as { id: string; name: string }[];
+    const body = (await r.json()) as { spaces?: { id: string; name: string }[] } | { id: string; name: string }[];
+    const spaces = Array.isArray(body) ? body : (body.spaces ?? []);
     return spaces[0]!.id;
   }, API);
   await page.goto(`/spaces/${spaceId}/settings/pages`);
