@@ -1,3 +1,5 @@
+// #623 / ADR-220 §6.2: the tree route answers `{ pages, truncated }` now — the state has nowhere to
+// live in a bare array, and a quiet cut was the only thing the old contract could express.
 // #104 / ADR-038: a space-link guest VIEWS the space's pages over HTTP. Real Postgres +
 // OpenFGA + Fastify. The space token lists the space pages and reads any in-space published
 // page; an out-of-space page is denied (FGA re-derives authority; never a cross-space leak).
@@ -53,7 +55,7 @@ describe('#104 space-link guest HTTP view', () => {
   it('lists the linked space pages (the navigation source)', async () => {
     const res = await app.inject({ method: 'GET', url: `/spaces/${SA}/pages`, headers: H })
     expect(res.statusCode).toBe(200)
-    expect((res.json() as { id: string }[]).map((p) => p.id)).toContain(PA)
+    expect((res.json() as { pages: { id: string }[] }).pages.map((p) => p.id)).toContain(PA)
   })
 
   it('reads an in-space published page', async () => {

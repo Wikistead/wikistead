@@ -1997,6 +1997,15 @@ export async function paintTree(
   return { branches }
 }
 
+/**
+ * #623 / ADR-220 §6.2: how many rows a GUEST's whole-space tree may show.
+ *
+ * The guest shell draws this list unvirtualised and fully expanded, so it is the surface where an
+ * enormous tree actually costs the reader something. The cap comes with a visible state — never a quiet
+ * cut — because a link whose tree is too large to draw should say so rather than look complete.
+ */
+export const GUEST_TREE_CAP = 500
+
 /** #623 / ADR-220 §6.1: how many pages one FLAT listing may carry. */
 export const FLAT_PAGES_LIMIT = 200
 
@@ -4122,7 +4131,15 @@ export async function pagesPlugin(app: FastifyInstance) {
     // #541: ?first=N → the partial first paint (clamped; see listPages). The full request follows it.
     const firstRaw = (req.query as { first?: string } | undefined)?.first
     const firstN = firstRaw != null ? Math.min(100, Math.max(1, Number.parseInt(firstRaw, 10) || 0)) || undefined : undefined
-    return listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context, firstN })
+    const pages = await listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context, firstN })
+    // #623 / ADR-220 §6.2: the GUEST shell renders this unvirtualised and fully expanded, so its bound
+    // is a CAP WITH A VISIBLE STATE rather than a quiet cut. A space link's tree is small in the
+    // ordinary case; in the extraordinary one a loud refusal beats a lie, and the shell says so.
+    //
+    // Members are NOT capped here — the branch route is their answer, and capping the whole-space read
+    // would be the silent truncation this ticket exists to remove.
+    const capped = req.guest && pages.length > GUEST_TREE_CAP
+    return { pages: capped ? pages.slice(0, GUEST_TREE_CAP) : pages, truncated: Boolean(capped) }
   })
 
   // #623 / ADR-220 §5: the first paint — the root branch plus the path to the open page.

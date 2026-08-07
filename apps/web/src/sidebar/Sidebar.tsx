@@ -76,7 +76,7 @@ function SidebarImpl() {
 
   const pagesQ = useQuery({
     queryKey: ["pages", current],
-    queryFn: () => apiFetch<Page[]>(`/spaces/${current}/pages`, token).then((r) => r ?? []),
+    queryFn: () => apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${current}/pages`, token).then((r) => r?.pages ?? []),
     enabled: !!current,
     staleTime: 30_000,
     // #492: the page tree is boot-critical — a transient failure used to stick as an empty sidebar until a
@@ -92,7 +92,7 @@ function SidebarImpl() {
   // unless the full confirm denies it (the server stays the fortress on both requests).
   const pagesFirstQ = useQuery({
     queryKey: ["pages-first", current],
-    queryFn: () => apiFetch<Page[]>(`/spaces/${current}/pages?first=40`, token).then((r) => r ?? []),
+    queryFn: () => apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${current}/pages?first=40`, token).then((r) => r?.pages ?? []),
     enabled: !!current && pagesQ.data === undefined,
     staleTime: 0,
     gcTime: 30_000,
