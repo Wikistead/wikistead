@@ -55,7 +55,12 @@ const ROUTES = resolve(import.meta.dirname, '../routes')
  */
 const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: string }> = {
   // ── debt: genuinely grows with a tenant's data, and #623 owes it a bound ───────────────────────
-  'account.ts:/me/activity': { kind: 'debt', why: '#623 B: one row per thing the person did; grows for ever.' },
+  // ⚠️ Was a 'debt' line reading "one row per thing the person did; grows for ever". Measured, and
+  // that was never true: the query buckets by CALENDAR DAY inside a twelve-month window, so the
+  // response is at most a year of days however much the person did, and the account getting older
+  // does not make it longer. The scan cannot see either half — `withoutSubqueries` strips the
+  // derived tables they live in — so the claim is stated here and CHECKED in activity-window-623.
+  'account.ts:/me/activity': { kind: 'bounded', why: 'GROUP BY calendar day inside a twelve-month window: at most ~367 rows, and a busy day is one row. Pinned by activity-window-623, because the scan strips the derived tables the window and the grouping live in.' },
   'members.ts:/admin/analytics': { kind: 'debt', why: '#623 B: a row per day per page; grows with the tenant and with time.' },
   'members.ts:/members/invites': { kind: 'debt', why: '#623 A: one row per pending invitation (#638 boxed the UI, not the payload).' },
   'notifications.ts:/notifications/unread-count': { kind: 'bounded', why: 'the count stops at UNREAD_BADGE_CAP + 1 — the number the bell already refuses to print past (it renders 99+). The LIMIT lives in a derived table, which withoutSubqueries strips before looking for a bound, so this line states what the scan cannot see rather than the scan being loosened to see it.' },
