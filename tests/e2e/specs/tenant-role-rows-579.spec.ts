@@ -1,5 +1,25 @@
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { sleep } from "../helpers";
+
+/**
+ * Narrow the member table, and do not come back until the SERVER has answered.
+ *
+ * #623 slice 2 (63665f68) made this filter a debounced server query — 250ms, then a fetch, then the
+ * table re-renders with what the server matched. Every caller below then acts on a ROW, and typing
+ * and acting straight away acts on the PRE-filter page: the response lands mid-interaction and takes
+ * the row (and any Select opened on it) with it. Measured here as "option not found" — the dropdown
+ * was open, the re-render unmounted it, and the options it was holding stopped existing — and in
+ * `admin-roles-420` as the option node detaching mid-click. One race, two faces.
+ *
+ * Waiting for the response is not enough on its own: the response arriving and the row being redrawn
+ * are two moments, so the caller must also wait for the row it wants. Callers below do that with the
+ * assertion they were already making.
+ */
+async function filterMembers(page: Page, q: string): Promise<void> {
+  const landed = page.waitForResponse((r) => r.url().includes(`q=${encodeURIComponent(q)}`), { timeout: 15_000 });
+  await page.getByTestId("members-filter").fill(q);
+  await landed;
+}
 
 // #579: /admin/members has ONE place where a tenant role is given or taken — the member's own row.
 // The screen used to have two: a Select on the row for the built-in role, and a separate form above
@@ -87,7 +107,7 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
 
     // narrow to ONE member with the table filter, then work on that row — the fixture's display name
     // is not something this spec should hard-code (it differs between the dev and e2e seeds)
-    await page.getByTestId("members-filter").fill("dev");
+    await filterMembers(page, "dev");
     await expect(page.getByTestId("member-roles").first()).toBeVisible({ timeout: 8000 });
     const rowRoles = page.getByTestId("member-roles").first();
 
@@ -104,7 +124,7 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(rowRoles.getByTestId("member-role-select"), "the control now shows what they have").toHaveText(roleA, { timeout: 8000 });
 
     await page.reload();
-    await page.getByTestId("members-filter").fill("dev");
+    await filterMembers(page, "dev");
     const after = page.getByTestId("member-roles").first();
     await expect(after.getByTestId("member-role-select"), "and it survives a reload — the server said so").toHaveText(roleA, { timeout: 10_000 });
 
@@ -113,7 +133,7 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await page.getByRole("option", { name: roleB }).click();
     await expect(after.getByTestId("member-role-select")).toHaveText(roleB, { timeout: 8000 });
     await page.reload();
-    await page.getByTestId("members-filter").fill("dev");
+    await filterMembers(page, "dev");
     const reloaded = page.getByTestId("member-roles").first();
     await expect(reloaded.getByTestId("member-role-select"), "the replacement stuck").toHaveText(roleB, { timeout: 10_000 });
     await expect(reloaded.getByTestId("member-role-chip"), "no chips: there is no set to draw").toHaveCount(0);
@@ -124,10 +144,10 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     // to give a role to, and the review rejected it — the route was invisible (nothing on screen
     // said typing here could create anything) and it had neither completion nor the confirmed/unconfirmed
     // distinction. Adding is now the shared form above the table, so the filter is a filter again.
-    await page.getByTestId("members-filter").fill("nobody-matches-this");
+    await filterMembers(page, "nobody-matches-this");
     await expect(page.getByTestId("member-row-group"), "no existing group matches").toHaveCount(0, { timeout: 8000 });
     await expect(page.getByTestId("member-row-new-group"), "and the filter does not confer roles").toHaveCount(0);
-    await page.getByTestId("members-filter").fill("dev");
+    await filterMembers(page, "dev");
     await expect(page.getByTestId("member-roles").first()).toBeVisible();
 
     // The ADD FORM is the second door to the same state (2026-08-04 ruling): pick the person, pick a
@@ -180,7 +200,7 @@ test("#579 ①: a group gets a tenant role from the MEMBER TABLE, by name", asyn
     await page.getByRole("option", { name: roleName }).click();
     await page.getByTestId("tenant-grant-add").click();
 
-    await page.getByTestId("members-filter").fill(groupName);
+    await filterMembers(page, groupName);
     const row = page.getByTestId("member-row-group").filter({ hasText: groupName });
     await expect(row, "the group appears with its NAME, never a hash").toBeVisible({ timeout: 8000 });
     await expect(row).not.toContainText(/[0-9a-f]{24}/);
