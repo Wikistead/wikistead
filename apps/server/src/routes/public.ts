@@ -198,7 +198,16 @@ const PUBLIC_RENDER_CACHE_TTL_S = 600
 // cursor advances past the last candidate EXAMINED rather than the last one emitted — otherwise a rejected
 // row at the boundary would be re-examined forever. A short page therefore does not mean the end; only a
 // null cursor does.
-export type PublicListRow = { id: string; title: string; created_at: string | Date }
+export type PublicListRow = { id: string; title: string; created_at: string | Date; cursor_at?: string }
+/**
+ * `createdAt` is an EPOCH NUMERIC as a string (#623), not an ISO timestamp.
+ *
+ * The distinction is the whole of that ticket on this route: an ISO string stops at milliseconds and
+ * `created_at` is a timestamptz(6), so a cursor built from one names an earlier instant than the row it
+ * came from — and on this DESC walk that skips rows rather than repeating them. `decodePublicCursor`
+ * normalises whatever arrives, so a caller constructing this by hand is the one place the shape has to
+ * be got right deliberately.
+ */
 export type PublicPageWindow = { limit: number; after: { createdAt: string; id: string } | null }
 
 export const PUBLIC_PAGES_LIMIT = 100
@@ -208,8 +217,21 @@ const CONFIRM_OVER_FETCH = 2
 /** …and how many such windows ONE request may spend looking. Past this the response is short, not longer. */
 const CONFIRM_MAX_WINDOWS = 3
 
+// #623: an epoch NUMERIC, never an ISO string. `created_at` is a timestamptz(6) and `toISOString`
+// stops at milliseconds, so a cursor built from one names an earlier instant than the row it came from.
+// On this DESC walk that does not duplicate — it SKIPS: every page whose `created_at` falls between the
+// truncated instant and the true one is on the wrong side of `<` and appears on no page at all. A
+// published page missing from the public listing is invisible to the reader and to us.
+//
+// `cursor_at` comes from SQL (`extract(epoch …)`) so nothing rounds it. The fallback keeps old cursors
+// readable rather than 400ing a reader mid-walk; it is the truncating path, which is why it is a
+// fallback and not the spelling.
+/** The instant a cursor is built from, at full precision — from SQL when the row came from SQL. */
+const cursorAtOf = (r: PublicListRow): string =>
+  r.cursor_at ?? String(new Date(r.created_at).getTime() / 1000)
+
 export const encodePublicCursor = (r: PublicListRow): string =>
-  `${new Date(r.created_at).toISOString()}|${r.id}`
+  `${cursorAtOf(r)}|${r.id}`
 
 export function decodePublicCursor(c: string | undefined): { createdAt: string; id: string } | null {
   if (!c) return null
@@ -217,8 +239,13 @@ export function decodePublicCursor(c: string | undefined): { createdAt: string; 
   if (at <= 0) return null
   const createdAt = c.slice(0, at)
   const id = c.slice(at + 1)
-  if (!id || Number.isNaN(Date.parse(createdAt))) return null
-  return { createdAt, id }
+  // A number now. An ISO string from a cursor minted before this change still parses — Date.parse
+  // accepts it — and is converted, so a reader paging through does not meet a 400.
+  const asNumber = Number(createdAt)
+  if (Number.isFinite(asNumber)) return { createdAt: String(asNumber), id }
+  const parsed = Date.parse(createdAt)
+  if (Number.isNaN(parsed)) return null
+  return { createdAt: String(parsed / 1000), id }
 }
 
 /**
@@ -232,14 +259,14 @@ export function publicPageLoaders(tenantId: string) {
       // `pages.id` is TEXT, not uuid (migration 002) — a `::uuid` cast here made every cursor-following
       // request fail with "operator does not exist: text < uuid". Found by the real-database pin below;
       // no amount of stubbing would have shown it.
-      ? tx`AND (created_at, id) < (${win.after.createdAt}::timestamptz, ${win.after.id})`
+      ? tx`AND (created_at, id) < (to_timestamp(${win.after.createdAt}::numeric), ${win.after.id})`
       : tx``
   return {
     // list_objects returns public page IDs across the entire shared FGA store; the RLS-scoped query
     // narrows to this tenant's pages only. Same anonymous principal as the single-page check.
     loadByIds: async (ids: string[], win: PublicPageWindow) => await withTenantTx(tenantId, async (tx) => {
       return tx<PublicListRow[]>`
-        SELECT id, title, created_at FROM pages
+        SELECT id, title, created_at, extract(epoch from created_at)::text AS cursor_at FROM pages
         WHERE id = ANY(${ids})
           AND published_at IS NOT NULL
           ${window(tx, win)}
@@ -249,7 +276,7 @@ export function publicPageLoaders(tenantId: string) {
     }) as PublicListRow[],
     loadPublishedCandidates: async (win: PublicPageWindow) => await withTenantTx(tenantId, async (tx) => {
       return tx<PublicListRow[]>`
-        SELECT id, title, created_at FROM pages
+        SELECT id, title, created_at, extract(epoch from created_at)::text AS cursor_at FROM pages
         WHERE published_at IS NOT NULL AND deleted_at IS NULL
           ${window(tx, win)}
         ORDER BY created_at DESC, id DESC
@@ -288,7 +315,10 @@ export async function listPublicPages(
       if (candidates.length === 0) return { items, nextCursor: null }
       const confirmed = await filterAuthorized(fga, ANON, 'view', candidates.map((r) => r.id), undefined, 'page', 4)
       for (const r of candidates) {
-        cursor = { createdAt: new Date(r.created_at).toISOString(), id: r.id }
+        // #623: the SAME epoch-numeric shape the window expects. This one is the loop's own cursor,
+        // not the response's, and it was the last ISO string left — a window advanced by a rounded
+        // instant re-reads candidates it has already examined, which is the budget being spent twice.
+        cursor = { createdAt: cursorAtOf(r), id: r.id }
         if (confirmed.has(r.id)) items.push({ id: r.id, title: r.title })
         if (items.length >= limit) return { items, nextCursor: encodePublicCursor(r) }
       }

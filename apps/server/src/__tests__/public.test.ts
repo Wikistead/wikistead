@@ -202,7 +202,9 @@ describe('#623: the public listing reads a window at a time', () => {
 
     const first = await loaders.loadPublishedCandidates({ limit: 1, after: null })
     expect(first, 'LIMIT 1 means one row').toHaveLength(1)
-    const after = { createdAt: new Date(first[0]!.created_at).toISOString(), id: first[0]!.id }
+    // #623: the window takes an EPOCH NUMERIC, not an ISO string — an ISO one stops at milliseconds
+    // and would skip every page between the truncated instant and the true one.
+    const after = { createdAt: String(new Date(first[0]!.created_at).getTime() / 1000), id: first[0]!.id }
     const next = await loaders.loadPublishedCandidates({ limit: 50, after })
     expect(next.map((r) => r.id), 'the keyset excludes the row it resumed from').not.toContain(first[0]!.id)
     expect(next.length, 'and returns the rest').toBe(all.length - 1)
