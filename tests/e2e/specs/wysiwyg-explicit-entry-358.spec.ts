@@ -10,7 +10,10 @@ test("#358: WYSIWYG — Ctrl+Enter reveals a details block for editing; auto car
   const page = await (await browser.newContext()).newPage();
   await openScratch(page, "wys-entry-358");
   await enterEdit(page);
-  await page.click("[data-pane=preview] .cm-content");
+  // The OUTER editor. Once a details block is opened for editing there are two `.cm-content` on this
+  // pane — the document's and the island's (`details-edit-body`, #278/#524) — and Playwright refuses an
+  // ambiguous locator in strict mode. The nested one carries a testid; the document's does not.
+  await page.click("[data-pane=preview] .cm-content:not([data-testid])");
   await page.keyboard.insertText(":::details[More]\nhidden body\n:::\n\nafter\n");
   await sleep(400);
   await page.getByTestId("displaymode-wysiwyg").click();
@@ -19,14 +22,14 @@ test("#358: WYSIWYG — Ctrl+Enter reveals a details block for editing; auto car
   // rendered as the summary bar; the raw ::: syntax is hidden (WYSIWYG)
   const bar = page.getByTestId("details-summary-bar");
   await expect(bar).toBeVisible();
-  let raw = await page.locator("[data-pane=preview] .cm-content").innerText();
+  let raw = await page.locator("[data-pane=preview] .cm-content:not([data-testid])").innerText();
   expect(raw).not.toContain(":::details");
 
   // #164 non-regression: NAVIGATING the caret onto the block must NOT auto-reveal in WYSIWYG.
-  await page.click("[data-pane=preview] .cm-content"); // caret into the doc (lands after the block)
+  await page.click("[data-pane=preview] .cm-content:not([data-testid])"); // caret into the doc (lands after the block)
   await page.keyboard.press("Control+Home");           // caret to doc start = onto the details atom
   await sleep(300);
-  raw = await page.locator("[data-pane=preview] .cm-content").innerText();
+  raw = await page.locator("[data-pane=preview] .cm-content:not([data-testid])").innerText();
   expect(raw).not.toContain(":::details"); // still the widget — automatic reveal stays suppressed
   await expect(page.getByTestId("details-summary-bar")).toBeVisible();
 
@@ -35,14 +38,14 @@ test("#358: WYSIWYG — Ctrl+Enter reveals a details block for editing; auto car
   await page.keyboard.press("Control+Enter");
   await sleep(400);
   await expect(page.getByTestId("details-editui")).toBeVisible({ timeout: 5000 });
-  raw = await page.locator("[data-pane=preview] .cm-content").innerText();
+  raw = await page.locator("[data-pane=preview] .cm-content:not([data-testid])").innerText();
   expect(raw, "no raw fences while editing").not.toContain(":::details");
   await expect(page.getByTestId("details-summary-bar")).toHaveCount(0);
 
   // Esc exits the panel → the rendered widget returns.
   await page.keyboard.press("Escape");
   await sleep(400);
-  raw = await page.locator("[data-pane=preview] .cm-content").innerText();
+  raw = await page.locator("[data-pane=preview] .cm-content:not([data-testid])").innerText();
   expect(raw).not.toContain(":::details");
   await expect(page.getByTestId("details-summary-bar")).toBeVisible();
 });
