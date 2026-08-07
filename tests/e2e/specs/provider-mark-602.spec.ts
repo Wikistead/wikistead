@@ -20,7 +20,10 @@ test("#602: the sign-in button carries its provider's mark, and only when it has
         ],
       }),
     }));
-  await page.goto("/auth/login");
+  // `/login`, the SCREEN. `/auth/login` is the server route that STARTS the OIDC redirect
+  // (`auth.ts`), so going there hands the browser to the IdP and no button of ours ever renders —
+  // which is why this read as "the sign-in button is missing". `login-screen-261` uses `/login`.
+  await page.goto("/login");
   await expect(page.getByTestId("login-signin")).toBeVisible({ timeout: 15_000 });
 
   // the primary button is the preset one: it draws a mark
