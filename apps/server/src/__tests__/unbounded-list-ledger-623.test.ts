@@ -495,6 +495,10 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // #623: the analytics series. Both roll-up routes lean on this one cap, and a behavioural pin
     // cannot see it — the response is short either way until a tenant has more than 400 days of data.
     { file: 'analytics/rollup.ts', fn: 'rollupPageViews' },
+    // #623 / ADR-220 §1: one branch of the page tree. Here for the reason that keeps recurring
+    // `slice` caps the response in JS, so deleting the SQL bound is invisible from outside, and a paged
+    // handler satisfies BOUNDED_MARKER on the word `cursor` alone.
+    { file: 'routes/pages.ts', fn: 'listBranch' },
     // #623: the custom-role list, serving all THREE role routes. Here for the reasons that keep
     // recurring: `slice` caps the response in JS, and a paged handler satisfies BOUNDED_MARKER on the
     // word `cursor` alone — so the sweep can no longer fail it, and this is where the SQL is read.
