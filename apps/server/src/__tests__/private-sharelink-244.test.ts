@@ -1,3 +1,5 @@
+// #623 / ADR-220 §6.2: the tree route answers `{ pages, truncated }` now — the state has nowhere to
+// live in a bare array, and a quiet cut was the only thing the old contract could express.
 // #244 / ADR-098 addendum: a space-share-link GUEST must NOT reach a PRIVATE page in the linked space.
 //
 // Root cause: the per-page PRIVATE marker was `user:*` ONLY, and OpenFGA's typed wildcard `user:*` matches
@@ -130,7 +132,7 @@ describe('#244 space-link guest ⊥ private page (HTTP end to end)', () => {
   it('does not see the private page in the space page list (but sees the public one)', async () => {
     const res = await app.inject({ method: 'GET', url: `/spaces/${SA}/pages`, headers: H })
     expect(res.statusCode).toBe(200)
-    const ids = (res.json() as { id: string }[]).map((p) => p.id)
+    const ids = (res.json() as { pages: { id: string }[] }).pages.map((p) => p.id)
     expect(ids).toContain(PUB)
     expect(ids).not.toContain(PRIV)
   })
@@ -138,6 +140,8 @@ describe('#244 space-link guest ⊥ private page (HTTP end to end)', () => {
   it('does not leak the private page as a backlink of the public page (#230 discovery path)', async () => {
     const res = await app.inject({ method: 'GET', url: `/pages/${PUB}/backlinks`, headers: H })
     expect(res.statusCode).toBe(200)
+    // ⚠️ /backlinks still answers a bare array — only the TREE route changed shape. A blanket
+    // search-and-replace rewrote this line too and it failed with "cannot read 'map' of undefined".
     const ids = (res.json() as { id: string }[]).map((p) => p.id)
     expect(ids).not.toContain(PRIV)
   })

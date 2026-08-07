@@ -47,7 +47,7 @@ function buildTree(pages: Page[]): TreeNode[] {
 // #457 `loading` distinguishes "the tree hasn't arrived" from "the space has no pages" — the
 // same three-state discipline the member sidebar got in #492 (#500 added the error/retry leg). The
 // skeleton is delay-gated so a fast tree fetch never flashes it.
-export function GuestSidebar({ pages, loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry }: { pages: Page[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error?: boolean; onRetry?: () => void }) {
+export function GuestSidebar({ pages, loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, truncated = false }: { pages: Page[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error?: boolean; onRetry?: () => void; truncated?: boolean }) {
   const { t } = useTranslation();
   const showSkeleton = useDelayedFlag(loading);
   const tree = buildTree(pages);
@@ -114,6 +114,14 @@ export function GuestSidebar({ pages, loading = false, space, openId, onOpen, on
         <div className="px-1 py-2 text-fg-dim" data-testid="guest-sidebar-empty">{t("share.spaceEmpty")}</div>
       ) : (
         tree.map((n) => <GuestNode key={n.id} node={n} depth={0} openId={openId} onOpen={onOpen} />)
+      )}
+      {/* #623 / ADR-220 §6.2: the cap is LOUD. This list is drawn unvirtualised and fully expanded, so
+          a tree the server had to cut has to say so — a silent cut looks like a complete tree that is
+          simply missing pages, and the reader has no way to tell. */}
+      {truncated && (
+        <p className="mt-2 px-1 text-[0.85em] text-fg-dim" data-testid="guest-tree-truncated">
+          {t("toast.treeTruncated")}
+        </p>
       )}
     </nav>
   );

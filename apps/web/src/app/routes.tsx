@@ -1028,11 +1028,18 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
   const [space, setSpace] = useState<{ name: string; iconImageUrl: string | null; homePageId?: string | null } | null>(null);
   const landedHome = useRef(false); // #364 ①: default-land on the home ONCE (never re-hijack navigation)
   const [openId, setOpenId] = useState<string | null>(null);
+  const [pagesTruncated, setPagesTruncated] = useState(false);
 
   const refreshPages = useCallback(() => {
     setPagesError(false);
-    apiFetch<Page[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
-      .then((r) => setPages(r ?? []))
+    apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+      .then((r) => {
+        setPages(r?.pages ?? []);
+        // #623 / ADR-220 §6.2: the cap comes with a VISIBLE state. This shell draws the tree
+        // unvirtualised and fully expanded, so a link whose tree is too large has to SAY so — a quiet
+        // cut would look like a complete tree that is simply missing pages.
+        setPagesTruncated(Boolean(r?.truncated));
+      })
       .catch(() => setPagesError(true));
   }, [spaceId, token]);
 
@@ -1056,8 +1063,8 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<Page[]>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
-      .then((r) => { if (!cancelled) setPages(r ?? []); })
+    apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+      .then((r) => { if (!cancelled) { setPages(r?.pages ?? []); setPagesTruncated(Boolean(r?.truncated)); } })
       .catch(() => { if (!cancelled) { setPages([]); setPagesError(true); } }); // #500: error ≠ empty
     // #270: the space header (name + public icon only) so the guest sidebar shows the real space, not a
     // fixed "Shared space" label. Best-effort — a failure just falls back to the label.
@@ -1082,7 +1089,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
 
   return (
     <AppShell
-      sidebar={<GuestSidebar pages={pages ?? []} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} />}
+      sidebar={<GuestSidebar pages={pages ?? []} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} truncated={pagesTruncated} />}
       // #449 / ADR-173: the guest gets the SAME search box (Ctrl-K + the header field), wired to their
       // own token and opening hits inside this shell via the tree's open handler. The server forces the
       // link's space scope and gates every hit on the share_link principal — no member chrome leaks here.

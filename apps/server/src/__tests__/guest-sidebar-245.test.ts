@@ -1,3 +1,5 @@
+// #623 / ADR-220 §6.2: the tree route answers `{ pages, truncated }` now — the state has nowhere to
+// live in a bare array, and a quiet cut was the only thing the old contract could express.
 // #245 / ADR-112: the guest reader-chrome sidebar shows the linked space's page tree via GET
 // /spaces/:id/pages. The chrome is convenience; the SERVER is the fortress. These anti-tests pin the
 // capability boundary the sidebar relies on:
@@ -74,7 +76,7 @@ describe('#245 guest sidebar capability boundary', () => {
     const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: SPACE_LINK, resource: { type: 'space', id: SPACE }, capability: 'view' })
     const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/pages`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
     expect(res.statusCode).toBe(200)
-    const ids = (res.json() as { id: string }[]).map((p) => p.id)
+    const ids = (res.json() as { pages: { id: string }[] }).pages.map((p) => p.id)
     expect(ids).toContain(PUB)
     expect(ids).not.toContain(DRAFT) // unpublished: no page#space → not view-inherited
     expect(ids).not.toContain(PRIV) // private: pair marker cuts the space-viewer inheritance for the guest
@@ -86,7 +88,7 @@ describe('#245 guest sidebar capability boundary', () => {
     const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: EDIT_LINK, resource: { type: 'space', id: SPACE }, capability: 'edit' })
     const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/pages`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
     expect(res.statusCode).toBe(200)
-    const ids = (res.json() as { id: string }[]).map((p) => p.id)
+    const ids = (res.json() as { pages: { id: string }[] }).pages.map((p) => p.id)
     expect(ids).toContain(PUB)       // the edit link CAN view the published page → it must appear
     expect(ids).not.toContain(DRAFT) // still no draft leak
     expect(ids).not.toContain(PRIV)  // still no private leak
@@ -97,7 +99,7 @@ describe('#245 guest sidebar capability boundary', () => {
     const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: EDIT_LINK_TB, resource: { type: 'space', id: SPACE }, capability: 'edit' })
     const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/pages`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
     expect(res.statusCode).toBe(200)
-    expect((res.json() as { id: string }[]).map((p) => p.id)).toContain(PUB)
+    expect((res.json() as { pages: { id: string }[] }).pages.map((p) => p.id)).toContain(PUB)
   })
 
   it('an EXPIRED edit link lists nothing (the non_expired condition denies — keeps the future case honest)', async () => {
@@ -105,7 +107,7 @@ describe('#245 guest sidebar capability boundary', () => {
     const tok = await mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: EDIT_LINK_EXP, resource: { type: 'space', id: SPACE }, capability: 'edit' })
     const res = await app.inject({ method: 'GET', url: `/spaces/${SPACE}/pages`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
     expect(res.statusCode).toBe(200)
-    expect((res.json() as { id: string }[]).map((p) => p.id)).not.toContain(PUB)
+    expect((res.json() as { pages: { id: string }[] }).pages.map((p) => p.id)).not.toContain(PUB)
   })
 
   it('a PAGE-scoped guest link cannot reach the space tree at all (403 — no sibling probe)', async () => {

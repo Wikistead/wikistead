@@ -107,7 +107,7 @@ export function usePages(spaceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["pages", spaceId],
-    queryFn: () => apiFetch<Page[]>(`/spaces/${spaceId}/pages`, token).then((r) => r ?? []),
+    queryFn: () => apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${spaceId}/pages`, token).then((r) => r?.pages ?? []),
     enabled,
   });
 }

@@ -1,3 +1,4 @@
+// #623 / ADR-220 §6.2: the tree route answers `{ pages, truncated }` now.
 // #274 / ADR-135 §3-§4: anonymous guest page CREATION (atomic create-publish) + guest attachment caps.
 // Integration over the real stack (Postgres + OpenFGA + Valkey + S3 + Fastify, no mocks). Load-bearing
 // boundaries under test:
@@ -118,7 +119,7 @@ describe('#274 guest create-publish (ADR-135 §3)', () => {
     expect(pub.statusCode, pub.body).toBe(200)
     // And the page is in the guest tree (published → listPages includes it for the link principal).
     const list = await app.inject({ method: 'GET', url: `/spaces/${spaceId}/pages`, headers: guestHeaders(tok) })
-    expect((list.json() as { id: string }[]).map((p) => p.id)).toContain(page.id)
+    expect((list.json() as { pages: { id: string }[] }).pages.map((p) => p.id)).toContain(page.id)
   })
 
   it('a VIEW space link cannot create (401 at the hook), and a PAGE edit link cannot create in the space (403 at FGA)', async () => {
