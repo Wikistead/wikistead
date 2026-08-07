@@ -62,7 +62,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // derived tables they live in — so the claim is stated here and CHECKED in activity-window-623.
   'account.ts:/me/activity': { kind: 'bounded', why: 'GROUP BY calendar day inside a twelve-month window: at most ~367 rows, and a busy day is one row. Pinned by activity-window-623, because the scan strips the derived tables the window and the grouping live in.' },
   'members.ts:/admin/analytics': { kind: 'debt', why: '#623 B: a row per day per page; grows with the tenant and with time.' },
-  'members.ts:/members/invites': { kind: 'debt', why: '#623 A: one row per pending invitation (#638 boxed the UI, not the payload).' },
   'notifications.ts:/notifications/unread-count': { kind: 'bounded', why: 'the count stops at UNREAD_BADGE_CAP + 1 — the number the bell already refuses to print past (it renders 99+). The LIMIT lives in a derived table, which withoutSubqueries strips before looking for a bound, so this line states what the scan cannot see rather than the scan being loosened to see it.' },
   'pins.ts:/pins': { kind: 'bounded', why: 'MAX_PINS_PER_TYPE refuses the pin past 200 per member per kind, so the list cannot grow (#623). A cap and not a page, for the /me/factors reason: reorder persists the whole ordered id list and the sidebar draws the set, so paging would let somebody hold more pins than they can see or reorder. Pinned by pins-capped-623.' },
   'spaces.ts:/spaces/:spaceId/access': { kind: 'debt', why: '#623 B: principal × space; the roster the permissions dialog reads.' },
@@ -546,6 +545,25 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     expect(body.match(/ORDER BY created_at DESC, id DESC/g) ?? [],
       'both ordered with a tiebreaker, or two pages created in the same import straddle the boundary')
       .toHaveLength(2)
+  })
+
+  it('the pending-invitation list is bounded too (also a route body)', () => {
+    // #623. Needed for the same reason as the members case above AND one more: `slice` caps the
+    // response in JS, so deleting the SQL bound changes nothing a behavioural pin can observe — the
+    // invites walk stayed green through that break until this case existed.
+    const src = readFileSync(resolve(import.meta.dirname, '..', 'routes/members.ts'), 'utf8')
+    const at = src.indexOf(`app.get<{ Querystring: { limit?: string; cursor?: string } }>('/members/invites'`)
+    expect(at, 'the invites route no longer takes a cursor').toBeGreaterThan(-1)
+    // comments stripped and the window cut at the next registration: the prose in this handler explains
+    // the mechanism, and a search that reads its own explanation finds a bound in every implementation
+    const raw = src.slice(at, at + 9000)
+    const nextRoute = raw.indexOf('\n  app.', 10)
+    const body = raw.slice(0, nextRoute > 0 ? nextRoute : raw.length)
+      .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/--.*$/, '')).join('\n')
+    expect(body, 'and still limits').toMatch(/\bLIMIT\b/)
+    expect(body, 'without an OFFSET').not.toMatch(/\bOFFSET\b/i)
+    expect(body, 'ordered with a tiebreaker, or two invites from one bulk send straddle the boundary')
+      .toMatch(/ORDER BY created_at DESC, id DESC/)
   })
 
   it('the members list is bounded too (it is a route body, not a named function)', () => {
