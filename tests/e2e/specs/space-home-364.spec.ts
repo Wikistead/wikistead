@@ -40,7 +40,8 @@ test("#364: empty state → write button → home renders at the space root; tre
   // the pointer is set — grab the home id for the later steps
   const homeId = await page.evaluate(async (sid: string) => {
     const r = await fetch("/api/spaces", { headers: { authorization: "Bearer dev-token" } });
-    const spaces = (await r.json()) as { id: string; homePageId?: string | null }[];
+    const body = (await r.json()) as { spaces?: { id: string; homePageId?: string | null }[] } | { id: string; homePageId?: string | null }[];
+    const spaces = Array.isArray(body) ? body : (body.spaces ?? []);
     return spaces.find((s) => s.id === sid)?.homePageId ?? null;
   }, spaceId);
   expect(homeId, "spaces list carries the pointer for the creator").toBeTruthy();
@@ -154,7 +155,8 @@ for (const capability of ["view", "edit"] as const) {
     await sleep(1500);
     const homeId = await page.evaluate(async (sid: string) => {
       const r = await fetch("/api/spaces", { headers: { authorization: "Bearer dev-token" } });
-      const spaces = (await r.json()) as { id: string; homePageId?: string | null }[];
+      const body = (await r.json()) as { spaces?: { id: string; homePageId?: string | null }[] } | { id: string; homePageId?: string | null }[];
+    const spaces = Array.isArray(body) ? body : (body.spaces ?? []);
       return spaces.find((s) => s.id === sid)?.homePageId ?? null;
     }, spaceId);
     expect(homeId, "the space has a home page").toBeTruthy();

@@ -9,7 +9,8 @@ const H = { Authorization: "Bearer dev-token", "content-type": "application/json
 
 test("#245: space-link guest gets the sidebar tree, no member chrome, opens a page", async ({ browser }) => {
   // Find a space that has at least one guest-listable (published) page.
-  const spaces = (await (await fetch(`${API}/spaces`, { headers: H })).json()) as { id: string; name: string }[];
+  const spacesBody = (await (await fetch(`${API}/spaces`, { headers: H })).json()) as { spaces?: { id: string; name: string }[] } | { id: string; name: string }[];
+  const spaces = Array.isArray(spacesBody) ? spacesBody : (spacesBody.spaces ?? []);
   let spaceId = "";
   let spaceName = "";
   for (const s of spaces) {
