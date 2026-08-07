@@ -1423,19 +1423,68 @@ async function spacePublicSurfaceEnabled(db: TenantDb): Promise<boolean> {
 // this is NOT open to every member — only someone who can actually grant on this space (#163
 // review condition). RLS-scopes to the tenant. A name with zero current members is still listed
 // (granting to it is allowed — it resolves once members sync, ADR-053).
+/** #623: how many group names one response may carry. */
+export const GROUP_NAMES_PAGE_LIMIT = 200
+
+export interface GroupNamesPage { groups: string[]; nextCursor: string | null }
+
+/**
+ * The tenant's directory group names, one page at a time.
+ *
+ * #623: this query was written out TWICE — here and in `members.ts` for `/admin/groups` — and both
+ * copies read every member row and returned every distinct name. One function now, so bounding it
+ * bounds both routes and a third copy has nowhere to come from.
+ *
+ * The cursor is the NAME, and there is no tiebreaker on purpose: `DISTINCT` makes the ordering key
+ * unique, so no two rows can straddle a boundary. (The timestamp cursors elsewhere in this ticket need
+ * one because two rows really can share an instant.)
+ *
+ * The empty-name filter moved INTO the query. It used to run on the rows after they came back, and a
+ * filter that runs after the page is taken makes the page shorter than the limit — which is fine, but
+ * it also means the cursor must come from the last SQL row rather than the last visible one. Filtering
+ * in SQL removes the question instead of answering it.
+ */
+export async function listGroupNames(
+  db: TenantDb,
+  args: { limit?: number; cursor?: string } = {},
+): Promise<GroupNamesPage> {
+  const limit = Math.min(1000, Math.max(1, args.limit ?? GROUP_NAMES_PAGE_LIMIT))
+  const after = args.cursor ?? null
+  const rows = await db.sql<{ g: string }[]>`
+    SELECT g FROM (SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL) names
+     WHERE g IS NOT NULL AND g <> ''
+       ${after != null ? db.sql`AND g > ${after}` : db.sql``}
+     ORDER BY g
+     LIMIT ${limit + 1}
+  `
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const last = page[page.length - 1]
+  return { groups: page.map((r) => r.g), nextCursor: hasMore && last ? last.g : null }
+}
+
+/** Every group name, by walking the pages. The walk is written once. */
+export async function listAllGroupNames(db: TenantDb): Promise<string[]> {
+  const out: string[] = []
+  let cursor: string | undefined
+  do {
+    const page: GroupNamesPage = await listGroupNames(db, cursor ? { cursor } : {})
+    out.push(...page.groups)
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
+  return out
+}
+
 export async function listTenantGroups(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { spaceId: string; userId: string },
-): Promise<string[]> {
+  args: { spaceId: string; userId: string; limit?: number; cursor?: string },
+): Promise<GroupNamesPage> {
   // ADR-209 (#607) §4: a deliberate WIDENING, called out in the ADR — the tenant's group names open to
   // a space-scoped verb, because a roster you cannot complete a grantee into is not operable. What is
   // exposed does not change, only which verb opens it.
   await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [] })
-  const rows = await db.sql<{ g: string }[]>`
-    SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL ORDER BY g
-  `
-  return rows.map((r) => r.g).filter((g) => g != null && g !== '')
+  return listGroupNames(db, { ...(args.limit != null ? { limit: args.limit } : {}), ...(args.cursor != null ? { cursor: args.cursor } : {}) })
 }
 
 // Member typeahead for the grant picker. manage-gated (a space manager may add any
@@ -1736,8 +1785,12 @@ export async function spacesPlugin(app: FastifyInstance) {
 
   // Tenant group-name source for the group-grant picker (#163). manage-gated (group names can be
   // sensitive — not exposed to all members).
-  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/groups', async (req) => {
-    return listTenantGroups(req.db, app.fga, { spaceId: req.params.spaceId, userId: req.user.sub })
+  app.get<{ Params: { spaceId: string }; Querystring: { limit?: string; cursor?: string } }>('/spaces/:spaceId/groups', async (req) => {
+    const limit = Number.parseInt(req.query.limit ?? '', 10)
+    return listTenantGroups(req.db, app.fga, {
+      spaceId: req.params.spaceId, userId: req.user.sub,
+      ...(Number.isFinite(limit) ? { limit } : {}), ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+    })
   })
 
   app.get<{ Params: { spaceId: string }; Querystring: { q?: string } }>('/spaces/:spaceId/member-candidates', async (req) => {

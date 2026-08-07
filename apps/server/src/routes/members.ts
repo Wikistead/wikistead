@@ -9,7 +9,7 @@ import { writeTuples, deleteTuples, readUserTuplesByType, isTenantAdmin } from '
 import type { TenantDb } from '../db/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/outbox.js'
-import { reindexPublishedPages } from './spaces.js'
+import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
@@ -228,11 +228,13 @@ export async function membersPlugin(app: FastifyInstance) {
   // argument (group names are not shown to every member), gated on tenant admin instead. Names only:
   // the id is derived server-side (group-sync.ts is the single id authority — a client that hashes
   // writes a tuple nobody holds, the #536bug).
-  app.get('/admin/groups', async (req, reply) => {
+  // #623: the same query used to live here AND in spaces.ts. One function now — see listGroupNames.
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/admin/groups', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
-    const rows = await req.db.sql<{ g: string }[]>`
-      SELECT DISTINCT unnest(groups) AS g FROM members WHERE groups IS NOT NULL ORDER BY g`
-    return rows.map((r) => r.g).filter((g) => g != null && g !== '')
+    const limit = Number.parseInt(req.query.limit ?? '', 10)
+    return listGroupNames(req.db, {
+      ...(Number.isFinite(limit) ? { limit } : {}), ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+    })
   })
 
   // #379 / ADR-150: resolve a SPECIFIC set of author subs to display identity — any tenant MEMBER may

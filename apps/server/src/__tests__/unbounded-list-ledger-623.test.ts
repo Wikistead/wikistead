@@ -67,7 +67,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'pins.ts:/pins': { kind: 'debt', why: '#623 B: one row per pin; nothing prunes them.' },
   'spaces.ts:/spaces/:spaceId/access': { kind: 'debt', why: '#623 B: principal × space; the roster the permissions dialog reads.' },
   'spaces.ts:/spaces/:spaceId/analytics': { kind: 'debt', why: '#623 B: a row per day per page, same shape as the tenant roll-up.' },
-  'spaces.ts:/spaces/:spaceId/groups': { kind: 'debt', why: '#623 A: one row per directory group; grows with the IdP, not with us.' },
 
   // ── bounded: the result cannot grow, and the reason is stated rather than assumed ──────────────
   'attachments.ts:/attachments/:id/download': { kind: 'bounded', why: 'one attachment by id — a row, not a list.' },
@@ -129,7 +128,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'admin-login-methods.ts:/admin/sso-exemptions': { kind: 'debt', why: '#623: one row per exempted member; an exemption is never pruned.' },
   'admin-login-methods.ts:/admin/login-methods/impact': { kind: 'debt', why: '#623: membersUnsatisfiedBy walks EVERY member to count who a stance would sign out.' },
   'custom-domains.ts:/admin/custom-domains': { kind: 'debt', why: '#623: one row per custom domain on the tenant.' },
-  'members.ts:/admin/groups': { kind: 'debt', why: '#623: DISTINCT unnest(groups) over every member row; grows with the IdP directory.' },
   'roles.ts:/pages/:pageId/assignable-roles': { kind: 'debt', why: '#623: every resource-scoped role — the page twin of /spaces/:spaceId/assignable-roles, and the same table.' },
   // the clearest case of the blind spot in the whole product: the handler is ONE line that calls an
   // imported function, so to a same-file scan the route contained no query whatsoever.
@@ -494,6 +492,12 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // two ledger lines. If it is ever split in two, the twin that keeps this name stays measured here
     // and the new one has to earn its own line.
     { file: 'routes/share-links.ts', fn: 'listShareLinks' },
+    // #623: the tenant's group names, serving BOTH /admin/groups and /spaces/:spaceId/groups. It has to
+    // be here rather than left to the sweep for two reasons at once: `slice` caps the response in JS, so
+    // deleting the SQL bound is invisible from outside, AND the word `cursor` in the handler satisfies
+    // BOUNDED_MARKER on its own. Measured — with neither of those understood, the break stayed green in
+    // both places.
+    { file: 'routes/spaces.ts', fn: 'listGroupNames' },
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {
