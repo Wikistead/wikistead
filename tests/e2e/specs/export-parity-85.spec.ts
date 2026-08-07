@@ -66,7 +66,11 @@ const FIXTURE = [
 const PROBES: { name: string; selector: string; props: string[] }[] = [
   { name: "heading", selector: "h1, .cm-lp-h1", props: ["color", "fontFamily", "fontWeight"] },
   { name: "body text", selector: "p", props: ["fontFamily", "fontSize", "lineHeight"] },
-  { name: "callout box", selector: "[class*=cm-lp-callout]", props: ["backgroundColor", "borderLeftColor", "borderLeftWidth"] },
+  { name: "callout box", selector: "[class*=cm-lp-callout]", props: ["backgroundColor", "backgroundImage"] },
+  // #632: the callout's left bar moved from a border to a background gradient (a border does not follow
+  // the panel's radius). Comparing `borderLeftWidth`/`borderLeftColor` still "passed" — it compared 0 to
+  // 0 and none to none — so the bar itself, the thing this row is here to hold to parity, had quietly
+  // stopped being measured.
   { name: "table cell", selector: "td", props: ["borderTopColor", "borderTopWidth", "padding"] },
 ];
 
