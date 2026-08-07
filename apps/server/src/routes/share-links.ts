@@ -200,20 +200,69 @@ export async function createShareLink(
 
 // List a resource's active share links (page or space). `manage` on the resource is required
 // (only someone who can administer it may see/curate its links).
+/** #623: how many share links one response may carry. */
+export const SHARE_LINKS_PAGE_LIMIT = 100
+
+export interface ShareLinksPage { links: ShareLink[]; nextCursor: string | null }
+
 export async function listShareLinks(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: { resource: ResourceRef; userId: string; limit?: number; cursor?: string },
+): Promise<ShareLinksPage> {
+  await requireShareOnResource(fga, args.userId, args.resource) // #420 3b
+  await requirePageNotTrashed(db, args.resource) // Rider 2
+  // #623: one row per live link, and nothing prunes them — a busy page accumulates. Two routes read
+  // through here (the page's links and the space's), so both are bounded by this one query.
+  //
+  // The cursor carries an epoch rather than a formatted timestamp: a parameter loses its microseconds
+  // on the way in, because the driver parses it into a JS Date. This walk is DESC, the direction that
+  // SKIPS — a link created between the truncated instant and the true one would appear on no page, and
+  // a share link missing from the list of live links is one nobody knows to revoke.
+  //
+  // `id` joins the ORDER BY: links are minted in bulk by scripted setup, and two stamped in the same
+  // instant would straddle a boundary for ever — one repeated, one never seen.
+  const limit = Math.min(500, Math.max(1, args.limit ?? SHARE_LINKS_PAGE_LIMIT))
+  const bar = args.cursor?.indexOf('|') ?? -1
+  const after = args.cursor && bar > 0 ? { at: args.cursor.slice(0, bar), id: args.cursor.slice(bar + 1) } : null
+  const rows = await db.sql<(ShareLinkRow & { cursor_at: string })[]>`
+    SELECT id, tenant_id, resource_type, resource_id, capability, expires_at, created_by, created_at, revoked_at,
+           extract(epoch from created_at)::text AS cursor_at
+    FROM share_links
+    WHERE resource_type = ${args.resource.type} AND resource_id = ${args.resource.id} AND revoked_at IS NULL
+      ${after ? db.sql`AND (created_at, id) < (to_timestamp(${after.at}::numeric), ${after.id})` : db.sql``}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${limit + 1}
+  `
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const last = page[page.length - 1]
+  return {
+    links: page.map(toShareLink),
+    nextCursor: hasMore && last ? `${last.cursor_at}|${last.id}` : null,
+  }
+}
+
+/**
+ * Every live link on a resource, by walking the pages.
+ *
+ * The dialog needs the whole set: it is the only place a link can be revoked, and a link that is not on
+ * the list is one nobody knows to take away. The walk is written once, and its loop condition is
+ * `nextCursor` — never "the page came back empty".
+ */
+export async function listAllShareLinks(
   db: TenantDb,
   fga: OpenFgaClient,
   args: { resource: ResourceRef; userId: string },
 ): Promise<ShareLink[]> {
-  await requireShareOnResource(fga, args.userId, args.resource) // #420 3b
-  await requirePageNotTrashed(db, args.resource) // Rider 2
-  const rows = await db.sql<ShareLinkRow[]>`
-    SELECT id, tenant_id, resource_type, resource_id, capability, expires_at, created_by, created_at, revoked_at
-    FROM share_links
-    WHERE resource_type = ${args.resource.type} AND resource_id = ${args.resource.id} AND revoked_at IS NULL
-    ORDER BY created_at DESC
-  `
-  return rows.map(toShareLink)
+  const out: ShareLink[] = []
+  let cursor: string | undefined
+  do {
+    const page: ShareLinksPage = await listShareLinks(db, fga, { ...args, ...(cursor ? { cursor } : {}) })
+    out.push(...page.links)
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
+  return out
 }
 
 // Revoke = delete the FGA tuple (instant; the authority) + stamp revoked_at.
@@ -489,12 +538,19 @@ export async function shareLinksPlugin(app: FastifyInstance) {
     },
   )
 
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/share-links', async (req) => {
-    return listShareLinks(req.db, app.fga, { resource: { type: 'page', id: req.params.pageId }, userId: req.user.sub })
+  // #623: both list routes are paged. `paging()` is shared so the two cannot drift — they read the
+  // same query and must offer the same controls.
+  const paging = (q: { limit?: string; cursor?: string }) => {
+    const limit = Number.parseInt(q.limit ?? '', 10)
+    return { ...(Number.isFinite(limit) ? { limit } : {}), ...(q.cursor ? { cursor: q.cursor } : {}) }
+  }
+
+  app.get<{ Params: { pageId: string }; Querystring: { limit?: string; cursor?: string } }>('/pages/:pageId/share-links', async (req) => {
+    return listShareLinks(req.db, app.fga, { resource: { type: 'page', id: req.params.pageId }, userId: req.user.sub, ...paging(req.query) })
   })
 
-  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/share-links', async (req) => {
-    return listShareLinks(req.db, app.fga, { resource: { type: 'space', id: req.params.spaceId }, userId: req.user.sub })
+  app.get<{ Params: { spaceId: string }; Querystring: { limit?: string; cursor?: string } }>('/spaces/:spaceId/share-links', async (req) => {
+    return listShareLinks(req.db, app.fga, { resource: { type: 'space', id: req.params.spaceId }, userId: req.user.sub, ...paging(req.query) })
   })
 
   app.delete<{ Params: { id: string } }>('/share-links/:id', async (req, reply) => {

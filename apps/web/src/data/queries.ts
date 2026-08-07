@@ -577,11 +577,21 @@ export function useReorderPins() {
   });
 }
 
+export interface ShareLinksPage { links: ShareLink[]; nextCursor: string | null }
+
 export function useShareLinks(resource: ShareResource | null, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["share-links", resource?.type, resource?.id],
-    queryFn: () => apiFetch<ShareLink[]>(linksPath(resource!), token).then((r) => r ?? []),
+    // #623: the response is paged. The dialog needs the WHOLE set — it is the only place a link can be
+    // revoked, and a link missing from the list is one nobody knows to take away.
+    queryFn: () =>
+      walkPages(
+        (cursor: string | null) =>
+          apiFetch<ShareLinksPage>(
+            `${linksPath(resource!)}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, token),
+        (p: ShareLinksPage) => p.links,
+      ),
     enabled: enabled && resource != null,
   });
 }
@@ -867,31 +877,43 @@ export function useToggleTask(pageId: string) {
 export interface RevisionsPage { revisions: Revision[]; nextCursor: string | null }
 
 /**
- * The whole history, by walking the pages (#623).
+ * Every row of a paged endpoint (#623), written ONCE.
  *
- * Separate from the hook, and injectable, because the loop is the part that can be wrong: stopping on
- * an empty page instead of on a null cursor, or forgetting to advance, both return a short history that
- * looks like a complete one. There is nothing on screen that says "this is where it stopped".
+ * Injectable, because the loop is the part that can be wrong: stopping on an empty page instead of on a
+ * null cursor, or forgetting to advance, both return a short list that looks like a complete one. There
+ * is nothing on screen that says "this is where it stopped" — so it is tested directly rather than
+ * through a UI assertion that would pass on any prefix.
+ *
+ * Stopping on an empty page is the specific failure the server's own comment warns about: authorization
+ * filtering runs after the query, so a page can carry no visible row while every row after it is
+ * visible.
+ */
+export async function walkPages<T, P extends { nextCursor: string | null }>(
+  fetchPage: (cursor: string | null) => Promise<P | null>,
+  rowsOf: (page: P) => T[],
+): Promise<T[]> {
+  const all: T[] = [];
+  let cursor: string | null = null;
+  // the loop condition is the CURSOR, never "the page came back empty"
+  do {
+    const page = await fetchPage(cursor);
+    if (!page) break;
+    all.push(...(rowsOf(page) ?? []));
+    cursor = page.nextCursor;
+  } while (cursor);
+  return all;
+}
+
+/**
+ * The whole page history.
  *
  * The panel MUST see the whole list. `latestRun` reads the newest contiguous run of one actor off it,
  * and a run cut at a page boundary would offer to revert more edits than the count beside it names —
  *ruled that affordance may only appear when it is honest. What is paid here is the size of one
  * response, which is what #623 is about; showing the history a page at a time is its own design.
  */
-export async function walkRevisions(
-  fetchPage: (cursor: string | null) => Promise<RevisionsPage | null>,
-): Promise<Revision[]> {
-  const all: Revision[] = [];
-  let cursor: string | null = null;
-  // the loop condition is the CURSOR, never "the page came back empty"
-  do {
-    const page = await fetchPage(cursor);
-    if (!page) break;
-    all.push(...(page.revisions ?? []));
-    cursor = page.nextCursor;
-  } while (cursor);
-  return all;
-}
+export const walkRevisions = (fetchPage: (cursor: string | null) => Promise<RevisionsPage | null>) =>
+  walkPages(fetchPage, (p: RevisionsPage) => p.revisions);
 
 export function usePageRevisions(pageId: string, enabled = true) {
   const { token } = useSession();

@@ -60,7 +60,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'members.ts:/members/invites': { kind: 'debt', why: '#623 A: one row per pending invitation (#638 boxed the UI, not the payload).' },
   'notifications.ts:/notifications/unread-count': { kind: 'bounded', why: 'the count stops at UNREAD_BADGE_CAP + 1 — the number the bell already refuses to print past (it renders 99+). The LIMIT lives in a derived table, which withoutSubqueries strips before looking for a bound, so this line states what the scan cannot see rather than the scan being loosened to see it.' },
   'pins.ts:/pins': { kind: 'debt', why: '#623 B: one row per pin; nothing prunes them.' },
-  'share-links.ts:/pages/:pageId/share-links': { kind: 'debt', why: '#623 B: one row per link; a busy page accumulates them.' },
   'spaces.ts:/spaces/:spaceId/access': { kind: 'debt', why: '#623 B: principal × space; the roster the permissions dialog reads.' },
   'spaces.ts:/spaces/:spaceId/analytics': { kind: 'debt', why: '#623 B: a row per day per page, same shape as the tenant roll-up.' },
   'spaces.ts:/spaces/:spaceId/groups': { kind: 'debt', why: '#623 A: one row per directory group; grows with the IdP, not with us.' },
@@ -98,7 +97,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // or to a lower-case variable. Five routes, each read by hand. `GET /spaces` was one of them and
   // has no line: it got the bound instead (slice 12b), which is what a ledger line is supposed to
   // turn into.
-  'share-links.ts:/spaces/:spaceId/share-links': { kind: 'debt', why: '#623 B: one row per link on a space — the twin of the page route above, and green until now only because its window ran to the end of the file and borrowed a DELETE handler’s `limit`.' },
   'spaces.ts:/spaces/:spaceId/delete-mode': { kind: 'bounded', why: 'one delete-mode setting for one space — a settings record. Its only LIMIT takes the tenant default as a scalar.' },
   'auth-local.ts:/auth/invite-kind': { kind: 'bounded', why: 'one invitation, addressed by the hash of the token in the link — a row, not a list.' },
   'public.ts:/public/attachments/:id/inline': { kind: 'bounded', why: 'one attachment by id — a row, not a list. The download twin was already here; this one was not.' },
@@ -487,6 +485,10 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // looking for a bound — so the ledger keeps a line saying why the route may read as unbounded, and
     // THIS is where the bound is actually held.
     { file: 'routes/notifications.ts', fn: 'unreadCount' },
+    // #623: BOTH share-link list routes read through this one query, which is why one slice removed
+    // two ledger lines. If it is ever split in two, the twin that keeps this name stays measured here
+    // and the new one has to earn its own line.
+    { file: 'routes/share-links.ts', fn: 'listShareLinks' },
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {

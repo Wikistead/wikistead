@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { walkRevisions, type RevisionsPage } from "./queries";
+import { walkRevisions, walkPages, type RevisionsPage, type ShareLinksPage } from "./queries";
 import type { Revision } from "./queries";
 
 // #623: the history endpoint is paged now, so the panel gets its list by walking. This pins the walk.
@@ -70,5 +70,19 @@ describe("#623: the history walk", () => {
   it("a request that answers with nothing ends the walk instead of looping", async () => {
     const { fetchPage } = paged([{ revisions: [rev("a")], nextCursor: "c1" }]);
     expect((await walkRevisions(fetchPage)).map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("the SAME loop serves the share-link dialog — there is one walk, not two", async () => {
+    // #623: `useShareLinks` walks too, and the dialog is the only place a link can be revoked, so a
+    // short list is a link nobody knows to take away. Written through `walkPages` rather than copied,
+    // because a second copy is where "stop on an empty page" comes back.
+    const pages: ShareLinksPage[] = [
+      { links: [{ id: "l1" }, { id: "l2" }] as ShareLinksPage["links"], nextCursor: "c1" },
+      { links: [] as ShareLinksPage["links"], nextCursor: "c2" },
+      { links: [{ id: "l3" }] as ShareLinksPage["links"], nextCursor: null },
+    ];
+    let i = 0;
+    const got = await walkPages(async () => pages[i++] ?? null, (p: ShareLinksPage) => p.links);
+    expect(got.map((l) => l.id)).toEqual(["l1", "l2", "l3"]);
   });
 });

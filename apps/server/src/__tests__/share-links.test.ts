@@ -10,7 +10,7 @@ import { verifyGuestToken } from '@wikistead/auth'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
-import { createShareLink, listShareLinks, revokeShareLink, mintTokenForShareLink } from '../routes/share-links.js'
+import { createShareLink, listAllShareLinks, revokeShareLink, mintTokenForShareLink } from '../routes/share-links.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -73,7 +73,7 @@ describe('share link lifecycle', () => {
     const a = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null })
     const b = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'page', id: pageId }, capability: 'edit', expiresInSeconds: null })
     await revokeShareLink(db, fgaClient, { id: b.id, userId: 'dev-user', tenantId: tenant.id })
-    const active = await listShareLinks(db, fgaClient, { resource: { type: 'page', id: pageId }, userId: 'dev-user' })
+    const active = await listAllShareLinks(db, fgaClient, { resource: { type: 'page', id: pageId }, userId: 'dev-user' })
     const ids = active.map((l) => l.id)
     expect(ids).toContain(a.id)
     expect(ids).not.toContain(b.id)
