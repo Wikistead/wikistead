@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import type { Sql } from 'postgres'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readUserTuplesByType, requireTenantAdmin, isAlreadyConverged, runInAuthzScope, SYSTEM_SCOPE, currentAuthzScope } from '@wikistead/authz'
+import { check, checkRelation, checkMemberAccess, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readObjectTuplesPage, readUserTuplesByType, requireTenantAdmin, isAlreadyConverged, runInAuthzScope, SYSTEM_SCOPE, currentAuthzScope } from '@wikistead/authz'
 import { emit } from '@wikistead/events'
 import { getCachedTitleDict, setCachedTitleDict, titleDictGeneration, beginTitleDictFill, endTitleDictFill } from '../title-dict-cache.js' // #534
 import { getTreeConfirm, setTreeConfirm, getCachedBadge, setCachedBadge, invalidatePageBadge } from '../tree-confirm-cache.js' // #541
@@ -1255,15 +1255,34 @@ export async function unrestrictPageAccess(
 }
 
 // List the principals RESTRICTED on a page (manage-gated) — the deny list, distinct from grants.
+/** #623: how many of a page's tuples one restriction read may take. */
+export const RESTRICTIONS_PAGE_SIZE = 100
+
+export interface PageRestrictionsPage {
+  restrictions: { principal: string; displayName?: string | null }[]
+  nextCursor: string | null
+}
+
 export async function listPageRestrictions(
   db: TenantDb,
   fga: OpenFgaClient,
-  args: { pageId: string; userId: string },
-): Promise<{ principal: string; displayName?: string | null }[]> {
+  args: { pageId: string; userId: string; cursor?: string; pageSize?: number },
+): Promise<PageRestrictionsPage> {
   await requireVerb(fga, args.userId, args.pageId, 'share') // #420 3b: grants/links/visibility = the share verb (manage passes via the superset)
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
   // #574: paginated — `restricted` is PER-PRINCIPAL, so this list silently stopped at fifty.
-  const tuples = await readObjectTuples(fga, `page:${args.pageId}`)
+  //
+  // #623: and it then returned every one of them. The bound is FGA's own page, and the marker is its
+  // continuation token — there is no timestamp to keyset on here.
+  //
+  // ⚠️ The relation filter below runs AFTER the read, and a page object carries grants, links and
+  // markers alongside restrictions, so a page can hold ZERO restrictions while more follow. The caller
+  // must walk on `nextCursor`, never on emptiness (`listAllPageRestrictions` is that walk, written
+  // once).
+  const { tuples, nextCursor } = await readObjectTuplesPage(fga, `page:${args.pageId}`, {
+    pageSize: args.pageSize ?? RESTRICTIONS_PAGE_SIZE,
+    ...(args.cursor ? { cursor: args.cursor } : {}),
+  })
   const out: { principal: string; displayName?: string | null }[] = []
   for (const key of tuples) {
     if (key.relation === 'restricted' && key.user) out.push({ principal: key.user })
@@ -1279,6 +1298,24 @@ export async function listPageRestrictions(
       if (r.principal.startsWith('user:')) r.displayName = ids.get(r.principal.slice('user:'.length))?.displayName ?? null
     }
   }
+  return { restrictions: out, nextCursor }
+}
+
+/** Every restriction on a page, by walking. The dialog is where one is lifted, so it needs them all. */
+export async function listAllPageRestrictions(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  // `pageSize` is a seam for the pin, not a caller knob: the empty-page shape this walk exists to
+  // survive only happens when the pages are small enough for the relation filter to empty one.
+  args: { pageId: string; userId: string; pageSize?: number },
+): Promise<{ principal: string; displayName?: string | null }[]> {
+  const out: { principal: string; displayName?: string | null }[] = []
+  let cursor: string | undefined
+  do {
+    const page: PageRestrictionsPage = await listPageRestrictions(db, fga, { ...args, ...(cursor ? { cursor } : {}) })
+    out.push(...page.restrictions)
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
   return out
 }
 
@@ -4381,8 +4418,10 @@ export async function pagesPlugin(app: FastifyInstance) {
   // #109 / ADR-072 monotonic deny — restrict/unrestrict a principal from a page (manage-gated). The
   // deny list is distinct from the grant list; a restricted principal 404s on the page even as a
   // space viewer. principal = user:<sub> | group:<id>#member (raw) OR groupName (#163 resolved).
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/restrict', async (req) => {
-    return listPageRestrictions(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })
+  app.get<{ Params: { pageId: string }; Querystring: { cursor?: string } }>('/pages/:pageId/restrict', async (req) => {
+    return listPageRestrictions(req.db, app.fga, {
+      pageId: req.params.pageId, userId: req.user.sub, ...(req.query?.cursor ? { cursor: req.query.cursor } : {}),
+    })
   })
   app.post<{ Params: { pageId: string }; Body: { principal?: string; groupName?: string } }>('/pages/:pageId/restrict', async (req, reply) => {
     const principal = req.body?.groupName ? groupGrantee(req.tenant.id, req.body.groupName) : (req.body?.principal ?? '')

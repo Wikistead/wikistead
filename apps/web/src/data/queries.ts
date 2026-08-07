@@ -1078,7 +1078,15 @@ export function usePageRestrictions(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["page-restrict", pageId],
-    queryFn: () => apiFetch<PageRestriction[]>(`/pages/${encodeURIComponent(pageId)}/restrict`, token).then((r) => r ?? []),
+    // #623: paged on FGA's own token. The dialog is where a restriction is lifted, so a short list is
+    // a restriction nobody can take off — it walks.
+    queryFn: () =>
+      walkPages(
+        (c: string | null) =>
+          apiFetch<{ restrictions: PageRestriction[]; nextCursor: string | null }>(
+            `/pages/${encodeURIComponent(pageId)}/restrict${cursorQuery(c)}`, token),
+        (p: { restrictions: PageRestriction[] }) => p.restrictions,
+      ),
     enabled: enabled && pageId.length > 0,
   });
 }

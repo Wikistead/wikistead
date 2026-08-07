@@ -106,6 +106,39 @@ export async function readObjectTuples(
   return out
 }
 
+/**
+ * ONE page of an object's tuples, with the position to resume from (#623).
+ *
+ * `readObjectTuples` above walks every page and hands back the whole set, which is right for the
+ * sweeps that delete an object's grants but wrong for a list a screen reads: a page with a thousand
+ * principals on it sent a thousand rows.
+ *
+ * ⚠️ The caller almost always filters by relation AFTER this returns — an object carries grants,
+ * restrictions, share links and markers together — so a page can carry ZERO rows the caller wants
+ * while more exist further on. The loop condition must be `nextCursor`, never "the page came back
+ * empty". That is the same trap the SQL lists have when authorization filtering runs after the query.
+ */
+export async function readObjectTuplesPage(
+  fga: OpenFgaClient,
+  object: string,
+  opts: { cursor?: string; pageSize?: number } = {},
+): Promise<{ tuples: { user: string; relation: string; object: string }[]; nextCursor: string | null }> {
+  // The page size is asked for explicitly rather than left to the store's default. Two reasons: the
+  // bound then belongs to this product instead of to a server setting nobody here controls, and a test
+  // can make the pages small enough to actually cross a boundary — measured, with the default the
+  // whole object came back in one read and the paging was never exercised.
+  const res = await fga.read({ object }, {
+    ...(opts.cursor ? { continuationToken: opts.cursor } : {}),
+    ...(opts.pageSize ? { pageSize: opts.pageSize } : {}),
+  })
+  const tuples: { user: string; relation: string; object: string }[] = []
+  for (const t of res.tuples ?? []) {
+    const k = t.key
+    if (k?.user && k.relation && k.object) tuples.push({ user: k.user, relation: k.relation, object: k.object })
+  }
+  return { tuples, nextCursor: res.continuation_token || null }
+}
+
 // OpenFGA rejects writes above max_tuples_per_write (default 100) — batch deletes/writes that can
 // exceed it go through this.
 export const FGA_WRITE_CHUNK = 100

@@ -128,9 +128,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // about. Checked in sso-exemptions-paged-623 rather than asserted here.
   'admin-login-methods.ts:/admin/login-methods/impact': { kind: 'bounded', why: 'answers two numbers — the count of members a stance would leave unsatisfied and how many hold a session. The roster it counts is never returned, so the response shape is fixed however large the tenant is.' },
   'custom-domains.ts:/admin/custom-domains': { kind: 'debt', why: '#623: one row per custom domain on the tenant.' },
-  // the clearest case of the blind spot in the whole product: the handler is ONE line that calls an
-  // imported function, so to a same-file scan the route contained no query whatsoever.
-  'pages.ts:/pages/:pageId/restrict': { kind: 'debt', why: '#623: one row per restricted principal on the page — the subtract-side twin of /pages/:pageId/access.' },
 
   // bounded, and NOT by a LIMIT — which is why each needs a line rather than a keyword.
   'billing.ts:/billing/usage': { kind: 'bounded', why: 'getUsage is SUM(amount) — one number per resource, and the resource list is a constant in the handler. The read scans, the response cannot grow.' },

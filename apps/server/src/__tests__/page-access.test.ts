@@ -10,7 +10,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteObjectTuples, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage, getPublished } from '../routes/pages.js'
+import { createPage, grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, unrestrictPageAccess, listAllPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage, getPublished } from '../routes/pages.js'
 import { createShareLink, listAllShareLinks, revokeShareLink, revokeResourceShareLinks } from '../routes/share-links.js'
 import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
@@ -131,7 +131,7 @@ describe('per-page restrict (monotonic deny)', () => {
     await restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', principal: R })
     expect(await check(fgaClient, R, 'view', { type: 'page', id: pageId })).toBe(false)
     // the deny appears in the restriction list (distinct from the grant list)
-    expect(await listPageRestrictions(db, fgaClient, { pageId, userId: 'dev-user' })).toEqual(
+    expect(await listAllPageRestrictions(db, fgaClient, { pageId, userId: 'dev-user' })).toEqual(
       expect.arrayContaining([expect.objectContaining({ principal: R })]), // #578: carries displayName too
     )
     // unrestrict → the grant re-applies, view=true again
@@ -142,7 +142,7 @@ describe('per-page restrict (monotonic deny)', () => {
   it('a non-manager cannot restrict / list restrictions (403)', async () => {
     await expect(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: STRANGER, principal: R }))
       .rejects.toMatchObject({ statusCode: 403 })
-    await expect(listPageRestrictions(db, fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
+    await expect(listAllPageRestrictions(db, fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('rejects a WILDCARD restrictee (400); a SPECIFIC share_link is a valid restrictee (#218 A5-2)', async () => {

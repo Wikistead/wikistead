@@ -19,7 +19,7 @@ import { LogicalStorageDriver } from '../storage/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import {
   createPage, publishPage, trashPage, restorePage, purgePage, listSpaceTrash,
-  grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, listPageRestrictions,
+  grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, listAllPageRestrictions,
   unrestrictPageAccess, isPagePrivate,
 } from '../routes/pages.js'
 import { createShareLink } from '../routes/share-links.js'
@@ -86,7 +86,7 @@ describe('split-verb route gates (#420 3b)', () => {
       await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: 'user:crr420-guest1', relation: 'view' })
       expect((await listPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: SHR })).some((g) => g.grantee === 'user:crr420-guest1')).toBe(true)
       await restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, principal: 'user:crr420-bad' })
-      expect((await listPageRestrictions(db, fgaClient, { pageId, userId: SHR })).some((r) => r.principal === 'user:crr420-bad')).toBe(true)
+      expect((await listAllPageRestrictions(db, fgaClient, { pageId, userId: SHR })).some((r) => r.principal === 'user:crr420-bad')).toBe(true)
       await unrestrictPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, principal: 'user:crr420-bad' })
       await revokePageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: 'user:crr420-guest1', relation: 'view' })
       const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, resource: P(pageId), capability: 'view', userId: SHR, plan: tenant.plan, expiresInSeconds: null })
