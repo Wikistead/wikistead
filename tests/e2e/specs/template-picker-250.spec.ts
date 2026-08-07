@@ -172,11 +172,15 @@ test("#267: template preview renders with the editor engine (math/todo/highlight
   await expect(preview.locator("[data-testid=callout-panel] strong")).toHaveText("bold");
   const calloutBg = await preview.locator("[data-testid=callout-panel]").evaluate((el) => {
     const cs = getComputedStyle(el);
-    return { bg: cs.backgroundColor, bar: cs.borderLeftWidth };
+    return { bg: cs.backgroundColor, bar: cs.backgroundImage };
   });
   expect(calloutBg.bg, "callout panel has no background tint").not.toBe("rgba(0, 0, 0, 0)");
   expect(calloutBg.bg).not.toBe("transparent");
-  expect(parseFloat(calloutBg.bar), "callout panel has no left colour bar").toBeGreaterThan(0);
+  // #632: the bar is PAINTED, not bordered — a `border-left` does not follow the panel's
+  // `border-radius` and cut across the rounded corner, so it became a background gradient. Reading
+  // `borderLeftWidth` measured the mechanism that was replaced and returned 0 while the bar was on
+  // screen. `public-page.spec.ts` had the same assertion and the same wrong answer.
+  expect(calloutBg.bar, "callout panel has no left colour bar").toMatch(/linear-gradient\(.*rgb/);
 
   await seek(".cm-lp-macro-wrap");
   await expect(preview.locator(".cm-lp-macro-wrap").first()).toHaveClass(/cm-lp-align-center/);
