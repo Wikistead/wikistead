@@ -48,7 +48,11 @@ test("#320 the header notification bell opens its inbox (empty state for a fresh
   await bell.click();
   // The popover opens and its inbox list renders (empty-state or items — both prove the query ran).
   await expect(page.getByTestId("notification-list")).toBeVisible();
-  await sleep(400);
-  const rendered = (await page.getByTestId("notification-empty").count()) + (await page.getByTestId("notification-item").count());
-  expect(rendered).toBeGreaterThan(0);
+  // WAIT for the outcome instead of sleeping and then counting. The list renders a loading branch first
+  // (`notifications.loading`), and a fixed 400ms is a bet on how long the query takes — lose it and the
+  // count is zero because nothing has arrived yet, which reads as "the inbox rendered neither state".
+  await expect(
+    page.getByTestId("notification-empty").or(page.getByTestId("notification-item")).first(),
+    "the inbox settles on one state or the other",
+  ).toBeVisible({ timeout: 10_000 });
 });
