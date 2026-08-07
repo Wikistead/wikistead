@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, setPublicSurface, sleep, WEB } from "../helpers";
+import { enterEdit, FGA, openScratch, setPublicSurface, sleep, WEB } from "../helpers";
 
 // #313: hover-copy anchor links on headings + #<slug> deep links, in a REAL browser with a REAL
 // clipboard (context clipboard permissions). Three surfaces: the member CM surface (widget button),
@@ -11,7 +11,6 @@ import { enterEdit, openScratch, setPublicSurface, sleep, WEB } from "../helpers
 const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
 const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
 const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
-const FGA = "http://localhost:8090";
 
 async function makePublic(pageId: string) {
   const res = await fetch(`${FGA}/stores/${STORE}/write`, {

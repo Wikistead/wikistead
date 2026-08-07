@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
+import { enterEdit, FGA, openScratch, setPublicSurface, sleep } from "../helpers";
 
 // #227 / ADR-030 (option b): the anonymous read-only PUBLIC reader-chrome for a public space. An anonymous
 // browser context (no session) browses a public space in the app shell's sidebar (its published+public page
@@ -10,7 +10,6 @@ import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
 const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
 const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
 const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
-const FGA = "http://localhost:8090";
 
 async function fgaWrite(tuple: { user: string; relation: string; object: string }) {
   const res = await fetch(`${FGA}/stores/${STORE}/write`, {
