@@ -205,11 +205,22 @@ test("#579 ①: a group gets a tenant role from the MEMBER TABLE, by name", asyn
     await expect(row, "the group appears with its NAME, never a hash").toBeVisible({ timeout: 8000 });
     await expect(row).not.toContainText(/[0-9a-f]{24}/);
 
-    // and the role comes off from the same control that put it on — there is no second affordance
-    await row.getByTestId("member-role-select").click();
-    await page.getByRole("option").first().click();
-    await expect(page.getByTestId("member-row-group").filter({ hasText: groupName }), "removing the role removes the row")
-      .toHaveCount(0, { timeout: 8000 });
+    // …and it comes off through the row's ⋯, behind a confirm.
+    //
+    // This used to read "the role comes off from the same control that put it on — there is no second
+    // affordance", and drove it by opening the Select and clicking the first option. #643 overturned
+    // exactly that: the placeholder was the revocation, nobody read it as one, and it put a destructive
+    // act in the list of ordinary choices — so it became a LABEL (`disabled: true`, first in the list)
+    // and revoking moved to the ⋯ where every other destructive action on this screen lives.
+    //
+    // The test kept clicking the first option. Playwright waits for a disabled item to become enabled,
+    // which it never does, so this hung until the 60s test timeout — and because the timeout lands while
+    // the `finally` is making API calls, the failure was REPORTED from the cleanup, pointing at
+    // `removeRole` rather than at the affordance that no longer exists.
+    await row.getByTestId("group-actions-trigger").click();
+    await page.getByTestId("group-unassign").click();
+    await page.getByTestId("members-confirm").click();
+    await expect(row, "with no grant left, the group leaves the table").toHaveCount(0, { timeout: 10_000 });
   } finally {
     await removeRole(request, [roleId]);
   }
