@@ -47,9 +47,30 @@ function toView(row: { domain: string; verification_token: string; status: strin
   }
 }
 
-export async function listCustomDomains(db: TenantDb): Promise<CustomDomainView[]> {
+/** #623: how many custom domains one response may carry. */
+export const CUSTOM_DOMAINS_PAGE_LIMIT = 100
+
+export interface CustomDomainsPage { domains: CustomDomainView[]; nextCursor: string | null }
+
+export async function listCustomDomains(
+  db: TenantDb,
+  args: { limit?: number; cursor?: string } = {},
+): Promise<CustomDomainsPage> {
+  // #623: one row per custom domain, and each row costs a `passkeysStrandedBy` query — so an unbounded
+  // list was an unbounded fan-out too, not just an unbounded payload.
+  //
+  // The marker is the DOMAIN, and there is no tiebreaker on purpose: `custom_domains` is keyed by it,
+  // so the ordering key is unique inside a tenant's read. (The timestamp cursors elsewhere in this
+  // ticket need one because two rows really can share an instant.) Ordered by domain rather than by
+  // `created_at` for the same reason — a name is its own stable order.
+  const limit = Math.min(500, Math.max(1, args.limit ?? CUSTOM_DOMAINS_PAGE_LIMIT))
+  const after = args.cursor ?? null
   const rows = await db.sql<{ domain: string; verification_token: string; status: string; verified_at: Date | null }[]>`
-    SELECT domain, verification_token, status, verified_at FROM custom_domains ORDER BY created_at
+    SELECT domain, verification_token, status, verified_at FROM custom_domains
+     WHERE TRUE
+       ${after != null ? db.sql`AND domain > ${after}` : db.sql``}
+     ORDER BY domain
+     LIMIT ${limit + 1}
   `
   // #664 / ADR-219 §1 (ruling 4): a passkey is bound to an RP ID, so moving the tenant to its own
   // domain invalidates every one made under the old host. The ruling requires the warning to appear in
@@ -58,8 +79,14 @@ export async function listCustomDomains(db: TenantDb): Promise<CustomDomainView[
   //
   // Counted per DOMAIN rather than once, because each pending domain is a different destination and the
   // answer differs: a domain already serving this tenant strands nobody.
-  const views = rows.map(toView)
-  return Promise.all(views.map(async (v) => ({ ...v, passkeysStranded: await passkeysStrandedBy(db, v.domain) })))
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const last = page[page.length - 1]
+  const views = page.map(toView)
+  return {
+    domains: await Promise.all(views.map(async (v) => ({ ...v, passkeysStranded: await passkeysStrandedBy(db, v.domain) }))),
+    nextCursor: hasMore && last ? last.domain : null,
+  }
 }
 
 // Add a custom domain (pending). Entitlement-gated (customDomain); a domain already claimed by
@@ -363,9 +390,13 @@ export async function removeCustomDomain(db: TenantDb, args: { tenantId: string;
 }
 
 export async function customDomainsPlugin(app: FastifyInstance) {
-  app.get('/admin/custom-domains', async (req) => {
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/admin/custom-domains', async (req) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
-    return listCustomDomains(req.db)
+    const asked = Number.parseInt(req.query.limit ?? '', 10)
+    return listCustomDomains(req.db, {
+      ...(Number.isFinite(asked) ? { limit: asked } : {}),
+      ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+    })
   })
 
   app.post<{ Body: { domain?: string } }>('/admin/custom-domains', async (req, reply) => {

@@ -110,7 +110,10 @@ describe('#664: the list carries the count too', () => {
   it('so a screen can warn before the button is pressed', async () => {
     await givePasskey(`list-${STAMP}`)
     const res = await app.inject({ method: 'GET', url: '/admin/custom-domains', headers: AUTH })
-    const mine = (res.json() as { domain: string; passkeysStranded?: number }[]).find((d) => d.domain === DOMAIN)
+    // #623: the list is paged now — the rows moved under `domains`, and each still carries the count
+    // the verify button reads.
+    const mine = (res.json() as { domains: { domain: string; passkeysStranded?: number }[] }).domains
+      .find((d) => d.domain === DOMAIN)
     expect(mine?.passkeysStranded, 'the same number the refusal would give').toBe(1)
   }, 120_000)
 })
