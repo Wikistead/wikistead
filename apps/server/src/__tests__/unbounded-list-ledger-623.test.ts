@@ -132,7 +132,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // unbounded and the RESPONSE cannot grow, which is a different axis from the one this ticket is
   // about. Checked in sso-exemptions-paged-623 rather than asserted here.
   'admin-login-methods.ts:/admin/login-methods/impact': { kind: 'bounded', why: 'answers two numbers — the count of members a stance would leave unsatisfied and how many hold a session. The roster it counts is never returned, so the response shape is fixed however large the tenant is.' },
-  'custom-domains.ts:/admin/custom-domains': { kind: 'debt', why: '#623: one row per custom domain on the tenant.' },
 
   // bounded, and NOT by a LIMIT — which is why each needs a line rather than a keyword.
   'billing.ts:/billing/usage': { kind: 'bounded', why: 'getUsage is SUM(amount) — one number per resource, and the resource list is a constant in the handler. The read scans, the response cannot grow.' },
@@ -509,6 +508,9 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // #623: the mention directory. `slice` caps the answer in JS, so the SQL bound is invisible from
     // outside — this is where it is read.
     { file: 'routes/comments.ts', fn: 'mentionableViewers' },
+    // #623: the custom-domain list. `slice` caps the answer in JS and the handler carries the word
+    // `cursor`, so neither the sweep nor a behavioural pin can see the SQL bound go.
+    { file: 'routes/custom-domains.ts', fn: 'listCustomDomains' },
     // #623: the custom-role list, serving all THREE role routes. Here for the reasons that keep
     // recurring: `slice` caps the response in JS, and a paged handler satisfies BOUNDED_MARKER on the
     // word `cursor` alone — so the sweep can no longer fail it, and this is where the SQL is read.
