@@ -23,7 +23,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteTuples, writeTuples } from '@wikistead/authz'
 import { buildApp } from '../app.js'
-import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listAllSpaceAccess } from '../routes/spaces.js'
 import { assignRoleInTx } from '../routes/roles.js'
 import { spaceGrantTuplesFor } from '../space-grant-expansion.js'
 import type { FastifyInstance } from 'fastify'
@@ -95,7 +95,7 @@ async function serverAllowsRoleChange(caller: string, grantee: string): Promise<
 
 describe('#607the roster offers no operation the server would refuse', () => {
   it('every row: what the UI would offer is a subset of what this caller may do', async () => {
-    const roster = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: AM })
+    const roster = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: AM })
     expect(roster.length, 'the sweep has rows to sweep').toBeGreaterThan(2)
 
     // The premise: at least one row must be REVOCABLE and belong to a principal who is NOT changeable.
@@ -125,7 +125,7 @@ describe('#607the roster offers no operation the server would refuse', () => {
   it('the caller who CAN do everything is offered everything (not a wall for everyone)', async () => {
     // A signal that says "no" to every row would satisfy the subset property perfectly and make the
     // screen useless. The manager's view is the other half of the statement.
-    const roster = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: OWNER })
+    const roster = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: OWNER })
     expect(roster.length).toBeGreaterThan(2)
     expect(roster.every((r) => r.changeable === true), 'a manager may change any principal here').toBe(true)
   }, 120_000)
@@ -139,7 +139,7 @@ describe('#607the roster offers no operation the server would refuse', () => {
     // changeable" was true before the ruling and is what a server that lost the narrowing would answer;
     // "everybody is changeable" is what a server that lost the ceiling would answer. The subset property
     // above holds vacuously under either, which is exactly whyasked for this premise.
-    const roster = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: AM })
+    const roster = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: AM })
     expect(roster.length).toBeGreaterThan(2)
     const frozen = roster.filter((r) => r.changeable === false)
     const movable = roster.filter((r) => r.changeable === true)

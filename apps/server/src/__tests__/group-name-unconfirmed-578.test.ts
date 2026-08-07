@@ -17,7 +17,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient } from '@wikistead/authz'
-import { createSpace, deleteSpace, grantSpaceAccess, listSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, listAllSpaceAccess } from '../routes/spaces.js'
 import { groupGrantee } from '../auth/group-sync.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
@@ -37,7 +37,7 @@ let spaceId = ''
 
 const rowsFor = async (name: string) => {
   const grantee = groupGrantee(TENANT, name)
-  const all = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: TENANT, userId: OWNER })
+  const all = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: TENANT, userId: OWNER })
   return all.filter((g) => g.grantee === grantee)
 }
 

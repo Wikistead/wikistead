@@ -17,7 +17,7 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteTuples } from '@wikistead/authz'
 import { buildApp } from '../app.js'
 import {
-  createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listSpaceAccess, listTenantGroups, listMemberCandidates,
+  createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, listAllSpaceAccess, listTenantGroups, listMemberCandidates,
   spaceCallMovesAdminClass,
 } from '../routes/spaces.js'
 import { assignRoleInTx } from '../routes/roles.js'
@@ -77,7 +77,7 @@ describe('#607 (a): the moved roster sites answer to the verb', () => {
   it('grants view/edit, reads the roster, completes from the pickers, revokes what it granted', async () => {
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: AM, grantee: `user:${TARGET}`, capability: 'view', plan: 'free' })
     expect(await check(fgaClient, `user:${TARGET}`, 'view', { type: 'space', id: spaceId }), 'the grant landed').toBe(true)
-    const roster = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: AM })
+    const roster = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: AM })
     expect(roster.some((r) => r.grantee === `user:${TARGET}` && r.capability === 'view'), 'the roster is readable').toBe(true)
     // the OWNER's manager row is visible but marked non-revocable for THIS caller (the UI signal)
     const ownerRow = roster.find((r) => r.grantee === `user:${OWNER}` && r.capability === 'manage')
@@ -223,7 +223,7 @@ describe('#607 (d): replace is refused when it would sweep an admin-class mark',
 describe('#607: a plain member is refused everything', () => {
   it('no site opens to a principal with no verb', async () => {
     await expect403(grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: PLAIN, grantee: `user:${TARGET}`, capability: 'view', plan: 'free' }), 'grant')
-    await expect403(listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: PLAIN }), 'roster')
+    await expect403(listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: PLAIN }), 'roster')
     await expect403(listTenantGroups(db, fgaClient, { spaceId, userId: PLAIN }), 'groups')
     await expect403(listMemberCandidates(db, fgaClient, { spaceId, userId: PLAIN, q: 'x' }), 'members')
   }, 60_000)

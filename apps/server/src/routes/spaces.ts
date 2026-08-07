@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, requireTenantAdmin, isSpaceCreator, isAlreadyConverged } from '@wikistead/authz'
+import { check, filterAuthorized, writeTuples, deleteTuples, deleteObjectTuples, readObjectTuples, readObjectTuplesPage, requireTenantAdmin, isSpaceCreator, isAlreadyConverged } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { isAccentKey } from '@wikistead/types'
 import { emit } from '@wikistead/events'
@@ -1157,17 +1157,37 @@ export async function revokeSpaceAccess(
   return { stillCovered }
 }
 
+/** #623: how many of a space's tuples one access read may take. */
+export const SPACE_ACCESS_PAGE_SIZE = 100
+
+export interface SpaceAccessRow {
+  grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean
+  displayName?: string | null; managed?: boolean; revocable?: boolean; changeable?: boolean
+}
+export interface SpaceAccessPage { grants: SpaceAccessRow[]; nextCursor: string | null }
+
 export async function listSpaceAccess(
   fga: OpenFgaClient,
   db: TenantDb,
-  args: { spaceId: string; tenantId: string; userId: string },
-): Promise<{ grantee: string; capability: SpaceCapability; groupName?: string; groupUnconfirmed?: boolean; displayName?: string | null; managed?: boolean; revocable?: boolean; changeable?: boolean }[]> {
+  args: { spaceId: string; tenantId: string; userId: string; cursor?: string; pageSize?: number },
+): Promise<SpaceAccessPage> {
   // ADR-209 (#607): reading the roster is the verb's whole point. The per-row `revocable` signal below
   // tells the CLIENT which rows this caller may take away (the server refuses anyway; two layers).
   await requireSpaceAccessAuthority(fga, args.userId, args.spaceId, { capabilities: [] })
   // #553 re-review N1: paginated — a bare read answers ONE page (50) and the comment arm falling off
   // it would draw an unfolded editor row whose revoke strips edit but leaves comment behind.
-  const tuples = await readObjectTuples(fga, `space:${args.spaceId}`)
+  //
+  // #623: and it then returned the whole roster. The bound is a page of tuples and the marker is the
+  // store's continuation token, asked for at an explicit size so the bound belongs here rather than to
+  // a server setting.
+  //
+  // ⚠️ Every filter below runs AFTER the read — the relation map, the principal shape, the custom-role
+  // expansion — and a space object carries share links and the tenant link too, so a page can hold ZERO
+  // rows while more follow. Walk on the marker, never on emptiness (`listAllSpaceAccess`).
+  const { tuples, nextCursor } = await readObjectTuplesPage(fga, `space:${args.spaceId}`, {
+    pageSize: args.pageSize ?? SPACE_ACCESS_PAGE_SIZE,
+    ...(args.cursor ? { cursor: args.cursor } : {}),
+  })
   // #163: resolve group grantee ids back to names for display (groupFgaId is one-way).
   const byId = groupNameByFgaId(args.tenantId, await knownGroupNames(db))
   // #578 bounce ①: a name the directory has produced vs one a manager typed for a group nobody carries
@@ -1255,6 +1275,28 @@ export async function listSpaceAccess(
       if (g.grantee.startsWith('user:') && !g.groupName) g.displayName = ids.get(g.grantee.slice('user:'.length))?.displayName ?? null
     }
   }
+  return { grants: out, nextCursor }
+}
+
+/**
+ * The whole space roster, by walking.
+ *
+ * The permissions screen is where a grant is taken away, and #607 made each row carry whether THIS
+ * caller may take it — a roster missing rows is access nobody can act on. `pageSize` is a seam for the
+ * pin, not a caller knob.
+ */
+export async function listAllSpaceAccess(
+  fga: OpenFgaClient,
+  db: TenantDb,
+  args: { spaceId: string; tenantId: string; userId: string; pageSize?: number },
+): Promise<SpaceAccessRow[]> {
+  const out: SpaceAccessRow[] = []
+  let cursor: string | undefined
+  do {
+    const page: SpaceAccessPage = await listSpaceAccess(fga, db, { ...args, ...(cursor ? { cursor } : {}) })
+    out.push(...page.grants)
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
   return out
 }
 
@@ -1694,8 +1736,11 @@ export async function spacesPlugin(app: FastifyInstance) {
   })
 
   // ── per-space access (Phase 5b) — all manage-gated ──
-  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/access', async (req) => {
-    return listSpaceAccess(app.fga, req.db, { spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub })
+  app.get<{ Params: { spaceId: string }; Querystring: { cursor?: string } }>('/spaces/:spaceId/access', async (req) => {
+    return listSpaceAccess(app.fga, req.db, {
+      spaceId: req.params.spaceId, tenantId: req.tenant.id, userId: req.user.sub,
+      ...(req.query?.cursor ? { cursor: req.query.cursor } : {}),
+    })
   })
 
   // grantee = user:<sub> | group:<id>#member (raw), OR groupName (#163: server resolves it to

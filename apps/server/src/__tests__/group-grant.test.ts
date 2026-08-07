@@ -11,7 +11,7 @@ import { fgaClient, checkRelation } from '@wikistead/authz'
 import { buildApp } from '../app.js'
 import { createSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
-import { grantSpaceAccess, revokeSpaceAccess, listTenantGroups, listSpaceAccess } from '../routes/spaces.js'
+import { grantSpaceAccess, revokeSpaceAccess, listTenantGroups, listAllSpaceAccess } from '../routes/spaces.js'
 import { grantPageAccess } from '../routes/pages.js'
 import { groupFgaId, groupGrantee, syncMemberGroups } from '../auth/group-sync.js'
 import type { FastifyInstance } from 'fastify'
@@ -113,7 +113,7 @@ describe('#163 grant access to a group by name', () => {
     expect(await checkRelation(fgaClient, `user:${MEMBER}`, 'viewer_member', { type: 'space', id: spaceId })).toBe(true)
     expect(await checkRelation(fgaClient, `user:${STRANGER}`, 'viewer', { type: 'space', id: spaceId })).toBe(false) // not in the group
     // the access list resolves the hashed grantee id back to the human group name (#163 display)
-    const listed = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: MANAGER })
+    const listed = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: MANAGER })
     expect(listed.find((g) => g.grantee === groupGrantee(T, GROUP))?.groupName).toBe('Engineering')
     await revokeSpaceAccess(db, fgaClient, app.searchDriver, {
       spaceId, tenantId: T, userId: MANAGER, grantee: groupGrantee(T, GROUP), capability: 'view',
@@ -131,12 +131,12 @@ describe('#163 grant access to a group by name', () => {
   })
 
   it('a grant to a group no longer in any member (renamed/emptied at IdP) shows the raw id (display fallback, ADR-053)', async () => {
-    // groupFgaId is one-way: if "Ghost" appears in no member's groups, listSpaceAccess can't map the
+    // groupFgaId is one-way: if "Ghost" appears in no member's groups, listAllSpaceAccess can't map the
     // hashed grantee back to a name → it falls back to the raw group:<id>#member (never crashes,
     // never shows a wrong name). The grant itself still resolves once a member syncs into "Ghost".
     const ghost = groupGrantee(T, 'Ghost')
     await grantSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: T, userId: MANAGER, grantee: ghost, capability: 'view' })
-    const listed = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: MANAGER })
+    const listed = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: MANAGER })
     const row = listed.find((g) => g.grantee === ghost)
     expect(row).toBeDefined()
     expect(row!.groupName).toBeUndefined() // unknown id → no name → UI shows the raw grantee

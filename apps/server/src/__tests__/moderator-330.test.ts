@@ -23,7 +23,7 @@ import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { LogicalSearchDriver } from '../search/index.js'
-import { createSpace, deleteSpace, grantSpaceAccess, listSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, listAllSpaceAccess } from '../routes/spaces.js'
 import { createPage, deletePage, getPage, grantPageAccess, listAllPageAccess, setPageFrozen, unsetPageFrozen } from '../routes/pages.js'
 import { markPatrolled, unmarkPatrolled } from '../routes/notifications.js'
 import type { Tenant } from '@wikistead/types'
@@ -148,7 +148,7 @@ describe('#330 moderator — product write paths (real PG + OpenFGA)', () => {
 
   it('the space grant vocabulary gained `moderate` → writes space#moderator; the list surfaces it', async () => {
     await grantSpaceAccess(db, fgaClient, driver, { spaceId, tenantId: tenant.id, userId: 'dev-user', grantee: `user:${MODSUB}`, capability: 'moderate', plan: tenant.plan })
-    const grants = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: tenant.id, userId: 'dev-user' })
+    const grants = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: tenant.id, userId: 'dev-user' })
     expect(grants.some((g) => g.grantee === `user:${MODSUB}` && g.capability === 'moderate')).toBe(true)
     // and it resolves: the appointee moderates the space's page
     expect(await can(`user:${MODSUB}`, 'moderate', pageId)).toBe(true)
