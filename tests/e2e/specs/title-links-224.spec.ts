@@ -84,6 +84,11 @@ test("#224 hover card: the excerpt card appears in the tooltip layer (view-re-co
   // publish the target so it has an excerpt body
   await page.goto(`/p/${targetId}?edit=1`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
+  // Let the collab doc SYNC before typing. `openScratch` (which the green tests in this file use)
+  // sleeps 400ms after the editor mounts for exactly this; arriving by hand with `?edit=1` waits only
+  // for `.cm-content` to exist. Typing into a doc that has not synced yet is overwritten when it does,
+  // and the publish below then snapshots an empty ydoc.
+  await sleep(600);
   await page.click("[data-pane=preview] .cm-content");
   // #351: the excerpt now renders as MARKDOWN in the card — author bold + a raw <script> to prove rich render
   // AND XSS-inert (the shared DOM-safe renderMarkdownToDom).
@@ -156,8 +161,18 @@ test("#224 guest surface: NO auto links render for a guest (uninjected — 2-lay
   const hostId = await createScratchPage(member, `guest-titlelink-host-${RUN}`);
   await member.goto(`/p/${hostId}?edit=1`);
   await member.waitForSelector("[data-pane=preview] .cm-content");
+  // Let the collab doc SYNC before typing. `openScratch` (which the green tests in this file use)
+  // sleeps 400ms after the editor mounts for exactly this; arriving by hand with `?edit=1` waits only
+  // for `.cm-content` to exist. Typing into a doc that has not synced yet is overwritten when it does,
+  // and the publish below then snapshots an empty ydoc.
+  await sleep(600);
   await member.click("[data-pane=preview] .cm-content");
   await member.keyboard.type(`guest body mentions ${target} here`);
+  // The text is IN the doc before publishing. A settle sleep is a bet on how long the collab sync takes;
+  // if it lands late it overwrites what was typed, and `publishAndWait` then spends fifteen seconds
+  // re-publishing an empty ydoc and reports it as the published body never containing the text. Waiting
+  // on the editor turns that race into a deterministic wait, and a genuine typing failure now fails here.
+  await expect(member.locator("[data-pane=preview] .cm-content")).toContainText("guest body mentions", { timeout: 10_000 });
   await publishAndWait(member, hostId, "guest body mentions"); // #354: poll the published body, not a fixed sleep
   const linkId = await member.evaluate(async ({ api, id }) => {
     const r = await fetch(`${api}/share-links`, {
@@ -189,8 +204,15 @@ test("#351 static card: a macro-heavy excerpt renders placeholder chips — no w
   // live widget + fire a view-gated fetch inside the card (therejection).
   await page.goto(`/p/${targetId}?edit=1`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
+  // Let the collab doc SYNC before typing. `openScratch` (which the green tests in this file use)
+  // sleeps 400ms after the editor mounts for exactly this; arriving by hand with `?edit=1` waits only
+  // for `.cm-content` to exist. Typing into a doc that has not synced yet is overwritten when it does,
+  // and the publish below then snapshots an empty ydoc.
+  await sleep(600);
   await page.click("[data-pane=preview] .cm-content");
   await page.keyboard.insertText("```mermaid\ngraph TD; A-->B\n```\n\n:::embed-page\ndemo\n:::\n\nplain **bold351** tail\n");
+  // See the note in the guest test: wait for the text to be in the doc rather than betting on the sync.
+  await expect(page.locator("[data-pane=preview] .cm-content")).toContainText("bold351", { timeout: 10_000 });
   await publishAndWait(page, targetId, "bold351");
 
   await openScratch(page, "title-links-static-card");
