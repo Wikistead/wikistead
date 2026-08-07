@@ -56,11 +56,17 @@ beforeAll(async () => {
   // microseconds on the way in, and the fixture then measures nothing.
   const ids = (await admin<{ id: string }[]>`
     SELECT id FROM share_links WHERE resource_id = ${pageId} ORDER BY id`).map((r) => r.id)
+  // ⚠️ ONE base instant for every row. `to_timestamp(${base}::numeric)` evaluated per statement is a
+  // different second once the loop crosses a boundary, and the microsecond offsets then stop being
+  // adjacent — measured as a red round-trip case in a full run while every single-file run was green.
+  // Carried as an epoch numeric for the same reason the cursors are: a timestamp handed to the driver
+  // loses its microseconds.
+  const [{ base }] = await admin<{ base: string }[]>`SELECT extract(epoch from date_trunc('second', now()))::text AS base`
   for (const [i, id] of ids.entries()) {
     const offset = i === 5 ? 6 : i
     await admin`
       UPDATE share_links
-         SET created_at = date_trunc('second', now()) + (${offset} || ' microseconds')::interval
+         SET created_at = to_timestamp(${base}::numeric) + (${offset} || ' microseconds')::interval
        WHERE id = ${id}`
   }
 }, 300_000)

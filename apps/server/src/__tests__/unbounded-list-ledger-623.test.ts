@@ -61,10 +61,10 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // does not make it longer. The scan cannot see either half — `withoutSubqueries` strips the
   // derived tables they live in — so the claim is stated here and CHECKED in activity-window-623.
   'account.ts:/me/activity': { kind: 'bounded', why: 'GROUP BY calendar day inside a twelve-month window: at most ~367 rows, and a busy day is one row. Pinned by activity-window-623, because the scan strips the derived tables the window and the grouping live in.' },
-  'members.ts:/admin/analytics': { kind: 'debt', why: '#623 B: a row per day per page; grows with the tenant and with time.' },
+  'members.ts:/admin/analytics': { kind: 'bounded', why: 'rollupPageViews answers a COUNT of pages and a series of DAYS capped at 400; the page ids the route reads feed a parameter and never travel. The read is unbounded and the response shape is fixed — the same axis as /billing/usage. Checked in analytics-shape-623; the 400 itself is held by the still-bounded list below.' },
   'notifications.ts:/notifications/unread-count': { kind: 'bounded', why: 'the count stops at UNREAD_BADGE_CAP + 1 — the number the bell already refuses to print past (it renders 99+). The LIMIT lives in a derived table, which withoutSubqueries strips before looking for a bound, so this line states what the scan cannot see rather than the scan being loosened to see it.' },
   'pins.ts:/pins': { kind: 'bounded', why: 'MAX_PINS_PER_TYPE refuses the pin past 200 per member per kind, so the list cannot grow (#623). A cap and not a page, for the /me/factors reason: reorder persists the whole ordered id list and the sidebar draws the set, so paging would let somebody hold more pins than they can see or reorder. Pinned by pins-capped-623.' },
-  'spaces.ts:/spaces/:spaceId/analytics': { kind: 'debt', why: '#623 B: a row per day per page, same shape as the tenant roll-up.' },
+  'spaces.ts:/spaces/:spaceId/analytics': { kind: 'bounded', why: 'the same helper over one space: a count and a capped series, never the roster. Checked in analytics-shape-623.' },
 
   // ── bounded: the result cannot grow, and the reason is stated rather than assumed ──────────────
   'attachments.ts:/attachments/:id/download': { kind: 'bounded', why: 'one attachment by id — a row, not a list.' },
@@ -492,6 +492,9 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // BOUNDED_MARKER on its own. Measured — with neither of those understood, the break stayed green in
     // both places.
     { file: 'routes/spaces.ts', fn: 'listGroupNames' },
+    // #623: the analytics series. Both roll-up routes lean on this one cap, and a behavioural pin
+    // cannot see it — the response is short either way until a tenant has more than 400 days of data.
+    { file: 'analytics/rollup.ts', fn: 'rollupPageViews' },
     // #623: the custom-role list, serving all THREE role routes. Here for the reasons that keep
     // recurring: `slice` caps the response in JS, and a paged handler satisfies BOUNDED_MARKER on the
     // word `cursor` alone — so the sweep can no longer fail it, and this is where the SQL is read.

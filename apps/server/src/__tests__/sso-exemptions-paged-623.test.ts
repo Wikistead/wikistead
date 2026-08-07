@@ -34,6 +34,12 @@ const list = (cursor?: string) =>
 beforeAll(async () => {
   app = await buildApp(); await app.ready()
   await seatMembers(admin, T, SUBS)
+  // ⚠️ ONE base instant for every row. `to_timestamp(${base}::numeric)` evaluated per statement is a
+  // different second once the loop crosses a boundary, and the microsecond offsets then stop being
+  // adjacent — measured as a red round-trip case in a full run while every single-file run was green.
+  // Carried as an epoch numeric for the same reason the cursors are: a timestamp handed to the driver
+  // loses its microseconds.
+  const [{ base }] = await admin<{ base: string }[]>`SELECT extract(epoch from date_trunc('second', now()))::text AS base`
   for (const [i, sub] of SUBS.entries()) {
     // ⚠️ Offsets 0,1,2,3,4,5,5,7,8 put the tied pair at ASCENDING positions 6 and 7 — ACROSS the
     // boundary for PAGE = 3, which is the only place a missing tiebreaker can be seen. Measured the
@@ -42,7 +48,7 @@ beforeAll(async () => {
     const offset = i === 6 ? 5 : i
     await admin`
       INSERT INTO sso_exemptions (tenant_id, member_sub, created_by, created_at)
-      VALUES (${T}, ${sub}, 'dev-user', date_trunc('second', now()) + (${offset} || ' microseconds')::interval)
+      VALUES (${T}, ${sub}, 'dev-user', to_timestamp(${base}::numeric) + (${offset} || ' microseconds')::interval)
       ON CONFLICT DO NOTHING`
   }
 }, 300_000)
