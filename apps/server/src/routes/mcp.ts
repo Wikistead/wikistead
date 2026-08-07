@@ -3,7 +3,7 @@ import { filterAuthorized, check } from '@wikistead/authz'
 import { renderMcpSyntaxSections } from '@wikistead/macro-render'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { docName } from '@wikistead/types'
-import { getPublished, listPages, getBacklinks, createPage, publishPage } from './pages.js'
+import { getPublished, listPages, listPagesFlat, getBacklinks, createPage, publishPage } from './pages.js'
 import { listAllSpaces } from './spaces.js'
 import { createPageComment } from './comments.js'
 import { mcpEditDraft, CollabUnavailableError } from '../collab-mcpedit.js'
@@ -109,14 +109,24 @@ const TOOLS: McpTool[] = [
     name: 'list_pages',
     description: 'List the pages in a space that you can view (id + title). Returns none if the space is empty or not visible to you.',
     scope: 'read',
-    inputSchema: { type: 'object', properties: { spaceId: { type: 'string', description: 'the space id' } }, required: ['spaceId'] },
+    inputSchema: { type: 'object', properties: { spaceId: { type: 'string', description: 'the space id' }, cursor: { type: 'string', description: 'continue from a previous call (the id this tool reported as `more after`)' } }, required: ['spaceId'] },
     async run(req, app, principal, args) {
       const spaceId = typeof args.spaceId === 'string' ? args.spaceId : ''
       if (!spaceId) throw toolError('spaceId is required')
-      // listPages FGA-view-filters per page (a non-viewable space yields an empty list — no existence oracle).
-      const pages = await listPages(req.db, app.fga, { spaceId, subject: `user:${principal.sub}` })
-      if (!pages.length) return 'no visible pages'
-      return pages.map((p) => `- ${p.title} (${p.id})`).join('\n')
+      // #623 / ADR-220 §6.1: this tool reads the space FLAT, and branch paging means nothing to it — so
+      // it keeps the flat contract and takes an explicit bound with a cursor. The answer SAYS when there
+      // is more, because a listing that quietly stops at 200 is the silent truncation this ticket is
+      // about; a model that cannot tell it was cut will report the rest as absent.
+      //
+      // listPagesFlat FGA-view-filters per page (a non-viewable space yields an empty list — no
+      // existence oracle).
+      const { pages, nextCursor } = await listPagesFlat(req.db, app.fga, {
+        spaceId, subject: `user:${principal.sub}`,
+        ...(typeof args.cursor === 'string' && args.cursor ? { cursor: args.cursor } : {}),
+      })
+      if (!pages.length) return nextCursor ? `no visible pages on this page of results — more after ${nextCursor}` : 'no visible pages'
+      const body = pages.map((p) => `- ${p.title} (${p.id})`).join('\n')
+      return nextCursor ? `${body}\n(more after ${nextCursor} — call again with cursor)` : body
     },
   },
   {
