@@ -58,6 +58,9 @@ export interface LoginMethodsView {
   canManageStance: boolean
 }
 
+/** #623: how many SSO exemptions one response may carry. */
+export const SSO_EXEMPTIONS_PAGE_LIMIT = 100
+
 export async function adminLoginMethodsPlugin(app: FastifyInstance) {
   app.get('/admin/login-methods', async (req): Promise<LoginMethodsView> => {
     // #604-B (item 3): the READ opens to `manage_connections`. This is the minimum the sign-in
@@ -329,13 +332,36 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
   // the stance bites. Admin-gated like the switch; every change audited in-tx (an exemption is an
   // authz fact). The listing carries `hasCredential` so the screen can say which exemptions could
   // actually sign in today (§5: the credential row is the only honest witness that a key exists).
-  app.get('/admin/sso-exemptions', async (req) => {
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/admin/sso-exemptions', async (req) => {
+    // #623: one row per exempted member, and an exemption is never pruned — this grows with people,
+    // not with configuration.
+    //
+    // The position marker carries an epoch rather than a formatted timestamp: a parameter loses its
+    // microseconds on the way in. This walk is ASC, the direction that REPEATS rather than skips, so a
+    // boundary row compares as greater than the marker naming it and comes back on the next page —
+    // measured on `/members`, where the walk stopped advancing entirely. `member_sub` breaks ties:
+    // exempting several people in one action stamps them in the same instant.
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
-    const rows = await req.db.sql<{ member_sub: string; created_at: Date; has_credential: boolean }[]>`
-      SELECT se.member_sub, se.created_at, (lc.member_sub IS NOT NULL) AS has_credential
+    const asked = Number.parseInt(req.query.limit ?? '', 10)
+    const limit = Math.min(500, Math.max(1, Number.isFinite(asked) ? asked : SSO_EXEMPTIONS_PAGE_LIMIT))
+    const bar = req.query.cursor?.indexOf('|') ?? -1
+    const after = req.query.cursor && bar > 0
+      ? { at: req.query.cursor.slice(0, bar), sub: req.query.cursor.slice(bar + 1) } : null
+    const rows = await req.db.sql<{ member_sub: string; created_at: Date; has_credential: boolean; cursor_at: string }[]>`
+      SELECT se.member_sub, se.created_at, (lc.member_sub IS NOT NULL) AS has_credential,
+             extract(epoch from se.created_at)::text AS cursor_at
       FROM sso_exemptions se LEFT JOIN local_credentials lc ON lc.member_sub = se.member_sub
-      ORDER BY se.created_at`
-    return rows.map((r) => ({ memberSub: r.member_sub, createdAt: r.created_at, hasCredential: r.has_credential }))
+      WHERE TRUE
+        ${after ? req.db.sql`AND (se.created_at, se.member_sub) > (to_timestamp(${after.at}::numeric), ${after.sub})` : req.db.sql``}
+      ORDER BY se.created_at, se.member_sub
+      LIMIT ${limit + 1}`
+    const hasMore = rows.length > limit
+    const page = hasMore ? rows.slice(0, limit) : rows
+    const last = page[page.length - 1]
+    return {
+      exemptions: page.map((r) => ({ memberSub: r.member_sub, createdAt: r.created_at, hasCredential: r.has_credential })),
+      nextCursor: hasMore && last ? `${last.cursor_at}|${last.member_sub}` : null,
+    }
   })
 
   app.put<{ Params: { sub: string } }>('/admin/sso-exemptions/:sub', async (req, reply) => {
