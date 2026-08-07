@@ -92,8 +92,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // as paid. Classified one at a time, by reading each handler.
   'comments.ts:/pages/:pageId/mentionable': { kind: 'debt', why: '#623 B: SELECT … FROM members with no bound, then an FGA batchCheck over EVERY member — the mention autocomplete pays for the whole roster.' },
   'pages.ts:/pages/:pageId/access': { kind: 'debt', why: '#623 B: principal × page, the roster the page permissions dialog reads — the /spaces/:spaceId/access shape.' },
-  'roles.ts:/admin/roles': { kind: 'debt', why: '#623 B: one row per custom role; grows with tenant configuration, nothing prunes it.' },
-  'roles.ts:/spaces/:spaceId/assignable-roles': { kind: 'debt', why: '#623 B: every resource-scoped role, same table as /admin/roles.' },
   'auth.ts:/auth/login-options': { kind: 'debt', why: '#623 A: one row per login connection; grows with IdP configuration, not with usage.' },
 
   // ── surfaced by slice 12's SECOND instrument fix: a bound marker that belonged to a scalar subquery,
@@ -127,7 +125,6 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'admin-login-methods.ts:/admin/sso-exemptions': { kind: 'debt', why: '#623: one row per exempted member; an exemption is never pruned.' },
   'admin-login-methods.ts:/admin/login-methods/impact': { kind: 'debt', why: '#623: membersUnsatisfiedBy walks EVERY member to count who a stance would sign out.' },
   'custom-domains.ts:/admin/custom-domains': { kind: 'debt', why: '#623: one row per custom domain on the tenant.' },
-  'roles.ts:/pages/:pageId/assignable-roles': { kind: 'debt', why: '#623: every resource-scoped role — the page twin of /spaces/:spaceId/assignable-roles, and the same table.' },
   // the clearest case of the blind spot in the whole product: the handler is ONE line that calls an
   // imported function, so to a same-file scan the route contained no query whatsoever.
   'pages.ts:/pages/:pageId/restrict': { kind: 'debt', why: '#623: one row per restricted principal on the page — the subtract-side twin of /pages/:pageId/access.' },
@@ -497,6 +494,10 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     // BOUNDED_MARKER on its own. Measured — with neither of those understood, the break stayed green in
     // both places.
     { file: 'routes/spaces.ts', fn: 'listGroupNames' },
+    // #623: the custom-role list, serving all THREE role routes. Here for the reasons that keep
+    // recurring: `slice` caps the response in JS, and a paged handler satisfies BOUNDED_MARKER on the
+    // word `cursor` alone — so the sweep can no longer fail it, and this is where the SQL is read.
+    { file: 'routes/roles.ts', fn: 'listCustomRoles' },
   ]
 
   it('each one still limits, and none of them paginates by OFFSET', () => {

@@ -702,6 +702,61 @@ function parseDefinition(body: { name?: unknown; capabilities?: unknown }, scope
   return { name, capabilities: caps as AnyRoleCapability[] }
 }
 
+/** #623: how many custom roles one response may carry. */
+export const ROLES_PAGE_LIMIT = 200
+
+export interface CustomRolesPage {
+  custom: { id: string; name: string; capabilities: string[]; scope: string }[]
+  nextCursor: string | null
+}
+
+/**
+ * The tenant's custom roles, one page at a time.
+ *
+ * #623: three routes read this table with three copies of the same query — the admin list and the two
+ * assignable-role lists — and every copy returned every row. One function now, so bounding it bounds
+ * all three and a fourth copy has nowhere to come from.
+ *
+ * The cursor is the NAME and there is no tiebreaker, because there cannot be a tie: `roles` carries
+ * UNIQUE (tenant_id, name) and RLS pins the tenant, so the ordering key is unique inside every read.
+ * (The timestamp cursors elsewhere in this ticket need one; this is the reason this one does not, said
+ * out loud so its absence does not read as an oversight.)
+ */
+export async function listCustomRoles(
+  db: TenantDb,
+  args: { scope?: 'resource'; limit?: number; cursor?: string } = {},
+): Promise<CustomRolesPage> {
+  const limit = Math.min(1000, Math.max(1, args.limit ?? ROLES_PAGE_LIMIT))
+  const after = args.cursor ?? null
+  const rows = await db.sql<RoleRow[]>`
+    SELECT id, name, capabilities, scope FROM roles
+     WHERE TRUE
+       ${args.scope ? db.sql`AND scope = ${args.scope}` : db.sql``}
+       ${after != null ? db.sql`AND name > ${after}` : db.sql``}
+     ORDER BY name
+     LIMIT ${limit + 1}
+  `
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const last = page[page.length - 1]
+  return {
+    custom: page.map((r) => ({ id: r.id, name: r.name, capabilities: r.capabilities, scope: r.scope })),
+    nextCursor: hasMore && last ? last.name : null,
+  }
+}
+
+/** Every custom role, by walking the pages. The walk is written once. */
+export async function listAllCustomRoles(db: TenantDb, scope?: 'resource'): Promise<CustomRolesPage['custom']> {
+  const out: CustomRolesPage['custom'] = []
+  let cursor: string | undefined
+  do {
+    const page: CustomRolesPage = await listCustomRoles(db, { ...(scope ? { scope } : {}), ...(cursor ? { cursor } : {}) })
+    out.push(...page.custom)
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
+  return out
+}
+
 export async function rolesPlugin(app: FastifyInstance) {
   const adminGate = async (req: { user: { sub: string }; tenant: { id: string } }) => {
     // #604 (ruling B): defining and handing out roles is its own power now (`or admin` unchanged)
@@ -715,14 +770,16 @@ export async function rolesPlugin(app: FastifyInstance) {
     if (!resolveEntitlements(req.tenant.plan).customRoles) throw entitlementDenied('customRoles')
   }
 
-  app.get('/admin/roles', async (req) => {
+  // #623: the three role lists take the same controls, read in one place so they cannot drift.
+  const paging = (q: { limit?: string; cursor?: string }) => {
+    const n = Number.parseInt(q.limit ?? '', 10)
+    return { ...(Number.isFinite(n) ? { limit: n } : {}), ...(q.cursor ? { cursor: q.cursor } : {}) }
+  }
+
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/admin/roles', async (req) => {
     await adminGate(req)
-    const rows = await req.db.sql<RoleRow[]>`
-      SELECT id, name, capabilities, scope, created_at, updated_at FROM roles ORDER BY name`
-    return {
-      builtIn: BUILT_IN_ROLES,
-      custom: rows.map((r) => ({ id: r.id, name: r.name, capabilities: r.capabilities, scope: r.scope })),
-    }
+    const { custom, nextCursor } = await listCustomRoles(req.db, paging(req.query))
+    return { builtIn: BUILT_IN_ROLES, custom, nextCursor }
   })
 
   app.post<{ Body: { name?: string; capabilities?: string[]; scope?: string } }>('/admin/roles', async (req, reply) => {
@@ -940,14 +997,10 @@ export async function rolesPlugin(app: FastifyInstance) {
   // roles ASSIGNABLE at space/page scope — built-ins plus custom RESOURCE-scope roles. Tenant-scope roles
   // (createSpaces etc.) are deliberately excluded: they are not assignable at a resource and stay
   // admin-console-only, so a manager never learns the tenant-admin role surface here.
-  app.get<{ Params: { spaceId: string } }>('/spaces/:spaceId/assignable-roles', async (req) => {
+  app.get<{ Params: { spaceId: string }; Querystring: { limit?: string; cursor?: string } }>('/spaces/:spaceId/assignable-roles', async (req) => {
     await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: 'space', resourceId: req.params.spaceId })
-    const rows = await req.db.sql<RoleRow[]>`
-      SELECT id, name, capabilities, scope FROM roles WHERE scope = 'resource' ORDER BY name`
-    return {
-      builtIn: BUILT_IN_ROLES,
-      custom: rows.map((r) => ({ id: r.id, name: r.name, capabilities: r.capabilities, scope: r.scope })),
-    }
+    const { custom, nextCursor } = await listCustomRoles(req.db, { scope: 'resource', ...paging(req.query) })
+    return { builtIn: BUILT_IN_ROLES, custom, nextCursor }
   })
 
   // #582 / ADR-202 §1: the PAGE equivalent of `/spaces/:spaceId/assignable-roles`. The page dialog
@@ -965,14 +1018,10 @@ export async function rolesPlugin(app: FastifyInstance) {
   // the body is tenant-wide role DEFINITIONS with nothing derived from the page — so the tenant-admin
   // short-circuit inside requireListAuthority, which answers before reading the page at all,
   // distinguishes nothing either.
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/assignable-roles', async (req) => {
+  app.get<{ Params: { pageId: string }; Querystring: { limit?: string; cursor?: string } }>('/pages/:pageId/assignable-roles', async (req) => {
     await requireListAuthority(app.fga, { sub: req.user.sub, tenantId: req.tenant.id, resourceType: 'page', resourceId: req.params.pageId })
-    const rows = await req.db.sql<RoleRow[]>`
-      SELECT id, name, capabilities, scope FROM roles WHERE scope = 'resource' ORDER BY name`
-    return {
-      builtIn: BUILT_IN_ROLES,
-      custom: rows.map((r) => ({ id: r.id, name: r.name, capabilities: r.capabilities, scope: r.scope })),
-    }
+    const { custom, nextCursor } = await listCustomRoles(req.db, { scope: 'resource', ...paging(req.query) })
+    return { builtIn: BUILT_IN_ROLES, custom, nextCursor }
   })
 
   app.post<{ Params: { roleId: string }; Body: { resourceType?: string; resourceId?: string; principal?: string; groupName?: string; replace?: boolean } }>(

@@ -65,12 +65,28 @@ afterAll(async () => {
 
 describe('#582: the page can fetch the roles it may offer', () => {
   it('returns built-ins plus resource-scope custom roles', async () => {
-    const res = await app.inject({ method: 'GET', url: `/pages/${pageId}/assignable-roles`, headers: H })
-    expect(res.statusCode).toBe(200)
-    const body = res.json() as { builtIn: { name: string }[]; custom: { id: string; scope: string }[] }
-    expect(body.builtIn.length, 'the built-ins the dialog already offered').toBeGreaterThan(0)
-    expect(body.custom.map((r) => r.id)).toContain(roleId)
-    expect(body.custom.every((r) => r.scope === 'resource'), 'tenant-scope roles stay out of a page picker').toBe(true)
+    // #623: the list is paged and the picker walks it, so this walks too. Reading only the first page
+    // was measured against the shared dev tenant (~950 roles from other suites) and this role was not
+    // on it — which is precisely the failure a picker would show as "that role does not exist".
+    const builtIn: { name: string }[] = []
+    const custom: { id: string; scope: string }[] = []
+    let cursor: string | null = null
+    for (let guard = 0; guard < 50; guard++) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/pages/${pageId}/assignable-roles${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+        headers: H,
+      })
+      expect(res.statusCode).toBe(200)
+      const page = res.json() as { builtIn: { name: string }[]; custom: { id: string; scope: string }[]; nextCursor: string | null }
+      if (!builtIn.length) builtIn.push(...page.builtIn)
+      custom.push(...page.custom)
+      if (!page.nextCursor) break
+      cursor = page.nextCursor
+    }
+    expect(builtIn.length, 'the built-ins the dialog already offered').toBeGreaterThan(0)
+    expect(custom.map((r) => r.id)).toContain(roleId)
+    expect(custom.every((r) => r.scope === 'resource'), 'tenant-scope roles stay out of a page picker').toBe(true)
   }, 180_000)
 
   it('a page-only manager can read it — which is the whole reason it exists', async () => {

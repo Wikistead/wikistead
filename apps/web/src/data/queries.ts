@@ -1765,11 +1765,43 @@ export interface AuditVerdict { valid: boolean; count: number; brokenAt?: number
 // #420 / ADR-164 increment 5: custom-role definitions + assignments (tenant-admin console; the
 // server enforces the admin gate + customRoles entitlement on writes — UI is convenience only).
 export interface RoleDef { id: string; name: string; capabilities: string[]; scope: "resource" | "tenant" }
+export interface RoleListPage {
+  builtIn: { name: string; capabilities: string[] }[];
+  custom: RoleDef[];
+  nextCursor: string | null;
+}
+
+/**
+ * #623: the three role lists are paged. Every screen that reads one needs the WHOLE set — the pickers
+ * complete a role out of it, so a short list silently makes some roles unassignable, and the admin tab
+ * is where a role is edited or deleted.
+ *
+ * `builtIn` comes back whole on every page (it is a constant, not a query), so the first page's copy is
+ * the answer; only `custom` accumulates.
+ */
+async function walkRoleList(
+  fetchPage: (cursor: string | null) => Promise<RoleListPage | null>,
+): Promise<{ builtIn: RoleListPage["builtIn"]; custom: RoleDef[] }> {
+  const custom: RoleDef[] = [];
+  let builtIn: RoleListPage["builtIn"] = [];
+  let cursor: string | null = null;
+  let first = true;
+  // the loop condition is the CURSOR, never "the page came back empty"
+  do {
+    const page: RoleListPage | null = await fetchPage(cursor);
+    if (!page) break;
+    if (first) { builtIn = page.builtIn ?? []; first = false; }
+    custom.push(...(page.custom ?? []));
+    cursor = page.nextCursor ?? null;
+  } while (cursor);
+  return { builtIn, custom };
+}
+
 export function useRoles(enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["roles"],
-    queryFn: () => apiFetch<{ builtIn: { name: string; capabilities: string[] }[]; custom: RoleDef[] }>("/admin/roles", token),
+    queryFn: () => walkRoleList((c) => apiFetch<RoleListPage>(`/admin/roles${cursorQuery(c)}`, token)),
     enabled,
   });
 }
@@ -1876,7 +1908,8 @@ export function useAssignableRoles(spaceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["assignable-roles", spaceId],
-    queryFn: () => apiFetch<{ builtIn: { name: string; capabilities: string[] }[]; custom: RoleDef[] }>(`/spaces/${encodeURIComponent(spaceId)}/assignable-roles`, token),
+    queryFn: () =>
+      walkRoleList((c) => apiFetch<RoleListPage>(`/spaces/${encodeURIComponent(spaceId)}/assignable-roles${cursorQuery(c)}`, token)),
     enabled: enabled && spaceId.length > 0,
   });
 }
@@ -1888,7 +1921,8 @@ export function usePageAssignableRoles(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["page-assignable-roles", pageId],
-    queryFn: () => apiFetch<{ builtIn: { name: string; capabilities: string[] }[]; custom: RoleDef[] }>(`/pages/${encodeURIComponent(pageId)}/assignable-roles`, token),
+    queryFn: () =>
+      walkRoleList((c) => apiFetch<RoleListPage>(`/pages/${encodeURIComponent(pageId)}/assignable-roles${cursorQuery(c)}`, token)),
     enabled: enabled && pageId.length > 0,
   });
 }

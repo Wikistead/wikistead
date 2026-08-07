@@ -96,8 +96,15 @@ describe('custom-role store (#420 increment 2)', () => {
     const dup = await app.inject({ method: 'POST', url: '/admin/roles', headers: H, payload: { name: 'crs420-recycler', capabilities: ['view'] } })
     expect(dup.statusCode).toBe(409)
 
-    const list = (await app.inject({ method: 'GET', url: '/admin/roles', headers: H })).json() as { custom: { id: string; name: string; capabilities: string[] }[] }
+    // #623: the list is paged. This case is about the DEFINITION, so it asks for the one role by name
+    // rather than walking — a `cursor` just below it puts it on the first page whatever else the shared
+    // tenant holds. (Measured: the dev tenant carries ~950 roles left behind by other suites, and a
+    // bare first page of 200 did not contain this one.)
+    const list = (await app.inject({
+      method: 'GET', url: `/admin/roles?cursor=${encodeURIComponent('crs420-recycle')}&limit=5`, headers: H,
+    })).json() as { custom: { id: string; name: string; capabilities: string[] }[] }
     const mine = list.custom.find((r) => r.name === 'crs420-recycler')!
+    expect(mine, 'the role just created is not on the page that starts at its name').toBeDefined()
     expect(mine.capabilities.sort()).toEqual(['delete', 'view'])
 
     // rename + capability edit round-trips
