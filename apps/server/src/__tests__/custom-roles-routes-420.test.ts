@@ -19,7 +19,7 @@ import { LogicalStorageDriver } from '../storage/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import {
   createPage, publishPage, trashPage, restorePage, purgePage, listSpaceTrash,
-  grantPageAccess, revokePageAccess, listPageAccess, restrictPageAccess, listAllPageRestrictions,
+  grantPageAccess, revokePageAccess, listAllPageAccess, restrictPageAccess, listAllPageRestrictions,
   unrestrictPageAccess, isPagePrivate,
 } from '../routes/pages.js'
 import { createShareLink } from '../routes/share-links.js'
@@ -84,7 +84,7 @@ describe('split-verb route gates (#420 3b)', () => {
     await writeTuples(fgaClient, [grant])
     try {
       await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: 'user:crr420-guest1', relation: 'view' })
-      expect((await listPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: SHR })).some((g) => g.grantee === 'user:crr420-guest1')).toBe(true)
+      expect((await listAllPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: SHR })).some((g) => g.grantee === 'user:crr420-guest1')).toBe(true)
       await restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, principal: 'user:crr420-bad' })
       expect((await listAllPageRestrictions(db, fgaClient, { pageId, userId: SHR })).some((r) => r.principal === 'user:crr420-bad')).toBe(true)
       await unrestrictPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, principal: 'user:crr420-bad' })
@@ -156,13 +156,13 @@ describe('split-verb route gates (#420 3b)', () => {
     // … trashed: every share-class call is a uniform 404 (never 403 — byte-identical to absent).
     const expect404 = (p: Promise<unknown>, label: string) => expect(p, label).rejects.toMatchObject({ statusCode: 404 })
     await expect404(grantPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: 'dev-user', grantee: 'user:z', relation: 'view' }), 'grant')
-    await expect404(listPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: 'dev-user' }), 'list access')
+    await expect404(listAllPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: 'dev-user' }), 'list access')
     await expect404(restrictPageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: 'dev-user', principal: 'user:z' }), 'restrict')
     await expect404(isPagePrivate(db, fgaClient, { pageId, userId: 'dev-user' }), 'private read')
     await expect404(createShareLink(db, fgaClient, { tenantId: tenant.id, resource: P(pageId), capability: 'view', userId: 'dev-user', plan: tenant.plan, expiresInSeconds: null }), 'link create')
     // Restore: the operations come back.
     await restorePage(db, fgaClient, driver, { pageId, userId: 'dev-user' })
-    expect((await listPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: 'dev-user' })).some((g) => g.grantee === 'user:crr420-pre')).toBe(true)
+    expect((await listAllPageAccess(fgaClient, db, { pageId, tenantId: tenant.id, userId: 'dev-user' })).some((g) => g.grantee === 'user:crr420-pre')).toBe(true)
     await trashPage(db, fgaClient, driver, { pageId, userId: 'dev-user' })
     await purgePage(db, fgaClient, driver, { pageId, userId: 'dev-user' })
   })

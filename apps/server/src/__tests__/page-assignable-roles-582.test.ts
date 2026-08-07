@@ -5,7 +5,7 @@
 //   1. A PAGE-only manager — someone holding `manage_direct`, which that very dialog grants — had no
 //      endpoint returning role definitions. `/spaces/:id/assignable-roles` is gated on SPACE manage and
 //      `/admin/roles` on tenant admin. #485 added the space one for exactly this reason.
-//   2. `listPageAccess` returned a role assignment's expansion tuples as independent capability rows,
+//   2. `listAllPageAccess` returned a role assignment's expansion tuples as independent capability rows,
 //      so one custom role appeared as three or four anonymous grants for the same principal — the
 //      defect the space screen was bounced for in #536 and fixed server-side.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -15,7 +15,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, listPageAccess, grantPageAccess } from '../routes/pages.js'
+import { createPage, deletePage, listAllPageAccess, grantPageAccess } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -121,7 +121,7 @@ describe('#582: one role reads as one row', () => {
     })
     expect(assigned.statusCode).toBeLessThan(300)
 
-    const rows = await listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: OWNER })
+    const rows = await listAllPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: OWNER })
     const mine = rows.filter((r) => r.grantee === `user:${HOLDER}`)
     expect(mine, `the role's three capabilities are the role's, not three grants: ${JSON.stringify(mine)}`).toEqual([])
   }, 180_000)
@@ -130,7 +130,7 @@ describe('#582: one role reads as one row', () => {
     await grantPageAccess(db, fgaClient, app.searchDriver, {
       pageId, tenantId: TENANT, userId: OWNER, grantee: `user:${HOLDER}`, relation: 'view',
     })
-    const rows = await listPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: OWNER })
+    const rows = await listAllPageAccess(fgaClient, db, { pageId, tenantId: TENANT, userId: OWNER })
     const mine = rows.filter((r) => r.grantee === `user:${HOLDER}`).map((r) => r.relation)
     expect(mine, 'the built-in row is its own face').toContain('view')
     expect(mine, 'and the rest of the role is still not enumerated').not.toContain('edit')

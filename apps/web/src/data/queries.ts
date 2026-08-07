@@ -1044,7 +1044,15 @@ export function usePageAccess(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["page-access", pageId],
-    queryFn: () => apiFetch<PageGrant[]>(`/pages/${encodeURIComponent(pageId)}/access`, token).then((r) => r ?? []),
+    // #623: paged on FGA's own token. The permissions dialog is where a grant is taken away, so a short
+    // list is access nobody can revoke — it walks.
+    queryFn: () =>
+      walkPages(
+        (c: string | null) =>
+          apiFetch<{ grants: PageGrant[]; nextCursor: string | null }>(
+            `/pages/${encodeURIComponent(pageId)}/access${cursorQuery(c)}`, token),
+        (p: { grants: PageGrant[] }) => p.grants,
+      ),
     enabled: enabled && pageId.length > 0,
   });
 }
