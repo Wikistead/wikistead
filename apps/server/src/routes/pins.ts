@@ -102,6 +102,14 @@ export async function listPins(
 // View-gated create. Existence (under RLS) and FGA view BOTH required — failing
 // either returns the same uniform 404 so the write is not an existence oracle.
 // Idempotent: re-pinning an already-pinned resource returns the existing pin.
+/**
+ * #623: how many pins one member may hold, per resource type.
+ *
+ * Generous on purpose — this is a bound on the list, not a product restriction. Nobody curating a
+ * sidebar reaches it; a script or a runaway client does.
+ */
+export const MAX_PINS_PER_TYPE = 200
+
 export async function createPin(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -121,6 +129,27 @@ export async function createPin(
 
   const canView = await check(fga, `user:${args.memberSub}`, 'view', { type: args.resourceType, id: args.resourceId })
   if (!canView) throw notFound()
+
+  // #623: pins are a list the member curates, and nothing prunes them. The bound is a CAP rather than a
+  // page, for the reason the ledger already states for authenticators: reorder persists the whole
+  // ordered id list, and the sidebar shows the set — paging would let somebody hold more pins than they
+  // can see or reorder.
+  //
+  // Counted per (member, resource type) because that is the unit the sidebar draws and `position`
+  // sequences. Re-pinning something ALREADY pinned stays allowed at the cap: it is idempotent, adds no
+  // row, and refusing it would make the control at the cap answer an error for a no-op.
+  const [{ n: pinned }] = await db.sql<[{ n: number }]>`
+    SELECT count(*)::int AS n FROM member_pins
+     WHERE tenant_id = ${args.tenantId} AND member_sub = ${args.memberSub} AND resource_type = ${args.resourceType}`
+  if (pinned >= MAX_PINS_PER_TYPE) {
+    const [already] = await db.sql<[{ id: string }?]>`
+      SELECT id FROM member_pins
+       WHERE tenant_id = ${args.tenantId} AND member_sub = ${args.memberSub}
+         AND resource_type = ${args.resourceType} AND resource_id = ${args.resourceId}`
+    if (!already) {
+      throw Object.assign(new Error('too many pins'), { statusCode: 409, code: 'pin_limit' })
+    }
+  }
 
   const [row] = await db.sql<{ id: string; position: number }[]>`
     INSERT INTO member_pins (tenant_id, member_sub, resource_type, resource_id, position)

@@ -104,7 +104,8 @@
     "edit": "Edit this sign-in method"
   },
   "toast": {
-    "published": "Published",
+    "pinLimit": "You can keep up to 200 pins of this kind. Unpin something to add another.",
+        "published": "Published",
     "publishFailed": "Couldn't publish",
     "restored": "Restored to the selected version",
     "restoreFailed": "Couldn't restore",

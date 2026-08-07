@@ -64,7 +64,7 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'members.ts:/admin/analytics': { kind: 'debt', why: '#623 B: a row per day per page; grows with the tenant and with time.' },
   'members.ts:/members/invites': { kind: 'debt', why: '#623 A: one row per pending invitation (#638 boxed the UI, not the payload).' },
   'notifications.ts:/notifications/unread-count': { kind: 'bounded', why: 'the count stops at UNREAD_BADGE_CAP + 1 — the number the bell already refuses to print past (it renders 99+). The LIMIT lives in a derived table, which withoutSubqueries strips before looking for a bound, so this line states what the scan cannot see rather than the scan being loosened to see it.' },
-  'pins.ts:/pins': { kind: 'debt', why: '#623 B: one row per pin; nothing prunes them.' },
+  'pins.ts:/pins': { kind: 'bounded', why: 'MAX_PINS_PER_TYPE refuses the pin past 200 per member per kind, so the list cannot grow (#623). A cap and not a page, for the /me/factors reason: reorder persists the whole ordered id list and the sidebar draws the set, so paging would let somebody hold more pins than they can see or reorder. Pinned by pins-capped-623.' },
   'spaces.ts:/spaces/:spaceId/access': { kind: 'debt', why: '#623 B: principal × space; the roster the permissions dialog reads.' },
   'spaces.ts:/spaces/:spaceId/analytics': { kind: 'debt', why: '#623 B: a row per day per page, same shape as the tenant roll-up.' },
 

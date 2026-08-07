@@ -118,8 +118,15 @@ function SidebarImpl() {
   const togglePin = useCallback((resourceType: PinResourceType, resourceId: string) => {
     const existing = pins.find((p) => p.resourceType === resourceType && p.resourceId === resourceId);
     if (existing) deletePin.mutate(existing.id);
-    else createPin.mutate({ resourceType, resourceId });
-  }, [pins, createPin, deletePin]);
+    else
+      // #623: the server caps how many pins one member may hold per kind. Without this the control
+      // would answer nothing at all at the cap — the click would look like it worked.
+      createPin.mutate({ resourceType, resourceId }, {
+        onError: (e: unknown) =>
+          notify.error(
+            (e as { code?: string })?.code === "pin_limit" ? t("toast.pinLimit") : t("toast.actionFailed")),
+      });
+  }, [pins, createPin, deletePin, t]);
 
   // v1 reorder = up/down (ADR-119 review decision): swap with the neighbour and persist
   // the full ordered id list for that type.
