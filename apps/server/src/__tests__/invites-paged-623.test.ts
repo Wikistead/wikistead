@@ -31,6 +31,12 @@ const list = (cursor?: string) =>
 beforeAll(async () => {
   app = await buildApp(); await app.ready()
   await admin`DELETE FROM invites WHERE tenant_id = ${T} AND email LIKE ${LIKE}`
+  // ⚠️ ONE base instant for every row. `to_timestamp(${base}::numeric)` evaluated per statement is a
+  // different second once the loop crosses a boundary, and the microsecond offsets then stop being
+  // adjacent — measured as a red round-trip case in a full run while every single-file run was green.
+  // Carried as an epoch numeric for the same reason the cursors are: a timestamp handed to the driver
+  // loses its microseconds.
+  const [{ base }] = await admin<{ base: string }[]>`SELECT extract(epoch from date_trunc('second', now()))::text AS base`
   for (let i = 0; i < N; i++) {
     // The offset is added IN SQL from an integer: a timestamp handed to the driver as a string loses
     // its microseconds on the way in, and the fixture then measures nothing. Offsets 8,7,6,6 put the
@@ -40,7 +46,7 @@ beforeAll(async () => {
       INSERT INTO invites (tenant_id, email, role, invited_by, token_hash, status, expires_at, created_at)
       VALUES (${T}, ${`inv623-${STAMP}-${String(i).padStart(2, '0')}@example.test`}, 'member', 'dev-user',
               ${`h-${STAMP}-${i}`}, 'pending', now() + interval '30 days',
-              date_trunc('second', now()) + (${offset} || ' microseconds')::interval)`
+              to_timestamp(${base}::numeric) + (${offset} || ' microseconds')::interval)`
   }
 }, 300_000)
 

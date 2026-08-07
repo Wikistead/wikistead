@@ -50,6 +50,12 @@ beforeAll(async () => {
   // Revisions written straight to the table: what is being measured is the cursor, not the publish path.
   // `now()` keeps them inside every plan's retention window, so this pin does not also depend on the
   // plan the dev tenant happens to carry.
+  // ⚠️ ONE base instant for every row. `to_timestamp(${base}::numeric)` evaluated per statement is a
+  // different second once the loop crosses a boundary, and the microsecond offsets then stop being
+  // adjacent — measured as a red round-trip case in a full run while every single-file run was green.
+  // Carried as an epoch numeric for the same reason the cursors are: a timestamp handed to the driver
+  // loses its microseconds.
+  const [{ base }] = await admin<{ base: string }[]>`SELECT extract(epoch from date_trunc('second', now()))::text AS base`
   for (let i = 0; i < N; i++) {
     // ⚠️ TWO of the nine share an instant, deliberately, AND THEY STRADDLE A PAGE BOUNDARY. A restore
     // writes a fresh revision and a bulk revert can stamp more than one inside the same transaction, so
@@ -62,7 +68,7 @@ beforeAll(async () => {
     await admin`
       INSERT INTO revisions (tenant_id, page_id, title, ydoc, created_by, created_at)
       VALUES (${tenant.id}, ${pageId}, ${`rev-${String(i).padStart(2, '0')}`}, '\\x00'::bytea, 'user:dev-user',
-              date_trunc('second', now()) + (${offset} || ' microseconds')::interval)`
+              to_timestamp(${base}::numeric) + (${offset} || ' microseconds')::interval)`
   }
 }, 180_000)
 
