@@ -35,7 +35,9 @@ test("history: a revision is listed and restoring it reverts the live editor", a
       async () =>
         page.evaluate(async ({ api, pageId }) => {
           const r = await fetch(`${api}/pages/${pageId}/revisions`, { headers: { Authorization: "Bearer dev-token" } });
-          return ((await r.json()) as unknown[]).length;
+          // #623: the history is paged. This counts the FIRST page, which is all these checks need
+          // (they wait for "at least one" / "one more than before"), and the default page holds 100.
+          return ((await r.json()) as { revisions: unknown[] }).revisions.length;
         }, { api: API, pageId }),
       { timeout: 15_000 },
     )

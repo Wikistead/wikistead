@@ -864,11 +864,54 @@ export function useToggleTask(pageId: string) {
   });
 }
 
+export interface RevisionsPage { revisions: Revision[]; nextCursor: string | null }
+
+/**
+ * The whole history, by walking the pages (#623).
+ *
+ * Separate from the hook, and injectable, because the loop is the part that can be wrong: stopping on
+ * an empty page instead of on a null cursor, or forgetting to advance, both return a short history that
+ * looks like a complete one. There is nothing on screen that says "this is where it stopped".
+ *
+ * The panel MUST see the whole list. `latestRun` reads the newest contiguous run of one actor off it,
+ * and a run cut at a page boundary would offer to revert more edits than the count beside it names —
+ * ruled that affordance may only appear when it is honest. What is paid here is the size of one
+ * response, which is what #623 is about; showing the history a page at a time is its own design.
+ */
+export async function walkRevisions(
+  fetchPage: (cursor: string | null) => Promise<RevisionsPage | null>,
+): Promise<Revision[]> {
+  const all: Revision[] = [];
+  let cursor: string | null = null;
+  // the loop condition is the CURSOR, never "the page came back empty"
+  do {
+    const page = await fetchPage(cursor);
+    if (!page) break;
+    all.push(...(page.revisions ?? []));
+    cursor = page.nextCursor;
+  } while (cursor);
+  return all;
+}
+
 export function usePageRevisions(pageId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["revisions", pageId],
-    queryFn: () => apiFetch<Revision[]>(`/pages/${encodeURIComponent(pageId)}/revisions`, token).then((r) => r ?? []),
+    // #623: the response is paged now (one row per published version — a long-lived page has
+    // hundreds). This walks to the end and returns the complete history, unchanged for every caller.
+    //
+    // The panel MUST see the whole list, not a first page: `latestRun` reads the newest contiguous
+    // run of one actor off it, and a run cut at a page boundary would report a count smaller than the
+    // number of edits it is offering to revert. ruled that affordance may only appear when it is
+    // honest, so paging the panel's view of the list would need its own design — what is paid here is
+    // the size of one response.
+    queryFn: () =>
+      walkRevisions((cursor) =>
+        apiFetch<RevisionsPage>(
+          `/pages/${encodeURIComponent(pageId)}/revisions${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+          token,
+        ),
+      ),
     enabled: enabled && pageId.length > 0,
   });
 }
