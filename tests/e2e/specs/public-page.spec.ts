@@ -171,12 +171,20 @@ test("#267 波及: the public reader shows the callout box + centers a mermaid d
   // the callout renders as a PANEL with a real background tint + a left colour bar (not flat text).
   const panel = body.locator("[data-testid=callout-panel]");
   await expect(panel).toHaveCount(1);
-  const box = await panel.evaluate((el) => { const cs = getComputedStyle(el); return { bg: cs.backgroundColor, bar: parseFloat(cs.borderLeftWidth) }; });
+  const box = await panel.evaluate((el) => { const cs = getComputedStyle(el); return { bg: cs.backgroundColor, bar: cs.backgroundImage }; });
   expect(box.bg).not.toBe("rgba(0, 0, 0, 0)");
-  expect(box.bar).toBeGreaterThan(0);
+  // #632: the bar is PAINTED, not bordered. It used to be a `border-left`, which does not follow the
+  // panel's `border-radius` — the colour visibly cut across the rounded corner — so it became a
+  // background gradient that does. This assertion read `borderLeftWidth` and got 0 while the bar was
+  // on screen the whole time: it was measuring the mechanism that got replaced, not the thing a
+  // reader sees. Same trap as measuring a border to check a colour anywhere else in this tree.
+  expect(box.bar, "the left colour bar is painted, in a colour").toMatch(/linear-gradient\(.*rgb/);
   // #319: the mermaid diagram RENDERS on the public reader (was a raw ```mermaid source dump before) and is
   // centered by default (#255) — the align class sits on the widget wrapper (decorations.ts), same as the editor.
-  await expect(anon.getByTestId("macro-mermaid")).toBeVisible();
+  // Scoped to the PUBLIC body. The page also carries a hidden print body (#505), so an unscoped
+  // `macro-mermaid` resolves to two elements and Playwright refuses in strict mode — and the two are
+  // not interchangeable: the assertion below is about the class on the copy the reader sees.
+  await expect(body.getByTestId("macro-mermaid")).toBeVisible();
   await expect(body.locator(".cm-lp-align-center")).toHaveCount(1);
 });
 
