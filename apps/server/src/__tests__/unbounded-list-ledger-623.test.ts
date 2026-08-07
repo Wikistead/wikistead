@@ -122,8 +122,11 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // admin rosters: each grows with how the tenant is configured rather than with how it is used, which
   // makes them slower to notice and no less unbounded.
   'admin-connections.ts:/admin/connections': { kind: 'debt', why: '#623: one row per login connection, ORDER BY sort — the admin twin of /auth/login-options.' },
-  'admin-login-methods.ts:/admin/sso-exemptions': { kind: 'debt', why: '#623: one row per exempted member; an exemption is never pruned.' },
-  'admin-login-methods.ts:/admin/login-methods/impact': { kind: 'debt', why: '#623: membersUnsatisfiedBy walks EVERY member to count who a stance would sign out.' },
+  // ⚠️ Was a 'debt' line. Measured: this route reads every member to COUNT, and the count is what it
+  // returns — `{stance, unsatisfied, signedOut}`, three fields whatever the tenant holds. The read is
+  // unbounded and the RESPONSE cannot grow, which is a different axis from the one this ticket is
+  // about. Checked in sso-exemptions-paged-623 rather than asserted here.
+  'admin-login-methods.ts:/admin/login-methods/impact': { kind: 'bounded', why: 'answers two numbers — the count of members a stance would leave unsatisfied and how many hold a session. The roster it counts is never returned, so the response shape is fixed however large the tenant is.' },
   'custom-domains.ts:/admin/custom-domains': { kind: 'debt', why: '#623: one row per custom domain on the tenant.' },
   // the clearest case of the blind spot in the whole product: the handler is ONE line that calls an
   // imported function, so to a same-file scan the route contained no query whatsoever.
@@ -546,6 +549,23 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     expect(body.match(/ORDER BY created_at DESC, id DESC/g) ?? [],
       'both ordered with a tiebreaker, or two pages created in the same import straddle the boundary')
       .toHaveLength(2)
+  })
+
+  it('the SSO-exemption list is bounded too (a route body again)', () => {
+    // #623, and the same two reasons as the invites case: `slice` caps the response in JS so the SQL
+    // bound cannot be observed from outside, and a paged handler satisfies BOUNDED_MARKER on the word
+    // `cursor` alone.
+    const src = readFileSync(resolve(import.meta.dirname, '..', 'routes/admin-login-methods.ts'), 'utf8')
+    const at = src.indexOf(`app.get<{ Querystring: { limit?: string; cursor?: string } }>('/admin/sso-exemptions'`)
+    expect(at, 'the exemptions route no longer takes a cursor').toBeGreaterThan(-1)
+    const raw = src.slice(at, at + 9000)
+    const nextRoute = raw.indexOf('\n  app.', 10)
+    const body = raw.slice(0, nextRoute > 0 ? nextRoute : raw.length)
+      .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/--.*$/, '')).join('\n')
+    expect(body, 'and still limits').toMatch(/\bLIMIT\b/)
+    expect(body, 'without an OFFSET').not.toMatch(/\bOFFSET\b/i)
+    expect(body, 'ordered with a tiebreaker, or exempting several people at once straddles a boundary')
+      .toMatch(/ORDER BY se\.created_at, se\.member_sub/)
   })
 
   it('the pending-invitation list is bounded too (also a route body)', () => {

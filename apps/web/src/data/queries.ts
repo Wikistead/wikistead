@@ -2236,7 +2236,15 @@ export function useSsoExemptions(enabled = true) {
   return useQuery({
     enabled,
     queryKey: ["sso-exemptions"],
-    queryFn: () => apiFetch<SsoExemptionDTO[]>("/admin/sso-exemptions", token).then((r) => r ?? []),
+    // #623: paged. The admin section is where an exemption is taken away, so a short list is an
+    // exemption nobody knows to remove — it walks.
+    queryFn: () =>
+      walkPages(
+        (c: string | null) =>
+          apiFetch<{ exemptions: SsoExemptionDTO[]; nextCursor: string | null }>(
+            `/admin/sso-exemptions${cursorQuery(c)}`, token),
+        (p: { exemptions: SsoExemptionDTO[] }) => p.exemptions,
+      ),
   });
 }
 export function useGrantSsoExemption() {
