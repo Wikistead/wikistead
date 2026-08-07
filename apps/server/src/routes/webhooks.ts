@@ -67,15 +67,26 @@ export async function listWebhooks(
   const limit = Math.min(200, Math.max(1, opts.limit ?? WEBHOOKS_PAGE_LIMIT))
   const at = opts.cursor?.indexOf('|') ?? -1
   const after = opts.cursor && at > 0 ? { at: opts.cursor.slice(0, at), id: opts.cursor.slice(at + 1) } : null
-  const rows = await db.sql<WebhookRow[]>`
-    SELECT id, url, event_filter, active, failure_count, created_at FROM webhooks
-    WHERE TRUE ${after ? db.sql`AND (created_at, id) < (${after.at}::timestamptz, ${after.id})` : db.sql``}
+  // #623: the cursor travels as an epoch NUMERIC, never as an ISO string. `created_at` is a
+  // timestamptz(6) and `toISOString` stops at milliseconds, so a cursor built from one names an
+  // earlier instant than the row it came from. On this DESC walk that does not duplicate — it SKIPS
+  // every row between the truncated instant and the true one is on the wrong side of `<` and appears
+  // on no page at all. A webhook that silently vanishes from its own list is worse than one listed
+  // twice. Same spelling as `/spaces` and `/members`; two spellings is how one of them stays wrong.
+  const rows = await db.sql<(WebhookRow & { cursor_at: string })[]>`
+    SELECT id, url, event_filter, active, failure_count, created_at,
+           extract(epoch from created_at)::text AS cursor_at
+      FROM webhooks
+    WHERE TRUE ${after ? db.sql`AND (created_at, id) < (to_timestamp(${after.at}::numeric), ${after.id})` : db.sql``}
     ORDER BY created_at DESC, id DESC
     LIMIT ${limit + 1}`
   const hasMore = rows.length > limit
   const page = hasMore ? rows.slice(0, limit) : rows
   const last = page[page.length - 1]
-  return { webhooks: page, nextCursor: hasMore && last ? `${last.created_at.toISOString()}|${last.id}` : null }
+  return {
+    webhooks: page.map(({ cursor_at: _drop, ...w }) => w),
+    nextCursor: hasMore && last ? `${last.cursor_at}|${last.id}` : null,
+  }
 }
 
 export async function deleteWebhook(db: TenantDb, id: string): Promise<boolean> {

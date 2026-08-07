@@ -22,9 +22,14 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 
 /** The keyset the SQL applies, in JS, so the stub can be walked the way the database would be. */
 function windowOf(rows: PublicListRow[], win: PublicPageWindow): PublicListRow[] {
-  const key = (r: PublicListRow) => `${new Date(r.created_at).toISOString()}|${r.id}`
+  // #623: an epoch numeric, the same shape the route's cursor now carries. The sort still needs a
+  // string that orders like the timestamp, so it is padded — a bare number sorts '9' after '10'.
+  const key = (r: PublicListRow) =>
+    `${String(new Date(r.created_at).getTime() / 1000).padStart(20, '0')}|${r.id}`
   const sorted = [...rows].sort((a, b) => (key(a) < key(b) ? 1 : -1)) // created_at DESC, id DESC
-  const from = win.after ? sorted.findIndex((r) => key(r) === `${win.after!.createdAt}|${win.after!.id}`) + 1 : 0
+  const from = win.after
+    ? sorted.findIndex((r) => key(r) === `${String(win.after!.createdAt).padStart(20, '0')}|${win.after!.id}`) + 1
+    : 0
   return sorted.slice(from, from + win.limit)
 }
 

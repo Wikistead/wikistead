@@ -341,21 +341,25 @@ export async function listFeed(
   // non-monotonic for TEXT uuids (rows dropped/duplicated past page 1). The API still passes the last
   // item's id; resolve its created_at here. An unknown id = no cursor (first page).
   const before = args.before || null
-  const [cur] = before ? await db.sql<{ created_at: Date }[]>`SELECT created_at FROM feed_events WHERE id = ${before}` : []
-  const curAt = cur?.created_at ?? null
+  const [cur] = before ? await db.sql<{ at: string }[]>`SELECT extract(epoch from created_at)::text AS at FROM feed_events WHERE id = ${before}` : []
+  // #623: carried as an epoch NUMERIC. Read back as a JS `Date` it lost the microseconds Postgres keeps
+  // (timestamptz(6)), and a cursor naming an earlier instant than its own row SKIPS on a DESC walk —
+  // every event between the truncated instant and the true one is on the wrong side of `<` and shows up
+  // on no page. A notification that never appears is one nobody knows to look for.
+  const curAt = cur?.at ?? null
   const rows = args.spaceId
     ? await db.sql<RawRow[]>`
         SELECT fe.id, fe.event_type, fe.page_id, fe.space_id, fe.actor, fe.created_at, pe.patrolled_at
         FROM feed_events fe LEFT JOIN patrolled_events pe ON pe.feed_event_id = fe.id
         WHERE fe.space_id = ${args.spaceId}
-          AND (${curAt}::timestamptz IS NULL OR (fe.created_at, fe.id) < (${curAt}, ${before}))
+          AND (${curAt}::numeric IS NULL OR (fe.created_at, fe.id) < (to_timestamp(${curAt}::numeric), ${before}))
           AND (${unpatrolled}::bool IS NOT TRUE OR pe.patrolled_at IS NULL)
           AND fe.event_type <> 'mention'
         ORDER BY fe.created_at DESC, fe.id DESC LIMIT ${overfetch}`
     : await db.sql<RawRow[]>`
         SELECT fe.id, fe.event_type, fe.page_id, fe.space_id, fe.actor, fe.created_at, pe.patrolled_at
         FROM feed_events fe LEFT JOIN patrolled_events pe ON pe.feed_event_id = fe.id
-        WHERE (${curAt}::timestamptz IS NULL OR (fe.created_at, fe.id) < (${curAt}, ${before}))
+        WHERE (${curAt}::numeric IS NULL OR (fe.created_at, fe.id) < (to_timestamp(${curAt}::numeric), ${before}))
           AND (${unpatrolled}::bool IS NOT TRUE OR pe.patrolled_at IS NULL)
           AND fe.event_type <> 'mention'
         ORDER BY fe.created_at DESC, fe.id DESC LIMIT ${overfetch}`
@@ -455,14 +459,18 @@ export async function listPatrol(
   const limit = Math.min(args.limit ?? 30, 100)
   const unpatrolled = args.unpatrolledOnly === true
   const before = args.before || null
-  const [cur] = before ? await db.sql<{ created_at: Date }[]>`SELECT created_at FROM feed_events WHERE id = ${before}` : []
-  const curAt = cur?.created_at ?? null
+  const [cur] = before ? await db.sql<{ at: string }[]>`SELECT extract(epoch from created_at)::text AS at FROM feed_events WHERE id = ${before}` : []
+  // #623: carried as an epoch NUMERIC. Read back as a JS `Date` it lost the microseconds Postgres keeps
+  // (timestamptz(6)), and a cursor naming an earlier instant than its own row SKIPS on a DESC walk —
+  // every event between the truncated instant and the true one is on the wrong side of `<` and shows up
+  // on no page. A notification that never appears is one nobody knows to look for.
+  const curAt = cur?.at ?? null
   const rows = await db.sql<RawRow[]>`
     SELECT fe.id, fe.event_type, fe.page_id, fe.space_id, fe.actor, fe.created_at, pe.patrolled_at
     FROM feed_events fe LEFT JOIN patrolled_events pe ON pe.feed_event_id = fe.id
     WHERE fe.space_id = ${args.spaceId}
       AND (fe.event_type LIKE 'abuse.%' OR fe.actor LIKE 'guest:%' OR fe.actor LIKE 'anon:%')
-      AND (${curAt}::timestamptz IS NULL OR (fe.created_at, fe.id) < (${curAt}, ${before}))
+      AND (${curAt}::numeric IS NULL OR (fe.created_at, fe.id) < (to_timestamp(${curAt}::numeric), ${before}))
       AND (${unpatrolled}::bool IS NOT TRUE OR pe.patrolled_at IS NULL)
       AND fe.event_type <> 'mention'
     ORDER BY fe.created_at DESC, fe.id DESC LIMIT ${limit * 4}`
@@ -480,14 +488,18 @@ export async function listNotifications(
   // #362 E2: tuple cursor on the ORDER BY (n.created_at, n.id) — same non-monotonic-id fix as listFeed.
   const before = args.before || null
   const [cur] = before
-    ? await db.sql<{ created_at: Date }[]>`SELECT created_at FROM notifications WHERE id = ${before} AND member_sub = ${args.memberSub}`
+    ? await db.sql<{ at: string }[]>`SELECT extract(epoch from created_at)::text AS at FROM notifications WHERE id = ${before} AND member_sub = ${args.memberSub}`
     : []
-  const curAt = cur?.created_at ?? null
+  // #623: carried as an epoch NUMERIC. Read back as a JS `Date` it lost the microseconds Postgres keeps
+  // (timestamptz(6)), and a cursor naming an earlier instant than its own row SKIPS on a DESC walk —
+  // every event between the truncated instant and the true one is on the wrong side of `<` and shows up
+  // on no page. A notification that never appears is one nobody knows to look for.
+  const curAt = cur?.at ?? null
   const rows = await db.sql<RawRow[]>`
     SELECT n.id AS notification_id, n.read_at, e.id, e.event_type, e.page_id, e.space_id, e.actor, e.created_at
     FROM notifications n JOIN feed_events e ON e.id = n.event_id
     WHERE n.member_sub = ${args.memberSub}
-      AND (${curAt}::timestamptz IS NULL OR (n.created_at, n.id) < (${curAt}, ${before}))
+      AND (${curAt}::numeric IS NULL OR (n.created_at, n.id) < (to_timestamp(${curAt}::numeric), ${before}))
     ORDER BY n.created_at DESC, n.id DESC LIMIT ${limit * 4}`
   // The caller gates against their own view (a notification is per-member; subject = the member).
   return (await gateEvents(db, fga, `user:${args.memberSub}`, rows)).slice(0, limit)
