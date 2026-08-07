@@ -12,7 +12,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { groupFgaId } from '../auth/group-sync.js'
-import { createSpace, deleteSpace, listSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, listAllSpaceAccess } from '../routes/spaces.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -124,7 +124,7 @@ describe('#536 (6): group assignments carry the human name, never the hash', () 
       { user: principal, relation: 'viewer_member', object: `space:${spaceId}` },
     ])
     try {
-      const rows = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: TENANT, userId: OWNER })
+      const rows = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: TENANT, userId: OWNER })
       const row = rows.find((r) => r.grantee === principal)
       expect(row!.groupName, 'both surfaces resolve through knownGroupNames').toBe(orphanGroup)
     } finally {

@@ -16,7 +16,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, deleteTuples } from '@wikistead/authz'
 import { buildApp } from '../app.js'
-import { createSpace, deleteSpace, grantSpaceAccess, listSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, grantSpaceAccess, listAllSpaceAccess } from '../routes/spaces.js'
 import { assignRoleInTx } from '../routes/roles.js'
 import type { FastifyInstance } from 'fastify'
 import type { Tenant } from '@wikistead/types'
@@ -55,7 +55,7 @@ afterAll(async () => {
 
 /** What the principal really holds: the roster rows AND the assignment rows, read separately. */
 async function realState(principal: string) {
-  const roster = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: OWNER })
+  const roster = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: OWNER })
   const rows = await db.sql<{ id: string }[]>`
     SELECT id FROM role_assignments WHERE resource_type = 'space' AND resource_id = ${spaceId} AND principal = ${principal}`
   return { rosterCaps: roster.filter((g) => g.grantee === principal).map((g) => g.capability).sort(), rows: rows.length }

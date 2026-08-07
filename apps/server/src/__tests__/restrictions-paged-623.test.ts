@@ -24,11 +24,15 @@ import type { Tenant } from '@wikistead/types'
 const driver = new LogicalSearchDriver()
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const STAMP = Date.now().toString(36)
-const N = 12
+// ⚠️ SEATS IN A SHARED TENANT. `seatMembers` writes `members` rows, and the seat-cap suites
+// (invite acceptance, plan freeze) count them — measured: a killed run of this file left 12 seats
+// behind and both of those went red until they were removed. The fixture is deliberately small, and
+// afterAll removes every seat it took.
+const N = 6
 // ⚠️ Small enough that the store hands the whole object back in one read at its default page size —
 // measured, and with the default BOTH break directions stayed green because paging never engaged. The
 // pages are made small here instead of the fixture made huge.
-const PAGE = 5
+const PAGE = 2
 const SUBS = Array.from({ length: N }, (_, i) => `res623-${STAMP}-${String(i).padStart(2, '0')}`)
 
 let tenant: Tenant

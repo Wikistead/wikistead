@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, check, writeTuples, deleteTuples } from '@wikistead/authz'
-import { createSpace, deleteSpace, listSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, listAllSpaceAccess } from '../routes/spaces.js'
 import { buildApp } from '../app.js'
 import { planConvergence, executeConvergence, pickKeeper, isRankedRow, type DupRow } from '../scripts/converge-role-duplicates-536.js'
 import type { Tenant } from '@wikistead/types'
@@ -229,9 +229,9 @@ describe('#536 (5): one-shot duplicate convergence', () => {
   }, 120_000)
 
   it('the dev shape: one role row + a rowless commenter — display collapses, the residue converges', async () => {
-    // display (listSpaceAccess): the custom role's EXPANSION tuples are not independent grant rows;
+    // display (listAllSpaceAccess): the custom role's EXPANSION tuples are not independent grant rows;
     // the uncovered legacy commenter still shows (it IS an independent legacy grant)
-    const access = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: TENANT, userId: OWNER })
+    const access = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: TENANT, userId: OWNER })
     const resRows = access.filter((g) => g.grantee === P_RES)
     expect(resRows.map((g) => g.capability).sort(), 'expansion caps filtered; the legacy comment shows').toEqual(['comment'])
 

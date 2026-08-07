@@ -24,7 +24,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, deleteTuples } from '@wikistead/authz'
 import { buildApp } from '../app.js'
-import { createSpace, deleteSpace, listSpaceAccess } from '../routes/spaces.js'
+import { createSpace, deleteSpace, listAllSpaceAccess } from '../routes/spaces.js'
 import { createPage, deletePage, publishPage } from '../routes/pages.js'
 import type { FastifyInstance } from 'fastify'
 import type { Tenant } from '@wikistead/types'
@@ -122,7 +122,7 @@ describe('#624: a principal who is not a member of this tenant is refused, at ev
   }, 60_000)
 
   it('the roster never shows a principal with no member row', async () => {
-    const roster = await listSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: OWNER })
+    const roster = await listAllSpaceAccess(fgaClient, db, { spaceId, tenantId: T, userId: OWNER })
     expect(roster.some((r) => r.grantee === STRANGER), 'the raw-hex row the ticket found').toBe(false)
   }, 60_000)
 

@@ -1419,7 +1419,16 @@ export function useSpaceAccess(spaceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["space-access", spaceId],
-    queryFn: () => apiFetch<SpaceGrant[]>(`/spaces/${encodeURIComponent(spaceId)}/access`, token).then((r) => r ?? []),
+    // #623: paged on FGA's own token. The permissions screen is where a grant is taken away, and #607
+    // made each row say whether THIS caller may take it — a roster missing rows is access nobody can
+    // act on. It walks.
+    queryFn: () =>
+      walkPages(
+        (c: string | null) =>
+          apiFetch<{ grants: SpaceGrant[]; nextCursor: string | null }>(
+            `/spaces/${encodeURIComponent(spaceId)}/access${cursorQuery(c)}`, token),
+        (p: { grants: SpaceGrant[] }) => p.grants,
+      ),
     enabled: enabled && spaceId.length > 0,
   });
 }
