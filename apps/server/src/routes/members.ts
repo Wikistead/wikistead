@@ -131,6 +131,9 @@ export async function sweepMemberDirectGrants(
   for (const spaceId of touchedSpaces) await reindexPublishedPages(db, driver, args.tenantId, spaceId)
 }
 
+/** #623: how many pending invitations one response may carry. */
+export const INVITES_PAGE_LIMIT = 100
+
 export async function membersPlugin(app: FastifyInstance) {
   // ── Members ────────────────────────────────────────────────────────────────
   app.get<{ Querystring: { limit?: string; cursor?: string; q?: string } }>('/members', async (req, reply) => {
@@ -639,13 +642,42 @@ export async function membersPlugin(app: FastifyInstance) {
   })
 
   // ── Invites ──────────────────────────────────────────────────────────────
-  app.get('/members/invites', async (req, reply) => {
+  // #623 — see the block inside the handler.
+  //
+  // ⚠️ The explanation lives INSIDE the handler, and that is not a style choice: prose written above a
+  // registration falls inside the PREVIOUS route's window, and the ledger scan reads that window for
+  // bound keywords. Written above this line, the word describing the paging mechanism made
+  // `GET /admin/analytics` read as bounded — a route two hundred lines away, with a real debt line.
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/members/invites', async (req, reply) => {
+    // One row per pending invitation, and #638 boxed the UI without touching the payload — a tenant
+    // that has been inviting for a year sent all of them on every open of the members screen.
+    //
+    // The position marker carries an epoch rather than a formatted timestamp: a parameter loses its
+    // microseconds on the way in. This walk is DESC — the direction that SKIPS — so an invitation
+    // issued between the truncated instant and the true one would appear on no page, and an invitation
+    // nobody can see is one nobody can revoke or re-issue. `id` breaks ties: a bulk invite stamps
+    // several in the same instant.
     if (!(await requireTenantAdmin(req, reply))) return
+    const asked = Number.parseInt(req.query.limit ?? '', 10)
+    const limit = Math.min(500, Math.max(1, Number.isFinite(asked) ? asked : INVITES_PAGE_LIMIT))
+    const bar = req.query.cursor?.indexOf('|') ?? -1
+    const after = req.query.cursor && bar > 0
+      ? { at: req.query.cursor.slice(0, bar), id: req.query.cursor.slice(bar + 1) } : null
     const rows = await req.db.sql<
-      { id: string; email: string | null; role: string; invited_by: string; expires_at: Date; created_at: Date; last_emailed_at: Date | null }[]
-    >`SELECT id, email, role, invited_by, expires_at, created_at, last_emailed_at
-        FROM invites WHERE status = 'pending' AND expires_at > now() ORDER BY created_at DESC`
-    return { invites: rows }
+      { id: string; email: string | null; role: string; invited_by: string; expires_at: Date; created_at: Date; last_emailed_at: Date | null; cursor_at: string }[]
+    >`SELECT id, email, role, invited_by, expires_at, created_at, last_emailed_at,
+             extract(epoch from created_at)::text AS cursor_at
+        FROM invites WHERE status = 'pending' AND expires_at > now()
+          ${after ? req.db.sql`AND (created_at, id) < (to_timestamp(${after.at}::numeric), ${after.id})` : req.db.sql``}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${limit + 1}`
+    const hasMore = rows.length > limit
+    const page = hasMore ? rows.slice(0, limit) : rows
+    const last = page[page.length - 1]
+    return {
+      invites: page.map(({ cursor_at: _drop, ...r }) => r),
+      nextCursor: hasMore && last ? `${last.cursor_at}|${last.id}` : null,
+    }
   })
 
   // Create an invite. Seat cap is enforced in createInvite (UNLIMITED self-host

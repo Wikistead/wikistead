@@ -49,8 +49,21 @@ export async function listMembers(
   const r = await apiFetch<{ members: Member[]; nextCursor: string | null }>(`/members${qs ? `?${qs}` : ""}`, token);
   return { members: r?.members ?? [], nextCursor: r?.nextCursor ?? null };
 }
+/** #623: the invitation list is paged now. The screen keeps the whole set — an invitation nobody can
+ *  see is one nobody can revoke or re-issue, and #638 put the controls on each row. */
 export async function listInvites(token: string): Promise<Invite[]> {
-  return (await apiFetch<{ invites: Invite[] }>("/members/invites", token))?.invites ?? [];
+  const all: Invite[] = [];
+  let cursor: string | null = null;
+  // the loop condition is the CURSOR, never "the page came back empty"
+  do {
+    const q: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    const r: { invites: Invite[]; nextCursor: string | null } | null =
+      await apiFetch(`/members/invites${q}`, token);
+    if (!r) break;
+    all.push(...(r.invites ?? []));
+    cursor = r.nextCursor ?? null;
+  } while (cursor);
+  return all;
 }
 export async function createInvite(token: string, body: { email: string; role: "admin" | "member"; roleId?: string | null }): Promise<{ inviteUrl: string; emailed: boolean }> {
   return (await apiFetch<{ inviteUrl: string; emailed: boolean }>("/members/invites", token, { method: "POST", body: JSON.stringify(body) }))!;
