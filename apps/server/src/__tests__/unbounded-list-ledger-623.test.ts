@@ -13,19 +13,31 @@
 // THE LEDGER IS EXPECTED TO SHRINK. Every route bounded by the paging work deletes its line here. A
 // line that stays is a decision somebody has to defend, not a fact that fades.
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
 
-// KNOWN BLIND SPOT, measured 2026-08-06 (slice 12) and NOT fixed here.
+// THE BLIND SPOT SLICE 12 RECORDED, now closed. Two changes that had to land together.
 //
-// This scan is same-file: a route's window covers its registration and the helpers declared beside it.
-// 45 GET routes delegate to an IMPORTED function instead, and following those imports two levels deep
-// finds 13 that read rows with no bound — including `/export` (a whole tenant), `/spaces/:id/export`,
-// `/audit/verify` (the whole hash chain) and `/billing/usage`. None of them can fail this test today.
+// Slice 12 measured it and said so out loud: the scan was same-file, so a route whose rows come from an
+// IMPORTED function was read as having no query at all. Re-measured here before changing anything
+// 61 GET routes delegate to an imported symbol, and 17 of them read rows through it.
 //
-// It is recorded rather than fixed because each of the 13 needs its own line and its own reason, which
-// is a judgement per route, not a regex; and because widening the scan is a change to the instrument
-// that should land on its own rather than inside the page-tree slice. Reported on #623.
+// The same report warned that narrowing the window and following imports must land in ONE commit,
+// because each one alone makes the instrument worse. Measured, both directions
+//
+// window narrowed alone 89 routes seen (down from 95) — six routes leave the scan entirely,
+// because their SQL was in a file they import
+// imports followed alone a route keeps its neighbour's `limit`, so the same false greens survive
+// both 104 routes seen, 52 unbounded (up from 36)
+//
+// ⚠️ Following imports NAIVELY — pasting the helper's body onto the route's — introduces a false green,
+// and it caught a live one: `GET /me/factors` read as bounded because `secondFactorStance` contains
+// `SELECT second_factor_kinds FROM tenant_login_prefs LIMIT 1`. That LIMIT belongs to a settings lookup
+// in another file; the list of factors has no bound at all. Borrowing across a file boundary is the same
+// mistake slice 12 fixed inside one file, made larger.
+//
+// So an imported helper is never concatenated. It is evaluated on its own, and it may only answer for a
+// route that has NO query of its own — see `routeBounded`.
 const ROUTES = resolve(import.meta.dirname, '../routes')
 
 /**
@@ -96,8 +108,40 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'pages.ts:/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: the whole space, one row per page, plus a per-page confirm.' },
   'public.ts:/public/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: 200 children per node to depth 6 — each step bounded, the product is not.' },
 
-  // ── internal: not a list surface at all ───────────────────────────────────────────────────────
-  'email-unsubscribe.ts:/email/unsubscribe': { kind: 'internal', why: 'one unsubscribe link resolves to one member — no listing.' },
+  // ── VISIBLE FOR THE FIRST TIME, now that the scan follows an import. Seventeen routes, each read by
+  // hand: a regex can tell you a route reads rows, not whether the response can grow.
+  //
+  // `email-unsubscribe.ts:/email/unsubscribe` LEFT the ledger in the same change and is not replaced
+  // by a line here: with the window cut at the next registration it has no query at all, so it is no
+  // longer a list route to correct. Its old line described a neighbour's SQL.
+
+  // the audit chains: both read every entry, and both must, because a hash chain is verified from its
+  // start. Bounding these is a design (checkpoints), not a LIMIT — which is exactly what a debt line is.
+  'audit.ts:/audit/verify': { kind: 'debt', why: '#623: recomputes the chain over EVERY audit row in the tenant. The verdict needs the whole chain, so the bound has to be a checkpoint design, not a page.' },
+  'audit.ts:/admin/transparency': { kind: 'debt', why: '#623: returns every transparency entry IN THE RESPONSE — the growing-page shape, not just a growing read.' },
+  'audit.ts:/admin/transparency/verify': { kind: 'debt', why: '#623: reads the whole transparency chain to verify it; same checkpoint question as /audit/verify.' },
+
+  // admin rosters: each grows with how the tenant is configured rather than with how it is used, which
+  // makes them slower to notice and no less unbounded.
+  'admin-connections.ts:/admin/connections': { kind: 'debt', why: '#623: one row per login connection, ORDER BY sort — the admin twin of /auth/login-options.' },
+  'admin-login-methods.ts:/admin/sso-exemptions': { kind: 'debt', why: '#623: one row per exempted member; an exemption is never pruned.' },
+  'admin-login-methods.ts:/admin/login-methods/impact': { kind: 'debt', why: '#623: membersUnsatisfiedBy walks EVERY member to count who a stance would sign out.' },
+  'custom-domains.ts:/admin/custom-domains': { kind: 'debt', why: '#623: one row per custom domain on the tenant.' },
+  'members.ts:/admin/groups': { kind: 'debt', why: '#623: DISTINCT unnest(groups) over every member row; grows with the IdP directory.' },
+  'roles.ts:/pages/:pageId/assignable-roles': { kind: 'debt', why: '#623: every resource-scoped role — the page twin of /spaces/:spaceId/assignable-roles, and the same table.' },
+  // the clearest case of the blind spot in the whole product: the handler is ONE line that calls an
+  // imported function, so to a same-file scan the route contained no query whatsoever.
+  'pages.ts:/pages/:pageId/restrict': { kind: 'debt', why: '#623: one row per restricted principal on the page — the subtract-side twin of /pages/:pageId/access.' },
+
+  // bounded, and NOT by a LIMIT — which is why each needs a line rather than a keyword.
+  'billing.ts:/billing/usage': { kind: 'bounded', why: 'getUsage is SUM(amount) — one number per resource, and the resource list is a constant in the handler. The read scans, the response cannot grow.' },
+  'export.ts:/export': { kind: 'bounded', why: 'buildTenantExport accumulates into a byte budget and throws ExportTooLargeError past MAX_EXPORT_BYTES (413). A refusal, not a truncation — the caller is told, rather than handed a silently short archive.' },
+  'export.ts:/spaces/:spaceId/export': { kind: 'bounded', why: 'the same MAX_EXPORT_BYTES budget as the tenant export, over one space.' },
+  'export.ts:/pages/:pageId/export.html': { kind: 'bounded', why: 'one page rendered to HTML — the same byte budget bounds its embedded images.' },
+  'pages.ts:/spaces/:spaceId/info': { kind: 'bounded', why: 'getSpaceInfo selects one space by id and one settings row — a record, not a list.' },
+  'pages.ts:/pages/:pageId/transclude/:refId': { kind: 'bounded', why: 'one transcluded fragment by id — the authenticated twin of the public route above.' },
+  'public-shell.ts:/pub/:pageId': { kind: 'bounded', why: 'loadPublicPage selects one published page by id — a row, not a list.' },
+  'public-shell.ts:/robots.txt': { kind: 'bounded', why: 'reads one tenant_settings flag to decide whether the public surface exists at all.' },
 }
 
 /**
@@ -183,18 +227,59 @@ const NOT_REALLY_BOUNDED: Record<string, string> = {
  * Route-level fixes both. It is the option this ticket's own report recommended; the alternative
  * (slice by file) contradicts the ordering ruling, which is to start with the surfaces that grow fastest.
  */
-function routesIn(file: string): { key: string; body: string }[] {
-  const src = readFileSync(resolve(ROUTES, file), 'utf8')
-  const out: { key: string; body: string }[] = []
-  // each `app.get(...)` registration, cut at the next one — the same window shape the "still bounded"
-  // suite below uses, and the same reason: a route's bound lives in its own handler, not in its
-  // neighbour's.
+/** Where `import { x } from './y.js'` actually points, or null for a package. */
+function resolveImport(fromAbs: string, spec: string): string | null {
+  if (!spec.startsWith('.')) return null
+  const base = resolve(dirname(fromAbs), spec).replace(/\.js$/, '')
+  for (const candidate of [`${base}.ts`, `${base}/index.ts`]) if (existsSync(candidate)) return candidate
+  return null
+}
+
+/** Local name → the file it was imported from. `import type` is skipped: a type carries no query. */
+function importMap(abs: string, src: string): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const m of src.matchAll(/import\s+(?!type\b)(?:[\w*\s{},]*?)\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) {
+    const target = resolveImport(abs, m[2]!)
+    if (!target) continue
+    for (const raw of m[1]!.split(',')) {
+      if (/^\s*type\s/.test(raw)) continue
+      const name = raw.trim().split(/\s+as\s+/).pop()!.trim()
+      if (name) map.set(name, target)
+    }
+  }
+  return map
+}
+
+/** A named declaration's text, cut at the next top-level one. */
+function declBody(src: string, name: string): string {
+  const decl = new RegExp(`^(?:export )?(?:async )?(?:function ${name}\\b|const ${name}\\s*[:=])`, 'm')
+  const found = decl.exec(src)
+  if (!found) return ''
+  const rest = src.slice(found.index)
+  const stop = /\n(?:export |(?:async )?function |const |class )/.exec(rest.slice(1))
+  return stop ? rest.slice(0, stop.index + 1) : rest
+}
+
+function routesIn(file: string): { key: string; body: string; helpers: { name: string; bounded: boolean }[] }[] {
+  const abs = resolve(ROUTES, file)
+  const src = readFileSync(abs, 'utf8')
+  const imports = importMap(abs, src)
+  const out: { key: string; body: string; helpers: { name: string; bounded: boolean }[] }[] = []
+  // each `app.get(...)` registration, cut at the next registration of ANY method.
+  //
+  // It used to be cut at the next `app.get`, and that let a route read the SQL of every POST/DELETE
+  // sitting between it and the next GET. Measured: `GET /spaces/:spaceId/share-links` was green solely
+  // on a `limit` belonging to a DELETE handler two routes later, and `GET /email/unsubscribe` looked
+  // list-shaped while having no query at all.
   const re = /app\.get(?:<[^>]*>)?\(\s*(['"`])([^'"`]+)\1/g
+  const anyRe = /app\.(?:get|post|put|patch|delete|head|options)(?:<[^>]*>)?\(\s*(['"`])([^'"`]+)\1/g
   let m: RegExpExecArray | null
   const starts: { at: number; path: string }[] = []
   while ((m = re.exec(src)) !== null) starts.push({ at: m.index, path: m[2]! })
-  for (const [i, r] of starts.entries()) {
-    const end = i + 1 < starts.length ? starts[i + 1]!.at : src.length
+  const registrations: number[] = []
+  while ((m = anyRe.exec(src)) !== null) registrations.push(m.index)
+  for (const r of starts) {
+    const end = registrations.find((at) => at > r.at) ?? src.length
     let body = src.slice(r.at, end)
     // …plus the helpers it delegates to, IN THE SAME FILE. Several routes are two lines that call a
     // named function, and the bound lives there (`listWatchesResolved`, `listApiKeys`). A window that
@@ -215,9 +300,38 @@ function routesIn(file: string): { key: string; body: string }[] {
       const stop = /\n(?:export |(?:async )?function |const |class )/.exec(rest.slice(1))
       body += stop ? rest.slice(0, stop.index + 1) : rest
     }
-    out.push({ key: `${file}:${r.path}`, body })
+    // …and the helpers it delegates to in ANOTHER file, kept SEPARATE. Concatenating them is what made
+    // `/me/factors` read as bounded on a settings lookup's `LIMIT 1` — see the header. Each is judged on
+    // its own text, and what the route may conclude from them is in `routeBounded`.
+    const helpers: { name: string; bounded: boolean }[] = []
+    for (const name of new Set([...body.matchAll(/\b([a-z][A-Za-z0-9_]*)\s*\(/g)].map((mm) => mm[1]!))) {
+      const target = imports.get(name)
+      if (!target) continue
+      const hb = declBody(readFileSync(target, 'utf8'), name)
+      if (hb && LIST_SHAPED.test(hb)) helpers.push({ name, bounded: isBounded(hb) })
+    }
+    out.push({ key: `${file}:${r.path}`, body, helpers })
   }
   return out
+}
+
+/**
+ * Whether a route's response is bounded.
+ *
+ * Three cases, and the middle one is the whole point of keeping helpers separate:
+ *
+ *   the route's own window is bounded            → bounded. Unchanged; this is what the scan always did.
+ *   the route has NO query of its own            → its rows come from the helpers it imports, so it is
+ *                                                  bounded only if EVERY list-shaped one of them is.
+ *   the route has a query AND imports helpers    → unbounded. A helper cannot vouch for a statement it
+ *                                                  does not contain, and this is the direction the file
+ *                                                  errs in deliberately: land in the ledger, not silently
+ *                                                  green.
+ */
+function routeBounded(r: { body: string; helpers: { bounded: boolean }[] }): boolean {
+  if (isBounded(r.body)) return true
+  if (LIST_SHAPED.test(r.body)) return false
+  return r.helpers.length > 0 && r.helpers.every((h) => h.bounded)
 }
 
 /**
@@ -230,11 +344,13 @@ function routesIn(file: string): { key: string; body: string }[] {
  */
 const LIST_SHAPED = /db\.sql<|sql<|\.sql`|listObjects|filterAuthorized|\btx\s*(?:<[^>]*>)?\s*`/
 
-function listShapedRoutes(): { key: string; body: string }[] {
+function listShapedRoutes(): { key: string; body: string; helpers: { name: string; bounded: boolean }[] }[] {
   return readdirSync(ROUTES)
     .filter((f) => f.endsWith('.ts'))
     .flatMap((f) => routesIn(f))
-    .filter((r) => LIST_SHAPED.test(r.body))
+    // …or reads its rows through a helper in another file, which is the whole point of this slice: a
+    // route with two lines and an import was not list-shaped to this scan at all.
+    .filter((r) => LIST_SHAPED.test(r.body) || r.helpers.length > 0)
 }
 
 describe('#623: no list route grows without saying so', () => {
@@ -247,7 +363,7 @@ describe('#623: no list route grows without saying so', () => {
   it('every list-shaped GET route is either bounded or in the ledger with a reason', () => {
     const missing: string[] = []
     for (const r of listShapedRoutes()) {
-      if (isBounded(r.body) && !NOT_REALLY_BOUNDED[r.key]) continue
+      if (routeBounded(r) && !NOT_REALLY_BOUNDED[r.key]) continue
       if (!LEDGER[r.key]) missing.push(r.key)
     }
     expect(
@@ -266,7 +382,7 @@ describe('#623: no list route grows without saying so', () => {
     const orphans = Object.keys(LEDGER).filter((k) => !live.has(k))
     expect(orphans, `ledger lines for routes that do not exist: ${orphans.join(', ')}`).toEqual([])
     const bounded = listShapedRoutes()
-      .filter((r) => isBounded(r.body) && !NOT_REALLY_BOUNDED[r.key] && LEDGER[r.key])
+      .filter((r) => routeBounded(r) && !NOT_REALLY_BOUNDED[r.key] && LEDGER[r.key])
     expect(bounded.map((r) => r.key), 'these routes are bounded now — delete their ledger lines').toEqual([])
   })
 
@@ -292,10 +408,34 @@ describe('#623: no list route grows without saying so', () => {
     for (const key of ['pages.ts:/spaces/:spaceId/pages', 'public.ts:/public/spaces/:spaceId/pages']) {
       const r = byKey.get(key)
       expect(r, `${key}: the scan does not see this route as list-shaped`).toBeDefined()
-      const counted = !isBounded(r!.body) || Boolean(NOT_REALLY_BOUNDED[key])
+      const counted = !routeBounded(r!) || Boolean(NOT_REALLY_BOUNDED[key])
       expect(counted, `${key}: counted as bounded, so bounding it would change nothing here`).toBe(true)
       expect(LEDGER[key], `${key}: …and it is owed a bound, out loud`).toBeDefined()
     }
+  })
+
+  it('a route whose rows come from an IMPORTED helper is measured, not skipped', () => {
+    // The blind spot slice 12 recorded, asserted rather than described. `/audit/verify` is two lines and
+    // a call: `verifyTenantAuditChain` lives in `audit/outbox.ts` and reads the whole chain. Before this
+    // change the route had no query the scan could see and could not fail this file at all.
+    const byKey = new Map(listShapedRoutes().map((r) => [r.key, r]))
+    const r = byKey.get('audit.ts:/audit/verify')
+    expect(r, 'the scan does not reach a route that delegates across a file boundary').toBeDefined()
+    expect(r!.helpers.map((h) => h.name), 'the imported helper is the one that reads the rows')
+      .toContain('verifyTenantAuditChain')
+    expect(routeBounded(r!), 'a helper that reads the whole chain cannot make the route bounded').toBe(false)
+  })
+
+  it('an imported helper cannot lend its bound to a route that queries for itself', () => {
+    // The false green this slice had to avoid. `/me/factors` imports `secondFactorStance`, whose body
+    // contains `LIMIT 1` for a settings row; the factor list it returns has no bound at all. Pasting the
+    // helper's text onto the route's made it read as bounded — measured, on the way to writing this.
+    const byKey = new Map(listShapedRoutes().map((r) => [r.key, r]))
+    const r = byKey.get('second-factor.ts:/me/factors')
+    expect(r, 'the factors route left the scan').toBeDefined()
+    expect(r!.helpers.some((h) => h.bounded), 'the borrowable LIMIT is still there to be borrowed').toBe(true)
+    expect(routeBounded(r!), 'a LIMIT belonging to a settings lookup in another file is not this list’s bound')
+      .toBe(false)
   })
 
   it('every ledger line carries a reason a reader can act on', () => {
