@@ -104,6 +104,9 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'pages.ts:/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: the whole space, one row per page, plus a per-page confirm.' },
   'public.ts:/public/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: 200 children per node to depth 6 — each step bounded, the product is not.' },
 
+  // ── ADR-220's two new tree surfaces. The scan cannot see either bound, so both say it here.
+  'pages.ts:/spaces/:spaceId/pages/paint': { kind: 'bounded', why: 'ADR-220 §5: the root branch plus one branch per ANCESTOR of the open page. Each branch is a bounded listBranch read and the count of them is bounded by MAX_PAGE_DEPTH, so the response is limit x depth — it grows with how deep the reader is, never with the size of the space. Pinned by paint-tree-623.' },
+
   // ── VISIBLE FOR THE FIRST TIME, now that the scan follows an import. Seventeen routes, each read by
   // hand: a regex can tell you a route reads rows, not whether the response can grow.
   //
