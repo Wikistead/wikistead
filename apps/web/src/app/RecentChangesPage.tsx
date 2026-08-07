@@ -65,6 +65,11 @@ export function RecentChangesRoute() {
                 aria-pressed={e.patrolled}
                 disabled={togglePatrol.isPending}
                 data-testid={`recent-changes-patrol-${e.id}`}
+                // #668's rule, missed here: a mark that is only an icon needs the words too. `data-tip`
+                // draws a tooltip for a mouse; it is not an accessible name, so this button announced
+                // itself as "button" and nothing else. Same string, so the label and the tooltip cannot
+                // drift — and `aria-pressed` beside it now has something to qualify.
+                aria-label={e.patrolled ? t("recentChanges.unmarkPatrolled") : t("recentChanges.markPatrolled")}
                 data-tip={e.patrolled ? t("recentChanges.unmarkPatrolled") : t("recentChanges.markPatrolled")}
                 onClick={() => togglePatrol.mutate({ eventId: e.id, patrolled: !!e.patrolled })}
                 className={`flex-none rounded p-1 ${e.patrolled ? "text-[var(--accent)]" : "text-fg-dim hover:bg-panel-2 hover:text-foreground"}`}
