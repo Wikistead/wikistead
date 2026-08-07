@@ -78,7 +78,8 @@ export async function setThreadStatus(token: string, threadId: string, action: "
 export async function deleteComment(token: string, commentId: string): Promise<void> {
   await apiFetch(`/comments/${encodeURIComponent(commentId)}`, token, { method: "DELETE" });
 }
-export async function fetchMentionable(token: string, pageId: string): Promise<Mentionable[]> {
-  const r = await apiFetch<{ members: Mentionable[] }>(`/pages/${encodeURIComponent(pageId)}/mentionable`, token).catch(() => null);
+export async function fetchMentionable(token: string, pageId: string, query?: string): Promise<Mentionable[]> {
+  const q = query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+  const r = await apiFetch<{ members: Mentionable[] }>(`/pages/${encodeURIComponent(pageId)}/mentionable${q}`, token).catch(() => null);
   return r?.members ?? [];
 }

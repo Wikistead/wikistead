@@ -39,6 +39,6 @@ export function useCommentMutations(pageId: string, tokenOverride?: string) {
 
 // Mention directory is fetched on demand (when the composer needs it), scoped
 // server-side to members who can VIEW this page.
-export function fetchMentionable(token: string, pageId: string) {
-  return api.fetchMentionable(token, pageId);
+export function fetchMentionable(token: string, pageId: string, query?: string) {
+  return api.fetchMentionable(token, pageId, query);
 }
