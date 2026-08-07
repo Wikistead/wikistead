@@ -70,7 +70,11 @@ test("#582 ①: the tenant tiers raise a panel of their own", async ({ page }) =
   await page.goto("/admin/members");
   await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
   await sleep(400);
-  await page.getByTestId("member-role-select").first().click();
+  // A PERSON's row. `.first` used to take whichever row came first, and since #579 folded groups into
+  // this table that can be a group — a different principal with a different vocabulary. The subject here
+  // is the TENANT TIERS on a member.
+  await page.locator("tr:not([data-testid='member-row-group'])")
+    .locator("[data-testid=member-role-select]").first().click();
   await expect(page.locator("[data-slot=select-content]")).toBeVisible({ timeout: 5_000 });
   await sleep(200);
 
@@ -78,12 +82,17 @@ test("#582 ①: the tenant tiers raise a panel of their own", async ({ page }) =
   // walking only downwards never reaches a tier that sits above it — with dev-user already `admin` this
   // test could not reach `tier:admin` at all and was red on master for that reason, not for a missing
   // panel (measured in the #582 review; the panel was there the whole time).
-  for (let i = 0; i < 12; i++) await page.keyboard.press("ArrowUp");
+  // The bound comes from the LIST, not from a guess. Twelve was enough when the picker held the two
+  // tiers and a couple of roles; on a shared tenant it also holds every custom role anybody has left
+  // behind, so a fixed twelve stops short of `tier:admin` and the test reports "no panel" for a panel
+  // that is there. Measured: this tenant carries several abandoned `e2e-*` roles at once.
+  const steps = await page.locator("[data-slot=select-content] [data-slot=select-item]").count() + 2;
+  for (let i = 0; i < steps; i++) await page.keyboard.press("ArrowUp");
   await sleep(120);
 
   // walk to the admin tier and read its panel
   let adminPanel = "";
-  for (let i = 0; i < 12 && !adminPanel; i++) {
+  for (let i = 0; i < steps && !adminPanel; i++) {
     if (i > 0) await page.keyboard.press("ArrowDown");
     await sleep(120);
     const seen = await page.evaluate(() => {
