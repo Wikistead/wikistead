@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
+import { enterEdit, FGA, openScratch, setPublicSurface, sleep } from "../helpers";
 
 // #465: a mermaid SVG carries `width="100%"` + a viewBox — no INTRINSIC width. Inside the #255 align
 // wrap (display:flex; align-items:center → shrink-to-fit) the width resolution is circular and the
@@ -12,7 +12,6 @@ import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
 const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
 const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
 const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
-const FGA = "http://localhost:8090";
 
 // A diagram whose natural width is comfortably past the 300px default.
 const DIAGRAM = [

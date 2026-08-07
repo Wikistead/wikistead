@@ -18,6 +18,13 @@ export const WEB_REAL_PORT = P.webReal; // real-auth web port, for `${slug}.loca
 // as "the invite email never arrived" — a product claim — and the spec was permanently red for every
 // session but one. Derived here so there is nowhere left to hardcode it.
 export const MAILPIT_API = `http://localhost:${P.mailpit}/api/v1`;
+// …and it left a SECOND one, which the sentence above ("nowhere left to hardcode it") missed: eight
+// specs write their public-visibility tuple straight at `http://localhost:8090`. That is offset 0's
+// OpenFGA. On an isolated stack the tuple lands in ANOTHER session's store — so the page never becomes
+// public here, and something over there quietly gains a `user:*` grant it was never asked for. The
+// failure reads as "the anonymous reader cannot see a public page", which is a product claim; all
+// twelve of `public-page.spec.ts` fail that way, and four more specs with them.
+export const FGA = `http://localhost:${P.fgaHttp}`;
 
 // #354: publish a page and WAIT until its published body actually contains `expectSubstring`. The publish flush
 // (collab Valkey req/ack) has a timeout and, under parallel-load, can snapshot a stale/empty ydoc so

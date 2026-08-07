@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { sleep } from "../helpers";
+import { FGA, sleep } from "../helpers";
 
 // #406 S1 / ADR-159 §3: the mobile chrome slice, pinned at the ADR's reference viewports —
 // phone 390×844 (below md) and tablet 768×1024 (at md, i.e. desktop chrome). The drawer is
@@ -198,7 +198,7 @@ test("#406 S2: phone public reader — no horizontal overflow, readable base fon
   await sleep(400);
   await authed.getByTestId("publish-page").click();
   await sleep(800);
-  const res = await fetch(`http://localhost:8090/stores/${STORE}/write`, {
+  const res = await fetch(`${FGA}/stores/${STORE}/write`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ writes: { tuple_keys: [{ user: "user:*", relation: "view_base", object: `page:${id}` }] }, authorization_model_id: MODEL }),

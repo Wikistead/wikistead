@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { FGA } from "../helpers";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { seedFgaFixtures, FIXTURE_OBJECTS, DENY_MARKER_RELATIONS, DENY_MARKER_USERS } from "../fixtures";
@@ -21,7 +22,6 @@ const EXPECTED_MARKER_RELATIONS = ["trashed", "private", "frozen", "frozen_guest
 const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
 const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
 const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
-const FGA = "http://localhost:8090";
 
 async function readMarkers(object: string, relation: string): Promise<number> {
   const res = await fetch(`${FGA}/stores/${STORE}/read`, {

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, openScratch, enterEdit, publishAndWait, sleep, API } from "../helpers";
+import { API, enterEdit, FGA, openDemo, openScratch, publishAndWait, sleep } from "../helpers";
 
 // #457: a page that is still fetching used to look exactly like a page with nothing in it. Now loading
 // draws an animated skeleton and a resolved-but-blank page says so in words. The skeleton is gated by a
@@ -307,7 +307,7 @@ test("#457the public reader skeletons while the page resolves", async ({ browser
   await authed.keyboard.insertText("# Public heading\n\npublic skeleton body\n");
   await sleep(500);
   await publishAndWait(authed, id, "public skeleton body");
-  const fga = await fetch(`http://localhost:8090/stores/${STORE}/write`, {
+  const fga = await fetch(`${FGA}/stores/${STORE}/write`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ writes: { tuple_keys: [{ user: "user:*", relation: "view_base", object: `page:${id}` }] }, authorization_model_id: MODEL }),

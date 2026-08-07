@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, setPublicSurface, sleep, API } from "../helpers";
+import { API, enterEdit, FGA, openScratch, setPublicSurface, sleep } from "../helpers";
 
 // #227 / ADR-030: the PUBLIC page view /pub/:pageId) — the frontend consumer of GET /public/pages/:id.
 // An ANONYMOUS browser context (no session/cookies) renders a published-public page's title + sanitized
@@ -12,7 +12,6 @@ import { enterEdit, openScratch, setPublicSurface, sleep, API } from "../helpers
 const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
 const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
 const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
-const FGA = "http://localhost:8090";
 
 async function makePublic(pageId: string) {
   const res = await fetch(`${FGA}/stores/${STORE}/write`, {

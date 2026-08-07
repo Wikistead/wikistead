@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
+import { enterEdit, FGA, openScratch, setPublicSurface, sleep } from "../helpers";
 
 // #312: the title-band STATIC title must clamp to at most 2 lines on EVERY surface — the view
 // surface, the page-EDIT mode (the bug: its `block` branch let a 4-line title grow the band), and
@@ -11,7 +11,6 @@ import { enterEdit, openScratch, setPublicSurface, sleep } from "../helpers";
 const repoEnv = readFileSync(fileURLToPath(new URL("../../../.env.e2e.local", import.meta.url)), "utf8");
 const STORE = /OPENFGA_STORE_ID=(.+)/.exec(repoEnv)![1]!.trim();
 const MODEL = /OPENFGA_MODEL_ID=(.+)/.exec(repoEnv)![1]!.trim();
-const FGA = "http://localhost:8090";
 
 async function makePublic(pageId: string) {
   const res = await fetch(`${FGA}/stores/${STORE}/write`, {
