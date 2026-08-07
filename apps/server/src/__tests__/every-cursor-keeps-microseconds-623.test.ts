@@ -35,8 +35,15 @@ const walk = (dir: string): string[] =>
  *
  * Matched on the SHAPE rather than on a list of routes — a fifth paged list added next month is found
  * by the thing that makes it a keyset walk.
+ *
+ * ANY timestamp column, not `created_at` alone. The first version named that one column, and the
+ * comment thread list pages on `last_activity` — so reverting just its comparison left all three cases
+ * here green. Measured. What caught that route was the OTHER half of the rule (nothing mints from
+ * `toISOString()`), which is luck rather than coverage: a route can carry the instant at full
+ * precision and still compare against a rounded one.
  */
-const KEYSET = /\(\s*[\w.]*created_at\s*,[^)]*\)\s*[<>]\s*\(([^)]*)\)/g
+const TIMESTAMP_COL = String.raw`(?:created_at|updated_at|last_activity|occurred_at|sent_at|last_used_at|confirmed_at|published_at|deleted_at)`
+const KEYSET = new RegExp(String.raw`\(\s*[\w.]*${TIMESTAMP_COL}\s*,[^)]*\)\s*[<>]\s*\(([^)]*)\)`, 'g')
 
 /** …and the only spelling allowed to carry the instant. */
 const SAFE = /to_timestamp\s*\(/
@@ -49,6 +56,13 @@ describe('#623: every keyset cursor keeps its microseconds', () => {
     // column, and the rule goes quietly green while the bug walks back in.
     const n = sources.reduce((acc, f) => acc + [...readFileSync(f, 'utf8').matchAll(KEYSET)].length, 0)
     expect(n, 'no keyset comparisons were found at all — has the shape changed?').toBeGreaterThanOrEqual(4)
+    // …and specifically that a column other than `created_at` is reachable, since that was the gap.
+    const cols = new Set(
+      sources.flatMap((f) => [...readFileSync(f, 'utf8').matchAll(KEYSET)]
+        .map((m) => m[0]!.match(new RegExp(TIMESTAMP_COL))?.[0] ?? '')))
+    expect([...cols].filter((c) => c && c !== 'created_at').length,
+      'the sweep only reaches `created_at` again — a walk on another column would go unmeasured')
+      .toBeGreaterThanOrEqual(1)
   })
 
   it('none of them compares against a timestamp the driver has rounded', () => {
