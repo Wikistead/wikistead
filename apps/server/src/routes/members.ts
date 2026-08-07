@@ -175,15 +175,27 @@ export async function membersPlugin(app: FastifyInstance) {
     const limit = Math.min(200, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : MEMBERS_PAGE_LIMIT))
     const cursor = (req.query as { cursor?: string } | undefined)?.cursor
     const at = cursor?.indexOf('|') ?? -1
+    // #623 slice 12b's sibling. The cursor used to carry `created_at.toISOString()`, which stops at
+    // MILLISECONDS — `created_at` is a timestamptz(6) and Postgres keeps microseconds. Cast back with
+    // `::timestamptz` the parameter named an earlier instant than the row it came from, so the row on
+    // the page boundary compared as greater than its own cursor and came round again. Measured on this
+    // route with rows a microsecond apart: the walk returned the same three members forever and six of
+    // the nine were unreachable.
+    //
+    // An epoch numeric is a NUMBER to the driver, so nothing rounds it, and `to_timestamp` puts every
+    // microsecond back. Same spelling as `/spaces`, deliberately: two cursors is how one of them stays
+    // wrong.
     const after = cursor && at > 0 ? { at: cursor.slice(0, at), sub: cursor.slice(at + 1) } : null
     const rows = await req.db.sql<
       {
         sub: string; email: string | null; display_name: string | null; picture_url: string | null
         role: string; groups: string[] | null; created_at: Date
         identity_source: string; deactivated_at: Date | null; deactivation_reason: string | null; has_password: boolean
-        has_factor: boolean
+        has_factor: boolean; cursor_at: string
       }[]
     >`SELECT m.sub, m.email, m.display_name, m.picture_url, m.role, m.groups, m.created_at,
+             -- the value the cursor is built from, carried out of SQL so no driver rounds it
+             extract(epoch from m.created_at)::text AS cursor_at,
              -- #627: WHOSE suspension it is decides whether the console may offer to undo it
              m.identity_source, m.deactivated_at, m.deactivation_reason, (lc.member_sub IS NOT NULL) AS has_password,
              -- #644 existence only, the same shape as has_password one line up — nothing about
@@ -197,7 +209,7 @@ export async function membersPlugin(app: FastifyInstance) {
       LEFT JOIN local_credentials lc ON lc.tenant_id = m.tenant_id AND lc.member_sub = m.sub
       WHERE TRUE
         ${q ? req.db.sql`AND (m.display_name ILIKE ${'%' + q + '%'} OR m.email ILIKE ${'%' + q + '%'} OR m.sub ILIKE ${'%' + q + '%'})` : req.db.sql``}
-        ${after ? req.db.sql`AND (m.created_at, m.sub) > (${after.at}::timestamptz, ${after.sub})` : req.db.sql``}
+        ${after ? req.db.sql`AND (m.created_at, m.sub) > (to_timestamp(${after.at}::numeric), ${after.sub})` : req.db.sql``}
       ORDER BY m.created_at, m.sub
       LIMIT ${limit + 1}`
     // one row past the limit answers "is there more" without a second count query
@@ -206,7 +218,7 @@ export async function membersPlugin(app: FastifyInstance) {
     const last = page[page.length - 1]
     return {
       members: page,
-      nextCursor: hasMore && last ? `${last.created_at.toISOString()}|${last.sub}` : null,
+      nextCursor: hasMore && last ? `${last.cursor_at}|${last.sub}` : null,
     }
   })
 
