@@ -186,10 +186,14 @@ export function SecondFactorPanel() {
 
   const list = factors.data ?? [];
 
+  // #682: the panel opens straight into the list. The line that used to sit here gave the STEPS of
+  // enrolling an authenticator app — to somebody who had not started, on a screen that also enrols
+  // passkeys, one line below a heading that already says what the screen is. Three faults in one
+  // sentence: it named one kind of two, it repeated `factorScanHint` which appears at the moment the
+  // key is on screen, and it added nothing to `factorsDesc`. Instructions belong to the operation, not
+  // to the panel.
   return (
     <div data-testid="second-factor-panel">
-      <p className="mb-2 text-xs text-fg-dim">{t("account.factorsHint")}</p>
-
       {list.length > 0 && (
         <ListBox className="mb-3" data-testid="factor-list">
           {list.map((f) => (
@@ -350,10 +354,13 @@ export function SecondFactorPanel() {
             onClick={() => void onAddPasskey()} data-testid="factor-add-passkey">{t("account.factorAddPasskey")}</Button>
         </FormRow>
       )}
-      {/* #653 ④. #664 states this same fact where a domain move is refused — "a passkey only
-          works on the host it was created for" — but that refusal is API-only and no screen carries it.
-          Said here, in the reader's words, while they are deciding to create one. */}
-      <p className="mt-2 text-xs text-fg-dim" data-testid="factor-key-domain-note">{t("account.factorKeyDomainNote")}</p>
+      {/* #682 (ruling): the domain note that stood here is gone. It was added by #653 ④ so that
+          the fact would appear on a screen rather than only in an API refusal — but it changes nothing
+          the reader can do: a passkey is made for the host they are already on. The person it does
+          concern is an admin moving the domain, and #664 warns them inside that flow, before it runs;
+          #680 refuses the move outright while passkeys are the only accepted kind. A fact that is
+          structurally prevented and separately warned about does not also need saying at every
+          enrolment. */}
     </div>
   );
 }

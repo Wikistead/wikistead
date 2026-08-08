@@ -247,7 +247,6 @@
     "vimMonoOff": "Off",
     "factorsTitle": "Two-factor authentication",
     "factorsDesc": "After your password, signing in also asks for a passkey or a six-digit code from an authenticator app.",
-    "factorsHint": "Add the app on your phone, then confirm with a code so we know it works.",
     "factorAdd": "Add authenticator",
     "factorLabel": "Name",
     "factorLabelPlaceholder": "Work phone",
@@ -278,7 +277,6 @@
     "factorKeyUnsupported": "This browser cannot use passkeys. Try another browser.",
     "factorKeyCancelled": "Registration cancelled.",
     "factorKeyAlready": "This passkey is already registered. It is in the list above.",
-    "factorKeyDomainNote": "A passkey only works on the host it was created for. Moving this workspace to its own domain means enrolling every passkey again.",
     "factorNotCounted": "Not accepted",
     "factorNotCountedTip": "This workspace no longer accepts this kind of factor, so it will not get you in. It is kept in case the setting changes back."
   },
@@ -737,7 +735,7 @@
     "factorEnrolPrompt": "This workspace requires two-factor authentication. Set up an authenticator app to continue.",
     "factorEnrolStart": "Set up an authenticator",
     "factorEnrolHint": "Enter this key in your authenticator app, then type the code it shows.",
-    "factorSecretNote": "This key is shown once. Enter it now.",
+    "factorSecretNote": "Enter it in your authenticator app.",
     "factorEnrolPasskey": "Set up a passkey",
     "factorNoWebauthn": "This workspace asks for a security key, and this browser cannot register one. Try another browser, or ask an administrator."
   },
