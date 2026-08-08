@@ -284,8 +284,11 @@ export async function stanceRefusal(
     // success response — and the person who would have to undo it is the one shut out.
     return stance === 'passkey'
       ? {
+          // #685: the number comes from `floorFor`, here as well as on the screen. This sentence used
+          // to spell "two" out, so the ruling sat in three places (the constant and two locales) and a
+          // change to the floor would have left an API caller reading the old figure.
           code: 'admin_passkey_floor',
-          message: 'enrol at least two passkeys on admin accounts before requiring passkeys — a passkey cannot be written down, so one is a single accident away from locking the workspace.',
+          message: `enrol at least ${floorFor('passkey')} passkeys on admin accounts before requiring passkeys — a passkey cannot be written down, so one is a single accident away from locking the workspace.`,
         }
       : stance === 'totp'
         ? {
