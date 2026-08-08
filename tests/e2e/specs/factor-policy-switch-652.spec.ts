@@ -178,6 +178,19 @@ test("#652: an admin turns the requirement on from the screen, and it bites", as
   await expect(offConfirm, "turning it OFF asks first").toBeVisible({ timeout: 10_000 });
   expect(await stanceInDb(), "…and writes nothing while the question is open").toBe(true);
 
+  // #683: and the dialog does not head the question with its opposite. It used to open "Require
+  // two-factor authentication" over a body ending "Stop requiring two-factor authentication?" — the
+  // first line read said the reverse of what was being asked, which is what #674 put this confirmation
+  // here to prevent. Measured on the RENDERED dialog rather than on the strings alone (that pin lives in
+  // `stance-dialog-direction-683`): what a reader meets is the heading in the real box.
+  const offHeading = (await offConfirm.evaluate((el) => {
+    const box = el.closest('[role="dialog"], [role="alertdialog"]') ?? el.parentElement;
+    return box?.querySelector("h1,h2,h3,[data-testid$=-title]")?.textContent ?? "";
+  })).trim();
+  expect(offHeading.length, "the confirmation has no heading to read").toBeGreaterThan(0);
+  expect(offHeading, `the OFF dialog is headed as if it turned the requirement ON :: ${offHeading}`)
+    .toMatch(/stop|やめ|解除|外す/i);
+
   // cancelling leaves the requirement standing — the half that makes the question real
   await page.keyboard.press("Escape");
   await expect(offConfirm).toBeHidden({ timeout: 10_000 });

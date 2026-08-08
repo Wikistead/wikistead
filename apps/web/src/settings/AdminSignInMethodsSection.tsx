@@ -72,6 +72,31 @@ const STANCE_LABEL: Record<(typeof STANCE_CHOICES)[number], string> = {
   totp: "adminAuth.stanceTotp",
 };
 
+/**
+ * #683: what each stance confirmation SAYS, as one entry per direction.
+ *
+ * The heading used to be the switch's name, fixed, while only the body followed the direction — so
+ * turning two-factor OFF opened a dialog headed "Require two-factor authentication" above a body ending
+ * "Stop requiring two-factor authentication?". A heading is the first line read, and #674 put a
+ * confirmation on the OFF direction precisely because it lowers the tenant's security; a heading that
+ * reads as raising it undoes the confirmation before the body is reached.
+ *
+ * Kept as a table so that a heading cannot exist without the body it belongs to. Two ternaries reading
+ * the same flag is exactly the shape that drifted: one of them was written without the flag, and
+ * nothing about the code said the two answers had to agree. Adding a third stance means adding a row
+ * here, and a row with a missing half does not compile.
+ */
+export const STANCE_COPY: Record<"factor" | "sso", Record<"on" | "off", { title: string; message: string }>> = {
+  factor: {
+    on: { title: "adminAuth.secondFactorEnableTitle", message: "adminAuth.secondFactorEnableConfirm" },
+    off: { title: "adminAuth.secondFactorDisableTitle", message: "adminAuth.secondFactorDisableConfirm" },
+  },
+  sso: {
+    on: { title: "adminAuth.ssoRequiredEnableTitle", message: "adminAuth.ssoRequiredEnableConfirm" },
+    off: { title: "adminAuth.ssoRequiredDisableTitle", message: "adminAuth.ssoRequiredDisableConfirm" },
+  },
+};
+
 const METHOD_ROW = "flex flex-col gap-1.5 rounded-md border border-border bg-panel px-3 py-2 text-sm";
 const METHOD_ROW_HEAD = "flex items-center gap-2";
 
@@ -189,12 +214,22 @@ export function AdminSignInMethodsSection() {
     },
   });
   /** What the question says, per stance and direction. Four sentences, none of them "are you sure". */
-  const stanceQuestion = (c: { stance: "factor" | "sso"; to: boolean }) => ({
-    title: t(c.stance === "factor" ? "adminAuth.secondFactorRequired" : "adminAuth.ssoRequired"),
-    message: t(c.stance === "factor"
-      ? (c.to ? "adminAuth.secondFactorEnableConfirm" : "adminAuth.secondFactorDisableConfirm")
-      : (c.to ? "adminAuth.ssoRequiredEnableConfirm" : "adminAuth.ssoRequiredDisableConfirm")),
-  });
+  // #683: the HEADING follows the direction too.
+  //
+  // It used to be the switch's NAME, fixed — so turning two-factor OFF opened a dialog headed "Require
+  // two-factor authentication" above a body ending "Stop requiring two-factor authentication?". The
+  // heading is the first thing read in a dialog, and #674 put a confirmation on the OFF direction
+  // precisely because it lowers the tenant's security; a heading that reads as raising it undoes that
+  // in one line.
+  //
+  // Heading and body are looked up TOGETHER, as one entry chosen by the direction, so they cannot come
+  // from different questions. Two ternaries reading the same flag is what drifted: one of them was
+  // written without it. Spelled out rather than built from a stem — `t(`${stem}${way}Title`)` hides the
+  // keys from #645's orphan sweep, which would then read all four as dead.
+  const stanceQuestion = (c: { stance: "factor" | "sso"; to: boolean }) => {
+    const said = STANCE_COPY[c.stance][c.to ? "on" : "off"];
+    return { title: t(said.title), message: t(said.message) };
+  };
   const m = methods.data?.methods;
   const onError = (e: unknown) => {
     // the server names the refusal by CODE — never sniff English message text. review F7: an
