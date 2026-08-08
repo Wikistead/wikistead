@@ -9,8 +9,9 @@
 // to assert the directive is still here, because a probe that was quietly emptied would also compile.
 import type { AuditChanges } from '../audit/outbox.js'
 
-// The field this ADR opened. Permitted, and it typechecks.
+// The fields this ADR has opened so far. Permitted, and they typecheck.
 export const allowed: AuditChanges = { second_factor_kinds: { from: 'any', to: 'passkey' } }
+export const allowedSso: AuditChanges = { sso_required: { from: false, to: true } }
 
 // @ts-expect-error a factor's label is what a MEMBER wrote about their own device (§3): it names no
 // tenant object, and it would be published to every holder of `view_audit` in a row nothing can amend.
