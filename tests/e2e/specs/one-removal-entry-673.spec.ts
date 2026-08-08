@@ -61,8 +61,12 @@ test("#673: every row offers the same controls, whatever kind it holds", async (
   const names = FACTORS.factors.map((f) => `${f.label} (${f.kind}${f.confirmedAt ? "" : ", unconfirmed"})`);
 
   // The unconfirmed row wears a mark the others do not — that is a STATUS, not a control, and it is
-  // #653's answer to a different problem. Everything else must match.
-  const controls = sets.map((s) => s.filter((t) => t !== "factor-label" && t !== "factor-pending-mark"));
+  // #653's answer to a different problem. `factor-kind-mark` (#653) is the same: it says WHAT the
+  // row is, and it is absent from an unnamed row on purpose (there the name already is the kind), so
+  // counting it here would call that legitimate difference an inconsistent way in. Everything else must
+  // match.
+  const STATUS = new Set(["factor-label", "factor-pending-mark", "factor-kind-mark"]);
+  const controls = sets.map((s) => s.filter((t) => !STATUS.has(t)));
 
   const first = controls[0]!;
   for (let i = 1; i < controls.length; i++) {

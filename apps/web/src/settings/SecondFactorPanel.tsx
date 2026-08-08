@@ -15,6 +15,7 @@ import {
 import { startAuthentication, startRegistration, browserSupportsWebAuthn } from "@simplewebauthn/browser"; // #666: the key proves itself
 import { ApiError } from "../data/apiClient";
 import { classifyRemovalFailure, classifyEnrolmentFailure } from "./factor-removal-failure"; // #673 ② / #653 ③
+import { factorKindName } from "./factor-kind"; // #653 / #673 the one place a kind is a noun
 
 // #653 / ADR-219: a member's own second factors. SELF-SCOPE — every call is keyed to the session's
 // subject by the server, so no other member's factor is addressable from this screen.
@@ -75,7 +76,9 @@ export function SecondFactorPanel() {
     try {
       await confirm.mutateAsync({ factorId: pending.factorId, code: code.trim() });
       setPending(null); setLabel(""); setCode("");
-      notify.success(t("account.factorAdded"));
+      // This branch is only ever reached for an authenticator app — the passkey ceremony finishes in
+      // `onAddPasskey` — so the kind is a constant here rather than a lookup.
+      notify.success(t("account.factorAdded", { kind: factorKindName("totp", t) }));
     } catch {
       notify.error(t("account.factorCodeWrong"));
     }
@@ -104,7 +107,7 @@ export function SecondFactorPanel() {
       const attestation = await startRegistration({ optionsJSON: started.options as never });
       await confirmPasskey.mutateAsync({ factorId: started.factorId, response: attestation });
       setLabel("");
-      notify.success(t("account.factorAdded"));
+      notify.success(t("account.factorAdded", { kind: factorKindName("passkey", t) }));
     } catch (e) {
       if (started) await remove.mutateAsync({ factorId: started.factorId }).catch(() => {});
       // #653 ③, the same shape #673 gave removal: situations whose next moves differ get
@@ -131,7 +134,7 @@ export function SecondFactorPanel() {
       // The browser refuses if the key is not present, which is exactly the proof being asked for.
       const assertion = await startAuthentication({ optionsJSON: options as never });
       await remove.mutateAsync({ factorId: id, passkey: assertion });
-      notify.success(t("account.factorRemoved"));
+      notify.success(t("account.factorRemoved", { kind: factorKindName("passkey", t) }));
     } catch (e) {
       // #673 ②: four situations used to share one sentence, including the two where the key was never
       // asked for. Telling somebody their key failed when the challenge route 404'd sends them looking
@@ -145,11 +148,14 @@ export function SecondFactorPanel() {
     }
   };
 
-  const onRemove = async (id: string, confirmed: boolean) => {
+  // The kind travels WITH the id. This path removes a typed-code factor and an unconfirmed row of any
+  // kind, so it cannot assume one — reading it from the row is what stops the sentence going back to
+  // naming whatever kind happened to exist when it was written.
+  const onRemove = async (id: string, kind: string, confirmed: boolean) => {
     try {
       await remove.mutateAsync({ factorId: id, code: confirmed ? removing?.code.trim() : undefined });
       setRemoving(null);
-      notify.success(t("account.factorRemoved"));
+      notify.success(t("account.factorRemoved", { kind: factorKindName(kind, t) }));
     } catch (e) {
       // The floor (#652 / ADR-219 §4) refuses the LAST admin's factor while the policy is on, and the
       // code they typed was right. Reporting that as "your code did not match" sends them back to the
@@ -206,7 +212,21 @@ export function SecondFactorPanel() {
                 </>
               ) : (
               <span className="min-w-0 flex-1 truncate" data-testid="factor-label">
-                {f.label || t("account.factorUnnamed")}
+                {/* #653 a row with no name is named by its KIND. The single fallback used to be
+                    the word "authenticator", so a passkey enrolled without a name — which the Add
+                    button allows, it sends an empty label — sat in the list calling itself an app. */}
+                {f.label || factorKindName(f.kind, t)}
+                {/* …and a row WITH a name says its kind beside it. asked whether to, and the
+                    answer is yes for the same reason the bug happened: this list mixes kinds on
+                    purpose, so a row called "Work phone" is otherwise unreadable as to which it is —
+                    which matters at exactly the moment it counts, when deciding which one to remove.
+                    Only when there is a label: an unnamed row IS the kind already, and saying it twice
+                    is the duplication ③ made this same panel fix. */}
+                {f.label && (
+                  <span className="ml-2 text-xs text-fg-dim" data-testid="factor-kind-mark">
+                    {factorKindName(f.kind, t)}
+                  </span>
+                )}
                 {/* #653 ①: an unconfirmed row IS shown, and says what it is. The cap counts these,
                     so hiding them made "you can create it, you cannot see it, and because you cannot
                     see it you cannot delete it" — three closed tabs and the account could never enrol
@@ -245,7 +265,7 @@ export function SecondFactorPanel() {
                     placeholder={t("account.factorCodePlaceholder")} aria-label={t("account.factorCode")}
                     inputMode="numeric" data-testid="factor-remove-code" />
                   <Button variant="danger" size="sm" data-testid="factor-remove-confirm"
-                    disabled={!removing.code.trim()} onClick={() => void onRemove(f.id, true)}>
+                    disabled={!removing.code.trim()} onClick={() => void onRemove(f.id, f.kind, true)}>
                     {t("account.factorRemove")}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setRemoving(null)}>{t("common.cancel")}</Button>
@@ -257,11 +277,18 @@ export function SecondFactorPanel() {
                    difference in the row gave one kind a small grey icon and the other a large red
                    button for the same danger, and put the method of proof ("remove with this key") in
                    the place where the ACTION belongs. Same act, same shape; the branch is below. */
+                /* #673 (3)(1): and red AT REST. #504 settled that a destructive entry point wears
+                   the danger colour standing still — "red only on hover" is the thing that policy names
+                   — and `api-key-revoke` and `invite-revoke` both do. This one bin was grey, so the
+                   screen that had just been made consistent with the LIST convention (#639) was
+                   inconsistent with the DANGER one. `variant="danger"` keeps the icon a bin, so ① above
+                   still holds: every row still offers exactly one, identical way in. */
                 <IconButton aria-label={t("account.factorRemove")} data-testid="factor-remove" className="flex-none"
+                  variant="danger"
                   disabled={remove.isPending || removeChallenge.isPending}
                   onClick={() => {
                     // possession is only asked for something that guards anything (#660)
-                    if (!f.confirmedAt) return void onRemove(f.id, false);
+                    if (!f.confirmedAt) return void onRemove(f.id, f.kind, false);
                     if (f.kind === "passkey") return void onRemovePasskey(f.id);
                     setRemoving({ id: f.id, code: "" });
                   }}>
