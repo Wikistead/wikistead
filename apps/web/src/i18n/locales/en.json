@@ -517,7 +517,7 @@
     "stancePasskeyWarning": "Passkeys cannot be exported: if the keys are lost, getting back in means contacting the operator.",
     "stanceConfirmTail": "Change what counts?",
     "passkeyNeedsSecondMember": "Requiring passkeys needs a second person in the workspace: losing the only key would leave nobody able to sign in.",
-    "passkeyFloorUnmet": "Requiring passkeys needs {{count}} passkeys across admin accounts. They can sit on one admin or be spread between several. A passkey cannot be written down, so any fewer is a single accident away from locking the workspace.",
+    "passkeyFloorUnmet": "Requiring passkeys needs {{count}} passkeys across admin accounts. They can sit on one admin or be spread between several.",
     "totpFloorUnmet": "Requiring authenticator apps needs at least one on an admin account: an admin whose only factor is a passkey could not satisfy this.",
     "stanceRefused": "“{{kind}}” cannot be chosen yet. {{reason}}",
     "stanceUnreachable": "Nobody could enrol what this asks for: a member with nothing enrolled would have no way to add one."
