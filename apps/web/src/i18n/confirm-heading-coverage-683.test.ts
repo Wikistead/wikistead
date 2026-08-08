@@ -66,7 +66,7 @@ describe("#683: every confirmation on this screen is accounted for", () => {
 
   it("no confirmation is headed with a control's label", () => {
     // THE defect, stated directly. `secondFactorRequired` is the switch's row label; using it as a
-    // heading is what produced "Require two-factor authentication" over "change what counts?".
+    // heading is what produced "Require two-factor authentication" over the picker's own question.
     //
     // The labels are found rather than listed: anything this file passes as `ariaLabel` or renders as a
     // row title is a control's name, and a heading must not be one of them.
