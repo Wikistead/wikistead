@@ -247,7 +247,6 @@
     "vimMonoOff": "OFF",
     "factorsTitle": "2 要素認証",
     "factorsDesc": "サインイン時、パスワードに加えてパスキー、または認証アプリの 6 桁コードを求めます。",
-    "factorsHint": "認証アプリに登録し、表示されたコードで確認してください。",
     "factorAdd": "認証アプリを追加",
     "factorLabel": "名前",
     "factorLabelPlaceholder": "仕事用のスマホ",
@@ -278,7 +277,6 @@
     "factorKeyUnsupported": "このブラウザはパスキーに対応していません。別のブラウザでお試しください。",
     "factorKeyCancelled": "登録を取り消しました。",
     "factorKeyAlready": "このパスキーはすでに登録されています。上の一覧にあります。",
-    "factorKeyDomainNote": "パスキーは、登録したときのドメインでのみ使えます。ワークスペースを独自ドメインへ移すと、登録し直しが必要です。",
     "factorNotCounted": "対象外",
     "factorNotCountedTip": "このワークスペースは現在この種類の要素を受け付けていないため、これではサインインできません。設定が戻る場合に備えて残してあります。"
   },
@@ -735,7 +733,7 @@
     "factorEnrolPrompt": "このワークスペースは 2 要素認証を求めています。認証アプリを設定すると続けられます。",
     "factorEnrolStart": "認証アプリを設定する",
     "factorEnrolHint": "このキーを認証アプリに入力し、表示されたコードを入れてください。",
-    "factorSecretNote": "このキーは一度しか表示されません。いま入力してください。",
+    "factorSecretNote": "認証アプリに入力してください。",
     "factorEnrolPasskey": "パスキーを設定する",
     "factorNoWebauthn": "このワークスペースはセキュリティキーを求めていますが、このブラウザでは登録できません。別のブラウザを試すか、管理者にご連絡ください。"
   },

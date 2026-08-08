@@ -144,6 +144,11 @@ export function FactorStep(
               typed key sets up another. */}
           <QrCode value={enrolling.uri} testId="login-factor-qr" />
           <span hidden data-testid="login-factor-uri">{enrolling.uri}</span>
+          {/* #682 sweep: the box itself already prints "shown only once, copy it now"
+              (`common.copyOnce`), and this note used to say it again in other words. That is the defect
+              #653③ had ruled on and fixed — on the SETTINGS panel only; the same box on this
+              screen kept the old wording, so the fix stopped at one of the two surfaces. The note now
+              says the one thing the box does not: where the key goes. */}
           <OneTimeSecret value={enrolling.secret} testId="login-factor-secret" grouped
             note={t("auth.factorSecretNote")} />
           {codeBox(confirmEnrolment, "login-factor-enrol")}
