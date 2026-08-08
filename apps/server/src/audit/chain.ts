@@ -18,6 +18,15 @@ export interface AuditEntryCore {
   action: string // e.g. 'member.removed'
   target: string // resource ref, e.g. 'page:<id>' ('' when not applicable)
   at: string // ISO 8601 timestamp
+  /**
+   * #684 / ADR-223: what the action changed, as `{field: {from, to}}` — absent for most actions.
+   *
+   * ⚠️ Absent must stay absent. It is not `{}`: the canonical form below gains an ELEMENT when this is
+   * present, so an entry without it hashes the six elements it always hashed. That is the whole of the
+   * compatibility story, and `audit_log` is append-only for the app role, so getting it wrong makes
+   * every existing row read as tampered with and offers no way back.
+   */
+  changes?: Record<string, { from: unknown; to: unknown }>
 }
 
 export interface AuditEntry extends AuditEntryCore {
@@ -29,8 +38,23 @@ export const GENESIS_PREV = '' // prevHash of the first entry in a tenant's chai
 
 // Canonical serialization: a fixed field order, only the integrity-relevant fields. No object
 // key-order ambiguity (array form), so the hash is stable across producers.
+//
+// #684 / ADR-223: `changes` extends the ARITY rather than adding a field. A seventh element appears
+// only when there is a payload, so every entry written before this — and every entry written after it
+// that carries nothing — hashes exactly the six elements it did before. A version field would not have
+// worked: adding one changes the input for the old rows too, and they cannot be re-hashed (`audit_log`
+// grants the app role SELECT and INSERT only). The arity IS the version.
+//
+// The payload is canonicalised by SORTED KEYS, because `JSON.stringify` preserves insertion order and
+// two producers building the same object differently would otherwise disagree about a chain they both
+// verify.
+function canonicalChanges(c: Record<string, { from: unknown; to: unknown }>): unknown {
+  return Object.keys(c).sort().map((k) => [k, c[k]!.from ?? null, c[k]!.to ?? null])
+}
+
 function canonical(e: AuditEntryCore): string {
-  return JSON.stringify([e.seq, e.tenantId, e.actor, e.action, e.target, e.at])
+  const head = [e.seq, e.tenantId, e.actor, e.action, e.target, e.at]
+  return JSON.stringify(e.changes ? [...head, canonicalChanges(e.changes)] : head)
 }
 
 export function computeEntryHash(prevHash: string, core: AuditEntryCore): string {
