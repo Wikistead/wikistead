@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { requireTenantAdmin, requireConnectionManager, isTenantAdmin } from '@wikistead/authz'
 import {
   mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersUnsatisfiedBy,
-  secondFactorStance, stanceRefusal, type FactorStance,
+  secondFactorStance, stanceRefusal, floorFor, type FactorStance,
 } from '../auth/factor-policy.js' // #652 / ADR-219 §4, #676 / ADR-222
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
@@ -61,6 +61,11 @@ export interface LoginMethodsView {
     entitled: boolean
     stance: FactorStance
     stanceRefusals: Record<'any' | 'passkey' | 'totp', string | null>
+    // #685: how many admin factors each stance needs, straight from `floorFor`. The sentence the
+    // screen prints for an unmet floor used to spell the number out in both locales, so the ruling
+    // lived in three places and changing it meant finding all of them. Sent rather than mirrored in
+    // the client: a copy on the web side is the same defect with a shorter commute.
+    stanceFloors: Record<'any' | 'passkey' | 'totp', number>
   }
   // #604-B: may the CALLER change the stance / platform / password selections and manage the
   // SSO exemptions? Those writes stayed on the admin tier while the read opened to
@@ -108,6 +113,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
           passkey: (await stanceRefusal(req.db, 'passkey', req.headers.host))?.code ?? null,
           totp: (await stanceRefusal(req.db, 'totp', req.headers.host))?.code ?? null,
         },
+        stanceFloors: { any: floorFor('any'), passkey: floorFor('passkey'), totp: floorFor('totp') },
       },
       methods: {
         'tenant-oidc': {

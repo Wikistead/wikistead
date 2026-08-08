@@ -103,12 +103,16 @@ describe('#676: the floor is about the stance, not about the transition', () => 
     expect(await secondFactorStance(db), 'and nothing was written').toBe('any')
   }, 180_000)
 
-  it('…and the same narrowing is allowed once two admin passkeys exist', async () => {
+  it('…and the same narrowing is allowed once the floor is met, spread across admins', async () => {
     // The control. Without it, a guard that refused every narrowing would pass the case above.
-    const a = await seatAdmin('two-a')
-    const b = await seatAdmin('two-b')
-    await givePasskey(a, 'two-a')
-    await givePasskey(b, 'two-b')
+    //
+    // #685: the COUNT comes from `floorFor`. It used to seat exactly two admins with a key each, which
+    // is this case's subject only incidentally — what it measures is "spread across people satisfies
+    // the floor", and that is true at any floor. Moving the ruling should not make this file wrong.
+    for (let i = 0; i < floorFor('passkey'); i++) {
+      const sub = await seatAdmin(`two-${i}`)
+      await givePasskey(sub, `two-${i}`)
+    }
     await admin`INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds)
                 VALUES (${T}, TRUE, 'any')
                 ON CONFLICT (tenant_id) DO UPDATE SET second_factor_required = TRUE, second_factor_kinds = 'any'`
@@ -117,26 +121,32 @@ describe('#676: the floor is about the stance, not about the transition', () => 
     expect(await secondFactorStance(db)).toBe('passkey')
   }, 180_000)
 
-  it('ONE passkey is not enough, and two on one admin are', async () => {
+  it('one short of the floor is not enough, and reaching it on ONE admin is', async () => {
     // The ruling, both halves. Counting admins rather than keys would refuse the second shape, which
     // pushes a small tenant into seating a person for the guard's benefit.
+    //
+    // #685: "one short" and "exactly enough" are derived. Written as 1-then-2 this case read as a claim
+    // about the number two; what it is really about is the boundary, wherever the boundary sits.
+    const floor = floorFor('passkey')
     const a = await seatAdmin('single')
-    await givePasskey(a, 'single-1')
-    const one = await setStance('passkey')
-    expect(one.statusCode, one.body).toBe(409)
-    expect(one.json<{ code: string }>().code).toBe('admin_passkey_floor')
+    for (let i = 1; i < floor; i++) await givePasskey(a, `single-${i}`)
+    const short = await setStance('passkey')
+    expect(short.statusCode, `${floor - 1} of ${floor} passkeys was accepted :: ${short.body}`).toBe(409)
+    expect(short.json<{ code: string }>().code).toBe('admin_passkey_floor')
 
-    await givePasskey(a, 'single-2')
-    expect((await setStance('passkey')).statusCode, 'two keys, one admin, is two accidents').toBe(204)
+    await givePasskey(a, `single-${floor}`)
+    expect((await setStance('passkey')).statusCode, 'the whole floor on one admin is that many accidents').toBe(204)
   }, 180_000)
 
   it('a TOTP does not count towards the passkey floor', async () => {
     // …which is the difference between "a floor" and "the floor for THIS stance".
+    // #685: one SHORT of the floor in passkeys, plus an authenticator app that cannot make up the
+    // difference. At any floor the arithmetic is the same claim.
     const a = await seatAdmin('mixed')
-    await givePasskey(a, 'mixed-key')
+    for (let i = 1; i < floorFor('passkey'); i++) await givePasskey(a, `mixed-key-${i}`)
     await giveTotp(a)
     const res = await setStance('passkey')
-    expect(res.statusCode, `one passkey and a TOTP is still one passkey :: ${res.body}`).toBe(409)
+    expect(res.statusCode, `${floorFor('passkey') - 1} passkeys and a TOTP is still short :: ${res.body}`).toBe(409)
   }, 180_000)
 })
 
@@ -234,27 +244,33 @@ describe('#676: the old spelling still works', () => {
 // out, which is precisely what #605's two-sided guard exists to prevent.
 describe('#676: the floor holds on the way out too', () => {
   it('the LAST passkey above the floor cannot be given up while `passkey` is selected', async () => {
+    // #685: EXACTLY the floor, however many that is — the state where the next removal is the one that
+    // strands the tenant. Written as two fixed keys this read as a claim about the number two.
     const a = await seatAdmin('out-a')
-    const b = await seatAdmin('out-b')
     await givePasskey(a, 'out-a')
-    await givePasskey(b, 'out-b')
+    for (let i = 1; i < floorFor('passkey'); i++) {
+      const other = await seatAdmin(`out-${i}`)
+      await givePasskey(other, `out-${i}`)
+    }
     await giveTotp(a) // …and an authenticator app, which under `passkey` protects nobody
     expect((await setStance('passkey')).statusCode).toBe(204)
 
     const [row] = await admin<{ id: string }[]>`
       SELECT id FROM member_factors WHERE member_sub = ${a} AND kind = 'passkey'`
     expect(await wouldStrandTenant(db, { memberSub: a, factorId: row!.id, host: HOST }),
-      'two keys is the floor, so giving one up takes the tenant below it').toBe(true)
+      'the tenant is at the floor, so giving one up takes it below').toBe(true)
   }, 180_000)
 
   it('…and a third key makes the same delete safe', async () => {
     // The control. Without it a guard that refused every passkey removal would pass the case above and
     // trap a tenant that has plenty.
+    // #685: one MORE than the floor — the smallest state in which the removal is safe.
     const a = await seatAdmin('out3-a')
-    const b = await seatAdmin('out3-b')
     await givePasskey(a, 'out3-a')
-    await givePasskey(a, 'out3-a2')
-    await givePasskey(b, 'out3-b')
+    for (let i = 1; i <= floorFor('passkey'); i++) {
+      const other = await seatAdmin(`out3-${i}`)
+      await givePasskey(other, `out3-${i}`)
+    }
     expect((await setStance('passkey')).statusCode).toBe(204)
 
     const [row] = await admin<{ id: string }[]>`

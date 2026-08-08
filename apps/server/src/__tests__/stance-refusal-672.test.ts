@@ -25,6 +25,7 @@ import { buildApp } from '../app.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { startPasskeyEnrolment, startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
 import { storePasskey } from '../auth/passkeys.js'
+import { floorFor } from '../auth/factor-policy.js' // #685: the floor's value has ONE home; here it is derived
 import { generateTotpSecret } from '../auth/totp.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -48,7 +49,9 @@ const setStance = (secondFactorKinds: string) =>
 const view = async () => {
   const res = await app.inject({ method: 'GET', url: '/admin/login-methods', headers: H })
   expect(res.statusCode, res.body).toBe(200)
-  return res.json<{ secondFactorRequired: { stance: string; stanceRefusals: Record<string, string | null> } }>()
+  return res.json<{ secondFactorRequired: {
+    stance: string; stanceRefusals: Record<string, string | null>; stanceFloors: Record<string, number>
+  } }>()
 }
 
 async function seatAdmin(name: string): Promise<string> {
@@ -112,7 +115,12 @@ describe('#672 ①: the refusal names which requirement is unmet', () => {
     // `message`: a thrown Error goes through Fastify's default serialiser, where `error` is the status
     // name ("Conflict") and the sentence is the message. Measured — the first draft asserted on
     // `error` and matched "Conflict" against /two passkeys/.
-    expect(res.json<{ message: string }>().message).toMatch(/two passkeys/i)
+    //
+    // #685: the FIGURE, derived. This matched /two passkeys/ — the sentence's own wording — so moving
+    // the floor would have broken a test that is not about the floor's value at all, and the only
+    // guard on the value itself lives in `passkey-floor-ruling-685`.
+    expect(res.json<{ message: string }>().message).toMatch(
+      new RegExp(`\\b${floorFor('passkey')}\\b.*passkeys`, 'i'))
   }, 180_000)
 
   it('the totp floor is its own refusal too (a passkey-only admin cannot satisfy it)', async () => {
@@ -145,12 +153,31 @@ describe('#672 ①: the screen is told exactly what the write would do', () => {
     // Run against a tenant holding ONE passkey and no authenticator app: `any` passes, `passkey` is one
     // short of its floor, `totp` has nobody. All three answers differ, so a walk that agreed by
     // accident cannot pass.
+    // #685: this fixture needs a state where `any` is satisfiable, `passkey` is SHORT and `totp` has
+    // nobody — which requires a passkey that counts for one stance and not the other, and therefore a
+    // passkey floor above one. At a floor of one there is no such state (the key that satisfies `any`
+    // satisfies `passkey` too), so the three answers cannot differ and the walk has nothing to walk.
+    // Stated rather than derived away: pretending otherwise would mean weakening the disagreement the
+    // case exists to prove.
+    expect(floorFor('passkey'), 'the three-way walk needs a passkey floor above one').toBeGreaterThan(1)
     const a = await seatAdmin('walk')
-    await givePasskey(a, 'walk')
+    for (let i = 1; i < floorFor('passkey'); i++) await givePasskey(a, `walk-${i}`)
 
-    const reported = (await view()).secondFactorRequired.stanceRefusals
+    const seen = (await view()).secondFactorRequired
+    const reported = seen.stanceRefusals
     expect(Object.keys(reported).sort(), 'the GET reports every stance the picker offers')
       .toEqual([...STANCES].sort())
+
+    // #685: and it reports the FLOOR for each of them, because the screen prints the number in the
+    // refusal's sentence and holds no copy of its own. Without this the web would interpolate
+    // `undefined` and the reader would meet a sentence with a hole in it — which is why there is no
+    // client-side default to fall back on: a default would be a second home for the ruling.
+    expect(Object.keys(seen.stanceFloors).sort(), 'a stance the picker offers has no floor to report')
+      .toEqual([...STANCES].sort())
+    for (const s of STANCES) {
+      expect(seen.stanceFloors[s], `the reported floor for ${s} is not the one the write uses`)
+        .toBe(floorFor(s))
+    }
 
     const written: Record<string, string | null> = {}
     for (const s of STANCES) {
@@ -167,8 +194,10 @@ describe('#672 ①: the screen is told exactly what the write would do', () => {
   it('the server still refuses a stance the screen would have greyed out', async () => {
     // #613: greying is convenience, the write is the fortress. A caller who never rendered the picker —
     // the API, a stale tab, curl — must hit the same wall.
+    // #685: one SHORT of the floor, derived. Written as a single key this case only described a
+    // refusal at a floor of two.
     const a = await seatAdmin('fortress')
-    await givePasskey(a, 'fortress')
+    for (let i = 1; i < floorFor('passkey'); i++) await givePasskey(a, `fortress-${i}`)
     expect((await view()).secondFactorRequired.stanceRefusals.passkey, 'the screen would grey it out')
       .toBe('admin_passkey_floor')
 
@@ -182,10 +211,13 @@ describe('#672 ①: the screen is told exactly what the write would do', () => {
   it('a writable stance is reported as writable (the walk is not "everything is refused")', async () => {
     // Without this, a `stanceRefusal` that returned a code unconditionally would satisfy every case
     // above — the picker would grey out all three and the screen would be unusable.
+    // #685: the floor met, spread across admins — however many that takes.
     const a = await seatAdmin('open-a')
-    const b = await seatAdmin('open-b')
     await givePasskey(a, 'open-a')
-    await givePasskey(b, 'open-b')
+    for (let i = 1; i < floorFor('passkey'); i++) {
+      const other = await seatAdmin(`open-${i}`)
+      await givePasskey(other, `open-${i}`)
+    }
     await giveTotp(a)
 
     const reported = (await view()).secondFactorRequired.stanceRefusals

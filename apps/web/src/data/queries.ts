@@ -2189,6 +2189,10 @@ export interface LoginMethodsDTO {
   secondFactorRequired?: {
     selected: boolean; canEnable: boolean; entitled: boolean; stance?: FactorStance
     stanceRefusals?: Partial<Record<"any" | "passkey" | "totp", string | null>>
+    // #685: how many admin factors each stance needs, from the server's own `floorFor`. The sentence
+    // for an unmet floor interpolates this rather than spelling the figure out in each locale, so the
+    // day the ruling changes the screen follows the constant instead of waiting to be found.
+    stanceFloors?: Partial<Record<"any" | "passkey" | "totp", number>>
   }
   // #604-B: whether the CALLER may write the stance / platform / password selections and the
   // SSO exemptions. The read opened to `manage_connections`; those writes stayed on the admin tier,

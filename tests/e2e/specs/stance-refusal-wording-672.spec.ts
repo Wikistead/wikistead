@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import postgres from "postgres";
@@ -88,6 +88,19 @@ async function adminHoldsOnlyAnApp(): Promise<void> {
   await setStance("any");
 }
 
+/**
+ * The passkey floor, asked of the SERVER (#685). The screen prints this number, so a pin that spelled
+ * it out would keep agreeing with a stale sentence after the ruling moved.
+ */
+async function passkeyFloor(page: Page): Promise<number> {
+  const got = await page.request.get("/api/admin/login-methods",
+    { headers: { authorization: "Bearer dev-token" } });
+  const body = await got.json() as { secondFactorRequired: { stanceFloors: Record<string, number> } };
+  const floor = body.secondFactorRequired?.stanceFloors?.passkey;
+  expect(floor, "the server reports no passkey floor for the screen to print").toBeGreaterThan(0);
+  return floor;
+}
+
 test("#672 ①: the refusal names two passkeys, not the factor the admin already has", async ({ page }) => {
   test.setTimeout(240_000);
   await adminHoldsOnlyAnApp();
@@ -100,7 +113,14 @@ test("#672 ①: the refusal names two passkeys, not the factor the admin already
 
   const said = (await page.getByTestId("stance-refused-passkey").innerText()).replace(/\s+/g, " ");
   // The requirement, in the words the reader needs: how many, and of what.
-  expect(said, `the reason says how many keys :: ${said}`).toMatch(/two passkeys/i);
+  //
+  // #685: the FIGURE is read back from the running server rather than spelled out here. This asserted
+  // /two passkeys/, so moving the floor would have broken a case that is not about the floor's value —
+  // and, worse, a screen still printing the OLD number would have passed, since the pin agreed with
+  // the stale copy rather than with the constant. Asked of the same endpoint the screen reads.
+  const floor = await passkeyFloor(page);
+  expect(said, `the reason says how many keys :: ${said}`)
+    .toMatch(new RegExp(`\\b${floor}\\b.*passkeys`, "i"));
   // …and NOT the sentence that sent them looking at an account that already holds a factor. Written as
   // the discarded wording rather than as "some reason is shown": the old screen showed a reason too.
   expect(said, `it still tells an enrolled admin to enrol :: ${said}`)
@@ -142,6 +162,13 @@ test("#672: the server refuses it too, for a caller who never saw the picker", a
   // holds the status name ("Conflict").
   const body = await res.json() as { code: string; message: string };
   expect(body.code, "…and it names WHICH floor, so the screen can say so").toBe("admin_passkey_floor");
-  expect(body.message).toMatch(/two passkeys/i);
+  // #685: derived, for the same reason as above — and here it also guards the API's own prose, which an
+  // integrator reads without ever loading the screen.
+  const view = await (await request.get("/api/admin/login-methods",
+    { headers: { authorization: "Bearer dev-token" } })).json() as
+    { secondFactorRequired: { stanceFloors: Record<string, number> } };
+  const floor = view.secondFactorRequired.stanceFloors.passkey;
+  expect(floor, "the server reports no passkey floor for the screen to print").toBeGreaterThan(0);
+  expect(body.message).toMatch(new RegExp(`\\b${floor}\\b.*passkeys`, "i"));
   expect(await stanceInDb(), "nothing was written").toBe("any");
 });

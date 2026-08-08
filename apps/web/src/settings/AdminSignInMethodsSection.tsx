@@ -148,9 +148,19 @@ export function AdminSignInMethodsSection() {
   // an admin who already held a factor was told to enrol one and never learnt the real requirement
   // two passkeys. The server names each floor now; anything unmapped stays the generic failure rather
   // than borrowing a neighbour's sentence.
+  //
+  // #685: the passkey floor arrives as a NUMBER (`stanceFloors`, straight from the server's `floorFor`)
+  // and the sentence interpolates it. It used to be spelled out in both locales, so the ruling sat in
+  // three places at once and moving the floor meant finding all of them.
+  //
+  // Deliberately WITHOUT a client-side default. A `?? 2` here would read as belt-and-braces and would
+  // in fact be a fourth copy of the ruling — the exact thing this ticket exists to remove — and it
+  // would keep printing the old figure long after the constant moved. That the server sends it is a
+  // guarded fact (`stance-floor-685`), not a hope.
+  const floors = methods.data?.secondFactorRequired?.stanceFloors;
   const refusalText = (code: string | undefined): string | null =>
     code === "admin_factor_required" ? t("adminAuth.secondFactorNoAdmin")
-    : code === "admin_passkey_floor" ? t("adminAuth.passkeyFloorUnmet")
+    : code === "admin_passkey_floor" ? t("adminAuth.passkeyFloorUnmet", { count: floors?.passkey })
     : code === "admin_totp_floor" ? t("adminAuth.totpFloorUnmet")
     : code === "passkey_needs_second_member" ? t("adminAuth.passkeyNeedsSecondMember")
     : code === "stance_unreachable" ? t("adminAuth.stanceUnreachable")
