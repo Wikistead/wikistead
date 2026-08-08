@@ -3,7 +3,7 @@ import { ListRow, ListBox } from "../ui/list-rows";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import type { TFunction } from "i18next";
 import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
-import { RESOURCE_TYPE_OPTIONS, derivedScope, touchesAdmin, adminDefaultExpiry, type Matrix } from "./api-key-permissions";
+import { RESOURCE_TYPE_OPTIONS, derivedScope, newKeyDefaultExpiry, type Matrix } from "./api-key-permissions";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2, ChevronRight } from "lucide-react"; // #544: an icon component, never a text glyph
 import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpaces, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
@@ -105,7 +105,10 @@ export function ApiKeysPanel({
   // tenant that forbids them is told, instead of quietly getting a short one.
   // Starts on the longest lifetime the tenant permits, which is always a value that EXISTS in the list.
   // A Select whose value matches no option renders as a bare chevron with no width (#603).
-  const [expiry, setExpiry] = useState<string>(() => defaultExpiry(maxAgeDays));
+  // #667 (ruling): the FIRST paint carries the thirty-day default too. `defaultExpiry` answers "never"
+  // when the tenant has no ceiling, so leaving it here would show the dangerous value until something
+  // else re-ran — and after a key was created, forever.
+  const [expiry, setExpiry] = useState<string>(() => newKeyDefaultExpiry(expiryChoices(maxAgeDays)));
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   // #637 / ADR-216: narrowing. Off by default and opened deliberately — an unnarrowed key is the common
   // case and the one the form should stay simple for. Spaces are a FLAT list: ADR-215 declined per-page
@@ -148,24 +151,28 @@ export function ApiKeysPanel({
   // control. If what is selected stops existing, fall back to the default rather than leaving a Select
   // pointing at nothing — that is the blank-chevron state again, just reached a moment later.
   useEffect(() => {
-    if (!expiryOptions.some((o) => o.value === expiry)) setExpiry(defaultExpiry(maxAgeDays));
+    if (!expiryOptions.some((o) => o.value === expiry)) setExpiry(newKeyDefaultExpiry(expiryChoices(maxAgeDays)));
   }, [maxAgeDays]);
-  // #667 / ADR-221 §10: choosing an administrative type moves the DEFAULT lifetime down the ladder the
-  // tenant already offers. A default and not a cap — "never" stays selectable, because the ceiling
-  // belongs to the tenant (#628) and a second one visible only to some type combinations would make the
-  // form refuse what the API grants. It follows the selection while the reader has not overridden it.
-  const adminPicked = touchesAdmin(matrix);
+  // #667 (ruling, 2026-08-09): ONE default lifetime, whatever is selected. It used to depend on whether
+  // an administrative type was picked, so an ordinary key defaulted to NEVER EXPIRING — the most
+  // dangerous choice, pre-selected, on the majority of keys. The branch that produced the inconsistency
+  // is gone, and with it the question every new resource type would have raised ("is this one
+  // administrative?"), which is how a security ledger and a content egress ended up on the long side.
+  //
+  // Still a default and not a cap: "never" remains selectable, and the ceiling stays the tenant's
+  // (#628). The thirty is resolved against the tenant's own ladder rather than written as a string, so
+  // a seven-day policy gets a rung that exists instead of a blank chevron (#603).
   const [expiryTouched, setExpiryTouched] = useState(false);
   useEffect(() => {
     if (expiryTouched) return;
-    setExpiry(adminPicked ? adminDefaultExpiry(expiryChoices(maxAgeDays)) : defaultExpiry(maxAgeDays));
-  }, [adminPicked, maxAgeDays, expiryTouched]);
+    setExpiry(newKeyDefaultExpiry(expiryChoices(maxAgeDays)));
+  }, [maxAgeDays, expiryTouched]);
 
   const onCreate = () => {
     if (!name.trim()) return;
     const done = (k: ApiKeyCreated | null) => {
       if (!k) return;
-      setCreated(k); setName(""); setExpiry(defaultExpiry(maxAgeDays));
+      setCreated(k); setName(""); setExpiry(newKeyDefaultExpiry(expiryChoices(maxAgeDays)));
       setPickedSpaces([]); setMatrix({}); setNarrowing(false); setExpiryTouched(false);
       notify.success(t("toast.saved"));
     };
@@ -315,13 +322,6 @@ export function ApiKeysPanel({
                 {matrixPicked && (
                   <span className="text-xs text-fg-dim" data-testid="api-key-derived-scope">
                     {t("adminApi.derivedScope", { scope: t(`adminApi.scope_${derivedScope(matrix)}`) })}
-                  </span>
-                )}
-                {/* §10: an administrative type shortens the default lifetime. Said out loud, because a
-                    default that moves under somebody without explanation reads as a bug. */}
-                {adminPicked && !expiryTouched && (
-                  <span className="text-xs text-fg-dim" data-testid="api-key-admin-expiry-note">
-                    {t("adminApi.adminExpiryNote")}
                   </span>
                 )}
               </div>
