@@ -1784,7 +1784,18 @@ export function useAdminRevokeApiKey() {
 export interface WebhookSummary { id: string; url: string; event_filter: string[] | null; active: boolean; failure_count: number; createdAt: string }
 export interface WebhookCreated { id: string; secret: string }
 // #401 / ADR-155: the audit-log viewer (tenant-admin + auditLog entitlement; server re-checks both).
-export interface AuditRow { seq: number; at: string; actor: string; action: string; target: string }
+export interface AuditRow {
+  seq: number; at: string; actor: string; action: string; target: string
+  /**
+   * #684 / ADR-223 §4: what the action changed, when the action carries values.
+   *
+   * Absent on most rows, and that is not an error — an action whose name says everything has nothing
+   * to add. Where it IS present the name alone cannot say which way a setting moved:
+   * `tenant.second_factor_required_on` is written both by a narrowing that signs half a workspace out
+   * and by the loosening that undoes it.
+   */
+  changes?: Record<string, { from: unknown; to: unknown }>
+}
 export interface AuditVerdict { valid: boolean; count: number; brokenAt?: number; brokenSeq?: number; reason?: string }
 
 // #420 / ADR-164 increment 5: custom-role definitions + assignments (tenant-admin console; the

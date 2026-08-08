@@ -123,7 +123,24 @@ export function AdminAuditTab() {
                     person, which is why #578's "unknown member" label does not belong here. */}
                 {/* raw-principal-ok: the ledger records WHO acted and the id IS the record (a name could later stop meaning what it meant) */}
                 <td className="font-mono text-xs [overflow-wrap:anywhere]">{r.actor.replace(/^user:/, "")}</td>
-                <td>{r.action}</td>
+                {/* #684 / ADR-223 §4: the action, and — when it carries them — what it changed.
+                    `tenant.second_factor_required_on` is written BOTH by a narrowing that signs half a
+                    workspace out and by the loosening that undoes it, so the name alone leaves the
+                    reader on exactly the row they stopped for. Rendered under the action rather than in
+                    a column of its own: most rows carry nothing, and an almost-always-empty column is
+                    width taken from the three that are always there. */}
+                <td>
+                  {r.action}
+                  {r.changes && (
+                    <div className="mt-0.5 font-mono text-xs text-fg-dim" data-testid="audit-changes">
+                      {Object.entries(r.changes).map(([field, pair]) => (
+                        <div key={field} data-testid="audit-change">
+                          {field}: {String(pair.from)} → {String(pair.to)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </td>
                 <td className="font-mono text-xs [overflow-wrap:anywhere]">{r.target}</td>
               </tr>
             ))}
