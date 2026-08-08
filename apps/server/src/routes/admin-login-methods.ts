@@ -212,6 +212,14 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
       const refusal = await stanceRefusal(req.db, stance, req.headers.host)
       if (refusal) throw Object.assign(new Error(refusal.message), { statusCode: 409, code: refusal.code })
       await req.db.tx(async (tx) => {
+        // #684 / ADR-223 §5: read the OLD stance inside the same transaction, before the upsert
+        // overwrites it. Read outside the tx and a concurrent write lands between them, so the ledger
+        // records a transition that never happened. An absent row is `off` — the reading side's own
+        // default (`factor-policy.ts`), not the column's, because treating a missing row as an
+        // absolute requirement would lock out every tenant that has never touched this.
+        const [prior] = await tx<[{ second_factor_kinds: string }?]>`
+          SELECT second_factor_kinds FROM tenant_login_prefs WHERE tenant_id = ${req.tenant.id} FOR UPDATE`
+        const from = prior?.second_factor_kinds ?? 'off'
         await tx`INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds)
                  VALUES (${req.tenant.id}, ${on}, ${stance})
                  ON CONFLICT (tenant_id) DO UPDATE
@@ -219,12 +227,16 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         await auditIfEntitled(tx, req.tenant, {
           actor: `user:${req.user.sub}`,
           action: on ? 'tenant.second_factor_required_on' : 'tenant.second_factor_required_off',
-          // #672 ruling ⑤ asked this line to carry {from, to}: `any → passkey` keeps `required` true,
-          // so as it stands the narrowing that signs half a tenant out writes the same row as the last
-          // change. `audit_log` has no payload column and its rows are hash-chained, so adding one
-          // changes what verification hashes — a decision with its own slice. Reported on #676; the
-          // WEBHOOK carries the pair today (below), which is the half that breaks no ledger.
           target: `tenant:${req.tenant.id}`,
+          // #672 ruling ⑤, delivered by ADR-223. The action name alone cannot tell these apart:
+          // `any → passkey` signs half a workspace out and `passkey → any` loosens the policy, and
+          // BOTH write `…_required_on`. The webhook subscriber could already see the difference; the
+          // person reading the audit log could not.
+          //
+          // A no-op writes `{from: x, to: x}` rather than nothing — absent already means "this action
+          // does not carry values", and giving it a second meaning ("it carried values, and they were
+          // equal") is how a field stops being readable.
+          changes: { second_factor_kinds: { from, to: stance } },
         })
       })
       if (on) {
