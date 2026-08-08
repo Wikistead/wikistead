@@ -98,6 +98,18 @@ test("#666: a passkey registered from the screen comes off by signing with itsel
   await row.getByTestId("factor-remove").click();
   await expect(row.getByTestId("factor-remove-code"), "…and never with a typed code").toHaveCount(0);
 
+  // #673and what it SAYS names what went. This is the ceremony path — `factor-kind-naming`
+  // reads the same sentence on the plain one — and it is the path that had the kind as a constant, so
+  // the two together cover both ways the noun can be got wrong.
+  //
+  // The VERB is required as well as the noun. Enrolling raised its own toast a moment ago and that one
+  // also says "passkey" — asking only for the noun would be answered by the message about adding it,
+  // and would stay green with the removal sentence back to naming the wrong kind.
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: /removed|削除/i }),
+    "removing a passkey does not say a passkey went",
+  ).toContainText(/passkey|パスキー/i, { timeout: 30_000 });
+
   await expect(rowFor(page, label), "the key is gone").toHaveCount(0, { timeout: 30_000 });
   // The row could vanish because the list was refetched into an error state. Reload and ask the server
   // again: what is being claimed is that the FACTOR is gone, not that a component unmounted.
