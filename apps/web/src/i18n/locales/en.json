@@ -413,7 +413,6 @@
     "action_read": "Read",
     "action_write": "Write",
     "derivedScope": "This key will be a {{scope}} key.",
-    "adminExpiryNote": "Administrative access is short-lived by default. You can change it.",
     "confinedTypes": "Resources: {{count}}",
     "legacyModel": "Older model",
     "legacyModelTip": "Issued before resource permissions existed. It keeps working exactly as it did; issue a new key to use the newer ones.",

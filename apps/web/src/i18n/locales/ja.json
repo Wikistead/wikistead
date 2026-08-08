@@ -412,7 +412,6 @@
     "action_read": "読み取り",
     "action_write": "書き込み",
     "derivedScope": "このキーは{{scope}}キーになります。",
-    "adminExpiryNote": "管理系の権限を選ぶと、既定の有効期限が短くなります。変更できます。",
     "confinedTypes": "リソース {{count}}",
     "legacyModel": "旧モデル",
     "legacyModelTip": "リソース単位の権限が入る前に発行されたキーです。これまでどおり動きます。新しい権限を使うには、キーを発行し直してください。",

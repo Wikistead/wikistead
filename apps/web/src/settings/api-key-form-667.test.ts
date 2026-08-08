@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { derivedScope, touchesAdmin, adminDefaultExpiry, RESOURCE_TYPE_OPTIONS } from "./api-key-permissions";
+import { derivedScope, newKeyDefaultExpiry, RESOURCE_TYPE_OPTIONS } from "./api-key-permissions";
 import { expiryChoices } from "./key-expiry-choices";
 
 // #667 / ADR-221 §5 §10: what the form decides on the reader's behalf, and what it must not.
@@ -42,26 +42,42 @@ describe("#667 §5: the scope is derived from the matrix", () => {
   });
 });
 
-describe("#667 §10: an administrative type shortens the default lifetime", () => {
-  it("knows which types are administrative", () => {
-    expect(touchesAdmin({ pages: "write" }), "content is not administration").toBe(false);
-    expect(touchesAdmin({ members: "read" })).toBe(true);
-    expect(touchesAdmin({ roles: "read" })).toBe(true);
-    expect(touchesAdmin({ tenant_settings: "read" })).toBe(true);
-    expect(touchesAdmin({ pages: "write", members: "read" }), "one is enough").toBe(true);
+// #667 (ruling, 2026-08-09): the per-type default was REVERSED. 30
+// — and the inconsistency was not only untidy: an ordinary key defaulted to never
+// expiring, so the most dangerous option was pre-selected on the majority of keys.
+//
+// The cases below are the ones that SURVIVE the reversal (thirty is picked; a tighter ceiling is
+// respected; it is a default and not a cap). What is gone is the conditional — and the case that used
+// to enumerate the three administrative names, because there is no longer a question to answer about
+// which types those are, which is half of what the ruling bought.
+describe("#667 (ruling): one default lifetime, whatever is selected", () => {
+  it("does not depend on what is selected", () => {
+    // The reversal itself, measured on the code rather than on the helper: the form must not branch on
+    // the matrix when choosing a default. Written as the absence of the old branch AND of a reader for
+    // the flag, because either one surviving brings the inconsistency back.
+    const panel = readFileSync(resolve(import.meta.dirname, "ApiKeysPanel.tsx"), "utf8");
+    expect(panel, "the default still branches on the selection").not.toContain("adminPicked");
+    expect(panel, "the shortened-lifetime note is still shown").not.toContain("adminExpiryNote");
+    const perms = readFileSync(resolve(import.meta.dirname, "api-key-permissions.ts"), "utf8");
+    expect(perms, "the types still carry an administrative flag").not.toMatch(/\badmin\??:/);
   });
 
-  it("picks thirty days when the tenant offers it", () => {
+  it("is thirty days, not never, when the tenant has no ceiling", () => {
+    // THE point of the ruling. A pin that only asked "the same whatever is selected" would be satisfied
+    // by defaulting everything to never — which is where the majority of keys already were.
     const choices = expiryChoices(null);
     expect(choices.some((c) => c.days === 30), "the ladder has a thirty-day rung").toBe(true);
-    expect(adminDefaultExpiry(choices)).toBe("30");
+    expect(choices.some((c) => c.days === null), "…and never is on it too, as the contrast").toBe(true);
+    const picked = newKeyDefaultExpiry(choices);
+    expect(picked, "an unlimited tenant defaults to never expiring again").not.toBe("");
+    expect(picked).toBe("30");
   });
 
   it("…and stays inside a tighter tenant ceiling rather than naming one that does not exist", () => {
     // A Select whose value matches no option renders as a bare chevron with no width (#603), so
     // asking for thirty on a seven-day policy would be a visual defect as well as a wrong default.
     const tight = expiryChoices(7);
-    const picked = adminDefaultExpiry(tight);
+    const picked = newKeyDefaultExpiry(tight);
     expect(tight.some((c) => c.value === picked), "the default exists in the list").toBe(true);
     expect(Number(picked)).toBeLessThanOrEqual(7);
   });
@@ -111,8 +127,4 @@ describe("#667: the picker offers nothing the server would refuse", () => {
     }
   });
 
-  it("the administrative types are the three §10 names", () => {
-    expect(RESOURCE_TYPE_OPTIONS.filter((o) => o.admin).map((o) => o.id).sort())
-      .toEqual(["members", "roles", "tenant_settings"]);
-  });
 });
