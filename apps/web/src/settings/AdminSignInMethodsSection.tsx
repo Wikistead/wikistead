@@ -97,6 +97,40 @@ export const STANCE_COPY: Record<"factor" | "sso", Record<"on" | "off", { title:
   },
 };
 
+/**
+ * EVERY confirmation on this screen that carries a heading, and where its heading comes from.
+ *
+ * #683 (review rejection): the first fix put the two stance switches in `STANCE_COPY` and left the
+ * kind picker's confirmation out — it still headed itself with the SWITCH'S LABEL ("Require two-factor
+ * authentication") above a body asking whether to change which factors count. The requirement was
+ * already on; nothing was being required. And the pin walked `STANCE_COPY`, so the one dialog outside
+ * that table was the one dialog it could not see. This ticket's own acceptance note had said not to
+ * write a pin that enumerates, "because a third stance will arrive" — and one had.
+ *
+ * So the table is now about CONFIRMATIONS rather than about stances, and the sweep is anchored to the
+ * FILE: every `<ConfirmDialog` in it must be accounted for here or listed below with a reason. A fourth
+ * dialog cannot be silently outside it, which is the failure this entry exists to close.
+ *
+ * `message` is the sentence the heading has to agree with. For the pickers that is the closing question
+ * (`stanceConfirmTail`); the count and the passkey warning that precede it are context, not the ask.
+ */
+export const CONFIRM_COPY: Record<string, { title: string; message: string }> = {
+  "factor/on": STANCE_COPY.factor.on,
+  "factor/off": STANCE_COPY.factor.off,
+  "sso/on": STANCE_COPY.sso.on,
+  "sso/off": STANCE_COPY.sso.off,
+  kinds: { title: "adminAuth.stanceKindsTitle", message: "adminAuth.stanceConfirmTail" },
+};
+
+/**
+ * Confirmations here that carry NO heading, and why that is not the #683 defect.
+ *
+ * A heading can only contradict a body if there is one, so these are outside the family rather than
+ * exceptions to it. Named so the count below is exact: "some dialogs have no title" is the sentence a
+ * missing fifth would hide behind.
+ */
+export const HEADLESS_CONFIRMS = ["sso-exemption-revoke-confirm"] as const;
+
 const METHOD_ROW = "flex flex-col gap-1.5 rounded-md border border-border bg-panel px-3 py-2 text-sm";
 const METHOD_ROW_HEAD = "flex items-center gap-2";
 
@@ -227,7 +261,7 @@ export function AdminSignInMethodsSection() {
   // written without it. Spelled out rather than built from a stem — `t(`${stem}${way}Title`)` hides the
   // keys from #645's orphan sweep, which would then read all four as dead.
   const stanceQuestion = (c: { stance: "factor" | "sso"; to: boolean }) => {
-    const said = STANCE_COPY[c.stance][c.to ? "on" : "off"];
+    const said = CONFIRM_COPY[`${c.stance}/${c.to ? "on" : "off"}`]!;
     return { title: t(said.title), message: t(said.message) };
   };
   const m = methods.data?.methods;
@@ -899,7 +933,10 @@ function StanceConfirm(
   return (
     <ConfirmDialog
       open
-      title={t("adminAuth.secondFactorRequired")}
+      // #683this said "Require two-factor authentication" — the SWITCH's label — above a body
+      // asking whether to change which kinds count, on a tenant where the requirement was already on.
+      // A heading borrowed from a control answers to the control, not to the question being asked.
+      title={t(CONFIRM_COPY.kinds.title)}
       message={[
         // Plural-aware, and count-first: the number is the reason this question exists.
         //
