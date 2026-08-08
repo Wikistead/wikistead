@@ -11,6 +11,7 @@ import { resolve } from "node:path";
 import { connectionsFor, connectionButtonText } from "./LoginScreen";
 import en from "../i18n/locales/en.json";
 import ja from "../i18n/locales/ja.json";
+import { isServerFault } from "./serverFault";
 
 const src = (f: string) => readFileSync(resolve(import.meta.dirname, f), "utf8");
 const t = (k: string) => k;
@@ -50,19 +51,30 @@ describe("#568: the password form is not a button", () => {
     expect(s).toContain('credentials: "include"');
   });
 
-  it("every SERVER failure reads the same — the screen must not become the enumeration oracle", () => {
-    const s = src("./LocalLoginForm.tsx");
-    // One message for whatever the server answered, chosen without reading the status: 401, 403 and
-    // 429 are one sentence. (A second message exists for "you have not typed an address yet", which
-    // the form knows on its own and never asks the server about — review F4. That one cannot leak
-    // anything, because no request was made.)
-    expect(s).toContain('setFailed("credentials")');
-    expect(s).not.toMatch(/status === 401|status === 404|res\.status ===/);
-    // the only other state is client-side and named as such
-    expect(s).toContain('setFailed("needsAddress")');
+  it("every failure ABOUT THE READER reads the same — the screen is not an enumeration oracle", () => {
+    // One sentence for whatever the server answered about this person: 401, 403, 404 and 429 must not
+    // be distinguishable, or the screen tells an attacker which addresses exist.
+    //
+    // ⚠️ #681 added ONE split, and it is not that one. A 5xx is not an answer about the reader at all —
+    // it is the server failing — and collapsing it into "that email and password do not work" sent
+    // every reader to the password-reset flow during an outage while the operator saw no errors. The
+    // rule is therefore stated as a MAPPING and measured, rather than as a ban on reading the status:
+    // the four reader-facing codes still land on one message.
+    const reader = [401, 403, 404, 429].map((status) => isServerFault({ status } as Response))
+    expect(new Set(reader).size, "two reader-facing statuses read differently").toBe(1)
+    expect(reader[0], "a refusal about the reader must not read as an outage").toBe(false)
+    // …and the outage really is separated, or #681 is back
+    expect(isServerFault({ status: 500 } as Response)).toBe(true)
+    expect(isServerFault(null), "a request that never completed is not about the reader either").toBe(true)
+
+    const s = src("./LocalLoginForm.tsx")
+    // the credential sentence is still the one a reader-facing refusal reaches
+    expect(s).toContain('"credentials"')
+    // the only other state that is NOT the server's answer is client-side and named as such
+    expect(s).toContain('setFailed("needsAddress")')
     for (const loc of [en, ja] as Array<{ auth: Record<string, string> }>) {
-      for (const k of ["localIdentifier", "localPassword", "localFailed", "resetNeedsAddress", "forgotPassword", "resetSent"]) {
-        expect(loc.auth[k], k).toBeTruthy();
+      for (const k of ["localIdentifier", "localPassword", "localFailed", "resetNeedsAddress", "forgotPassword", "resetSent", "temporarilyUnavailable"]) {
+        expect(loc.auth[k], k).toBeTruthy()
       }
     }
   });

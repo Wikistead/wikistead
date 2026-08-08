@@ -678,6 +678,7 @@
     "groupUnconfirmed": "このグループを持つメンバーはまだいません。誰かがサインインした時点で有効になります。"
   },
   "auth": {
+    "temporarilyUnavailable": "いま問題が起きています。しばらくしてからもう一度お試しください。",
     "localIdentifier": "メールアドレス",
     "localPassword": "パスワード",
     "localFailed": "このメールアドレスとパスワードの組み合わせでは、サインインできません。",
