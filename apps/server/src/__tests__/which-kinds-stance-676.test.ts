@@ -95,7 +95,11 @@ describe('#676: the floor is about the stance, not about the transition', () => 
 
     const res = await setStance('passkey')
     expect(res.statusCode, res.body).toBe(409)
-    expect(res.json<{ code: string }>().code).toBe('admin_factor_required')
+    // #672 the PASSKEY floor has its own code now. It shared `admin_factor_required` with the
+    // ON/OFF switch, and the screen printed the switch's sentence — "enrol a second factor" — at an
+    // admin who already held one. What this case measures (the narrowing is refused, nothing written)
+    // is unchanged; only the name of the refusal is.
+    expect(res.json<{ code: string }>().code).toBe('admin_passkey_floor')
     expect(await secondFactorStance(db), 'and nothing was written').toBe('any')
   }, 180_000)
 
@@ -120,7 +124,7 @@ describe('#676: the floor is about the stance, not about the transition', () => 
     await givePasskey(a, 'single-1')
     const one = await setStance('passkey')
     expect(one.statusCode, one.body).toBe(409)
-    expect(one.json<{ code: string }>().code).toBe('admin_factor_required')
+    expect(one.json<{ code: string }>().code).toBe('admin_passkey_floor')
 
     await givePasskey(a, 'single-2')
     expect((await setStance('passkey')).statusCode, 'two keys, one admin, is two accidents').toBe(204)

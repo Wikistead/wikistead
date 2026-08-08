@@ -102,9 +102,12 @@ describe("#645: no locale key without a reader", () => {
     // `x.y_other`, and neither suffixed form ever appears in the source. Without this, adding the first
     // plural key to a namespace reports both halves as dead and invites deleting the live one. (The
     // parity check in `no-dash-copy-585` already strips these; this sweep did not.)
-    const orphans = en.filter((k) => k.replace(/_(one|other)$/, "")).filter((k) =>
+    // #672: `_zero` reads the same way. The first one written in this repo was reported dead here
+    // the rule knew about the plural CATEGORIES and `_zero` is not one of them, it is i18next's
+    // special case for a count of zero, resolved under the same base name.
+    const orphans = en.filter((k) => k.replace(/_(one|other|zero)$/, "")).filter((k) =>
       !code.includes(k)
-      && !code.includes(k.replace(/_(one|other)$/, ""))
+      && !code.includes(k.replace(/_(one|other|zero)$/, ""))
       && ![...interpolated].some((p) => k === p || (k.startsWith(p) && /[._]/.test(k[p.length] ?? "")))
       && !openEnded.some((p) => k.startsWith(p))
       // …and a prefix that ends mid-word claims what continues it: `contextMenu.align` covers

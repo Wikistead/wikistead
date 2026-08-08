@@ -255,6 +255,74 @@ export async function floorMet(
 }
 
 /**
+ * Why this stance may not be written — the ONE place that answers it, for both sides of the screen.
+ *
+ * #672 (review rejection/): the floor threw a single code, `admin_factor_required`, whichever
+ * stance had been asked for. The screen mapped that code to the sentence the ON/OFF switch uses —
+ * "enrol a second factor on an admin account first" — and said it to an admin whose account already
+ * held one. What was actually being asked for (TWO PASSKEYS) appeared nowhere, so there was no way to
+ * read the way forward off the screen. The refusal now carries WHICH floor it is.
+ *
+ * It is a function returning the refusal rather than a throw so the GET can report the same answer the
+ * PATCH would give. That matters more than saving a query: the screen greys out the options that cannot
+ * be written, and a second implementation of "can it be written" is how the grey and the 409 come to
+ * disagree — the shape #605's two-sided guard exists to prevent, and the shape ADR-222 §2 collapsed
+ * five copies of into `presentableKinds`.
+ *
+ * ⚠️ The floor is NOT defended here. This is the convenience half; the fortress is the PATCH refusing
+ * (#613: never a gate that only hides). Greying an option out and refusing it are the same sentence
+ * said in two places, and the tests break both.
+ */
+export type StanceRefusal = { code: string; message: string }
+
+export async function stanceRefusal(
+  db: TenantDb, stance: FactorStance, host: string | undefined,
+): Promise<StanceRefusal | null> {
+  if (stance === 'off') return null // nothing is required, so there is nothing to be unable to satisfy
+  if (!(await floorMet(db, stance, host))) {
+    // #605's precondition, mirrored. Selecting a stance nobody can satisfy is a lock-out wearing a
+    // success response — and the person who would have to undo it is the one shut out.
+    return stance === 'passkey'
+      ? {
+          code: 'admin_passkey_floor',
+          message: 'enrol at least two passkeys on admin accounts before requiring passkeys — a passkey cannot be written down, so one is a single accident away from locking the workspace.',
+        }
+      : stance === 'totp'
+        ? {
+            code: 'admin_totp_floor',
+            message: 'enrol an authenticator app on an admin account before requiring one — an admin whose only factor is a passkey could not satisfy this.',
+          }
+        : {
+            code: 'admin_factor_required',
+            message: 'enrol a second factor on at least one admin account before requiring one — otherwise the requirement locks out the people who could turn it off.',
+          }
+  }
+  // ADR-222 §6: a stance nobody can enrol into without a session is a state nobody can leave — the
+  // policy denies the session, and the session-less doors are the only way to get a factor. Asked as a
+  // capability so it resolves itself when a door is added, rather than as a ban on the word `passkey`
+  // with a note to delete it later.
+  if (!interstitialCanMint(stance)) {
+    return {
+      code: 'stance_unreachable',
+      message: 'nobody could enrol what this stance asks for: a member with nothing enrolled has no way to add one.',
+    }
+  }
+  // #672 ruling ②-2: a one-member tenant is not offered `passkey` until #650 gives them a way back in.
+  // What is exposed there is "the only admin loses their key", which is that ticket's subject.
+  if (stance === 'passkey') {
+    const [seats] = await db.sql<[{ n: number }?]>`
+      SELECT count(*)::int AS n FROM members WHERE deactivated_at IS NULL`
+    if ((seats?.n ?? 0) < 2) {
+      return {
+        code: 'passkey_needs_second_member',
+        message: 'requiring passkeys needs a second person in the workspace: losing the only key would leave nobody able to sign in.',
+      }
+    }
+  }
+  return null
+}
+
+/**
  * Kept for the reading `canEnable` has always had: may the requirement be turned on AT ALL.
  *
  * Expressed through the counter above rather than with a query of its own — the walk in
