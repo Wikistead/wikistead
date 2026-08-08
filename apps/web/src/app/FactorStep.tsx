@@ -8,6 +8,7 @@ import { QrCode } from "../ui/QrCode"; // #653 the same code the settings screen
 import { assetUrl } from "../data/apiClient";
 import { startRegistration } from "@simplewebauthn/browser"; // #678: a key made at the door
 import { isServerFault } from "./serverFault";
+import { factorKindsPhrase } from "../settings/factor-kind"; // #686: one home for the kind nouns
 
 // #652 / ADR-219 §6: the half-authenticated step. The password was right; the tenant requires one more
 // thing, and there is no session yet — what stands in for one is a receipt cookie the server set, which
@@ -28,7 +29,7 @@ export function FactorStep(
   const [busy, setBusy] = useState(false);
   // #681: "that code is wrong" is a claim about the CODE. A 500 is not, and a person told their
   // correct code is wrong will keep re-reading their authenticator while the outage continues.
-  const [failed, setFailed] = useState<false | "code" | "unavailable">(false);
+  const [failed, setFailed] = useState<false | "code" | "badCode" | "unavailable">(false);
   // #653 `uri` was in this response all along and the TYPE dropped it, so the sign-in screen
   // offered typing and nothing else while the settings screen — same server field — drew a QR. Reading
   // it here is the whole fix; the server is untouched.
@@ -58,11 +59,28 @@ export function FactorStep(
     window.location.href = body?.returnTo || returnTo || "/";
   };
 
+  /**
+    * #686 B: a code the server REFUSED is not "that did not work".
+    *
+    * The account panel has said "that code did not match" since #657; the two surfaces on the sign-in
+    * side collapsed every non-5xx failure into one generic sentence. It is the same shape #673 and #681
+    * each fixed once — a person who mistyped six digits is told nothing, and retypes the same thing.
+    *
+    * Read from the server's CODE, never from its prose (#578: replacing an error sentence silently
+    * broke four places that matched on it). Anything the server does not name that way keeps the
+    * generic sentence, because "the code is wrong" said about a rate limit is a new wrong answer.
+    */
+  const classify = async (res: Response | null): Promise<"unavailable" | "badCode" | "code"> => {
+    if (isServerFault(res)) return "unavailable";
+    const body = await res?.clone().json().catch(() => null) as { code?: string } | null;
+    return body?.code === "factor_code_invalid" ? "badCode" : "code";
+  };
+
   const present = async () => {
     if (busy || !code.trim()) return;
     setBusy(true); setFailed(false);
     const res = await post("/auth/local/factor", { code: code.trim(), returnTo }).catch(() => null);
-    if (!res?.ok) { setFailed(isServerFault(res) ? "unavailable" : "code"); setBusy(false); return; }
+    if (!res?.ok) { setFailed(await classify(res)); setBusy(false); return; }
     await arrive(res);
   };
 
@@ -101,7 +119,7 @@ export function FactorStep(
     setBusy(true); setFailed(false);
     const res = await post(`/auth/local/factor/enrol/${encodeURIComponent(enrolling.factorId)}/confirm`,
       { code: code.trim(), returnTo }).catch(() => null);
-    if (!res?.ok) { setFailed(isServerFault(res) ? "unavailable" : "code"); setBusy(false); return; }
+    if (!res?.ok) { setFailed(await classify(res)); setBusy(false); return; }
     await arrive(res);
   };
 
@@ -124,7 +142,9 @@ export function FactorStep(
       {failed && (
         <div className="wks-left-bar rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
           data-testid="login-factor-error" role="alert">
-          {t(failed === "unavailable" ? "auth.temporarilyUnavailable" : "auth.factorFailed")}
+          {t(failed === "unavailable" ? "auth.temporarilyUnavailable"
+            : failed === "badCode" ? "account.factorCodeWrong"
+            : "auth.factorFailed")}
         </div>
       )}
 
@@ -157,7 +177,13 @@ export function FactorStep(
         <>
           {/* Nothing to present, so nothing to type yet. This is §6's circle: without this button the
               policy is unrecoverable for anybody who had not enrolled before it was turned on. */}
-          <p className="m-0 text-sm text-fg-dim" data-testid="login-factor-prompt">{t("auth.factorEnrolPrompt")}</p>
+          {/* #686 A ①: the sentence names the kinds this workspace ACCEPTS. It used to say "an
+              authenticator app" unconditionally — beside a button offering only a passkey when the
+              stance was narrowed, so the one instruction a locked-out reader had was impossible to
+              follow. `kinds` was already here, used by `accepts()` on the very next line. */}
+          <p className="m-0 text-sm text-fg-dim" data-testid="login-factor-prompt">
+            {t("auth.factorEnrolPrompt", { kinds: factorKindsPhrase(kinds, t) })}
+          </p>
           {accepts("totp") && (
             <Button variant="primary" className="w-full" disabled={busy}
               onClick={() => void startEnrolment()} data-testid="login-factor-enrol-start">

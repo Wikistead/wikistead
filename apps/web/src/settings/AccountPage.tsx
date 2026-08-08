@@ -25,6 +25,8 @@ import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant 
 import { EditorOnboardingDialog } from "../app/EditorOnboarding"; // #289: "redo the setup questions"
 import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
 import { SettingsShell, type SettingsTab } from "./SettingsShell";
+import { factorKindsPhrase, acceptedFactorKinds } from "./factor-kind"; // #686
+import { useMyFactors } from "../data/queries"; // #686: the stance rides along on this query
 
 // Personal account settings (ADR-020, Design-6). Self-scope: the server keys every
 // read/write to the authenticated member (WHERE sub = req.user.sub) — not an FGA ACL.
@@ -545,8 +547,16 @@ function ThemeTab() {
 // a credential and the profile is a name and a picture.
 function SecurityTab() {
   const { t } = useTranslation();
+  // #686 A ②: the description names the kinds this workspace ACCEPTS. It used to promise "a passkey
+  // or a six-digit code" to every tenant, including ones that had narrowed to one of them — the same
+  // fact each row already carries as its "does not count" mark, contradicted one line above the list.
+  // The stance rides along on the factors query, so this costs no extra request.
+  const factors = useMyFactors();
   return (
-    <SettingsPage title={t("account.factorsTitle")} description={t("account.factorsDesc")}>
+    <SettingsPage
+      title={t("account.factorsTitle")}
+      description={t("account.factorsDesc", { kinds: factorKindsPhrase(acceptedFactorKinds(factors.data?.stance), t) })}
+    >
       <SecondFactorPanel />
     </SettingsPage>
   );

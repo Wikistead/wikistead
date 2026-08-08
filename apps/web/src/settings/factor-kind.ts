@@ -26,3 +26,46 @@ export function factorKindName(kind: string | null | undefined, t: TFunction): s
     default: return t("account.factorKindOther");
   }
 }
+
+/**
+ * The kinds a workspace accepts, written out for a reader (#686 A).
+ *
+ * Three sentences named a kind while the tenant's stance was already in hand one line away: the
+ * interstitial's prompt said "set up an authenticator app" beside a button offering only a passkey, and
+ * the account panel promised a passkey to a tenant that had stopped accepting them. A person told to do
+ * something the workspace refuses has no way to comply — and on the interstitial they are not signed in,
+ * so that sentence is the only instruction they have.
+ *
+ * Built from `factorKindName` rather than from its own words. Naming the kinds again here is how this
+ * surface grew four spellings of "authenticator app" (#653, #673/); the nouns have one
+ * home and every sentence interpolates them.
+ *
+ * An EMPTY or absent list reads as "everything", matching what the interstitial's `accepts()` already
+ * does with an older server's response — a screen that named nothing would be worse than one that names
+ * one kind too many.
+ */
+export const ALL_FACTOR_KINDS = ["passkey", "totp"] as const;
+
+export function factorKindsPhrase(kinds: readonly string[] | null | undefined, t: TFunction): string {
+  const named = (kinds?.length ? kinds : ALL_FACTOR_KINDS).filter((k) => k);
+  const names = named.map((k) => factorKindName(k, t));
+  // Two is the most this product has, but the join is written for N: the day a third kind lands, the
+  // sentence should read rather than need finding.
+  if (names.length <= 1) return names[0] ?? factorKindName(null, t);
+  return names.slice(0, -1).join(t("account.factorKindListSep")) + t("account.factorKindOr") + names[names.length - 1];
+}
+
+/**
+ * The kinds a stance accepts, as the screen sees it (#686 A ②).
+ *
+ * The server answers the same question per ROW (`counts`), deliberately, because it also needs the host
+ * — a passkey made before a domain move is a row nobody can present. This is the coarser question the
+ * SENTENCES ask: which kinds may be offered at all. It is not a second copy of the row rule, and it must
+ * not be used to decide whether a row counts.
+ *
+ * `off` and an unknown value read as everything: a workspace that asks for nothing has no narrowing to
+ * describe, and an older server that sends no stance should not shrink the sentence.
+ */
+export function acceptedFactorKinds(stance: string | null | undefined): readonly string[] {
+  return stance === "passkey" || stance === "totp" ? [stance] : ALL_FACTOR_KINDS;
+}

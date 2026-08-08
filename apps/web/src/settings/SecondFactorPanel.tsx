@@ -79,8 +79,12 @@ export function SecondFactorPanel() {
       // This branch is only ever reached for an authenticator app — the passkey ceremony finishes in
       // `onAddPasskey` — so the kind is a constant here rather than a lookup.
       notify.success(t("account.factorAdded", { kind: factorKindName("totp", t) }));
-    } catch {
-      notify.error(t("account.factorCodeWrong"));
+    } catch (e) {
+      // #686 (sweep): a SERVER FAULT is not a wrong code. #681 drew this line on four sign-in screens
+      // and this one was outside that sweep — it told somebody their six digits were wrong while the
+      // dependency behind the confirm was broken, which is the exact defect, one surface over.
+      notify.error(e instanceof ApiError && e.status >= 500
+        ? t("auth.temporarilyUnavailable") : t("account.factorCodeWrong"));
     }
   };
 
@@ -167,6 +171,10 @@ export function SecondFactorPanel() {
       // carries is the FACT; the words belong to the screen.
       if (e instanceof ApiError && e.code === "last_admin_factor") {
         notify.error(t("account.factorLastAdmin"));
+      } else if (e instanceof ApiError && e.status >= 500) {
+        // #686 (sweep): same line as above, and as #681's. The floor case already proves this branch
+        // knows how to say something other than "your code was wrong"; an outage deserves it too.
+        notify.error(t("auth.temporarilyUnavailable"));
       } else {
         notify.error(t("account.factorCodeWrong"));
       }
@@ -184,7 +192,19 @@ export function SecondFactorPanel() {
     }
   };
 
-  const list = factors.data ?? [];
+  const list = factors.data?.factors ?? [];
+  // #686 (ruling): the ADD buttons follow the tenant's stance. Offering "add a passkey" where
+  // passkeys are not accepted invites somebody to enrol a factor that will not let them in — the row
+  // then carries "does not count", which is the right answer to a question nobody should have been
+  // asked. Existing rows are untouched: they stay listed and marked (#672), because taking away what
+  // somebody already has is a different act from declining to add more.
+  //
+  // ⚠️ Convenience only. The endpoints still accept these enrolments and still mark them as not
+  // counting; this hides an entrance, it does not close one (#613). If the endpoints are to refuse
+  // outright that is its own change, with its own pin.
+  const stance = factors.data?.stance ?? null;
+  const canAdd = (kind: string) =>
+    stance == null || stance === "off" || stance === "any" || stance === kind;
 
   // #682: the panel opens straight into the list. The line that used to sit here gave the STEPS of
   // enrolling an authenticator app — to somebody who had not started, on a screen that also enrols
@@ -346,12 +366,17 @@ export function SecondFactorPanel() {
           <Input value={label} onChange={(e) => setLabel(e.target.value)}
             placeholder={t("account.factorLabelPlaceholder")} aria-label={t("account.factorLabel")}
             data-testid="factor-label-input" />
-          <Button variant="primary" disabled={startEnrolment.isPending || atLimit}
-            onClick={() => void onStart()} data-testid="factor-add">{t("account.factorAdd")}</Button>
+          {canAdd("totp") && (
+            <Button variant="primary" disabled={startEnrolment.isPending || atLimit}
+              onClick={() => void onStart()} data-testid="factor-add">{t("account.factorAdd")}</Button>
+          )}
           {/* #666 review: each label names the KIND, because what separates the two buttons is not the
               verb — one asks for an authenticator app, the other for a key this device holds. */}
-          <Button disabled={startPasskey.isPending || confirmPasskey.isPending || atLimit}
-            onClick={() => void onAddPasskey()} data-testid="factor-add-passkey">{t("account.factorAddPasskey")}</Button>
+          {canAdd("passkey") && (
+            <Button variant={canAdd("totp") ? "default" : "primary"}
+              disabled={startPasskey.isPending || confirmPasskey.isPending || atLimit}
+              onClick={() => void onAddPasskey()} data-testid="factor-add-passkey">{t("account.factorAddPasskey")}</Button>
+          )}
         </FormRow>
       )}
       {/* #682 (ruling): the domain note that stood here is gone. It was added by #653 ④ so that

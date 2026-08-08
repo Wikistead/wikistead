@@ -41,7 +41,7 @@ export interface Page {
   position: number;
   // Cheap per-page flag (draft != published) for the sidebar badge. Over-
   // approximated server-side (true on any draft save); the open page uses the
-  // accurate usePublished() value.
+  // accurate usePublished value.
   hasUnpublishedChanges?: boolean;
   // Whether the page has ever been published (cheap: published_at IS NOT NULL).
   // With hasUnpublishedChanges this gives the sidebar's 3-state badge.
@@ -311,7 +311,7 @@ export function useBulkPublishPages() {
   });
 }
 
-// #511 / ADR-185 (slice 5): bulk MOVE into another space. The destination must be one the caller MANAGES —
+// #511 / ADR-185 (slice 5): bulk MOVE into another space. The destination must be one the caller MANAGES
 // the picker only offers those, and the server checks it again (the approved decision is manage on BOTH
 // sides, and the single-page primitive only asks `edit` of the destination, so the bulk path adds it).
 // `movedWithAncestor`: the page travelled inside a selected parent's subtree, so it is at the destination
@@ -727,7 +727,7 @@ export function useMemberIdentity(sub: string | null | undefined) {
       }).then((r) => r?.identities?.[memberSub!] ?? null),
   });
   // #431 the caller's OWN sub resolves from the session, which already holds the canonical
-  // display name (/auth/me — the same value the top-right menu and the members roster show). Without
+  // display name /auth/me — the same value the top-right menu and the members roster show). Without
   // this, a member who never customized their identity was absent from the endpoint (ADR-150 resolves
   // CUSTOMIZED members only, a user-ratified rule that exists so the endpoint is not a membership
   // oracle), so their own authored content fell back to the sub-derived label: "DU" in the header and
@@ -1024,7 +1024,7 @@ export interface PageMeta {
   createdByHasAvatar?: boolean;
   updatedByName?: string | null;
   updatedByHasAvatar?: boolean;
-  // #285 (condition 1): the SAFE-side publish flag for the search preview's draft badge —
+  // #285 (condition 1): the SAFE-side publish flag for the search preview's draft badge
   // published_at IS NOT NULL from the view-gated getPage (NEVER the manage-gated isPagePublic).
   published?: boolean;
 }
@@ -1036,7 +1036,7 @@ export interface PageGrant { grantee: string; relation: PageRelation; groupName?
 // #596: the revoke/unassign honesty payload. `stillCovered` names what keeps granting a capability
 // after this removal (a custom role's name / a built-in capability), so surfaces can say "removed,
 // but X still grants this" instead of a success toast that implies the access is gone.
-// `via` is OMITTED when the caller may not read role definitions on that resource (#596 review F1:
+// `via` is OMITTED when the caller may not read role definitions on that resource (#596 review F1
 // a page grant is `share`-gated, role names are `manage`-gated by ADR-202 §1).
 export interface RevokeOutcome { removed: boolean; stillCovered: { capability: string; via?: string }[] }
 
@@ -1146,7 +1146,7 @@ export function useSetPrivate(pageId: string) {
 }
 
 // #329 / ADR-139 — page FREEZE toggle (manage-gated server-side; the model is the fortress). level null =
-// unfreeze (DELETE). The current level rides on the page payload (usePage().frozen) — no separate GET.
+// unfreeze (DELETE). The current level rides on the page payload (usePage.frozen) — no separate GET.
 export function useSetFrozen(pageId: string) {
   const { token } = useSession();
   const qc = useQueryClient();
@@ -1846,7 +1846,7 @@ export function useUpdateRole() {
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string; name: string; capabilities: string[] }) =>
       apiFetch<RoleDef>(`/admin/roles/${encodeURIComponent(id)}`, token, { method: "PUT", body: JSON.stringify(body) }),
-    // #445 the inline capability toggle commits per-op, so the checkbox must MOVE on click —
+    // #445 the inline capability toggle commits per-op, so the checkbox must MOVE on click
     // a controlled box that waits for the invalidate/refetch reads as a dead click. Standard optimistic
     // pattern: patch the cache immediately, roll back on error (the 403/409 toast explains why), and
     // settle with the invalidate so the server row is the final truth either way.
@@ -2218,7 +2218,7 @@ export function useUpdatePlatformLogin() {
   });
 }
 
-// #568 / ADR-198 §3: the local switch. Its own hook rather than a parameter on the platform one —
+// #568 / ADR-198 §3: the local switch. Its own hook rather than a parameter on the platform one
 // they are different decisions, and the server refuses to close the last door in either case.
 // #605 / ADR-210: the stance switch and its exemptions.
 export type FactorStance = "off" | "any" | "passkey" | "totp";
@@ -2571,8 +2571,11 @@ export function useMyFactors() {
   const { token } = useSession();
   return useQuery({
     queryKey: ["me", "factors"],
+    // #686 A ②: the STANCE comes back too, and is kept. The screen used to drop it and promise a
+    // passkey to a workspace that had stopped accepting them — the same fact the `counts` mark on each
+    // row already reflects, thrown away one level up.
     queryFn: () => apiFetch<{ factors: MemberFactor[]; stance?: string }>("/me/factors", token)
-      .then((r) => r?.factors ?? []),
+      .then((r) => ({ factors: r?.factors ?? [], stance: r?.stance ?? null })),
   });
 }
 /** Begin an enrolment. The secret comes back ONCE, in this response — there is no way to ask again. */
