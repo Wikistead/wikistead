@@ -128,7 +128,10 @@ describe("#585: no dash punctuation in UI copy", () => {
     // #668; when this comment was written the key it named did not exist in either locale, which is
     // exactly the hole #662's scan went looking for. Compare the singular-stripped sets so the parity
     // check stays about MISSING TRANSLATIONS and not about grammar.
-    const keysOf = (t: Tree) => [...new Set(flatten(t).map(([k]) => k.replace(/_(one|other)$/, "")))].sort();
+    // #672: `_zero` joins them. It is not a plural CATEGORY — i18next looks it up as a special case
+    // before plural resolution — so a language whose only form is `other` carries it too, and a parity
+    // check that did not strip it would demand a `_zero` in every language that has an `_other`.
+    const keysOf = (t: Tree) => [...new Set(flatten(t).map(([k]) => k.replace(/_(one|other|zero)$/, "")))].sort();
     const [e, j] = [keysOf(en as Tree), keysOf(ja as Tree)];
     expect(e.filter((k) => !j.includes(k)), "English keys with no Japanese").toEqual([]);
     expect(j.filter((k) => !e.includes(k)), "Japanese keys with no English").toEqual([]);

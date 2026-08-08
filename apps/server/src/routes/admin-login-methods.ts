@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { requireTenantAdmin, requireConnectionManager, isTenantAdmin } from '@wikistead/authz'
 import {
   mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersUnsatisfiedBy,
-  secondFactorStance, floorMet, interstitialCanMint, type FactorStance,
+  secondFactorStance, stanceRefusal, type FactorStance,
 } from '../auth/factor-policy.js' // #652 / ADR-219 §4, #676 / ADR-222
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
@@ -51,7 +51,17 @@ export interface LoginMethodsView {
   // "nobody here could satisfy it" are different problems with different fixes.
   // #676 / ADR-222: `stance` is WHICH kinds are accepted; `selected` stays as "is anything required",
   // derived from it, so #652's screen keeps working while #679 grows the picker.
-  secondFactorRequired: { selected: boolean; canEnable: boolean; entitled: boolean; stance: FactorStance }
+  // #672 (review rejection): `stanceRefusals` is why each kind-stance cannot be written right now,
+  // keyed by stance and `null` when it can. It exists so the screen can say WHICH requirement is unmet
+  // before the reader picks an option that would only ever 409 — the "button that always fails" #606
+  // named. It is the PATCH's own answer, not a second opinion; see `stanceRefusal`.
+  secondFactorRequired: {
+    selected: boolean
+    canEnable: boolean
+    entitled: boolean
+    stance: FactorStance
+    stanceRefusals: Record<'any' | 'passkey' | 'totp', string | null>
+  }
   // #604-B: may the CALLER change the stance / platform / password selections and manage the
   // SSO exemptions? Those writes stayed on the admin tier while the read opened to
   // `manage_connections`, so the screen has to be told which of its controls belong to it.
@@ -93,6 +103,11 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         selected: await secondFactorRequired(req.db),
         canEnable: (await adminWithFactorCount(req.db, req.headers.host)) > 0,
         entitled: mfaPolicyEntitled(req.tenant),
+        stanceRefusals: {
+          any: (await stanceRefusal(req.db, 'any', req.headers.host))?.code ?? null,
+          passkey: (await stanceRefusal(req.db, 'passkey', req.headers.host))?.code ?? null,
+          totp: (await stanceRefusal(req.db, 'totp', req.headers.host))?.code ?? null,
+        },
       },
       methods: {
         'tenant-oidc': {
@@ -182,42 +197,14 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         throw Object.assign(new Error('a second-factor requirement is not available on this plan'),
           { statusCode: 402, code: 'mfa_policy_not_entitled' })
       }
-      // THE FLOOR, asked about the stance being ASKED FOR — not about "is it going on". `any → passkey`
-      // leaves the requirement on the whole time, so a guard keyed to the transition would wave through
-      // the narrowing that is most likely to strand a tenant (ADR-222 §2).
-      if (!(await floorMet(req.db, stance, req.headers.host))) {
-        // #605's precondition, mirrored. Selecting a stance nobody can satisfy is a lock-out wearing a
-        // success response — and the person who would have to undo it is the one shut out. The passkey
-        // floor is TWO, because a passkey cannot be written down (#672 ruling ②).
-        throw Object.assign(
-          new Error(stance === 'passkey'
-            ? 'enrol at least two passkeys on admin accounts before requiring passkeys — a passkey cannot be written down, so one is a single accident away from locking the workspace.'
-            : 'enrol a second factor on at least one admin account before requiring one — otherwise the requirement locks out the people who could turn it off.'),
-          { statusCode: 409, code: 'admin_factor_required' },
-        )
-      }
-      // ADR-222 §6: a stance nobody can enrol into without a session is a state nobody can leave —
-      // the policy denies the session, and the session-less doors are the only way to get a factor.
-      // Asked as a capability so it resolves itself when a door is added, rather than as a ban on the
-      // word `passkey` with a note to delete it later.
-      if (on && !interstitialCanMint(stance)) {
-        throw Object.assign(
-          new Error('nobody could enrol what this stance asks for: a member with nothing enrolled has no way to add one.'),
-          { statusCode: 409, code: 'stance_unreachable' },
-        )
-      }
-      // #672 ruling ②-2: a one-member tenant is not offered `passkey` until #650 gives them a way back
-      // in. What is exposed there is "the only admin loses their key", which is that ticket's subject.
-      if (stance === 'passkey') {
-        const [seats] = await req.db.sql<[{ n: number }?]>`
-          SELECT count(*)::int AS n FROM members WHERE deactivated_at IS NULL`
-        if ((seats?.n ?? 0) < 2) {
-          throw Object.assign(
-            new Error('requiring passkeys needs a second person in the workspace: losing the only key would leave nobody able to sign in.'),
-            { statusCode: 409, code: 'passkey_needs_second_member' },
-          )
-        }
-      }
+      // THE FLOOR and its neighbours, asked about the stance being ASKED FOR — not about "is it going
+      // on". `any → passkey` leaves the requirement on the whole time, so a guard keyed to the
+      // transition would wave through the narrowing most likely to strand a tenant (ADR-222 §2).
+      //
+      // ⚠️ THIS is the fortress. The GET reports the same refusals so the screen can grey the options
+      // out, but that is convenience — the write is refused here whatever the screen allowed (#613).
+      const refusal = await stanceRefusal(req.db, stance, req.headers.host)
+      if (refusal) throw Object.assign(new Error(refusal.message), { statusCode: 409, code: refusal.code })
       await req.db.tx(async (tx) => {
         await tx`INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds)
                  VALUES (${req.tenant.id}, ${on}, ${stance})

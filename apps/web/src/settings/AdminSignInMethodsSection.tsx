@@ -62,6 +62,16 @@ export function connectionName(c: Pick<AdminConnectionDTO, "preset" | "label" | 
 // #589 bounce: every method is a row, so every row is built from ONE class. The reject was that they
 // and three hand-written class strings is how that happens. `data-method-row` marks them so a pin can
 // walk the list instead of naming the methods it knows about: a fifth method is measured by existing.
+// #679 / ADR-222 §1: the kind-stances, in the order they are offered. `off` is not among them — it is
+// the switch above, not a kind. One list, so the picker and the refusal lines below it cannot come to
+// offer different sets (#672).
+const STANCE_CHOICES = ["any", "passkey", "totp"] as const;
+const STANCE_LABEL: Record<(typeof STANCE_CHOICES)[number], string> = {
+  any: "adminAuth.stanceAny",
+  passkey: "adminAuth.stancePasskey",
+  totp: "adminAuth.stanceTotp",
+};
+
 const METHOD_ROW = "flex flex-col gap-1.5 rounded-md border border-border bg-panel px-3 py-2 text-sm";
 const METHOD_ROW_HEAD = "flex items-center gap-2";
 
@@ -128,18 +138,26 @@ export function AdminSignInMethodsSection() {
   const [confirming, setConfirming] = useState<{ stance: "factor" | "sso"; to: boolean } | null>(null);
 
   const rows = connections.data ?? [];
-  // #652the two write-time refusals the server can still raise even when the row looked
-  // writable (the last enrolled admin cleared their factor between the read and the click). Reported
-  // with the sentence that names the fix, not a generic failure.
+  // #652the write-time refusals the server can still raise even when the row looked writable
+  // (the last enrolled admin cleared their factor between the read and the click). Reported with the
+  // sentence that names the fix, not a generic failure.
+  //
+  // #672 (review rejection/): ONE mapping, read both by the toast below and by the reason
+  // printed under the picker, because they are the same sentence said at two moments. The screen used
+  // to answer `admin_factor_required` with the ON/OFF switch's wording whatever had been asked for, so
+  // an admin who already held a factor was told to enrol one and never learnt the real requirement
+  // two passkeys. The server names each floor now; anything unmapped stays the generic failure rather
+  // than borrowing a neighbour's sentence.
+  const refusalText = (code: string | undefined): string | null =>
+    code === "admin_factor_required" ? t("adminAuth.secondFactorNoAdmin")
+    : code === "admin_passkey_floor" ? t("adminAuth.passkeyFloorUnmet")
+    : code === "admin_totp_floor" ? t("adminAuth.totpFloorUnmet")
+    : code === "passkey_needs_second_member" ? t("adminAuth.passkeyNeedsSecondMember")
+    : code === "stance_unreachable" ? t("adminAuth.stanceUnreachable")
+    : code === "mfa_policy_not_entitled" ? t("adminAuth.method_unentitled")
+    : null;
   const stanceError = (e: unknown) => {
-    const code = e instanceof ApiError ? e.code : undefined;
-    notify.error(
-      code === "admin_factor_required" ? t("adminAuth.secondFactorNoAdmin")
-      : code === "passkey_needs_second_member" ? t("adminAuth.passkeyNeedsSecondMember")
-      : code === "stance_unreachable" ? t("adminAuth.stanceUnreachable")
-      : code === "mfa_policy_not_entitled" ? t("adminAuth.method_unentitled")
-      : t("adminAuth.methodsSaveFailed"),
-    );
+    notify.error(refusalText(e instanceof ApiError ? e.code : undefined) ?? t("adminAuth.methodsSaveFailed"));
   };
   const saveStance = (kinds: FactorStance) => secondFactorStance.mutate(kinds, {
     onSuccess: () => notify.success(t("toast.saved")),
@@ -147,14 +165,7 @@ export function AdminSignInMethodsSection() {
   });
   const saveFactorPolicy = (on: boolean) => secondFactorRequired.mutate(on, {
     onSuccess: () => notify.success(t("toast.saved")),
-    onError: (e) => {
-      const code = e instanceof ApiError ? e.code : undefined;
-      notify.error(
-        code === "admin_factor_required" ? t("adminAuth.secondFactorNoAdmin")
-        : code === "mfa_policy_not_entitled" ? t("adminAuth.method_unentitled")
-        : t("adminAuth.methodsSaveFailed"),
-      );
-    },
+    onError: stanceError,
   });
   const saveSsoStance = (on: boolean) => ssoRequired.mutate(on, {
     onSuccess: () => notify.success(t("toast.saved")),
@@ -661,19 +672,45 @@ export function AdminSignInMethodsSection() {
                 interchangeable — a passkey resists phishing and dies when the host changes (#664), a
                 code does neither — so a workspace that has decided to require one still has a decision
                 to make. Hidden while nothing is required, because there is no question then. */}
-            {methods.data.secondFactorRequired.selected && canManageStance && (
+            {methods.data.secondFactorRequired.selected && canManageStance && ((sf) => {
+              // #672 (review rejection): an option the server would only ever 409 is not offered as
+              // a choice — #606's "button that always fails" — and the reason is printed BESIDE the
+              // picker, not hung on hover. The switch above already learnt that (#652): a
+              // disabled control whose reason only appears on hover reads as broken, and the reader on
+              // a touch screen never reads it at all.
+              //
+              // ⚠️ Which is why a refusal we cannot NAME does not grey anything out. A greyed option
+              // with no sentence beside it is the state that rule exists to prevent, so an unrecognised
+              // code (an older screen against a newer server) leaves the option selectable and lets the
+              // 409 do the talking. Greying is convenience; `stanceRefusal` on the server is the half
+              // that has to be right (#613 — never a gate that only hides).
+              const refused = new Map(STANCE_CHOICES.flatMap((s) => {
+                // The stance already in force is never refused to its own tenant: they are living in
+                // it, and a picker that greyed out its current value would read as an error about the
+                // past rather than about a choice.
+                if (s === sf.stance) return [];
+                const why = refusalText(sf.stanceRefusals?.[s] ?? undefined);
+                return why ? [[s, why] as const] : [];
+              }));
+              return (
               <div className="flex flex-col gap-1 border-t border-border pt-1.5" data-testid="second-factor-kinds">
                 <div className="text-xs text-fg-dim">{t("adminAuth.secondFactorKindsLead")}</div>
-                <Select size="sm" value={methods.data.secondFactorRequired.stance ?? "any"}
+                <Select size="sm" value={sf.stance ?? "any"}
                   ariaLabel={t("adminAuth.secondFactorKindsLead")} testId="second-factor-kinds-select"
-                  options={[
-                    { value: "any", label: t("adminAuth.stanceAny") },
-                    { value: "passkey", label: t("adminAuth.stancePasskey") },
-                    { value: "totp", label: t("adminAuth.stanceTotp") },
-                  ]}
+                  options={STANCE_CHOICES.map((s) => ({
+                    value: s,
+                    label: t(STANCE_LABEL[s]),
+                    disabled: refused.has(s),
+                  }))}
                   onChange={(v) => setPickingStance(v as FactorStance)} />
+                {[...refused].map(([s, why]) => (
+                  <div key={s} className="text-xs text-[var(--warning,#b45309)]" data-testid={`stance-refused-${s}`}>
+                    {t("adminAuth.stanceRefused", { kind: t(STANCE_LABEL[s]), reason: why })}
+                  </div>
+                ))}
               </div>
-            )}
+              );
+            })(methods.data.secondFactorRequired)}
           </div>
         )}
 
@@ -820,6 +857,12 @@ function StanceConfirm(
       title={t("adminAuth.secondFactorRequired")}
       message={[
         // Plural-aware, and count-first: the number is the reason this question exists.
+        //
+        // #672 (review rejection②): at zero this read "0 members cannot satisfy this and will be
+        // signed out now" — a sentence about people who do not exist, and in Japanese
+        // pointing at nobody. One `{{count}}` string cannot say 0, 1 and N, and Japanese having no
+        // plural is not a reason to skip the branch: `_zero` is a case, not a plural form. At zero the
+        // sentence says so and stops, because there is no sign-out to describe.
         t("adminAuth.stanceConfirmSweep", { count: n }),
         // ruling ②-3: a passkey cannot be exported, and losing it means talking to the operator. Said
         // before the write, in the same standing as #664's domain-move warning.

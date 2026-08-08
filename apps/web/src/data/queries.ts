@@ -2183,7 +2183,13 @@ export interface LoginMethodsDTO {
   // one greyed switch would tell a tenant to upgrade when the fix is to enrol a factor.
   // `stance` (#676) is which kinds are accepted: "off" | "any" | "passkey" | "totp". `selected` stays
   // as "is anything required" — the switch #652 drew — and the picker that reads `stance` is #679.
-  secondFactorRequired?: { selected: boolean; canEnable: boolean; entitled: boolean; stance?: FactorStance }
+  // #672 (review rejection): `stanceRefusals` is the server's own reason each kind-stance cannot be
+  // written right now — the same answer its PATCH would give — so the picker can stop offering a choice
+  // that only ever 409s, and say which requirement is unmet.
+  secondFactorRequired?: {
+    selected: boolean; canEnable: boolean; entitled: boolean; stance?: FactorStance
+    stanceRefusals?: Partial<Record<"any" | "passkey" | "totp", string | null>>
+  }
   // #604-B: whether the CALLER may write the stance / platform / password selections and the
   // SSO exemptions. The read opened to `manage_connections`; those writes stayed on the admin tier,
   // so the server names the line instead of the screen inferring it from a tier flag.
