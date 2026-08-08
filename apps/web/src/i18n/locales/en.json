@@ -680,6 +680,7 @@
     "groupUnconfirmed": "No member carries this group yet. The grant applies as soon as one signs in."
   },
   "auth": {
+    "temporarilyUnavailable": "Something is wrong on our side right now. Please try again shortly.",
     "localIdentifier": "Email address",
     "localPassword": "Password",
     "localFailed": "That email address and password do not match an account here.",

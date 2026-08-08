@@ -7,6 +7,7 @@ import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { QrCode } from "../ui/QrCode"; // #653the same code the settings screen draws
 import { assetUrl } from "../data/apiClient";
 import { startRegistration } from "@simplewebauthn/browser"; // #678: a key made at the door
+import { isServerFault } from "./serverFault";
 
 // #652 / ADR-219 §6: the half-authenticated step. The password was right; the tenant requires one more
 // thing, and there is no session yet — what stands in for one is a receipt cookie the server set, which
@@ -25,7 +26,9 @@ export function FactorStep(
   const { t } = useTranslation();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  // #681: "that code is wrong" is a claim about the CODE. A 500 is not, and a person told their
+  // correct code is wrong will keep re-reading their authenticator while the outage continues.
+  const [failed, setFailed] = useState<false | "code" | "unavailable">(false);
   // #653`uri` was in this response all along and the TYPE dropped it, so the sign-in screen
   // offered typing and nothing else while the settings screen — same server field — drew a QR. Reading
   // it here is the whole fix; the server is untouched.
@@ -59,7 +62,7 @@ export function FactorStep(
     if (busy || !code.trim()) return;
     setBusy(true); setFailed(false);
     const res = await post("/auth/local/factor", { code: code.trim(), returnTo }).catch(() => null);
-    if (!res?.ok) { setFailed(true); setBusy(false); return; }
+    if (!res?.ok) { setFailed(isServerFault(res) ? "unavailable" : "code"); setBusy(false); return; }
     await arrive(res);
   };
 
@@ -69,22 +72,26 @@ export function FactorStep(
     let started: { factorId: string; options: Record<string, unknown> } | null = null;
     try {
       const res = await post("/auth/local/factor/enrol/passkey", {});
-      if (!res.ok) throw new Error("start");
+      // classify BEFORE throwing: below, the same catch also sees the browser ceremony being
+      // cancelled, and a person who pressed Escape has not hit an outage.
+      if (!res.ok) { setFailed(isServerFault(res) ? "unavailable" : "code"); setBusy(false); return; }
       started = await res.json() as { factorId: string; options: Record<string, unknown> };
       const attestation = await startRegistration({ optionsJSON: started.options as never });
       const done = await post(`/auth/local/factor/enrol/${encodeURIComponent(started.factorId)}/passkey`,
         { response: attestation, returnTo });
-      if (!done.ok) throw new Error("confirm");
+      if (!done.ok) { setFailed(isServerFault(done) ? "unavailable" : "code"); setBusy(false); return; }
       await arrive(done);
     } catch {
-      setFailed(true); setBusy(false);
+      // ⚠️ NOT "unavailable": this catch also fires when the reader cancels the browser's key prompt,
+      // and telling them the service is down would be a second wrong answer in the same place.
+      setFailed("code"); setBusy(false);
     }
   };
 
   const startEnrolment = async () => {
     setBusy(true); setFailed(false);
     const res = await post("/auth/local/factor/enrol", {}).catch(() => null);
-    if (!res?.ok) { setFailed(true); setBusy(false); return; }
+    if (!res?.ok) { setFailed(isServerFault(res) ? "unavailable" : "code"); setBusy(false); return; }
     setEnrolling(await res.json() as { factorId: string; secret: string; uri: string });
     setBusy(false);
   };
@@ -94,7 +101,7 @@ export function FactorStep(
     setBusy(true); setFailed(false);
     const res = await post(`/auth/local/factor/enrol/${encodeURIComponent(enrolling.factorId)}/confirm`,
       { code: code.trim(), returnTo }).catch(() => null);
-    if (!res?.ok) { setFailed(true); setBusy(false); return; }
+    if (!res?.ok) { setFailed(isServerFault(res) ? "unavailable" : "code"); setBusy(false); return; }
     await arrive(res);
   };
 
@@ -117,7 +124,7 @@ export function FactorStep(
       {failed && (
         <div className="wks-left-bar rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
           data-testid="login-factor-error" role="alert">
-          {t("auth.factorFailed")}
+          {t(failed === "unavailable" ? "auth.temporarilyUnavailable" : "auth.factorFailed")}
         </div>
       )}
 
