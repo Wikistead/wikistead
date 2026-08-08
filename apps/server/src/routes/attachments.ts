@@ -10,6 +10,7 @@ import { withTenantTx } from '../db/index.js' // #382
 import { makeS3Key } from '../storage/driver.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
+import { requireBody } from './require-body.js' // #667a bodyless write is 400, not 500
 
 // Upload TTL: short enough to limit leaked-URL exposure, long enough for large files.
 const PUT_TTL  = 15 * 60   // 15 minutes
@@ -327,6 +328,7 @@ export async function attachmentsPlugin(app: FastifyInstance) {
   app.post<{ Params: { spaceId: string; pageId: string }; Body: PresignBody }>(
     '/spaces/:spaceId/pages/:pageId/attachments/presign', { config: { guest: 'edit' } },
     async (req, reply) => {
+      const body = requireBody(req.body) // #667filename and contentType are both required
       if (!req.user && req.guest && !(await guestAttachRateAllowed(app.valkey, req.db, { tenantId: req.tenant.id, shareLinkId: req.guest.shareLinkId, anonId: req.guest.anonId }))) {
         return reply.code(429).send({ error: 'rate limited', reason: 'attach_rate' })
       }
@@ -335,8 +337,8 @@ export async function attachmentsPlugin(app: FastifyInstance) {
         plan: req.tenant.plan,
         pageId: req.params.pageId,
         ...(req.user ? { userId: req.user.sub } : { guest: { shareLinkId: req.guest!.shareLinkId } }),
-        filename: req.body.filename,
-        contentType: req.body.contentType,
+        filename: body.filename,
+        contentType: body.contentType,
       })
       return reply.code(201).send(result)
     },
