@@ -279,9 +279,24 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         }
       }
       await req.db.tx(async (tx) => {
+        // #684 / ADR-223 slice 5: the same shape as the second-factor stance beside it. Read inside the
+        // transaction and before the upsert — outside it, a concurrent write lands between the read and
+        // the write and the ledger records a transition that never happened. An absent row is `false`,
+        // which is what the resolver treats a missing preference as.
+        const [prior] = await tx<[{ sso_required: boolean }?]>`
+          SELECT sso_required FROM tenant_login_prefs WHERE tenant_id = ${req.tenant.id} FOR UPDATE`
+        const from = prior?.sso_required ?? false
         await tx`INSERT INTO tenant_login_prefs (tenant_id, sso_required) VALUES (${req.tenant.id}, ${on})
                  ON CONFLICT (tenant_id) DO UPDATE SET sso_required = ${on}, updated_at = now()`
-        await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: on ? 'tenant.sso_required_on' : 'tenant.sso_required_off', target: `tenant:${req.tenant.id}` })
+        await auditIfEntitled(tx, req.tenant, {
+          actor: `user:${req.user.sub}`,
+          action: on ? 'tenant.sso_required_on' : 'tenant.sso_required_off',
+          target: `tenant:${req.tenant.id}`,
+          // Closing every other way in and opening them again are different acts, and the two action
+          // names are all the ledger had. A no-op writes the pair rather than nothing, for the reason
+          // the stance above does: absent already means "this action carries no values".
+          changes: { sso_required: { from, to: on } },
+        })
       })
       const after = await resolveLogin(req.db, req.tenant)
       emit({ type: 'tenant.login_methods_updated', tenantId: req.tenant.id, actorId: req.user.sub, platformLoginEnabled: after.methods.has('platform-oidc') })
