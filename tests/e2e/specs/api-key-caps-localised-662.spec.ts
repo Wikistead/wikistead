@@ -13,39 +13,57 @@ import { openDemo, sleep } from "../helpers";
 // Measured as "no raw wire verb survives", not as "some Japanese appears". A pin that looked for
 // would stay green if five of the six labels were still English, and a pin that asserted a specific
 // string would break the day the copy is reworded — which #659 just did to its neighbours.
-const WIRE_VERBS = ["view", "edit", "publish", "delete", "comment", "manage"];
+// ⚠️ #667 replaced the six borrowed role verbs with the resource-type x read/write table, so the list
+// this spec was written against no longer exists and it went red on master. What it measures survives
+// the change intact — a Japanese admin must be offered Japanese, not the wire vocabulary — so it is
+// repointed at the table rather than deleted, and the wire words it forbids are the new ones.
+//
+// The type ids are the wire vocabulary now (`pages`, `page_publishing`, `space_settings`, …), and the
+// actions still are (`read`, `write`). Both are checked: a missing `adminApi.type.*` key would paint the
+// id, and a missing `adminApi.action_*` would paint the verb, which is exactly what #662 shipped.
+const WIRE_WORDS = [
+  "pages", "page_publishing", "page_lifecycle", "page_sharing", "page_moderation", "comments",
+  "attachments", "search", "recent", "spaces", "space_settings", "space_publishing", "space_lifecycle",
+  "space_sharing", "space_moderation", "members", "roles", "tenant_settings", "webhooks", "analytics",
+  "audit", "read", "write", "none",
+];
 
-async function capLabels(page: import("@playwright/test").Page, lang: string): Promise<string[]> {
+async function permLabels(page: import("@playwright/test").Page, lang: string): Promise<string[]> {
   await page.addInitScript((l) => { try { localStorage.setItem("wks.lang", l); } catch { /* private */ } }, lang);
   await openDemo(page);
   await page.goto("/admin/api");
   const toggle = page.getByTestId("api-key-narrow-toggle");
   await expect(toggle, "the create form is on screen").toBeVisible({ timeout: 20_000 });
   await toggle.click();
-  await expect(page.getByTestId("api-key-cap-list")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("api-key-perm-list")).toBeVisible({ timeout: 10_000 });
   await sleep(300);
-  return (await page.getByTestId("api-key-cap-option").allInnerTexts()).map((s) => s.trim()).filter(Boolean);
+  // Every word the row offers — the type's name AND the three action labels beside it, because the
+  // fallback that shipped #662 painted a raw key wherever one was missing, and either half can be.
+  return (await page.getByTestId("api-key-perm-row").allInnerTexts())
+    .flatMap((row) => row.split(/\s+/))
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
-test("#662: a Japanese admin is offered capabilities in Japanese", async ({ page }) => {
+test("#662: a Japanese admin is offered the permission vocabulary in Japanese", async ({ page }) => {
   test.setTimeout(120_000);
-  const ja = await capLabels(page, "ja");
-  expect(ja.length, "the six narrowable capabilities are offered").toBe(WIRE_VERBS.length);
+  const ja = await permLabels(page, "ja");
+  expect(ja.length, "the table is populated").toBeGreaterThan(20);
 
-  const raw = ja.filter((l) => WIRE_VERBS.includes(l.toLowerCase()));
-  expect(raw, `raw wire verbs reached a Japanese screen :: ${JSON.stringify(ja)}`).toEqual([]);
+  const raw = ja.filter((l) => WIRE_WORDS.includes(l.toLowerCase()));
+  expect(raw, `raw wire words reached a Japanese screen :: ${JSON.stringify(raw)}`).toEqual([]);
 
-  // …and it is really the shared vocabulary, not a second one invented for this form. `adminRoles.cap`
-  // is what the role editor uses, so the same capability reads the same word on both screens.
-  expect(ja, "the capability vocabulary the role editor uses").toContain("閲覧");
-  expect(ja, "…all of it").toContain("編集");
+  // …and it really is Japanese rather than merely "not the wire word": a stray romanisation or an
+  // English fallback would clear the check above and still be the defect #662 was about.
+  expect(ja.some((l) => /[ぁ-んァ-ン一-龯]/.test(l)), `nothing on this screen is Japanese :: ${JSON.stringify(ja.slice(0, 8))}`).toBe(true);
 });
 
-test("#662: English is unchanged, so the fix is a translation and not a rename", async ({ page }) => {
+test("#662: English is a translation too, not the wire words left showing", async ({ page }) => {
   test.setTimeout(120_000);
-  const en = await capLabels(page, "en");
-  expect(en.length).toBe(WIRE_VERBS.length);
-  // English capitalises them (`adminRoles.cap.view` = "View"), which is the role editor's wording too.
-  // Comparing case-insensitively keeps this about WHICH WORDS, not about their shape.
-  expect(en.map((s) => s.toLowerCase()).sort(), "the same six, in English").toEqual([...WIRE_VERBS].sort());
+  const en = await permLabels(page, "en");
+  expect(en.length, "the table is populated").toBeGreaterThan(20);
+  // The English reader is the one an untranslated screen hides from: `pages` and `tenant_settings` look
+  // enough like English to pass unnoticed, which is why the identifier form is forbidden here as well.
+  const raw = en.filter((l) => WIRE_WORDS.includes(l.toLowerCase()) && /[_]/.test(l));
+  expect(raw, `raw wire identifiers reached the English screen :: ${JSON.stringify(raw)}`).toEqual([]);
 });

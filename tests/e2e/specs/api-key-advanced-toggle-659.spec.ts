@@ -42,9 +42,14 @@ test("#659: the toggle keeps its name, and the chevron says which way it is", as
   expect(Math.abs((openChevron ?? 0) - (closedChevron ?? 0)), "the chevron turns when it opens")
     .toBeGreaterThan(45);
 
-  // the panel still holds both of the things the old name only half-described
+  // the panel still holds both of the things the old name only half-described.
+  //
+  // ⚠️ `api-key-cap-list` until #667: the six borrowed role verbs were replaced by the resource-type x
+  // read/write table, so this asserted an element the product no longer renders and the spec was red on
+  // master. Repointed rather than deleted — what it measures is that the toggle reveals BOTH halves of
+  // the narrowing, and that is still true; only the name of the second half changed.
   await expect(page.getByTestId("api-key-space-list"), "spaces").toBeVisible();
-  await expect(page.getByTestId("api-key-cap-list"), "capabilities").toBeVisible();
+  await expect(page.getByTestId("api-key-perm-list"), "permissions").toBeVisible();
 
   await toggle.click();
   await expect(panel, "and it closes again").toBeHidden({ timeout: 10_000 });
