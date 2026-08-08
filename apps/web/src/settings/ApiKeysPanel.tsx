@@ -272,14 +272,26 @@ export function ApiKeysPanel({
                     leaving the type unticked. The server declares the same vocabulary and refuses
                     anything else (`unknown_type` / `unknown_action` / `unreachable_permission`), so this
                     list going stale is a refusal rather than a silent acceptance. */}
-                <div className="flex flex-col gap-1" data-testid="api-key-perm-list">
+                {/* #667 ①: ONE grid for all twenty-one rows, so the columns line up by
+                    construction. They used to be twenty-one flex rows, and the three types with no
+                    `write` cell (search, recent, audit) let their two radios slide 69px right — a
+                    reader running an eye down the list caught on those three. A spacer of the same
+                    width would have to guess it, in two languages; a shared grid track cannot be wrong.
+                    The row keeps its element (and its testid) via `contents`, so its cells are the
+                    grid's children and every column is measured across the whole table. */}
+                <div
+                  className="grid grid-cols-[minmax(0,1fr)_max-content_max-content_max-content] items-center gap-x-3 gap-y-1 text-sm"
+                  data-testid="api-key-perm-list"
+                >
                   {RESOURCE_TYPE_OPTIONS.map((o) => (
-                    <div key={o.id} className="flex items-center gap-2 text-sm" data-testid="api-key-perm-row">
-                      <span className="min-w-0 flex-1 truncate">{t(`adminApi.type.${o.id}`)}</span>
+                    <div key={o.id} className="contents" data-testid="api-key-perm-row">
+                      <span className="min-w-0 truncate">{t(`adminApi.type.${o.id}`)}</span>
                       {(["none", "read", "write"] as const).map((a) => {
                         // a type no route requires `write` on is a cell the server refuses — offering it
-                        // would be the #642 defect in a new place: a choice that reaches nothing
-                        if (a === "write" && !o.writable) return null;
+                        // would be the #642 defect in a new place: a choice that reaches nothing. The
+                        // COLUMN still exists though: an empty cell says "there is no write here" as
+                        // plainly as an absent one, and keeps the two to its left where the eye expects.
+                        if (a === "write" && !o.writable) return <span key={a} aria-hidden="true" />;
                         const on = a === "none" ? matrix[o.id] === undefined : matrix[o.id] === a;
                         return (
                           <label key={a} className="flex flex-none items-center gap-1 text-xs text-fg-dim">

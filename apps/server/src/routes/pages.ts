@@ -48,6 +48,7 @@ import { deletePinsForResources } from './pins.js'
 import { fanOutFeedEvent, sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
 import { enqueueWebhookOutbox } from './webhooks.js'
 import { assertGranteeIsMember } from '../auth/member-principal.js' // #624: a grant names somebody who is here
+import { requireBody } from './require-body.js' // #667 a bodyless write is 400, not 500
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames
 // the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
@@ -4056,6 +4057,10 @@ export async function pagesPlugin(app: FastifyInstance) {
   // seeds (templateId/fromPageId): template#view has no share_link path and the fence stays structural.
   app.post<{ Params: { spaceId: string }; Body: { title?: string; parentId?: string | null; fromPageId?: string | null; templateId?: string | null } }>(
     '/spaces/:spaceId/pages', { config: { guest: 'edit' } }, async (req, reply) => {
+      // #667 every field here is optional, so a bodyless POST could have meant "an untitled
+      // page". It is refused instead, and uniformly with its four neighbours: creating something is
+      // worth being asked for explicitly, and nobody can be relying on the old behaviour — it was a 500.
+      const body = requireBody(req.body)
       if (!req.user) {
         if (!req.guest) return reply.code(401).send({ error: 'unauthorized' })
         // #274 / ADR-135 §3: the guest created-page cap (two-bucket link+session window; static reason
@@ -4078,8 +4083,8 @@ export async function pagesPlugin(app: FastifyInstance) {
           spaceId: req.params.spaceId,
           shareLinkId: req.guest.shareLinkId,
           anonId: req.guest.anonId,
-          title: req.body.title,
-          parentId: req.body.parentId ?? null,
+          title: body.title,
+          parentId: body.parentId ?? null,
         })
         return reply.code(201).send(page)
       }
@@ -4087,10 +4092,10 @@ export async function pagesPlugin(app: FastifyInstance) {
         tenantId: req.tenant.id,
         spaceId: req.params.spaceId,
         userId: req.user.sub,
-        title: req.body.title,
-        parentId: req.body.parentId ?? null,
-        fromPageId: req.body.fromPageId ?? null, // #229: seed from a page ("duplicate", view-gated)
-        templateId: req.body.templateId ?? null, // #250: seed from a template snapshot (view-gated)
+        title: body.title,
+        parentId: body.parentId ?? null,
+        fromPageId: body.fromPageId ?? null, // #229: seed from a page ("duplicate", view-gated)
+        templateId: body.templateId ?? null, // #250: seed from a template snapshot (view-gated)
       })
       return reply.code(201).send(page)
     },
@@ -4101,12 +4106,16 @@ export async function pagesPlugin(app: FastifyInstance) {
   // (3b ②); when parentId is given, the parent's space is authoritative.
   app.patch<{ Params: { pageId: string }; Body: { parentId?: string | null; afterId?: string | null; spaceId?: string | null } }>(
     '/pages/:pageId/move', async (req) => {
+      // #667 every field defaults to null, so treating a missing body as `{}` would read as
+      // "move to the top level, first position" — a destructive default nobody asked for. An explicit
+      // `{}` still means that, because the caller said so.
+      const body = requireBody(req.body)
       return movePage(req.db, app.fga, app.searchDriver, {
         pageId: req.params.pageId,
         userId: req.user.sub,
-        parentId: req.body.parentId ?? null,
-        afterId: req.body.afterId ?? null,
-        spaceId: req.body.spaceId ?? null,
+        parentId: body.parentId ?? null,
+        afterId: body.afterId ?? null,
+        spaceId: body.spaceId ?? null,
       })
     },
   )
@@ -4245,10 +4254,11 @@ export async function pagesPlugin(app: FastifyInstance) {
   // the auth hook's capability guard before the handler.
   app.patch<{ Params: { pageId: string }; Body: { title: string } }>(
     '/pages/:pageId', { config: { guest: 'edit' } }, async (req) => {
+      const body = requireBody(req.body) // #667 the reported crash — `req.body.title` on undefined
       return updatePage(req.db, app.fga, app.searchDriver, {
         pageId: req.params.pageId,
         ...(req.user ? { userId: req.user.sub } : { guest: { shareLinkId: req.guest!.shareLinkId, anonId: req.guest!.anonId } }),
-        title: req.body.title,
+        title: body.title,
       })
     },
   )
@@ -4391,10 +4401,11 @@ export async function pagesPlugin(app: FastifyInstance) {
   // the live draft, so flush it first, then fold the one flip into published_md.
   app.post<{ Params: { pageId: string }; Body: { index: number } }>(
     '/pages/:pageId/tasks/toggle', { config: { guest: 'edit' } }, async (req) => {
+      const body = requireBody(req.body) // #667 `index` is required, and undefined would toggle nothing
       const p = principalForPage(req, req.params.pageId)
       await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
       return toggleTask(req.db, app.fga, app.searchDriver, {
-        pageId: req.params.pageId, subject: p.subject, createdBy: p.createdBy, index: req.body.index, context: p.context,
+        pageId: req.params.pageId, subject: p.subject, createdBy: p.createdBy, index: body.index, context: p.context,
       })
     },
   )
