@@ -150,8 +150,9 @@ polish, hardening, and the business layer — most of it captured as ADR drafts 
 - **Ops / scale**: production reverse proxy + persistent OpenFGA; revision pruning /
   S3 offload.
 - **Business / legal**: final plan limits + pricing and a metered-overage soft cap;
-  CE/EE split + AGPL legal review; `LICENSE` / `CHANGELOG` / `CONTRIBUTING`; release
-  tooling (semantic-release, intentionally deferred — see the project design notes).
+  CE/EE split + AGPL legal review; the copyright line on `LICENSE`. Release tooling is
+  in place (semantic-release derives the version from commit subjects); cutting a
+  release stays a human act.
 
 ## Contributing
 
