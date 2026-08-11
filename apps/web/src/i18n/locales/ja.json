@@ -732,7 +732,8 @@
     "recoveryLink": "別の方法でサインインする",
     "recoveryTitle": "復旧用サインイン",
     "recoveryBody": "SSO 必須の間、例外に指名されたメンバー用の入り口です。メールアドレスとパスワードでサインインしてください。",
-    "factorPrompt": "認証アプリのコードを入力してください。",
+    "factorPrompt": "続けるには{{kinds}}で確認してください。",
+    "factorPresentPasskey": "パスキーで確認する",
     "factorCode": "コード",
     "factorCodePlaceholder": "123456",
     "factorContinue": "続ける",
@@ -742,7 +743,7 @@
     "factorEnrolHint": "このキーを認証アプリに入力し、表示されたコードを入れてください。",
     "factorSecretNote": "認証アプリに入力してください。",
     "factorEnrolPasskey": "パスキーを設定する",
-    "factorNoWebauthn": "このワークスペースはセキュリティキーを求めていますが、このブラウザでは登録できません。別のブラウザを試すか、管理者にご連絡ください。"
+    "factorNoWebauthn": "このワークスペースはセキュリティキーを求めていますが、このブラウザは対応していません。別のブラウザを試すか、管理者にご連絡ください。"
   },
   "share": {
     "invalid": "この共有リンクは無効・期限切れ・取り消し済みです。",

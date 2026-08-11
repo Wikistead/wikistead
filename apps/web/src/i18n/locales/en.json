@@ -734,7 +734,8 @@
     "recoveryLink": "Sign in another way",
     "recoveryTitle": "Recovery sign-in",
     "recoveryBody": "For members named as exceptions while SSO is required. Sign in with your email address and password.",
-    "factorPrompt": "Enter the code from your authenticator app.",
+    "factorPrompt": "Confirm with {{kinds}} to continue.",
+    "factorPresentPasskey": "Use your passkey",
     "factorCode": "Code",
     "factorCodePlaceholder": "123456",
     "factorContinue": "Continue",
@@ -744,7 +745,7 @@
     "factorEnrolHint": "Enter this key in your authenticator app, then type the code it shows.",
     "factorSecretNote": "Enter it in your authenticator app.",
     "factorEnrolPasskey": "Set up a passkey",
-    "factorNoWebauthn": "This workspace asks for a security key, and this browser cannot register one. Try another browser, or ask an administrator."
+    "factorNoWebauthn": "This workspace asks for a security key, and this browser does not support them. Try another browser, or ask an administrator."
   },
   "share": {
     "invalid": "This share link is invalid, expired, or revoked.",

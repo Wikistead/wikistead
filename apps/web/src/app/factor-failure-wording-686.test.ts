@@ -30,14 +30,24 @@ describe("#686 族 B: the sign-in surfaces say which failure it was", () => {
       .not.toMatch(/message\s*[=.]==?\s*["'`]/);
   });
 
-  it("both code-submitting surfaces use it — the door and the enrolment confirm", () => {
-    // Two `await classify(` calls, because those are the two places a person types six digits. The
-    // passkey ceremony's failures deliberately do NOT use it: that catch also fires when the reader
-    // presses Escape on the browser prompt, and "your code was wrong" about a cancelled ceremony is
-    // the same species of lie this file exists to remove.
-    expect((STEP.match(/await classify\(/g) ?? []).length,
-      "one of the two code surfaces still collapses its failures").toBe(2);
-    expect(STEP, "the passkey ceremony's catch was swept in with them")
+  it("every surface holding a server response classifies it, rather than collapsing", () => {
+    // ⚠️ WAS a count (`toBe(2)`, the two code-typing surfaces) and #687 legitimately added a third
+    // and fourth call — the passkey presentation's own two responses. A number would have been
+    // "fixed" by raising it, which measures nothing; the property is that NO surface throws away a
+    // response it is holding. So: every early return that inspects `res.ok`/`done.ok` must classify.
+    const responseFailures = [...STEP.matchAll(/if \(!(?:res|done)(?:\?)?\.ok\) \{ setFailed\(([^)]*)\)/g)]
+      .map((m) => m[1]!.trim());
+    expect(responseFailures.length, "no response-shaped failure branch was found — the scan broke")
+      .toBeGreaterThanOrEqual(4);
+    const collapsed = responseFailures.filter((arg) => !arg.startsWith("await classify("));
+    // The enrolment STARTS are the deliberate exception and are named, not pattern-excused: those two
+    // responses precede any code being typed, so `badCode` cannot apply to them.
+    expect(collapsed.every((arg) => arg.startsWith("isServerFault(")),
+      `a surface collapses a server response it was holding: ${collapsed.join(" | ")}`).toBe(true);
+    // The browser CEREMONY's catch deliberately stays generic: it also fires when the reader presses
+    // Escape on the key prompt, and "your code was wrong" about a cancelled ceremony is the same
+    // species of lie this file exists to remove.
+    expect(STEP, "the passkey ceremony's catch was swept in with the classified ones")
       .toContain('setFailed("code"); setBusy(false);');
   });
 

@@ -481,7 +481,20 @@ export async function authLocalPlugin(app: FastifyInstance) {
         // #679 will draw the kinds; the value is here now because the screen cannot ask for it later
         // (the receipt holder has no session, so `/me/factors` is closed to them) and because a member
         // sent to enrol under `passkey` must not meet a form offering an authenticator app.
-        return { ok: false, factor: enrolled ? 'required' : 'enrolment-required' as const, kinds: acceptedKinds(factorStance) }
+        //
+        // #687: the two stages want DIFFERENT sets, and sending the stance for both is what left the
+        // door drawing a code box at somebody holding only a security key.
+        //   required           → `usable`: what THIS member can present here and now. Anything else is
+        //                        an instruction they cannot follow — the lock-out a real YubiKey hit.
+        //   enrolment-required → the stance: they hold nothing yet, so the question is what they may
+        //                        install.
+        // `usable` is a fact about the caller's own account and they have already proved the password,
+        // so naming it tells them nothing they could not learn by trying.
+        return {
+          ok: false,
+          factor: enrolled ? 'required' : 'enrolment-required' as const,
+          kinds: enrolled ? usable : acceptedKinds(factorStance),
+        }
       }
 
       let sid: string
