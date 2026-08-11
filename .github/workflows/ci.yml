@@ -86,7 +86,7 @@ jobs:
           set -euo pipefail
           # filter-ok: the k8s manifests are private infrastructure (#178) — this gate
           # self-disables where they are absent (the public tree) and still runs in the upstream.
-          if [ ! -d deploy/k8s ]; then echo "no k8s manifests here — nothing to gate"; exit 0; fi
+          if [ ! -d deploy/k8s ]; then echo "no k8s manifests here — nothing to gate"; exit 0; fi # filter-ok: the guard itself
           # wikistead images only — the in-cluster infra images (postgres/openfga/…) are convenience
           # scaffolding the prod overlay replaces with operators/managed services (see PROD NOTES/#423).
           if kustomize build deploy/k8s/overlays/prod | grep -E 'image: .*wikistead-[a-z]+:latest'; then # filter-ok: guarded above
