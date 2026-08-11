@@ -6,7 +6,7 @@ import { Input } from "../ui/Input";
 import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { QrCode } from "../ui/QrCode"; // #653the same code the settings screen draws
 import { assetUrl } from "../data/apiClient";
-import { startRegistration } from "@simplewebauthn/browser"; // #678: a key made at the door
+import { startRegistration, startAuthentication } from "@simplewebauthn/browser"; // #678: a key made at the door; #687: and presented at it
 import { isServerFault } from "./serverFault";
 import { factorKindsPhrase, browserCanUseFactorKind } from "../settings/factor-kind"; // #686: one home for the kind nouns
 
@@ -106,6 +106,35 @@ export function FactorStep(
     }
   };
 
+  /**
+   * #687: PRESENT a passkey at the door. The lock-out this fixes: a member holding only a security
+   * key reached a screen with a six-digit box and no other way forward — the server had accepted
+   * assertions here since #665 and nothing on the screen ever asked for one.
+   *
+   * Two calls, mirroring the settings panel's removal flow: the server mints the challenge (it is a
+   * write — see the route's own note), the browser proves the key, the assertion goes back to the
+   * same `/auth/local/factor` that takes a code. The options are used AS RECEIVED — rebuilding them
+   * here is what broke #666.
+   */
+  const presentPasskey = async () => {
+    if (busy) return;
+    setBusy(true); setFailed(false);
+    try {
+      const res = await post("/auth/local/factor/passkey/options", {});
+      // Classified before the ceremony, because the catch below also sees a cancelled prompt.
+      if (!res.ok) { setFailed(await classify(res)); setBusy(false); return; }
+      const { options } = await res.json() as { options: Record<string, unknown> };
+      const assertion = await startAuthentication({ optionsJSON: options as never });
+      const done = await post("/auth/local/factor", { passkey: assertion, returnTo });
+      if (!done.ok) { setFailed(await classify(done)); setBusy(false); return; }
+      await arrive(done);
+    } catch {
+      // ⚠️ NOT "unavailable" and NOT "badCode": this catch fires when the reader dismisses the
+      // browser's key prompt or the key is absent. Neither is an outage, and neither is a wrong code.
+      setFailed("code"); setBusy(false);
+    }
+  };
+
   const startEnrolment = async () => {
     setBusy(true); setFailed(false);
     const res = await post("/auth/local/factor/enrol", {}).catch(() => null);
@@ -150,8 +179,31 @@ export function FactorStep(
 
       {stage === "required" ? (
         <>
-          <p className="m-0 text-sm text-fg-dim" data-testid="login-factor-prompt">{t("auth.factorPrompt")}</p>
-          {codeBox(present, "login-factor")}
+          {/* #687: the sentence names what THIS member can present (the server sends their own usable
+              kinds at this stage, not the tenant's stance), the same way #686 made the enrolment
+              prompt name what may be installed. It used to say "your authenticator app" to somebody
+              whose only factor was a security key. */}
+          <p className="m-0 text-sm text-fg-dim" data-testid="login-factor-prompt">
+            {t("auth.factorPrompt", { kinds: factorKindsPhrase(kinds, t) })}
+          </p>
+          {/* The code box belongs to the person who can answer with a code. Showing it to somebody who
+              holds only a passkey is the #606 shape — a control whose only outcome is a refusal. */}
+          {accepts("totp") && codeBox(present, "login-factor")}
+          {accepts("passkey") && webauthn && (
+            <Button variant={accepts("totp") ? "default" : "primary"} className="w-full" disabled={busy}
+              onClick={() => void presentPasskey()} data-testid="login-factor-passkey">
+              {busy && <Loader2 size={16} className="animate-spin" />}
+              {t("auth.factorPresentPasskey")}
+            </Button>
+          )}
+          {/* Nothing on offer: the member's only accepted kind needs WebAuthn and this browser has
+              none. Same ruling as the enrolment side (#672 ③) — the lock-out is accepted, but it must
+              be legible rather than an empty panel. */}
+          {!accepts("totp") && !webauthn && (
+            <p className="m-0 text-sm text-[var(--danger)]" data-testid="login-factor-unsupported">
+              {t("auth.factorNoWebauthn")}
+            </p>
+          )}
         </>
       ) : enrolling ? (
         <>
