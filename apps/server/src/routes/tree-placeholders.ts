@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { OpenFgaClient } from '@openfga/sdk'
-import { checkRelation, filterAuthorized, currentAuthzScope, readUserTuplesByType } from '@wikistead/authz'
+import { filterAuthorized, currentAuthzScope } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
 import { groupGrantee } from '../auth/group-sync.js'
 
@@ -153,12 +153,26 @@ async function grantsPath(ctx: Ctx, branchParentId: string | null, principals: s
   // `viewable` is not `view` (restricted and trashed subtract later), so everything is Checked below.
   const candidates = new Set<string>()
   for (const principal of principals) {
-    if (ctx.budget.left <= 0) { ctx.exhausted = true; return }
-    const tuples = await readUserTuplesByType(ctx.fga, principal, 'page:')
-    ctx.budget.left -= 1
-    for (const t of tuples) {
-      if ((TREE_VIEW_LEAVES as readonly string[]).includes(t.relation)) candidates.add(t.object.slice('page:'.length))
-    }
+    // ⚠️ Page-by-page, CHARGED PER PAGE — not read to completion. The first version read every tuple
+    // first and charged one unit after, and for the member who created a space (manage_direct on all
+    // of it) that is thousands of tuples in dozens of round trips before the budget was ever asked —
+    // measured on #541's 197-page fixture, where it starved the paint this route exists to keep fast.
+    // §4.3 said the cost "follows the roster"; the budget is only true of the roster walk if the walk
+    // itself is metered.
+    let cursor: string | undefined
+    do {
+      if (ctx.budget.left <= 0) { ctx.exhausted = true; return }
+      ctx.budget.left -= 1
+      const res = await ctx.fga.read({ user: principal, object: 'page:' },
+        { pageSize: 50, ...(cursor ? { continuationToken: cursor } : {}) })
+      for (const t of res.tuples ?? []) {
+        const k = t.key
+        if (k?.relation && k.object && (TREE_VIEW_LEAVES as readonly string[]).includes(k.relation)) {
+          candidates.add(k.object.slice('page:'.length))
+        }
+      }
+      cursor = res.continuation_token || undefined
+    } while (cursor)
   }
   if (!candidates.size) return
 

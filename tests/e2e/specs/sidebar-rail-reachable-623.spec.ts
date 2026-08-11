@@ -22,8 +22,13 @@ const PAGES = Array.from({ length: 300 }, (_, i) => ({
 
 test("#623: no row of the page tree is stranded below the fold", async ({ page }) => {
   test.setTimeout(180_000);
-  await page.route(/\/spaces\/[^/]+\/pages(\?|$)/, (r) =>
-    r.request().method() === "GET" ? r.fulfill({ json: PAGES }) : r.fallback());
+  // #623 §6.3: the tree reads §5's paint now, so the tall fixture rides that route. The old
+  // whole-space stub kept matching nothing and this spec quietly measured the real five-row demo tree
+  // — rows can be missing from a measurement for reasons that have nothing to do with the claim.
+  await page.route((u) => u.pathname.endsWith("/pages/paint"), (r) =>
+    r.request().method() === "GET"
+      ? r.fulfill({ json: { branches: [{ parentId: null, pages: PAGES, nextCursor: null }] } })
+      : r.fallback());
   await openDemo(page);
   await sleep(1500);
 

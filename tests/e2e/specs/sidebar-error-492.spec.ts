@@ -1,10 +1,14 @@
 import { test, expect } from "@playwright/test";
 import { openDemo } from "../helpers";
 
-// #492: a transient failure of the boot-critical page-tree fetch (`GET /spaces/:id/pages`) used to render
-// the sidebar as the "No pages yet" EMPTY state — `pages = pagesQ.data ?? []` conflates error/loading with
-// genuinely empty. The fix distinguishes them: a failed fetch shows a retry affordance, not the empty text.
-const pagesTree = /\/spaces\/[^/]+\/pages(\?|$)/;
+// #492: a transient failure of the boot-critical page-tree fetch used to render the sidebar as the
+// "No pages yet" EMPTY state — `pages = pagesQ.data ?? []` conflates error/loading with genuinely
+// empty. The fix distinguishes them: a failed fetch shows a retry affordance, not the empty text.
+//
+// #623 §6.3: the boot-critical read is §5's PAINT now (`/pages/paint`), and this pattern matches both
+// it and any branch read — the claim is about the tree's first fetch failing, whichever route carries
+// it, so pinning the old whole-space path would leave this green while the real read failed unseen.
+const pagesTree = /\/spaces\/[^/]+\/pages(\/paint|\/branch)?(\?|$)/;
 
 test("#492: a FAILED page-tree fetch shows a retry affordance, not the empty state", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();

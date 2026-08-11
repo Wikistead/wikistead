@@ -822,6 +822,7 @@
     "noSpace": "No space",
     "untitledSpace": "Untitled space",
     "loadFailed": "Failed to load.",
+    "placeholderPage": "(A page you can’t view)",
     "retry": "Retry",
     "noSpaces": "No spaces yet. Create one above.",
     "noPages": "No pages yet. Add one above.",

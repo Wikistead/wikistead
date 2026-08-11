@@ -3,9 +3,10 @@ import { SELECTED_ROW } from "../ui/selected-row"; // #632: shared with the sett
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, FilePen, FilePlus, FileText, Loader2, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
+import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX } from "./lazy-tree"; // #623 §6.3
 
 // The presentational page-tree — the ONE react-arborist tree + row renderer shared by every surface that
 // shows a space's page hierarchy: the member `Sidebar`, and (read-only) the anonymous public reader-chrome
@@ -49,6 +50,22 @@ function useSize() {
   return { ref, size };
 }
 
+/**
+ * #623 §1: the branch's next page arrives by SCROLLING — this row asks for it when it becomes
+ * visible. In a virtualised tree, being RENDERED is being scrolled to: react-arborist only mounts
+ * rows inside the viewport, so a mount effect is the "scrolled into view" signal without an observer.
+ */
+function MoreRow({ onVisible }: { onVisible: () => void }) {
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+    onVisible();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return <div className="flex h-full items-center px-3 text-fg-dim" data-testid="tree-branch-more"><MoreHorizontal size={13} /></div>;
+}
+
 export function PageTree({
   nodes,
   selectedId,
@@ -58,6 +75,8 @@ export function PageTree({
   onRowAction,
   onTogglePin,
   onMove,
+  onToggleBranch,
+  onLoadMore,
   disableDrop,
   deleteMode = "trash_only",
 }: {
@@ -73,6 +92,11 @@ export function PageTree({
   // #284: pin/unpin toggle — a member-personal action, so NOT canEdit-gated (a view-only
   // member may pin). Ref-routed like onRowAction (the NodeRow identity contract, ADR-119).
   onTogglePin?: (d: PageTreeNode) => void;
+  // #623 §6.3: a lazy caller is told which page row opened/closed, so it can fetch that branch. The
+  // sentinel child (`unloaded:`) is what made the chevron draw before anything was fetched.
+  onToggleBranch?: (pageId: string, open: boolean) => void;
+  /** §1: the `more:` row asks for the branch's next page when it scrolls into view. */
+  onLoadMore?: (parentId: string | null) => void;
   onMove?: (args: { dragIds: string[]; parentId: string | null; index: number }) => void;
   disableDrop?: (args: { parentNode: NodeApi<PageTreeNode> | null; dragNodes: NodeApi<PageTreeNode>[] }) => boolean;
 }) {
@@ -97,9 +121,43 @@ export function PageTree({
   // NodeRow would change its identity and remount every row (the Radix menu-close bug).
   const onTogglePinRef = useRef(onTogglePin);
   onTogglePinRef.current = onTogglePin;
+  // #623 §6.3: same ref contract — a fresh callback identity would remount every row (the Radix bug).
+  const onLoadMoreRef = useRef(onLoadMore);
+  onLoadMoreRef.current = onLoadMore;
+  const onToggleBranchRef = useRef(onToggleBranch);
+  onToggleBranchRef.current = onToggleBranch;
 
   const NodeRow = useCallback(({ node, style, dragHandle }: NodeRendererProps<PageTreeNode>) => {
     const d = node.data;
+    // #623 §6.3: the three synthetic rows a lazy branch produces. None is a page: no open, no menu,
+    // no drag, no pin — §4.7's "not usable" said in the renderer.
+    if (d.id.startsWith(UNLOADED_CHILD_PREFIX)) {
+      // The instant between expanding a row and its branch arriving. Exists mostly unseen: the parent
+      // draws its chevron because of this child, and the fetch replaces it on the next render.
+      return <div className="flex h-full items-center px-3 text-fg-dim" data-testid="tree-branch-loading"><Loader2 size={13} className="animate-spin" /></div>;
+    }
+    if (d.id.startsWith(MORE_PREFIX)) {
+      const parentId = d.id.slice(MORE_PREFIX.length);
+      return (
+        <MoreRow key={d.id} onVisible={() => onLoadMoreRef.current?.(parentId === "root" ? null : parentId)} />
+      );
+    }
+    if (d.id.startsWith(PLACEHOLDER_PREFIX)) {
+      // §4 / ruling ②: one fixed, unnamed label for every cause — private, draft and restricted are
+      // indistinguishable here on purpose. Expandable only; its children are already in hand.
+      return (
+        <div className="flex h-full w-full min-w-0 items-center gap-1.5 px-1 select-none" data-testid="tree-placeholder">
+          <span
+            className="flex size-4 flex-none cursor-pointer items-center justify-center"
+            onClick={(e) => { e.stopPropagation(); node.toggle(); }}
+            data-testid="tree-placeholder-chevron"
+          >
+            <ChevronRight size={13} className={cn("text-fg-dim transition-transform duration-[120ms]", node.isOpen && "rotate-90")} />
+          </span>
+          <span className="truncate text-sm italic text-fg-dim">{d.name}</span>
+        </div>
+      );
+    }
     const selected = d.pageId === selectedId;
     const hasChildren = (d.children?.length ?? 0) > 0;
     // #193 (rebuilt as ONE structure): react-arborist positions each row in a wrapper of exactly
@@ -281,7 +339,14 @@ export function PageTree({
         disableDrag={!canEdit}
         disableDrop={disableDrop ?? (() => true)}
         onMove={onMove}
-        onActivate={(n: NodeApi<PageTreeNode>) => onOpen(n.data.pageId)}
+        onActivate={(n: NodeApi<PageTreeNode>) => { if (n.data.pageId) onOpen(n.data.pageId); }}
+        // #623 §6.3: tell the lazy caller which BRANCH opened. Arborist reports the id only; the
+        // direction is read back from the node, post-toggle.
+        onToggle={(id: string) => {
+          if (!id.startsWith("page:")) return;
+          const open = treeRef.current?.get(id)?.isOpen ?? true;
+          onToggleBranchRef.current?.(id.slice(5), open);
+        }}
       >
         {NodeRow}
       </Tree>

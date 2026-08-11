@@ -36,7 +36,9 @@ test("#541: a realistic 197-page space's sidebar arrives with the body — on ev
   const pageIds: string[] = [];
   for (let i = 0; i < PAGES; i++) {
     const r = await api.post(`/spaces/${spaceId}/pages`, { data: { title: `Page ${String(i).padStart(3, "0")}` } });
-    expect(r.ok()).toBe(true);
+    // the body in the message: a fixture that dies mid-loop must say WHY (it did not, and the first
+    // diagnosis chased the timing this spec is actually about)
+    expect(r.ok(), `page ${i}: ${r.status()} ${await r.text()}`).toBe(true);
     pageIds.push(((await r.json()) as { id: string }).id);
   }
   // The tuples that make authz cost something on dev: published bulk, a private band (lock badges +

@@ -16,7 +16,7 @@ import { collectPageView, analyticsDayUTC } from '../analytics/collect.js' // #4
 import { resolveEntitlements } from '@wikistead/entitlements' // #464: EE gate for the analytics dashboard
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
-import { resolveTreePlaceholders, type PlaceholderNode } from './tree-placeholders.js' // #623 / ADR-220 §4
+import { resolveTreePlaceholders, PLACEHOLDER_NODE_MAX, type PlaceholderNode } from './tree-placeholders.js' // #623 / ADR-220 §4
 import type { TenantDb } from '../db/index.js'
 import { pool, registry, acquireTenantDb } from '../db/index.js' // #411: cross-tenant trash retention sweep
 import { flushDraft } from '../collab-flush.js'
@@ -1857,7 +1857,7 @@ export async function listBranch(
     limit?: number
     cursor?: string
     /** §4: resolve placeholder chains for this branch (member principals only; the routes decide). */
-    placeholders?: { tenantId: string; groups: string[] }
+    placeholders?: { tenantId: string; groups: string[]; budget?: { left: number } }
   },
 ): Promise<BranchPage & { restarted: boolean; placeholders?: PlaceholderNode[]; placeholdersExhausted?: boolean }> {
   const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
@@ -1933,6 +1933,7 @@ export async function listBranch(
       spaceId: args.spaceId, tenantId: args.placeholders.tenantId, branchParentId: args.parentId,
       subject: args.subject, groups: args.placeholders.groups,
       invisibleChildIds: page.filter((r) => !visible.has(r.id)).map((r) => r.id),
+      ...(args.placeholders.budget ? { budget: args.placeholders.budget } : {}),
       ...(args.context ? { context: args.context } : {}),
       toPage: (row) => toPage(row as unknown as PageRow) as unknown as { id: string },
     })
@@ -1978,12 +1979,15 @@ export async function paintTree(
     placeholders?: { tenantId: string; groups: string[] }
   },
 ): Promise<{ branches: PaintedBranch[] }> {
+  // §4.3: ONE budget for the whole paint. Each branch resolving with its own would multiply the
+  // ceiling by the depth of the open page — up to ten budgets where the ADR priced one.
+  const paintBudget = { left: PLACEHOLDER_NODE_MAX }
   const one = async (parentId: string | null): Promise<PaintedBranch> => {
     const b = await listBranch(db, fga, {
       spaceId: args.spaceId, parentId, subject: args.subject,
       ...(args.context ? { context: args.context } : {}),
       ...(args.limit != null ? { limit: args.limit } : {}),
-      ...(args.placeholders ? { placeholders: args.placeholders } : {}),
+      ...(args.placeholders ? { placeholders: { ...args.placeholders, budget: paintBudget } } : {}),
     })
     return {
       parentId, pages: b.pages, nextCursor: b.nextCursor,
