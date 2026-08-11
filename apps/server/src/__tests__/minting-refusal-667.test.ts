@@ -25,6 +25,8 @@ import postgres from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import { pool } from '../db/pool.js'
 import { buildApp } from '../app.js'
+// @ts-expect-error — .mjs script module, no types; #621: the image build has no repo-root scripts/
+import { eeServerSourceRoot } from '../../../../scripts/ee-source-root.mjs'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const T = 'tenant_dev'
@@ -107,9 +109,12 @@ describe('#667: the list finds a new minting route on the day it lands', () => {
   // `createScimToken` returns `{ plaintext }`, `listShareLinks` returns ids). A route that invents a
   // seventh way will not be caught by the words — but a route that copies one of the existing six will,
   // and copying is how the sixth arrived.
+  // #178: the EE root is resolved (the package is mid-move to the ee/ overlay); null only in a
+  // CE-only clone, where the EE minting routes are legitimately not in the tree to scan.
+  const EE_ROOT = eeServerSourceRoot(resolve(import.meta.dirname, '../../../..'))
   const ROOTS = [
     resolve(import.meta.dirname, '../routes'),
-    resolve(import.meta.dirname, '../../../../packages/ee-server/src'),
+    ...(EE_ROOT === null ? [] : [EE_ROOT]),
   ]
   const HANDS_OUT = /\bplaintext\b|createApiKey\s*\(|createScimToken\s*\(|listShareLinks\s*\(/
 

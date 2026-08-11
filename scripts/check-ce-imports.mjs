@@ -19,21 +19,27 @@
 // code, which is the licensing invariant ADR-069 guarantees. Invariant 1 (EE namespace) still applies
 // to apps.
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const EE_NAMESPACE = '@wikistead-ee/'
 const DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
+// #178 / ADR-084 (2026-08-12 addendum): the private overlay's workspace dirs (appended to
+// pnpm-workspace.yaml locally by dev-bootstrap.sh — must stay in agreement with it). Absent in a
+// CE-only clone and BEFORE the move; discovered when a bootstrapped dev tree has them, so invariant 2
+// keeps naming the overlay packages after they leave packages/.
+const OVERLAY_DIRS = ['ee/packages-ee', 'ee/apps-ee']
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
 }
 
-// Discover every workspace package (packages/* and apps/*) with its manifest.
+// Discover every workspace package (packages/*, apps/*, and any present overlay dirs) with its manifest.
 function discoverPackages() {
   const pkgs = []
-  for (const dir of ['packages', 'apps']) {
+  for (const dir of ['packages', 'apps', ...OVERLAY_DIRS]) {
     const base = join(root, dir)
     if (!existsSync(base)) continue
     for (const entry of readdirSync(base)) {
@@ -42,6 +48,17 @@ function discoverPackages() {
     }
   }
   return pkgs
+}
+
+const isOverlay = (p) => OVERLAY_DIRS.some((d) => p.dir === d)
+/** Is this path ignored by git? The overlay's whole point is that its bytes never enter CE's objects. */
+function gitIgnored(path) {
+  try {
+    execFileSync('git', ['check-ignore', '-q', path], { cwd: root, stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
 }
 
 function walk(dir) {
@@ -107,17 +124,28 @@ if (proprietary.length > 0) {
   console.warn('WARN: no proprietary (private) workspace packages found — invariant 2 has nothing to enforce.')
 }
 
-// 3. #178: every proprietary package must also be FILTERBED from the public repo. The two lists used to
-// describe the same set with only one of them updating itself — the proprietary set here is derived from
-// `"private": true`, while the filter carried a hand-written path list, so a new proprietary package was
-// covered here automatically and silently MISSED there. Both now read the SAME derivation
-// (proprietaryPackagePaths, exported by the filter); this check stays as the belt that proves the two
-// consumers agree, and it catches the case the derivation cannot: a proprietary package the filter's
-// module fails to see at all.
+// 3. #178: every proprietary package's bytes must be UNPUBLISHABLE, and there are exactly two ways to
+// be that (ADR-084 2026-08-12 addendum) — two-armed on purpose:
+//   - IN THE CE TREE (packages/, apps/): its history needs erasing, so it must be on the filter's list.
+//     The two lists used to describe the same set with only one of them updating itself — both now read
+//     the SAME derivation (proprietaryPackagePaths, exported by the filter); this check stays as the
+//     belt that proves the two consumers agree, and it catches the case the derivation cannot: a
+//     proprietary package the filter's module fails to see at all.
+//   - IN THE OVERLAY (ee/…): its bytes never enter CE's git objects, so the filter has nothing to erase
+//     — but ONLY if it is actually gitignored, which is therefore what gets checked. An overlay
+//     package that git would track is the worst of both arms: not filtered AND in the objects.
+// A package that is neither filtered nor ignored fails; so does an overlay package that is not
+// `private: true` (everything under ee/ is proprietary by definition — an unmarked one would dodge
+// invariants 1–2's proprietary handling).
 {
   const { FILTER_PATHS, proprietaryPackagePaths } = await import(pathToFileURL(join(root, 'scripts/prepublish-filter.mjs')).href)
   const derived = new Set(proprietaryPackagePaths(root))
   for (const p of packages) {
+    if (isOverlay(p)) {
+      if (p.json.private !== true) fail(`overlay package ${p.name ?? p.entry} (${p.dir}/${p.entry}) is not "private": true — everything in the overlay is proprietary`)
+      if (!gitIgnored(p.path)) fail(`overlay package ${p.name ?? p.entry} (${p.dir}/${p.entry}) is NOT gitignored — its bytes would enter the CE repo's objects`)
+      continue
+    }
     if (p.json.private !== true || !p.name) continue
     const rel = `${p.dir}/${p.entry}`
     if (!derived.has(rel)) {

@@ -2,6 +2,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+// @ts-expect-error — .mjs script module, no types (repo-root JS helper)
+import { eeServerSourceRoot } from "../../../../scripts/ee-source-root.mjs";
 
 // #637 / ADR-216, rewritten for #667 / ADR-221: the picker offers exactly what the EE side declares.
 //
@@ -19,11 +21,18 @@ import { resolve } from "node:path";
 //
 // The declaration lives in EE and the picker in CE, which is why this compares TEXT rather than
 // importing it — the CE→EE boundary guard forbids the import, and rightly: #178 lifts that package out.
-describe("#667: the permission picker and the EE classification declare the same types", () => {
+//
+// #178: the EE source root is resolved (the package is mid-move to the ee/ overlay). skipIf, not a
+// silent branch — a CE-only clone has no declaration to compare against and the skip is visible; a
+// drifted overlay throws in the resolver rather than landing here.
+const EE_ROOT = eeServerSourceRoot(resolve(import.meta.dirname, "../../../.."));
+
+describe.skipIf(EE_ROOT === null)("#667: the permission picker and the EE classification declare the same types", () => {
   const read = (p: string) => readFileSync(resolve(import.meta.dirname, p), "utf8");
+  const readEe = (rel: string) => readFileSync(resolve(EE_ROOT!, rel), "utf8");
 
   it("every declared type is offerable, and nothing else is", () => {
-    const declared = read("../../../../packages/ee-server/src/api-keys/classification.ts");
+    const declared = readEe("api-keys/classification.ts");
     const block = /export const RESOURCE_TYPES = \[([\s\S]*?)\] as const/.exec(declared)?.[1] ?? "";
     const types = new Set([...block.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!));
     expect(types.size, "the declaration was parsed (a broken pattern must not pass vacuously)").toBeGreaterThan(10);
@@ -40,7 +49,7 @@ describe("#667: the permission picker and the EE classification declare the same
     // The server refuses `search: write` with `unreachable_permission` — no route requires it, so the
     // cell would say the integration can write to search while nothing lets it. Offering a choice the
     // server will refuse is the #642 defect in a new place.
-    const map = read("../../../../packages/ee-server/src/api-keys/classification.ts");
+    const map = readEe("api-keys/classification.ts");
     const requiresWrite = new Set(
       [...map.matchAll(/\{\s*type:\s*'([a-z_]+)',\s*action:\s*'write'\s*\}/g)].map((m) => m[1]!),
     );

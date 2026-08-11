@@ -18,8 +18,13 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
+// #178: the EE package is mid-move to the ee/ overlay, so its source root is RESOLVED, not hard-coded
+// — null only in a genuinely CE-only clone (an overlay that drifted throws in the resolver instead).
+// @ts-expect-error — .mjs script module, no types; #621: the image build has no repo-root scripts/
+import { eeServerSourceRoot } from '../../../../scripts/ee-source-root.mjs'
+
 const SERVER = resolve(import.meta.dirname, '..')
-const EE = resolve(import.meta.dirname, '../../../../packages/ee-server/src')
+const EE = eeServerSourceRoot(resolve(import.meta.dirname, '../../../..'))
 const NAME = /[Ww]ikistead/
 
 /** Files allowed to write the name, each because it is an identifier or IS the fallback. */
@@ -63,13 +68,16 @@ describe('#575 slice D: the server reads the product name rather than writing it
     expect(offendersIn(SERVER, ALLOWED), 'use productName()').toEqual([])
   })
 
-  it('nor does EE', () => {
-    expect(offendersIn(EE, ALLOWED_EE), 'use the deployment value').toEqual([])
+  // skipIf, not a silent branch: in a CE-only clone there is no EE source to sweep and the skip is
+  // visible in the run. In this upstream the resolver always finds it (or throws on a drifted overlay).
+  it.skipIf(EE === null)('nor does EE', () => {
+    expect(offendersIn(EE!, ALLOWED_EE), 'use the deployment value').toEqual([])
   })
 
   it('the exemption list is not stale — every entry is a real file', () => {
     for (const rel of Object.keys(ALLOWED)) expect(() => readFileSync(join(SERVER, rel), 'utf8'), rel).not.toThrow()
-    for (const rel of Object.keys(ALLOWED_EE)) expect(() => readFileSync(join(EE, rel), 'utf8'), rel).not.toThrow()
+    if (EE !== null)
+      for (const rel of Object.keys(ALLOWED_EE)) expect(() => readFileSync(join(EE, rel), 'utf8'), rel).not.toThrow()
   })
 
   it('the surfaces slice B and D converted really interpolate it', () => {
