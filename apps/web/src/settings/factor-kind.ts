@@ -69,3 +69,21 @@ export function factorKindsPhrase(kinds: readonly string[] | null | undefined, t
 export function acceptedFactorKinds(stance: string | null | undefined): readonly string[] {
   return stance === "passkey" || stance === "totp" ? [stance] : ALL_FACTOR_KINDS;
 }
+
+/**
+ * Whether THIS browser can enrol and present a factor of the given kind (#686).
+ *
+ * The same asymmetry as the stance, one fact over: the sign-in interstitial hid its passkey button in a
+ * browser without WebAuthn while the account panel kept offering "Add a passkey" — an entrance that
+ * cannot be walked through. The two surfaces were reading DIFFERENT copies of the question (one asked,
+ * one never did), which is the whole defect; now both read this one.
+ *
+ * Only the synchronous check, by ruling (#672 ③): the platform-authenticator probe answers about a
+ * fingerprint reader, and a laptop without one still takes a USB key — an async "cannot" here would
+ * turn a working setup into a refusal. Kinds that need nothing from the browser answer true, so a
+ * third kind is offerable on day one and narrows itself only when it actually depends on an API.
+ */
+export function browserCanUseFactorKind(kind: string): boolean {
+  if (kind === "passkey") return typeof window !== "undefined" && "PublicKeyCredential" in window;
+  return true;
+}
