@@ -199,10 +199,10 @@ If a tenant's OIDC config locks everyone out, see
 - **Health**: `server` exposes `healthz`/`readyz`; deep dependency-readiness
   checks are tracked in #400 — keep infra-level probes on Postgres/OpenFGA/Meili
   in the meantime.
-- **Pre-production gate**: a checklist of items that can only be verified in a
-  real environment (cookie scoping across tenant subdomains, XFF trust, WS
-  timeouts, noindex behaviour, rate-limit fan-out across replicas, …) lives in
-  `docs/runbooks/prelaunch-deploy-gate.md`. Walk it before going live.
+- **Pre-production gate**: before going live, walk the items that can only be
+  verified in a real environment — cookie scoping across tenant subdomains,
+  XFF trust, WS timeouts, noindex behaviour, and rate-limit fan-out across
+  replicas.
 
 ## Where the user documentation lives
 
