@@ -555,7 +555,7 @@ function SecurityTab() {
   return (
     <SettingsPage
       title={t("account.factorsTitle")}
-      description={t("account.factorsDesc", { kinds: factorKindsPhrase(acceptedFactorKinds(factors.data?.stance), t) })}
+      description={t("account.factorsDesc", { kinds: factorKindsPhrase(acceptedFactorKinds(factors.data?.stance), t, "presented") })}
     >
       <SecondFactorPanel />
     </SettingsPage>

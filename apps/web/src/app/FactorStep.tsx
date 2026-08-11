@@ -184,7 +184,7 @@ export function FactorStep(
               prompt name what may be installed. It used to say "your authenticator app" to somebody
               whose only factor was a security key. */}
           <p className="m-0 text-sm text-fg-dim" data-testid="login-factor-prompt">
-            {t("auth.factorPrompt", { kinds: factorKindsPhrase(kinds, t) })}
+            {t("auth.factorPrompt", { kinds: factorKindsPhrase(kinds, t, "presented") })}
           </p>
           {/* The code box belongs to the person who can answer with a code. Showing it to somebody who
               holds only a passkey is the #606 shape — a control whose only outcome is a refusal. */}
@@ -234,7 +234,7 @@ export function FactorStep(
               stance was narrowed, so the one instruction a locked-out reader had was impossible to
               follow. `kinds` was already here, used by `accepts()` on the very next line. */}
           <p className="m-0 text-sm text-fg-dim" data-testid="login-factor-prompt">
-            {t("auth.factorEnrolPrompt", { kinds: factorKindsPhrase(kinds, t) })}
+            {t("auth.factorEnrolPrompt", { kinds: factorKindsPhrase(kinds, t, "setup") })}
           </p>
           {accepts("totp") && (
             <Button variant="primary" className="w-full" disabled={busy}

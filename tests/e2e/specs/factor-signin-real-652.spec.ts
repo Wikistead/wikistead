@@ -175,8 +175,7 @@ test("#652: password, then a real code, and you are in", async ({ page, request 
   await page.goto("/settings/account/security");
   await expect(page.getByTestId("second-factor-panel")).toBeVisible({ timeout: 20_000 });
   await dismissOverlays(page);
-  await page.getByTestId("factor-label-input").fill("e2e real");
-  await page.getByTestId("factor-add").click();
+  await page.getByTestId("factor-add").click(); // #653enrolment takes no name
   await expect(page.getByTestId("factor-enrolling")).toBeVisible({ timeout: 15_000 });
   const secret = (await page.getByTestId("factor-secret-value").innerText()).replace(/\s/g, "");
   await page.getByTestId("factor-confirm-code").fill(totp(secret));

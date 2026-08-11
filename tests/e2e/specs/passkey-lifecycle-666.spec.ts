@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import postgres from "postgres";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, nameNewestFactor } from "../helpers";
 
 // #666the GREEN path — a passkey is registered, and then it comes OFF by signing with itself.
 //
@@ -79,8 +79,10 @@ test("#666: a passkey registered from the screen comes off by signing with itsel
   await openSecurity(page);
 
   // ── register ───────────────────────────────────────────────────────────────────────────────────
-  await page.getByTestId("factor-label-input").fill(label);
+  // #653enrolment takes no name. The key is registered first and named afterwards, which is
+  // also the walk a person makes now.
   await page.getByTestId("factor-add-passkey").click();
+  await nameNewestFactor(page, label);
   await expect(rowFor(page, label), "the key is listed once it is registered").toBeVisible({ timeout: 30_000 });
   // Registered, not merely started: an unconfirmed row also appears in the list, and the pending mark is
   // what tells them apart. This is the difference between "the browser was asked" and "the key answered".
@@ -125,8 +127,8 @@ test("#666: without the key, the removal is refused and the factor stays", async
   const label = `key-666-kept-${Date.now().toString(36)}`;
 
   await openSecurity(page);
-  await page.getByTestId("factor-label-input").fill(label);
   await page.getByTestId("factor-add-passkey").click();
+  await nameNewestFactor(page, label);
   await expect(rowFor(page, label)).toBeVisible({ timeout: 30_000 });
 
   // Take the key away — the shape of losing the phone, and the only control that proves the assertion
