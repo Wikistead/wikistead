@@ -12,6 +12,7 @@ import { auditIfEntitled } from '../audit/outbox.js'
 import { destroyUnsatisfiedSessions, countSweptSessions } from '../auth/session.js' // #652 / ADR-219 §2, #679
 import { loadPlatformOidc } from '../auth/oidc.js'
 import { resolveLogin } from './auth.js'
+import { MAX_OIDC_CONNECTIONS } from './admin-connections.js' // #623 ③: one number, owned there
 
 // #537 / ADR-195 Slice 3: the admin's view of "which ways in exist", and the ONE tenant-level switch
 // that has no per-IdP home — platform login (the deployment's shared IdP). tenant#admin gated.
@@ -71,6 +72,10 @@ export interface LoginMethodsView {
   // SSO exemptions? Those writes stayed on the admin tier while the read opened to
   // `manage_connections`, so the screen has to be told which of its controls belong to it.
   canManageStance: boolean
+  // #623 (ruling③): how many OIDC connections this workspace may hold, from the server's own
+  // constant. The screen disables the add button at the cap and says why — but that is convenience;
+  // the POST refuses at the same number, and the number lives in one place (the #685 shape).
+  oidcConnectionCap: number
 }
 
 /** #623: how many SSO exemptions one response may carry. */
@@ -102,6 +107,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
       // The stance/selection writes are tier-gated (see the note on the gate above). The screen asks
       // the server rather than guessing from a tier flag it happens to hold.
       canManageStance: await isTenantAdmin(app.fga, req.user.sub, req.tenant.id),
+      oidcConnectionCap: MAX_OIDC_CONNECTIONS,
       ssoRequired: { selected: !!pref?.sso_required, biting: stance.biting },
       secondFactorRequired: {
         stance: await secondFactorStance(req.db),

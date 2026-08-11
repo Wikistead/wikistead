@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { API } from "../helpers";
+import { API , sweepConnections} from "../helpers";
+
+// #623: my own debris from failed runs, swept on the way IN (the cap makes leftovers block the suite).
+test.beforeAll(async () => { await sweepConnections(["http://127.0.0.1:9/"]); });
 
 // #615: a connection is configured where it is created.
 //

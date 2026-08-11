@@ -9,6 +9,7 @@
     "deleteTitle": "Delete this connection?",
     "deleteConfirm": "Delete \"{{name}}\"? Members who signed in through it keep their content, but their sign-in identities will NOT reconnect if you re-create it.",
     "lockoutRefused": "That would remove the last way to sign in. Enable another connection first.",
+    "limitReached": "This workspace can hold up to {{count}} connections. Remove one before adding another.",
     "verifyBeforeEnable": "Test the connection before you enable it. An enabled connection whose issuer cannot be reached is refused at save.",
     "presetBadge": "preset: {{preset}}",
     "moveUp": "Move up",

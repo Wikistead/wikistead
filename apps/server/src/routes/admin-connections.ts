@@ -35,6 +35,20 @@ import { assertNotLastWayIn } from '../auth/login-methods.js'
 //   - trust_groups is settable HERE (the §2 rev2 "where connections are
 //     created" surface) and default FALSE — flipping them is a deliberate admin act.
 
+/**
+ * #623 (ruling③④): how many OIDC connections a tenant may HOLD — a cap, not a page.
+ *
+ * This list cannot page. Reordering saves the complete ordered id list, so a page would let a tenant
+ * hold connections it can neither see nor reorder; and the same rows become sign-in buttons on
+ * `/auth/login-options`, where "load more ways to sign in" is not a product. Same family as
+ * `MAX_FACTORS_PER_MEMBER` (10) and the pin cap (200): the bound is on what can EXIST.
+ *
+ * Twenty, by ruling, for both the creatable and the shown count — one number, so a connection that can
+ * be created can always be seen. Refused HERE, at issue (#642: never cut the display side while the
+ * write keeps minting).
+ */
+export const MAX_OIDC_CONNECTIONS = 20
+
 const PRESETS: Record<string, { issuer?: (p: { entraTenantId?: string }) => string }> = {
   google: { issuer: () => 'https://accounts.google.com' },
   microsoft: { issuer: (p) => `https://login.microsoftonline.com/${p.entraTenantId}/v2.0` },
@@ -107,6 +121,15 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     trustGroups?: boolean; groupsClaim?: string | null
   } }>('/admin/connections', async (req, reply) => {
     await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
+    // #623 ③: the cap is asked FIRST — before any per-field validation — so the answer to "why can't
+    // I add one" is the true one rather than whichever field check happens to run first.
+    const [{ held }] = await req.db.sql<[{ held: number }]>`
+      SELECT COUNT(*)::int AS held FROM tenant_oidc`
+    if (held >= MAX_OIDC_CONNECTIONS) {
+      throw Object.assign(
+        new Error(`this workspace already has ${MAX_OIDC_CONNECTIONS} connections — remove one before adding another`),
+        { statusCode: 409, code: 'connection_limit_reached' })
+    }
     const b = req.body ?? {}
     const preset = b.preset ?? null
     if (preset !== null && !(preset in PRESETS)) {

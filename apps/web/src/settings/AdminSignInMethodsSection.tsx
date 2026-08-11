@@ -274,6 +274,7 @@ export function AdminSignInMethodsSection() {
     notify.error(
       code === "login_lockout" ? t("adminConnections.lockoutRefused")
       : code === "oidc_unreachable" ? t("adminAuth.saveFailed")
+      : code === "connection_limit_reached" ? t("adminConnections.limitReached", { count: methods.data?.oidcConnectionCap })
       : t("toast.actionFailed"),
     );
   };
@@ -858,11 +859,27 @@ export function AdminSignInMethodsSection() {
         )}
       </div>
 
-      {!adding && (
-        <Button variant="default" size="sm" className="mt-3" data-testid="admin-connection-add" onClick={() => setAdding(true)}>
-          {t("adminConnections.add")}
-        </Button>
-      )}
+      {!adding && (() => {
+        // #623 ③: at the cap the button says WHY it will not work instead of offering a click that can
+        // only 409 (#606's "button that always fails"). The number is the server's (`oidcConnectionCap`);
+        // an older server that does not send it never disables — the POST still refuses, which is the
+        // fortress. Counted against the OIDC rows only: SAML and platform are not creatable here.
+        const cap = methods.data?.oidcConnectionCap;
+        const atCap = cap !== undefined && rows.length >= cap;
+        return (
+          <>
+            <Button variant="default" size="sm" className="mt-3" data-testid="admin-connection-add"
+              disabled={atCap} onClick={() => setAdding(true)}>
+              {t("adminConnections.add")}
+            </Button>
+            {atCap && (
+              <p className="mt-1 text-xs text-fg-dim" data-testid="admin-connection-cap-note">
+                {t("adminConnections.limitReached", { count: cap })}
+              </p>
+            )}
+          </>
+        );
+      })()}
 
       <ConfirmDialog
         open={revokingExemption !== null}

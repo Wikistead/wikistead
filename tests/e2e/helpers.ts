@@ -26,6 +26,27 @@ export const MAILPIT_API = `http://localhost:${P.mailpit}/api/v1`;
 // twelve of `public-page.spec.ts` fail that way, and four more specs with them.
 export const FGA = `http://localhost:${P.fgaHttp}`;
 
+/**
+ * Delete this spec's leftover OIDC connections before it runs (#623).
+ *
+ * Connection fixtures used to be cleaned per-id on the success path only, so every failed run left
+ * its rows behind — measured at 44 rows of sim589/mcp592 debris, all disabled. That was invisible
+ * until the connection cap (ruling③) made existence itself bounded: at 20 held, every further
+ * create answers 409 and the whole family of specs goes red at once. Sweeping AFTER a run can be
+ * skipped by a kill; sweeping your own issuers BEFORE the run converges however the last run died.
+ */
+export async function sweepConnections(issuerPrefixes: string[]): Promise<void> {
+  const H = { Authorization: "Bearer dev-token" };
+  const res = await fetch(`${API}/admin/connections`, { headers: H });
+  if (!res.ok) return; // nothing to sweep on a fresh stack is not a failure
+  const rows = (await res.json()) as { id: string; issuer: string }[];
+  for (const r of rows) {
+    if (issuerPrefixes.some((p) => r.issuer.startsWith(p))) {
+      await fetch(`${API}/admin/connections/${r.id}`, { method: "DELETE", headers: H }).catch(() => {});
+    }
+  }
+}
+
 // #354: publish a page and WAIT until its published body actually contains `expectSubstring`. The publish flush
 // (collab Valkey req/ack) has a timeout and, under parallel-load, can snapshot a stale/empty ydoc so
 // published_md comes out empty — making "type → sleep → publish → assert the view" specs flaky. Polling the
