@@ -16,6 +16,7 @@ import { collectPageView, analyticsDayUTC } from '../analytics/collect.js' // #4
 import { resolveEntitlements } from '@wikistead/entitlements' // #464: EE gate for the analytics dashboard
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
+import { resolveTreePlaceholders, type PlaceholderNode } from './tree-placeholders.js' // #623 / ADR-220 §4
 import type { TenantDb } from '../db/index.js'
 import { pool, registry, acquireTenantDb } from '../db/index.js' // #411: cross-tenant trash retention sweep
 import { flushDraft } from '../collab-flush.js'
@@ -1855,8 +1856,10 @@ export async function listBranch(
     context?: { current_time: string }
     limit?: number
     cursor?: string
+    /** §4: resolve placeholder chains for this branch (member principals only; the routes decide). */
+    placeholders?: { tenantId: string; groups: string[] }
   },
-): Promise<BranchPage & { restarted: boolean }> {
+): Promise<BranchPage & { restarted: boolean; placeholders?: PlaceholderNode[]; placeholdersExhausted?: boolean }> {
   const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
   const limit = Math.min(500, Math.max(1, args.limit ?? BRANCH_PAGE_LIMIT))
 
@@ -1919,14 +1922,35 @@ export async function listBranch(
 
   // §3: every row on its own. `filterAuthorized` keeps the bounded lanes #541 established.
   const visible = new Set(await filterAuthorized(fga, args.subject, 'view', page.map((r) => r.id), args.context))
+
+  // §4: the invisible children are already in hand — the complement of the allowed set — and they are
+  // path 2's seeds. Volunteered here, in the same response, because a placeholder must never be
+  // expandable through this route (§4.2): expanding one opens a node already delivered.
+  let placeholders: PlaceholderNode[] | undefined
+  let placeholdersExhausted: boolean | undefined
+  if (args.placeholders) {
+    const resolved = await resolveTreePlaceholders(db, fga, {
+      spaceId: args.spaceId, tenantId: args.placeholders.tenantId, branchParentId: args.parentId,
+      subject: args.subject, groups: args.placeholders.groups,
+      invisibleChildIds: page.filter((r) => !visible.has(r.id)).map((r) => r.id),
+      ...(args.context ? { context: args.context } : {}),
+      toPage: (row) => toPage(row as unknown as PageRow) as unknown as { id: string },
+    })
+    placeholders = resolved.placeholders
+    placeholdersExhausted = resolved.placeholdersExhausted
+  }
   return {
     pages: page.filter((r) => visible.has(r.id)).map(toPage),
     nextCursor,
     restarted,
+    ...(placeholders !== undefined ? { placeholders, placeholdersExhausted } : {}),
   }
 }
 
-export interface PaintedBranch { parentId: string | null; pages: Page[]; nextCursor: string | null }
+export interface PaintedBranch {
+  parentId: string | null; pages: Page[]; nextCursor: string | null
+  placeholders?: PlaceholderNode[]; placeholdersExhausted?: boolean
+}
 
 /**
  * The FIRST PAINT: the root branch, plus the branches along the path to the page the reader has open.
@@ -1951,6 +1975,7 @@ export async function paintTree(
     context?: { current_time: string }
     open?: string | undefined
     limit?: number
+    placeholders?: { tenantId: string; groups: string[] }
   },
 ): Promise<{ branches: PaintedBranch[] }> {
   const one = async (parentId: string | null): Promise<PaintedBranch> => {
@@ -1958,8 +1983,12 @@ export async function paintTree(
       spaceId: args.spaceId, parentId, subject: args.subject,
       ...(args.context ? { context: args.context } : {}),
       ...(args.limit != null ? { limit: args.limit } : {}),
+      ...(args.placeholders ? { placeholders: args.placeholders } : {}),
     })
-    return { parentId, pages: b.pages, nextCursor: b.nextCursor }
+    return {
+      parentId, pages: b.pages, nextCursor: b.nextCursor,
+      ...(b.placeholders !== undefined ? { placeholders: b.placeholders, placeholdersExhausted: b.placeholdersExhausted } : {}),
+    }
   }
 
   const branches: PaintedBranch[] = [await one(null)]
@@ -4173,6 +4202,8 @@ export async function pagesPlugin(app: FastifyInstance) {
         ...(context ? { context } : {}),
         ...(req.query.open ? { open: req.query.open } : {}),
         ...(Number.isFinite(asked) ? { limit: asked } : {}),
+        // §4.4: members only — a share_link never resolves chains, settled by principal type here
+        ...(req.user ? { placeholders: { tenantId: req.tenant.id, groups: req.user.groups } } : {}),
       })
     })
 
@@ -4208,6 +4239,7 @@ export async function pagesPlugin(app: FastifyInstance) {
         ...(context ? { context } : {}),
         ...(Number.isFinite(asked) ? { limit: asked } : {}),
         ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+        ...(req.user ? { placeholders: { tenantId: req.tenant.id, groups: req.user.groups } } : {}),
       })
     })
 
