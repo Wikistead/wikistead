@@ -1,20 +1,19 @@
 #!/usr/bin/env node
-// #147 / ADR-042 (rulingitem 4): no NEW plaintext credential enters the deploy manifests.
+// #147 / ADR-042 (rulingitem 4): no plaintext credential enters the deploy manifests.
 //
-// Two of them are there today — `POSTGRES_PASSWORD: app` and the OpenFGA datastore URI with its
-// password inline — and this guard does not remove them. Removing them needs SOPS, SOPS needs a
-// `.sops.yaml`, and that file's creation rules cannot be written before somebody decides who holds the
-// age key and where decryption happens. The ruling put that work in the deploy phase for exactly that
-// reason: written early, the encrypted files are re-done the moment the key operation is settled.
+// The two that were committed before SOPS existed — `POSTGRES_PASSWORD: app` and the OpenFGA
+// datastore URI with its password inline — are GONE (#147encrypted to the dev age key under
+// deploy/k8s/secrets/, referenced by secretKeyRef). The ledger below is therefore empty, and this
+// guard's whole job is keeping it that way: a plaintext credential committed once is in the history
+// for ever, so it has to be rotated rather than deleted — the failure is one-way, which is why this
+// fails before the commit rather than after.
 //
-// What CAN be done now, and is the reason this exists: STOP THE DEBT GROWING. A plaintext credential
-// committed once is in the history for ever, so it has to be rotated rather than deleted — the failure
-// is one-way, and a guard that arrives with the deploy phase arrives after the commit that needed it.
-//
-// The shape is the ledger #623 uses: the known plaintext is listed WITH ITS REASON, anything else fails,
-// and the list shrinking is how anybody can tell the promise was kept. It is deliberately not a `grep`
-// for passwords —asked for an allowlist of KEYS whose value must not be inline, because grepping
-// for secret-looking strings finds every example in every comment and gets switched off.
+// The shape is the ledger #623 uses: known plaintext would be listed WITH ITS REASON, anything else
+// fails, and the list shrinking is how anybody can tell the promise was kept. It is deliberately not
+// a `grep` for passwords —asked for an allowlist of KEYS whose value must not be inline,
+// because grepping for secret-looking strings finds every example in every comment and gets switched
+// off. `*.enc.yaml` is exempt: its values are ciphertext by definition, and `.sops.yaml` pins which
+// age recipient every such file encrypts to.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -39,10 +38,8 @@ const SECRET_SUFFIXES = ['_PASSWORD', '_SECRET', '_KEY', '_TOKEN', '_URI', '_DSN
  * has to defend rather than a fact that fades.
  */
 const KNOWN = {
-  'k8s/base/openfga.yaml:OPENFGA_DATASTORE_URI':
-    '#147: the datastore URI carries its password inline. Removed when SOPS lands (ADR-042, deploy phase).',
-  'k8s/base/postgres.yaml:POSTGRES_PASSWORD':
-    '#147: the dev-shaped password the base manifest ships with. Same removal.',
+  // Empty since #147repaid the debt (both former entries are SOPS-encrypted Secrets now).
+  // A new line here is a new promise with a ticket number attached — not an exemption.
 }
 
 function walk(dir) {
@@ -63,19 +60,50 @@ for (const file of walk(SCAN)) {
   if (/\.enc\.ya?ml$/.test(file)) continue
   const rel = relative(root, file).replace(/^deploy\//, '')
   const src = readFileSync(file, 'utf8')
+  // `{ name: FOO_PASSWORD, value: … }` and the multi-line `- name:` / `value:` form both appear in
+  // this tree, so the name and the value are matched on one line OR remembered across two. The
+  // carry-over is real (#147measured the earlier version matching only the inline form, so a
+  // credential written on two lines walked straight past the guard the comment claimed would catch
+  // it). `valueFrom:` on the following line is the CORRECT form and clears the carried name.
+  let carried = null
   for (const line of src.split('\n')) {
     // A comment is prose, not a manifest. Without this the guard reports its own explanation.
     if (/^\s*#/.test(line)) continue
-    // `{ name: FOO_PASSWORD, value: … }` and the multi-line `- name:` / `value:` form both appear in
-    // this tree, so the name and the value are matched on one line OR remembered across two.
-    const inline = /name:\s*([A-Z][A-Z0-9_]*)\s*,\s*value:\s*(\S)/.exec(line)
-    if (!inline) continue
-    const [, name] = inline
-    if (!SECRET_SUFFIXES.some((s) => name.endsWith(s))) continue
-    const key = `${rel}:${name}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    if (!(key in KNOWN)) offenders.push(key)
+    const flagAlways = (name) => {
+      const key = `${rel}:${name}`
+      if (seen.has(key)) return
+      seen.add(key)
+      if (!(key in KNOWN)) offenders.push(key)
+    }
+    const flag = (name) => {
+      if (!SECRET_SUFFIXES.some((s) => name.endsWith(s))) return
+      flagAlways(name)
+    }
+    const inline = /name:\s*([A-Z][A-Z0-9_]*)\s*,\s*value:\s*\S/.exec(line)
+    if (inline) { flag(inline[1]); carried = null; continue }
+    const nameOnly = /-\s*name:\s*([A-Z][A-Z0-9_]*)\s*$/.exec(line)
+    if (nameOnly) { carried = nameOnly[1]; continue }
+    if (carried && /^\s*value:\s*\S/.test(line)) flag(carried)
+    carried = null
+
+    // Arm 2 (#147, measured): kustomize GENERATOR LITERALS — `- some-key=value` — are Secret
+    // objects in the cluster but plaintext in git, and the env-var arms above never see them (the
+    // dev overlay's meili/s3/guest-token literals all walked past the first version of this guard).
+    // Keys here are lower-dashed, so the suffix match is case-insensitive.
+    const literal = /^\s*-\s*([A-Za-z][A-Za-z0-9_.-]*)=(\S)/.exec(line)
+    if (literal && SECRET_SUFFIXES.some((s) => literal[1].toUpperCase().replaceAll('-', '_').endsWith(s))) {
+      flagAlways(literal[1])
+    }
+
+    // Arm 3 (#147, measured): a URI whose userinfo embeds a password is a credential whatever
+    // its key is called — `DATABASE_URL=postgres://app:app@…` ends in `_URL`, not `_URI`, and the
+    // allowlist arms above waved it through. Values only; comments were skipped at the top, so this
+    // cannot fire on prose (thereason the guard is not a grep).
+    const userinfo = /[a-z][a-z0-9+.-]*:\/\/[^/\s:@'"]+:[^/\s@'"]+@/.exec(line)
+    if (userinfo) {
+      const named = /(?:name:\s*|-\s*)([A-Za-z][A-Za-z0-9_.-]*)[=:]/.exec(line)
+      flagAlways(named ? named[1] : 'uri-with-userinfo')
+    }
   }
 }
 
@@ -99,4 +127,4 @@ if (offenders.length > 0 || stale.length > 0) {
   process.exit(1)
 }
 
-console.log(`OK: no new plaintext credentials in deploy/ (${seen.size} secret-shaped values, ${Object.keys(KNOWN).length} known and owed to #147)`)
+console.log(`OK: no plaintext credentials in deploy/ (${seen.size} secret-shaped inline values, ${Object.keys(KNOWN).length} on the ledger)`)
