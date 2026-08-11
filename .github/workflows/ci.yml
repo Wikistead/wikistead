@@ -84,9 +84,12 @@ jobs:
       - name: Assert the prod overlay renders no :latest wikistead image
         run: |
           set -euo pipefail
+          # filter-ok: the k8s manifests are private infrastructure (#178) — this gate
+          # self-disables where they are absent (the public tree) and still runs in the upstream.
+          if [ ! -d deploy/k8s ]; then echo "no k8s manifests here — nothing to gate"; exit 0; fi
           # wikistead images only — the in-cluster infra images (postgres/openfga/…) are convenience
           # scaffolding the prod overlay replaces with operators/managed services (see PROD NOTES/#423).
-          if kustomize build deploy/k8s/overlays/prod | grep -E 'image: .*wikistead-[a-z]+:latest'; then
+          if kustomize build deploy/k8s/overlays/prod | grep -E 'image: .*wikistead-[a-z]+:latest'; then # filter-ok: guarded above
             echo "::error::prod overlay renders a :latest wikistead image — pins must be explicit (ADR-162)"
             exit 1
           fi

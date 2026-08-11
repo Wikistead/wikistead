@@ -39,8 +39,7 @@ packages/
   entitlements/  plan → limits resolution, separate from authz
 infra/openfga/model.fga   authorization model (DSL, see ADR-002)
 infra/db/migrations/      001 tenants … 011 page nesting
-docs/adr/                 ADR-000 … ADR-014
-deploy/                   Kustomize base + dev/prod overlays + ArgoCD app-of-apps
+deploy/caddy/             single-host reverse proxy for self-hosting (ACME TLS)
 docker-compose.yml        full local middleware stack
 ```
 
@@ -128,7 +127,8 @@ top. Test counts are integration tests against **real Postgres + real OpenFGA**
 | **Web frontend** (editor, tree, search, share, attachments) | ✅ | e2e: editor / foundation / tree (3) / search / share / attachments |
 | **Editor** (CM6 live-preview, vim, macros: mermaid/callout/table/excalidraw, comments, i18n en/ja) | ✅ | e2e: editor / macros / tables / atom-motion / comments |
 
-ADRs (`docs/adr/`) record the locked decisions and the active design drafts.
+Code comments cite ADR-nnn design records throughout — the maintainers' design log,
+where locked decisions and their reasoning live.
 Migrations 001–011 are applied by `migrate`. Remaining `TODO(phase: ...)` markers
 point at the polish/business items below, not missing core features.
 
@@ -136,8 +136,8 @@ point at the polish/business items below, not missing core features.
 Core knowledge-base features are implemented and green (tenancy, authz, spaces/pages,
 collab, search, storage, revisions, public render, API keys, share links, billing, the
 web editor with live-preview / vim / macros, comments, i18n en/ja). What's left is
-polish, hardening, and the business layer — most of it captured as ADR drafts in
-`docs/adr/`:
+polish, hardening, and the business layer — most of it already designed (the ADR-nnn
+records cited below):
 - **Macros**: columns / details / tabs directives; PlantUML / math rendering (Mermaid,
   callout, table, Excalidraw are done).
 - **Search hardening**: body-content indexing; CJK/Japanese tokenization config; the
@@ -159,7 +159,7 @@ polish, hardening, and the business layer — most of it captured as ADR drafts 
 Wikistead has a [Code of Conduct](CODE_OF_CONDUCT.md). **Security issues** must go through
 the private channel in [SECURITY.md](SECURITY.md) — never a public issue. Bug reports and
 feature requests use the [issue forms](.github/ISSUE_TEMPLATE/); the feature form is scored
-against the product's north stars (Knowledge First, Open formats — see the project design notes). External
+against the product's north stars (Knowledge First, Open formats, Link First). External
 pull requests are **not accepted at this time** (see the
 [PR template](.github/PULL_REQUEST_TEMPLATE.md) for the policy and the internal validation
 checklist: `pnpm build` / `pnpm typecheck` / `pnpm test` / `pnpm license:check`).

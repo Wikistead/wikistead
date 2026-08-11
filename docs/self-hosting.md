@@ -23,7 +23,7 @@ Wikistead is three application processes over five infrastructure services:
 | SMTP (optional) | Invitation / notification email | any relay; dev uses Mailpit |
 | Kroki (optional) | Server-side PlantUML rendering | `yuzutech/kroki` |
 
-Two invariants shape every deployment (details: `deploy/README.md`, ADR-016/039):
+Two invariants shape every deployment:
 
 1. **One origin.** Web, `/api`, and `/collab` must be served from the same origin
    through a reverse proxy — the session cookie is a host-only BFF cookie and the
@@ -31,11 +31,9 @@ Two invariants shape every deployment (details: `deploy/README.md`, ADR-016/039)
    directly.
 2. **OpenFGA must run on a persistent datastore** (Postgres — never the in-memory
    engine: a restart would silently erase every permission in the system). The
-   compose file wires this with a host volume. **The k8s base does NOT persist it:
-   its Postgres is a dev-convenience Deployment with no PVC** — a pod restart
-   loses the app database AND every permission. For production you must supply a
-   durable Postgres yourself (StatefulSet + PVC, or a managed/operator database —
-   tracked as the #423 launch blocker; backup/restore is #403).
+   compose file wires this with a host volume; on Kubernetes that means a
+   PVC-backed StatefulSet or a managed/operator database — a Postgres pod without
+   a volume loses the app database AND every permission on restart.
 
 ## Requirements
 
@@ -96,44 +94,27 @@ TLS (`caddy run --config deploy/caddy/Caddyfile` with `SITE_HOST` /
 
 ## Production (Kubernetes)
 
-Manifests live in `deploy/k8s` as a Kustomize base + overlays; `deploy/argocd`
-adds an optional app-of-apps. Follow `deploy/README.md` for the proxy/ingress
-rules — the short version:
+Kubernetes manifests are not shipped: the compose file above is the reference
+topology (the six services plus the two invariants), and any manifests that
+express it work. What production needs beyond the compose defaults:
 
-```bash
-# straight kustomize
-kubectl apply -k deploy/k8s/overlays/prod
-# or GitOps
-kubectl apply -f deploy/argocd/project.yaml
-kubectl apply -f deploy/argocd/app-of-apps.yaml
-```
-
-Before applying, walk the overlay and replace every `CHANGE_ME` (git URL, image
-registry, hosts) and every dev credential:
-
-- **Secrets**: the base references `kb-secrets` (database URLs, `MEILI_MASTER_KEY`,
-  S3 keys, `OIDC_SECRET_ENC_KEY`, `GUEST_TOKEN_SECRET`, SMTP, Stripe). Manage them
-  with your cluster's secret tooling. Note: encrypting the OpenFGA datastore URI
-  with SOPS+age is tracked in #147 and not yet wired — do not commit real
-  credentials to a fork until it lands, or wire your own SealedSecrets/SOPS.
-- **Postgres / OpenFGA**: the base runs OpenFGA against Postgres (the persistent
-  ENGINE is mandatory), **but the base's Postgres itself is ephemeral — a plain
-  Deployment with no data volume** (dev convenience, exactly like the SeaweedFS
-  note below). For production, replace it with a StatefulSet + PVC or a managed/
-  operator Postgres (CloudNativePG etc.) BEFORE putting data in — a pod restart
-  on the base manifest wipes the app database and every permission (#423 tracks
-  wiring this in-repo; #403 tracks backup/restore). On first deploy, create the
-  store + write `infra/openfga/model.fga`, then set
+- **Secrets**: provide the runtime env (database URLs, `MEILI_MASTER_KEY`,
+  S3 keys, `OIDC_SECRET_ENC_KEY`, `GUEST_TOKEN_SECRET`, SMTP, Stripe) through
+  your cluster's secret tooling (Kubernetes Secrets, SOPS, sealed-secrets,
+  an external manager — your choice). Never commit real credential values.
+- **Postgres / OpenFGA**: run OpenFGA against Postgres (the persistent ENGINE is
+  mandatory) on a PVC-backed StatefulSet or a managed/operator Postgres
+  (CloudNativePG etc.) — never a volume-less Deployment. On first deploy, create
+  the store + write `infra/openfga/model.fga`, then set
   `OPENFGA_STORE_ID`/`OPENFGA_MODEL_ID` in the server/collab env. The server
   asserts the datastore/model at boot and refuses to start misconfigured.
-- **Storage**: the base ships SeaweedFS (single binary, S3 gateway) with an
-  `emptyDir` — for production either give it a PersistentVolume or, preferably,
-  point `S3_*` at managed object storage (S3/R2; keep
-  `AWS_*_CHECKSUM_*=WHEN_REQUIRED` so browser presigned PUTs work).
-- **Ingress / TLS**: `deploy/k8s/base/ingress.yaml` routes `/api`, `/collab`
-  (WS + sticky sessions + 1h timeouts), and `/` on one host, with cert-manager
-  TLS. Per-tenant subdomains ride the same services via the Host header; a
-  wildcard cert needs DNS-01 (#235, open) — until then use explicit hosts.
+- **Storage**: point `S3_*` at managed object storage (S3/R2), or at a SeaweedFS
+  you give a PersistentVolume (keep `AWS_*_CHECKSUM_*=WHEN_REQUIRED` so browser
+  presigned PUTs work).
+- **Ingress / TLS**: route `/`, `/api`, and `/collab` on ONE host (the
+  same-origin invariant), with WebSocket upgrade, sticky sessions and ≥1h
+  read timeouts on `/collab`. Per-tenant subdomains ride the same services via
+  the Host header; a wildcard cert needs DNS-01 — until then use explicit hosts.
 - **Migrations**: run `pnpm --filter @wikistead/server migrate` against the prod
   database (with `DATABASE_ADMIN_URL`) as a release step — migrations are
   idempotent and ordered (`infra/db/migrations`). Re-run on every upgrade.
@@ -227,6 +208,6 @@ If a tenant's OIDC config locks everyone out, see
 
 This file is the CE-repo deployment guide. The end-user documentation site
 (getting started, editor guide, feature docs) is maintained in the private
-docs-site overlay repository (`docs-site/`, see ADR-084) and published
+docs-site repository and published
 separately; see #180 for the bridge between generated reference material and
 that site.
