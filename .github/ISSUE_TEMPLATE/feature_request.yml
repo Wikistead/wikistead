@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Wikistead's north star is a best-in-class **writing experience**, **knowledge-first**,
-        **open formats**, and **link-first** (see `the project design notes`). Ideas that pull toward task
+        **open formats**, and **link-first**. Ideas that pull toward task
         management / CRM / database-centric directions are intentionally out of scope.
   - type: textarea
     id: problem

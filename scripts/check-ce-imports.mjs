@@ -137,7 +137,16 @@ if (proprietary.length > 0) {
 // A package that is neither filtered nor ignored fails; so does an overlay package that is not
 // `private: true` (everything under ee/ is proprietary by definition — an unmarked one would dodge
 // invariants 1–2's proprietary handling).
-{
+if (!existsSync(join(root, 'scripts/prepublish-filter.mjs'))) {
+  // The public tree: the filter erased ITSELF (its exclusion list narrates what was removed), so
+  // there is nothing for the two consumers to agree on. But a tracked proprietary package in a tree
+  // WITHOUT the filter is exactly the leak the filter exists to prevent — their absences must coincide.
+  for (const p of packages) {
+    if (!isOverlay(p) && p.json.private === true && p.name) {
+      fail(`proprietary package ${p.name} (${p.dir}/${p.entry}) exists but the filter does not — this tree reads as a public tree carrying EE bytes`)
+    }
+  }
+} else {
   const { FILTER_PATHS, proprietaryPackagePaths } = await import(pathToFileURL(join(root, 'scripts/prepublish-filter.mjs')).href)
   const derived = new Set(proprietaryPackagePaths(root))
   for (const p of packages) {
