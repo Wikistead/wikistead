@@ -8,7 +8,7 @@ import { QrCode } from "../ui/QrCode"; // #653 the same code the settings screen
 import { assetUrl } from "../data/apiClient";
 import { startRegistration } from "@simplewebauthn/browser"; // #678: a key made at the door
 import { isServerFault } from "./serverFault";
-import { factorKindsPhrase } from "../settings/factor-kind"; // #686: one home for the kind nouns
+import { factorKindsPhrase, browserCanUseFactorKind } from "../settings/factor-kind"; // #686: one home for the kind nouns
 
 // #652 / ADR-219 §6: the half-authenticated step. The password was right; the tenant requires one more
 // thing, and there is no session yet — what stands in for one is a receipt cookie the server set, which
@@ -39,11 +39,11 @@ export function FactorStep(
   // is what the screen offered before this existed — a default that adds nothing rather than one that
   // hides a door.
   const accepts = (kind: string) => !kinds?.length || kinds.includes(kind);
-  // …and whether this browser can do WebAuthn AT ALL. Only the synchronous check (#672 ruling ③): the
-  // platform-authenticator probe answers about a fingerprint reader, and a laptop without one would
-  // still take a USB key — telling that person "this device cannot" turns a working setup into a
-  // refusal.
-  const webauthn = typeof window !== "undefined" && "PublicKeyCredential" in window;
+  // …and whether this browser can do WebAuthn AT ALL. The SHARED predicate (#686): the account
+  // panel asked a private copy of this question — no, it never asked — while this screen asked its
+  // own, and the two surfaces drifted. The sync-only rule (#672 ruling ③: no platform-authenticator
+  // probe) now lives in factor-kind.ts with the rest of the kind facts.
+  const webauthn = browserCanUseFactorKind("passkey");
 
   const post = async (path: string, body: unknown) =>
     fetch(assetUrl(path), {

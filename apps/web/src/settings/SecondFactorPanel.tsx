@@ -12,10 +12,10 @@ import {
   useMyFactors, useStartTotpEnrolment, useConfirmFactor, useRemoveFactor, useRemovePasskeyChallenge,
   useRenameFactor, useStartPasskeyEnrolment, useConfirmPasskey,
 } from "../data/queries";
-import { startAuthentication, startRegistration, browserSupportsWebAuthn } from "@simplewebauthn/browser"; // #666: the key proves itself
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser"; // #666: the key proves itself
 import { ApiError } from "../data/apiClient";
 import { classifyRemovalFailure, classifyEnrolmentFailure } from "./factor-removal-failure"; // #673 ② / #653 ③
-import { factorKindName } from "./factor-kind"; // #653 / #673 the one place a kind is a noun
+import { factorKindName, acceptedFactorKinds, browserCanUseFactorKind } from "./factor-kind"; // #653 / #673 the one place a kind is a noun
 
 // #653 / ADR-219: a member's own second factors. SELF-SCOPE — every call is keyed to the session's
 // subject by the server, so no other member's factor is addressable from this screen.
@@ -102,8 +102,10 @@ export function SecondFactorPanel() {
   const onAddPasskey = async () => {
     // #653 ③: asked BEFORE anything is started. A browser that cannot run the ceremony would
     // otherwise be issued a challenge it can never answer — a row against the cap of ten, bought for
-    // nothing — and then told its key was at fault.
-    if (!browserSupportsWebAuthn()) { notify.error(t("account.factorKeyUnsupported")); return; }
+    // nothing — and then told its key was at fault. (#686 the SHARED predicate — this was a
+    // third private copy of the capability question. Unreachable now that the add button itself hides,
+    // but a keyboard/test path that calls the handler directly still deserves the honest refusal.)
+    if (!browserCanUseFactorKind("passkey")) { notify.error(t("account.factorKeyUnsupported")); return; }
     let started: { factorId: string; options: Record<string, unknown> } | null = null;
     try {
       started = await startPasskey.mutateAsync({ label: label.trim() });
@@ -193,18 +195,19 @@ export function SecondFactorPanel() {
   };
 
   const list = factors.data?.factors ?? [];
-  // #686 (ruling): the ADD buttons follow the tenant's stance. Offering "add a passkey" where
-  // passkeys are not accepted invites somebody to enrol a factor that will not let them in — the row
-  // then carries "does not count", which is the right answer to a question nobody should have been
-  // asked. Existing rows are untouched: they stay listed and marked (#672), because taking away what
-  // somebody already has is a different act from declining to add more.
+  // #686 (ruling +): the ADD buttons follow the tenant's stance AND this browser's
+  // ability — the offer set is the intersection. Offering "add a passkey" where passkeys are not
+  // accepted invites somebody to enrol a factor that will not let them in; offering it in a browser
+  // without WebAuthn is an entrance that cannot be walked through at all (the sign-in interstitial
+  // already hid that door — this panel was the one surface not asking). Existing rows are untouched:
+  // they stay listed and marked (#672), because taking away what somebody already has is a different
+  // act from declining to add more.
   //
   // ⚠️ Convenience only. The endpoints still accept these enrolments and still mark them as not
   // counting; this hides an entrance, it does not close one (#613). If the endpoints are to refuse
   // outright that is its own change, with its own pin.
   const stance = factors.data?.stance ?? null;
-  const canAdd = (kind: string) =>
-    stance == null || stance === "off" || stance === "any" || stance === kind;
+  const canAdd = (kind: string) => acceptedFactorKinds(stance).includes(kind) && browserCanUseFactorKind(kind);
 
   // #682: the panel opens straight into the list. The line that used to sit here gave the STEPS of
   // enrolling an authenticator app — to somebody who had not started, on a screen that also enrols
