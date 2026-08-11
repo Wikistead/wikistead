@@ -12,6 +12,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import IORedis from 'ioredis'
 import { createSession, readSession, doorOf, type SessionData } from '../auth/session.js'
+// @ts-expect-error — .mjs script module, no types; #621: the image build has no repo-root scripts/
+import { eeServerSourceRoot } from '../../../../scripts/ee-source-root.mjs'
 
 const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
 const T = 'tenant_dev'
@@ -50,12 +52,14 @@ describe('#655: the door is recorded', () => {
 
 describe('#655: every path that opens a session says which door it opened', () => {
   // A scan rather than five assertions about five files: the count is what the ticket names, and a
-  // sixth path added next month is exactly the case a list of five cannot catch. Includes
-  // `packages/ee-server` — the SAML caller lives in another package and is the one a sweep of
-  // `apps/server` alone would miss.
+  // sixth path added next month is exactly the case a list of five cannot catch. Includes the EE
+  // server source — the SAML caller lives in another package and is the one a sweep of `apps/server`
+  // alone would miss. #178: its root is resolved (the package is mid-move to the ee/ overlay); null
+  // only in a CE-only clone, where the SAML rule below is dropped with it.
+  const EE_ROOT = eeServerSourceRoot(resolve(import.meta.dirname, '../../../..'))
   const ROOTS = [
     resolve(import.meta.dirname, '../..', 'src'),
-    resolve(import.meta.dirname, '../../../..', 'packages/ee-server/src'),
+    ...(EE_ROOT === null ? [] : [EE_ROOT]),
   ]
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -68,7 +72,10 @@ describe('#655: every path that opens a session says which door it opened', () =
   // is what catches a path naming the wrong thing.
   const EXPECTED: { file: RegExp; doors: string[] }[] = [
     { file: /routes\/auth\.ts$/, doors: ['federated'] },                 // OIDC callback
-    { file: /saml\/saml-auth\.ts$/, doors: ['federated'] },              // SAML, in the other package
+    // SAML lives in the EE package; the rule travels with the root — dropped only when a CE-only
+    // clone has no EE source at all (the "still exists" assertion below would otherwise turn a
+    // legitimate absence into a red).
+    ...(EE_ROOT === null ? [] : [{ file: /saml\/saml-auth\.ts$/, doors: ['federated'] }]), // SAML, in the other package
     // #652 slice 3 added `local+factor` here, and it is the only file that may say it: the factor is
     // answered at the product's own door and nowhere else. `local` still appears in the same file (the
     // password step, before anything has been presented) — the two are the two halves of one sign-in,

@@ -1,6 +1,8 @@
 import { defineConfig } from "@playwright/test";
 // @ts-expect-error — repo-root JS helper, no types
 import { e2ePorts } from "../../scripts/stack-offset.mjs";
+// @ts-expect-error — repo-root JS helper, no types
+import { eeServerMain } from "../../scripts/ee-source-root.mjs";
 
 // E2E runs against the isolated e2e middleware (docker-compose.e2e.yml, started
 // by `pnpm setup:e2e`). Playwright starts the app processes on dedicated ports via
@@ -15,6 +17,12 @@ const P = e2ePorts();
 const REPO = new URL("../../", import.meta.url).pathname;
 const ENV_FILES = "--env-file=.env.e2e --env-file=.env.e2e.local";
 const HOST = "dev.localhost";
+
+// #178 / ADR-084: the EE composition root's location is mid-move (packages/ee-server → ee/ overlay),
+// so it is RESOLVED, not hard-coded. Null means a genuinely CE-only clone: run the CE entrypoint, and
+// say so — an overlay that exists but drifted THROWS in the resolver instead of degrading to this.
+const SERVER_ENTRY = eeServerMain(REPO) ?? `${REPO}apps/server/src/index.ts`;
+if (!eeServerMain(REPO)) console.warn("[e2e] no EE source found — running the CE-only composition root");
 
 export default defineConfig({
   testDir: "./specs",
@@ -35,12 +43,13 @@ export default defineConfig({
   },
   webServer: [
     {
-      // #178 / ADR-084: run the EE composition root (packages/ee-server/src/main.ts) so the e2e stack
-      // exercises the SHIPPING EE build (SCIM etc. mounted via the seam), not the CE-only server.
+      // #178 / ADR-084: run the EE composition root (main.ts, wherever the resolver finds it) so the
+      // e2e stack exercises the SHIPPING EE build (SCIM etc. mounted via the seam), not the CE-only
+      // server — except in a CE-only clone, where the CE entrypoint is all there is.
       // --conditions=source makes @wikistead/server/ee-host resolve to its TS source (tsx), matching how
       // apps/server ran from source before the split (no dist build needed for the dev/e2e server).
       // SERVER_PORT comes from .env.e2e.local (offset); healthz is polled on the same derived port.
-      command: `npx tsx --conditions=source ${ENV_FILES} packages/ee-server/src/main.ts`,
+      command: `npx tsx --conditions=source ${ENV_FILES} ${SERVER_ENTRY}`,
       cwd: REPO,
       url: `http://localhost:${P.server}/healthz`,
       reuseExistingServer: false,

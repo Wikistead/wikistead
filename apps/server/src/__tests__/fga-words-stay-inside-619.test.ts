@@ -18,6 +18,8 @@ import { resolve, join } from 'node:path'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
+// @ts-expect-error — .mjs script module, no types; #621: the image build has no repo-root scripts/
+import { eeServerSourceRoot } from '../../../../scripts/ee-source-root.mjs'
 import { buildApp } from '../app.js'
 import { ensureMembers, memberTuples } from './helpers/membership.js'
 
@@ -116,8 +118,15 @@ describe('#619: the store\'s words stay inside', () => {
   it('EVERY fga write site in the tree goes through the translating helpers (discovery)', () => {
     // The leak that started this ticket was one write that skipped the boundary. Naming the known
     // sites would not have caught it, and would not catch the next one — so walk the source.
-    const roots = ['apps/server/src', 'packages/authz/src', 'packages/ee-server/src', 'apps/collab/src']
     const repo = resolve(import.meta.dirname, '../../../..')
+    // #178: the EE root is resolved (mid-move to the ee/ overlay); null only in a CE-only clone.
+    const eeRoot = eeServerSourceRoot(repo)
+    const roots = [
+      join(repo, 'apps/server/src'),
+      join(repo, 'packages/authz/src'),
+      ...(eeRoot === null ? [] : [eeRoot]),
+      join(repo, 'apps/collab/src'),
+    ]
     const offenders: string[] = []
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir)) {
@@ -147,7 +156,7 @@ describe('#619: the store\'s words stay inside', () => {
         })
       }
     }
-    for (const root of roots) walk(join(repo, root))
+    for (const root of roots) walk(root)
     expect(offenders, 'these write to the store without the translation boundary').toEqual([])
   })
 })
