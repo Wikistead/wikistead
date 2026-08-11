@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createHmac } from "node:crypto";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, nameNewestFactor } from "../helpers";
 import { decodePng } from "../paint";
 
 // #653 / ADR-219: enrolling and giving up a second factor, from the screen.
@@ -42,7 +42,7 @@ test("#653: a factor can be enrolled from the screen, and only given up by provi
   await gotoSecurity(page);
 
   // ── enrol ───────────────────────────────────────────────────────────────────────────────────────
-  await page.getByTestId("factor-label-input").fill("e2e phone");
+  // #653 no name before enrolling — the row is named from the pencil once it exists (below).
   await page.getByTestId("factor-add").click();
   await expect(page.getByTestId("factor-enrolling"), "the enrolment opened").toBeVisible({ timeout: 15_000 });
 
@@ -105,6 +105,9 @@ test("#653: a factor can be enrolled from the screen, and only given up by provi
   await page.getByTestId("factor-confirm").click();
   await expect(page.getByTestId("factor-enrolling"), "the form closed").toBeHidden({ timeout: 15_000 });
 
+  // #653 it arrives unnamed and is named from the pencil — the walk a person makes now, and the
+  // only entrance there is. The rest of this test follows the row by that name.
+  await nameNewestFactor(page, "e2e phone");
   const row = page.locator('[data-testid="factor-row"]').filter({ hasText: "e2e phone" }).first();
   await expect(row, "the factor is listed under the name given to it").toBeVisible({ timeout: 15_000 });
 

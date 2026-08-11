@@ -15,7 +15,9 @@
 // walked, and each is required to name exactly the kinds it accepts and no others.
 import { describe, it, expect, beforeAll } from "vitest";
 import i18next, { type i18n as I18n } from "i18next";
-import { factorKindsPhrase, acceptedFactorKinds, factorKindName, ALL_FACTOR_KINDS } from "../settings/factor-kind";
+import {
+  factorKindsPhrase, acceptedFactorKinds, factorKindName, factorKindPhrase, ALL_FACTOR_KINDS,
+} from "../settings/factor-kind";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
 
@@ -38,21 +40,28 @@ describe("#686 族 A: the copy names what the workspace accepts", () => {
         await i18n.changeLanguage(lng);
         const t = i18n.t.bind(i18n) as never;
         const accepted = acceptedFactorKinds(stance);
-        const phrase = factorKindsPhrase(accepted, t);
 
-        // Both sentences are built from that phrase, so both are checked through it.
-        const prompt = i18n.t("auth.factorEnrolPrompt", { kinds: phrase });
-        const desc = i18n.t("account.factorsDesc", { kinds: phrase });
+        // #686 each sentence takes the noun SHAPE its own grammar needs — you set up an app,
+        // you present a code from it. Built through the same call the screen makes, so a call site
+        // asking for the wrong shape is measured here rather than read past.
+        const said = [
+          ["the interstitial", "setup" as const,
+            i18n.t("auth.factorEnrolPrompt", { kinds: factorKindsPhrase(accepted, t, "setup") })],
+          ["the account panel", "presented" as const,
+            i18n.t("account.factorsDesc", { kinds: factorKindsPhrase(accepted, t, "presented") })],
+          ["the sign-in door", "presented" as const,
+            i18n.t("auth.factorPrompt", { kinds: factorKindsPhrase(accepted, t, "presented") })],
+        ] as const;
 
-        for (const [where, said] of [["the interstitial", prompt], ["the account panel", desc]] as const) {
+        for (const [where, shape, sentence] of said) {
           for (const kind of ALL_FACTOR_KINDS) {
-            const name = factorKindName(kind, t);
+            const noun = factorKindPhrase(kind, t, shape);
             const shouldName = accepted.includes(kind);
-            expect(said.includes(name), `${where} ${shouldName ? "omits" : "names"} ${kind} :: ${said}`)
+            expect(sentence.includes(noun), `${where} ${shouldName ? "omits" : "names"} ${kind} :: ${sentence}`)
               .toBe(shouldName);
           }
           // A sentence with a hole in it is worse than one naming a kind too many.
-          expect(said, `${where} left a placeholder`).not.toContain("{{");
+          expect(sentence, `${where} left a placeholder`).not.toContain("{{");
         }
       });
     }
@@ -61,7 +70,8 @@ describe("#686 族 A: the copy names what the workspace accepts", () => {
   it("a narrowed stance really does say something different — or the mapping is vacuous", async () => {
     await i18n.changeLanguage("ja");
     const t = i18n.t.bind(i18n) as never;
-    const say = (s: string | null) => i18n.t("auth.factorEnrolPrompt", { kinds: factorKindsPhrase(acceptedFactorKinds(s), t) });
+    const say = (s: string | null) =>
+      i18n.t("auth.factorEnrolPrompt", { kinds: factorKindsPhrase(acceptedFactorKinds(s), t, "setup") });
     expect(say("passkey")).not.toBe(say("totp"));
     expect(say("any")).not.toBe(say("passkey"));
     // …and "no stance" reads as everything, matching what the interstitial's own `accepts` does with
@@ -69,11 +79,52 @@ describe("#686 族 A: the copy names what the workspace accepts", () => {
     expect(say(null)).toBe(say("any"));
   });
 
-  it("an unknown kind is never called an authenticator app", async () => {
-    // The default that #653 was about: a third kind must not inherit one of today's names.
-    await i18n.changeLanguage("ja");
+  it("an unknown kind is never called an authenticator app — in EITHER shape", async () => {
+    // The default that #653 was about: a third kind must not inherit one of today's names. It
+    // now has two chances to inherit one, and the second (\u201ca code from your authenticator app\u201d) is the
+    // more misleading — it tells somebody to type digits at a key they tap.
+    for (const lng of ["en", "ja"] as const) {
+      await i18n.changeLanguage(lng);
+      const t = i18n.t.bind(i18n) as never;
+      expect(factorKindName("webauthn-v3", t)).toBe(factorKindName(null, t));
+      expect(factorKindName("webauthn-v3", t)).not.toBe(factorKindName("totp", t));
+      for (const shape of ["setup", "presented"] as const) {
+        expect(factorKindPhrase("webauthn-v3", t, shape)).toBe(factorKindPhrase(null, t, shape));
+        expect(factorKindPhrase("webauthn-v3", t, shape)).not.toBe(factorKindPhrase("totp", t, shape));
+      }
+    }
+  });
+
+  it("the two shapes are genuinely different nouns — one shared function would be vacuous", async () => {
+    // ⚠️ THE CONTROL for. Wiring both sentence types back through one noun is exactly the state
+    // being fixed, and every mapping assertion above would still pass: they only ask that the sentence
+    // names the accepted kinds. What must differ is WHAT it calls them.
+    for (const lng of ["en", "ja"] as const) {
+      await i18n.changeLanguage(lng);
+      const t = i18n.t.bind(i18n) as never;
+      expect(factorKindPhrase("totp", t, "setup"),
+        `${lng}: what you install and what you present are the same words`)
+        .not.toBe(factorKindPhrase("totp", t, "presented"));
+      // …and the LABEL is a third thing: it belongs on a row, not inside a sentence. In English the
+      // article is what separates them; in Japanese the presented form carries \u300c\u306e\u30b3\u30fc\u30c9\u300d.
+      expect(factorKindPhrase("totp", t, "presented"), `${lng}: the label leaked into running prose`)
+        .not.toBe(factorKindName("totp", t));
+    }
+  });
+
+  it("no sentence carries a bare label — the article/particle comes from the locale", async () => {
+    // The English defect measured: \u201cSet up Authenticator app to continue.\u201d The mid-sentence
+    // capital is the tell, and it is what a label looks like when it is dropped into prose.
+    await i18n.changeLanguage("en");
     const t = i18n.t.bind(i18n) as never;
-    expect(factorKindName("webauthn-v3", t)).toBe(factorKindName(null, t));
-    expect(factorKindName("webauthn-v3", t)).not.toBe(factorKindName("totp", t));
+    for (const [key, shape] of [
+      ["auth.factorEnrolPrompt", "setup"], ["account.factorsDesc", "presented"], ["auth.factorPrompt", "presented"],
+    ] as const) {
+      const sentence = i18n.t(key, { kinds: factorKindsPhrase(["totp"], t, shape) });
+      expect(sentence, `${key} still drops the label into prose`).not.toContain(factorKindName("totp", t));
+      // The nouns are lower-case and articled; nothing in the code adds the article (a rule this
+      // repository must not learn, since the next locale would have to defeat it).
+      expect(factorKindPhrase("totp", t, shape), "the English noun lost its article").toMatch(/^(a|an) /);
+    }
   });
 });

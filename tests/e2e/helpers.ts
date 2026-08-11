@@ -171,3 +171,40 @@ export function charAfterCaret() {
     return { found: true, char: null };
   };
 }
+
+/**
+ * Name the factor that was just enrolled (#653 there is no name field before enrolling).
+ *
+ * The panel starts every enrolment unnamed, so a row is found by its KIND until somebody names it —
+ * and the specs that follow a factor through its life need a name that is theirs alone. The pencil on
+ * the row is the only way to give one, which is the point of the ruling: naming is something you do to
+ * a thing you have.
+ *
+ * ⚠️ The newest row is the LAST one: the server orders by `created_at` (`second-factors.ts`). Matching
+ * on the kind name instead would grab whichever unnamed row of that kind came first — and these specs
+ * share one seeded member, so a neighbour's row is often already sitting there.
+ */
+export async function nameNewestFactor(page: Page, label: string): Promise<void> {
+  const rows = page.locator('[data-testid="factor-row"]');
+  // ⚠️ TARGETED BY BEING UNNAMED, not by position. Two earlier versions failed in batches, and both
+  // failures were the same mistake in different clothes: `.last()` re-resolved between steps, and then
+  // an index taken BEFORE the new row had landed pointed at a NEIGHBOUR's row — these specs share one
+  // seeded member, so the name went onto somebody else's factor and the caller then followed the wrong
+  // row (measured: a passkey walk ended up asserting against a TOTP row's remove-code box).
+  //
+  // A row wears `factor-kind-mark` only once it HAS a name, so the row just enrolled is the last one
+  // without it. Waiting for that is also waiting for the list to have refreshed, which is the thing
+  // the index version silently skipped.
+  const unnamed = rows.filter({ hasNot: page.getByTestId("factor-kind-mark") });
+  await unnamed.last().waitFor({ state: "visible", timeout: 20_000 });
+  await unnamed.last().getByTestId("factor-rename").click();
+  // The panel keeps exactly one row in rename mode, so the open editor is an unambiguous handle that
+  // does not shift when another row arrives mid-edit.
+  const editing = rows.filter({ has: page.getByTestId("factor-rename-input") });
+  await editing.getByTestId("factor-rename-input").waitFor({ state: "visible", timeout: 15_000 });
+  await editing.getByTestId("factor-rename-input").fill(label);
+  await editing.getByTestId("factor-rename-save").click();
+  // Wait for the row to carry the name, not merely for the click: the save is a request, and the next
+  // step in every caller looks the row up BY that name.
+  await page.locator('[data-testid="factor-row"]', { hasText: label }).first().waitFor({ timeout: 15_000 });
+}

@@ -41,7 +41,6 @@ export function SecondFactorPanel() {
   // #653 ④: inline, because this product edits rows in the row (no extra dialog).
   const [renaming, setRenaming] = useState<{ id: string; label: string } | null>(null);
 
-  const [label, setLabel] = useState("");
   const [pending, setPending] = useState<{ factorId: string; secret: string; uri: string } | null>(null);
   const [code, setCode] = useState("");
   // Which factor is being removed, and the code being typed for it. #660 asks for possession, so the
@@ -54,7 +53,7 @@ export function SecondFactorPanel() {
 
   const onStart = async () => {
     try {
-      const res = await startEnrolment.mutateAsync({ label: label.trim() });
+      const res = await startEnrolment.mutateAsync({ label: '' });
       setPending(res);
       setCode("");
     } catch (e) {
@@ -75,7 +74,7 @@ export function SecondFactorPanel() {
     if (!pending) return;
     try {
       await confirm.mutateAsync({ factorId: pending.factorId, code: code.trim() });
-      setPending(null); setLabel(""); setCode("");
+      setPending(null); setCode("");
       // This branch is only ever reached for an authenticator app — the passkey ceremony finishes in
       // `onAddPasskey` — so the kind is a constant here rather than a lookup.
       notify.success(t("account.factorAdded", { kind: factorKindName("totp", t) }));
@@ -108,11 +107,10 @@ export function SecondFactorPanel() {
     if (!browserCanUseFactorKind("passkey")) { notify.error(t("account.factorKeyUnsupported")); return; }
     let started: { factorId: string; options: Record<string, unknown> } | null = null;
     try {
-      started = await startPasskey.mutateAsync({ label: label.trim() });
+      started = await startPasskey.mutateAsync({ label: '' });
       if (!started) throw new Error("no options");
       const attestation = await startRegistration({ optionsJSON: started.options as never });
       await confirmPasskey.mutateAsync({ factorId: started.factorId, response: attestation });
-      setLabel("");
       notify.success(t("account.factorAdded", { kind: factorKindName("passkey", t) }));
     } catch (e) {
       if (started) await remove.mutateAsync({ factorId: started.factorId }).catch(() => {});
@@ -365,10 +363,12 @@ export function SecondFactorPanel() {
           </FormRow>
         </div>
       ) : (
+        /* #653 (ruling): NO NAME FIELD before enrolling. Naming a factor is something a person
+           does once they have one — asking first put an empty box, with an example nobody's device is
+           called, in front of the only two buttons on the screen. An unnamed row already reads as its
+           kind (#653 the fallback), and the pencil on the row is the one place a name is given.
+           It also removes the last thing left standing when both add buttons are hidden (#686 the zero-entrance panel). */
         <FormRow>
-          <Input value={label} onChange={(e) => setLabel(e.target.value)}
-            placeholder={t("account.factorLabelPlaceholder")} aria-label={t("account.factorLabel")}
-            data-testid="factor-label-input" />
           {canAdd("totp") && (
             <Button variant="primary" disabled={startEnrolment.isPending || atLimit}
               onClick={() => void onStart()} data-testid="factor-add">{t("account.factorAdd")}</Button>

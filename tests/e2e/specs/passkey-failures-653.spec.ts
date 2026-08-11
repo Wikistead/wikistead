@@ -70,8 +70,7 @@ test("#653: a dismissed prompt is not reported as a broken key", async ({ page, 
     // it. The wait is REAL (sixty seconds, the library's default) rather than shortened, because the
     // thing being measured is what the screen does when the ceremony ends that way.
     await key.silence();
-    await page.getByTestId("factor-label-input").fill(name);
-    await page.getByTestId("factor-add-passkey").click();
+    await page.getByTestId("factor-add-passkey").click(); // #653 enrolment takes no name
 
     // Asserted as what the screen SAID, not as what it did not say: `.not.toContain` on a page that
     // never spoke passes, and a silent failure is exactly the outcome this test exists to rule out.
@@ -105,22 +104,42 @@ test("#653: a browser that cannot do this says so, rather than failing at the ke
   // still throws the half-made row away — so the count matches either way. (It did: this test passed
   // with the guard deleted until it was rewritten.) What actually differs is WHAT THE READER IS TOLD,
   // and whether a browser that cannot finish is allowed to start.
-  await page.addInitScript(() => {
-    // What `browserSupportsWebAuthn()` reads. Deleted before any app code runs.
-    Reflect.deleteProperty(window, "PublicKeyCredential");
-  });
   let started = 0;
   await page.route((url) => url.pathname === "/api/me/factors/passkey", (route) => {
     if (route.request().method() === "POST") started++;
     return route.fallback();
   });
-  await gotoSecurity(page);
 
-  await page.getByTestId("factor-add-passkey").click();
-  await expect.poll(async () => (await page.locator("[data-sonner-toast], [role=status]").allInnerTexts()).join(" | "),
+  // ── the entrance is not there at all (#686) ───────────────────────────────────────────────
+  // Deleted before any app code runs, so the panel renders knowing the browser cannot do this. Since
+  // #686 the offer set is (accepted kinds ∩ what the browser can do), and a passkey needs WebAuthn —
+  // so there is nothing to press. That is the FIRST answer to "what does an unsupported browser get".
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(window, "PublicKeyCredential");
+  });
+  await gotoSecurity(page);
+  await expect(page.getByTestId("factor-add-passkey"),
+    "a browser that cannot register a key is still offered the button").toHaveCount(0);
+  // The control: the OTHER kind is unaffected, so this is capability and not a blanket hide.
+  await expect(page.getByTestId("factor-add"), "the authenticator entrance vanished with it").toBeVisible();
+
+  // ── and the handler still refuses, if something reaches it ──────────────────────────────────────
+  // Hiding a control is convenience; the refusal is what makes it true (#613). Reached the way the
+  // reviewer's probe did: let the panel render WITH WebAuthn, take it away, then press.
+  const second = await page.context().newPage();
+  await second.route((url) => url.pathname === "/api/me/factors/passkey", (route) => {
+    if (route.request().method() === "POST") started++;
+    return route.fallback();
+  });
+  await gotoSecurity(second);
+  await expect(second.getByTestId("factor-add-passkey")).toBeVisible({ timeout: 20_000 });
+  await second.evaluate(() => { Reflect.deleteProperty(window, "PublicKeyCredential"); });
+  await second.getByTestId("factor-add-passkey").click();
+  await expect.poll(async () => (await second.locator("[data-sonner-toast], [role=status]").allInnerTexts()).join(" | "),
     { timeout: 30_000, intervals: [500] }).toContain("browser");
 
-  // …and nothing was started on the server. A challenge issued to a browser that cannot answer it is a
-  // row against the cap, bought for nothing.
+  // …and nothing was started on the server, on EITHER page. A challenge issued to a browser that
+  // cannot answer it is a row against the cap, bought for nothing.
   expect(started, "an unsupported browser was still allowed to start an enrolment").toBe(0);
+  await second.close();
 });

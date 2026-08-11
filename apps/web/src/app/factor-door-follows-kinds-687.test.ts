@@ -61,11 +61,16 @@ describe("#687: the door offers what the member holds", () => {
   });
 
   it("the prompt names the kinds rather than one hard-coded kind", () => {
-    expect(requiredBranch, "the prompt does not interpolate the kinds").toContain("factorKindsPhrase(kinds, t)");
+    // #686 added the sentence SHAPE, and the door is a "present it" sentence — the noun has to
+    // be what you hand over (a code from your app), not what you install. Asserted with the shape, so
+    // a call site switched to "setup" here is caught rather than read as "still interpolating".
+    expect(requiredBranch, "the prompt does not interpolate the kinds in the presented shape")
+      .toContain('factorKindsPhrase(kinds, t, "presented")');
     for (const [lang, dict] of [["en", en], ["ja", ja]] as const) {
       const copy: string = dict.auth.factorPrompt;
       expect(copy, `${lang}: the prompt does not take the kinds`).toContain("{{kinds}}");
-      // The old sentence named the authenticator app unconditionally — to somebody holding a key.
+      // The old sentence named the authenticator app unconditionally — to somebody holding a key. The
+      // kind nouns now live only in the interpolated value, never in the sentence around it.
       expect(copy.toLowerCase(), `${lang}: the prompt still names one kind in prose`)
         .not.toMatch(/authenticator|認証アプリ|passkey|パスキー/);
     }

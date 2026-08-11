@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, nameNewestFactor } from "../helpers";
 
 // #653 four things the user found on the device, none of which any green test noticed.
 //
@@ -44,8 +44,7 @@ async function enrol(page: import("@playwright/test").Page, label: string): Prom
   // spec FILES in parallel, so a neighbouring file's enrolment can delete the pending row this one is
   // waiting on. `mode: "serial"` orders this file's tests and cannot reach across files.
   for (let attempt = 0; ; attempt++) {
-    await page.getByTestId("factor-label-input").fill(label);
-    await page.getByTestId("factor-add").click();
+    await page.getByTestId("factor-add").click(); // #653 unnamed; named after it exists
     try {
       await expect(page.getByTestId("factor-secret-value")).toBeVisible({ timeout: 15_000 });
       break;
@@ -64,6 +63,9 @@ async function enrol(page: import("@playwright/test").Page, label: string): Prom
   const code = await totpFor(page, key);
   await page.getByTestId("factor-confirm-code").fill(code);
   await page.getByTestId("factor-confirm").click();
+  // #653 the row arrives unnamed, and this spec follows it by name afterwards — so it is named
+  // here, from the pencil, which is now the only way to give one.
+  await nameNewestFactor(page, label);
   await expect(page.getByTestId("factor-row").filter({ hasText: label })).toBeVisible({ timeout: 10_000 });
   return key;
 }
