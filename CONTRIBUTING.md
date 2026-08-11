@@ -23,7 +23,7 @@ Please open an **Issue**:
 - **Bug reports** — steps to reproduce, expected vs. actual behaviour, the version/commit,
   and your environment.
 - **Feature requests / ideas** — the problem you're trying to solve and your proposed
-  direction. Note the product's north star (see `the project design notes`): a best-in-class writing
+  direction. Note the product's north star: a best-in-class writing
   experience, knowledge-first, open formats, link-first.
 
 ## Security
