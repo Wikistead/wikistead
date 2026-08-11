@@ -504,12 +504,28 @@ export async function publicPlugin(app: FastifyInstance) {
       if (spaceRow.noindex) reply.header('X-Robots-Tag', 'noindex')
       const asked = Number.parseInt(req.query.limit ?? '', 10)
       const parentRaw = req.query.parent
-      return listPublicBranch(tenant.id, {
+      const parentId = !parentRaw || parentRaw === 'root' ? null : parentRaw
+      const branch = await listPublicBranch(tenant.id, {
         spaceId: req.params.spaceId,
-        parentId: !parentRaw || parentRaw === 'root' ? null : parentRaw,
+        parentId,
         ...(Number.isFinite(asked) ? { limit: asked } : {}),
         ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
       })
+      // #623 §10 (client slice): the ROOT branch carries the HOME, additively — the shell shows it as a
+      // fixed entry above the tree and would otherwise need the retiring whole-tree route just for this
+      // one pair. Same gate as the whole-tree route: published AND anonymously viewable, else null.
+      if (parentId !== null) return branch
+      const homeRow = (await withTenantTx(tenant.id, async (tx) => {
+        const [r] = await tx<{ id: string; title: string }[]>`
+          SELECT p.id, p.title FROM pages p JOIN spaces s ON s.id = p.space_id
+          WHERE s.id = ${req.params.spaceId} AND p.id = s.home_page_id
+            AND p.published_at IS NOT NULL AND p.deleted_at IS NULL`
+        return r ?? null
+      })) as { id: string; title: string } | null
+      const home = homeRow && (await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: homeRow.id }))
+        ? { id: homeRow.id, title: homeRow.title }
+        : null
+      return { ...branch, home }
     })
 
   // GET /public/pages/:pageId — single public page read-only render

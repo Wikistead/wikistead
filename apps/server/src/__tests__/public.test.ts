@@ -11,7 +11,7 @@ import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, deletePage } from '../routes/pages.js'
-import { loadPublicChildTree, publicPageLoaders, type PublicChild } from '../routes/public.js'
+import { loadPublicChildTree, listPublicBranch, publicPageLoaders, type PublicChild } from '../routes/public.js'
 import { checkRelation } from '@wikistead/authz'
 import type { Tenant } from '@wikistead/types'
 
@@ -355,9 +355,20 @@ describe('loadPublicChildTree leak safety', () => {
     for (const id of flatten(tree)) expect(allowed.has(id)).toBe(true)
   })
 
-  it('⑤ respects the depth bound without a placeholder for the cut-off subtree', async () => {
+  it('⑤ the depth bound stays honest in the whole-tree read, and the BRANCH route reaches past it', async () => {
+    // The first half is the old pin, kept: the whole-tree read cuts at its depth without hinting at
+    // the cut-off subtree (an empty array, never a placeholder — the anonymous surface must not say
+    // "something deeper exists").
     const shallow = await loadPublicChildTree(tenant.id, P, 1) // direct children only
     const c1 = shallow.find((n) => n.id === C1)!
     expect(c1.children).toEqual([]) // G1/G3 are depth 2 — empty array, not a hint they exist
+
+    // #623 §10: the truncation DISAPPEARS under branches. What was silently dropped by depth becomes
+    // reachable by expanding — the ADR requires the old pin to be replaced by this measurement rather
+    // than deleted, because "depth 6 drops the 7th level" was pinned as intended behaviour and the
+    // intent changed.
+    const deep = await listPublicBranch(tenant.id, { spaceId, parentId: C1 })
+    expect(deep.pages.map((x) => x.id), 'the level the whole-tree read cut is reachable branch-wise')
+      .toContain(G1)
   })
 })
