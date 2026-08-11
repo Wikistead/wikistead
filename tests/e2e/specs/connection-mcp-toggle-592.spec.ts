@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { API } from "../helpers";
+import { API , sweepConnections} from "../helpers";
+
+// #623: my own debris from failed runs, swept on the way IN (the cap makes leftovers block the suite).
+test.beforeAll(async () => { await sweepConnections(["https://mcp592."]); });
 
 // #592 / ADR-204 (OQ3): MCP access is a per-connection switch, and it lives IN the connection's row —
 // not on a screen of its own. The row is where an admin already decides what a connection may do

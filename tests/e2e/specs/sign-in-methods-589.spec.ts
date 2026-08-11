@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { API } from "../helpers";
+import { API , sweepConnections} from "../helpers";
+
+// #623: my own debris from failed runs, swept on the way IN (the cap makes leftovers block the suite).
+test.beforeAll(async () => { await sweepConnections(["https://sim589-", "https://an-extremely-long-identity-provider"]); });
 
 // #589 / ADR-195 addendum: one list of sign-in methods, each row edited in place.
 //

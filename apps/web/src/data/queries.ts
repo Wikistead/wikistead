@@ -2209,6 +2209,9 @@ export interface LoginMethodsDTO {
   // SSO exemptions. The read opened to `manage_connections`; those writes stayed on the admin tier,
   // so the server names the line instead of the screen inferring it from a tier flag.
   canManageStance?: boolean
+  // #623 (ruling ③): how many OIDC connections this workspace may hold. The add button
+  // disables at the cap with the reason; the POST's 409 is the fortress. Server-owned (the #685 shape).
+  oidcConnectionCap?: number
 }
 export function useLoginMethods() {
   const { token } = useSession();
