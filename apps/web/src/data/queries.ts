@@ -855,14 +855,23 @@ export function useToggleTask(pageId: string) {
     onMutate: ({ checked }: { index: number; applyFlip?: () => void; checked?: boolean }) => {
       if (checked === undefined) return;
       const delta = checked ? -1 : 1;
-      for (const [key, data] of qc.getQueriesData<Page[]>({ queryKey: ["pages"] })) {
-        if (!Array.isArray(data)) continue;
-        if (!data.some((p) => p.id === pageId)) continue;
-        qc.setQueryData<Page[]>(key, data.map((p) => (
-          p.id === pageId
-            ? { ...p, taskDone: Math.max(0, Math.min(p.taskTotal ?? 0, (p.taskDone ?? 0) + delta)) }
-            : p
-        )));
+      const bump = (p: Page): Page => (
+        p.id === pageId
+          ? { ...p, taskDone: Math.max(0, Math.min(p.taskTotal ?? 0, (p.taskDone ?? 0) + delta)) }
+          : p
+      );
+      for (const [key, data] of qc.getQueriesData<unknown>({ queryKey: ["pages"] })) {
+        if (Array.isArray(data)) {
+          const rows = data as Page[];
+          if (!rows.some((p) => p.id === pageId)) continue;
+          qc.setQueryData<Page[]>(key, rows.map(bump));
+        } else if (data && typeof data === "object" && Array.isArray((data as { pages?: unknown }).pages)) {
+          // #623 §6.3: the sidebar's rows live in BRANCH entries now ({pages, nextCursor, …}). Without
+          // this arm the guard above silently skipped them and the sidebar ring waited for the refetch.
+          const branch = data as { pages: Page[] };
+          if (!branch.pages.some((p) => p.id === pageId)) continue;
+          qc.setQueryData(key, { ...branch, pages: branch.pages.map(bump) });
+        }
       }
     },
     onSettled: () => {

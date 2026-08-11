@@ -820,6 +820,7 @@
     "noSpace": "スペースなし",
     "untitledSpace": "無題のスペース",
     "loadFailed": "読み込みに失敗しました。",
+    "placeholderPage": "（表示できないページ）",
     "retry": "再試行",
     "noSpaces": "スペースがまだありません。上から作成してください。",
     "noPages": "ページがまだありません。上から追加してください。",

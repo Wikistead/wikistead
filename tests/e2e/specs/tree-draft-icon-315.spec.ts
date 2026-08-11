@@ -51,7 +51,9 @@ test("#315 published row: FileText (no draft icon), dot only after a dirty edit,
 
   // published title is NOT dimmed: it differs from the fg-dim file icon color
   const nameColor = await row.locator("[data-testid=tree-page-name]").evaluate((el) => getComputedStyle(el).color);
-  const iconColor = await row.locator("svg").first().evaluate((el) => getComputedStyle(el).color); // chevron/file glyphs are fg-dim
+  // #623 ①(c): every row draws a chevron now, so svg.first() stopped being the FILE glyph — it grabbed
+  // the chevron and compared the name against the wrong element (a false red the day the ruling landed).
+  const iconColor = await row.locator("svg").last().evaluate((el) => getComputedStyle(el).color); // the file glyph is fg-dim
   expect(nameColor).not.toBe(iconColor);
 
   // dirty edit → the accent dot appears, and the icon does NOT flip back to the draft icon

@@ -38,7 +38,7 @@ import { TemplatePickerDialog } from "./TemplatePickerDialog";
 import { NewPageButton } from "./NewPageButton";
 import { downloadSpaceExport, importSpaceArchive } from "../data/exportApi"; // #309 export / #308 import
 
-import { buildPageNodes } from "./page-nodes";
+import { useLazyPageTree, buildLazyNodes } from "./lazy-tree"; // #623 §6.3
 
 // #538the route holds the TOC's visibleHeadings state, so every CM-internal scroll tick
 // re-rendered the route — and this whole subtree with it. The profile named react-arborist's
@@ -74,34 +74,27 @@ function SidebarImpl() {
     if (current && current !== activeSpaceId) setActiveSpaceId(current);
   }, [current, activeSpaceId, setActiveSpaceId]);
 
-  const pagesQ = useQuery({
-    queryKey: ["pages", current],
-    queryFn: () => apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${current}/pages`, token).then((r) => r?.pages ?? []),
-    enabled: !!current,
-    staleTime: 30_000,
-    // #492: the page tree is boot-critical — a transient failure used to stick as an empty sidebar until a
-    // manual reload (the global default is retry:1). Give this one query more headroom so a brief network
-    // blip self-heals; a hard failure still surfaces the error state below (never a silent empty tree).
-    retry: 3,
-  });
-  // #541(user ruling): don't wait for the WHOLE space's confirm before painting. While the full
-  // tree is in flight (cold open of a big space — the count-proportional ~7ms×N confirm), a PARTIAL
-  // first paint (?first=40: the first rows in display order, each still individually FGA-confirmed
-  // server-side, badges deferred) fills the sidebar in small-space time. The full response replaces it
-  // moments later — rows only ever get ADDED and badges appear; nothing the partial showed disappears
-  // unless the full confirm denies it (the server stays the fortress on both requests).
-  const pagesFirstQ = useQuery({
-    queryKey: ["pages-first", current],
-    queryFn: () => apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${current}/pages?first=40`, token).then((r) => r?.pages ?? []),
-    enabled: !!current && pagesQ.data === undefined,
-    staleTime: 0,
-    gcTime: 30_000,
-  });
-  const pages = useMemo(() => pagesQ.data ?? (pagesQ.data === undefined ? pagesFirstQ.data : undefined) ?? [], [pagesQ.data, pagesFirstQ.data]);
-  // #492: distinguish "still loading" and "failed to load" from "genuinely empty". `pages` is `data ?? []`,
-  // so on error/first-load it is also empty — rendering "No pages yet" then hid a failure and offered no
-  // retry. The delayed flag keeps a fast load from flashing a skeleton (the #457 anti-flicker convention).
-  const pagesLoading = useDelayedFlag(!!current && pagesQ.isLoading);
+  // #623 / ADR-220 §6.3: the tree is fetched BRANCH BY BRANCH. The first request is §5's paint (the
+  // root branch plus the path to the open page — ADR-220 §5's measurement: ~8× faster than the pair
+  // the sidebar used to fire, badges included); every other branch arrives when its row is expanded.
+  // This retires the whole-space read AND #541's ?first=40 partial (`firstN`), which §5 ruled leaves
+  // with the same slice that proves the paint is not slower — measured in the ADR.
+  const lazyTree = useLazyPageTree(current ?? null, pageId ?? null);
+  // #492's split survives the migration: "still loading" and "failed" must not render as "No pages
+  // yet". The paint is the boot-critical read now, so it carries the flag.
+  const pagesLoading = useDelayedFlag(!!current && lazyTree.paint.isLoading);
+  const pagesQ = lazyTree.paint;
+  // Every page currently LOADED, flat — the DnD guard and the move both read it. Deliberately partial
+  // it holds what the reader can see on screen, and the server refuses what a partial view gets wrong
+  // (§7: the cycle check is server-side; this walk is convenience).
+  const pages = useMemo(() => {
+    const out: Page[] = [];
+    for (const b of lazyTree.byParent.values()) {
+      out.push(...b.pages);
+      for (const ph of b.placeholders ?? []) out.push(...ph.pages);
+    }
+    return out;
+  }, [lazyTree.byParent]);
   const pageById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
 
   // #284 / ADR-119: the member's pins. The server list is view-confirmed (double gate
@@ -140,7 +133,10 @@ function SidebarImpl() {
     reorderPins.mutate({ resourceType, orderedIds: ids });
   }, [pagePins, spacePins, reorderPins]);
 
-  const data = useMemo(() => buildPageNodes(pages, null, pinnedPageIds), [pages, pinnedPageIds]);
+  const data = useMemo(() => buildLazyNodes({
+    spaceId: current ?? "", byParent: lazyTree.byParent, pinnedPageIds,
+    placeholderName: t("sidebar.placeholderPage"),
+  }), [current, lazyTree.byParent, pinnedPageIds, t]);
 
   // Active space capability gates management actions (UI only; the server is the
   // fortress). Space-level: a per-page edit override inside a view-only space would
@@ -261,9 +257,17 @@ function SidebarImpl() {
 
   // DnD guard: block dropping a page onto itself or a descendant (cycle). Root drops and page parents
   // within the active space are fine. (Member-only — the public tree is read-only, no DnD.)
+  // #623 §7: under lazy branches this walk sees only LOADED pages, so it is convenience — an ancestor
+  // that is not loaded cannot be walked to. The server refuses the cycle regardless; a partial map may
+  // let the drop be attempted, never let it land.
   const disableDrop = ({ parentNode, dragNodes }: { parentNode: NodeApi<PageTreeNode> | null; dragNodes: NodeApi<PageTreeNode>[] }) => {
     const drag = dragNodes[0]?.data;
     if (!drag) return true;
+    // #623 §4.7: a synthetic row (placeholder / loading / more) is neither a drag source nor a drop
+    // target — "drop onto the placeholder" is a short path back to naming an invisible parent. The
+    // pageId is empty exactly on those rows.
+    if (!drag.pageId) return true;
+    if (parentNode && !parentNode.data.pageId && parentNode.data.id !== "__REACT_ARBORIST_INTERNAL_ROOT__") return true;
     if (parentNode && parentNode.data.pageId) {
       let cur: Page | undefined = pageById.get(parentNode.data.pageId);
       while (cur) {
@@ -414,6 +418,8 @@ function SidebarImpl() {
           onMove={onMove}
           disableDrop={disableDrop}
           deleteMode={currentSpace?.deleteMode ?? "trash_only"}
+          onToggleBranch={(id, open) => (open ? lazyTree.expand(id) : lazyTree.collapse(id))}
+          onLoadMore={(parentId) => void lazyTree.loadMore(parentId)}
         />
       )}
 
