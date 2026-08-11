@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { refreshVimMono, reflectEditing } from "./FontProvider"; // #633: vim decides the prose grid, while editing
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useParams, useSearchParams, useNavigate, Link as RouterLink } from "react-router-dom";
 
@@ -1756,16 +1756,88 @@ function PublicPageRoute() {
 // #227map the public tree (`/public/spaces/:id/pages` — every node is published + public) onto the
 // shared PageTreeNode shape. Published/non-private/ring-less, so the draft/unpublished/private/ring badges all
 // collapse. This is the ONLY public-specific code left; the rendering is the member PageTree component itself.
-function toPublicTreeNodes(nodes: PublicChildNode[]): PageTreeNode[] {
-  return nodes.map((n) => ({
-    id: `page:${n.id}`, name: n.title, pageId: n.id, spaceId: "",
-    published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0,
-    children: toPublicTreeNodes(n.children),
-  }));
+// #623 / ADR-220 §10 (client slice): the public tree fetches BRANCH BY BRANCH, like the member tree.
+// The whole-tree route was depth-bounded at 6 and silently dropped the 7th level (pinned as intended
+// at the time); per-branch fetching removes that truncation — a deep page becomes reachable by
+// expanding its ancestors. The anonymous reader expands rows the way a member does; every row draws a
+// chevron from the same sentinel-child device (ruling①(c)).
+interface PublicBranch { pages: { id: string; title: string }[]; nextCursor: string | null; home?: { id: string; title: string } | null }
+
+function usePublicLazyTree(spaceId: string | undefined) {
+  const qc = useQueryClient();
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const key = (parent: string | null) => ["public-tree", spaceId, parent ?? "root"];
+
+  const root = useQuery({
+    queryKey: key(null),
+    enabled: !!spaceId,
+    retry: 1,
+    queryFn: async (): Promise<PublicBranch> => {
+      const res = await fetch(assetUrl(`/public/spaces/${encodeURIComponent(spaceId!)}/pages/branch`));
+      if (!res.ok) throw new Error(String(res.status));
+      return (await res.json()) as PublicBranch;
+    },
+  });
+  const branches = useQueries({
+    queries: [...expanded].map((parent) => ({
+      queryKey: key(parent),
+      enabled: !!spaceId,
+      staleTime: 30_000,
+      queryFn: async (): Promise<PublicBranch> => {
+        const res = await fetch(assetUrl(`/public/spaces/${encodeURIComponent(spaceId!)}/pages/branch?parent=${encodeURIComponent(parent)}`));
+        if (!res.ok) throw new Error(String(res.status));
+        return (await res.json()) as PublicBranch;
+      },
+    })),
+  });
+  const byParent = useMemo(() => {
+    const m = new Map<string | null, PublicBranch>();
+    if (root.data) m.set(null, root.data);
+    [...expanded].forEach((parent, i) => { const d = branches[i]?.data; if (d) m.set(parent, d); });
+    return m;
+  }, [root.data, expanded, branches]);
+  const loadMore = useCallback(async (parent: string | null) => {
+    const have = qc.getQueryData<PublicBranch>(key(parent));
+    if (!have?.nextCursor || !spaceId) return;
+    const qs = new URLSearchParams();
+    if (parent) qs.set("parent", parent);
+    qs.set("cursor", have.nextCursor);
+    const res = await fetch(assetUrl(`/public/spaces/${encodeURIComponent(spaceId)}/pages/branch?${qs}`));
+    if (!res.ok) return;
+    const next = (await res.json()) as PublicBranch & { restarted?: boolean };
+    qc.setQueryData<PublicBranch>(key(parent), next.restarted ? next : { ...next, pages: [...have.pages, ...next.pages], home: have.home });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spaceId, qc]);
+  return {
+    root, byParent,
+    expand: (id: string) => setExpanded((s) => (s.has(id) ? s : new Set([...s, id]))),
+    collapse: (id: string) => setExpanded((s) => { const n = new Set(s); n.delete(id); return n; }),
+    loadMore,
+  };
 }
-function PublicSpaceSidebar({ nodes, home, openId, onOpen }: { nodes: PublicChildNode[]; home: { id: string; title: string } | null; openId: string | null; onOpen: (id: string) => void }) {
+
+function toPublicLazyNodes(byParent: ReadonlyMap<string | null, PublicBranch>): PageTreeNode[] {
+  const node = (p: { id: string; title: string }): PageTreeNode => ({
+    id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: "",
+    published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0,
+    children: childrenOf(p.id),
+  });
+  const childrenOf = (parent: string): PageTreeNode[] => {
+    const b = byParent.get(parent);
+    if (!b) return [{ id: `unloaded:${parent}`, name: "", pageId: "", spaceId: "", published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [] }];
+    return assemble(b, parent);
+  };
+  const assemble = (b: PublicBranch, parent: string | null): PageTreeNode[] => {
+    const rows = b.pages.map(node);
+    if (b.nextCursor) rows.push({ id: `more:${parent ?? "root"}`, name: "", pageId: "", spaceId: "", published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [] });
+    return rows;
+  };
+  const root = byParent.get(null);
+  return root ? assemble(root, null) : [];
+}
+function PublicSpaceSidebar({ tree, home, openId, onOpen }: { tree: ReturnType<typeof usePublicLazyTree>; home: { id: string; title: string } | null; openId: string | null; onOpen: (id: string) => void }) {
   const { t } = useTranslation();
-  const treeNodes = useMemo(() => toPublicTreeNodes(nodes), [nodes]);
+  const treeNodes = useMemo(() => toPublicLazyNodes(tree.byParent), [tree.byParent]);
   // The SAME frame + tree component the member Sidebar renders (data-testid="sidebar" + PageTree rows), but
   // read-only: no canEdit → no row menu / DnD / create; no session — every node came from a /public/* fetch.
   return (
@@ -1790,7 +1862,9 @@ function PublicSpaceSidebar({ nodes, home, openId, onOpen }: { nodes: PublicChil
           </div>
         </div>
       )}
-      <PageTree nodes={treeNodes} selectedId={openId} onOpen={onOpen} openByDefault />
+      <PageTree nodes={treeNodes} selectedId={openId} onOpen={onOpen}
+        onToggleBranch={(id, open) => (open ? tree.expand(id) : tree.collapse(id))}
+        onLoadMore={(parentId) => void tree.loadMore(parentId)} />
     </div>
   );
 }
@@ -1808,38 +1882,24 @@ function PublicPoweredBy() {
 function PublicSpaceRoute() {
   const { t } = useTranslation();
   const { spaceId } = useParams<{ spaceId: string }>();
-  const [tree, setTree] = useState<PublicChildNode[] | null>(null);
-  const [home, setHome] = useState<{ id: string; title: string } | null>(null);
-  const [notFound, setNotFound] = useState(false);
+  // #623 §10: one bounded request — the root branch, which carries `home` additively. The whole-tree
+  // route (depth-bounded, unbounded in breadth) is no longer called from here.
+  const lazy = usePublicLazyTree(spaceId);
+  const home = lazy.root.data?.home ?? null;
   const [openId, setOpenId] = useState<string | null>(null);
-
   useEffect(() => {
-    let cancelled = false;
-    if (!spaceId) { setNotFound(true); return; }
-    fetch(assetUrl(`/public/spaces/${encodeURIComponent(spaceId)}/pages`))
-      .then(async (res) => {
-        if (cancelled) return;
-        if (!res.ok) { setNotFound(true); return; }
-        // #364 / ADR-157: the route now returns { home, tree }; tolerate the legacy bare array.
-        const body = (await res.json()) as PublicChildNode[] | { home: { id: string; title: string } | null; tree: PublicChildNode[] };
-        const t = Array.isArray(body) ? body : body.tree;
-        const h = Array.isArray(body) ? null : body.home;
-        setTree(t);
-        setHome(h);
-        setOpenId(h?.id ?? t[0]?.id ?? null); // the home is the space root — open it by default
-      })
-      .catch(() => { if (!cancelled) setNotFound(true); });
-    return () => { cancelled = true; };
-  }, [spaceId]);
+    if (openId || !lazy.root.data) return;
+    setOpenId(home?.id ?? lazy.root.data.pages[0]?.id ?? null); // the home is the space root — open it by default
+  }, [openId, home, lazy.root.data]);
 
-  if (notFound) return <AppShell><div data-testid="public-not-found" style={{ padding: 24 }}>{t("publicPage.notFound")}</div></AppShell>;
+  if (lazy.root.isError) return <AppShell><div data-testid="public-not-found" style={{ padding: 24 }}>{t("publicPage.notFound")}</div></AppShell>;
   return (
-    <AppShell sidebar={<PublicSpaceSidebar nodes={tree ?? []} home={home} openId={openId} onOpen={setOpenId} />} headerExtra={<PublicPoweredBy />}>
+    <AppShell sidebar={<PublicSpaceSidebar tree={lazy} home={home} openId={openId} onOpen={setOpenId} />} headerExtra={<PublicPoweredBy />}>
       {openId ? (
         <PublicPageContent key={openId} pageId={openId} />
       ) : (
         <div className="flex h-full items-center justify-center p-8 text-fg-dim" data-testid="public-space-empty">
-          {tree == null ? "" : t("share.spacePickPrompt")}
+          {lazy.root.data == null ? "" : t("share.spacePickPrompt")}
         </div>
       )}
     </AppShell>
