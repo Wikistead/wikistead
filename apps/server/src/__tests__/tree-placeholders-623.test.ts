@@ -15,7 +15,7 @@ import { fgaClient, writeTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, publishPage, setPagePrivate, restrictPageAccess, listBranch } from '../routes/pages.js'
+import { createPage, deletePage, publishPage, setPagePrivate, restrictPageAccess, listBranch, branchPlaceholders, paintTree } from '../routes/pages.js'
 import { TREE_VIEW_LEAVES, resolveTreePlaceholders } from '../routes/tree-placeholders.js'
 import { groupGrantee } from '../auth/group-sync.js'
 import type { Tenant } from '@wikistead/types'
@@ -43,10 +43,12 @@ async function page(title: string, parentId: string | null, opts: { publish?: bo
   return p.id
 }
 
+// #623②: the chains come from the FOLLOW-UP resolver now; the branch itself never resolves
+// them. The assertions below ask this, plus one paint-path regression pin at the bottom.
 const branch = (parent: string | null, subject = READER) =>
-  listBranch(db, fgaClient, {
-    spaceId, parentId: parent, subject,
-    placeholders: { tenantId: tenant.id, groups: subject === READER ? [GROUP] : [] },
+  branchPlaceholders(db, fgaClient, {
+    spaceId, parentId: parent, subject, tenantId: tenant.id,
+    groups: subject === READER ? [GROUP] : [],
   })
 
 beforeAll(async () => {
@@ -83,7 +85,8 @@ describe('#623 §4: all three invisibility causes anchor a placeholder', () => {
     await writeTuples(fgaClient, [{ user: READER, relation: 'view_direct', object: `page:${child}` }])
 
     const b = await branch(null)
-    expect(b.pages.map((p) => p.id), 'the private parent leaked into the page list').not.toContain(parent)
+    const rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
+    expect(rows.pages.map((p) => p.id), 'the private parent leaked into the page list').not.toContain(parent)
     const holder = (b.placeholders ?? []).find((n) => n.pages.some((p) => p.id === child))
     expect(holder, 'the granted child was handed over and never arrived').toBeTruthy()
     expect(holder!.under, 'the chain hangs off the branch root').toBeNull()
@@ -98,7 +101,6 @@ describe('#623 §4: all three invisibility causes anchor a placeholder', () => {
     const child = await page(`ph-draft-child-${STAMP}`, draft)
 
     const b = await branch(null)
-    expect(b.pages.map((p) => p.id)).not.toContain(draft)
     const holder = (b.placeholders ?? []).find((n) => n.pages.some((p) => p.id === child))
     expect(holder, 'the published child under a draft parent is unreachable in the tree').toBeTruthy()
     expect(JSON.stringify(b)).not.toContain(`ph-draft-${STAMP}`)
@@ -112,14 +114,12 @@ describe('#623 §4: all three invisibility causes anchor a placeholder', () => {
     })
 
     const b = await branch(null)
-    expect(b.pages.map((p) => p.id), 'the restriction did not bite').not.toContain(parent)
     const holder = (b.placeholders ?? []).find((n) => n.pages.some((p) => p.id === child))
     expect(holder, 'a restricted parent hid its published child — the class a published-based walk misses').toBeTruthy()
   }, 300_000)
 
   it('the grant read finds a GROUP grant on its own (path 1, isolated: no seeds for path 2)', async () => {
-    // visible A (collapsed: this test resolves the ROOT branch, so A's children are unresolved)
-    //   → private B → child granted to the READER'S GROUP.
+    // visible A (collapsed) → private B → child granted to the READER'S GROUP.
     const a = await page(`ph-anc-${STAMP}`, null)
     const b0 = await page(`ph-anc-mid-${STAMP}`, a)
     const child = await page(`ph-anc-child-${STAMP}`, b0)
@@ -129,12 +129,9 @@ describe('#623 §4: all three invisibility causes anchor a placeholder', () => {
       { user: groupGrantee(tenant.id, GROUP), relation: 'view_direct', object: `page:${child}` },
     ]).catch(() => {})
 
-    // ⚠️ Isolated from path 2 by construction, and this wording is the second draft. The first
-    // resolved A's branch through listBranch — and stayed GREEN with the whole grant read deleted,
-    // because the private mid-page is an invisible CHILD of that branch and path 2 descends it to the
-    // same answer. With per-branch resolution the two paths overlap wherever the chain starts at the
-    // branch; what only path 1 can do is answer WITHOUT walking (precision under a spent budget). So
-    // the seeds are EMPTY here: any placement below can only have come from the grant read.
+    // ⚠️ Isolated from path 2 by construction (the first draft resolved the branch and stayed GREEN
+    // with the whole grant read deleted — path 2 descends to the same answer wherever the chain
+    // starts at the branch). Seeds are EMPTY: any placement can only come from the grant read.
     const r = await resolveTreePlaceholders(db, fgaClient, {
       spaceId, tenantId: tenant.id, branchParentId: a, subject: READER, groups: [GROUP],
       invisibleChildIds: [], toPage: (row) => ({ id: row.id as string }),
@@ -157,13 +154,10 @@ describe('#623 §4: what a placeholder must NOT do', () => {
   }, 300_000)
 
   it('a share_link subject resolves nothing (§4.4: settled by principal type)', async () => {
-    const r = await listBranch(db, fgaClient, {
-      spaceId, parentId: null, subject: `share_link:zz623ph-${STAMP}`,
+    const r = await branchPlaceholders(db, fgaClient, {
+      spaceId, parentId: null, subject: `share_link:zz623ph-${STAMP}`, tenantId: tenant.id, groups: [],
       context: { current_time: new Date().toISOString() },
-      placeholders: { tenantId: tenant.id, groups: [] },
     }).catch(() => null)
-    // the space check may 404 the unknown link — both answers are fine; what must not happen is a
-    // placeholder list for a guest
     if (r) expect(r.placeholders ?? []).toEqual([])
   }, 300_000)
 
@@ -174,6 +168,42 @@ describe('#623 §4: what a placeholder must NOT do', () => {
       budget: { left: 1 },
     })
     expect(res.placeholdersExhausted, 'the budget ran out silently').toBe(true)
+  }, 300_000)
+
+  it('②: the PAINT resolves no chains — a hidden grant is absent there and present in the follow-up', async () => {
+    // The regression pin the rejection asked for: " paint ". A fixture
+    // with a real hidden-grant chain paints WITHOUT it (nothing visible waits on a roster read), and
+    // the follow-up resolver DOES place it (the feature is not lost).
+    const parent = await page(`ph-paint-${STAMP}`, null)
+    const child = await page(`ph-paint-child-${STAMP}`, parent)
+    await setPagePrivate(db, fgaClient, driver, { pageId: parent, tenantId: tenant.id, userId: 'dev-user' })
+    await writeTuples(fgaClient, [{ user: READER, relation: 'view_direct', object: `page:${child}` }]).catch(() => {})
+
+    const painted = await paintTree(db, fgaClient, { spaceId, subject: READER })
+    expect(JSON.stringify(painted), 'the paint carried a placeholder — the resolution is back on the hot path')
+      .not.toContain(child)
+
+    const follow = await branch(null)
+    expect((follow.placeholders ?? []).some((n) => n.pages.some((p) => p.id === child)),
+      'the follow-up no longer places the chain the paint stopped carrying').toBe(true)
+  }, 300_000)
+
+  it('①: a chevron means a VISIBLE child — rows without one draw none, and invisible-only rows tell nothing', async () => {
+    // visible parent A with a visible child → hasChildren true.
+    const a = await page(`ch-a-${STAMP}`, null)
+    await page(`ch-a-kid-${STAMP}`, a)
+    // visible parent B with an INVISIBLE-only child (draft; READER holds no grant) → hasChildren false
+    // the corrected leak reading — an invisible child is reported as ABSENT, telling nothing.
+    const b0 = await page(`ch-b-${STAMP}`, null)
+    await page(`ch-b-kid-${STAMP}`, b0, { publish: false })
+    // leaf C → false.
+    const c0 = await page(`ch-c-${STAMP}`, null)
+
+    const rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
+    const flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
+    expect(flag.get(a), 'a visible child earns the chevron').toBe(true)
+    expect(flag.get(b0), 'an invisible-only child must read as NO children').toBe(false)
+    expect(flag.get(c0), 'a leaf draws no chevron').toBe(false)
   }, 300_000)
 
   it('the viewing-leaf list is derived from the model, not from memory', () => {

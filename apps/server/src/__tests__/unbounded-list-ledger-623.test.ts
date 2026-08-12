@@ -97,7 +97,7 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // over-ran into a NEIGHBOURING helper that happened to contain a LIMIT — the bound belonged to
   // somebody else. They are not new routes and not new debt; they are debt that was being counted
   // as paid. Classified one at a time, by reading each handler.
-  'auth.ts:/auth/login-options': { kind: 'debt', why: '#623 A: one row per login connection; grows with IdP configuration, not with usage.' },
+  'auth.ts:/auth/login-options': { kind: 'bounded', why: '#623 (ruling3-4): a tenant may HOLD at most MAX_OIDC_CONNECTIONS (20) — the bound is on existence, enforced at the POST with a 409, and the sign-in screen shows every one (created = shown, pinned in connection-cap-623). Paging was rejected: reorder saves the complete ordered id list, and "load more ways to sign in" is not a product.' },
 
   // ── surfaced by slice 12's SECOND instrument fix: a bound marker that belonged to a scalar subquery,
   // or to a lower-case variable. Five routes, each read by hand. `GET /spaces` was one of them and
@@ -136,7 +136,7 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
 
   // admin rosters: each grows with how the tenant is configured rather than with how it is used, which
   // makes them slower to notice and no less unbounded.
-  'admin-connections.ts:/admin/connections': { kind: 'debt', why: '#623: one row per login connection, ORDER BY sort — the admin twin of /auth/login-options.' },
+  'admin-connections.ts:/admin/connections': { kind: 'bounded', why: '#623 (ruling3): capped by MAX_OIDC_CONNECTIONS (20) at issue — the 21st POST answers 409 connection_limit_reached and the screen disables the add button at the cap the server reports. Pinned in connection-cap-623.' },
   // ⚠️ Was a 'debt' line. Measured: this route reads every member to COUNT, and the count is what it
   // returns — `{stance, unsatisfied, signedOut}`, three fields whatever the tenant holds. The read is
   // unbounded and the RESPONSE cannot grow, which is a different axis from the one this ticket is

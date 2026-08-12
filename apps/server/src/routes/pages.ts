@@ -1856,10 +1856,8 @@ export async function listBranch(
     context?: { current_time: string }
     limit?: number
     cursor?: string
-    /** §4: resolve placeholder chains for this branch (member principals only; the routes decide). */
-    placeholders?: { tenantId: string; groups: string[]; budget?: { left: number } }
   },
-): Promise<BranchPage & { restarted: boolean; placeholders?: PlaceholderNode[]; placeholdersExhausted?: boolean }> {
+): Promise<BranchPage & { restarted: boolean }> {
   const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
   const limit = Math.min(500, Math.max(1, args.limit ?? BRANCH_PAGE_LIMIT))
 
@@ -1920,38 +1918,103 @@ export async function listBranch(
   const lastRow = page[page.length - 1]
   const nextCursor = hasMore && lastRow ? lastRow.id : null
 
-  // §3: every row on its own. `filterAuthorized` keeps the bounded lanes #541 established.
-  const visible = new Set(await filterAuthorized(fga, args.subject, 'view', page.map((r) => r.id), args.context))
+  // #623①: which rows get a CHEVRON — "has a child THIS READER can see", one level down. The
+  // child ids ride the SAME batchCheck as the rows (no new round trip); a row whose children are all
+  // invisible answers "no children", which is the corrected reading of the leak: what must not be
+  // told is "something you cannot see is here", and an invisible child reported as ABSENT tells
+  // nothing. Capped per row: the cap's false negative (a visible child hiding behind CHEVRON_PROBE_CAP
+  // invisible siblings) draws no chevron — accepted by the ruling, and strictly quieter than the lie
+  // it replaces.
+  const kids = page.length
+    ? await db.sql<{ id: string; parent_id: string }[]>`
+        SELECT id, parent_id FROM (
+          SELECT p.id, p.parent_id,
+                 ROW_NUMBER() OVER (PARTITION BY p.parent_id ORDER BY p.position, p.created_at) AS rn
+          FROM pages p JOIN spaces s ON s.id = p.space_id
+          WHERE p.parent_id = ANY(${page.map((r) => r.id)}) AND p.space_id = ${args.spaceId}
+            AND p.deleted_at IS NULL AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+        ) x WHERE rn <= ${CHEVRON_PROBE_CAP}`
+    : []
 
-  // §4: the invisible children are already in hand — the complement of the allowed set — and they are
-  // path 2's seeds. Volunteered here, in the same response, because a placeholder must never be
-  // expandable through this route (§4.2): expanding one opens a node already delivered.
-  let placeholders: PlaceholderNode[] | undefined
-  let placeholdersExhausted: boolean | undefined
-  if (args.placeholders) {
-    const resolved = await resolveTreePlaceholders(db, fga, {
-      spaceId: args.spaceId, tenantId: args.placeholders.tenantId, branchParentId: args.parentId,
-      subject: args.subject, groups: args.placeholders.groups,
-      invisibleChildIds: page.filter((r) => !visible.has(r.id)).map((r) => r.id),
-      ...(args.placeholders.budget ? { budget: args.placeholders.budget } : {}),
-      ...(args.context ? { context: args.context } : {}),
-      toPage: (row) => toPage(row as unknown as PageRow) as unknown as { id: string },
-    })
-    placeholders = resolved.placeholders
-    placeholdersExhausted = resolved.placeholdersExhausted
-  }
+  // §3: every row on its own — and now the probe children fold in. ONE batchCheck for both questions.
+  const checked = new Set(await filterAuthorized(
+    fga, args.subject, 'view', [...page.map((r) => r.id), ...kids.map((k) => k.id)], args.context))
+  const visible = new Set(page.map((r) => r.id).filter((id) => checked.has(id)))
+  const expandable = new Set(kids.filter((k) => checked.has(k.id)).map((k) => k.parent_id))
+
+  // §4 placeholders are NOT resolved here any more (②): a rare feature must not tax every load.
+  // The branch answers immediately; `/pages/tree-placeholders` serves the chains as a follow-up the
+  // screen requests after painting. The invisible-children seeds it needs are re-derived there.
   return {
-    pages: page.filter((r) => visible.has(r.id)).map(toPage),
+    pages: page.filter((r) => visible.has(r.id)).map((r) => ({ ...toPage(r), hasChildren: expandable.has(r.id) })),
     nextCursor,
     restarted,
-    ...(placeholders !== undefined ? { placeholders, placeholdersExhausted } : {}),
   }
 }
 
-export interface PaintedBranch {
-  parentId: string | null; pages: Page[]; nextCursor: string | null
-  placeholders?: PlaceholderNode[]; placeholdersExhausted?: boolean
+/**
+ * #623②: §4's placeholder chains, as a FOLLOW-UP — never on the paint path.
+ *
+ * Resolving them inline read a creator's whole grant roster on every branch of every cold open
+ * (728 tuples measured on dev) for a feature that is rare in the data. The screen paints first and
+ * then asks this; the unnamed rows arrive a beat later. §2's gate is unchanged — the caller still
+ * names a parent, and every refusal is the same 404 the branch route answers.
+ */
+export async function branchPlaceholders(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: {
+    spaceId: string
+    parentId: string | null
+    subject: string
+    tenantId: string
+    groups: string[]
+    context?: { current_time: string }
+  },
+): Promise<{ placeholders: PlaceholderNode[]; placeholdersExhausted: boolean }> {
+  const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
+  if (args.parentId === null) {
+    if (!(await checkRelation(fga, args.subject, 'viewer', { type: 'space', id: args.spaceId }, args.context))) {
+      throw notFound()
+    }
+  } else {
+    const [row] = await db.sql<[{ space_id: string; deleted_at: Date | null }?]>`
+      SELECT space_id, deleted_at FROM pages WHERE id = ${args.parentId}`
+    if (!row || row.deleted_at || row.space_id !== args.spaceId) throw notFound()
+    if (!(await checkRelation(fga, args.subject, 'view', { type: 'page', id: args.parentId }, args.context))) {
+      throw notFound()
+    }
+  }
+  // Path 2's seeds, re-derived: the branch's direct children the reader cannot view. The derivation
+  // spends the same budget the resolver walks with, so "seed finding" cannot become an unmetered walk.
+  const budget = { left: PLACEHOLDER_NODE_MAX }
+  const rows = await db.sql<{ id: string }[]>`
+    SELECT p.id FROM pages p JOIN spaces s ON s.id = p.space_id
+    WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL
+      AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+      AND ${args.parentId === null ? db.sql`p.parent_id IS NULL` : db.sql`p.parent_id = ${args.parentId}`}
+    ORDER BY p.position, p.created_at
+    LIMIT ${PLACEHOLDER_NODE_MAX}`
+  budget.left -= rows.length
+  const seen = new Set(await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context))
+  return resolveTreePlaceholders(db, fga, {
+    spaceId: args.spaceId, tenantId: args.tenantId, branchParentId: args.parentId,
+    subject: args.subject, groups: args.groups,
+    invisibleChildIds: rows.filter((r) => !seen.has(r.id)).map((r) => r.id),
+    budget,
+    ...(args.context ? { context: args.context } : {}),
+    toPage: (row) => toPage(row as unknown as PageRow) as unknown as { id: string },
+  })
 }
+
+/**
+ * #623①: how many children one row's chevron probe may examine. The probe rides the row
+ * batchCheck (~23ms/id measured), so this bounds the paint's extra cost at rows×cap in the worst
+ * case and ~1×rows in the common one (most rows have few children).
+ */
+export const CHEVRON_PROBE_CAP = 3
+
+export interface PaintedBranch { parentId: string | null; pages: Page[]; nextCursor: string | null }
 
 /**
  * The FIRST PAINT: the root branch, plus the branches along the path to the page the reader has open.
@@ -1976,23 +2039,18 @@ export async function paintTree(
     context?: { current_time: string }
     open?: string | undefined
     limit?: number
-    placeholders?: { tenantId: string; groups: string[] }
   },
 ): Promise<{ branches: PaintedBranch[] }> {
-  // §4.3: ONE budget for the whole paint. Each branch resolving with its own would multiply the
-  // ceiling by the depth of the open page — up to ten budgets where the ADR priced one.
-  const paintBudget = { left: PLACEHOLDER_NODE_MAX }
+  // #623②: the paint resolves NO placeholder chains — that walk read a creator's whole grant
+  // roster (728 tuples, measured) on every cold open, for a feature that is rare in the data. The
+  // screen asks `/pages/tree-placeholders` AFTER painting; nothing visible waits for it.
   const one = async (parentId: string | null): Promise<PaintedBranch> => {
     const b = await listBranch(db, fga, {
       spaceId: args.spaceId, parentId, subject: args.subject,
       ...(args.context ? { context: args.context } : {}),
       ...(args.limit != null ? { limit: args.limit } : {}),
-      ...(args.placeholders ? { placeholders: { ...args.placeholders, budget: paintBudget } } : {}),
     })
-    return {
-      parentId, pages: b.pages, nextCursor: b.nextCursor,
-      ...(b.placeholders !== undefined ? { placeholders: b.placeholders, placeholdersExhausted: b.placeholdersExhausted } : {}),
-    }
+    return { parentId, pages: b.pages, nextCursor: b.nextCursor }
   }
 
   const branches: PaintedBranch[] = [await one(null)]
@@ -4206,8 +4264,6 @@ export async function pagesPlugin(app: FastifyInstance) {
         ...(context ? { context } : {}),
         ...(req.query.open ? { open: req.query.open } : {}),
         ...(Number.isFinite(asked) ? { limit: asked } : {}),
-        // §4.4: members only — a share_link never resolves chains, settled by principal type here
-        ...(req.user ? { placeholders: { tenantId: req.tenant.id, groups: req.user.groups } } : {}),
       })
     })
 
@@ -4243,7 +4299,21 @@ export async function pagesPlugin(app: FastifyInstance) {
         ...(context ? { context } : {}),
         ...(Number.isFinite(asked) ? { limit: asked } : {}),
         ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
-        ...(req.user ? { placeholders: { tenantId: req.tenant.id, groups: req.user.groups } } : {}),
+      })
+    })
+
+  // #623②: the placeholder follow-up. Members only — §4.4 settles guests by principal type,
+  // and a share_link asking gets an empty answer rather than a distinguishable refusal.
+  app.get<{ Params: { spaceId: string }; Querystring: { parent?: string } }>(
+    '/spaces/:spaceId/pages/tree-placeholders', async (req, reply) => {
+      if (!req.user) return reply.code(401).send({ error: 'unauthorized' })
+      const parentRaw = req.query.parent
+      return branchPlaceholders(req.db, app.fga, {
+        spaceId: req.params.spaceId,
+        parentId: !parentRaw || parentRaw === 'root' ? null : parentRaw,
+        subject: `user:${req.user.sub}`,
+        tenantId: req.tenant.id,
+        groups: req.user.groups,
       })
     })
 

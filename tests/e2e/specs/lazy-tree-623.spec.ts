@@ -13,10 +13,10 @@ import { openDemo, sleep } from "../helpers";
 // never open. A row with an invisible-only subtree still opens (and shows nothing), which is exactly
 // the lie (c) accepts: "there may be children", never "something denied exists".
 
-const P = (id: string, title: string, parentId: string | null = null) => ({
+const P = (id: string, title: string, parentId: string | null = null, hasChildren = false) => ({
   id, tenantId: "t", spaceId: "demo_space", parentId, title, position: 0,
   createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
-  published: true, hasUnpublishedChanges: false, taskDone: 0, taskTotal: 0,
+  published: true, hasUnpublishedChanges: false, taskDone: 0, taskTotal: 0, hasChildren,
 });
 
 async function openLazySpace(page: Page, opts: { branchDelayMs?: number } = {}) {
@@ -27,7 +27,7 @@ async function openLazySpace(page: Page, opts: { branchDelayMs?: number } = {}) 
       body: JSON.stringify({
         branches: [{
           parentId: null,
-          pages: [P("p-top", "Top page"), P("p-plain", "Plain leaf")],
+          pages: [P("p-top", "Top page", null, true), P("p-plain", "Plain leaf")],
           nextCursor: null,
           placeholders: [
             { token: "tok-1", under: null, parentToken: null, pages: [P("p-granted", "Granted child", null)] },
@@ -49,7 +49,7 @@ async function openLazySpace(page: Page, opts: { branchDelayMs?: number } = {}) 
           // silently shrink it (the first draft returned [] here and hid a real hook defect behind a
           // fixture defect: the tree emptied and the spec could not say which side was wrong)
           : parent === "root"
-            ? { pages: [P("p-top", "Top page"), P("p-plain", "Plain leaf")], nextCursor: null,
+            ? { pages: [P("p-top", "Top page", null, true), P("p-plain", "Plain leaf")], nextCursor: null,
                 placeholders: [{ token: "tok-1", under: null, parentToken: null, pages: [P("p-granted", "Granted child", null)] }] }
             : { pages: [], nextCursor: null },
       ),
@@ -63,16 +63,25 @@ async function openLazySpace(page: Page, opts: { branchDelayMs?: number } = {}) 
   return { requested };
 }
 
-test("#623 ①(c): an unexpanded row can be expanded — and only then is its branch asked for", async ({ page }) => {
+test("#623 ①: a row with a visible child expands; a leaf draws no chevron at all", async ({ page }) => {
   test.setTimeout(120_000);
   const { requested } = await openLazySpace(page);
 
   // The paint answered the ROOT alone. Nothing has asked for p-top's branch yet.
   expect(requested.filter((r) => r === "p-top"), "a branch was fetched before its row was opened").toHaveLength(0);
 
-  // The row is expandable although nothing about its children is loaded — the ruling's whole point.
+  //①: the chevron follows the server's hasChildren. The leaf must NOT be expandable — the
+  // retracted ruling drew a chevron on every row, and the rejection's words for it were "
+  // > UI". A chevron in arborist exists only when a row has children,
+  // so the leaf's svg count is the measurable difference.
+  const leaf = page.locator('[data-testid="tree-page"]', { hasText: "Plain leaf" }).first();
+  await expect(leaf).toBeVisible();
+  await expect(leaf.locator("[data-testid=tree-expand-toggle] svg"), "the childless row still draws an expander").toHaveCount(0);
+
+  // The row WITH a visible child is expandable although nothing about its children is loaded.
   const row = page.locator('[data-testid="tree-page"]', { hasText: "Top page" }).first();
   await expect(row).toBeVisible();
+  await expect(row.locator("[data-testid=tree-expand-toggle] svg"), "the parent row lost its chevron").toHaveCount(1);
   await row.locator(".rotate-0, [class*=chevron], svg").first().click().catch(() => row.dblclick());
   await expect
     .poll(() => requested.filter((r) => r === "p-top").length, { timeout: 10_000 })

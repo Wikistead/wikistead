@@ -137,7 +137,10 @@ export function PageTree({
       return <div className="flex h-full items-center px-3 text-fg-dim" data-testid="tree-branch-loading"><Loader2 size={13} className="animate-spin" /></div>;
     }
     if (d.id.startsWith(MORE_PREFIX)) {
-      const parentId = d.id.slice(MORE_PREFIX.length);
+      // `more:<parent>:<cursor>` — the cursor is part of the IDENTITY (a fixed id survived the
+      // append, its mount-once guard stayed spent, and page three never loaded). Parents are uuids and
+      // never contain a colon, so the first segment is the parent.
+      const parentId = d.id.slice(MORE_PREFIX.length).split(":")[0]!;
       return (
         <MoreRow key={d.id} onVisible={() => onLoadMoreRef.current?.(parentId === "root" ? null : parentId)} />
       );

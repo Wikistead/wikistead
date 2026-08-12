@@ -37,6 +37,9 @@ export interface Page {
   id: string;
   spaceId: string;
   parentId: string | null;
+  // #623①: does this page have a child THE VIEWER CAN SEE? Server-answered (folded into
+  // the branch batchCheck); the chevron draws from this and only this.
+  hasChildren?: boolean;
   title: string;
   position: number;
   // Cheap per-page flag (draft != published) for the sidebar badge. Over-

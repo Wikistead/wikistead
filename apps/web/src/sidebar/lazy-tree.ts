@@ -32,6 +32,9 @@ interface PaintAnswer {
 
 const ROOT = "root";
 
+/** #623③: how many rows the first paint confirms per branch. */
+export const PAINT_LIMIT = 30;
+
 export function branchKey(spaceId: string, parentId: string | null): (string | null)[] {
   return ["pages", spaceId, "branch", parentId ?? ROOT];
 }
@@ -60,8 +63,11 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
     // rebuilding from nothing). The stale paint stays up; the new one replaces it when it lands.
     placeholderData: (prev: { paintedParents: (string | null)[] } | undefined) => prev,
     queryFn: async () => {
-      const r = await apiFetch<PaintAnswer>(
-        `/spaces/${spaceId}/pages/paint${openPageId ? `?open=${encodeURIComponent(openPageId)}` : ""}`, token);
+      // #623③: confirm what the screen can SHOW (~20 rows visible; 30 leaves headroom), not
+      // the whole branch. The rest arrives by scrolling through the `more:` row.
+      const qs = new URLSearchParams({ limit: String(PAINT_LIMIT) });
+      if (openPageId) qs.set("open", openPageId);
+      const r = await apiFetch<PaintAnswer>(`/spaces/${spaceId}/pages/paint?${qs}`, token);
       const branches: PaintAnswer["branches"] = r?.branches ?? [];
       for (const b of branches) {
         qc.setQueryData(branchKey(spaceId!, b.parentId), {
@@ -174,20 +180,26 @@ export function buildLazyNodes(args: {
     taskDone: p.taskDone ?? 0,
     taskTotal: p.taskTotal ?? 0,
     pinned: pinnedPageIds.has(p.id),
-    children: childrenOf(p.id),
+    children: childrenOf(p),
   });
 
-  const childrenOf = (parentId: string): PageTreeNode[] => {
-    const branch = byParent.get(parentId);
+  // #623①: the sentinel — and with it the chevron — exists ONLY for a row the server says has
+  // a child the reader can see (`hasChildren`, folded into the branch's own batchCheck). The previous
+  // ruling drew one on every row and the rejection called it what it was: a chevron on a childless
+  // page is a lie the reader pays for with a click. An invisible-only child reads as ABSENT here
+  // nothing says "something you cannot see is here".
+  const childrenOf = (p: Page): PageTreeNode[] => {
+    const branch = byParent.get(p.id);
     if (!branch) {
-      // Not loaded: one sentinel child, so the chevron draws. It renders as a brief loading row for
-      // the instant between the expand and the branch answer.
+      if (!p.hasChildren) return [];
+      // has a visible child, not yet loaded: one sentinel child, so the chevron draws. It renders as
+      // a brief loading row for the instant between the expand and the branch answer.
       return [{
-        id: `${UNLOADED_CHILD_PREFIX}${parentId}`, name: "", pageId: "", spaceId,
+        id: `${UNLOADED_CHILD_PREFIX}${p.id}`, name: "", pageId: "", spaceId,
         published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
       }];
     }
-    return assemble(branch, parentId);
+    return assemble(branch, p.id);
   };
 
   const placeholderNodes = (branch: BranchAnswer, under: string | null): PageTreeNode[] => {
@@ -219,8 +231,11 @@ export function buildLazyNodes(args: {
       ...placeholderNodes(branch, parentId),
     ];
     if (branch.nextCursor) {
+      // #623(the "more" row misfiring): the row's id CARRIES THE CURSOR. With a fixed id the
+      // arborist row survives the append, its mount-once guard stays spent, and the next page never
+      // loads — one fetch per branch, however deep it went. A new cursor is a new id is a fresh row.
       rows.push({
-        id: `${MORE_PREFIX}${parentId ?? ROOT}`, name: "", pageId: "", spaceId,
+        id: `${MORE_PREFIX}${parentId ?? ROOT}:${branch.nextCursor}`, name: "", pageId: "", spaceId,
         published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
       });
     }
