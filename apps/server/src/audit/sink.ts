@@ -122,6 +122,11 @@ export function registerAuditSink(s: AuditSink): void {
   sink = s
 }
 
+/** True when a ledger is composed in — the admin-surfaces nav filter reads this (#688). */
+export function auditLedgerRegistered(): boolean {
+  return sink !== null
+}
+
 // Enqueue an audit intent ONLY when a ledger exists AND the tenant is entitled to it. Call inside
 // the operation tx (the intent commits atomically with the operation). Null on a CE build (no
 // ledger registered) and for unentitled tenants alike: in both cases there is no ledger to write.

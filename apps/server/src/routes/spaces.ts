@@ -12,7 +12,6 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, knownGroupNames, confirmedGroupNames, resolveGroupName } from '../auth/group-sync.js'
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: full name on the manage-gated grant list
-import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
 import { auditIfEntitled } from '../audit/sink.js'
 import { deletePinsForResources } from './pins.js'
 import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
@@ -1699,41 +1698,8 @@ export async function spacesPlugin(app: FastifyInstance) {
     return { deleteMode: v }
   })
 
-  // #520 / ADR-189 (analytics v2 · slice 1): SPACE-level page-view aggregation. Rolls up page_view_daily
-  // over ONLY the pages the caller can MANAGE (§5 manage-filter-set) — never space#viewer (the ADR-126 leak
-  // class), so a private page's view activity never surfaces to a non-manager. Existence floor: space `view`
-  // (a 404 hides a space you cannot see). EE-gated exactly like the per-page dashboard (#464). No roster, no
-  // member names, no minted IDs — aggregate counts only (the search-term stream was rejected at Review).
-  // #520 / ADR-189 slice 2: period (from/to date range) + viewerClass filter + sort (day|views · asc|desc)
-  // as OPTIONAL query params. These only SHAPE the already-authorized roll-up (they run AFTER the §5
-  // manage-filter-set), so the authz surface is unchanged from slice 1. Everything is validated and
-  // parameterised (the sort clause is picked from a fixed allowlist, never interpolated user text).
-  // #520 / ADR-189 slice 3: `unique=true` switches the MEMBER metric from summed page counts to DISTINCT
-  // members across the space — page_view_roster (one row per page/member/day) COUNT(DISTINCT member_sub),
-  // so a member who read N pages counts ONCE. Guest/anon have NO cross-page session id (ADR-175 §4: no
-  // minted ids), so their "unique" stays the per-page deduped-session sum — a session/day approximation the
-  // UI must label as such (slice 4). The roster is personal data, read on the SAME manage-filter-set.
-  // #520 / ADR-189 slice 5: the roll-up itself (manage-filter-set + shaping + unique) now lives in the
-  // SHARED `rollupPageViews` helper so this space surface and the tenant surface /admin/analytics) cannot
-  // drift on the privacy-critical part. This route keeps what is scope-specific: the existence floor
-  // (space `view` → 404), the EE gate, and the candidate page set (this space, RLS-scoped).
-  app.get<{ Params: { spaceId: string }; Querystring: RollupQuery }>('/spaces/:spaceId/analytics', async (req, reply) => {
-    const subject = `user:${req.user.sub}`
-    const unique = isUniqueMode(req.query)
-    if (!(await check(app.fga, subject, 'view', { type: 'space', id: req.params.spaceId }))) return reply.code(404).send({ error: 'not found' }) // existence-hiding floor
-    if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, pages: 0, daily: [], unique } // EE gate (paid feature)
-    const invalid = validateRollupQuery(req.query) // 400 before any FGA/DB work
-    if (invalid) return reply.code(400).send({ error: invalid })
-    // Candidates are this space's pages; the ancestry map spans the whole (RLS-scoped) tenant because a
-    // private ANCESTOR that makes a candidate private need not itself be a candidate.
-    const rows = await req.db.sql<{ id: string; parent_id: string | null; space_id: string }[]>`SELECT id, parent_id, space_id FROM pages`
-    const parentOf = new Map(rows.map((r) => [r.id, r.parent_id] as const))
-    const candidates = rows.filter((r) => r.space_id === req.params.spaceId).map((r) => r.id)
-    // #520 ONE check decides whether the per-page fan-out is needed at all. A space manager manages
-    // every non-private page in the space by the model, so only private ones still get a per-page check.
-    const scopeManager = await check(app.fga, subject, 'manage', { type: 'space', id: req.params.spaceId })
-    return rollupPageViews(req.db, app.fga, subject, candidates, req.query, scopeManager, { parentOf, managedSpaceIds: [req.params.spaceId] })
-  })
+  // #688 slice 2: GET /spaces/:spaceId/analytics moved with the analytics feature into
+  // @wikistead-ee/server (analyticsEeMount) — the manage-filter-set and its comments moved verbatim.
 
   // ── per-space access (Phase 5b) — all manage-gated ──
   app.get<{ Params: { spaceId: string }; Querystring: { cursor?: string } }>('/spaces/:spaceId/access', async (req) => {

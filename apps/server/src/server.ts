@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify'
 import { buildApp } from './app.js'
 import { startOutboxWorker } from './search/index.js'
 import { startWebhookDrainWorker } from './routes/webhooks.js'
-import { startAnalyticsDrainWorker } from './analytics/outbox.js'
 import { startEmailDrainWorker } from './email/outbox.js'
 import { startShareLinkSweepWorker } from './routes/share-links.js'
 import { pool } from './db/pool.js'
@@ -53,12 +52,8 @@ export async function startServer(): Promise<FastifyInstance> {
   // inject-driven tests don't spawn a timer.
   startWebhookDrainWorker(fgaClient, Number(process.env.WEBHOOK_OUTBOX_POLL_MS ?? 5000))
 
-  // Background analytics drain (#464 / ADR-175): folds enqueued page-view intents into the who-viewed
-  // roster + daily counters (at-least-once; fold+delete in one tenant tx). Without this worker the
-  // roster stays empty for ever and the outbox accumulates unboundedly — the return: every test
-  // called the drain directly, so nothing noticed the worker was never started. Started here (not
-  // buildApp) so inject-driven tests don't spawn a timer.
-  startAnalyticsDrainWorker(Number(process.env.ANALYTICS_OUTBOX_POLL_MS ?? 5000))
+  // #688 slice 2: the analytics drain worker moved with the collector into @wikistead-ee/server
+  // (analyticsEeMount starts it on the app lifecycle, beside the audit drain).
 
   // Background email delivery (#547 / ADR-196 §5): drains the email outbox — messages are BUILT at
   // send time behind the send-time authz gates, per-tenant transport via the §7 resolver. Started

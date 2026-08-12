@@ -23,7 +23,6 @@ export const MEMBERS_PAGE_LIMIT = 50
 import { suspendMember, reactivateMember, LastAdminSuspensionError } from '../auth/member-suspension.js' // #627: the shared suspension verb (CE)
 import { auditIfEntitled } from '../audit/sink.js'
 import { resolveEntitlements } from '@wikistead/entitlements' // #520: EE gate for the tenant analytics roll-up
-import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
 import { emit } from '@wikistead/events'
 import { productName } from '../product-name.js' // #575: the name is a deployment value
 
@@ -599,47 +598,8 @@ export async function membersPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // #464 / ADR-175 §6 (DSAR): a tenant admin erases ONE member's page-analytics reading history on request,
-  // WITHOUT removing the member (unlike DELETE /members/:sub — the member keeps their access). Same erasure
-  // as the removal path — roster rows + not-yet-drained outbox rows — in one tx, with an EE-gated audit row.
-  // The un-drained outbox purge stops a pending fold from re-creating the roster (the member still exists,
-  // so the drain's membership re-check does not apply here). Tenant-admin only.
-  app.delete<{ Params: { sub: string } }>('/admin/analytics/member/:sub', async (req, reply) => {
-    if (!(await requireTenantAdmin(req, reply))) return
-    await req.db.tx(async (tx) => {
-      await tx`DELETE FROM page_view_roster WHERE member_sub = ${req.params.sub}`
-      await tx`DELETE FROM analytics_outbox WHERE tenant_id = ${req.tenant.id} AND viewer_class = 'member' AND member_sub = ${req.params.sub}`
-      await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'analytics.erased', target: `user:${req.params.sub}` })
-    })
-    return reply.code(204).send()
-  })
-
-  // #520 / ADR-189 slice 5: the TENANT-level page-view roll-up (the approved scope is "space AND tenant
-  // aggregation"; the space surface is GET /spaces/:id/analytics). Existence floor = tenant#admin (403 for a
-  // non-admin, matching every other /admin route here — a member already knows the tenant exists, so there is
-  // nothing to hide), then the SAME EE gate and the SAME §5 manage-filter-set as the space surface via the
-  // shared rollupPageViews. That filter is what keeps this honest: a tenant admin manages non-private pages
-  // through `manager from space`, so PRIVATE pages they do not manage stay out of the tenant total too — the
-  // aggregate is never "everything in the tenant", it is "everything you manage". Counts only, no roster.
-  app.get<{ Querystring: RollupQuery }>('/admin/analytics', async (req, reply) => {
-    if (!(await requireTenantAdmin(req, reply))) return
-    const unique = isUniqueMode(req.query)
-    if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, pages: 0, daily: [], unique } // EE gate
-    const invalid = validateRollupQuery(req.query) // 400 before any FGA/DB work
-    if (invalid) return reply.code(400).send({ error: invalid })
-    // Every page in THIS tenant (req.db is RLS-scoped, so the tenant boundary is the database's, not a filter).
-    const rows = await req.db.sql<{ id: string; parent_id: string | null }[]>`SELECT id, parent_id FROM pages`
-    // A tenant admin manages every space, so every space's page#space links may be trusted. (The read cost
-    // is (linked pages / 50) round-trips PLUS one per space — NOT "spaces, not pages"; that earlier claim
-    // came from a measurement against page ids with no tuples at all. See rollup.ts for the real numbers.)
-    const spaceRows = await req.db.sql<{ id: string }[]>`SELECT id FROM spaces`
-    // #520 a tenant admin IS a manager of every space (`space#manager … or admin from tenant`), so the
-    // per-page fan-out — worst here, this scope being the whole tenant — collapses to the private pages only.
-    // The gate above already established tenant#admin, so the hint costs no extra check.
-    const parentOf = new Map(rows.map((r) => [r.id, r.parent_id] as const))
-    return rollupPageViews(req.db, req.server.fga, `user:${req.user.sub}`, rows.map((r) => r.id), req.query, true,
-      { parentOf, managedSpaceIds: spaceRows.map((r) => r.id) })
-  })
+  // #688 slice 2: the DSAR erase and the tenant roll-up (GET /admin/analytics) moved with the
+  // analytics feature into @wikistead-ee/server — analyticsEeMount registers them via the seam.
 
   // ── Invites ──────────────────────────────────────────────────────────────
   // #623 — see the block inside the handler.

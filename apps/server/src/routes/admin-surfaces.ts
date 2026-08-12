@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient, ClientBatchCheckSingleResponse } from '@openfga/sdk'
 import { fgaModelId } from '@wikistead/authz'
+import { auditLedgerRegistered } from '../audit/sink.js' // #688: EE-composed features only surface when composed
+import { analyticsRegistered } from '../analytics/sink.js'
 
 // #604 / ADR-208 (ruling B): WHICH admin surfaces may this caller enter?
 //
@@ -52,7 +54,12 @@ export async function readableAdminSurfaces(fga: OpenFgaClient, userId: string, 
       .map((r: ClientBatchCheckSingleResponse) => relations[Number(r.correlationId)])
       .filter((relation): relation is string => relation !== undefined),
   )
-  return Object.entries(ADMIN_SURFACES)
+  // #688: `audit` and `analytics` are EE-composed — a CE build has no routes behind those doors, and
+  // the tier alone would render dead navigation there. CE resolves entitlements to UNLIMITED, so the
+  // honest signal is REGISTRATION: the mount registered its sink/collector, or the surface is absent.
+  const composed = ([k]: [string, string]) =>
+    (k !== 'audit' || auditLedgerRegistered()) && (k !== 'analytics' || analyticsRegistered())
+  return Object.entries(ADMIN_SURFACES).filter(composed)
     .filter(([, relation]) => open.has(relation))
     .map(([surface]) => surface)
 }

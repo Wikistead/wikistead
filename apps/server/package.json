@@ -36,7 +36,6 @@
     "tenant:local-admin": "tsx --env-file=../../.env src/scripts/local-admin.ts",
     "orphan:sweep": "tsx --env-file=../../.env src/scripts/orphan-claim-sweep.ts",
     "revisions:gc": "tsx --env-file=../../.env src/scripts/revisions-gc.ts",
-    "analytics:gc": "tsx --env-file=../../.env src/scripts/analytics-gc.ts",
     "revisions:backfill": "tsx --env-file=../../.env src/scripts/revisions-backfill.ts",
     "plan:reconcile": "tsx --env-file=../../.env src/scripts/plan-reconcile.ts",
     "tenant:promote": "tsx --env-file=../../.env src/scripts/promote-tenant.ts",

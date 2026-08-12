@@ -12,7 +12,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/index.js'
 import { DICT_CHANNEL_PREFIX } from '../search/outbox.js' // #534 the background fill pings clients on the same channel
 import type { SearchDriver } from '../search/index.js'
 import { resolveAuthorIdentities, authorFields } from '../author-identity.js' // #486 / ADR-150 Addendum 2
-import { collectPageView, analyticsDayUTC } from '../analytics/collect.js' // #464 / ADR-175
+import { collectPageViewEvent } from '../analytics/sink.js' // #464 / ADR-175, behind the seam since #688
 import { resolveEntitlements } from '@wikistead/entitlements' // #464: EE gate for the analytics dashboard
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
@@ -4475,38 +4475,19 @@ export async function pagesPlugin(app: FastifyInstance) {
     if (!canView) {
       return reply.code(404).send({ error: 'not found' }) // existence-hiding — same floor as /published
     }
-    const viewerClass = req.user ? 'member' : 'guest'
-    const memberSub = req.user ? req.user.sub : null
-    // dedup key: a member by sub, a guest by its pseudonymous per-session anonId (never a durable store)
-    const dedupKey = req.user ? req.user.sub : (req.guest?.anonId ?? `g:${req.guest?.shareLinkId ?? ''}`)
-    await collectPageView({
-      sql: req.db.sql, valkey: app.valkey, tenant: { id: req.tenant.id, plan: req.tenant.plan },
-      pageId: req.params.pageId, viewerClass, memberSub, dedupKey, day: analyticsDayUTC(new Date()),
-    }).catch(() => {})
+    // dedup key: a member by sub, a guest by its pseudonymous per-session anonId (never a durable store).
+    // The event goes to the seam raw; the EE collector owns entitlement, day bucketing and the write.
+    const tenant = { id: req.tenant.id, plan: req.tenant.plan }
+    await collectPageViewEvent(req.user
+      ? { tenant, pageId: req.params.pageId, viewerClass: 'member', memberSub: req.user.sub, dedupKey: req.user.sub }
+      : { tenant, pageId: req.params.pageId, viewerClass: 'guest', dedupKey: req.guest?.anonId ?? `g:${req.guest?.shareLinkId ?? ''}` },
+    ).catch(() => {})
     return reply.code(204).send()
   })
 
-  // #464 / ADR-175: the page analytics DASHBOARD — who-viewed roster (members named) + the guest/anon
-  // aggregate. MEMBER-ONLY (no config.guest — the roster is strong signal). Two-gated (ADR-126 pattern)
-  // (1) `view` is the floor → a non-viewer 404s (existence-hiding, never an oracle); (2) the roster
-  // requires `manage` → a viewer who is not a manager 403s (they see the page but not who read it). The
-  // data is read on the caller's RLS handle (req.db) scoped to THIS page — never `space#viewer`-gated
-  // (the #464/ADR-126 leak class). EE-gated: an unentitled tenant gets `entitled:false` (the UI shows the
-  // upgrade affordance), never the reading history.
-  app.get<{ Params: { pageId: string } }>('/pages/:pageId/analytics', async (req, reply) => {
-    const subject = `user:${req.user.sub}`
-    const ref = { type: 'page', id: req.params.pageId } as const
-    if (!(await check(app.fga, subject, 'view', ref))) return reply.code(404).send({ error: 'not found' }) // existence-hiding floor
-    if (!(await check(app.fga, subject, 'manage', ref))) return reply.code(403).send({ error: 'manage required' }) // roster is manage-gated
-    if (!resolveEntitlements(req.tenant.plan).analytics) return { entitled: false, roster: [], daily: [] } // EE gate (paid feature)
-    // RLS-scoped (req.db → this tenant) + page_id filter (this page). roster = members named; daily = the
-    // per-viewer-class aggregate (members counted distinct/day, guests/anon deduped sessions).
-    const roster = await req.db.sql<{ member_sub: string; day: string }[]>`
-      SELECT member_sub, day::text AS day FROM page_view_roster WHERE page_id = ${req.params.pageId} ORDER BY day DESC, member_sub LIMIT 2000`
-    const daily = await req.db.sql<{ day: string; viewer_class: string; views: number }[]>`
-      SELECT day::text AS day, viewer_class, views::int AS views FROM page_view_daily WHERE page_id = ${req.params.pageId} ORDER BY day DESC LIMIT 400`
-    return { entitled: true, roster: roster.map((r) => ({ memberSub: r.member_sub, day: r.day })), daily: daily.map((d) => ({ day: d.day, viewerClass: d.viewer_class, views: d.views })) }
-  })
+  // #688 slice 2: GET /pages/:pageId/analytics (the who-viewed dashboard) moved with the feature
+  // into @wikistead-ee/server (analyticsEeMount). The view SIGNAL above stays: existence-hiding and
+  // the guest config belong with the pages surface, and the event crosses the seam raw.
 
   // #230: backlinks for a page (member or view-guest). Each returned page is FGA-view-gated for the
   // caller, so this leaks no reference from a page the viewer cannot see.
