@@ -395,6 +395,23 @@ paths:
         - { name: limit, in: query, required: false, schema: { type: integer }, description: "Rows per response (clamped)." }
       responses: { "200": { description: One page of the branch }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
 
+  /spaces/{spaceId}/pages/tree-placeholders:
+    get:
+      operationId: listSpaceTreePlaceholders
+      tags: [spaces]
+      summary: The tree's placeholder rows — where something granted sits under something invisible
+      description: >-
+        ADR-220 §4. A member can hold `view` on a page whose ancestor they cannot see; the tree still
+        has to offer a way down to it without naming what is denied. This answers placeholder rows —
+        one fixed, unnamed label each, carrying an opaque token and the visible pages granted beneath
+        it — resolved OFF the first-paint path (#623②) so the sidebar never waits on it. The
+        walk is budget-bounded; exhausting the budget shortens the answer, never fails it. Members
+        only: a guest's share link scopes what they see by itself, so a caller without a member
+        session is refused.
+      parameters:
+        - { $ref: "#/components/parameters/spaceId" }
+      responses: { "200": { description: Placeholder rows (possibly empty) }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
+
   /spaces/{spaceId}/pages/{pageId}/attachments/presign:
     post:
       operationId: createAttachmentPresign
