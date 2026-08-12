@@ -378,7 +378,7 @@ async function applyInviteRole(
 ): Promise<void> {
   if (!invite.role_id || seated !== 'created') return
   const { assignRoleWithinTx } = await import('../routes/roles.js')
-  const { auditIfEntitled } = await import('../audit/outbox.js')
+  const { auditIfEntitled } = await import('../audit/sink.js')
   const [role] = await tx<{ id: string; capabilities: string[]; scope: string }[]>`
     SELECT id, capabilities, scope FROM roles WHERE id = ${invite.role_id}`
   // The pointer can be null by now (ON DELETE SET NULL) or the role can have changed scope. Either way

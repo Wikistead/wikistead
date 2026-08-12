@@ -25,8 +25,17 @@ export { groupFgaId, syncMemberGroups } from './auth/group-sync.js'
 export { isLastAdmin } from './auth/last-admin.js'
 export { loginMethodCeiling, otherLoginMethodsEffective } from './auth/login-methods.js' // #537: SAML start/ACS honour the deployment ceiling; the SAML disable guard shares the lockout predicate
 export { billableMemberCount, lockSeats } from './auth/invites.js'
-export { auditIfEntitled, drainAuditOutbox, verifyTenantAuditChain } from './audit/outbox.js'
-export { auditPlugin } from './routes/audit.js' // #401 / ADR-155: the viewer moves to the ee/ overlay with the write side (#178)
+// #688: the LEDGER moved into @wikistead-ee/server (write side, drain, viewer, transparency). What the
+// seam carries now is the CE half: the vocabulary + the registration point (sink), and the generic
+// plumbing the moved code rides. `auditIfEntitled` stays exported — it is the CE facade, and EE code
+// (SCIM provisioning, key issuance) calls the same function CE routes do.
+export { auditIfEntitled, registerAuditSink, auditActor, registerTransparencyProjector } from './audit/sink.js'
+export type { AuditCore, AuditChanges, AuditChangeField, AuditSink, TransparencyProjector, OperatorActionForProjection } from './audit/sink.js'
+// The hash-chain PRIMITIVE stays CE — the operator ledger (CE, break-glass) rides it — and the EE
+// ledger links with the same one rather than a copy that could drift (#688).
+export { computeEntryHash, verifyAuditChain, linkEntry, GENESIS_PREV } from './audit/chain.js'
+export type { AuditEntry, AuditEntryCore, ChainVerdict } from './audit/chain.js'
+export { claimOutboxBatch, startOutboxDrainWorker } from './db/outbox-lease.js' // #432: the outbox lease the EE drain rides
 export { entitlementDenied } from './entitlement-ux.js'
 // #475: SCIM deprovisioning revokes the member's API keys, so the EE side needs the same key
 // primitives the CE routes use — additive re-exports of CE code, no EE dependency added.
@@ -36,13 +45,13 @@ export { verifyApiKey } from './api-key-auth.js'
 // #178: additional CE-GENERAL auth helpers the moved SAML code needs (SAML → packages/ee-server, mirroring
 // SCIM). Each is a pure CE utility ALREADY shared by CE OIDC (session / secret-crypto / oidc / return-to) —
 // none imports EE, so exposing them via this barrel is a pure additive re-export, not new CE code. The
-// hash-chained operator ledger primitive STAYS in CE (audit/outbox already rides it, and CE's oidc-disable
+// hash-chained operator ledger STAYS in CE (a break-glass record — CE's oidc-disable
 // script uses appendOperatorEntry) — EE consumes it through the seam like the rest of the audit surface.
 export { coerceGroups } from './auth/oidc.js'
 export { encryptSecret, decryptSecret } from './auth/secret-crypto.js'
 export { SESSION_COOKIE, establishMemberSession, sessionCookieOptions, destroyMemberSessions, createSession } from './auth/session.js' // #477: SCIM deactivation drops the member's sessions too
 export { safeReturnTo } from './auth/return-to.js'
-export { appendOperatorEntry, type OperatorAction } from './audit/operator-ledger.js'
+export { appendOperatorEntry, OPERATOR_CHAIN_LOCK, type OperatorAction } from './audit/operator-ledger.js' // #688: transparency (EE) projects this CE ledger
 
 // #627 / ADR-213: the suspension verb lives in CE now — SCIM calls it with `reason: 'scim'` rather than
 // carrying its own copy, so there is one meaning of "suspended" for the console and the directory alike.

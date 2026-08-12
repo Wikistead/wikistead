@@ -50,15 +50,10 @@ for (const file of files) {
   console.log(`apply ${file}`)
 }
 
-// #435 / ADR-169 (owner ruling: disclose the past too): project pre-feature operator ledger rows
-// into the per-tenant Access Transparency log. This runs HERE — the admin connection — because the
-// operator console's operator_ro role deliberately has no privilege on tenant_transparency_log.
-// Idempotent (multiset match) and serialized against live break-glass appends (OPERATOR_CHAIN_LOCK),
-// so re-running deploys is safe. A failure fails the migration run: silently skipping it would
-// leave the disclosure ruling unimplemented with no signal.
-const { backfillTransparencyProjection } = await import('./audit/transparency.js')
-const { projected } = await backfillTransparencyProjection(sql)
-if (projected > 0) console.log(`access-transparency backfill: ${projected} row(s) projected`)
+// #435 backfill note (#688): the Access Transparency backfill moved with the feature into
+// @wikistead-ee/server — auditEeMount runs it at boot on the admin connection (idempotent, multiset
+// match, serialized by OPERATOR_CHAIN_LOCK, and a failure still fails LOUDLY — it aborts the EE
+// boot). A CE build has no transparency log to project into, so this script has nothing to do.
 
 await sql.end()
 console.log('migrations complete')

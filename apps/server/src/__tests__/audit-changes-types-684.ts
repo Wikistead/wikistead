@@ -7,7 +7,7 @@
 //
 // It is not a test file (no `.test.ts`), so vitest never runs it; `audit-changes-bounds-684` reads it
 // to assert the directive is still here, because a probe that was quietly emptied would also compile.
-import type { AuditChanges } from '../audit/outbox.js'
+import type { AuditChanges } from '../audit/sink.js'
 
 // The fields this ADR has opened so far. Permitted, and they typecheck.
 export const allowed: AuditChanges = { second_factor_kinds: { from: 'any', to: 'passkey' } }

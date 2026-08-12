@@ -8,7 +8,7 @@ import { billableMemberCount, lockSeats } from './invites.js'
 import { syncMemberGroups } from './group-sync.js'
 import { isLastAdmin } from './last-admin.js'
 import { destroyMemberSessions } from './session.js'
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 
 // #627 / ADR-213: SUSPENDING A MEMBER — one verb, in CE, for every caller.
 //

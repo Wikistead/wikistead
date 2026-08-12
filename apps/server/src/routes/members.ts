@@ -21,7 +21,7 @@ import { holdsAConfirmedFactor } from '../auth/factor-policy.js' // #644 / #675:
 // that a normal tenant is one request.
 export const MEMBERS_PAGE_LIMIT = 50
 import { suspendMember, reactivateMember, LastAdminSuspensionError } from '../auth/member-suspension.js' // #627: the shared suspension verb (CE)
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 import { resolveEntitlements } from '@wikistead/entitlements' // #520: EE gate for the tenant analytics roll-up
 import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
 import { emit } from '@wikistead/events'

@@ -13,7 +13,7 @@ import type { SearchDriver } from '../search/index.js'
 import { groupGrantee, groupNameByFgaId, knownGroupNames, confirmedGroupNames, resolveGroupName } from '../auth/group-sync.js'
 import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-190: full name on the manage-gated grant list
 import { rollupPageViews, validateRollupQuery, isUniqueMode, type RollupQuery } from '../analytics/rollup.js' // #520 / ADR-189
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 import { deletePinsForResources } from './pins.js'
 import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
 import { importArchive, ImportTooLargeError, ImportInvalidError } from '../import/index.js'

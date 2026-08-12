@@ -1,0 +1,16 @@
+{
+  // #688: the TYPECHECK program — src plus tests. Tests exercise the EE composition (the audit
+  // ledger lives in @wikistead-ee/server), but a package.json dependency would cycle turbo's graph
+  // (ee-server already depends on this package), so the EE package resolves here through a paths
+  // alias to its built TYPES (dist — source would fall outside rootDir; turbo builds ee-server first). Vitest mirrors the same alias at runtime (vitest.config.ts). The build
+  // tsconfig excludes __tests__ and never sees this alias.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@wikistead-ee/server": ["../../packages/ee-server/dist/index.d.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": []
+}
