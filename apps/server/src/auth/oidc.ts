@@ -21,7 +21,7 @@ export interface TenantOidcConfig {
 // ADR-055 / #102: coerce an UNTRUSTED groups claim (it rides the token) into a safe string[].
 // Accept only an array of non-empty strings; trim, de-dupe, and BOUND it (≤100 groups, ≤200 chars
 // each) so a hostile/huge token can't blow up the row or the FGA writes. Over-limit is truncated +
-// logged, NEVER thrown — an IdP anomaly must not block login (the owner approval condition).
+// logged, NEVER thrown — an IdP anomaly must not block login (owner approval condition).
 const MAX_GROUPS = 100
 const MAX_GROUP_LEN = 200
 export function coerceGroups(raw: unknown, sub?: string): string[] {

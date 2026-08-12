@@ -59,7 +59,7 @@ describe('#116 revision pruning (keep last N per page)', () => {
     expect(n).toBe(1) // unaffected by the other page hitting the cap
   })
 
-  // #116 review (the owner point 3): the trigger is SECURITY INVOKER, so the prune DELETE
+  // #116 review (owner point 3): the trigger is SECURITY INVOKER, so the prune DELETE
   // runs as the INSERTING role under RLS — and BOTH real revision-insert paths (publish via
   // req.db, restore via pool.begin+set_config) insert as the app role, NOT the admin/superuser
   // the tests above use. (The collab auto-save path does NOT insert revisions — storeYdoc only

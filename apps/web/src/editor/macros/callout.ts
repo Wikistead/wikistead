@@ -124,7 +124,7 @@ interface CalloutSpec {
   icon: string; // Lucide icon NAME (#158-C4); the header renders it as a mask-image SVG
 }
 
-// #158-C4 mapping (the owner): note=Pencil (distinct from info), info=Info, tip=Lightbulb,
+// #158-C4 mapping (owner): note=Pencil (distinct from info), info=Info, tip=Lightbulb,
 // warning=TriangleAlert, danger=OctagonAlert. Names key the mask-image CSS in decorations.ts. The type
 // list itself is shared (CALLOUT_TYPES) so the editor and the server export stay in lockstep.
 const ICONS: Record<CalloutType, string> = {
