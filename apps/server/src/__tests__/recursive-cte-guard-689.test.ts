@@ -139,24 +139,38 @@ describe('#689 walks refuse a corrupt tree; movePage serializes check-and-write'
     const x = await mk('lock-X')
     const y = await mk('lock-Y')
     const db2 = await acquireTenantDb(tenant)
+    let release!: () => void
+    let released = false
+    let holder: Promise<unknown> = Promise.resolve()
     try {
-      let release!: () => void
       const held = new Promise<void>((r) => { release = r })
-      const holder = db2.tx(async (tx) => {
+      // #692: WAIT for the lock to actually be held before launching the move. The first version
+      // started both and slept — a race the holder happened to win wherever the FGA store was slow
+      // enough, and lost on a fresh store (movePage's pre-lock authz outran db2's cold connection),
+      // which read as "the move does not take the lock" about a move that takes it fine.
+      let acquired!: () => void
+      const lockHeld = new Promise<void>((r) => { acquired = r })
+      holder = db2.tx(async (tx) => {
         await tx`SELECT pg_advisory_xact_lock(hashtext(${`page-move:${spaceId}`})::bigint)`
+        acquired()
         await held // keep the tx (and the lock) open until the probe has measured
       })
+      await lockHeld
       let settled = false
       const move = movePage(db, fgaClient, driver, { pageId: y.id, userId: 'dev-user', parentId: x.id, afterId: null })
         .finally(() => { settled = true })
       await new Promise((r) => setTimeout(r, 300))
       // With the lock held elsewhere, the move's check-and-write section cannot have run to completion.
       expect(settled, 'movePage completed while the per-space lock was held — the move does not take it').toBe(false)
-      release()
+      release(); released = true
       await holder
       await move // …and it completes once the lock frees
       expect(settled).toBe(true)
     } finally {
+      // #692: release on EVERY exit — a failed assertion above used to leave the lock held, which
+      // starved the next test's moves (5s timeout) and the afterAll's deleteSpace (hook timeout):
+      // one defect wearing three faces.
+      if (!released) { release(); await holder.catch(() => {}) }
       await db2.release()
     }
   })
