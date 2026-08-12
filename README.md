@@ -151,8 +151,9 @@ records cited below):
   S3 offload.
 - **Business / legal**: final plan limits + pricing and a metered-overage soft cap;
   CE/EE split + AGPL legal review; the copyright line on `LICENSE`. Release tooling is
-  in place (semantic-release derives the version from commit subjects); cutting a
-  release stays a human act.
+  in place (semantic-release derives the version from commit subjects, and a merge to
+  the default branch releases itself); promoting a release to production stays a
+  human act.
 
 ## Contributing
 
