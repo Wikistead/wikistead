@@ -35,7 +35,10 @@ export type { AuditCore, AuditChanges, AuditChangeField, AuditSink, Transparency
 // ledger links with the same one rather than a copy that could drift (#688).
 export { computeEntryHash, verifyAuditChain, linkEntry, GENESIS_PREV } from './audit/chain.js'
 export type { AuditEntry, AuditEntryCore, ChainVerdict } from './audit/chain.js'
-export { claimOutboxBatch, startOutboxDrainWorker } from './db/outbox-lease.js' // #432: the outbox lease the EE drain rides
+export { claimOutboxBatch, startOutboxDrainWorker } from './db/outbox-lease.js' // #432: the outbox lease the EE drains ride
+export { bumpRateBucket } from './rate-limit.js' // #688 slice 2: the collection dedup key rides the shared bucket
+export { registerPageViewCollector } from './analytics/sink.js' // #688 slice 2: the raw public-view event's registration point
+export type { PageViewEvent, PageViewCollector } from './analytics/sink.js'
 export { entitlementDenied } from './entitlement-ux.js'
 // #475: SCIM deprovisioning revokes the member's API keys, so the EE side needs the same key
 // primitives the CE routes use — additive re-exports of CE code, no EE dependency added.

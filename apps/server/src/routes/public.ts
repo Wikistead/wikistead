@@ -17,7 +17,7 @@ import { resolveTranscludeRef } from '../transclude-resolve.js'
 import { renderPlantuml } from '../plantuml-render.js'
 import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from '../rate-limit.js'
 import { pool } from '../db/pool.js' // #464: durable analytics enqueue (analytics_outbox has no RLS)
-import { collectPageView, hashAnonId, analyticsDayUTC } from '../analytics/collect.js' // #464 / ADR-175
+import { collectPageViewEvent } from '../analytics/sink.js' // #464 / ADR-175, behind the seam since #688
 
 // noindex: the page's own flag OR'd with its space's flag (#277 / ADR-116 guardrail 4) — a page
 // reached via space inheritance is noindex if EITHER the page or its space says so.
@@ -568,10 +568,8 @@ export async function publicPlugin(app: FastifyInstance) {
     // the IP hashed and never stored. AFTER the public view gate above, so existence-hiding is intact and
     // only a genuinely public page is ever recorded. await+catch: durable enqueue, but a collection hiccup
     // (Valkey/DB) never fails the read.
-    await collectPageView({
-      sql: pool, valkey: app.valkey, tenant: { id: tenant.id, plan: tenant.plan },
-      pageId: page.id, viewerClass: 'anon', memberSub: null,
-      dedupKey: hashAnonId(req.ip), day: analyticsDayUTC(new Date()),
+    await collectPageViewEvent({
+      tenant: { id: tenant.id, plan: tenant.plan }, pageId: page.id, viewerClass: 'anon', ip: req.ip,
     }).catch(() => {})
 
     const children = await loadPublicChildTree(tenant.id, page.id)

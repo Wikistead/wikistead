@@ -42,6 +42,9 @@ const ROUTES = resolve(import.meta.dirname, '../routes')
 // #688: the audit viewer's home since the ledger moved behind the seam (absent from the public tree).
 const EE_AUDIT_MOUNT_DIR = resolve(import.meta.dirname, '../../../../packages/ee-server/src/audit')
 const HAS_EE_AUDIT = existsSync(resolve(EE_AUDIT_MOUNT_DIR, 'mount.ts'))
+// #688 slice 2: who-viewed followed the ledger across the seam.
+const EE_ANALYTICS_DIR = resolve(import.meta.dirname, '../../../../packages/ee-server/src/analytics')
+const HAS_EE_ANALYTICS = existsSync(resolve(EE_ANALYTICS_DIR, 'mount.ts'))
 
 /**
  * Routes that return an unbounded list today, and why they are still allowed to.
@@ -64,10 +67,12 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // does not make it longer. The scan cannot see either half — `withoutSubqueries` strips the
   // derived tables they live in — so the claim is stated here and CHECKED in activity-window-623.
   'account.ts:/me/activity': { kind: 'bounded', why: 'GROUP BY calendar day inside a twelve-month window: at most ~367 rows, and a busy day is one row. Pinned by activity-window-623, because the scan strips the derived tables the window and the grouping live in.' },
-  'members.ts:/admin/analytics': { kind: 'bounded', why: 'rollupPageViews answers a COUNT of pages and a series of DAYS capped at 400; the page ids the route reads feed a parameter and never travel. The read is unbounded and the response shape is fixed — the same axis as /billing/usage. Checked in analytics-shape-623; the 400 itself is held by the still-bounded list below.' },
+  ...(HAS_EE_ANALYTICS ? {
+  'mount.ts:/admin/analytics': { kind: 'bounded' as const, why: 'rollupPageViews answers a COUNT of pages and a series of DAYS capped at 400; the page ids the route reads feed a parameter and never travel. The read is unbounded and the response shape is fixed — the same axis as /billing/usage. Checked in analytics-shape-623; the 400 itself is held by the still-bounded list below.' },
   'notifications.ts:/notifications/unread-count': { kind: 'bounded', why: 'the count stops at UNREAD_BADGE_CAP + 1 — the number the bell already refuses to print past (it renders 99+). The LIMIT lives in a derived table, which withoutSubqueries strips before looking for a bound, so this line states what the scan cannot see rather than the scan being loosened to see it.' },
   'pins.ts:/pins': { kind: 'bounded', why: 'MAX_PINS_PER_TYPE refuses the pin past 200 per member per kind, so the list cannot grow (#623). A cap and not a page, for the /me/factors reason: reorder persists the whole ordered id list and the sidebar draws the set, so paging would let somebody hold more pins than they can see or reorder. Pinned by pins-capped-623.' },
-  'spaces.ts:/spaces/:spaceId/analytics': { kind: 'bounded', why: 'the same helper over one space: a count and a capped series, never the roster. Checked in analytics-shape-623.' },
+  'mount.ts:/spaces/:spaceId/analytics': { kind: 'bounded' as const, why: 'the same helper over one space: a count and a capped series, never the roster. Checked in analytics-shape-623.' },
+  } : {}),
 
   // ── bounded: the result cannot grow, and the reason is stated rather than assumed ──────────────
   'attachments.ts:/attachments/:id/download': { kind: 'bounded', why: 'one attachment by id — a row, not a list.' },
@@ -357,7 +362,10 @@ function listShapedRoutes(): { key: string; body: string; helpers: { name: strin
   // package boundary — the suite runs the EE composition, so its routes are this suite's routes. The
   // mirror carries neither the EE package nor (via the derived exclusion) most EE-coupled suites;
   // THIS file stays CE, so the extra scan is conditional and the audit entries in the ledger are too.
-  const eeRoutes = existsSync(EE_AUDIT_MOUNT_DIR) ? routesIn('mount.ts', EE_AUDIT_MOUNT_DIR) : []
+  const eeRoutes = [
+    ...(HAS_EE_AUDIT ? routesIn('mount.ts', EE_AUDIT_MOUNT_DIR) : []),
+    ...(HAS_EE_ANALYTICS ? routesIn('mount.ts', EE_ANALYTICS_DIR) : []),
+  ]
   return [...ceRoutes, ...eeRoutes]
     // …or reads its rows through a helper in another file, which is the whole point of this slice: a
     // route with two lines and an import was not list-shaped to this scan at all.
@@ -511,7 +519,8 @@ describe('#623: the lists bounded so far still carry their bound', () => {
     { file: 'routes/spaces.ts', fn: 'listGroupNames' },
     // #623: the analytics series. Both roll-up routes lean on this one cap, and a behavioural pin
     // cannot see it — the response is short either way until a tenant has more than 400 days of data.
-    { file: 'analytics/rollup.ts', fn: 'rollupPageViews' },
+    // #688 slice 2: the file lives in the EE package now (absent from the CE build, hence conditional).
+    ...(HAS_EE_ANALYTICS ? [{ file: '../../../packages/ee-server/src/analytics/rollup.ts', fn: 'rollupPageViews' }] : []),
     // #623 / ADR-220 §1: one branch of the page tree. Here for the reason that keeps recurring
     // `slice` caps the response in JS, so deleting the SQL bound is invisible from outside, and a paged
     // handler satisfies BOUNDED_MARKER on the word `cursor` alone.
