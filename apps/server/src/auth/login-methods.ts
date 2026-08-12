@@ -116,6 +116,7 @@ export async function resolveAvailableLogin(
   }
   // saml is decided BEFORE platform: the platform pref below conditions on "any own IdP effective",
   // and saml is an own IdP.
+  // #693 seam: the CE resolver composes WHICH doors are offered; the SAML door's bytes live in ee/
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) {
     methods.add('saml')
   }
@@ -195,6 +196,7 @@ export async function resolveLoginConnections(
     // its fixed brand; the API refuses labels on presets, this is the second seatbelt)
     for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: r.preset ? null : r.label, brand: r.preset, trustGroups: r.trust_groups, subjectPrefix: r.subject_prefix })
   }
+  // #693 seam: the CE resolver composes WHICH doors are offered; the SAML door's bytes live in ee/
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso) {
     // one per tenant in v1 (ADR-197 §1 B5); SAML never bootstraps (§2 rev2: oidc-only in v1)
     const [row] = await db.sql<{ id: string; trust_groups: boolean }[]>`SELECT id, trust_groups FROM tenant_saml WHERE enabled LIMIT 1`.catch((err: unknown) => {
@@ -287,6 +289,7 @@ export async function otherLoginMethodsEffective(
   // no own IdP is effective (see resolveAvailableLogin), so a configured, in-ceiling platform IdP is
   // ALWAYS a way back in — either directly, or by lapse once the disable being guarded goes through.
   if (except !== 'platform-oidc' && ceiling.has('platform-oidc') && loadPlatformOidc()) return true
+  // #693 seam: the CE resolver composes WHICH doors are offered; the SAML door's bytes live in ee/
   if (except !== 'saml' && ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) return true
   if (except !== 'tenant-oidc' && ceiling.has('tenant-oidc') && (await tenantOidcEnabled(db))) return true
   return false

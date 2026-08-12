@@ -22,6 +22,12 @@ export type LeverUnit = 'boolean' | 'days' | 'bytes' | 'count' | 'rate' | 'enum'
 export interface LeverDoc {
   // Human title for the lever (docs heading / table row label).
   title: string
+  // #693: which EDITION owns this lever's ENFORCEMENT BYTES. 'ee' means the code that gates on it
+  // must live in the private overlay — an entitlement check in the CE tree is #688's defect (locked
+  // by plan, bytes public: the audit ledger sat that way for eight months). Optional with 'ce' as the
+  // default so the common case stays unannotated; a lint (check-ee-lever-placement.mjs) derives its
+  // deny-set from the 'ee' rows, so a sixth EE lever is guarded by being declared, not remembered.
+  edition?: 'ce' | 'ee'
   // What the lever gates (one line, generated verbatim into the docs).
   summary: string
   // How the value is interpreted — drives how the generator renders the limit.
@@ -110,6 +116,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     downgrade: 'three-point revoke on loss — row + host→tenant map + cert (ADR-064)',
   },
   scim: {
+    edition: 'ee',
     title: 'SCIM provisioning',
     summary: 'SCIM directory provisioning — tokens + endpoints (#134 / ADR-070, EE).',
     unit: 'boolean',
@@ -131,6 +138,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     downgrade: 'new AI calls soft-cap when over the lower allowance; existing content/usage kept (ADR-082/072)',
   },
   samlSso: {
+    edition: 'ee',
     title: 'SAML SSO',
     summary: 'Tenant SAML single sign-on — config + login (#135 / ADR-067, EE).',
     unit: 'boolean',
@@ -145,6 +153,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     downgrade: 'transport falls back to the CE default (SMTP/no-op); the feature itself is CE and never gated',
   },
   auditLog: {
+    edition: 'ee',
     title: 'Compliance audit log',
     summary: 'Durable, hash-chained audit ledger of authz/compliance operations (#134 #177 / ADR-070, EE).',
     unit: 'boolean',
@@ -152,6 +161,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     downgrade: 'gated; EE-only (no audit ledger written for CE/free)',
   },
   accessTransparency: {
+    edition: 'ee',
     title: 'Access Transparency',
     summary: 'Tenant-facing disclosure of operator break-glass accesses — a per-tenant, hash-chained projection of the sealed operator ledger (#435 / ADR-169, EE).',
     unit: 'boolean',
@@ -159,6 +169,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     downgrade: 'gated; rows retained and hidden (the #401 convention)',
   },
   analytics: {
+    edition: 'ee',
     title: 'Page analytics (who-viewed)',
     summary: 'Per-viewer page analytics: members named in a roster, guests/anonymous aggregated (#464 / ADR-175, EE).',
     unit: 'boolean',
