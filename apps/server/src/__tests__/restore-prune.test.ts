@@ -1,5 +1,5 @@
 // Integration test — real Postgres + OpenFGA + Meilisearch + Fastify, no mocks.
-// #116 review (the owner point 2): restore is COPY-based, so the prune trigger deleting
+// #116 review (owner point 2): restore is COPY-based, so the prune trigger deleting
 // the restored-from revision can never corrupt the result. restoreRevision reads the target
 // revision, builds an INDEPENDENT new ydoc, inserts it as a fresh revision, and repoints
 // published_* at that NEW revision (published_revision_id is a soft pointer, migration 016).

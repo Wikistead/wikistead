@@ -53,7 +53,7 @@ describe('#107 share-link exchange rate limit', () => {
     expect(codes[30]).toBe(429)
   })
 
-  // #107 review (the owner): with trustProxy enabled (app.ts), the per-IP bucket must key on
+  // #107 review (owner): with trustProxy enabled (app.ts), the per-IP bucket must key on
   // the X-Forwarded-For CLIENT ip, not the proxy's socket address — otherwise, behind the prod
   // reverse proxy (ADR-039), every client would share one bucket (the proxy's IP) and a single
   // user could exhaust it for everyone. Proven without a real proxy: vary only the XFF header.
