@@ -139,6 +139,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         },
         saml: {
           inCeiling: ceiling.has('saml'),
+          // #693 seam: the methods screen reports SAML's entitled flag; config + login bytes live in ee/
           entitled: resolveEntitlements(req.tenant.plan).samlSso,
           configured: samlRow != null,
           selected: !!samlRow?.enabled,

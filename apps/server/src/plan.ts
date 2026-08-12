@@ -30,3 +30,4 @@ export function effectivePlan(args: {
   const now = args.now ?? Date.now()
   return args.pendingPlanAt.getTime() + grace * 1000 <= now ? args.pendingPlan : args.plan
 }
+

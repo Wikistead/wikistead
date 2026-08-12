@@ -17,6 +17,7 @@
     "docs:gen": "tsx scripts/gen-docs.ts",
     "docs:check": "tsx scripts/gen-docs.ts --check",
     "lint:no-ee-imports": "node scripts/check-ce-imports.mjs",
+    "lint:ee-lever-placement": "node scripts/check-ee-lever-placement.mjs",
     "lint:no-css-modules": "node scripts/check-no-css-modules.mjs",
     "lint:doc-links": "node scripts/check-doc-links.mjs",
     "lint:deploy-secrets": "node scripts/check-deploy-secrets.mjs",

@@ -53,12 +53,15 @@ export function renderEntitlementsMarkdown(): string {
     'separately. This page is generated from the code (`LEVER_CATALOG`).',
     '',
   )
-  lines.push('| Lever | What it gates | Self-host (Community) | Enforced at | Downgrade |')
-  lines.push('|---|---|---|---|---|')
+  // #693: the EDITION column mirrors catalog `edition` — 'EE' rows are levers whose enforcement
+  // bytes live in the private overlay, and the placement lint derives its deny-set from them.
+  lines.push('| Lever | Edition | What it gates | Self-host (Community) | Enforced at | Downgrade |')
+  lines.push('|---|---|---|---|---|---|')
   for (const key of Object.keys(LEVER_CATALOG)) {
     const lever = LEVER_CATALOG[key as keyof typeof LEVER_CATALOG]
     const cells = [
       `**${lever.title}** (\`${key}\`)`,
+      lever.edition === 'ee' ? 'EE' : 'CE',
       lever.summary,
       renderCommunityValue(key, lever),
       lever.enforcedAt,

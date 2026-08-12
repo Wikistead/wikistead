@@ -56,6 +56,7 @@ export async function federatedWayInCount(
       }
     }
   }
+  // #693 seam: the CE stance resolver asks whether the SAML door counts as an own IdP; its bytes live in ee/
   if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso) {
     const [saml] = await db.sql<{ id: string }[]>`SELECT id FROM tenant_saml WHERE enabled LIMIT 1`.catch((err: unknown) => {
       if ((err as { code?: string }).code === '42P01') return [] as { id: string }[]
