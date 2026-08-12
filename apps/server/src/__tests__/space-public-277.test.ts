@@ -125,6 +125,12 @@ describe('#277 write gate (uniform 403, RLS belt)', () => {
 
 describe('#277 exposure = public ∩ published ∩ not-private', () => {
   it('a tenant admin may toggle (manager via admin-from-tenant); grant + noindex + audit + outbox land', async () => {
+    // The outbox assertion below attributes EVERY row for these pages to the toggle, but createPage
+    // and publishPage enqueue their own upsert rows in beforeAll — normally drained by the async
+    // processor before this test runs, and intermittently NOT (measured: the draft's creation-time row
+    // survived on a busy stack and read as "the toggle enqueued a draft"). Clear the slate so the
+    // SELECT measures the toggle alone.
+    await admin`DELETE FROM search_outbox WHERE page_id IN (${pubPage}, ${draftPage}, ${privPage})`
     await setSpacePublic(db, fgaClient, driver, { spaceId, tenantId: TENANT, userId: TADMIN, plan: 'team' })
     expect(await isSpacePublic(fgaClient, { spaceId, userId: 'dev-user' })).toBe(true)
     const [s] = await admin<{ noindex: boolean }[]>`SELECT noindex FROM spaces WHERE id = ${spaceId}`
