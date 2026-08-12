@@ -17,16 +17,27 @@ import type { Tenant } from '@wikistead/types'
 import { startPasskeyEnrolment, startTotpEnrolment, confirmFactor, listFactors } from '../auth/second-factors.js'
 import { storePasskey, takeChallenge } from '../auth/passkeys.js'
 import { generateTotpSecret, totpCode } from '../auth/totp.js'
+import { createSession, SESSION_COOKIE } from '../auth/session.js'
+import { fgaClient } from '@wikistead/authz'
+import { seatMembers, unseatMembers } from './helpers/seat-members.js'
+import { ensureMembers, memberTuples } from './helpers/membership.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
 const STAMP = Date.now().toString(36)
+// #692: a MEMBER OF THIS FILE'S OWN, not the shared `dev-user`. Everything these routes key on —
+// the factor rows this file's beforeEach deletes wholesale, the one challenge slot
+// (`passkeychal:<tenant>:<sub>`), the failure counter and its lock — is per (tenant, sub), and
+// `dev-user` is the sub half the suite acts as. Under full-suite concurrency another file's
+// beforeEach deleted the factor mid-test (404 where 400 was pinned) and other files' failed proofs
+// pushed the shared counter into `factor_locked` (429). A private sub owns all three slots alone.
+const SELF = `p666-self-${STAMP}`
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
-const AUTH = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
-const H = { ...AUTH, 'content-type': 'application/json' }
 
 let app: FastifyInstance
 let db: TenantDb
+let AUTH: { host: string; cookie: string }
+let H: { host: string; cookie: string; 'content-type': string }
 
 const del = (id: string, query = '') =>
   app.inject({ method: 'DELETE', url: `/me/factors/${id}${query}`, headers: AUTH })
@@ -34,23 +45,32 @@ const del = (id: string, query = '') =>
 beforeAll(async () => {
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
+  // A real cookie session: the dev bearer is `dev-user`, which is exactly the shared identity this
+  // file must not act as. #471: the request principal must be a member — seat + tuple first.
+  await seatMembers(adminPool, TENANT, [SELF])
+  await ensureMembers(TENANT, [SELF])
+  AUTH = { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${await createSession(app.valkey, { tenantId: TENANT, sub: SELF, role: 'member' })}` }
+  H = { ...AUTH, 'content-type': 'application/json' }
 }, 180_000)
 
 beforeEach(async () => {
-  await adminPool`DELETE FROM member_factors WHERE tenant_id = ${TENANT} AND member_sub = 'dev-user'`.catch(() => {})
+  await adminPool`DELETE FROM member_factors WHERE tenant_id = ${TENANT} AND member_sub = ${SELF}`.catch(() => {})
   await app.valkey.del(
-    `factor:try:${TENANT}:dev-user`, `factor:lock:${TENANT}:dev-user`, `passkeychal:${TENANT}:dev-user`,
+    `factor:try:${TENANT}:${SELF}`, `factor:lock:${TENANT}:${SELF}`, `passkeychal:${TENANT}:${SELF}`,
   ).catch(() => {})
 })
 
 afterAll(async () => {
-  await adminPool`DELETE FROM member_factors WHERE tenant_id = ${TENANT} AND member_sub = 'dev-user'`.catch(() => {})
+  await adminPool`DELETE FROM member_factors WHERE tenant_id = ${TENANT} AND member_sub = ${SELF}`.catch(() => {})
+  const { deleteTuples } = await import('@wikistead/authz')
+  await deleteTuples(fgaClient, memberTuples(TENANT, [SELF])).catch(() => {})
+  await unseatMembers(adminPool, TENANT, [SELF])
   await db.release(); await app.close(); await adminPool.end(); await pool.end()
 }, 120_000)
 
-/** A confirmed passkey belonging to dev-user. */
+/** A confirmed passkey belonging to this file's own member. */
 async function givePasskey(credentialId: string): Promise<string> {
-  const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user', label: 'key' })
+  const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: SELF, label: 'key' })
   await storePasskey(db, {
     tenantId: TENANT, factorId,
     passkey: { credentialId, publicKey: 'pk', signCount: 0, transports: ['usb'], rpId: 'dev.localhost' },
@@ -79,18 +99,18 @@ describe('#666: a confirmed passkey can be removed', () => {
     // Possession is per-factor. Otherwise taking one lets somebody strip the other, and holding two
     // stops meaning anything.
     const secret = generateTotpSecret()
-    const totp = await startTotpEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user', secret })
+    const totp = await startTotpEnrolment(db, { tenantId: TENANT, memberSub: SELF, secret })
     await confirmFactor(db, totp.factorId)
     const passkeyId = await givePasskey(`crossed-${STAMP}`)
 
     const res = await del(passkeyId, `?code=${totpCode(secret, Date.now())}`)
     expect(res.statusCode, res.body).toBe(400)
-    expect((await listFactors(db, 'dev-user')).map((f) => f.id), 'both are still there').toContain(passkeyId)
+    expect((await listFactors(db, SELF)).map((f) => f.id), 'both are still there').toContain(passkeyId)
   }, 120_000)
 
   it('…and a passkey assertion does not remove a TOTP factor', async () => {
     const secret = generateTotpSecret()
-    const totp = await startTotpEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user', secret })
+    const totp = await startTotpEnrolment(db, { tenantId: TENANT, memberSub: SELF, secret })
     await confirmFactor(db, totp.factorId)
     await givePasskey(`other-${STAMP}`)
 
@@ -104,7 +124,7 @@ describe('#666: a confirmed passkey can be removed', () => {
   it('an unconfirmed passkey still goes without proving anything', async () => {
     // It guards nothing, and demanding possession of a key that was never finished would make an
     // abandoned enrolment permanent — the trap #653 had to undo.
-    const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
+    const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: SELF })
     expect((await del(factorId)).statusCode).toBe(204)
   }, 120_000)
 
@@ -117,7 +137,7 @@ describe('#666: a confirmed passkey can be removed', () => {
     expect(first.statusCode).toBe(400)
     const second = await del(factorId, `?passkey=${encodeURIComponent(JSON.stringify({ id: `once-${STAMP}` }))}`)
     expect(second.statusCode, 'and the challenge is gone').toBe(400)
-    expect(await app.valkey.get(`passkeychal:${TENANT}:dev-user`), 'nothing live is left').toBeNull()
+    expect(await app.valkey.get(`passkeychal:${TENANT}:${SELF}`), 'nothing live is left').toBeNull()
   }, 120_000)
 
   it('somebody else\'s passkey is not addressable', async () => {
@@ -142,7 +162,7 @@ describe('#666: a confirmed passkey can be removed', () => {
     // Same family as the removal bug: the confirm route filtered only on "pending", so a passkey
     // reached it, `totpSecretFor` answered null, and the member was told their CODE was wrong about a
     // factor that has none. Which proof a factor takes belongs to the factor.
-    const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
+    const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: SELF })
     const res = await app.inject({
       method: 'POST', url: `/me/factors/${factorId}/confirm`, headers: H, payload: JSON.stringify({ code: '123456' }),
     })
@@ -161,10 +181,10 @@ describe('#666: a confirmed passkey can be removed', () => {
     expect(issued.statusCode, issued.body).toBe(200)
     const offered = issued.json<{ options: { challenge: string } }>().options.challenge
 
-    const banked = await takeChallenge(app.valkey, TENANT, 'dev-user')
+    const banked = await takeChallenge(app.valkey, TENANT, SELF)
     expect(banked, 'the same store, the same challenge').toBe(offered)
     // …and it is now gone, which is what makes the challenge one-shot rather than merely short-lived.
-    expect(await takeChallenge(app.valkey, TENANT, 'dev-user'), 'taken once').toBeNull()
+    expect(await takeChallenge(app.valkey, TENANT, SELF), 'taken once').toBeNull()
   }, 120_000)
 
   it('the options name the credential in the shape WebAuthn accepts', async () => {
