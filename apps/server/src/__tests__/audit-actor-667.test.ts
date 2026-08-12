@@ -19,6 +19,7 @@ import { pool } from '../db/pool.js'
 import { buildApp } from '../app.js'
 import { auditActor } from '../audit/sink.js'
 import { runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
+import { expectLedgerAtLeast } from './helpers/expect-ledger.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const T = 'tenant_dev'
@@ -105,7 +106,9 @@ describe('#667 §9: a real request writes the key into the ledger', () => {
     const rows = await rowsFor(roleId)
     // Assert the PREMISE before the property: a test satisfied by zero rows measures nothing, which is
     // exactly what the first version of this file did against a route that is not audited.
-    expect(rows.length, 'the operation was audited (the tenant is audit-entitled)').toBeGreaterThan(0)
+    // #692 D: composition-aware — a build with no ledger composed in enqueues nothing, and THAT is
+    // asserted (exactly zero), so the actor loop below is vacuous only where the set is proven empty.
+    await expectLedgerAtLeast(async () => rows.length, 1, 'the operation was audited (the tenant is audit-entitled)')
     for (const r of rows) {
       expect(r.actor, 'the key, not its owner').toBe(`api_key:${id}`)
       expect(r.actor).not.toContain(OWNER)
@@ -120,7 +123,7 @@ describe('#667 §9: a real request writes the key into the ledger', () => {
     const roleId = res.json<{ id: string }>().id
     made.push(roleId)
     const rows = await rowsFor(roleId)
-    expect(rows.length, 'the control was audited too').toBeGreaterThan(0)
+    await expectLedgerAtLeast(async () => rows.length, 1, 'the control was audited too')
     for (const r of rows) expect(r.actor, 'a person acting is the person').toBe(`user:${OWNER}`)
   }, 120_000)
 

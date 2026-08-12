@@ -21,6 +21,15 @@ import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import { ensureMembers, memberTuples } from './helpers/membership.js'
 import { ADMIN_SURFACES, readableAdminSurfaces } from '../routes/admin-surfaces.js'
 import { TENANT_CAP_RELATION } from '../routes/roles.js'
+import { auditLedgerRegistered } from '../audit/sink.js'
+import { analyticsRegistered } from '../analytics/sink.js'
+
+// #692 B: `audit` and `analytics` exist in the registry but only SURFACE when their EE mount
+// registered (#688) — the dev suite composes EE through the vitest alias, the CE build composes
+// nothing, and a pin that hard-codes the composed answer is red exactly there. The pin asks the same
+// predicates production asks, in BOTH directions: registered → the door is offered, not → absent.
+const composedSurface = (s: string) =>
+  (s !== 'audit' || auditLedgerRegistered()) && (s !== 'analytics' || analyticsRegistered())
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6381')
@@ -101,7 +110,9 @@ describe('#604a carved-out verb LEADS somewhere', () => {
   it.each(CARVE_OUTS)('%s opens exactly the surfaces its relation gates — and nothing else', async (cap, relation) => {
     const sub = holders.get(cap)!
     const open = await readableAdminSurfaces(fgaClient, sub, TENANT)
-    const expected = Object.entries(ADMIN_SURFACES).filter(([, r]) => r === relation).map(([s]) => s)
+    // #692 B: an uncomposed door is absent for everybody, including its verb's holder.
+    const expected = Object.entries(ADMIN_SURFACES)
+      .filter(([s, r]) => r === relation && composedSurface(s)).map(([s]) => s)
     expect(open.sort(), `${cap} should open ${expected.join(', ')}`).toEqual(expected.sort())
     // The point of a carve-out: holding one power does not quietly bring the tier's others.
     const tierOnly = Object.entries(ADMIN_SURFACES).filter(([, r]) => r === 'admin').map(([s]) => s)
@@ -112,9 +123,14 @@ describe('#604a carved-out verb LEADS somewhere', () => {
     expect(await readableAdminSurfaces(fgaClient, PLAIN, TENANT)).toEqual([])
   }, 120_000)
 
-  it('an admin still gets every surface — the tier lost nothing', async () => {
+  it('an admin still gets every COMPOSED surface — the tier lost nothing', async () => {
     const open = await readableAdminSurfaces(fgaClient, 'dev-user', TENANT)
-    expect(open.sort()).toEqual(Object.keys(ADMIN_SURFACES).sort())
+    expect(open.sort()).toEqual(Object.keys(ADMIN_SURFACES).filter(composedSurface).sort())
+    // Both directions of #688's registration signal, so this stays meaningful on BOTH suites:
+    // where the EE mount registered, the door must be offered; where it did not, offering it
+    // would be dead navigation (the exact defect readableAdminSurfaces filters against).
+    expect(open.includes('audit'), 'audit door disagrees with auditLedgerRegistered()').toBe(auditLedgerRegistered())
+    expect(open.includes('analytics'), 'analytics door disagrees with analyticsRegistered()').toBe(analyticsRegistered())
   }, 120_000)
 
   it('the endpoint answers the CALLER\'s own list, and needs no tier to be asked', async () => {

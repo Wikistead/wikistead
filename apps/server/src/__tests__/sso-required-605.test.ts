@@ -16,6 +16,7 @@ import { assertNotLastWayIn, resolveLoginConnections } from '../auth/login-metho
 import { completePasswordReset, mintPasswordReset, mintPasswordSetup } from '../auth/password-reset.js'
 import type { FastifyInstance } from 'fastify'
 import type { Tenant } from '@wikistead/types'
+import { auditLedgerRegistered } from '../audit/sink.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const T = 'tenant_t605'
@@ -94,7 +95,8 @@ describe('#605 §R5-4: turning the stance ON has write-time preconditions', () =
     const on = await app.inject({ method: 'PATCH', url: '/admin/login-methods', headers: H, payload: { ssoRequired: true } })
     expect(on.statusCode).toBe(204)
     const [audit] = await admin`SELECT action FROM audit_outbox WHERE tenant_id = ${T} AND action = 'tenant.sso_required_on' LIMIT 1`
-    expect(audit, 'the switch is in the ledger, in-tx').toBeTruthy()
+    // #692 D: present exactly when a ledger is composed in — the CE no-op is pinned too.
+    expect(audit !== undefined, 'the switch is in the ledger, in-tx (iff composed)').toBe(auditLedgerRegistered())
     expect((await resolveSsoStance(db, { plan: 'free' })).biting).toBe(true)
   }, 60_000)
 
@@ -195,6 +197,6 @@ describe('#605 §R5-1/§R5-2: the guard is counterfactual, and failures fall to 
     expect(view.ssoRequired.selected).toBe(false)
     expect(view.methods.local.effective).toBe(true)
     const [audit] = await admin`SELECT action FROM audit_outbox WHERE tenant_id = ${T} AND action = 'tenant.sso_required_off' LIMIT 1`
-    expect(audit).toBeTruthy()
+    expect(audit !== undefined, '#692 D: audited iff a ledger is composed in').toBe(auditLedgerRegistered())
   })
 })

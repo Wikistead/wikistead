@@ -13,6 +13,7 @@ import { createSpace, deleteSpace, listAllSpaceAccess } from '../routes/spaces.j
 import { buildApp } from '../app.js'
 import { planConvergence, executeConvergence, pickKeeper, isRankedRow, type DupRow } from '../scripts/converge-role-duplicates-536.js'
 import type { Tenant } from '@wikistead/types'
+import { expectLedgerAtLeast } from './helpers/expect-ledger.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
@@ -216,7 +217,8 @@ describe('#536(5): one-shot duplicate convergence', () => {
     const audited = await adminPool<{ n: string }[]>`
       SELECT (SELECT count(*) FROM audit_log    WHERE tenant_id = ${TENANT} AND action = 'space.access_revoked' AND target = ${`space:${spaceId}`} AND actor = ${'user:operator:converge-536'})
            + (SELECT count(*) FROM audit_outbox WHERE tenant_id = ${TENANT} AND action = 'space.access_revoked' AND target = ${`space:${spaceId}`} AND actor = ${'user:operator:converge-536'}) AS n`
-    expect(Number(audited[0]!.n), 'THIS run audited its built-in removals as space.access_revoked').toBeGreaterThan(0)
+    // #692 D: however many removals, each is audited under a composed ledger; silent under none.
+    await expectLedgerAtLeast(async () => Number(audited[0]!.n), 1, 'THIS run audited its built-in removals as space.access_revoked')
 
     // operator ledger has the summary entry for the tenant
     const ledger = await adminPool<{ action: string; target: string }[]>`

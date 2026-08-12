@@ -22,6 +22,7 @@ import { createPage, deletePage, trashPage, directDeletePage, restorePage, purge
 import { onDomainEvent } from '@wikistead/events'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import type { Tenant } from '@wikistead/types'
+import { ledgerRows } from './helpers/expect-ledger.js'
 
 const driver = new LogicalSearchDriver()
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -140,7 +141,8 @@ describe('per-mode pathway enforcement (#437 §2)', () => {
     // #437 §3: the in-tx audit intent (auditIfEntitled enqueues to audit_outbox; the reliable drain
     // owns the ledger append). Deterministic either way: entitled ⇒ exactly +1; CE ⇒ unchanged.
     const outboxAfter = Number((await admin`SELECT count(*)::int AS n FROM audit_outbox WHERE tenant_id = ${tenant.id} AND action = 'page.purged'`)[0]!.n)
-    expect(outboxAfter - outboxBefore).toBe(resolveEntitlements(tenant.plan).auditLog ? 1 : 0)
+    // #692 D: two gates in series — the build composes a ledger AND the plan is entitled to it.
+    expect(outboxAfter - outboxBefore).toBe(ledgerRows(resolveEntitlements(tenant.plan).auditLog ? 1 : 0))
     await setSpaceMode(null)
   })
 
