@@ -23,6 +23,7 @@ import { createPage, deletePage, publishPage, grantPageAccess, revokePageAccess 
 import { assignRoleInTx, unassignRoleInTx } from '../routes/roles.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
+import { ledgerRows } from './helpers/expect-ledger.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
@@ -239,7 +240,8 @@ describe('#536 review: a re-granted rowless tuple is still revocable', () => {
     const after = (await adminPool<{ n: string }[]>`
       SELECT (SELECT count(*) FROM audit_log    WHERE tenant_id = ${TENANT} AND action = 'space.access_granted' AND target = ${`space:${spaceId}`})
            + (SELECT count(*) FROM audit_outbox WHERE tenant_id = ${TENANT} AND action = 'space.access_granted' AND target = ${`space:${spaceId}`}) AS n`)[0].n
-    expect(Number(after), 'the duplicate grant audited too').toBeGreaterThan(Number(before))
+    // #692 D: one event for the duplicate under a composed ledger, zero under none (CE no-op).
+    expect(Number(after) - Number(before), 'the duplicate grant audited too').toBe(ledgerRows(1))
   }, 120_000)
 })
 

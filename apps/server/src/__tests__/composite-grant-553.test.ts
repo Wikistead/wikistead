@@ -12,6 +12,7 @@ import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess, grantSpa
 import { createPage, deletePage, publishPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
+import { ledgerRows } from './helpers/expect-ledger.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
@@ -117,7 +118,8 @@ describe('#553 T1: the editor-noun composite grant', () => {
            + (SELECT count(*) FROM audit_outbox WHERE tenant_id = ${TENANT} AND action = 'space.access_granted' AND target = ${`space:${spaceId}`}) AS n`)[0]!.n)
     const before = await count()
     await composite(p, ['edit', 'comment'])
-    expect((await count()) - before, 'two audit events for one noun add').toBe(2)
+    // #692 D: two per-arm events under a composed ledger, zero under none (CE no-op).
+    expect((await count()) - before, 'two audit events for one noun add').toBe(ledgerRows(2))
   }, 120_000)
 })
 

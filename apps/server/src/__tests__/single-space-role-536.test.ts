@@ -18,6 +18,7 @@ import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess } from '.
 import { createPage, deletePage, publishPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
+import { expectLedgerAtLeast } from './helpers/expect-ledger.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
@@ -190,7 +191,8 @@ describe('#536 a manager is demoted only by someone who said so', () => {
     await grantSpaceAccess(db, fgaClient, app.searchDriver, {
       spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business', replace: true,
     })
-    expect(await revoked() - before, 'the strongest change this path makes must leave a trace').toBeGreaterThan(0)
+    // #692 D: at least the demotion's own event under a composed ledger; silent under none.
+    await expectLedgerAtLeast(async () => (await revoked()) - before, 1, 'the strongest change this path makes must leave a trace')
   }, 120_000)
 
   // and the sweep must delete the WHOLE grant, not the part that happens to be in the display table

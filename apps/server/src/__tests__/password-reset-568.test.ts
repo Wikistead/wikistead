@@ -229,10 +229,12 @@ describe('#568 review R1-R3: the reset surface itself', () => {
   }, 180_000)
 
   it('the reset events reach the EE ledger, not only the webhook stream (§6 C7)', async () => {
-    const { drainAuditFor } = await import('./helpers/audit-drain.js')
+    // #692 D: composition-aware — a composed ledger records both events, an uncomposed one records
+    // nothing (auditIfEntitled is a documented no-op), and BOTH answers are pinned.
+    const { drainLedgerFor, expectLedger } = await import('./helpers/expect-ledger.js')
     const { identifier, sub } = await makeLocalMember('audit')
     const count = async () => {
-      await drainAuditFor(adminPool, TENANT)
+      await drainLedgerFor(adminPool, TENANT)
       const [r] = await adminPool<[{ n: string }]>`
         SELECT count(*)::text AS n FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`member:${sub}`}
           AND action IN ('member.password_reset_requested', 'member.password_reset_completed')`
@@ -242,7 +244,7 @@ describe('#568 review R1-R3: the reset surface itself', () => {
     await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: H, payload: { identifier } })
     const minted = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
     await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: minted.token, password: NEXT } })
-    expect(await count() - before, 'both the request and the completion are on the ledger').toBeGreaterThanOrEqual(2)
+    await expectLedger(async () => (await count()) - before, 2, 'both the request and the completion are on the ledger')
   }, 180_000)
 })
 
@@ -250,7 +252,7 @@ describe('#568 review F1/F2: the ledger says what happened, and does not say who
   it('F1: a password change that COMMITS always leaves a ledger line (same transaction)', async () => {
     // A separate transaction with a swallowed error can leave the password changed and the ledger
     // silent, which is the one state an investigation cannot recover from.
-    const { drainAuditFor } = await import('./helpers/audit-drain.js')
+    const { drainLedgerFor, ledgerRows } = await import('./helpers/expect-ledger.js')
     const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('../auth/password-reset.ts', import.meta.url), 'utf8'))
     expect(src, 'the completion audits inside its own tx').toContain('auditIfEntitled(tx, tenant')
     const route = await import('node:fs').then((fs) => fs.readFileSync(new URL('../routes/auth-local.ts', import.meta.url), 'utf8'))
@@ -260,23 +262,25 @@ describe('#568 review F1/F2: the ledger says what happened, and does not say who
     const { identifier, sub } = await makeLocalMember('f1')
     const minted = (await mintPasswordReset(db, { plan: 'free' }, identifier))!
     await app.inject({ method: 'POST', url: '/auth/local/reset', headers: H, payload: { token: minted.token, password: NEXT } })
-    await drainAuditFor(adminPool, TENANT)
+    await drainLedgerFor(adminPool, TENANT)
     const rows = await adminPool<{ actor: string }[]>`
       SELECT actor FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`member:${sub}`} AND action = 'member.password_reset_completed'`
-    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.length, 'one completion, or zero on an uncomposed build (#692 D)').toBe(ledgerRows(1))
   }, 180_000)
 
   it('F2: the REQUEST is attributed to nobody — it is unauthenticated and anyone may type an address', async () => {
     // Recording the member as the actor would tell a takeover investigation that the owner asked for
     // this, which is the opposite of what the ledger knows.
-    const { drainAuditFor } = await import('./helpers/audit-drain.js')
+    const { drainLedgerFor, ledgerRows } = await import('./helpers/expect-ledger.js')
     const { identifier, sub } = await makeLocalMember('f2')
     await app.inject({ method: 'POST', url: '/auth/local/reset-request', headers: H, payload: { identifier } })
-    await drainAuditFor(adminPool, TENANT)
+    await drainLedgerFor(adminPool, TENANT)
     const rows = await adminPool<{ actor: string }[]>`
       SELECT actor FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`member:${sub}`} AND action = 'member.password_reset_requested'`
-    expect(rows.length).toBeGreaterThan(0)
-    expect(rows.every((r) => r.actor !== `user:${sub}`), 'never attributed to the member').toBe(true)
-    expect(rows[0]!.actor).toBe('anonymous')
+    // #692 D: the row count is composition-aware; the ACTOR lines only exist to read when a ledger
+    // is composed in (the count above proves the set is empty otherwise).
+    expect(rows.length, 'one request row, or zero on an uncomposed build').toBe(ledgerRows(1))
+    for (const r of rows) expect(r.actor, 'never attributed to the member').not.toBe(`user:${sub}`)
+    for (const r of rows) expect(r.actor).toBe('anonymous')
   }, 180_000)
 })
