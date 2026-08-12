@@ -294,7 +294,7 @@ export async function createPage(
     if (homeRow?.home_page_id === parentId) throw Object.assign(new Error('the space home is a leaf (v1) — pages cannot be created under it'), { statusCode: 400 })
     // #218 / ADR-103 (comment 996 decision 3): cap nesting depth so the inherited-authz parent chain stays
     // resolvable under OpenFGA's resolution-depth limit. The new leaf's depth = parent depth + 1.
-    if ((await ancestorDepth(db, parentId)) + 1 > MAX_PAGE_DEPTH) {
+    if ((await ancestorDepth(db.sql, parentId)) + 1 > MAX_PAGE_DEPTH) {
       throw Object.assign(new Error(`max nesting depth (${MAX_PAGE_DEPTH}) exceeded`), { statusCode: 400 })
     }
   }
@@ -384,7 +384,7 @@ export async function guestCreatePublishPage(
     if (!canViewParent) throw Object.assign(new Error('not found'), { statusCode: 404 })
     const [p] = await db.sql<{ space_id: string }[]>`SELECT space_id FROM pages WHERE id = ${parentId}`
     if (!p || p.space_id !== args.spaceId) throw Object.assign(new Error('parent not in space'), { statusCode: 400 })
-    if ((await ancestorDepth(db, parentId)) + 1 > MAX_PAGE_DEPTH) {
+    if ((await ancestorDepth(db.sql, parentId)) + 1 > MAX_PAGE_DEPTH) {
       throw Object.assign(new Error(`max nesting depth (${MAX_PAGE_DEPTH}) exceeded`), { statusCode: 400 })
     }
   }
@@ -1371,7 +1371,7 @@ export async function setPagePrivate(
   // public-grant strip, share-link sweep, and reindex must run on EVERY descendant too — the model can't
   // subtract a descendant's DIRECT `view_base@user:*` (public) or its direct share-link grants, so those would
   // survive the inherited private as live holes.
-  const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
+  const subtree = [args.pageId, ...(await descendantIds(db.sql, args.pageId))]
   const oids = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_private', target: `page:${args.pageId}` })
@@ -1461,7 +1461,7 @@ export async function unsetPagePrivate(
   // cascaded down; removing the root marker un-inherits it), so the whole subtree must be reindexed (space
   // members re-enter stage-1). We do NOT restore public grants or share-links (safe-side: one-way — a
   // re-publish or explicit public toggle re-adds them per page if desired).
-  const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
+  const subtree = [args.pageId, ...(await descendantIds(db.sql, args.pageId))]
   const oids = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_non_private', target: `page:${args.pageId}` })
@@ -2207,7 +2207,7 @@ async function applyMovePrivacyBoundary(
   driver: SearchDriver,
   args: { rootId: string; tenantId: string; userId: string; stripSweep: boolean; reindex: boolean },
 ): Promise<void> {
-  const subtree = [args.rootId, ...(await descendantIds(db, args.rootId))]
+  const subtree = [args.rootId, ...(await descendantIds(db.sql, args.rootId))]
   let unremoved: string[] = []
   if (args.stripSweep) {
     // Same rule as setPagePrivate's strip: "was not public" is convergence, a refusal is not. The move has
@@ -2244,15 +2244,37 @@ async function applyMovePrivacyBoundary(
   }
 }
 
-async function descendantIds(db: TenantDb, rootId: string): Promise<string[]> {
-  const rows = await db.sql<{ id: string }[]>`
+// #689: every parent-chain CTE in this family carries a depth guard, and hitting it is an ERROR, not a
+// clamp. A parent cycle — the concurrent-move TOCTOU movePage now locks against, or direct SQL outside
+// the API — made these walks spin forever: one ancestorDepth query was measured running for 5 days,
+// holding its pooled connection, and each request touching the cyclic family eats another connection
+// until the tenant starves. A silent clamp would be worse than the error: these walks feed the
+// create/move depth guards, and a truncated answer makes those guards approve what they should refuse.
+// Legal trees stay strictly below the cap (a page holds at most MAX_PAGE_DEPTH ancestors), so the only
+// way to reach it is structural corruption — say so, loudly.
+// (PAGE_TREE_WALK_CAP is declared just under MAX_PAGE_DEPTH below — it is derived from it, and these
+// functions only read it at call time.)
+
+function pageTreeCorrupt(where: string, id: string): Error {
+  console.error('[pageTreeWalk] parent chain exceeded PAGE_TREE_WALK_CAP — the page tree is corrupt (parent cycle or over-deep rows)', { where, id })
+  return Object.assign(new Error('page tree is corrupt — a parent walk exceeded the structural cap'), {
+    statusCode: 500, code: 'page_tree_corrupt',
+  })
+}
+
+// The Sql-tag parameter (not TenantDb): movePage calls these INSIDE its serializing transaction, so the
+// walk and the UPDATE it protects read the same snapshot under the same advisory lock (#689).
+export async function descendantIds(sql: Sql, rootId: string): Promise<string[]> {
+  const rows = await sql<{ id: string; depth: number }[]>`
     WITH RECURSIVE d AS (
-      SELECT id FROM pages WHERE parent_id = ${rootId}
+      SELECT id, 1 AS depth FROM pages WHERE parent_id = ${rootId}
       UNION ALL
-      SELECT p.id FROM pages p JOIN d ON p.parent_id = d.id
+      SELECT p.id, d.depth + 1 FROM pages p JOIN d ON p.parent_id = d.id
+       WHERE d.depth < ${PAGE_TREE_WALK_CAP}
     )
-    SELECT id FROM d
+    SELECT id, depth FROM d
   `
+  if (rows.some((r) => r.depth >= PAGE_TREE_WALK_CAP)) throw pageTreeCorrupt('descendantIds', rootId)
   return rows.map((r) => r.id)
 }
 
@@ -2265,30 +2287,41 @@ async function descendantIds(db: TenantDb, rootId: string): Promise<string[]> {
 // separately so the atomic flip carries no separable scaffolding.
 export const MAX_PAGE_DEPTH = 10 // 0-indexed: a top-level page is depth 0, so up to 11 nesting levels.
 
+// #689: the walk cap the three parent-chain CTEs above/below refuse at. +2 is margin, not headroom
+// rows deeper than MAX_PAGE_DEPTH but under the cap (pre-guard data) still answer rather than 500, while
+// a cycle always reaches the cap. ONE derived constant so the write-boundary cap and the walk cap cannot
+// drift apart.
+export const PAGE_TREE_WALK_CAP = MAX_PAGE_DEPTH + 2
+
 // Depth of a page = its number of ancestors (0 for a top-level page). Walks parent_id up to the root.
-async function ancestorDepth(db: TenantDb, id: string): Promise<number> {
-  const [r] = await db.sql<[{ n: number }]>`
+export async function ancestorDepth(sql: Sql, id: string): Promise<number> {
+  const rows = await sql<{ parent_id: string | null; depth: number }[]>`
     WITH RECURSIVE anc AS (
-      SELECT parent_id FROM pages WHERE id = ${id}
+      SELECT parent_id, 0 AS depth FROM pages WHERE id = ${id}
       UNION ALL
-      SELECT p.parent_id FROM pages p JOIN anc ON p.id = anc.parent_id WHERE anc.parent_id IS NOT NULL
+      SELECT p.parent_id, anc.depth + 1 FROM pages p JOIN anc ON p.id = anc.parent_id
+       WHERE anc.parent_id IS NOT NULL AND anc.depth < ${PAGE_TREE_WALK_CAP}
     )
-    SELECT count(*) FILTER (WHERE parent_id IS NOT NULL)::int AS n FROM anc
+    SELECT parent_id, depth FROM anc
   `
-  return r?.n ?? 0
+  if (rows.some((r) => r.depth >= PAGE_TREE_WALK_CAP)) throw pageTreeCorrupt('ancestorDepth', id)
+  return rows.filter((r) => r.parent_id != null).length
 }
 
 // Height of the subtree rooted at `id` = the deepest descendant's distance below it (0 for a leaf).
-async function subtreeHeight(db: TenantDb, id: string): Promise<number> {
-  const [r] = await db.sql<[{ h: number }]>`
+export async function subtreeHeight(sql: Sql, id: string): Promise<number> {
+  const [r] = await sql<[{ h: number }]>`
     WITH RECURSIVE d AS (
       SELECT id, 0 AS lvl FROM pages WHERE id = ${id}
       UNION ALL
       SELECT p.id, d.lvl + 1 FROM pages p JOIN d ON p.parent_id = d.id
+       WHERE d.lvl < ${PAGE_TREE_WALK_CAP}
     )
     SELECT COALESCE(MAX(lvl), 0)::int AS h FROM d
   `
-  return r?.h ?? 0
+  const h = r?.h ?? 0
+  if (h >= PAGE_TREE_WALK_CAP) throw pageTreeCorrupt('subtreeHeight', id)
+  return h
 }
 
 // Swap each page's direct `space:<id>#space@page:<id>` grant from oldSpace to
@@ -2432,77 +2465,81 @@ export async function movePage(
   }
 
   // No cycles: a page cannot be nested under itself or its own descendant.
-  if (newParent) {
-    if (newParent === args.pageId) throw Object.assign(new Error('cannot nest under itself'), { statusCode: 400 })
-    if ((await descendantIds(db, args.pageId)).includes(newParent)) {
-      throw Object.assign(new Error('cannot nest under own descendant'), { statusCode: 400 })
-    }
-    // #218 / ADR-103 (comment 996 decision 3): the MOVED subtree's deepest node lands at
-    // newParent depth + 1 + the subtree's own height — cap it under the resolution-depth limit.
-    if ((await ancestorDepth(db, newParent)) + 1 + (await subtreeHeight(db, args.pageId)) > MAX_PAGE_DEPTH) {
-      throw Object.assign(new Error(`max nesting depth (${MAX_PAGE_DEPTH}) exceeded`), { statusCode: 400 })
+  if (newParent === args.pageId) throw Object.assign(new Error('cannot nest under itself'), { statusCode: 400 })
+
+  // #689: the descendant/depth checks below READ the tree and the UPDATE writes it — run apart, two
+  // concurrent moves ("A under B" | "B under A") each pass the read before either write lands, and the
+  // commit pair IS a parent cycle (the corruption the walk caps above then 500 on). So the checks, the
+  // position computation and the write share ONE transaction under a per-space advisory xact lock (the
+  // task-fold tool). Moves within one space serialize; moves in different spaces stay concurrent. A
+  // cross-space move locks BOTH spaces in sorted order so two opposite cross-space moves cannot deadlock.
+  const lockSpaces = crossSpace ? [page.space_id, targetSpace].sort() : [targetSpace]
+  const structuralGuards = async (tx: Sql): Promise<void> => {
+    for (const s of lockSpaces) await tx`SELECT pg_advisory_xact_lock(hashtext(${`page-move:${s}`})::bigint)`
+    if (newParent) {
+      if ((await descendantIds(tx, args.pageId)).includes(newParent)) {
+        throw Object.assign(new Error('cannot nest under own descendant'), { statusCode: 400 })
+      }
+      // #218 / ADR-103 (comment 996 decision 3): the MOVED subtree's deepest node lands at
+      // newParent depth + 1 + the subtree's own height — cap it under the resolution-depth limit.
+      if ((await ancestorDepth(tx, newParent)) + 1 + (await subtreeHeight(tx, args.pageId)) > MAX_PAGE_DEPTH) {
+        throw Object.assign(new Error(`max nesting depth (${MAX_PAGE_DEPTH}) exceeded`), { statusCode: 400 })
+      }
     }
   }
 
-  // Position between afterId and the next sibling in the DESTINATION sibling list.
-  const sibs = await db.sql<{ id: string; position: number }[]>`
-    SELECT id, position FROM pages
-    WHERE space_id = ${targetSpace} AND parent_id IS NOT DISTINCT FROM ${newParent} AND id <> ${args.pageId}
-    ORDER BY position, created_at
-  `
-  let before: number | null = null
-  let after: number | null = null
-  if (args.afterId == null) {
-    after = sibs[0]?.position ?? null
-  } else {
-    const idx = sibs.findIndex((s) => s.id === args.afterId)
-    if (idx === -1) throw Object.assign(new Error('afterId is not a sibling'), { statusCode: 400 })
-    before = sibs[idx].position
-    after = sibs[idx + 1]?.position ?? null
+  // Position between afterId and the next sibling in the DESTINATION sibling list. Collapsed gap
+  // (#118): re-spread the destination sibling group first, then recompute the slot — same tx.
+  const computePosition = async (tx: Sql): Promise<number> => {
+    const sibs = await tx<{ id: string; position: number }[]>`
+      SELECT id, position FROM pages
+      WHERE space_id = ${targetSpace} AND parent_id IS NOT DISTINCT FROM ${newParent} AND id <> ${args.pageId}
+      ORDER BY position, created_at
+    `
+    let before: number | null = null
+    let after: number | null = null
+    if (args.afterId == null) {
+      after = sibs[0]?.position ?? null
+    } else {
+      const idx = sibs.findIndex((s) => s.id === args.afterId)
+      if (idx === -1) throw Object.assign(new Error('afterId is not a sibling'), { statusCode: 400 })
+      before = sibs[idx].position
+      after = sibs[idx + 1]?.position ?? null
+    }
+    if (gapCollapsed(before, after)) {
+      const fresh = await rebalanceSiblings(tx, targetSpace, newParent, args.pageId)
+      if (args.afterId == null) { before = null; after = fresh[0]?.position ?? null }
+      else { const i = fresh.findIndex((s) => s.id === args.afterId); before = fresh[i]!.position; after = fresh[i + 1]?.position ?? null }
+    }
+    return positionBetween(before, after)
   }
-  const position = positionBetween(before, after)
 
   if (!crossSpace) {
-    // Common case: a single-row UPDATE with the fractional position (no sibling renumber, so
-    // concurrent moves of different pages don't conflict). Collapsed gap (#118): re-spread the
-    // destination sibling group first, then recompute the slot — all in one tx.
-    if (gapCollapsed(before, after)) {
-      const r = await db.tx(async (tx) => {
-        const fresh = await rebalanceSiblings(tx, targetSpace, newParent, args.pageId)
-        let b: number | null = null
-        let a: number | null = null
-        if (args.afterId == null) a = fresh[0]?.position ?? null
-        else { const i = fresh.findIndex((s) => s.id === args.afterId); b = fresh[i]!.position; a = fresh[i + 1]?.position ?? null }
-        const [row] = await tx<PageRow[]>`
-          UPDATE pages SET parent_id = ${newParent}, position = ${positionBetween(b, a)}, updated_at = now()
-          WHERE id = ${args.pageId}
-          RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
-        `
-        return row!
-      })
-      await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218: re-point the parent tuple (private/grants cascade)
-      // #218 / ADR-103: after the parent tuple is set, apply the private write-boundary if the effective private
-      // state changed (strip/sweep only on the transition INTO private; reindex either way for the denorm).
-      if (effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: willBePrivate, reindex: true })
-      emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
-      return toPage(r)
-    }
-    const [r] = await db.sql<PageRow[]>`
-      UPDATE pages SET parent_id = ${newParent}, position = ${position}, updated_at = now()
-      WHERE id = ${args.pageId}
-      RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
-    `
+    const r = await db.tx(async (tx) => {
+      await structuralGuards(tx)
+      const position = await computePosition(tx)
+      const [row] = await tx<PageRow[]>`
+        UPDATE pages SET parent_id = ${newParent}, position = ${position}, updated_at = now()
+        WHERE id = ${args.pageId}
+        RETURNING id, tenant_id, space_id, parent_id, title, position, created_at, updated_at
+      `
+      return row!
+    })
     await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218: re-point the parent tuple (private/grants cascade)
+    // #218 / ADR-103: after the parent tuple is set, apply the private write-boundary if the effective private
+    // state changed (strip/sweep only on the transition INTO private; reindex either way for the denorm).
     if (effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: willBePrivate, reindex: true })
     emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
     return toPage(r)
   }
 
   // ── cross-space: subtree follows the page; re-index each; swap space grants ──
-  const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
   const oldSpace = page.space_id
   const outboxIds: { id: string; pageId: string }[] = []
   const row = await db.tx(async (tx) => {
+    await structuralGuards(tx)
+    const position = await computePosition(tx)
+    const subtree = [args.pageId, ...(await descendantIds(tx, args.pageId))]
     await tx`UPDATE pages SET space_id = ${targetSpace}, updated_at = now() WHERE id IN ${tx(subtree)}`
     const [r] = await tx<PageRow[]>`
       UPDATE pages SET parent_id = ${newParent}, position = ${position}, updated_at = now()
@@ -2583,7 +2620,7 @@ export async function trashPage(
   if ((await resolveDeleteMode(db, meta.space_id)) === 'direct_only') {
     throw Object.assign(new Error('the trash pathway is disabled by policy'), { statusCode: 400, reason: 'delete_mode' })
   }
-  const subtree = [args.pageId, ...(await descendantIds(db, args.pageId))]
+  const subtree = [args.pageId, ...(await descendantIds(db.sql, args.pageId))]
   // Idempotent scope: only rows not already claimed by an existing trash entry get stamped/marked
   // a nested OLDER trash root keeps its own deleted_root_id (restore/purge are keyed by it, ADR §2).
   const fresh = (await db.sql<{ id: string }[]>`
@@ -3142,7 +3179,7 @@ async function physicalDeletePage(
   // for descendants must be cleaned too (else ghost auth / stale search). Sweep
   // the page AND all descendants. FGA-first (ADR-003): if a tuple sweep fails the
   // DB row is untouched and the op is retryable.
-  const ids = [args.pageId, ...(await descendantIds(db, args.pageId))]
+  const ids = [args.pageId, ...(await descendantIds(db.sql, args.pageId))]
   for (const id of ids) await deleteObjectTuples(fga, `page:${id}`)
 
   // #437 / ADR-167 §3: permanent deletion is exactly where attribution matters most — EE tenants
