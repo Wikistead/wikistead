@@ -1761,7 +1761,7 @@ function PublicPageRoute() {
 // at the time); per-branch fetching removes that truncation — a deep page becomes reachable by
 // expanding its ancestors. The anonymous reader expands rows the way a member does; every row draws a
 // chevron from the same sentinel-child device (ruling ①(c)).
-interface PublicBranch { pages: { id: string; title: string }[]; nextCursor: string | null; home?: { id: string; title: string } | null }
+interface PublicBranch { pages: { id: string; title: string; hasChildren?: boolean }[]; nextCursor: string | null; home?: { id: string; title: string } | null }
 
 function usePublicLazyTree(spaceId: string | undefined) {
   const qc = useQueryClient();
@@ -1817,19 +1817,24 @@ function usePublicLazyTree(spaceId: string | undefined) {
 }
 
 function toPublicLazyNodes(byParent: ReadonlyMap<string | null, PublicBranch>): PageTreeNode[] {
-  const node = (p: { id: string; title: string }): PageTreeNode => ({
+  const node = (p: { id: string; title: string; hasChildren?: boolean }): PageTreeNode => ({
     id: `page:${p.id}`, name: p.title, pageId: p.id, spaceId: "",
     published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0,
-    children: childrenOf(p.id),
+    children: childrenOf(p),
   });
-  const childrenOf = (parent: string): PageTreeNode[] => {
-    const b = byParent.get(parent);
-    if (!b) return [{ id: `unloaded:${parent}`, name: "", pageId: "", spaceId: "", published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [] }];
-    return assemble(b, parent);
+  // #623 ①: the chevron follows the server's `hasChildren` (a PUBLIC child exists), same as the
+  // member tree — a chevron on a childless row is a lie whoever the reader is.
+  const childrenOf = (p: { id: string; hasChildren?: boolean }): PageTreeNode[] => {
+    const b = byParent.get(p.id);
+    if (!b) {
+      if (!p.hasChildren) return [];
+      return [{ id: `unloaded:${p.id}`, name: "", pageId: "", spaceId: "", published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [] }];
+    }
+    return assemble(b, p.id);
   };
   const assemble = (b: PublicBranch, parent: string | null): PageTreeNode[] => {
     const rows = b.pages.map(node);
-    if (b.nextCursor) rows.push({ id: `more:${parent ?? "root"}`, name: "", pageId: "", spaceId: "", published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [] });
+    if (b.nextCursor) rows.push({ id: `more:${parent ?? "root"}:${b.nextCursor}`, name: "", pageId: "", spaceId: "", published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [] });
     return rows;
   };
   const root = byParent.get(null);

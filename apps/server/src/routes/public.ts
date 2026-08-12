@@ -151,7 +151,7 @@ export const PUBLIC_BRANCH_LIMIT = 100
 export async function listPublicBranch(
   tenantId: string,
   args: { spaceId: string; parentId: string | null; cursor?: string; limit?: number },
-): Promise<{ pages: { id: string; title: string }[]; nextCursor: string | null; restarted: boolean }> {
+): Promise<{ pages: { id: string; title: string; hasChildren?: boolean }[]; nextCursor: string | null; restarted: boolean }> {
   const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
   const limit = Math.min(500, Math.max(1, args.limit ?? PUBLIC_BRANCH_LIMIT))
 
@@ -214,9 +214,33 @@ export async function listPublicBranch(
 
   // Every node individually, as the whole-tree walk does. A child that is not public is ABSENT, and the
   // gap is not observable (no index, no count).
-  const out: { id: string; title: string }[] = []
+  //
+  // #623 ①: the chevron probe, same shape as the member branch — the first PUBLIC child of each
+  // row rides the same per-node confirms. A row whose children are none-public reads "no children",
+  // which tells the anonymous reader nothing.
+  const kids = page.length
+    ? ((await withTenantTx(tenantId, async (tx) => {
+        return tx<{ id: string; parent_id: string }[]>`
+          SELECT id, parent_id FROM (
+            SELECT p.id, p.parent_id,
+                   ROW_NUMBER() OVER (PARTITION BY p.parent_id ORDER BY p.position, p.created_at) AS rn
+            FROM pages p JOIN spaces s ON s.id = p.space_id
+            WHERE p.parent_id = ANY(${page.map((r) => r.id)}) AND p.space_id = ${args.spaceId}
+              AND p.deleted_at IS NULL AND p.published_at IS NOT NULL
+              AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+          ) x WHERE rn <= 3`
+      })) as { id: string; parent_id: string }[])
+    : []
+  const expandable = new Set<string>()
+  for (const k of kids) {
+    if (expandable.has(k.parent_id)) continue
+    if (await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: k.id })) expandable.add(k.parent_id)
+  }
+  const out: { id: string; title: string; hasChildren: boolean }[] = []
   for (const r of page) {
-    if (await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: r.id })) out.push(r)
+    if (await checkRelation(fgaClient, ANON, 'view', { type: 'page', id: r.id })) {
+      out.push({ ...r, hasChildren: expandable.has(r.id) })
+    }
   }
   return { pages: out, nextCursor, restarted }
 }
