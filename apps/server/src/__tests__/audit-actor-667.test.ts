@@ -17,7 +17,7 @@ import postgres from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import { pool } from '../db/pool.js'
 import { buildApp } from '../app.js'
-import { auditActor } from '../audit/outbox.js'
+import { auditActor } from '../audit/sink.js'
 import { runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -156,19 +156,20 @@ describe('#667 §9: no call site is expected to know about this', () => {
     for (const f of files(SRC)) {
       const src = readFileSync(f, 'utf8')
         .replace(/\/\*[\s\S]*?\*\//g, ' ').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n')
-      // `outbox.ts` is the one place; everywhere else, writing an `api_key:` actor means a second
-      // derivation that will drift from this one.
-      if (f.endsWith('audit/outbox.ts')) continue
+      // `sink.ts` is the one place (#688 moved the derivation there with the vocabulary — the EE
+      // ledger calls the same auditActor through the seam); everywhere else, writing an `api_key:`
+      // actor means a second derivation that will drift from this one.
+      if (f.endsWith('audit/sink.ts')) continue
       if (/actor:\s*`?api_key:/.test(src)) byHand.push(f.slice(f.indexOf('/src/') + 1))
     }
-    expect(byHand, `these build an api_key actor themselves — the derivation belongs in audit/outbox.ts`)
+    expect(byHand, `these build an api_key actor themselves — the derivation belongs in audit/sink.ts`)
       .toEqual([])
   })
 
   it('…and the scan would notice, because the one place IS found', () => {
     // Guard against the check above passing because the pattern matches nothing anywhere.
-    const outbox = readFileSync(resolve(SRC, 'audit/outbox.ts'), 'utf8')
-    expect(outbox, 'the derivation exists where it is supposed to').toMatch(/api_key:\$\{keyId\}/)
+    const sink = readFileSync(resolve(SRC, 'audit/sink.ts'), 'utf8')
+    expect(sink, 'the derivation exists where it is supposed to').toMatch(/api_key:\$\{keyId\}/)
   })
 
   it('the call sites still write member actors, and that is correct', () => {

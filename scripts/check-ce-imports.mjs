@@ -101,6 +101,12 @@ for (const dir of ['packages', 'apps']) {
   if (!existsSync(base)) continue
   for (const file of walk(base)) {
     if (proprietaryPaths.some((pp) => file.startsWith(pp + '/') || file.startsWith(pp + '\\'))) continue // EE package → exempt
+    // #688: an APP's __tests__ may exercise the EE COMPOSITION (the audit suites assert ledger rows,
+    // exactly as the 18 Cloud-plan suites register cloudEntitlements under invariant 2's app
+    // exemption). The mirror never ships them — the filter's derived exclusion drops every test-side
+    // file matching this same namespace regex — and LIBRARIES stay fully banned: a CE package's tests
+    // publishing with an EE import would break every consumer's install.
+    if (dir === 'apps' && /[\\/]__tests__[\\/]/.test(file)) continue
     if (eeImport.test(readFileSync(file, 'utf8'))) fail(`CE file imports the EE namespace: ${file.replace(root, '')}`)
   }
 }

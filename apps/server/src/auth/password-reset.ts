@@ -20,7 +20,7 @@ import type { TenantDb } from '../db/index.js'
 import { hashPassword } from './password-hash.js'
 import { validatePasswordPolicy } from './password-policy.js'
 import { localLoginEnabled } from './login-methods.js'
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 
 // Short: a reset link is a bearer credential for an account, and the person asked for it seconds ago.
 export const RESET_TTL_MS = 60 * 60 * 1000

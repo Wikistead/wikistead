@@ -1,7 +1,7 @@
 import type postgres from 'postgres'
 import { emit } from '@wikistead/events'
 import { linkEntry, verifyAuditChain, type AuditEntry, type AuditEntryCore } from './chain.js'
-import { appendTransparencyProjection, tenantOfTarget } from './transparency.js'
+import { projectTransparency } from './sink.js' // #688: the disclosure projection is EE; CE break-glass records the ledger row alone
 
 // Operator audit ledger (#179 / ADR-089) — the durable, append-only, hash-chained record of operator
 // out-of-band privileged actions (break-glass), SEPARATE from the tenant audit_log (#177). One GLOBAL
@@ -56,15 +56,16 @@ export async function appendOperatorEntry(tx: postgres.TransactionSql, action: O
   // and future break-glass caller disclosures automatically (no per-caller drift). Only tenant-targeted
   // entries project; cross-tenant/global actions disclose nothing to anyone. The projection stores the
   // operator's stable PSEUDONYM, never the identity (owner ruling).
-  const tenantId = tenantOfTarget(action.target)
-  if (tenantId) {
-    await appendTransparencyProjection(tx, {
-      tenantId, actor: action.actor, action: action.action, reason: action.reason, target: action.target, at: action.at,
-    })
+  // #688: whether a disclosure is OWED is the EE feature's question — the projector is registered by
+  // the EE composition root, rides this same admin tx (both-or-neither, unchanged), and answers with
+  // the tenant it disclosed to. A CE build has no transparency feature, so nothing projects and no
+  // vendor.access fires — the operator ledger row above is the whole record.
+  const disclosedTo = await projectTransparency(tx, action)
+  if (disclosedTo) {
     // Owner ruling: the vendor.access notification fires for NEW accesses only — this live append
-    // path emits; the backfill (transparency.ts) never does. emit() is post-insert fire-and-forget
-    // (webhook delivery is the standard event path; a delivery failure never blocks the ledger tx).
-    emit({ type: 'vendor.access', tenantId, action: action.action, at: action.at })
+    // path emits; the backfill never does. emit() is post-insert fire-and-forget (webhook delivery
+    // is the standard event path; a delivery failure never blocks the ledger tx).
+    emit({ type: 'vendor.access', tenantId: disclosedTo, action: action.action, at: action.at })
   }
   return linked
 }

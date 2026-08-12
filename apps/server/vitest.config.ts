@@ -33,9 +33,31 @@ function loadEnv() {
 loadEnv()
 
 export default defineConfig({
+  // #688: tests reach the EE package (the audit ledger) through an alias to its SOURCE rather than a
+  // package.json dependency — ee-server depends on this package, so a dependency back would cycle
+  // turbo's graph. Source, not dist: a stale dist here has bitten before, and vitest transforms the
+  // TS the same either way. tsconfig.typecheck.json mirrors the alias for tsc.
+  resolve: {
+    alias: {
+      '@wikistead-ee/server': resolve(import.meta.dirname, '../../packages/ee-server/src/index.ts'),
+      // ⚠️ The EE SOURCE above imports '@wikistead/server/ee-host', which node resolution would take
+      // to this package's DIST — a second module instance whose registrations (the audit sink, the
+      // transparency projector) the source-compiled routes never see. Measured: every route-level
+      // audit assertion read 0 rows while direct enqueues worked. One graph, one instance:
+      '@wikistead/server/ee-host': resolve(import.meta.dirname, 'src/ee-host.ts'),
+    },
+  },
   test: {
     // Integration tests share a single DB instance — run files sequentially
     // to prevent concurrent state interference (e.g., space count races).
     fileParallelism: false,
+    // #688: the suite tests the EE COMPOSITION's audit behaviour (ledger rows exist after audited
+    // operations), so the EE audit sink + viewer mount register once for every file — the same
+    // wiring main.ts does at the real composition root. See the setup file for why.
+    // ⚠️ Conditional on the file EXISTING: the public tree carries neither the EE package nor this
+    // setup (the filter's derived exclusion drops both), and a hard reference would kill the whole
+    // remaining suite there at startup.
+    setupFiles: existsSync(resolve(import.meta.dirname, 'src/__tests__/helpers/setup-ee-audit.ts'))
+      ? ['./src/__tests__/helpers/setup-ee-audit.ts'] : [],
   },
 })

@@ -17,7 +17,7 @@
     "build": "tsc -b",
     "dev": "tsc -b -w",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "lint": "echo 'noop'",
     "migrate": "tsx --env-file=../../.env src/migrate.ts",
     "fga:bootstrap": "tsx --env-file=../../.env ../../infra/openfga/bootstrap.ts",

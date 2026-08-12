@@ -1,10 +1,40 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
-    "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
-    "dev": { "cache": false, "persistent": true },
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
     "lint": {},
-    "typecheck": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["^build"] }
+    "typecheck": {
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "@wikistead/server#typecheck": {
+      "dependsOn": [
+        "build",
+        "@wikistead-ee/server#build"
+      ]
+    },
+    "@wikistead/server#test": {
+      "dependsOn": [
+        "build",
+        "@wikistead-ee/server#build"
+      ]
+    }
   }
 }

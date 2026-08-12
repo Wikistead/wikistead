@@ -3,7 +3,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { writeTuples, deleteTuples, readObjectTuples, requireTenantAdminOr404 } from '@wikistead/authz'
 import type { TenantDb } from '../db/index.js'
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 
 // Default claim TTL: an un-reassigned claim auto-expires back to orphan after this (ADR-061).
 // A conservative ops default (24h); tunable. Enforced by the reconciling sweep (no time-

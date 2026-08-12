@@ -39,6 +39,9 @@ import { resolve, dirname } from 'node:path'
 // So an imported helper is never concatenated. It is evaluated on its own, and it may only answer for a
 // route that has NO query of its own — see `routeBounded`.
 const ROUTES = resolve(import.meta.dirname, '../routes')
+// #688: the audit viewer's home since the ledger moved behind the seam (absent from the public tree).
+const EE_AUDIT_MOUNT_DIR = resolve(import.meta.dirname, '../../../../packages/ee-server/src/audit')
+const HAS_EE_AUDIT = existsSync(resolve(EE_AUDIT_MOUNT_DIR, 'mount.ts'))
 
 /**
  * Routes that return an unbounded list today, and why they are still allowed to.
@@ -119,10 +122,12 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // routes. Measured: every one of them answers a fixed shape. The reads are unbounded — a chain is
   // verified from its start — and that is the axis /billing/usage sits on, not the one this ticket is
   // about. The correction is the classification, and audit-shape-623 checks it instead of asserting it.
-  'audit.ts:/audit/verify': { kind: 'bounded', why: 'answers a VERDICT — {valid, count, brokenAt?, brokenSeq?, reason?} — never the entries it recomputed over. A hash chain has to be verified from its start, so the read is unbounded by construction and the response shape is fixed; that is the /billing/usage axis, not the one this ticket is about. Checked in audit-shape-623.' },
-  // `audit.ts:/admin/transparency` has NO LINE: the scan sees its bound now that the route takes a
+  ...(HAS_EE_AUDIT ? {
+  'mount.ts:/audit/verify': { kind: 'bounded' as const, why: 'answers a VERDICT — {valid, count, brokenAt?, brokenSeq?, reason?} — never the entries it recomputed over. A hash chain has to be verified from its start, so the read is unbounded by construction and the response shape is fixed; that is the /billing/usage axis, not the one this ticket is about. Checked in audit-shape-623.' },
+  // `mount.ts:/admin/transparency` has NO LINE: the scan sees its bound now that the route takes a
   // `before` marker, which is what a ledger line turning into a real bound looks like.
-  'audit.ts:/admin/transparency/verify': { kind: 'bounded', why: 'answers {total, ...verdict} — a count and a judgement, never the chain. Same axis as /audit/verify. Checked in audit-shape-623.' },
+  'mount.ts:/admin/transparency/verify': { kind: 'bounded' as const, why: 'answers {total, ...verdict} — a count and a judgement, never the chain. Same axis as /audit/verify. Checked in audit-shape-623.' },
+  } : {}),
 
   // admin rosters: each grows with how the tenant is configured rather than with how it is used, which
   // makes them slower to notice and no less unbounded.
@@ -260,8 +265,8 @@ function declBody(src: string, name: string): string {
   return stop ? rest.slice(0, stop.index + 1) : rest
 }
 
-function routesIn(file: string): { key: string; body: string; helpers: { name: string; bounded: boolean }[] }[] {
-  const abs = resolve(ROUTES, file)
+function routesIn(file: string, dir: string = ROUTES): { key: string; body: string; helpers: { name: string; bounded: boolean }[] }[] {
+  const abs = resolve(dir, file)
   const src = readFileSync(abs, 'utf8')
   const imports = importMap(abs, src)
   const out: { key: string; body: string; helpers: { name: string; bounded: boolean }[] }[] = []
@@ -345,9 +350,15 @@ function routeBounded(r: { body: string; helpers: { bounded: boolean }[] }): boo
 const LIST_SHAPED = /db\.sql<|sql<|\.sql`|listObjects|filterAuthorized|\btx\s*(?:<[^>]*>)?\s*`/
 
 function listShapedRoutes(): { key: string; body: string; helpers: { name: string; bounded: boolean }[] }[] {
-  return readdirSync(ROUTES)
+  const ceRoutes = readdirSync(ROUTES)
     .filter((f) => f.endsWith('.ts'))
     .flatMap((f) => routesIn(f))
+  // #688: the audit viewer moved into @wikistead-ee/server, and this discipline must not stop at the
+  // package boundary — the suite runs the EE composition, so its routes are this suite's routes. The
+  // mirror carries neither the EE package nor (via the derived exclusion) most EE-coupled suites;
+  // THIS file stays CE, so the extra scan is conditional and the audit entries in the ledger are too.
+  const eeRoutes = existsSync(EE_AUDIT_MOUNT_DIR) ? routesIn('mount.ts', EE_AUDIT_MOUNT_DIR) : []
+  return [...ceRoutes, ...eeRoutes]
     // …or reads its rows through a helper in another file, which is the whole point of this slice: a
     // route with two lines and an import was not list-shaped to this scan at all.
     .filter((r) => LIST_SHAPED.test(r.body) || r.helpers.length > 0)
@@ -414,12 +425,12 @@ describe('#623: no list route grows without saying so', () => {
     }
   })
 
-  it('a route whose rows come from an IMPORTED helper is measured, not skipped', () => {
+  it.skipIf(!HAS_EE_AUDIT)('a route whose rows come from an IMPORTED helper is measured, not skipped', () => {
     // The blind spot slice 12 recorded, asserted rather than described. `/audit/verify` is two lines and
-    // a call: `verifyTenantAuditChain` lives in `audit/outbox.ts` and reads the whole chain. Before this
+    // a call: `verifyTenantAuditChain` lives in the EE package's audit/outbox.ts and reads the whole chain (#688). Before this
     // change the route had no query the scan could see and could not fail this file at all.
     const byKey = new Map(listShapedRoutes().map((r) => [r.key, r]))
-    const r = byKey.get('audit.ts:/audit/verify')
+    const r = byKey.get('mount.ts:/audit/verify')
     expect(r, 'the scan does not reach a route that delegates across a file boundary').toBeDefined()
     expect(r!.helpers.map((h) => h.name), 'the imported helper is the one that reads the rows')
       .toContain('verifyTenantAuditChain')

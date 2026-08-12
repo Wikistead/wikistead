@@ -37,7 +37,7 @@ function abuseActor(req: { guest?: { shareLinkId: string; anonId?: string | null
 import { guestPublishRateAllowed, guestCreatePageRateAllowed } from '../abuse-rate.js' // #328 / #274: guest publish + create caps
 import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-sync.js'
 import { listAllGroupNames } from './spaces.js' // #623: the one bounded group-name query
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
 import { resolveTranscludeRef } from '../transclude-resolve.js'
 import { renderPlantumlResult } from '../plantuml-render.js'

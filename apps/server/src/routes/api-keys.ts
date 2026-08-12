@@ -5,7 +5,7 @@ import { emit } from '@wikistead/events'
 import { requireTenantAdmin, isTenantAdmin, isApiKeyIssuer, filterAuthorized } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { entitlementDenied } from '../entitlement-ux.js'
-import { auditIfEntitled } from '../audit/outbox.js' // #495: admin revoke writes an in-tx tamper-evident audit row
+import { auditIfEntitled } from '../audit/sink.js' // #495: admin revoke writes an in-tx tamper-evident audit row
 import { resolveAuthorIdentities } from '../author-identity.js' // #495 / #486: owner-name resolution on the admin list
 import { enqueueWebhookOutbox } from './webhooks.js' // #495 Q3: api_key.revoked reaches subscribed webhooks
 import type { TenantDb } from '../db/index.js'

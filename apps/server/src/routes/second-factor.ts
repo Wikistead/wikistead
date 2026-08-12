@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type IORedis from 'ioredis'
 import { emit } from '@wikistead/events'
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 import {
   startTotpEnrolment, totpSecretFor, confirmFactor, listFactors, markFactorUsed, deleteFactor,
   discardPendingFactors, startPasskeyEnrolment, type FactorKind,

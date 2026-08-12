@@ -9,7 +9,16 @@ afterEach(() => resetEeFeatures())
 
 describe('EE mount seam (registerEeFeatures / getEeFeatures)', () => {
   it('defaults to null — a CE build runs no EE features (open-core)', () => {
-    expect(getEeFeatures()).toBeNull()
+    // #688: the SUITE now runs as the EE composition (setup-ee-audit registers the audit mount for
+    // every file), so the ambient value is non-null here by design. The CE default is still the
+    // thing under test — observe it through reset, then restore the suite's registration.
+    const suiteMount = getEeFeatures()
+    resetEeFeatures()
+    try {
+      expect(getEeFeatures()).toBeNull()
+    } finally {
+      if (suiteMount) registerEeFeatures(suiteMount)
+    }
   })
 
   it('runs the registered mount with the host the CE core passes', async () => {

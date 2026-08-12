@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from './app.js'
 import { startOutboxWorker } from './search/index.js'
-import { startAuditDrainWorker } from './audit/outbox.js'
 import { startWebhookDrainWorker } from './routes/webhooks.js'
 import { startAnalyticsDrainWorker } from './analytics/outbox.js'
 import { startEmailDrainWorker } from './email/outbox.js'
@@ -38,9 +37,8 @@ export async function startServer(): Promise<FastifyInstance> {
   // driving the app via inject don't spawn a timer.
   startOutboxWorker(app.searchDriver, Number(process.env.SEARCH_OUTBOX_POLL_MS ?? 2000))
 
-  // Background audit drain (#177): appends enqueued audit intents to the hash-chained audit_log.
-  // Reliable + idempotent; started here (not buildApp) so inject-driven tests don't spawn a timer.
-  startAuditDrainWorker(Number(process.env.AUDIT_OUTBOX_POLL_MS ?? 3000))
+  // #688: the audit drain worker moved with the ledger into @wikistead-ee/server — auditEeMount
+  // starts it on the app lifecycle. A CE entry has no ledger to drain, so nothing starts here.
 
   // Background share-link revoke-failure sweep (#220): retries FGA-delete failures recorded during a
   // privatisation so a "private but link alive on FGA" leak window self-heals. Coarse interval (failures

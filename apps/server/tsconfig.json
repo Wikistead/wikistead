@@ -2,5 +2,6 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist", "rootDir": "src" },
   "references": [{ "path": "../../packages/types" }, { "path": "../../packages/auth" }, { "path": "../../packages/authz" }, { "path": "../../packages/entitlements" }, { "path": "../../packages/hooks" }, { "path": "../../packages/events" }],
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/__tests__"] // #688: tests typecheck via tsconfig.typecheck.json (they reach the EE package through a paths alias the BUILD must never see — a package edge would cycle turbo: server <-> ee-server)
 }

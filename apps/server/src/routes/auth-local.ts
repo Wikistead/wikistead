@@ -16,7 +16,7 @@
 import type { FastifyInstance } from 'fastify'
 import type IORedis from 'ioredis'
 import { emit } from '@wikistead/events'
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
 import { FACTOR_COOKIE, createFactorSession, readFactorSession, destroyFactorSession, factorCookieOptions } from '../auth/factor-session.js' // #652 / ADR-219 §6
 import {

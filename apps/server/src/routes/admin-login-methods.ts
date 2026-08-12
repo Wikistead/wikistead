@@ -8,7 +8,7 @@ import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import { loginMethodCeiling, setPlatformLoginDisabled } from '../auth/login-methods.js'
 import { federatedWayInCount, resolveSsoStance } from '../auth/sso-stance.js'
-import { auditIfEntitled } from '../audit/outbox.js'
+import { auditIfEntitled } from '../audit/sink.js'
 import { destroyUnsatisfiedSessions, countSweptSessions } from '../auth/session.js' // #652 / ADR-219 §2, #679
 import { loadPlatformOidc } from '../auth/oidc.js'
 import { resolveLogin } from './auth.js'
