@@ -62,7 +62,7 @@ import { invalidateTitleDictCache } from './title-dict-cache.js' // #534
 import { invalidateTreeConfirmCache } from './tree-confirm-cache.js' // #541
 import { assertLoginCeilingValid } from './auth/login-methods.js' // #537
 import { SESSION_COOKIE, readSession } from './auth/session.js'
-import { assertSecretKey } from './auth/secret-crypto.js'
+import { assertSecretKey, assertNoPublishedSecretsInProduction } from './auth/secret-crypto.js'
 import { spacesPlugin } from './routes/spaces.js'
 import { pagesPlugin } from './routes/pages.js'
 import { templatesPlugin } from './routes/templates.js'
@@ -151,6 +151,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Fail-closed at boot: refuse to start without a valid OIDC secret key (would
   // otherwise risk plaintext secret storage). See auth/secret-crypto.ts.
   assertSecretKey()
+
+  // #690: …and refuse to start PRODUCTION on a secret that is published in the public repository's
+  // fixtures — a committed key is public, and public keys do not guard anything.
+  assertNoPublishedSecretsInProduction()
 
   // trustProxy: behind the prod reverse proxy (ADR-039) the client IP arrives via
   // X-Forwarded-For; without this req.ip would be the proxy's address, defeating the

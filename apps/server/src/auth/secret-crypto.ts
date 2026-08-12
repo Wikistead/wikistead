@@ -29,6 +29,37 @@ export function assertSecretKey(): void {
   loadKey()
 }
 
+// #690: secrets whose values are PUBLISHED — committed in this repository's public fixtures
+// (.env.e2e, .env.server-test, .env.example) and, for the encryption key, a historical env backup.
+// A published key still decodes to 32 perfectly valid bytes, so the length assert above happily
+// boots production on it. The values are spelled here as literals on purpose: they are already
+// public by definition (that is the defect), and the literal is what a grep can find.
+//
+// A test derives this table from the fixture files themselves, so changing a fixture value without
+// adding the NEW published value here is red, not silent.
+export const PUBLISHED_FIXTURE_SECRETS: Readonly<Record<string, readonly string[]>> = {
+  OIDC_SECRET_ENC_KEY: ['7yMsXpBHk5/8edVzkeyWcjhYQTyj7EZDAd3Mz6KQHFo='],
+  GUEST_TOKEN_SECRET: ['e2e_guest_secret', 'server_test_guest_secret', 'dev_guest_secret_change_me'],
+  MEILI_MASTER_KEY: ['dev_master_key_change_me'],
+}
+
+// #690: refuse to BOOT production on a published secret (same safety-valve shape as the entitlements
+// and secret-key asserts above — a configuration error surfaces at deploy time, loudly, never as a
+// quietly guessable production key). Dev and the test stacks run on exactly these values by design,
+// so anything but NODE_ENV=production passes untouched.
+export function assertNoPublishedSecretsInProduction(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_ENV !== 'production') return
+  for (const [name, published] of Object.entries(PUBLISHED_FIXTURE_SECRETS)) {
+    const value = env[name]
+    if (value && published.includes(value)) {
+      throw new Error(
+        `${name} is set to a key that is published in the public repository's fixtures — ` +
+        'generate a fresh secret for production (refusing to start)',
+      )
+    }
+  }
+}
+
 // Returns base64(iv || ciphertext || tag).
 export function encryptSecret(plaintext: string): string {
   const key = loadKey()
