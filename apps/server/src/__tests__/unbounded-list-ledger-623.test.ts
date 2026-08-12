@@ -67,10 +67,13 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // does not make it longer. The scan cannot see either half — `withoutSubqueries` strips the
   // derived tables they live in — so the claim is stated here and CHECKED in activity-window-623.
   'account.ts:/me/activity': { kind: 'bounded', why: 'GROUP BY calendar day inside a twelve-month window: at most ~367 rows, and a busy day is one row. Pinned by activity-window-623, because the scan strips the derived tables the window and the grouping live in.' },
-  ...(HAS_EE_ANALYTICS ? {
-  'mount.ts:/admin/analytics': { kind: 'bounded' as const, why: 'rollupPageViews answers a COUNT of pages and a series of DAYS capped at 400; the page ids the route reads feed a parameter and never travel. The read is unbounded and the response shape is fixed — the same axis as /billing/usage. Checked in analytics-shape-623; the 400 itself is held by the still-bounded list below.' },
+  // #692 A: these two are CE rows and MUST NOT ride the EE conditional — they did, the block
+  // swallowed its neighbours, and the CE build's ledger lost two routes it serves (green on dev
+  // only because the condition was true there). When a conditional wraps rows, count what is inside.
   'notifications.ts:/notifications/unread-count': { kind: 'bounded', why: 'the count stops at UNREAD_BADGE_CAP + 1 — the number the bell already refuses to print past (it renders 99+). The LIMIT lives in a derived table, which withoutSubqueries strips before looking for a bound, so this line states what the scan cannot see rather than the scan being loosened to see it.' },
   'pins.ts:/pins': { kind: 'bounded', why: 'MAX_PINS_PER_TYPE refuses the pin past 200 per member per kind, so the list cannot grow (#623). A cap and not a page, for the /me/factors reason: reorder persists the whole ordered id list and the sidebar draws the set, so paging would let somebody hold more pins than they can see or reorder. Pinned by pins-capped-623.' },
+  ...(HAS_EE_ANALYTICS ? {
+  'mount.ts:/admin/analytics': { kind: 'bounded' as const, why: 'rollupPageViews answers a COUNT of pages and a series of DAYS capped at 400; the page ids the route reads feed a parameter and never travel. The read is unbounded and the response shape is fixed — the same axis as /billing/usage. Checked in analytics-shape-623; the 400 itself is held by the still-bounded list below.' },
   'mount.ts:/spaces/:spaceId/analytics': { kind: 'bounded' as const, why: 'the same helper over one space: a count and a capped series, never the roster. Checked in analytics-shape-623.' },
   } : {}),
 
