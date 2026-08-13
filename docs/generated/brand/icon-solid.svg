@@ -1,0 +1,5 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Wikistead">
+  <rect width="48" height="48" rx="11" fill="currentColor"/>
+  <path d="M11 22 L24 11 L37 22 L37 33 Q37 35 35 35 L28 35 L24 40 L24 35 L13 35 Q11 35 11 33 Z" fill="none" stroke="var(--logo-bg, #fff)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 25 L30 25 M18 30 L25 30" fill="none" stroke="var(--logo-bg, #fff)" stroke-width="3" stroke-linecap="round"/>
+</svg>

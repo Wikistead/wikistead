@@ -11,6 +11,60 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// #706: the BRAND KIT — the public subset of the product's design tokens, plus the mark and the
+// self-hosted faces, emitted as a generated artifact so the docs site (and later the LP) consume
+// the RELEASED product's look through the same pinned pull as the generated references. Never the
+// whole tokens.css (internal tokens stay internal), never a hand copy (a copy is a second truth).
+const BRAND_TOKENS = ['bg', 'fg', 'fg-dim', 'panel', 'panel-2', 'panel-3', 'border', 'accent', 'accent-fg'] as const
+
+function renderBrandCss(): string {
+  const src = readFileSync(join(root, 'apps/web/src/styles/tokens.css'), 'utf8')
+  const themes: Record<'light' | 'dark', Record<string, string>> = { light: {}, dark: {} }
+  let current: 'light' | 'dark' | null = null
+  for (const line of src.split('\n')) {
+    const scheme = line.match(/color-scheme:\s*(light|dark)/)
+    if (scheme) { current = scheme[1] as 'light' | 'dark'; continue }
+    const decl = line.match(/^\s*--([a-z0-9-]+):\s*([^;]+);/)
+    if (!decl || !current) continue
+    const [, name, value] = decl
+    if ((BRAND_TOKENS as readonly string[]).includes(name!) && !(name! in themes[current])) {
+      themes[current][name!] = value!.trim()
+    }
+  }
+  for (const t of ['light', 'dark'] as const) {
+    for (const name of BRAND_TOKENS) {
+      if (!(name in themes[t])) throw new Error(`brand kit: token --${name} not found for ${t} in tokens.css — the extraction or the token moved`)
+    }
+  }
+  const block = (vars: Record<string, string>) => BRAND_TOKENS.map((n) => `  --wks-${n}: ${vars[n]};`).join('\n')
+  return [
+    '/* AUTO-GENERATED — DO NOT EDIT BY HAND.',
+    ' * Source: apps/web/src/styles/tokens.css (the public brand subset, #706).',
+    ' * Regenerate: pnpm docs:gen · Verify (CI): pnpm docs:check',
+    ' * Consumed by the docs site (and the LP) through the pinned generated-docs pull. */',
+    ':root {',
+    block(themes.light),
+    '}',
+    ":root[data-theme='dark'] {",
+    block(themes.dark),
+    '}',
+    '',
+  ].join('\n')
+}
+
+// The mark and the faces travel with the tokens: byte copies, checked byte-for-byte in --check.
+// (The faces are OFL-1.1 — redistribution is the licence's point; the licence files ride along.)
+const BRAND_ASSETS: { from: string; to: string }[] = [
+  { from: 'apps/web/public/favicon.svg', to: 'docs/generated/brand/favicon.svg' },
+  { from: 'apps/web/public/icon-solid.svg', to: 'docs/generated/brand/icon-solid.svg' },
+  { from: 'apps/web/src/assets/fonts/udevgothic-Regular.woff2', to: 'docs/generated/brand/fonts/udevgothic-Regular.woff2' },
+  { from: 'apps/web/src/assets/fonts/udevgothic-Bold.woff2', to: 'docs/generated/brand/fonts/udevgothic-Bold.woff2' },
+  { from: 'apps/web/src/assets/fonts/wikistead-mono-Regular.woff2', to: 'docs/generated/brand/fonts/wikistead-mono-Regular.woff2' },
+  { from: 'apps/web/src/assets/fonts/wikistead-mono-Bold.woff2', to: 'docs/generated/brand/fonts/wikistead-mono-Bold.woff2' },
+  { from: 'apps/web/src/assets/fonts/LICENSE-UDEVGothic.txt', to: 'docs/generated/brand/fonts/LICENSE-UDEVGothic.txt' },
+  { from: 'apps/web/src/assets/fonts/LICENSE-SourceCodePro.txt', to: 'docs/generated/brand/fonts/LICENSE-SourceCodePro.txt' },
+]
 import { renderEntitlementsMarkdown } from '../packages/entitlements/src/index.js'
 import { renderEventsMarkdown } from '../packages/events/src/index.js'
 import { renderAccountSettingsMarkdown } from '../apps/server/src/settings-catalog.js'
@@ -35,6 +89,11 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     outPath: join(root, 'docs/generated/account-settings.md'),
     render: renderAccountSettingsMarkdown,
   },
+  {
+    name: 'brand kit (tokens)',
+    outPath: join(root, 'docs/generated/brand/tokens.css'),
+    render: renderBrandCss,
+  },
 ]
 
 const check = process.argv.includes('--check')
@@ -52,6 +111,23 @@ for (const s of SURFACES) {
     mkdirSync(dirname(s.outPath), { recursive: true })
     writeFileSync(s.outPath, next)
     console.log(`generated: ${s.name} → ${s.outPath.replace(root, '.')}`)
+  }
+}
+
+for (const asset of BRAND_ASSETS) {
+  const from = join(root, asset.from)
+  const to = join(root, asset.to)
+  const want = readFileSync(from)
+  if (check) {
+    const have = existsSync(to) ? readFileSync(to) : Buffer.alloc(0)
+    if (!want.equals(have)) {
+      stale = true
+      console.error(`STALE: brand asset — ${asset.to} differs from ${asset.from}. Run \`pnpm docs:gen\`.`)
+    }
+  } else {
+    mkdirSync(dirname(to), { recursive: true })
+    writeFileSync(to, want)
+    console.log(`generated: brand asset → ${asset.to}`)
   }
 }
 
