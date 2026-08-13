@@ -1,4 +1,4 @@
-import { resolveEntitlements } from '@wikistead/entitlements'
+import { samlEntitled } from './saml-entitlement.js'
 import type { TenantDb } from '../db/index.js'
 import { loadPlatformOidc, type TenantOidcConfig } from './oidc.js'
 
@@ -116,8 +116,9 @@ export async function resolveAvailableLogin(
   }
   // saml is decided BEFORE platform: the platform pref below conditions on "any own IdP effective",
   // and saml is an own IdP.
-  // #693 seam: the CE resolver composes WHICH doors are offered; the SAML door's bytes live in ee/
-  if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) {
+  // #693entitlement answered by the REGISTERED predicate (CE default false) — a CE build
+  // must not count a door with no bytes behind it, whatever data was imported.
+  if (ceiling.has('saml') && samlEntitled(tenant) && (await tenantSamlEnabled(db))) {
     methods.add('saml')
   }
   // #568 / ADR-198 §3 M8 + §9: local is an OWN way in (no external IdP involved) and carries no
@@ -196,8 +197,7 @@ export async function resolveLoginConnections(
     // its fixed brand; the API refuses labels on presets, this is the second seatbelt)
     for (const r of rows) out.push({ id: r.id, kind: 'oidc', label: r.preset ? null : r.label, brand: r.preset, trustGroups: r.trust_groups, subjectPrefix: r.subject_prefix })
   }
-  // #693 seam: the CE resolver composes WHICH doors are offered; the SAML door's bytes live in ee/
-  if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso) {
+  if (ceiling.has('saml') && samlEntitled(tenant)) {
     // one per tenant in v1 (ADR-197 §1 B5); SAML never bootstraps (§2 rev2: oidc-only in v1)
     const [row] = await db.sql<{ id: string; trust_groups: boolean }[]>`SELECT id, trust_groups FROM tenant_saml WHERE enabled LIMIT 1`.catch((err: unknown) => {
       if ((err as { code?: string }).code === '42P01') return [] as { id: string; trust_groups: boolean }[]
@@ -289,8 +289,7 @@ export async function otherLoginMethodsEffective(
   // no own IdP is effective (see resolveAvailableLogin), so a configured, in-ceiling platform IdP is
   // ALWAYS a way back in — either directly, or by lapse once the disable being guarded goes through.
   if (except !== 'platform-oidc' && ceiling.has('platform-oidc') && loadPlatformOidc()) return true
-  // #693 seam: the CE resolver composes WHICH doors are offered; the SAML door's bytes live in ee/
-  if (except !== 'saml' && ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso && (await tenantSamlEnabled(db))) return true
+  if (except !== 'saml' && ceiling.has('saml') && samlEntitled(tenant) && (await tenantSamlEnabled(db))) return true
   if (except !== 'tenant-oidc' && ceiling.has('tenant-oidc') && (await tenantOidcEnabled(db))) return true
   return false
 }

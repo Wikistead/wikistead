@@ -10,7 +10,7 @@
 // The stance never bites while no federated method is effective (§2 (d), the same lapse discipline as
 // the platform preference): stored intent is kept, nothing is rewritten, and restoring a connection
 // resumes enforcement with no extra write (§R5-4 — intended, not a bug; the enable side gets no guard).
-import { resolveEntitlements } from '@wikistead/entitlements'
+import { samlEntitled } from './saml-entitlement.js'
 import type { TenantDb } from '../db/index.js'
 import { loginMethodCeiling } from './login-methods.js'
 import { decryptSecret } from './secret-crypto.js'
@@ -56,8 +56,7 @@ export async function federatedWayInCount(
       }
     }
   }
-  // #693 seam: the CE stance resolver asks whether the SAML door counts as an own IdP; its bytes live in ee/
-  if (ceiling.has('saml') && resolveEntitlements(tenant.plan).samlSso) {
+  if (ceiling.has('saml') && samlEntitled(tenant)) {
     const [saml] = await db.sql<{ id: string }[]>`SELECT id FROM tenant_saml WHERE enabled LIMIT 1`.catch((err: unknown) => {
       if ((err as { code?: string }).code === '42P01') return [] as { id: string }[]
       throw err

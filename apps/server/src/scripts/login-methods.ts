@@ -20,7 +20,7 @@
 import os from 'node:os'
 import postgres from 'postgres'
 import { emit } from '@wikistead/events'
-import { resolveEntitlements } from '@wikistead/entitlements'
+import { samlEntitled } from '../auth/saml-entitlement.js'
 import { appendOperatorEntry } from '../audit/operator-ledger.js'
 import { loginMethodCeiling, type LoginMethod } from '../auth/login-methods.js'
 import { loadPlatformOidc } from '../auth/oidc.js'
@@ -56,8 +56,7 @@ export async function inspectLoginMethods(sql: postgres.Sql, args: { slug: strin
   const [saml] = await sql<{ enabled: boolean }[]>`SELECT enabled FROM tenant_saml WHERE tenant_id = ${tenant.id}`.catch(() => [] as { enabled: boolean }[])
   const [pref] = await sql<{ platform_login_disabled: boolean; local_login_enabled: boolean; sso_required: boolean }[]>`SELECT platform_login_disabled, local_login_enabled, sso_required FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`
   const platformCfg = !!loadPlatformOidc()
-  // #693 seam: the CLI mirrors the resolver's door composition; SAML bytes live in ee/
-  const entitledSaml = resolveEntitlements(tenant.plan).samlSso
+  const entitledSaml = samlEntitled(tenant)
 
   const pick = (m: {
     inCeiling: boolean
