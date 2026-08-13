@@ -4,7 +4,7 @@ import {
   mfaPolicyEntitled, adminWithFactorCount, secondFactorRequired, membersUnsatisfiedBy,
   secondFactorStance, stanceRefusal, floorFor, type FactorStance,
 } from '../auth/factor-policy.js' // #652 / ADR-219 §4, #676 / ADR-222
-import { resolveEntitlements } from '@wikistead/entitlements'
+import { samlEntitled } from '../auth/saml-entitlement.js'
 import { emit } from '@wikistead/events'
 import { loginMethodCeiling, setPlatformLoginDisabled } from '../auth/login-methods.js'
 import { federatedWayInCount, resolveSsoStance } from '../auth/sso-stance.js'
@@ -139,8 +139,8 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         },
         saml: {
           inCeiling: ceiling.has('saml'),
-          // #693 seam: the methods screen reports SAML's entitled flag; config + login bytes live in ee/
-          entitled: resolveEntitlements(req.tenant.plan).samlSso,
+          // #693 the registered predicate — a CE build reports "not available in this edition".
+          entitled: samlEntitled(req.tenant),
           configured: samlRow != null,
           selected: !!samlRow?.enabled,
           effective: available.methods.has('saml'),

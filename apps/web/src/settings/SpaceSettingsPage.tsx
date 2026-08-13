@@ -33,7 +33,6 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
     { key: "general", label: t("spaceSettings.general"), to: `/spaces/${spaceId}/settings/general` },
     { key: "members", label: t("spaceSettings.members"), to: `/spaces/${spaceId}/settings/members` },
     { key: "pages", label: t("spaceSettings.pages"), to: `/spaces/${spaceId}/settings/pages` },
-    // #693 seam: tab visibility only; the analytics bytes live behind ee/ routes
     { key: "analytics", label: t("spaceSettings.analytics"), to: `/spaces/${spaceId}/settings/analytics` },
     { key: "trash", label: t("spaceSettings.trash"), to: `/spaces/${spaceId}/settings/trash` },
     // #326: the patrol queue lives with the space it moderates (ruling ②), not in a cross-space page.

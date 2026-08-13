@@ -23,6 +23,7 @@ export { groupFgaId, syncMemberGroups } from './auth/group-sync.js'
 // is gone. The last-admin predicate is NOT — SCIM deactivation asks the same question the console does,
 // and it moved to its own module rather than dying with the file it happened to share (#573).
 export { isLastAdmin } from './auth/last-admin.js'
+export { registerSamlEntitlement } from './auth/saml-entitlement.js' // #693 the EE root registers the entitlement-reading predicate
 export { loginMethodCeiling, otherLoginMethodsEffective } from './auth/login-methods.js' // #537: SAML start/ACS honour the deployment ceiling; the SAML disable guard shares the lockout predicate
 export { billableMemberCount, lockSeats } from './auth/invites.js'
 // #688: the LEDGER moved into @wikistead-ee/server (write side, drain, viewer, transparency). What the

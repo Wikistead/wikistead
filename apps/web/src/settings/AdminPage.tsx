@@ -40,7 +40,6 @@ function useAdminTabs(): SettingsTab[] {
     { key: "api", label: t("adminNav.api"), to: "/admin/api" },
     { key: "webhooks", label: t("adminNav.webhooks"), to: "/admin/webhooks" },
     { key: "audit", label: t("adminNav.audit"), to: "/admin/audit" },
-    // #693 seam: nav visibility only; the analytics pipeline and dashboard data live behind ee/ routes
     { key: "analytics", label: t("adminNav.analytics"), to: "/admin/analytics" }, // #520 / ADR-189: tenant roll-up
     { key: "roles", label: t("adminNav.roles"), to: "/admin/roles" },
     { key: "embeds", label: t("adminNav.embeds"), to: "/admin/embeds" },
