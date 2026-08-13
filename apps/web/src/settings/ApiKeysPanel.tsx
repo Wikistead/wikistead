@@ -6,10 +6,10 @@ import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
 import { RESOURCE_TYPE_OPTIONS, derivedScope, newKeyDefaultExpiry, type Matrix } from "./api-key-permissions";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2, ChevronRight } from "lucide-react"; // #544: an icon component, never a text glyph
-import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpaces, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
+import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpaces, useSpaceNameSearch, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
-import { filterSpaceOptions, hiddenCount } from "./space-filter";
+import { filterSpaceOptions, hiddenCount, type SpaceOption } from "./space-filter";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: revoking a key is irreversible — confirm first
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
@@ -117,11 +117,21 @@ export function ApiKeysPanel({
   const spacesQ = useSpaces();
   const [spaceFilter, setSpaceFilter] = useState("");
   const [narrowing, setNarrowing] = useState(false);
-  const [pickedSpaces, setPickedSpaces] = useState<string[]>([]);
-  // Derived, not stored: a stale filtered copy is how a picker starts disagreeing with its source.
+  // #705 (review must-fix 6): picked spaces are kept as OPTIONS, not ids — the server-side filter
+  // below can answer a page that lacks a picked space, and its row must still say its own name.
+  const [pickedSpaces, setPickedSpaces] = useState<SpaceOption[]>([]);
+  const pickedIds = pickedSpaces.map((s) => s.id);
+  // #705 v1: typing asks the SERVER, so the filter matches every space the caller may see — the
+  // roster in `useSpaces` is only the no-filter browse list now. `hasMore` drives a "more matches"
+  // line; no number (the density-oracle ruling — the count of non-matching spaces is unknowable
+  // here and must not be faked).
+  const spaceSearch = useSpaceNameSearch(spaceFilter);
   const allSpaces = spacesQ.data ?? [];
-  const shownSpaces = filterSpaceOptions(allSpaces, spaceFilter, pickedSpaces);
-  const hidden = hiddenCount(allSpaces, shownSpaces);
+  const filtering = spaceFilter.trim().length > 0;
+  const sourceSpaces = filtering ? (spaceSearch.data?.spaces ?? []) : allSpaces;
+  const shownSpaces = filterSpaceOptions(sourceSpaces, spaceFilter, pickedSpaces);
+  const hidden = filtering ? 0 : hiddenCount(allSpaces, shownSpaces);
+  const moreMatches = filtering && (spaceSearch.data?.hasMore ?? false);
   // #667 / ADR-221 §1: the resource-type matrix replaces the six borrowed role verbs AND the scope
   // Select. The reader picks once; `scope` falls out of what they picked (§5), and the METHOD CEILING
   // stays a separate mechanism in the server so an all-read key cannot write even when the route map is
@@ -183,7 +193,7 @@ export function ApiKeysPanel({
     if (narrowing && (pickedSpaces.length > 0 || matrixPicked)) {
       narrowedCreate.mutate({
         ...base,
-        ...(pickedSpaces.length > 0 ? { spaces: pickedSpaces } : {}),
+        ...(pickedIds.length > 0 ? { spaces: pickedIds } : {}),
         // #667: the matrix, never the old verbs. The server refuses a key carrying both
         // (`mixed_permission_model`) — a row read by one rule with the other half sitting there looking
         // like it meant something is a ledger that lies.
@@ -246,8 +256,10 @@ export function ApiKeysPanel({
                 <ListBox className="flex flex-col gap-1" data-testid="api-key-space-list">
                   {shownSpaces.map((sp) => (
                     <label key={sp.id} className="flex items-center gap-2 text-sm" data-testid="api-key-space-option">
-                      <input type="checkbox" checked={pickedSpaces.includes(sp.id)}
-                        onChange={() => toggle(pickedSpaces, setPickedSpaces, sp.id)}
+                      <input type="checkbox" checked={pickedIds.includes(sp.id)}
+                        onChange={() => setPickedSpaces((prev) => prev.some((p) => p.id === sp.id)
+                          ? prev.filter((p) => p.id !== sp.id)
+                          : [...prev, { id: sp.id, name: sp.name, iconImageUrl: sp.iconImageUrl }])}
                         data-testid={`api-key-space-${sp.id}`} />
                       {/* #661the same component the switcher and the sidebar draw a space with,
                           at the size the switcher's list uses. Drawing it here by hand would be a second
@@ -264,6 +276,11 @@ export function ApiKeysPanel({
                 {hidden > 0 && (
                   <span className="text-xs text-fg-dim" data-testid="api-key-space-hidden">
                     {t("adminApi.spaceFilterHidden", { count: hidden })}
+                  </span>
+                )}
+                {moreMatches && (
+                  <span className="text-xs text-fg-dim" data-testid="api-key-space-more">
+                    {t("adminApi.spaceFilterMore")}
                   </span>
                 )}
               </div>

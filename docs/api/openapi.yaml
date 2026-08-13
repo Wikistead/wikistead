@@ -464,7 +464,18 @@ paths:
     get:
       operationId: listSpaces
       tags: [spaces]
-      summary: List spaces the caller can view (with their capability)
+      summary: List spaces the caller can view (with their capability) — paged, filterable by name
+      description: >-
+        #623/#705. A keyset page ({ spaces, nextCursor }); walk nextCursor for the roster, including
+        over empty pages (authorization filters after the SQL). `q` filters by name SERVER-side, so a
+        picker's filter matches every space the caller may see; a cursor is bound to the q that minted
+        it — a mismatched cursor restarts from the top and the response says so (`restarted`). No total
+        is reported, deliberately: a count over the filtered walk would leak unauthorized density (the
+        search route's precedent).
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string }, description: "Case-insensitive name substring filter." }
+        - { name: cursor, in: query, required: false, schema: { type: string }, description: "The keyset cursor from the previous page (bound to its q)." }
+        - { name: limit, in: query, required: false, schema: { type: integer }, description: "Rows per page (clamped)." }
       responses: { "200": { description: Spaces, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Space" } } } } }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     post:
       operationId: createSpace

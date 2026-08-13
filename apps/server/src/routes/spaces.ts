@@ -157,7 +157,7 @@ export async function getSpaceInfo(
 /** #623 slice 12b: how many spaces one response may carry. */
 export const SPACES_PAGE_LIMIT = 100
 
-export interface SpacesPage { spaces: Space[]; nextCursor: string | null }
+export interface SpacesPage { spaces: Space[]; nextCursor: string | null; restarted?: boolean }
 
 /**
  * Every space the caller may see, by walking the pages.
@@ -181,7 +181,7 @@ export async function listAllSpaces(db: TenantDb, fga: OpenFgaClient, userId: st
 
 export async function listSpaces(
   db: TenantDb, fga: OpenFgaClient, userId: string,
-  opts: { limit?: number; cursor?: string } = {},
+  opts: { limit?: number; cursor?: string; q?: string } = {},
 ): Promise<SpacesPage> {
   // accent_key (space branding, Phase 5c) joined in so the client can apply the
   // space ▷ tenant ▷ default accent cascade without a per-space fetch.
@@ -197,8 +197,22 @@ export async function listSpaces(
   // imported in one transaction stamps many spaces in the same instant — and without a tiebreaker two
   // of them straddle a page boundary for ever, one repeated and one never seen.
   const limit = Math.min(200, Math.max(1, opts.limit ?? SPACES_PAGE_LIMIT))
-  const at = opts.cursor?.indexOf('|') ?? -1
-  const after = opts.cursor && at > 0 ? { at: opts.cursor.slice(0, at), id: opts.cursor.slice(at + 1) } : null
+  // #705: the name filter. ILIKE substring, the members.ts:213 shape — wildcard characters in the
+  // input behave as members' do (kept identical rather than escaped, so the two filters cannot
+  // drift apart in feel). The filter narrows the SQL BEFORE the authorization pass below, so it can
+  // only ever shrink what the caller would have seen — never widen it.
+  const q = opts.q?.trim() || null
+  // #705 (review must-fix 5): the cursor is BOUND to the q that minted it. A cursor from another
+  // filter names a position in a different walk; honouring it would silently return a partial
+  // list. Mismatch restarts from the top and says so (`restarted`, the branch route's word).
+  let restarted = false
+  let after: { at: string; id: string } | null = null
+  if (opts.cursor) {
+    const [at, id, qtag] = opts.cursor.split('|')
+    const expected = q ? encodeURIComponent(q) : undefined
+    if (at && id && qtag === expected) after = { at, id }
+    else restarted = true
+  }
   const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon_image_key: string | null; home_page_id: string | null; delete_mode: string | null; tenant_delete_mode: string | null; cursor_at: string })[]>`
     SELECT s.id, s.tenant_id, s.name, s.created_at, s.home_page_id, ss.accent_key, ss.icon_image_key,
            -- The cursor's timestamp travels as an EPOCH, not as a formatted date, and this is not
@@ -211,6 +225,7 @@ export async function listSpaces(
            s.delete_mode, (SELECT delete_mode FROM tenant_settings LIMIT 1) AS tenant_delete_mode
     FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
     WHERE TRUE
+      ${q ? db.sql`AND s.name ILIKE ${'%' + q + '%'}` : db.sql``}
       ${after ? db.sql`AND (s.created_at, s.id) > (to_timestamp(${after.at}::numeric), ${after.id})` : db.sql``}
     ORDER BY s.created_at, s.id
     LIMIT ${limit + 1}
@@ -224,7 +239,7 @@ export async function listSpaces(
   // and every space after it unreachable — the stage-1/stage-2 gap that search already has to live with.
   // A caller must therefore keep walking while `nextCursor` is non-null, even on an empty page.
   const lastRow = page[page.length - 1]
-  const nextCursor = hasMore && lastRow ? `${lastRow.cursor_at}|${lastRow.id}` : null
+  const nextCursor = hasMore && lastRow ? `${lastRow.cursor_at}|${lastRow.id}${q ? `|${encodeURIComponent(q)}` : ''}` : null
   // Per space, derive the caller's capability (view|edit|manage) so the sidebar can
   // show/hide management actions (the UI signal; the server stays the fortress).
   // Spaces are few, so a few checks each is cheap. Non-viewable spaces are dropped.
@@ -272,7 +287,7 @@ export async function listSpaces(
     homePageId: homeVisible.get(r.id) ? r.home_page_id : null,
     deleteMode: (r.delete_mode ?? r.tenant_delete_mode ?? 'trash_only') as 'trash_only' | 'both' | 'direct_only',
   }))
-  return { spaces, nextCursor }
+  return restarted ? { spaces, nextCursor, restarted: true } : { spaces, nextCursor }
 }
 
 // Set/clear a space's branding accent (Phase 5c). manage-gated AND entitlement-
@@ -1627,11 +1642,12 @@ export async function spacesPlugin(app: FastifyInstance) {
   // `/webhooks` already return. A caller that wants the whole roster walks the cursor; a caller that
   // wants the first screenful stops after one request. What no caller can do any more is receive every
   // space a tenant has in one payload, which is what this route did.
-  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/spaces', async (req) => {
+  app.get<{ Querystring: { limit?: string; cursor?: string; q?: string } }>('/spaces', async (req) => {
     const raw = Number.parseInt(req.query?.limit ?? '', 10)
     return listSpaces(req.db, app.fga, req.user.sub, {
       limit: Number.isFinite(raw) ? raw : undefined,
       cursor: req.query?.cursor,
+      q: req.query?.q,
     })
   })
 

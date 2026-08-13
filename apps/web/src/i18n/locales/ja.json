@@ -444,7 +444,8 @@
       "webhooks": "Webhook",
       "analytics": "アナリティクス",
       "audit": "監査ログ"
-    }
+    },
+    "spaceFilterMore": "この一覧の先にも一致があります。さらに入力して絞り込んでください。"
   },
   "adminAuth": {
     "title": "認証",
@@ -834,7 +835,8 @@
     "home": "ホーム",
     "deleteForever": "完全に削除",
     "deleteForeverTitle": "完全に削除",
-    "deleteForeverConfirm": "「{{name}}」とその下位ページを完全に削除しますか？この操作は取り消せません（ゴミ箱からの復元はできません）。"
+    "deleteForeverConfirm": "「{{name}}」とその下位ページを完全に削除しますか？この操作は取り消せません（ゴミ箱からの復元はできません）。",
+    "moreSpaceMatches": "さらに一致があります。入力で絞り込めます"
   },
   "dialogs": {
     "renamePageTitle": "ページ名を変更",

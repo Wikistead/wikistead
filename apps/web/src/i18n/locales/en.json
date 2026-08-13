@@ -445,7 +445,8 @@
       "webhooks": "Webhooks",
       "analytics": "Analytics",
       "audit": "Audit log"
-    }
+    },
+    "spaceFilterMore": "More matches beyond this list. Keep typing to narrow."
   },
   "adminAuth": {
     "title": "Authentication",
@@ -836,7 +837,8 @@
     "home": "Home",
     "deleteForever": "Delete permanently",
     "deleteForeverTitle": "Delete permanently",
-    "deleteForeverConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone; there is no trash to restore from."
+    "deleteForeverConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone; there is no trash to restore from.",
+    "moreSpaceMatches": "More matches. Keep typing to narrow"
   },
   "dialogs": {
     "renamePageTitle": "Rename page",

@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, ChevronsUpDown, FolderDown, FolderUp, Loader2, 
 import { Command, CommandInput, CommandList, CommandItem, CommandGroup, CommandSeparator } from "../components/ui/command";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { cn } from "../lib/utils";
-import type { Space } from "../data/queries";
+import { useSpaceNameSearch, type Space } from "../data/queries";
 import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } from "./space-recent";
 
 // #263: the space switcher. #226 auto-creates a personal space per member, so a flat list of every
@@ -69,11 +69,19 @@ export function SpaceSwitcher({
 
   // #287: a query always searches ALL spaces (bounded/expanded is only for the no-query browse). With no
   // query, "expanded" shows every space name-sorted; otherwise the bounded default (current + recents).
+  // #705 v1: a typed query asks the SERVER, so it matches every space the caller may see — not just
+  // the roster pages in hand. The answer flows through visibleSpaces for the same ordering rules;
+  // hasMore drives a non-numeric "more matches" line (no total — the review's density-oracle ruling).
+  const search = useSpaceNameSearch(query);
+  const searching = query.trim().length > 0;
   const list = useMemo(
-    () => (!query.trim() && expanded ? allSpacesSorted(spaces) : visibleSpaces(spaces, currentId, query, pinnedSpaceIds)),
-    [spaces, currentId, query, expanded, pinnedSpaceIds],
+    () => (!searching && expanded
+      ? allSpacesSorted(spaces)
+      : visibleSpaces(searching ? (search.data?.spaces ?? []) : spaces, currentId, query, pinnedSpaceIds)),
+    [spaces, currentId, query, expanded, pinnedSpaceIds, searching, search.data],
   );
-  const hidden = hiddenSpaceCount(spaces.length, list.length, query);
+  const hidden = searching ? 0 : hiddenSpaceCount(spaces.length, list.length, query);
+  const moreMatches = searching && (search.data?.hasMore ?? false);
 
   const select = (id: string) => { onSelect(id); recordRecentSpace(id); setOpen(false); setQuery(""); };
 
@@ -147,6 +155,11 @@ export function SpaceSwitcher({
                   <CommandItem value="__show-all" onSelect={() => setExpanded(true)} data-testid="space-show-all" className="text-muted-foreground">
                     {t("sidebar.showAllSpaces", { count: hidden })}
                   </CommandItem>
+                )}
+                {moreMatches && (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground" data-testid="space-more-matches">
+                    {t("sidebar.moreSpaceMatches")}
+                  </div>
                 )}
               </CommandGroup>
               <CommandSeparator />
