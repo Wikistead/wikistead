@@ -8,7 +8,7 @@ import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
 // @ts-expect-error — .mjs script module, no types (pure JS CI helper)
-import { evaluateDocLinks, matchesAny, globToRegExp, DOC_CODE_MAP } from '../../../../scripts/doc-code-map.mjs'
+import { evaluateDocLinks, evaluateSurfaceDocs, matchesAny, globToRegExp, DOC_CODE_MAP } from '../../../../scripts/doc-code-map.mjs'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
 
@@ -87,5 +87,39 @@ describe('doc↔code linkage evaluator (#139 / ADR-080)', () => {
     for (const e of DOC_CODE_MAP) {
       if (e.kind === 'generated') expect(files.has(e.doc), `${e.doc} missing`).toBe(true)
     }
+  })
+})
+
+// #697 / ADR-225 §4.2 — the surface-ledger evaluator, break-checked with synthetic registries so
+// each refusal direction is measured (a green suite must not rest on the ledger happening to match).
+describe('surface-docs evaluator (#697 / ADR-225 §4.2)', () => {
+  const LEDGER = { widget: { a: 'wikistead-docs/a.md', b: 'none: internal' } }
+
+  it('a registered surface with no row is a violation (the new-feature case)', () => {
+    const v = evaluateSurfaceDocs({ widget: ['a', 'b', 'c'] }, LEDGER)
+    expect(v).toHaveLength(1)
+    expect(v[0]).toMatchObject({ registry: 'widget', id: 'c' })
+  })
+
+  it('a row whose surface is gone is a violation (stale coverage claim)', () => {
+    const v = evaluateSurfaceDocs({ widget: ['a'] }, LEDGER)
+    expect(v).toHaveLength(1)
+    expect(v[0]).toMatchObject({ registry: 'widget', id: 'b' })
+  })
+
+  it('an empty walk is a violation, not universal coverage (vacuity guard)', () => {
+    const v = evaluateSurfaceDocs({ widget: [] }, LEDGER)
+    expect(v).toHaveLength(1)
+    expect(v[0]!.why).toContain('vacuity')
+  })
+
+  it('a registry the ledger does not know is a violation', () => {
+    const v = evaluateSurfaceDocs({ gizmo: ['x'] }, LEDGER)
+    expect(v).toHaveLength(1)
+    expect(v[0]).toMatchObject({ registry: 'gizmo' })
+  })
+
+  it('a matching walk answers no violations (and none: rows count as covered)', () => {
+    expect(evaluateSurfaceDocs({ widget: ['a', 'b'] }, LEDGER)).toEqual([])
   })
 })

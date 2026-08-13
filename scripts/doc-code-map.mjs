@@ -93,6 +93,120 @@ export function matchesAny(file, globs) {
   return globs.some((g) => globToRegExp(g).test(file))
 }
 
+// ── #697 / ADR-225 §4.2: the SURFACE LEDGER ─────────────────────────────────────────────────────
+//
+// The map above binds code REGIONS; it cannot see a surface born outside every region, and a new
+// registry item inside a region only trips the check when its docs page exists to move. This ledger
+// closes that from the other side: every surface the product actually REGISTERS — walked from the
+// registries themselves by the discovery tests (`doc-coverage-697` in the server and web suites),
+// never enumerated here — must have a row naming its docs page, or an explicit `none:<reason>`.
+// A registered surface with no row is red ON THE DAY IT IS REGISTERED; a row whose surface is gone
+// is red too (a stale ledger is how coverage claims rot — both directions, like #692's pins).
+//
+// Server HTTP routes are deliberately NOT a registry here: the api-inventory (#407) pin already
+// walks the served route table and fails on any route neither documented in docs/api/openapi.yaml
+// nor explicitly excluded — a second ledger over the same surface would be two competing exclusion
+// lists (the dont-pin-another-ticket's-surface lesson). Settings / levers / events are item-level
+// mechanical already (gen-docs walks their catalogs); their duty here is the meta-entry below.
+//
+// Docs pages are docs-repo-relative (`wikistead-docs/…`), the paths #703's scaffold creates. Their
+// EXISTENCE is checked by the docs repo's own CI once it exists; this side pins the BINDING.
+export const SURFACE_DOCS = {
+  // Admin console tabs — keys of ADMIN_SURFACES (apps/server/src/routes/admin-surfaces.ts).
+  'admin-surface': {
+    members: 'wikistead-docs/src/content/docs/admin/members.md',
+    spaces: 'wikistead-docs/src/content/docs/admin/spaces.md',
+    branding: 'wikistead-docs/src/content/docs/admin/branding.md',
+    auth: 'wikistead-docs/src/content/docs/admin/sign-in-methods.md',
+    api: 'wikistead-docs/src/content/docs/admin/api-keys.md',
+    webhooks: 'wikistead-docs/src/content/docs/admin/webhooks.md',
+    audit: 'wikistead-docs/src/content/docs/admin/audit-log.md', // EE-badged page
+    analytics: 'wikistead-docs/src/content/docs/admin/analytics.md', // EE-badged page
+    roles: 'wikistead-docs/src/content/docs/admin/roles.md',
+    embeds: 'wikistead-docs/src/content/docs/admin/embeds.md',
+    public: 'wikistead-docs/src/content/docs/publishing/public-spaces.md',
+    moderation: 'wikistead-docs/src/content/docs/admin/moderation.md',
+    billing: 'wikistead-docs/src/content/docs/admin/billing.md',
+    orphans: 'wikistead-docs/src/content/docs/admin/orphaned-drafts.md',
+  },
+  // Editor macros — registered fence languages and directive names (the registry walk imports
+  // apps/web/src/editor/macros and asks registeredFenceLangs / registeredDirectiveNames).
+  macro: {
+    'fence:mermaid': 'wikistead-docs/src/content/docs/editor/diagrams.md',
+    'fence:plantuml': 'wikistead-docs/src/content/docs/editor/diagrams.md',
+    'fence:excalidraw': 'wikistead-docs/src/content/docs/editor/drawings.md',
+    'directive:note': 'wikistead-docs/src/content/docs/editor/callouts.md',
+    'directive:info': 'wikistead-docs/src/content/docs/editor/callouts.md',
+    'directive:tip': 'wikistead-docs/src/content/docs/editor/callouts.md',
+    'directive:warning': 'wikistead-docs/src/content/docs/editor/callouts.md',
+    'directive:danger': 'wikistead-docs/src/content/docs/editor/callouts.md',
+    'directive:table': 'wikistead-docs/src/content/docs/editor/tables.md',
+    'directive:columns': 'wikistead-docs/src/content/docs/editor/layout-macros.md',
+    'directive:tabs': 'wikistead-docs/src/content/docs/editor/layout-macros.md',
+    'directive:details': 'wikistead-docs/src/content/docs/editor/layout-macros.md',
+    'directive:embed-page': 'wikistead-docs/src/content/docs/editor/embeds.md',
+    'directive:embed-external': 'wikistead-docs/src/content/docs/editor/embeds.md',
+    'directive:tagged': 'wikistead-docs/src/content/docs/editor/tags.md',
+    'directive:children': 'wikistead-docs/src/content/docs/editor/page-lists.md',
+    'directive:todo': 'wikistead-docs/src/content/docs/editor/tasks.md',
+  },
+  // The web app's screens — the <Route path> table in apps/web/src/app/routes.tsx (that one file
+  // IS the router registry; there is no composition to miss). `none:` rows are redirects and the
+  // catch-all — not screens a reader can be on.
+  'web-route': {
+    '/p/:pageId': 'wikistead-docs/src/content/docs/guides/pages.md',
+    '/spaces/:spaceId': 'wikistead-docs/src/content/docs/guides/spaces.md',
+    '/pub/space/:spaceId': 'wikistead-docs/src/content/docs/publishing/public-spaces.md',
+    '/pub/:pageId': 'wikistead-docs/src/content/docs/publishing/public-spaces.md',
+    '/share/:linkId': 'wikistead-docs/src/content/docs/guides/share-links.md',
+    '/invite': 'wikistead-docs/src/content/docs/admin/members.md',
+    '/reset-password': 'wikistead-docs/src/content/docs/guides/sign-in.md',
+    '/templates': 'wikistead-docs/src/content/docs/guides/templates.md',
+    '/changes': 'wikistead-docs/src/content/docs/guides/recent-changes.md',
+    '/watches': 'wikistead-docs/src/content/docs/guides/notifications.md',
+    '/admin/*': 'wikistead-docs/src/content/docs/admin/index.md', // per-tab pages ride the admin-surface registry above
+    '/settings/account/*': 'wikistead-docs/src/content/docs/settings/account.md',
+    '/spaces/:spaceId/settings/*': 'wikistead-docs/src/content/docs/guides/space-settings.md',
+    '/settings/members': 'none: redirect to /admin/members, not a screen',
+    '/join': 'wikistead-docs/src/content/docs/guides/sign-in.md',
+    '/join/workspace': 'wikistead-docs/src/content/docs/guides/sign-in.md',
+    '/login': 'wikistead-docs/src/content/docs/guides/sign-in.md',
+    '/login/recovery': 'wikistead-docs/src/content/docs/guides/sign-in.md',
+    '*': 'none: catch-all redirect to the demo page, not a screen',
+  },
+}
+
+/**
+ * Evaluate the surface ledger against what the registries actually contain.
+ * `discovered` is `{ [registry]: string[] }` — produced by the discovery tests, never by hand.
+ * Violations, both directions:
+ *   - a discovered surface with no ledger row (the "new feature, no docs" case);
+ *   - a ledger row whose surface no longer exists (stale coverage claim);
+ *   - an empty walk for a claimed registry (vacuity — a broken walk must not read as covered);
+ *   - a registry the ledger does not know at all.
+ */
+export function evaluateSurfaceDocs(discovered, ledger = SURFACE_DOCS) {
+  const violations = []
+  for (const [registry, ids] of Object.entries(discovered)) {
+    const rows = ledger[registry]
+    if (!rows) {
+      violations.push({ registry, id: null, why: 'registry has no ledger section at all' })
+      continue
+    }
+    if (ids.length === 0) {
+      violations.push({ registry, id: null, why: 'the registry walk came back empty — the walk broke (vacuity), this is not "all covered"' })
+      continue
+    }
+    for (const id of ids) {
+      if (!(id in rows)) violations.push({ registry, id, why: 'registered surface has no docs binding — add a row (a page, or none:<reason>)' })
+    }
+    for (const id of Object.keys(rows)) {
+      if (!ids.includes(id)) violations.push({ registry, id, why: 'ledger row names a surface the registry no longer has — stale, remove or rename it' })
+    }
+  }
+  return violations
+}
+
 // Evaluate the linkage against a set of changed files. Returns one violation per map
 // entry whose code region changed but whose docs page did NOT — i.e. code and docs were
 // decoupled in this change.
