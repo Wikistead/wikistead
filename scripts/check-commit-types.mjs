@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs'
 // #138 prep / the project design notes (" / / "): commit subjects are Conventional Commits,
 // and the TYPE comes from the list the project design notes fixes.
 //
@@ -20,7 +21,15 @@ import { execFileSync } from 'node:child_process'
 // the project design notes: `type(scope): subject`, type ∈ feat | fix | chore | docs | refactor | test | build | perf.
 // Written out rather than "any lowercase word" — a fixed vocabulary is the point, since the release
 // tooling maps each type to a version bump and an unknown one maps to nothing.
-const TYPES = ['feat', 'fix', 'chore', 'docs', 'refactor', 'test', 'build', 'perf']
+// #138(adjacent finding): the vocabulary is READ from release.config.mjs rather than
+// duplicated — the two lists could drift and nobody would notice; now a type added to either
+// place without the other fails loudly (an unreadable config is a hard error, not a fallback).
+const releaseConfig = readFileSync(new URL('../release.config.mjs', import.meta.url), 'utf8')
+const TYPES = [...releaseConfig.matchAll(/\{ type: '([a-z]+)', release: /g)].map((m) => m[1])
+if (TYPES.length === 0) {
+  console.error('check-commit-types: no types readable from release.config.mjs — the vocabulary source moved; fix the extraction, do not fall back.')
+  process.exit(1)
+}
 const SUBJECT = new RegExp(`^(${TYPES.join('|')})(\\([^)]+\\))?!?: .+`)
 
 /** Commits on HEAD that are not on `base` — this branch's own work, not the history behind it. */
