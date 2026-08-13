@@ -12,6 +12,14 @@
 import { describe, it, expect, afterAll, afterEach } from 'vitest'
 import postgres from 'postgres'
 import { inspectLoginMethods, recoverLoginMethods, renderPicture } from '../scripts/login-methods.js'
+import { registerSamlEntitlement, resetSamlEntitlement } from '../auth/saml-entitlement.js'
+import { resolveEntitlements } from '@wikistead/entitlements'
+
+// The saml rows in the picture assume an EE composition: samlEntitled is a registered predicate,
+// CE default false (#693), under which every saml blocker would read 'entitlement'. This
+// file ships in the CE build, where no setup registers the EE predicate — register it per file
+// so the blocker chain reaches 'config' (module state is per-vitest-file).
+registerSamlEntitlement((t) => resolveEntitlements(t.plan).samlSso)
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const created: string[] = []
@@ -32,6 +40,7 @@ afterEach(() => {
   delete process.env.PLATFORM_OIDC_ISSUER
 })
 afterAll(async () => {
+  resetSamlEntitlement()
   for (const id of created) {
     await admin`DELETE FROM tenant_login_prefs WHERE tenant_id = ${id}`.catch(() => {})
     await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${id}`.catch(() => {})
