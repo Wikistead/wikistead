@@ -44,6 +44,7 @@ jobs:
       - run: pnpm lint:doc-links -- --strict  # ADR-225 §4.1: enforceable doc↔code violations fail CI (generated always; authored when the docs checkout above is armed)
       - run: pnpm lint:deploy-secrets  # #147/ADR-042 no NEW plaintext credential in deploy/ (the known two are owed, not allowed)
       - run: pnpm lint:commit-types    # #138 prep: the release tooling reads these subjects, so the type list is fixed now
+      - run: node scripts/check-release-derivation.mjs  # #138 the version DERIVATION is measured (breaking→major on all three types, 0.x and 1.x)
   test:
     # #293 / #268: the unit + integration test suite. The server suite runs against the ISOLATED
     # server-test middleware (docker-compose.server-test.yml) brought up, migrated, and seeded by
