@@ -1,0 +1,73 @@
+# #697 / ADR-225 §3(c): every release opens a SOURCE_TAG bump PR on the docs repository, so docs
+# lag is a visible open PR and never a silent drift. MERGING that PR is the human act — the same
+# shape as the prod pin (#148) and for the same reason.
+#
+# Dry-run until armed (#414's pattern, ruled "from day one" in #697): while DOCS_REPO is
+# CHANGE_ME the run still derives the bump and prints the exact PR it would open (title, branch,
+# file content) to the step summary with a warning annotation — neither silent failure nor silent
+# success. Arming is the one-line DOCS_REPO swap plus the DOCS_REPO_TOKEN secret (a cross-repo PR
+# cannot ride the ephemeral GITHUB_TOKEN, which is scoped to THIS repository).
+name: docs-pin
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  DOCS_REPO: CHANGE_ME # flip to e.g. Wikistead/wikistead-docs to arm (dry-run until then)
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - id: guard
+        run: |
+          if [ "$DOCS_REPO" = "CHANGE_ME" ]; then
+            echo "::warning title=docs-pin is in DRY-RUN::DOCS_REPO is CHANGE_ME — the SOURCE_TAG bump PR is rehearsed below, not opened. Set the real docs repo (and the DOCS_REPO_TOKEN secret) to arm."
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "${{ secrets.DOCS_REPO_TOKEN }}" ]; then
+            echo "::error title=docs-pin cannot open the PR::DOCS_REPO is set but the DOCS_REPO_TOKEN secret is missing — half-armed is a misconfiguration, not a mode."
+            exit 1
+          else
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+      - name: Open the SOURCE_TAG bump PR on the docs repo
+        if: steps.guard.outputs.armed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_REPO_TOKEN }}
+          TAG: ${{ steps.guard.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh repo clone "$DOCS_REPO" docs -- --depth 1
+          cd docs
+          BRANCH="source-tag/${TAG}"
+          git switch -c "$BRANCH"
+          echo "$TAG" > SOURCE_TAG
+          git add SOURCE_TAG
+          git -c user.name=wikistead-release -c user.email=release@wikistead.invalid \
+            commit -m "chore: pin docs source to ${TAG}"
+          git push origin "$BRANCH"
+          gh pr create --repo "$DOCS_REPO" --head "$BRANCH" \
+            --title "Pin docs source to ${TAG}" \
+            --body "Automated by the source repository's release (docs-pin.yml). Merging republishes the generated references at ${TAG} — the human gate for docs, like the prod pin (#148) is for deploys."
+      - name: 'DRY-RUN: the PR this release would open'
+        if: steps.guard.outputs.armed != 'true'
+        env:
+          TAG: ${{ steps.guard.outputs.tag }}
+        run: |
+          {
+            echo "## docs-pin DRY-RUN (DOCS_REPO is CHANGE_ME)"
+            echo ""
+            echo "Would open on the docs repo:"
+            echo "- branch: \`source-tag/${TAG}\`"
+            echo "- file \`SOURCE_TAG\`:"
+            echo '```'
+            echo "${TAG}"
+            echo '```'
+            echo "- PR title: Pin docs source to ${TAG}"
+            echo ""
+            echo "Arm by setting DOCS_REPO to the real repository and adding the DOCS_REPO_TOKEN secret."
+          } >> "$GITHUB_STEP_SUMMARY"
