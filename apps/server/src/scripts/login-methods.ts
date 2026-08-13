@@ -264,14 +264,17 @@ export function renderPicture(p: LoginMethodsPicture): string {
   return lines.join('\n')
 }
 
-// CLI entry: run only when invoked directly (not when imported by a test).
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const slug = process.argv[2]
+// The CLI body, exported so the EE composition can run the SAME command with its own composition
+// (#693the entitlement predicate is registered per composition root, and a CE-composed
+// process answering "saml: blocked by entitlement" is the truth for CE — the EE wrapper in
+// packages/ee-server/src/scripts registers the predicate first and gets the entitled picture).
+export async function cliMain(argv: string[] = process.argv): Promise<void> {
+  const slug = argv[2]
   if (!slug || slug.startsWith('--')) {
     console.error('usage: pnpm tenant:login-methods <tenantSlug> [--enable=<m>] [--disable=<m>] [--connection=<id>:on|off] [--platform-login=on|off] [--sso-required=on|off] [--by=<operator>]')
     process.exit(2)
   }
-  const opt = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
+  const opt = (name: string) => argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
   const asMethod = (v: string | undefined): LoginMethod | undefined => {
     if (v === undefined) return undefined
     // #568 §3 M8: break-glass learns `local` — a tenant whose only way in is password sign-in must
@@ -315,4 +318,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } finally {
     await adminPool.end()
   }
+}
+
+// CLI entry: run only when invoked directly (exact-URL match, so a wrapper of the same basename
+// importing this module does not double-run it).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void cliMain()
 }

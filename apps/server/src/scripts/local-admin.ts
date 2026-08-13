@@ -138,7 +138,8 @@ export function renderLocalAdmin(r: LocalAdminResult): string[] {
   return out
 }
 
-async function main(): Promise<void> {
+// Exported for the EE composition's wrapper (#693) — same command, EE-composed process.
+export async function cliMain(): Promise<void> {
   const argv = process.argv.slice(2)
   const flag = (name: string): string | undefined =>
     argv.find((a) => a.startsWith(`--${name}=`))?.split('=').slice(1).join('=')
@@ -166,4 +167,6 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1]?.endsWith('local-admin.ts')) void main()
+// Exact-URL match (not endsWith): the EE wrapper shares this basename and imports this module —
+// a suffix guard would run the CE composition once on import and the wrapper's call second (#693).
+if (import.meta.url === `file://${process.argv[1]}`) void cliMain()

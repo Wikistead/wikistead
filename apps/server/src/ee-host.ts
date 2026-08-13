@@ -24,6 +24,10 @@ export { groupFgaId, syncMemberGroups } from './auth/group-sync.js'
 // and it moved to its own module rather than dying with the file it happened to share (#573).
 export { isLastAdmin } from './auth/last-admin.js'
 export { registerSamlEntitlement } from './auth/saml-entitlement.js' // #693the EE root registers the entitlement-reading predicate
+// #693the break-glass CLIs run per COMPOSITION — the EE wrappers register the predicate and
+// call the same mains, so an entitled tenant's picture is honest in both editions.
+export { cliMain as loginMethodsCliMain } from './scripts/login-methods.js'
+export { cliMain as localAdminCliMain } from './scripts/local-admin.js'
 export { loginMethodCeiling, otherLoginMethodsEffective } from './auth/login-methods.js' // #537: SAML start/ACS honour the deployment ceiling; the SAML disable guard shares the lockout predicate
 export { billableMemberCount, lockSeats } from './auth/invites.js'
 // #688: the LEDGER moved into @wikistead-ee/server (write side, drain, viewer, transparency). What the
