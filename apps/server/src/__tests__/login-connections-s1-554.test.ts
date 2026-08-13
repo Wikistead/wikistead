@@ -17,6 +17,8 @@ import { fgaClient } from '@wikistead/authz'
 import { updateTenantOidc, type DiscoveryFetch } from '../routes/tenant-oidc.js'
 import { resolveLoginConnections } from '../auth/login-methods.js'
 import { provisionTenant } from '../auth/provisioning.js'
+import { registerSamlEntitlement, resetSamlEntitlement } from '../auth/saml-entitlement.js'
+import { resolveEntitlements } from '@wikistead/entitlements'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -33,6 +35,11 @@ let db: TenantDb
 let adminSub = ''
 
 beforeAll(async () => {
+  // The SAML rows here are an EE-composed premise: samlEntitled is a registered predicate, CE
+  // default false (#693). This file ships in the CE build, where no setup registers the EE
+  // predicate — register the composition per file (the seam test pins the CE default). The
+  // entitlements-resolver override below still bites: this predicate reads through it.
+  registerSamlEntitlement((t) => resolveEntitlements(t.plan).samlSso)
   adminSub = `lc554-admin-${STAMP}`
   const t = await provisionTenant(fgaClient, { slug: `lc554-${STAMP}`, admin: { sub: adminSub } })
   tenantId = t.tenantId
@@ -40,6 +47,7 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(async () => {
+  resetSamlEntitlement()
   await db.release()
   await admin`DELETE FROM tenants WHERE id = ${tenantId}`.catch(() => {})
   await admin.end()

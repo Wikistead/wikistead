@@ -16,6 +16,8 @@ import { buildApp } from '../app.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import type { Tenant } from '@wikistead/types'
+import { registerSamlEntitlement, resetSamlEntitlement } from '../auth/saml-entitlement.js'
+import { resolveEntitlements } from '@wikistead/entitlements'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const HOST = 'dev.localhost'
@@ -26,6 +28,11 @@ let memberSid: string
 const ADMIN_H = { host: HOST, authorization: 'Bearer dev-token' }
 
 beforeAll(async () => {
+  // Pin 3 exercises SAML as the effective own IdP, which is an EE-composed premise: samlEntitled
+  // is a registered predicate, CE default false (#693). This file SHIPS IN THE CE BUILD,
+  // where no setup registers the EE predicate — so the composition is registered here, per file
+  // (module state is per-vitest-file; the seam test ce-saml-entitlement-693 states the CE default).
+  registerSamlEntitlement((t) => resolveEntitlements(t.plan).samlSso)
   app = await buildApp()
   await app.ready()
   tenant = (await new TenantRegistry(pool).findBySlug('dev'))! as Tenant
@@ -46,6 +53,7 @@ afterEach(async () => {
   delete process.env.LOGIN_METHODS
 })
 afterAll(async () => {
+  resetSamlEntitlement()
   await deleteTuples(fgaClient, [{ user: 'user:lm537-member', relation: 'member', object: `tenant:${tenant.id}` }]).catch(() => {})
   await app.close()
   await admin.end()
