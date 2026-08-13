@@ -23,15 +23,19 @@ import { storePasskey } from '../auth/passkeys.js'
 import { generateTotpSecret, totpCode } from '../auth/totp.js'
 import { hashPassword } from '../auth/password-hash.js'
 import type { Tenant } from '@wikistead/types'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
-const T = 'tenant_dev'
+// #700: this file flips the tenant-wide stance and wipes dev-user's factor rows per test — both
+// writes reached every parallel neighbour on tenant_dev. A private tenant owns them.
+let T: string
+let HOST: string
+let pt: PrivateTenant
 const STAMP = Date.now().toString(36)
-const HOST = 'dev.localhost'
 const PASSWORD = 'a password for the 677 doors'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
-const H = { host: HOST, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
-const AUTH = { host: HOST, authorization: 'Bearer dev-token', 'content-type': 'application/json' }
+let H: { host: string; 'content-type': string; 'sec-fetch-site': string }
+let AUTH: { host: string; authorization: string; 'content-type': string }
 
 let app: FastifyInstance
 let db: TenantDb
@@ -72,6 +76,11 @@ const cookieOf = (res: Awaited<ReturnType<typeof signIn>>) =>
   res.cookies.find((c) => c.name === FACTOR_COOKIE)?.value
 
 beforeAll(async () => {
+  pt = await privateTenant(admin, 't677d')
+  T = pt.id
+  HOST = `${pt.slug}.localhost`
+  H = { host: HOST, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
+  AUTH = pt.H
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(T))
   const [pref] = await admin<{ local_login_enabled: boolean }[]>`
@@ -96,6 +105,7 @@ afterAll(async () => {
     await admin`DELETE FROM local_credentials WHERE tenant_id = ${T} AND member_sub IN (${mine})`.catch(() => {})
     await admin`DELETE FROM members WHERE tenant_id = ${T} AND email = ${email}`.catch(() => {})
   }
+  await pt.dispose()
   await db.release(); await app.close(); await admin.end(); await pool.end()
 }, 180_000)
 

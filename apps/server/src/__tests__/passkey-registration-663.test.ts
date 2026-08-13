@@ -18,19 +18,30 @@ import { buildApp } from '../app.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { rpIdFromHost, originFromHost, takeChallenge, passkeysStrandedBy, storePasskey } from '../auth/passkeys.js'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 import { startPasskeyEnrolment, startTotpEnrolment, confirmFactor, listFactors } from '../auth/second-factors.js'
 import { generateTotpSecret } from '../auth/totp.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
-const TENANT = 'tenant_dev'
+// #700: this file wipes dev-user's factor rows and the one challenge slot per test — private
+// tenant, so the wipes and the limiter stay its own. The RP ID follows the request host, so the
+// request-coupled assertions use HOST; the pure rpIdFromHost cases keep literal inputs.
+let TENANT: string
+let HOST: string
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
-const AUTH = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
-const H = { ...AUTH, 'content-type': 'application/json' }
+let AUTH: { host: string; authorization: string }
+let H: { host: string; authorization: string; 'content-type': string }
 
+let pt: PrivateTenant
 let app: FastifyInstance
 let db: TenantDb
 
 beforeAll(async () => {
+  pt = await privateTenant(adminPool, 't663')
+  TENANT = pt.id
+  HOST = `${pt.slug}.localhost`
+  AUTH = pt.AUTH
+  H = pt.H
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
 }, 180_000)
@@ -45,6 +56,7 @@ beforeEach(async () => {
 })
 
 afterAll(async () => {
+  await pt.dispose()
   await adminPool`DELETE FROM member_factors WHERE tenant_id = ${TENANT} AND member_sub = 'dev-user'`.catch(() => {})
   await db.release(); await app.close(); await adminPool.end(); await pool.end()
 }, 120_000)
@@ -69,7 +81,7 @@ describe('#663: the Relying Party is where the request arrived', () => {
     const res = await app.inject({ method: 'POST', url: '/me/factors/passkey', headers: H, payload: '{}' })
     expect(res.statusCode, res.body).toBe(201)
     const { options } = res.json() as { options: { rp: { id: string }; challenge: string } }
-    expect(options.rp.id, 'the RP is the host this request came to').toBe('dev.localhost')
+    expect(options.rp.id, 'the RP is the host this request came to').toBe(HOST)
   }, 120_000)
 })
 
@@ -139,7 +151,7 @@ describe('#663: passkeys and TOTP share one list', () => {
     const pk = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user', label: 'yubikey' })
     await storePasskey(db, {
       tenantId: TENANT, factorId: pk.factorId,
-      passkey: { credentialId: 'cred-663', publicKey: 'pk', signCount: 0, transports: ['usb'], rpId: 'dev.localhost' },
+      passkey: { credentialId: 'cred-663', publicKey: 'pk', signCount: 0, transports: ['usb'], rpId: HOST },
     })
     await confirmFactor(db, pk.factorId)
 
@@ -152,7 +164,7 @@ describe('#663: passkeys and TOTP share one list', () => {
     // Two rows answering one assertion, the second with a counter that starts behind the first's.
     const a = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
     const b = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
-    const passkey = { credentialId: 'dup-663', publicKey: 'pk', signCount: 0, transports: [], rpId: 'dev.localhost' }
+    const passkey = { credentialId: 'dup-663', publicKey: 'pk', signCount: 0, transports: [], rpId: HOST }
     await storePasskey(db, { tenantId: TENANT, factorId: a.factorId, passkey })
     await expect(storePasskey(db, { tenantId: TENANT, factorId: b.factorId, passkey })).rejects.toThrow()
   }, 120_000)
@@ -163,7 +175,7 @@ describe('#663: passkeys and TOTP share one list', () => {
     const pk = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
     await storePasskey(db, {
       tenantId: TENANT, factorId: pk.factorId,
-      passkey: { credentialId: 'held-663', publicKey: 'pk', signCount: 0, transports: ['usb'], rpId: 'dev.localhost' },
+      passkey: { credentialId: 'held-663', publicKey: 'pk', signCount: 0, transports: ['usb'], rpId: HOST },
     })
     await confirmFactor(db, pk.factorId)
 
@@ -178,19 +190,19 @@ describe('#663: what a domain move would strand (#664 needs a number)', () => {
     const pk = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
     await storePasskey(db, {
       tenantId: TENANT, factorId: pk.factorId,
-      passkey: { credentialId: 'move-663', publicKey: 'pk', signCount: 0, transports: [], rpId: 'dev.localhost' },
+      passkey: { credentialId: 'move-663', publicKey: 'pk', signCount: 0, transports: [], rpId: HOST },
     })
     await confirmFactor(db, pk.factorId)
 
     expect(await passkeysStrandedBy(db, 'wiki.acme.com'), 'moving elsewhere strands them').toBe(1)
-    expect(await passkeysStrandedBy(db, 'dev.localhost'), 'staying put strands nobody').toBe(0)
+    expect(await passkeysStrandedBy(db, HOST), 'staying put strands nobody').toBe(0)
   }, 120_000)
 
   it('an unconfirmed passkey is nobody\'s loss', async () => {
     const pk = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
     await storePasskey(db, {
       tenantId: TENANT, factorId: pk.factorId,
-      passkey: { credentialId: 'pending-663', publicKey: 'pk', signCount: 0, transports: [], rpId: 'dev.localhost' },
+      passkey: { credentialId: 'pending-663', publicKey: 'pk', signCount: 0, transports: [], rpId: HOST },
     })
     expect(await passkeysStrandedBy(db, 'wiki.acme.com'), 'it was never usable').toBe(0)
   }, 120_000)

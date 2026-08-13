@@ -15,14 +15,19 @@ import { totpCode, generateTotpSecret } from '../auth/totp.js'
 import { startTotpEnrolment, confirmFactor } from '../auth/second-factors.js'
 import { adminWithFactorCount, wouldStrandTenant, secondFactorRequired } from '../auth/factor-policy.js'
 import { createSession, readSession } from '../auth/session.js' // #652 / ADR-219 §2: the sweep
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
-const TENANT = 'tenant_dev'
+// #700: the STANCE this file flips is tenant-wide, and the beforeEach wipes dev-user's factors —
+// on tenant_dev both writes reached every parallel neighbour (the 409 last_admin_factor #692
+// measured came from exactly this file's flips). A private tenant owns the policy and the slots.
+let TENANT: string
+let pt: PrivateTenant
 const STAMP = Date.now().toString(36)
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
-const HOST = 'dev.localhost' // the same host the injected requests carry, so the floor asks the same question
-const AUTH = { host: HOST, authorization: 'Bearer dev-token' }
-const H = { ...AUTH, 'content-type': 'application/json' }
+let HOST: string
+let AUTH: { host: string; authorization: string }
+let H: { host: string; authorization: string; 'content-type': string }
 
 let app: FastifyInstance
 let db: TenantDb
@@ -48,6 +53,11 @@ async function memberWithFactor(name: string, role: 'admin' | 'member'): Promise
 }
 
 beforeAll(async () => {
+  pt = await privateTenant(adminPool, 't652')
+  TENANT = pt.id
+  HOST = `${pt.slug}.localhost`
+  AUTH = pt.AUTH
+  H = pt.H
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
 }, 180_000)
@@ -67,6 +77,7 @@ afterAll(async () => {
     await adminPool`DELETE FROM member_factors WHERE member_sub = ${sub}`.catch(() => {})
     await adminPool`DELETE FROM members WHERE sub = ${sub}`.catch(() => {})
   }
+  await pt.dispose()
   await db.release(); await app.close(); await adminPool.end(); await pool.end()
 }, 120_000)
 
