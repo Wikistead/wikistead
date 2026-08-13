@@ -38,6 +38,14 @@ export const DOC_CODE_MAP = [
     code: ['apps/server/src/settings-catalog.ts'],
     doc: 'docs/generated/account-settings.md',
   },
+  {
+    // #706: the docs/LP brand kit derives from the product tokens — a token change must ship the
+    // regenerated kit in the same change (the asset copies are byte-checked by docs:check besides).
+    label: 'brand kit',
+    kind: 'generated',
+    code: ['apps/web/src/styles/tokens.css'],
+    doc: 'docs/generated/brand/tokens.css',
+  },
   // Authored pages live in the wikistead-docs repo (paths are docs-repo-relative). Seeded
   // for the designated regions; the check binds them in the combined CI checkout.
   {
