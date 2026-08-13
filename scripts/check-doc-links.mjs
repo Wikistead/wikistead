@@ -8,11 +8,12 @@
 //
 // #697 / ADR-225 §4.1 — what --strict can honestly enforce differs by entry kind:
 //   'generated' pages live in THIS repo, so their violation is always enforceable → fail.
-//   'authored' pages live in the docs repo; in a checkout that does not carry it, the doc
-//   side of the binding cannot be satisfied AT ALL, and failing would make every routes/
-//   macros/settings change red with no green path. So authored violations fail only when a
-//   docs checkout is present (combined CI checkout `wikistead-docs/`, or the local overlay
-//   `docs-site/`), and stay loud warnings otherwise. This asymmetry is stated in ADR-225.
+//   'authored' pages live in the docs repo; the binding is only satisfiable where the doc
+//   side appears in the SAME diff — the combined CI checkout (`wikistead-docs/`). The local
+//   `docs-site/` overlay is its own git repository, invisible to this repo's diff, so its
+//   presence must NOT arm enforcement (measured on #693: the first arming made every mapped
+//   change red with no green path in a bootstrapped dev checkout). Elsewhere authored
+//   violations stay loud warnings. This asymmetry is stated in ADR-225.
 //
 // Changed files come from `git diff --name-only <base>...HEAD`. The base is
 // DOC_LINK_BASE (env) or `origin/main`, falling back to HEAD~1 for a local run.
@@ -21,7 +22,7 @@ import { existsSync } from 'node:fs'
 import { evaluateDocLinks } from './doc-code-map.mjs'
 
 const strict = process.argv.includes('--strict')
-const docsCheckoutPresent = existsSync('wikistead-docs') || existsSync('docs-site')
+const docsCheckoutPresent = existsSync('wikistead-docs')
 
 function changedFiles() {
   const base = process.env.DOC_LINK_BASE || 'origin/main'
