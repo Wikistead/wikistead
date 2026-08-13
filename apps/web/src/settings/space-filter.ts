@@ -27,12 +27,17 @@ export interface SpaceOption {
 export function filterSpaceOptions(
   spaces: readonly SpaceOption[],
   query: string,
-  picked: readonly string[],
+  picked: readonly SpaceOption[],
 ): SpaceOption[] {
+  // #705 (review must-fix 6): picked entries are OPTIONS, not ids — with a server-side filter the
+  // current response may not contain a picked space at all, and a row that cannot say its own name
+  // breaks the very invariant this file exists for. Picked rows the list lacks are prepended.
+  const chosen = new Set(picked.map((s) => s.id));
   const q = query.trim().toLowerCase();
-  if (!q) return [...spaces];
-  const chosen = new Set(picked);
-  return spaces.filter((s) => chosen.has(s.id) || s.name.toLowerCase().includes(q));
+  const base = q ? spaces.filter((s) => chosen.has(s.id) || s.name.toLowerCase().includes(q)) : [...spaces];
+  const present = new Set(base.map((s) => s.id));
+  const missingPicked = picked.filter((s) => !present.has(s.id));
+  return [...missingPicked, ...base];
 }
 
 /**

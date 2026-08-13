@@ -106,6 +106,29 @@ export function useSpaces(enabled = true) {
   });
 }
 
+// #705 v1: the picker/switcher FILTER asks the server, so it matches every space the caller may
+// see — not just the pages the roster walk happens to hold. First page only; `hasMore` (a non-null
+// nextCursor) drives a "more matches" line, never a number (the review's density-oracle ruling
+// no total). The roster walk above stays for id-resolution surfaces (v2 splits it).
+export function useSpaceNameSearch(q: string) {
+  const { token } = useSession();
+  const trimmed = q.trim();
+  return useQuery({
+    queryKey: ["spaces-search", trimmed],
+    queryFn: async ({ signal }) => {
+      const page = await apiFetch<{ spaces: Space[]; nextCursor: string | null }>(
+        `/spaces?q=${encodeURIComponent(trimmed)}`, token, { signal },
+      );
+      return {
+        spaces: (page?.spaces ?? []).map((s) => ({ ...s, iconImageUrl: s.iconImageUrl ? assetUrl(s.iconImageUrl) : null })),
+        hasMore: (page?.nextCursor ?? null) != null,
+      };
+    },
+    enabled: trimmed.length > 0,
+    placeholderData: (prev) => prev, // keep the last answer while the next keystroke's flight lands
+  });
+}
+
 export function usePages(spaceId: string, enabled = true) {
   const { token } = useSession();
   return useQuery({

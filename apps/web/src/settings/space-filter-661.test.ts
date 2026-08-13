@@ -22,7 +22,7 @@ describe("#661: the filter narrows what is shown, never what is chosen", () => {
     // The failure this exists for: filter to "mark", and Engineering — already ticked — disappears while
     // remaining in the payload. The reader then issues a credential that reaches a space they cannot see
     // on the screen that is asking them to choose. A screenshot of that looks entirely correct.
-    const shown = filterSpaceOptions(SPACES, "mark", ["eng"]);
+    const shown = filterSpaceOptions(SPACES, "mark", [{ id: "eng", name: "Engineering" }]);
     expect(shown.map((s) => s.id), "the ticked space was filtered out of its own form").toContain("eng");
     expect(shown.map((s) => s.id)).toContain("mkt");
     expect(shown.map((s) => s.id), "…without dragging in everything else").not.toContain("ops");
@@ -65,9 +65,23 @@ describe("#661: the filter narrows what is shown, never what is chosen", () => {
     // screen, not here. What IS here: filtering is O(n) over whatever arrived, and picks survive it, so
     // the two mechanisms compose rather than fighting.
     const many: SpaceOption[] = Array.from({ length: 400 }, (_, i) => ({ id: `s${i}`, name: `Space ${i}` }));
-    const picked = ["s399"];
+    const picked = [{ id: "s399", name: "Space 399" }];
     const shown = filterSpaceOptions(many, "Space 1", picked);
     expect(shown.map((s) => s.id), "the pick survived a 400-space list").toContain("s399");
     expect(shown.length, "…and the filter still did its job").toBeLessThan(many.length);
+  });
+});
+
+describe("#705: picked options survive a server-filtered page that lacks them", () => {
+  it("a picked space missing from the list is PREPENDED with its own name", () => {
+    const serverPage: SpaceOption[] = [{ id: "mkt", name: "Marketing" }];
+    const shown = filterSpaceOptions(serverPage, "mark", [{ id: "eng", name: "Engineering" }]);
+    expect(shown.map((s) => s.id)).toEqual(["eng", "mkt"]);
+    expect(shown[0]!.name, "the missing pick kept its own name — the pick carries the OPTION (must-fix 6)").toBe("Engineering");
+  });
+
+  it("a picked space already present is not duplicated", () => {
+    const shown = filterSpaceOptions(SPACES, "", [{ id: "eng", name: "Engineering" }]);
+    expect(shown.filter((s) => s.id === "eng")).toHaveLength(1);
   });
 });
