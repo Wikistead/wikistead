@@ -14,14 +14,19 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { storePasskey } from '../auth/passkeys.js'
 import { startPasskeyEnrolment, confirmFactor } from '../auth/second-factors.js'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
-const TENANT = 'tenant_dev'
+// #700: the beforeEach wipes dev-user's factor rows and the passkeys registered here live on the
+// request host — a private tenant keeps both slots (and the custom-domain fixture) this file's own.
+let TENANT: string
+let HOST: string
+let pt: PrivateTenant
 const STAMP = Date.now().toString(36)
 const DOMAIN = `wiki-664-${STAMP}.example`
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
-const AUTH = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
-const H = { ...AUTH, 'content-type': 'application/json' }
+let AUTH: { host: string; authorization: string }
+let H: { host: string; authorization: string; 'content-type': string }
 
 let app: FastifyInstance
 let db: TenantDb
@@ -30,6 +35,11 @@ const verify = (body?: unknown) =>
   app.inject({ method: 'POST', url: `/admin/custom-domains/${DOMAIN}/verify`, headers: H, payload: JSON.stringify(body ?? {}) })
 
 beforeAll(async () => {
+  pt = await privateTenant(adminPool, 't664')
+  TENANT = pt.id
+  HOST = `${pt.slug}.localhost`
+  AUTH = pt.AUTH
+  H = pt.H
   app = await buildApp(); await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
 }, 180_000)
@@ -45,11 +55,12 @@ beforeEach(async () => {
 afterAll(async () => {
   await adminPool`DELETE FROM member_factors WHERE tenant_id = ${TENANT} AND member_sub = 'dev-user'`.catch(() => {})
   await adminPool`DELETE FROM custom_domains WHERE domain = ${DOMAIN}`.catch(() => {})
+  await pt.dispose()
   await db.release(); await app.close(); await adminPool.end(); await pool.end()
 }, 120_000)
 
 /** A confirmed passkey made under the CURRENT host, i.e. one this move would strand. */
-async function givePasskey(credentialId: string, rpId = 'dev.localhost'): Promise<void> {
+async function givePasskey(credentialId: string, rpId = HOST): Promise<void> {
   const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
   await storePasskey(db, {
     tenantId: TENANT, factorId,
@@ -100,7 +111,8 @@ describe('#664: a move that would strand passkeys is refused until it is acknowl
     const { factorId } = await startPasskeyEnrolment(db, { tenantId: TENANT, memberSub: 'dev-user' })
     await storePasskey(db, {
       tenantId: TENANT, factorId,
-      passkey: { credentialId: `pending-${STAMP}`, publicKey: 'pk', signCount: 0, transports: [], rpId: 'dev.localhost' },
+      // rpId = the request host, so PENDING-ness is the only axis this case varies (#700).
+      passkey: { credentialId: `pending-${STAMP}`, publicKey: 'pk', signCount: 0, transports: [], rpId: HOST },
     })
     expect(passedTheGate((await verify()).statusCode), 'it was never usable').toBe(true)
   }, 120_000)

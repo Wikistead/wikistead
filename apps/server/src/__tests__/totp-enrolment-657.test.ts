@@ -12,12 +12,17 @@ import { buildApp } from '../app.js'
 import { totpCode, totpCounter, TOTP_STEP_SECONDS } from '../auth/totp.js'
 import { FACTOR_VERIFY_MAX, MAX_FACTORS_PER_MEMBER } from '../routes/second-factor.js'
 import { drainAuditFor } from './helpers/audit-drain.js'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
-const TENANT = 'tenant_dev'
+// #700: this file trips the per-member limiter, fills the factor cap, wipes dev-user's factor rows
+// in beforeEach, and counts tenant-wide audit deltas — every one of those slots was shared with the
+// rest of the suite through (tenant_dev, dev-user). A private tenant makes them all this file's own.
+let TENANT: string
+let pt: PrivateTenant
 const STAMP = Date.now().toString(36)
-const AUTH = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
-const H = { ...AUTH, 'content-type': 'application/json' }
+let AUTH: { host: string; authorization: string }
+let H: { host: string; authorization: string; 'content-type': string }
 
 let app: FastifyInstance
 const factorIds: string[] = []
@@ -53,6 +58,10 @@ async function start(label?: string): Promise<{ factorId: string; secret: string
 }
 
 beforeAll(async () => {
+  pt = await privateTenant(adminPool, 't657')
+  TENANT = pt.id
+  AUTH = pt.AUTH
+  H = pt.H
   app = await buildApp(); await app.ready()
 }, 180_000)
 
@@ -75,6 +84,7 @@ afterAll(async () => {
   await adminPool`DELETE FROM members WHERE sub LIKE ${`f657-%`}`.catch(() => {})
   // the limiter is keyed per member and this file deliberately trips it
   await app.valkey.del(`factor:try:${TENANT}:dev-user`, `factor:lock:${TENANT}:dev-user`).catch(() => {})
+  await pt.dispose()
   await app.close(); await adminPool.end(); await pool.end()
 }, 120_000)
 
