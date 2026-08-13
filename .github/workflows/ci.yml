@@ -22,7 +22,7 @@ jobs:
       - run: pnpm lint:ee-lever-placement   # #693/#688: an EE lever's enforcement must not read in the CE tree
       - run: pnpm lint:no-css-modules  # shadcn/Tailwind migration: no new CSS Modules
       - run: pnpm docs:check           # ADR-080 doc↔code linkage: generated docs not stale
-      - run: pnpm lint:doc-links       # ADR-080: warn if a code region changed without its docs page
+      - run: pnpm lint:doc-links -- --strict  # ADR-225 §4.1: enforceable doc↔code violations fail CI (generated always; authored where a docs checkout exists)
       - run: pnpm lint:deploy-secrets  # #147/ADR-042no NEW plaintext credential in deploy/ (the known two are owed, not allowed)
       - run: pnpm lint:commit-types    # #138 prep: the release tooling reads these subjects, so the type list is fixed now
   test:
