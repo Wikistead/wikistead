@@ -94,6 +94,16 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     outPath: join(root, 'docs/generated/brand/tokens.css'),
     render: renderBrandCss,
   },
+  {
+    // #180 / ADR-225 §3(a): the VERSION MARKER the docs-site pull verifies against its SOURCE_TAG
+    // (the torn-pull guard armed itself the day this line landed). The content is the root
+    // package.json version and NOTHING else — a SHA or timestamp here would fail docs:check on
+    // every commit (the ADR-080 addendum trap); the version moves only when a release commit
+    // bumps it, which is exactly when the marker should move.
+    name: 'source-version marker',
+    outPath: join(root, 'docs/generated/.source-version'),
+    render: () => `${(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string }).version}\n`,
+  },
 ]
 
 const check = process.argv.includes('--check')
