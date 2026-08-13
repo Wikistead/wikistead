@@ -44,7 +44,13 @@ beforeAll(async () => {
                 VALUES (${p.id}, ${TENANT}, ${SPACE}, 'Sync Page', ${ydoc(body)}, ${body})
                 ON CONFLICT (id) DO NOTHING`
   }
-  await writeTuples(fgaClient, fgaFixture)
+  // One at a time, tolerating 'already exists': OpenFGA refuses a WHOLE batch when any tuple in it
+  // exists, and a killed previous run (afterAll never reached) leaves these behind — the batch then
+  // refuses forever and this file is deterministically red until someone hand-cleans the store
+  // (measured 2026-08-14; the membership helper documents the same trap).
+  for (const tuple of fgaFixture) {
+    await writeTuples(fgaClient, [tuple]).catch(() => { /* already there — a prior run's leftover */ })
+  }
   // Mimic a backlog accumulated while Meili was down: enqueue one 'upsert' per page, undrained.
   for (const p of PAGES) {
     await admin`INSERT INTO search_outbox (tenant_id, page_id, operation) VALUES (${TENANT}, ${p.id}, 'upsert')`
