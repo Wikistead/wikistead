@@ -1,5 +1,17 @@
 name: ci
 on: [push, pull_request]
+
+env:
+  # #704 / ADR-225 §4.1: the docs repository whose checkout ARMS the authored half of the
+  # doc-links gate. CHANGE_ME = dormant (the step below skips, authored violations stay loud
+  # warnings — the pre-#704 behaviour). Flip to e.g. Wikistead/wikistead-docs AFTER the #703
+  # scaffold is pushed there (an empty docs repo turns every mapped change red for the wrong
+  # reason), and expect the first armed PR to pay the accumulated warning debt (ADR-225
+  # §Consequences — that is the point). Public repo, so no token; a set-but-uncloneable value
+  # fails the checkout step itself — half-armed is loud, never a silent fall-back to warn
+  # (the silent fall-back IS the hole #704 closes).
+  DOCS_REPO: CHANGE_ME
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,7 +34,14 @@ jobs:
       - run: pnpm lint:ee-lever-placement   # #693/#688: an EE lever's enforcement must not read in the CE tree
       - run: pnpm lint:no-css-modules  # shadcn/Tailwind migration: no new CSS Modules
       - run: pnpm docs:check           # ADR-080 doc↔code linkage: generated docs not stale
-      - run: pnpm lint:doc-links -- --strict  # ADR-225 §4.1: enforceable doc↔code violations fail CI (generated always; authored where a docs checkout exists)
+      # #704: the docs repo lands at the path check-doc-links.mjs treats as the combined checkout
+      # (`wikistead-docs/`), arming the authored half of the strict gate below.
+      - uses: actions/checkout@v4
+        if: env.DOCS_REPO != 'CHANGE_ME'
+        with:
+          repository: ${{ env.DOCS_REPO }}
+          path: wikistead-docs
+      - run: pnpm lint:doc-links -- --strict  # ADR-225 §4.1: enforceable doc↔code violations fail CI (generated always; authored when the docs checkout above is armed)
       - run: pnpm lint:deploy-secrets  # #147/ADR-042 no NEW plaintext credential in deploy/ (the known two are owed, not allowed)
       - run: pnpm lint:commit-types    # #138 prep: the release tooling reads these subjects, so the type list is fixed now
   test:
