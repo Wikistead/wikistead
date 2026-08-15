@@ -9,6 +9,7 @@
 // Generation is a CI build step over CE code only — it never runtime-imports product
 // code into the SSG, and never pulls the proprietary Cloud plan table (CE/EE boundary).
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -139,6 +140,22 @@ for (const asset of BRAND_ASSETS) {
     writeFileSync(to, want)
     console.log(`generated: brand asset → ${asset.to}`)
   }
+}
+
+// #696§5: the PLAN MATRIX (per-tier lever values for the LP's comparison table) is a Cloud
+// artifact — its generator reads the proprietary plan table, so it lives INSIDE
+// packages/entitlements-cloud and is SPAWNED, never imported (a CE-tree import of that namespace
+// is the boundary violation the filter refuses to hide; the whole package vanishes from the CE
+// mirror, generator included). Present → run in the same mode; absent (the CE tree) → skip loudly.
+const planMatrixGen = join(root, 'packages/entitlements-cloud/scripts/gen-plan-matrix.ts')
+if (existsSync(planMatrixGen)) {
+  const { status } = spawnSync('pnpm', ['exec', 'tsx', planMatrixGen, ...(check ? ['--check'] : [])], {
+    cwd: root,
+    stdio: 'inherit',
+  })
+  if (status !== 0) stale = true
+} else {
+  console.log('plan matrix: generator absent (CE tree without the Cloud package) — skipped.')
 }
 
 if (check) {
