@@ -179,9 +179,78 @@ export async function listAllSpaces(db: TenantDb, fga: OpenFgaClient, userId: st
   return out
 }
 
+// #710: the row shape both the listing and the id-resolver select — one query shape, one enrichment,
+// so the two paths cannot drift (the one-bug-five-cursors class: 8 client surfaces read this data).
+type EnrichableSpaceRow = SpaceRow & {
+  accent_key: string | null; icon_image_key: string | null; home_page_id: string | null
+  delete_mode: string | null; tenant_delete_mode: string | null
+}
+
+// #710: the authorization + shaping half of listSpaces, factored so POST /spaces/resolve returns
+// byte-identical space objects. Drops non-viewable rows (uniformly with rows that never existed);
+// derives capability/canModerate/canManageAccess via the batched FGA passes (#489/#607) and gates
+// the home pointer per ADR-157 §2. An FGA infrastructure error THROWS — it must fail the whole
+// request, never silently drop one caller-visible space from a batch.
+async function enrichSpaceRows(
+  fga: OpenFgaClient, userId: string, page: EnrichableSpaceRow[],
+): Promise<Space[]> {
+  const user = `user:${userId}`
+  const spaceIds = page.map((r) => r.id)
+  const [viewSet, editSet, manageSet, moderateSet, accessSet] = await Promise.all([
+    filterAuthorized(fga, user, 'view', spaceIds, undefined, 'space'),
+    filterAuthorized(fga, user, 'edit', spaceIds, undefined, 'space'),
+    filterAuthorized(fga, user, 'manage', spaceIds, undefined, 'space'),
+    filterAuthorized(fga, user, 'moderate', spaceIds, undefined, 'space'),
+    filterAuthorized(fga, user, 'manageAccess', spaceIds, undefined, 'space'),
+  ])
+  const capById = new Map(page.map((r) => {
+    const capability: Space['capability'] | null =
+      manageSet.has(r.id) ? 'manage' : editSet.has(r.id) ? 'edit' : viewSet.has(r.id) ? 'view' : null
+    return [r.id, { capability, canModerate: moderateSet.has(r.id), canManageAccess: accessSet.has(r.id) }] as const
+  }))
+  const homePageIds = page
+    .filter((r) => r.home_page_id != null && capById.get(r.id)?.capability != null)
+    .map((r) => r.home_page_id as string)
+  const homeOk = await filterAuthorized(fga, user, 'view', homePageIds) // type defaults to 'page'
+  const homeVisible = new Map(page.map((r) => [r.id, r.home_page_id != null && homeOk.has(r.home_page_id)] as const))
+  return page.filter((r) => capById.get(r.id)?.capability != null).map((r) => ({
+    ...toSpace(r), capability: capById.get(r.id)!.capability!, canModerate: capById.get(r.id)!.canModerate, canManageAccess: capById.get(r.id)!.canManageAccess, accentKey: r.accent_key,
+    iconImageUrl: r.icon_image_key ? `/spaces/${r.id}/icon-image` : null,
+    homePageId: homeVisible.get(r.id) ? r.home_page_id : null,
+    deleteMode: (r.delete_mode ?? r.tenant_delete_mode ?? 'trash_only') as 'trash_only' | 'both' | 'direct_only',
+  }))
+}
+
+/** #710: how many ids one resolve request may carry (pins + recents + current fit comfortably). */
+export const SPACES_RESOLVE_LIMIT = 100
+
+// #710 A: resolve spaces BY ID for the surfaces that hold an id and need the space (sidebar active
+// space, pins/recents, home normalization, deleteMode, pickers' selected entries) — so holding an id
+// no longer requires walking the whole roster. The answer maps EVERY requested id, uniformly
+// a space the caller cannot view and a space that does not exist are both `null` — byte-identical,
+// never an existence oracle (the 404-unification rule, applied per id). No partial infrastructure
+// success: an FGA error rejects the whole request (enrichSpaceRows throws) rather than returning a
+// map with silently-missing entries a client would read as "deleted".
+export async function resolveSpaces(
+  db: TenantDb, fga: OpenFgaClient, userId: string, ids: string[],
+): Promise<Record<string, Space | null>> {
+  const wanted = [...new Set(ids)].slice(0, SPACES_RESOLVE_LIMIT)
+  const out: Record<string, Space | null> = {}
+  for (const id of wanted) out[id] = null
+  if (wanted.length === 0) return out
+  const rows = await db.sql<EnrichableSpaceRow[]>`
+    SELECT s.id, s.tenant_id, s.name, s.created_at, s.home_page_id, ss.accent_key, ss.icon_image_key,
+           s.delete_mode, (SELECT delete_mode FROM tenant_settings LIMIT 1) AS tenant_delete_mode
+    FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
+    WHERE s.id = ANY(${wanted})
+  `
+  for (const space of await enrichSpaceRows(fga, userId, rows)) out[space.id] = space
+  return out
+}
+
 export async function listSpaces(
   db: TenantDb, fga: OpenFgaClient, userId: string,
-  opts: { limit?: number; cursor?: string; q?: string } = {},
+  opts: { limit?: number; cursor?: string; q?: string; order?: 'created' | 'name' } = {},
 ): Promise<SpacesPage> {
   // accent_key (space branding, Phase 5c) joined in so the client can apply the
   // space ▷ tenant ▷ default accent cascade without a per-space fetch.
@@ -202,18 +271,23 @@ export async function listSpaces(
   // drift apart in feel). The filter narrows the SQL BEFORE the authorization pass below, so it can
   // only ever shrink what the caller would have seen — never widen it.
   const q = opts.q?.trim() || null
-  // #705 (review must-fix 5): the cursor is BOUND to the q that minted it. A cursor from another
-  // filter names a position in a different walk; honouring it would silently return a partial
-  // list. Mismatch restarts from the top and says so (`restarted`, the branch route's word).
+  // #710 C: the NAME-ordered walk (#287's "show all", server-side now). created_at's keyset cannot
+  // express name order, so the order is its own keyset — (lower(name), id), the same tiebreaker
+  // discipline — and it is BOUND into the cursor exactly like q: a cursor minted under one order
+  // names a position in a different walk under the other.
+  const order: 'created' | 'name' = opts.order === 'name' ? 'name' : 'created'
+  // #705 (review must-fix 5): the cursor is BOUND to the q AND the order that minted it. A cursor
+  // from another filter/order names a position in a different walk; honouring it would silently
+  // return a partial list. Mismatch restarts from the top and says so (`restarted`).
   let restarted = false
   let after: { at: string; id: string } | null = null
   if (opts.cursor) {
-    const [at, id, qtag] = opts.cursor.split('|')
-    const expected = q ? encodeURIComponent(q) : undefined
-    if (at && id && qtag === expected) after = { at, id }
+    const [at, id, qtag, ordertag] = opts.cursor.split('|')
+    const expected = q ? encodeURIComponent(q) : ''
+    if (at != null && id && (qtag ?? '') === expected && (ordertag ?? 'created') === order) after = { at: decodeURIComponent(at), id }
     else restarted = true
   }
-  const rows = await db.sql<(SpaceRow & { accent_key: string | null; icon_image_key: string | null; home_page_id: string | null; delete_mode: string | null; tenant_delete_mode: string | null; cursor_at: string })[]>`
+  const rows = await db.sql<(EnrichableSpaceRow & { cursor_at: string })[]>`
     SELECT s.id, s.tenant_id, s.name, s.created_at, s.home_page_id, ss.accent_key, ss.icon_image_key,
            -- The cursor's timestamp travels as an EPOCH, not as a formatted date, and this is not
            -- style. Measured: a parameter carrying '2026-08-06 16:24:04.585575+00' comes back out of
@@ -221,13 +295,17 @@ export async function listSpaces(
            -- milliseconds. The boundary row then compares as greater than the cursor that names it and
            -- is returned again on the next page. An epoch numeric is a number to the driver, so nothing
            -- rounds it, and to_timestamp() puts every microsecond back.
-           extract(epoch from s.created_at)::text AS cursor_at,
+           -- #710 C: under name order the cursor key is lower(name) instead — a plain string, nothing
+           -- for the driver to round; s.id stays the tiebreaker in both walks.
+           ${order === 'name' ? db.sql`lower(s.name) AS cursor_at,` : db.sql`extract(epoch from s.created_at)::text AS cursor_at,`}
            s.delete_mode, (SELECT delete_mode FROM tenant_settings LIMIT 1) AS tenant_delete_mode
     FROM spaces s LEFT JOIN space_settings ss ON ss.space_id = s.id
     WHERE TRUE
       ${q ? db.sql`AND s.name ILIKE ${'%' + q + '%'}` : db.sql``}
-      ${after ? db.sql`AND (s.created_at, s.id) > (to_timestamp(${after.at}::numeric), ${after.id})` : db.sql``}
-    ORDER BY s.created_at, s.id
+      ${after ? (order === 'name'
+        ? db.sql`AND (lower(s.name), s.id) > (${after.at}, ${after.id})`
+        : db.sql`AND (s.created_at, s.id) > (to_timestamp(${after.at}::numeric), ${after.id})`) : db.sql``}
+    ${order === 'name' ? db.sql`ORDER BY lower(s.name), s.id` : db.sql`ORDER BY s.created_at, s.id`}
     LIMIT ${limit + 1}
   `
   // one row past the limit answers "is there more" without a second count query
@@ -239,54 +317,16 @@ export async function listSpaces(
   // and every space after it unreachable — the stage-1/stage-2 gap that search already has to live with.
   // A caller must therefore keep walking while `nextCursor` is non-null, even on an empty page.
   const lastRow = page[page.length - 1]
-  const nextCursor = hasMore && lastRow ? `${lastRow.cursor_at}|${lastRow.id}${q ? `|${encodeURIComponent(q)}` : ''}` : null
-  // Per space, derive the caller's capability (view|edit|manage) so the sidebar can
-  // show/hide management actions (the UI signal; the server stays the fortress).
-  // Spaces are few, so a few checks each is cheap. Non-viewable spaces are dropped.
-  const user = `user:${userId}`
-  const spaceIds = page.map((r) => r.id)
-  // #489 / ADR-183: batch the per-space capability fan-out — it was 4 individual FGA checks × N spaces
-  // (676+ round-trips for 169 spaces, ~1.16s cold) — into 4 server-side BatchCheck passes, one per
-  // capability, exactly as #500 batched the page tree. Each pass returns the authorized subset for that
-  // capability; the per-space derivation below is byte-equivalent to the old per-check version (pinned by
-  // the anti-test).
-  // #326: `moderate` is reported ALONGSIDE the capability rather than folded into it. A space moderator is
-  // not a manager (model.fga: `moderator … or manager`), and collapsing the two would hand every moderator
-  // the rename/delete affordances. The UI needs both to offer the moderation queue without space settings.
-  // ADR-209 (#607): a FIFTH batch for the membership verb — the ADR calls this cost out rather than
-  // adding it silently. The batches run in parallel, so wall-clock stays the slowest single pass;
-  // the extra pass is the price of `canManageAccess` riding the listing like `canModerate` does
-  // (#326's precedent: alongside the ladder, never widening it).
-  const [viewSet, editSet, manageSet, moderateSet, accessSet] = await Promise.all([
-    filterAuthorized(fga, user, 'view', spaceIds, undefined, 'space'),
-    filterAuthorized(fga, user, 'edit', spaceIds, undefined, 'space'),
-    filterAuthorized(fga, user, 'manage', spaceIds, undefined, 'space'),
-    filterAuthorized(fga, user, 'moderate', spaceIds, undefined, 'space'),
-    filterAuthorized(fga, user, 'manageAccess', spaceIds, undefined, 'space'),
-  ])
-  const capById = new Map(page.map((r) => {
-    const capability: Space['capability'] | null =
-      manageSet.has(r.id) ? 'manage' : editSet.has(r.id) ? 'edit' : viewSet.has(r.id) ? 'view' : null
-    return [r.id, { capability, canModerate: moderateSet.has(r.id), canManageAccess: accessSet.has(r.id) }] as const
-  }))
-  // iconImageUrl is a relative API path (the client prefixes it with the API base for
-  // the <img> src). Public bytes are served by GET /spaces/:id/icon-image.
-  // #364 / ADR-157 §2 (the pointer must not become an existence oracle): expose homePageId ONLY when the
-  // CALLER can `view` the pointed page — via the shared FGA primitive, never a bespoke check. A denied
-  // pointer is OMITTED (null), byte-identical to "no home set". #489: batched too — ONE BatchCheck over the
-  // home pages of the VIEWABLE spaces (same gate as before: a non-viewable space's pointer is never
-  // consulted, so its home page id never enters the batch).
-  const homePageIds = page
-    .filter((r) => r.home_page_id != null && capById.get(r.id)?.capability != null)
-    .map((r) => r.home_page_id as string)
-  const homeOk = await filterAuthorized(fga, user, 'view', homePageIds) // type defaults to 'page'
-  const homeVisible = new Map(page.map((r) => [r.id, r.home_page_id != null && homeOk.has(r.home_page_id)] as const))
-  const spaces = page.filter((r) => capById.get(r.id)?.capability != null).map((r) => ({
-    ...toSpace(r), capability: capById.get(r.id)!.capability!, canModerate: capById.get(r.id)!.canModerate, canManageAccess: capById.get(r.id)!.canManageAccess, accentKey: r.accent_key,
-    iconImageUrl: r.icon_image_key ? `/spaces/${r.id}/icon-image` : null,
-    homePageId: homeVisible.get(r.id) ? r.home_page_id : null,
-    deleteMode: (r.delete_mode ?? r.tenant_delete_mode ?? 'trash_only') as 'trash_only' | 'both' | 'direct_only',
-  }))
+  // #710: the name-key can carry '|' (it is a user-typed name), so the cursor's first field is
+  // URI-encoded in BOTH walks and decoded on parse — epoch strings pass through unchanged. The
+  // order tag rides only when non-default, keeping every pre-#710 cursor parseable.
+  const nextCursor = hasMore && lastRow
+    ? `${encodeURIComponent(lastRow.cursor_at)}|${lastRow.id}${q || order === 'name' ? `|${q ? encodeURIComponent(q) : ''}` : ''}${order === 'name' ? '|name' : ''}`
+    : null
+  // Per space, derive the caller's capability and gate the home pointer — the shared enrichment
+  // (#489/#607/#326/ADR-157 §2 discipline lives in enrichSpaceRows, one copy for the listing AND
+  // the id-resolver, so the 8 consuming surfaces can never see two shapes).
+  const spaces = await enrichSpaceRows(fga, userId, page)
   return restarted ? { spaces, nextCursor, restarted: true } : { spaces, nextCursor }
 }
 
@@ -1642,13 +1682,27 @@ export async function spacesPlugin(app: FastifyInstance) {
   // `/webhooks` already return. A caller that wants the whole roster walks the cursor; a caller that
   // wants the first screenful stops after one request. What no caller can do any more is receive every
   // space a tenant has in one payload, which is what this route did.
-  app.get<{ Querystring: { limit?: string; cursor?: string; q?: string } }>('/spaces', async (req) => {
+  app.get<{ Querystring: { limit?: string; cursor?: string; q?: string; order?: string } }>('/spaces', async (req) => {
     const raw = Number.parseInt(req.query?.limit ?? '', 10)
     return listSpaces(req.db, app.fga, req.user.sub, {
       limit: Number.isFinite(raw) ? raw : undefined,
       cursor: req.query?.cursor,
       q: req.query?.q,
+      // #710 C: `order=name` is the #287 "show all" walk; anything else is the default created walk.
+      order: req.query?.order === 'name' ? 'name' : 'created',
     })
+  })
+
+  // #710 A: batch id-resolution — POST because the ids are a body (the bulk-export precedent, #511).
+  // Every requested id answers, uniformly: a space the caller cannot view and a space that does not
+  // exist are both null (never an existence oracle); an authorization-infrastructure error rejects
+  // the whole request instead of leaving silently-missing entries a client would read as "deleted".
+  app.post<{ Body: { ids?: unknown } }>('/spaces/resolve', async (req, reply) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x): x is string => typeof x === 'string') : null
+    if (!ids || ids.length === 0 || ids.length > SPACES_RESOLVE_LIMIT) {
+      return reply.code(400).send({ error: 'ids must be a non-empty array of at most 100 space ids' })
+    }
+    return { spaces: await resolveSpaces(req.db, app.fga, req.user.sub, ids) }
   })
 
   // #364 / ADR-157: create-and-point the space home (edit-gated; 409 when one exists).

@@ -474,14 +474,28 @@ paths:
         search route's precedent).
       parameters:
         - { name: q, in: query, required: false, schema: { type: string }, description: "Case-insensitive name substring filter." }
-        - { name: cursor, in: query, required: false, schema: { type: string }, description: "The keyset cursor from the previous page (bound to its q)." }
+        - { name: cursor, in: query, required: false, schema: { type: string }, description: "The keyset cursor from the previous page (bound to its q AND order)." }
         - { name: limit, in: query, required: false, schema: { type: integer }, description: "Rows per page (clamped)." }
+        - { name: order, in: query, required: false, schema: { type: string, enum: [created, name] }, description: "#710: `name` walks a (lower(name), id) keyset — the browse order; default is created." }
       responses: { "200": { description: Spaces, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Space" } } } } }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     post:
       operationId: createSpace
       tags: [spaces]
       summary: Create a space
       responses: { "201": { description: Created }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
+  /spaces/resolve:
+    post:
+      operationId: resolveSpaces
+      tags: [spaces]
+      summary: Resolve spaces by id, in one batch — the id-holding surfaces' path (#710)
+      description: >-
+        #710. Body { ids } (1..100). Answers EVERY requested id, uniformly: a space the caller cannot
+        view and a space that does not exist are both null — byte-identical, never an existence
+        oracle. Resolved entries carry the same shape (capability, deleteMode, homePageId, icon) as
+        the listing. An authorization-infrastructure error rejects the whole request rather than
+        silently omitting entries a client would read as "deleted".
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [ids], properties: { ids: { type: array, items: { type: string }, minItems: 1, maxItems: 100 } } } } } }
+      responses: { "200": { description: "{ spaces: { [id]: Space | null } }" }, "400": { description: "ids missing, empty or over the cap" }, "401": { description: Missing or invalid credentials }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}:
     patch:
       operationId: updateSpace
