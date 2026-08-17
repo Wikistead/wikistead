@@ -414,7 +414,6 @@
     "confinedCaps": "操作 {{count}}",
     "confinedHidden": "見えないもの {{count}} 件",
     "spaceFilter": "スペースを絞り込む",
-    "spaceFilterHidden_other": "他に {{count}} 件（絞り込み中）",
     "action_none": "なし",
     "action_read": "読み取り",
     "action_write": "書き込み",
@@ -654,7 +653,9 @@
     "bulkMoveNested": "{{moved}} 件を移動・{{nested}} 件は親と一緒に移動しました。",
     "movePlaceholder": "スペースを選択",
     "filter": "ページを絞り込む",
-    "more": "さらに表示"
+    "more": "さらに表示",
+    "moveFilterPlaceholder": "スペースを探す…",
+    "moveMore": "一致するスペースが他にもあります。入力して絞り込んでください。"
   },
   "spaceMembers": {
     "title": "メンバーと権限",
@@ -807,7 +808,7 @@
     "movePinUp": "ピンを上へ",
     "movePinDown": "ピンを下へ",
     "noSpacesMatch": "一致するスペースがありません。",
-    "showAllSpaces": "すべてのスペースを表示（他 {{count}} 件）",
+    "showAllSpaces": "すべてのスペースを表示…",
     "newSpace": "新しいスペース",
     "renameSpace": "スペース名を変更",
     "spaceName": "スペース名",
@@ -836,7 +837,8 @@
     "deleteForever": "完全に削除",
     "deleteForeverTitle": "完全に削除",
     "deleteForeverConfirm": "「{{name}}」とその下位ページを完全に削除しますか？この操作は取り消せません（ゴミ箱からの復元はできません）。",
-    "moreSpaceMatches": "さらに一致があります。入力で絞り込めます"
+    "moreSpaceMatches": "さらに一致があります。入力で絞り込めます",
+    "moreSpaces": "さらに表示…"
   },
   "dialogs": {
     "renamePageTitle": "ページ名を変更",

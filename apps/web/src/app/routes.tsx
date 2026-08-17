@@ -227,7 +227,7 @@ import { SearchBox } from "../search/SearchBox";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
 import { FALLBACK_PRODUCT_NAME, useProductName } from "./product-name";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpaces, useBranding, type Page } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpacesPage, useResolvedSpace, useBranding, type Page } from "../data/queries";
 import { TenantBrand } from "./BrandLockup"; // #430 the public header uses the shared two-slot lockup
 import { Avatar } from "../ui/Avatar"; // #430 the public header's space chip (shared primitive)
 import { GuestSidebar } from "./GuestSidebar";
@@ -310,8 +310,9 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const { t } = useTranslation();
   const params = useParams<{ pageId: string }>();
   const pageId = pageIdOverride ?? params.pageId;
-  const spacesForHome = useSpaces();
-  const homeOwner = !pageIdOverride && pageId ? (spacesForHome.data ?? []).find((s) => s.homePageId === pageId) : undefined;
+  // #710: "is this page some space's home?" is answered by the page's OWN space, resolved by id
+  // a home page always lives in the space that points at it, so the roster walk this used to scan
+  // (and miss, past page one) is unnecessary. Resolution happens below, after pageQ names the space.
   const [searchParams, setSearchParams] = useSearchParams();
   const autoEdit = searchParams.get("edit") === "1"; // set by the create-page flow
   // Diff modal is URL-driven (?diff=<revId>): a shallow deep-link (no route added) that
@@ -330,6 +331,8 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const pageQ = usePage(pageId ?? "");
   const page = pageQ.data;
   const capability = page?.capability ?? "view";
+  const pageSpace = useResolvedSpace(!pageIdOverride ? page?.spaceId : null);
+  const homeOwner = !pageIdOverride && pageId && pageSpace && pageSpace.homePageId === pageId ? pageSpace : undefined;
 
   // Draft/publish: view renders the PUBLISHED snapshot; edit-capable users get a
   // Publish control + an "unpublished changes" indicator.
@@ -503,7 +506,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const directDeletePage = useDirectDeletePage();
   // #437 / ADR-167: the space's resolved deletion-pathway policy shapes which delete entries the ⋯
   // menu offers (UI only — the server routes gate regardless).
-  const activeSpace = useSpaces().data?.find((s) => s.id === spaceId);
+  const activeSpace = useResolvedSpace(spaceId); // #710: by id, not by roster membership
   const deleteMode = activeSpace?.deleteMode ?? "trash_only";
   const duplicatePage = useCreatePage(); // #229/#242: "Duplicate page" → new page seeded from this one
   const navigate = useNavigate();
@@ -1918,12 +1921,14 @@ function SpaceHomeRoute() {
   const { t } = useTranslation();
   const { spaceId } = useParams<{ spaceId: string }>();
   const { status, logout, token } = useSession();
-  const spacesQ = useSpaces(status === "authed");
+  const spaceResolved = useResolvedSpace(spaceId, status === "authed");
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const { setActiveSpaceId } = useActiveSpace();
-  const space = (spacesQ.data ?? []).find((sp) => sp.id === spaceId);
+  // #710: resolved by id — a space on any roster page (or none) answers the same way. null is
+  // DEFINITIVE (gone or not visible, uniformly), undefined is still in flight.
+  const space = spaceResolved ?? undefined;
   // #364 ①: the sidebar follows the URL here, not an opened page. The page-driven sync (PageRoute)
   // never fires for a home-less space (the empty state opens no page), so a direct /spaces/:id link left
   // the sidebar on the previous space. Sync from the RESOLVED space (not the raw param) so a bogus id
@@ -1931,7 +1936,7 @@ function SpaceHomeRoute() {
   useEffect(() => { if (space?.id) setActiveSpaceId(space.id); }, [space?.id, setActiveSpaceId]);
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
-  if (spacesQ.isSuccess && !space) {
+  if (spaceResolved === null) {
     return (
       <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
         <div style={{ padding: 24 }} data-testid="page-not-found">{t("page.notFound")}</div>

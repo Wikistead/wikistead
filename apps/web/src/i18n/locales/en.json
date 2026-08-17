@@ -414,8 +414,6 @@
     "confinedCaps": "Actions: {{count}}",
     "confinedHidden": "and {{count}} you cannot see",
     "spaceFilter": "Filter spaces",
-    "spaceFilterHidden_one": "{{count}} more, hidden by the filter",
-    "spaceFilterHidden_other": "{{count}} more, hidden by the filter",
     "action_none": "None",
     "action_read": "Read",
     "action_write": "Write",
@@ -656,7 +654,9 @@
     "bulkMoveNested": "Moved {{moved}} page(s); {{nested}} moved with their parent.",
     "movePlaceholder": "Choose a space",
     "filter": "Filter pages",
-    "more": "Show more"
+    "more": "Show more",
+    "moveFilterPlaceholder": "Find a space…",
+    "moveMore": "More spaces match. Keep typing to narrow."
   },
   "spaceMembers": {
     "title": "Members & permissions",
@@ -809,7 +809,7 @@
     "movePinUp": "Move pin up",
     "movePinDown": "Move pin down",
     "noSpacesMatch": "No spaces match.",
-    "showAllSpaces": "Show all spaces ({{count}} more)",
+    "showAllSpaces": "Show all spaces…",
     "newSpace": "New space",
     "renameSpace": "Rename space",
     "spaceName": "Space name",
@@ -838,7 +838,8 @@
     "deleteForever": "Delete permanently",
     "deleteForeverTitle": "Delete permanently",
     "deleteForeverConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone; there is no trash to restore from.",
-    "moreSpaceMatches": "More matches. Keep typing to narrow"
+    "moreSpaceMatches": "More matches. Keep typing to narrow",
+    "moreSpaces": "More spaces…"
   },
   "dialogs": {
     "renamePageTitle": "Rename page",

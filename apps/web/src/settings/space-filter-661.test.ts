@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterSpaceOptions, hiddenCount, type SpaceOption } from "./space-filter";
+import { filterSpaceOptions, type SpaceOption } from "./space-filter";
 
 // #661 (user, on the device): " UI ".
 //
@@ -46,18 +46,10 @@ describe("#661: the filter narrows what is shown, never what is chosen", () => {
     expect(filterSpaceOptions(SPACES, "   ", []), "a stray space emptied the list").toHaveLength(SPACES.length);
   });
 
-  it("a query that matches nothing yields nothing — and the count says how much is hidden", () => {
-    const shown = filterSpaceOptions(SPACES, "zzz", []);
-    expect(shown).toEqual([]);
-    // "0 spaces" and "0 of 4" are different facts. Without the second, a narrowed list reads as a short
-    // tenant, and a key gets issued against a roster the reader believes is complete.
-    expect(hiddenCount(SPACES, shown)).toBe(4);
-  });
-
-  it("the hidden count never goes negative, and is zero when nothing is filtered", () => {
-    expect(hiddenCount(SPACES, filterSpaceOptions(SPACES, "", []))).toBe(0);
-    expect(hiddenCount(SPACES, [...SPACES, ...SPACES]), "a wider `shown` than `all` is not a negative")
-      .toBe(0);
+  it("a query that matches nothing yields nothing", () => {
+    // #710: the numeric hidden count is retired with the client-side roster — the "list is not the
+    // whole tenant" signal is a boolean "more" line fed by the server's hasMore in both modes.
+    expect(filterSpaceOptions(SPACES, "zzz", [])).toEqual([]);
   });
 
   it("the list does not grow with the tenant — the filter is the reader's, the box is the product's", () => {

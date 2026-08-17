@@ -45,5 +45,5 @@ export function filterSpaceOptions(
  * list — "3 of 40" is a different fact from "3", and the second one invites issuing a key against a
  * roster the reader believes is complete.
  */
-export const hiddenCount = (spaces: readonly SpaceOption[], shown: readonly SpaceOption[]): number =>
-  Math.max(0, spaces.length - shown.length);
+// #710: hiddenCount is retired — it counted over the full roster the client no longer holds
+// (a first-page count would silently under-state); the picker shows a boolean "more" line instead.

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
-import { visibleSpaces, recordRecentSpace, hiddenSpaceCount, allSpacesSorted } from "./space-recent";
+import { visibleSpaces, recordRecentSpace } from "./space-recent";
 import type { Space } from "../data/queries";
 
 const mk = (id: string, name: string): Space => ({ id, name });
@@ -73,29 +73,5 @@ describe("#284 visibleSpaces with pins (pinned-first, cap-exempt)", () => {
   });
 });
 
-describe("#263 rejection ①: hiddenSpaceCount (surface the silent truncation)", () => {
-  it("empty query: reports how many viewable spaces are NOT shown", () => {
-    expect(hiddenSpaceCount(16, 8, "")).toBe(8); // 16 viewable, 8 shown → 8 hidden
-  });
-  it("empty query, nothing hidden when everything fits", () => {
-    expect(hiddenSpaceCount(5, 5, "")).toBe(0);
-    expect(hiddenSpaceCount(3, 8, "")).toBe(0); // never negative
-  });
-  it("while searching, nothing is hidden (search spans ALL spaces)", () => {
-    expect(hiddenSpaceCount(16, 4, "263")).toBe(0);
-    expect(hiddenSpaceCount(16, 4, "  ")).toBe(12); // whitespace-only is not a query
-  });
-});
-
-describe("#287 allSpacesSorted (the 'show all' browse list)", () => {
-  it("returns EVERY space, name-sorted case-insensitively (not the bounded/recency order)", () => {
-    const s = [mk("a", "Zebra"), mk("b", "alpha"), mk("c", "Mango")];
-    expect(allSpacesSorted(s).map((x) => x.name)).toEqual(["alpha", "Mango", "Zebra"]);
-    expect(allSpacesSorted(s).length).toBe(3); // all, not capped
-  });
-  it("does not mutate the input array", () => {
-    const s = [mk("a", "B"), mk("b", "A")];
-    allSpacesSorted(s);
-    expect(s.map((x) => x.id)).toEqual(["a", "b"]);
-  });
-});
+// #710: hiddenSpaceCount / allSpacesSorted are retired with the client-side roster walk — the
+// count and the name order both come from the server now (a first-page count would lie).

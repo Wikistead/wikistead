@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
-  useCommentOpen, useSetCommentOpen, useSpaces,
+  useCommentOpen, useSetCommentOpen, useResolvedSpace,
   useAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole,
   type PageRelation,
 } from "../data/queries";
@@ -102,7 +102,7 @@ export function SpaceMembersTab() {
   // #607 / ADR-209: the caller's authority shapes the OFFER (the server is still the gate). An
   // access-manager reaches this screen without holding the space, and the admin-class nouns are not
   // theirs to hand out.
-  const callerManages = (useSpaces().data ?? []).find((sp) => sp.id === spaceId)?.capability === "manage";
+  const callerManages = useResolvedSpace(spaceId)?.capability === "manage"; // #710: by id, not roster membership
   const candidates = useMemberCandidates(spaceId, picked ? "" : query);
   const groups = useTenantGroups(spaceId, mode === "group");
 

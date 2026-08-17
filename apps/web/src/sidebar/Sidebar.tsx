@@ -7,11 +7,13 @@ import type { NodeApi } from "react-arborist";
 import { ChevronDown, ChevronUp, FileText, Home, PinOff, Settings } from "lucide-react";
 import { PageTree, type PageTreeNode } from "./PageTree";
 import { SpaceSwitcher } from "./SpaceSwitcher";
+import { readRecent } from "./space-recent"; // #710: the recents ids feed the resolver batch
 import { landingSpaceTab } from "../settings/space-tabs"; // #607: one answer to "which settings tab can this caller reach"
 import { SpaceIcon } from "../ui/SpaceIcon"; // #284 show a page pin's owning space
 import { SidebarTreeSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #492: loading vs empty vs error
 import {
-  useSpaces,
+  useSpacesPage,
+  useResolvedSpaces,
   useCreateSpace,
   useMyCapabilities,
   useRenameSpace,
@@ -26,6 +28,7 @@ import {
   useReorderPins,
   type Page,
   type PinResourceType,
+  type Space,
 } from "../data/queries";
 import { apiFetch } from "../data/apiClient";
 import { useSession } from "../session/SessionProvider";
@@ -53,8 +56,30 @@ function SidebarImpl() {
   const { pageId } = useParams<{ pageId: string }>();
   const { activeSpaceId, setActiveSpaceId } = useActiveSpace();
 
-  const spacesQ = useSpaces();
-  const spaces = useMemo(() => spacesQ.data ?? [], [spacesQ.data]);
+  const spacesQ = useSpacesPage();
+  const firstPage = useMemo(() => spacesQ.data?.spaces ?? [], [spacesQ.data]);
+
+  // #710 B: the roster is a first page now. Every space the sidebar must ADDRESS BY ID — the stored
+  // active choice, the pinned spaces, the recents — resolves through one batch instead of hoping to
+  // find itself in a page it may not be on. The pool below merges both, so the switcher's bounded
+  // list keeps its exact ordering rules over exactly the spaces it needs.
+  const pinsQEarly = usePins();
+  const resolveIds = useMemo(() => {
+    const ids = [
+      ...(activeSpaceId ? [activeSpaceId] : []),
+      ...(pinsQEarly.data ?? []).filter((p) => p.resourceType === "space").map((p) => p.resourceId),
+      ...readRecent(),
+    ];
+    return [...new Set(ids)];
+  }, [activeSpaceId, pinsQEarly.data]);
+  const resolveQ = useResolvedSpaces(resolveIds);
+  const spaces = useMemo(() => {
+    const byId = new Map<string, Space>(firstPage.map((s) => [s.id, s]));
+    for (const s of Object.values(resolveQ.data ?? {})) {
+      if (s && !byId.has(s.id)) byId.set(s.id, s);
+    }
+    return [...byId.values()];
+  }, [firstPage, resolveQ.data]);
 
   // Active space: the stored choice if it still exists, else the first space.
   //
@@ -66,9 +91,14 @@ function SidebarImpl() {
   // starts immediately; once the list lands, a stale stored id falls back to the first space exactly as
   // before (and the effect below repairs the stored value).
   const current = useMemo(() => {
-    if (activeSpaceId && (spacesQ.data === undefined || spaces.some((s) => s.id === activeSpaceId))) return activeSpaceId;
-    return spaces[0]?.id;
-  }, [activeSpaceId, spaces, spacesQ.data]);
+    if (!activeSpaceId) return spaces[0]?.id;
+    // #710: the stored id is validated by RESOLUTION, not by membership of a page it may not be on
+    // (first-page-only membership is what would have silently switched the reader's space — the
+    // blast-radius-1 breakage). While the resolver is in flight the stored id stays trusted
+    // (#541's boot rule); a DEFINITIVE null — gone or no longer visible — falls back.
+    if (resolveQ.data === undefined) return activeSpaceId;
+    return resolveQ.data[activeSpaceId] != null ? activeSpaceId : spaces[0]?.id;
+  }, [activeSpaceId, spaces, resolveQ.data]);
   // Seed/repair the stored active space (first load, or the stored one was deleted).
   useEffect(() => {
     if (current && current !== activeSpaceId) setActiveSpaceId(current);
@@ -99,7 +129,7 @@ function SidebarImpl() {
 
   // #284 / ADR-119: the member's pins. The server list is view-confirmed (double gate
   // live resource row + FGA view), so rendering it verbatim can never leak a stale title.
-  const pinsQ = usePins();
+  const pinsQ = pinsQEarly;
   const pins = useMemo(() => pinsQ.data ?? [], [pinsQ.data]);
   const pagePins = useMemo(() => pins.filter((p) => p.resourceType === "page"), [pins]);
   const spacePins = useMemo(() => pins.filter((p) => p.resourceType === "space"), [pins]);
@@ -309,6 +339,7 @@ function SidebarImpl() {
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
         <SpaceSwitcher
           spaces={spaces}
+          hasMoreSpaces={spacesQ.data?.hasMore ?? false}
           currentId={current}
           currentSpace={currentSpace}
           canManage={canManage}

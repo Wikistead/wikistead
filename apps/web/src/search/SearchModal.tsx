@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { useSearch, useSpaces, usePage, usePublished, useGuestPublished } from "../data/queries";
+import { useSearch, useResolvedSpaces, usePage, usePublished, useGuestPublished } from "../data/queries";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
@@ -43,7 +43,11 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
   const [input, setInput] = useState("");
   const debounced = useDebouncedValue(input, 250);
   const { data: hits, isFetching } = useSearch(open ? debounced : "", guestToken);
-  const spaces = useSpaces(!isGuest); // member-only route; a guest has no cross-space list
+  // #710: resolve exactly the spaces the HITS name (one batch over distinct ids) — the roster walk
+  // that fetched every space to label a dozen results is gone. Member-only; a guest has no
+  // cross-space resolution (and the guest surface renders no space chips).
+  const hitSpaceIds = useMemo(() => [...new Set((hits ?? []).map((h) => h.spaceId).filter(Boolean))], [hits]);
+  const resolved = useResolvedSpaces(hitSpaceIds, !isGuest);
   // cmdk's highlighted value (a page id) — drives the preview pane, debounced so arrowing through
   // the list doesn't fire a view-gated fetch per keypress.
   const [selected, setSelected] = useState("");
@@ -65,9 +69,11 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
   // ICON. iconImageUrl is already assetUrl-prefixed by useSpaces; accentKey/id seed the initials fallback.
   const spaceById = useMemo(() => {
     const m = new Map<string, { id: string; name: string; iconImageUrl?: string | null }>();
-    for (const s of spaces.data ?? []) m.set(s.id, { id: s.id, name: s.name || "Untitled space", iconImageUrl: s.iconImageUrl });
+    for (const s of Object.values(resolved.data ?? {})) {
+      if (s) m.set(s.id, { id: s.id, name: s.name || "Untitled space", iconImageUrl: s.iconImageUrl });
+    }
     return m;
-  }, [spaces.data]);
+  }, [resolved.data]);
 
   const items = useMemo(
     () => (hits ?? []).map((h) => ({
