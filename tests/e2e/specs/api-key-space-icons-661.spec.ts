@@ -38,9 +38,14 @@ async function openNarrow(page: import("@playwright/test").Page) {
   // tree out from under the app (A's note on the neighbouring spec).
   await page.route((url) => url.pathname === `/api${ICON_PATH}`, (route) =>
     route.fulfill({ status: 200, contentType: "image/svg+xml", body: ICON_SVG }));
+  // #719: the stub answered a BARE ARRAY, which stopped being the endpoint's shape on `1ccc1953`
+  // (#623 slice 12b, the day after this spec was written): the route pages now, and the client reads
+  // `page.spaces`. A bare array made that `undefined ?? []` — an EMPTY list — so every assertion below
+  // was measuring a form with no rows at all. The shape is `{ spaces, nextCursor }`; the row-count
+  // assertion in the test body is what keeps this honest if the shape moves again.
   await page.route((url) => url.pathname === "/api/spaces", (route) =>
     route.request().method() === "GET"
-      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SPACES) })
+      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ spaces: SPACES, nextCursor: null }) })
       : route.fallback());
   await openDemo(page);
   await page.goto("/admin/api");
@@ -48,6 +53,10 @@ async function openNarrow(page: import("@playwright/test").Page) {
   await expect(toggle, "the create form is on screen").toBeVisible({ timeout: 20_000 });
   await toggle.click();
   await expect(page.getByTestId("api-key-space-list")).toBeVisible({ timeout: 10_000 });
+  // #719: the list ELEMENT being visible says nothing about rows — an empty box is visible too, and
+  // that is exactly how this spec sat green-shaped but vacuous for eleven days. Wait for the rows the
+  // stub promised before any measurement runs.
+  await expect(page.getByTestId("api-key-space-option").first(), "the stub's rows are drawn").toBeVisible({ timeout: 10_000 });
   await sleep(300);
 }
 
