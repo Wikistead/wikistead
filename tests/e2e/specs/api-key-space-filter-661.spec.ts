@@ -22,12 +22,21 @@ async function openNarrow(page: import("@playwright/test").Page) {
   // The browser reaches the server through the web proxy, so the pattern is the PATH the page requests,
   // matched exactly — `**/api/spaces` would also swallow `/api/spaces/<id>/pages`, and stubbing the page
   // tree out from under the app is a different test with a different (broken) subject.
-  await page.route((url) => url.pathname === "/api/spaces", (route) =>
-    route.request().method() === "GET"
-      // #623 slice 12b: the route pages now — `{ spaces, nextCursor }`. One page, no cursor: this test
-      // is about the FORM in front of forty spaces, not about the walk.
-      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ spaces: SPACES, nextCursor: null }) })
-      : route.fallback());
+  await page.route((url) => url.pathname === "/api/spaces", (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    // #623 slice 12b: the route pages — `{ spaces, nextCursor }`. #705/#710: typing asks the SERVER
+    // (`?q=`), so this stub must answer BOTH shapes or the filtered branch talks to the real tenant.
+    // browse (no q) → one page, no cursor: this test is about the FORM in front of forty spaces.
+    // search (q) → the matches, AND a cursor — i.e. the server still has more beyond this page,
+    // which is exactly the state the "more matches" line exists to announce (#710 D
+    // the old numeric hidden-count died with the roster; the signal is now the
+    // server's hasMore, and a cursor is how the server says it).
+    const q = new URL(route.request().url()).searchParams.get("q")?.trim() ?? "";
+    const body = q
+      ? { spaces: SPACES.filter((s) => s.name.toLowerCase().includes(q.toLowerCase())), nextCursor: "more-beyond-this-page" }
+      : { spaces: SPACES, nextCursor: null };
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
   await openDemo(page);
   await page.goto("/admin/api");
   const toggle = page.getByTestId("api-key-narrow-toggle");
@@ -53,11 +62,20 @@ test("#661: forty spaces do not stretch the form, and the filter narrows them", 
   expect(box.overflow, "…so the box must be the thing that scrolls").toMatch(/auto|scroll/);
   expect(box.h, "the form grew with the tenant").toBeLessThan(500);
 
+  // Before typing, the whole (stubbed) roster fits: nothing is withheld, so nothing announces it.
+  // Measuring the quiet side too is what keeps the next assertion from passing on a line that is
+  // simply always rendered.
+  await expect(page.getByTestId("api-key-space-more"), "nothing is hidden yet, so nothing says so").toHaveCount(0);
+
   // the filter narrows
   await page.getByTestId("api-key-space-filter").fill("Marketing");
   await sleep(250);
   expect(await page.getByTestId("api-key-space-option").count(), "the filter did nothing").toBe(1);
-  await expect(page.getByTestId("api-key-space-hidden"), "…and says how much it hid").toBeVisible();
+  // …and the form SAYS that what you see is not everything that matched. #710 D replaced the numeric
+  // hidden-count with this line: a count taken from the first page would silently under-state (the
+  // client no longer holds the roster), so the honest signal is the server's own "there is more".
+  // The pin is the READER'S side of that — a narrowed list must never read as the complete answer.
+  await expect(page.getByTestId("api-key-space-more"), "…and says the list is not the whole answer").toBeVisible();
 });
 
 test("#661: a space you ticked does not vanish when you keep typing", async ({ page }) => {
