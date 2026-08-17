@@ -40,6 +40,7 @@ import { SetPasswordForm } from "./SetPasswordForm";
 
 
 import { Editor, type AnchorGetter } from "../editor/Editor";
+import { setVimClipboardMode } from "../editor/live-preview/vim-clipboard";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
 
@@ -78,6 +79,11 @@ function useEditorKeymap(): [boolean, () => void] {
   const settings = useAccountSettings();
   const [vim, setVim] = useState(readLocalVim);
   const mode = settings.data?.editorKeymap; // 'vim' | 'default' | 'local' | undefined (loading)
+  // ADR-105 / #225: the vim⇄clipboard mode is a MODULE REF read at keystroke time (never a vim
+  // Compartment reconfigure — the toggle-keeps-collab invariant). Guests have no member row and
+  // never load account settings, so the ref keeps its 'off' default (pure vim) for them.
+  const clipMode = settings.data?.editorVimClipboard;
+  useEffect(() => { setVimClipboardMode(clipMode ?? "off"); }, [clipMode]);
   useEffect(() => {
     if (!mode) return;
     if (mode === "vim") setVim(true);

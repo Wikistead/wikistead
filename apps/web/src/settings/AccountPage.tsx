@@ -299,6 +299,20 @@ function EditorTab() {
       />
       </SettingsCard>
 
+      <SettingsCard testid="account-vim-clipboard">
+        {/* ADR-105 / #225: vim ⇄ OS clipboard. 'paste' = plain p/P read the system clipboard
+            (URLs linkify like Ctrl+V); yank/delete never write it. Server validates the enum. */}
+        <label className="mb-1 block text-sm font-medium">{t("account.vimClipboard")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.vimClipboardHint")}</p>
+        <RadioGroup
+          value={settings.data?.editorVimClipboard ?? "off"}
+          onChange={(v) => update.mutate({ editorVimClipboard: v as "off" | "paste" })}
+          ariaLabel={t("account.vimClipboard")}
+          testId="account-vim-clipboard"
+          options={(["off", "paste"] as const).map((m) => ({ value: m, label: t(`account.vimClipboard_${m}`) }))}
+        />
+      </SettingsCard>
+
       <SettingsCard testid="account-atom-policy">
         {/* #395A: the ADR-156 atom/typed-body policy line, on a surface EVERY user can reach
             the onboarding done-screen shows it only on first run, so existing members never saw it.

@@ -10,6 +10,12 @@ export const KEYMAP_MODES: KeymapMode[] = ['default', 'vim', 'local']
 export type DisplayModePref = 'live' | 'source' | 'wysiwyg' | 'local'
 export const DISPLAY_MODE_PREFS: DisplayModePref[] = ['live', 'source', 'wysiwyg', 'local']
 
+// ADR-105 / #225: vim register ⇄ system-clipboard mode. 'paste' makes a plain p/P read the OS
+// clipboard (through the shared linkify path); yank/delete never write it. 'full' (unnamed register
+// IS the clipboard) was ruled out on #225/— the vim engine has no stable seam for it.
+export type VimClipboardMode = 'off' | 'paste'
+export const VIM_CLIPBOARD_MODES: VimClipboardMode[] = ['off', 'paste']
+
 // #289 / ADR-115: the per-user editor CHROME VISIBILITY object (JSONB `members.editor_chrome`).
 // Visibility ONLY — the startup mode stays in editor_display_mode (single source of truth,#2).
 // null = never enrolled → all chrome shown. Validated strictly (unknown keys / non-booleans 400).
@@ -42,6 +48,10 @@ const KEYMAP_DESC: Record<KeymapMode, string> = {
   vim: 'Always start in vim mode (the toolbar toggle still switches for the session).',
   local: "Follow this device's last toolbar choice (the default).",
 }
+const VIM_CLIPBOARD_DESC: Record<VimClipboardMode, string> = {
+  off: 'Pure vim: registers and the OS clipboard stay separate; `"+y` / `"+p` are the only bridge (the default).',
+  paste: 'A plain `p` / `P` pastes the system clipboard (URLs auto-linkify like Ctrl+V); `y`/`d` never write it.',
+}
 const DISPLAY_DESC: Record<DisplayModePref, string> = {
   live: 'Always start in Live preview.',
   source: 'Always start in Source mode.',
@@ -64,6 +74,8 @@ export function renderAccountSettingsMarkdown(): string {
   for (const m of KEYMAP_MODES) lines.push(`| \`${m}\` | ${KEYMAP_DESC[m]} |`)
   lines.push('', '## Editor display mode (startup, cross-device)', '', '| Value | Meaning |', '|---|---|')
   for (const m of DISPLAY_MODE_PREFS) lines.push(`| \`${m}\` | ${DISPLAY_DESC[m]} |`)
+  lines.push('', '## Vim system clipboard (cross-device)', '', '| Value | Meaning |', '|---|---|')
+  for (const m of VIM_CLIPBOARD_MODES) lines.push(`| \`${m}\` | ${VIM_CLIPBOARD_DESC[m]} |`)
   lines.push('', '## Custom key bindings', '')
   lines.push(`Rebindable commands: ${REMAPPABLE_COMMANDS.map((c) => `\`${c}\``).join(', ')}.`)
   lines.push('', `Reserved (never bindable — browser-owned): ${RESERVED_KEYS.map((k) => `\`${k}\``).join(', ')}.`)

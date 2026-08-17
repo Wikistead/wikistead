@@ -767,6 +767,7 @@ export interface AccountSettings {
   identitySource: string;             // #523 / ADR-190: 'oidc' → name is IdP-managed (read-only); 'local' → editable
   editorKeymap: "default" | "vim" | "local"; // startup-mode preference (keymap)
   editorDisplayMode: "live" | "source" | "wysiwyg" | "local"; // startup display mode (ADR-056 / #164 · #289 wysiwyg)
+  editorVimClipboard: "off" | "paste"; // vim ⇄ OS clipboard mode (ADR-105 / #225); 'off' = pure vim
   keybindings: Record<string, string>; // commandId → chord override (ADR-021); {} = defaults
   hasAvatar: boolean;
   editorChrome: EditorChromeVisibility | null; // #289: visibility only (startup mode stays above)
@@ -857,7 +858,7 @@ export function useUpdateAccountSettings() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean }) =>
+    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; editorVimClipboard?: "off" | "paste"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean }) =>
       apiFetch<AccountSettings>("/me/settings", token, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
   });
