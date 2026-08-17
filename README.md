@@ -1,14 +1,19 @@
 # wikistead
 
-Self-hostable, multi-tenant **collaborative knowledge-base SaaS**. Markdown-based
-editor with two surfaces over one CRDT document: a **vim** source+preview surface
-for technical users and an **Obsidian-style live-preview** surface for everyone
-else. Core differentiator: **anonymous real-time co-editing via share links**.
+Self-hostable, multi-tenant **collaborative knowledge-base SaaS**. A Markdown-first
+editor on a **single CodeMirror 6 live-preview surface** over one CRDT document —
+tables, diagrams and callouts render in place while the source stays plain
+Markdown, and technical users get a **real vim mode** (a keymap toggle, not a
+separate editor). Core differentiator: **anonymous real-time co-editing via share
+links**.
 
-Built to ship **closed-source or open-core** — every dependency is permissive
-(MIT / Apache-2.0 / BSD / ISC), enforced by a CI license allowlist.
+Ships **open-core** — the Community Edition is AGPL-3.0, and every bundled
+dependency is permissive (MIT / Apache-2.0 / BSD / ISC), enforced by a CI license
+allowlist.
 
-## Locked architecture (see prompt + ADRs)
+## Locked architecture
+Locked decisions are recorded as ADR-nnn design records, cited throughout the code
+comments (the maintainers' design log).
 | Concern | Decision |
 |---|---|
 | Authorization | **OpenFGA** (ReBAC). Space→page inheritance, per-page override, groups, share-link subjects with time Conditions. |
@@ -16,7 +21,7 @@ Built to ship **closed-source or open-core** — every dependency is permissive
 | Members | **OIDC — any compliant IdP, configured per tenant** (password, Google, Microsoft, SAML-bridged, etc.). The app validates against each tenant's registered JWKS; no specific IdP is mandated. |
 | Billing | **Stripe**; entitlement layer separate from authz (free→paid guest access is one setting). |
 | Tenancy | **Hybrid, method-agnostic**: logical (RLS) default, namespace promotion for enterprise. App never branches on it. |
-| Editing | Single canonical **`Y.Text`** + **CodeMirror 6** two surfaces (vim / live-preview). No block UI, no CRDT-type bridging. |
+| Editing | Single canonical **`Y.Text`** + one **CodeMirror 6** live-preview surface (vim is a keymap toggle on the same surface). No block UI, no CRDT-type bridging. |
 | Realtime | **Yjs + Hocuspocus**, scaled via **Valkey**. Local edit target <16ms; remote propagation is a separate SLO. |
 | Search | **Meilisearch** (single index + tenant tokens). Denormalized viewer ACL filter → confirm the displayed dozen via OpenFGA → revoke = sync reindex (outbox). |
 | Storage | **S3-compatible** abstraction; default OSS impl **SeaweedFS** (Apache-2.0, see ADR-014), swappable for R2 / S3. Tenant key-prefixing, browser presigned PUT/GET. |
@@ -38,7 +43,7 @@ packages/
   hooks/    CE extension hook points
   entitlements/  plan → limits resolution, separate from authz
 infra/openfga/model.fga   authorization model (DSL, see ADR-002)
-infra/db/migrations/      001 tenants … 011 page nesting
+infra/db/migrations/      numbered SQL migrations (applied by `migrate`)
 deploy/caddy/             single-host reverse proxy for self-hosting (ACME TLS)
 docker-compose.yml        full local middleware stack
 ```
@@ -129,7 +134,7 @@ top. Test counts are integration tests against **real Postgres + real OpenFGA**
 
 Code comments cite ADR-nnn design records throughout — the maintainers' design log,
 where locked decisions and their reasoning live.
-Migrations 001–011 are applied by `migrate`. Remaining `TODO(phase: ...)` markers
+Migrations are applied by `migrate`. Remaining `TODO(phase: ...)` markers
 point at the polish/business items below, not missing core features.
 
 ## Remaining (polish + business)
@@ -151,9 +156,9 @@ records cited below):
   S3 offload.
 - **Business / legal**: final plan limits + pricing and a metered-overage soft cap;
   CE/EE split + AGPL legal review; the copyright line on `LICENSE`. Release tooling is
-  in place (semantic-release derives the version from commit subjects, and a merge to
-  the default branch releases itself); promoting a release to production stays a
-  human act.
+  in place (semantic-release derives the version from commit subjects; the workflow
+  keeps one release PR open and up to date, and merging that PR is what cuts the
+  version); promoting a release to production stays a second human act.
 
 ## Contributing
 
