@@ -61,8 +61,8 @@ but do tell us if we ship a vulnerable version so we can update the pin).
 ## Supported versions
 
 Wikistead is pre-1.0 and evolving quickly. Security fixes are made against the **latest
-release and `main`**. If no tagged release exists yet, `main` is the supported line. We do
-not backport fixes to older commits before 1.0.
+release and the default branch**. If no tagged release exists yet, the default branch is
+the supported line. We do not backport fixes to older commits before 1.0.
 
 ## Disclosure process
 
