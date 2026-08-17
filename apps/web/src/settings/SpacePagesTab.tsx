@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Trash2, Upload, Lock, LockOpen, Download, FolderInput } from "lucide-react";
-import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages, useBulkSetPageVisibility, useBulkMovePages, useSpaces } from "../data/queries";
+import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages, useBulkSetPageVisibility, useBulkMovePages, useSpacesPage, useSpaceNameSearch } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
@@ -41,7 +41,9 @@ export function SpacePagesTab() {
   const bulkPublish = useBulkPublishPages();
   const bulkVisibility = useBulkSetPageVisibility();
   const bulkMove = useBulkMovePages();
-  const spaces = useSpaces();
+  const spaces = useSpacesPage();
+  const [moveFilter, setMoveFilter] = useState("");
+  const moveSearch = useSpaceNameSearch(moveFilter); // #710: the server matches EVERY manageable space, not one roster page
   const { token } = useSession();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -113,7 +115,12 @@ export function SpacePagesTab() {
   // #511 slice 5: move the selection into another space. The picker lists ONLY spaces the caller manages
   // (the approved rule), and the server re-checks that manage on the destination — the UI narrowing is a
   // convenience, never the gate.
-  const moveTargets = (spaces.data ?? []).filter((s) => s.id !== spaceId && s.capability === "manage");
+  // #710: the destination list is the first roster page (bounded browse) or, when the reader types,
+  // the server's name search — either way filtered to manage-capability here; the server re-checks
+  // the move regardless. No client walk assembles "every space" any more.
+  const moveSource = moveFilter.trim() ? (moveSearch.data?.spaces ?? []) : (spaces.data?.spaces ?? []);
+  const moveTargets = moveSource.filter((s) => s.id !== spaceId && s.capability === "manage");
+  const moveHasMore = moveFilter.trim() ? (moveSearch.data?.hasMore ?? false) : (spaces.data?.hasMore ?? false);
   const runBulkMove = () => {
     const ids = [...selected];
     const targetSpaceId = moveTarget;
@@ -299,22 +306,33 @@ export function SpacePagesTab() {
         confirmTestId="bulk-move-confirm"
         tone="primary"
         warning={
-          moveTargets.length === 0
-            ? <p className="text-sm text-fg-dim" data-testid="bulk-move-empty">{t("spacePages.moveNoTargets")}</p>
-            : (
-              <label className="flex flex-col gap-1 text-sm">
-                {t("spacePages.moveTarget")}
-                <select
-                  className="rounded-md border border-border bg-panel p-1"
-                  data-testid="bulk-move-target"
-                  value={moveTarget}
-                  onChange={(e) => setMoveTarget(e.target.value)}
-                >
-                  <option value="">{t("spacePages.movePlaceholder")}</option>
-                  {moveTargets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </label>
-            )
+          <div className="flex flex-col gap-2">
+            {/* #710: type to find a destination past the first roster page — the server answers. */}
+            <input
+              className="rounded-md border border-border bg-panel p-1 text-sm"
+              data-testid="bulk-move-filter"
+              placeholder={t("spacePages.moveFilterPlaceholder")}
+              value={moveFilter}
+              onChange={(e) => setMoveFilter(e.target.value)}
+            />
+            {moveTargets.length === 0
+              ? <p className="text-sm text-fg-dim" data-testid="bulk-move-empty">{t("spacePages.moveNoTargets")}</p>
+              : (
+                <label className="flex flex-col gap-1 text-sm">
+                  {t("spacePages.moveTarget")}
+                  <select
+                    className="rounded-md border border-border bg-panel p-1"
+                    data-testid="bulk-move-target"
+                    value={moveTarget}
+                    onChange={(e) => setMoveTarget(e.target.value)}
+                  >
+                    <option value="">{t("spacePages.movePlaceholder")}</option>
+                    {moveTargets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </label>
+              )}
+            {moveHasMore && <p className="text-xs text-fg-dim" data-testid="bulk-move-more">{t("spacePages.moveMore")}</p>}
+          </div>
         }
       />
 

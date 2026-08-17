@@ -58,17 +58,6 @@ export function visibleSpaces(spaces: Space[], currentId: string | undefined, qu
   return out;
 }
 
-// #263 rejection ①: how many viewable spaces are hidden by the bounded default list, so the switcher can
-// tell the user "there are more — search to find them" instead of silently truncating. Zero while a query
-// is active (search spans ALL viewable spaces, so nothing is hidden) and never negative.
-export function hiddenSpaceCount(total: number, shown: number, query: string): number {
-  if (query.trim()) return 0;
-  return Math.max(0, total - shown);
-}
-
-// #287: the "show all" list — EVERY viewable space, NAME-sorted (case-insensitive) for browsing when you
-// can't remember a name. Distinct from the bounded default (current + recents order): this is the full set
-// to scan. Same server-FGA-filtered `spaces` set — no new fetch, no new permission surface.
-export function allSpacesSorted(spaces: Space[]): Space[] {
-  return [...spaces].sort((a, b) => (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" }));
-}
+// #710: hiddenSpaceCount and allSpacesSorted are GONE. The first counted over a roster the client
+// no longer holds (a first-page count would silently under-state); the second sorted it (name order
+// is a server keyset walk now — useSpacesByName). Their jobs moved server-side with the walk.

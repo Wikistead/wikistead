@@ -6,10 +6,10 @@ import { expiryChoices, defaultExpiry } from "./key-expiry-choices";
 import { RESOURCE_TYPE_OPTIONS, derivedScope, newKeyDefaultExpiry, type Matrix } from "./api-key-permissions";
 import { useTranslation } from "react-i18next";
 import { Copy, Trash2, ChevronRight } from "lucide-react"; // #544: an icon component, never a text glyph
-import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpaces, useSpaceNameSearch, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
+import { useCreateApiKey, useCreateNarrowedApiKey, useRevokeApiKey, useAdminRevokeApiKey, useSpacesPage, useSpaceNameSearch, type ApiScope, type ApiKeySummary, type ApiKeyCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
-import { filterSpaceOptions, hiddenCount, type SpaceOption } from "./space-filter";
+import { filterSpaceOptions, type SpaceOption } from "./space-filter";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: revoking a key is irreversible — confirm first
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
@@ -114,7 +114,7 @@ export function ApiKeysPanel({
   // case and the one the form should stay simple for. Spaces are a FLAT list: ADR-215 declined per-page
   // narrowing precisely because a page picker means handling a tree, and a space picker does not.
   const narrowedCreate = useCreateNarrowedApiKey();
-  const spacesQ = useSpaces();
+  const spacesQ = useSpacesPage();
   const [spaceFilter, setSpaceFilter] = useState("");
   const [narrowing, setNarrowing] = useState(false);
   // #705 (review must-fix 6): picked spaces are kept as OPTIONS, not ids — the server-side filter
@@ -126,12 +126,16 @@ export function ApiKeysPanel({
   // line; no number (the density-oracle ruling — the count of non-matching spaces is unknowable
   // here and must not be faked).
   const spaceSearch = useSpaceNameSearch(spaceFilter);
-  const allSpaces = spacesQ.data ?? [];
+  // #710 B: the browse list is the FIRST roster page; typing asks the server (every viewable space,
+  // #705). The numeric hidden count is gone with the roster — a first-page count would under-state
+  // silently, so the "more" line is a boolean in both modes (the density-oracle rule).
+  const allSpaces = spacesQ.data?.spaces ?? [];
   const filtering = spaceFilter.trim().length > 0;
   const sourceSpaces = filtering ? (spaceSearch.data?.spaces ?? []) : allSpaces;
   const shownSpaces = filterSpaceOptions(sourceSpaces, spaceFilter, pickedSpaces);
-  const hidden = filtering ? 0 : hiddenCount(allSpaces, shownSpaces);
-  const moreMatches = filtering && (spaceSearch.data?.hasMore ?? false);
+  const moreMatches = filtering
+    ? (spaceSearch.data?.hasMore ?? false)
+    : (spacesQ.data?.hasMore ?? false);
   // #667 / ADR-221 §1: the resource-type matrix replaces the six borrowed role verbs AND the scope
   // Select. The reader picks once; `scope` falls out of what they picked (§5), and the METHOD CEILING
   // stays a separate mechanism in the server so an all-read key cannot write even when the route map is
@@ -271,13 +275,10 @@ export function ApiKeysPanel({
                     </label>
                   ))}
                 </ListBox>
-                {/* A narrowed list must not read as a short one. Without this, "3 spaces" looks like the
-                    whole tenant and a key gets issued against a roster the reader thinks is complete. */}
-                {hidden > 0 && (
-                  <span className="text-xs text-fg-dim" data-testid="api-key-space-hidden">
-                    {t("adminApi.spaceFilterHidden", { count: hidden })}
-                  </span>
-                )}
+                {/* A short list must not read as the whole tenant — a key would get issued against a
+                    roster the reader thinks is complete. #710: the signal is a boolean in BOTH modes
+                    now (first page has more / search has more); a number would come from a roster the
+                    client no longer holds and silently under-state. */}
                 {moreMatches && (
                   <span className="text-xs text-fg-dim" data-testid="api-key-space-more">
                     {t("adminApi.spaceFilterMore")}

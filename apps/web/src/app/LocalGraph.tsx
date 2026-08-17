@@ -1,10 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import Graph from "graphology";
 import Sigma from "sigma";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import { useTheme } from "./ThemeProvider";
-import { useSpaces, type LocalGraphResult } from "../data/queries";
+import { useResolvedSpaces, type LocalGraphResult } from "../data/queries";
 import { colorHexFromString } from "../ui/avatar";
 
 // #394 / ADR-147: the local link-graph canvas (sigma.js + graphology — the user-ruled renderer). PURE
@@ -34,8 +34,12 @@ export function LocalGraphCanvas({
   // a per-page grant into an otherwise invisible space — draws in ONE shared neutral color with a
   // single generic legend row. The neutral bucket is a UI measure, not a security boundary (the
   // enforced boundary is the name; spaceId-level grouping is pre-existing wire behaviour).
-  const spaces = useSpaces();
-  const knownSpaces = new Map((spaces.data ?? []).map((s) => [s.id, s.name]));
+  // #710: resolve the spaces the GRAPH's nodes name, by id — the graph labels what it draws, not
+  // the whole roster. The neutral-bucket rule below is unchanged: an unresolvable space (null) is
+  // exactly the "not in the viewer's list" case it always handled.
+  const nodeSpaceIds = useMemo(() => [...new Set(data.nodes.map((n) => n.spaceId).filter(Boolean))], [data.nodes]);
+  const resolved = useResolvedSpaces(nodeSpaceIds);
+  const knownSpaces = new Map(Object.values(resolved.data ?? {}).filter((s): s is NonNullable<typeof s> => s != null).map((s) => [s.id, s.name]));
   const knownSpacesKey = [...knownSpaces.keys()].sort().join(",");
   // The handler lives in a ref so pointer wiring survives re-renders without rebuilding the sigma instance.
   const openRef = useRef(onOpenPage);

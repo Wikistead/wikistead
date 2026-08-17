@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
-import { useSearch, useSpaces } from "../data/queries";
+import { useSearch, useResolvedSpaces } from "../data/queries";
 import { useDebouncedValue } from "../search/useDebouncedValue";
 import { HitPreviewPane } from "../search/HitPreviewPane";
 import { SpaceIcon } from "../ui/SpaceIcon";
@@ -19,8 +19,10 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
   const [input, setInput] = useState("");
   const debounced = useDebouncedValue(input, 250);
   const { data: hits } = useSearch(debounced);
-  const spaces = useSpaces();
-  const space = (id: string) => (spaces.data ?? []).find((s) => s.id === id) ?? null;
+  // #710: resolve the spaces the HITS name, by id — no roster walk to label a result list.
+  const hitSpaceIds = useMemo(() => [...new Set((hits ?? []).map((h) => h.spaceId).filter(Boolean))], [hits]);
+  const resolved = useResolvedSpaces(hitSpaceIds);
+  const space = (id: string) => resolved.data?.[id] ?? null;
   const spaceName = (id: string) => space(id)?.name ?? "";
   // #348: the highlighted hit id drives the right preview pane, debounced so arrowing doesn't fetch per keypress.
   const [selected, setSelected] = useState("");

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
 import { useSession } from "../session/SessionProvider";
@@ -77,31 +77,73 @@ export interface Page {
   updatedByHasAvatar?: boolean;
 }
 
-export function useSpaces(enabled = true) {
+// #710 B: the FIRST PAGE of the roster, and nothing more — the walk that turned every app open into
+// 4 round-trips / 94 KB on a 330-space tenant is gone. Surfaces that hold a space ID resolve it via
+// useResolvedSpaces below (one batch, never a walk); browse/search surfaces page or ask the server.
+// `hasMore` says a page boundary exists — it is a boolean on purpose, never a count (the density-
+// oracle ruling: the server does not reveal how many spaces the caller cannot see past the page).
+const prefixIcons = (spaces: Space[]) =>
+  spaces.map((s) => ({ ...s, iconImageUrl: s.iconImageUrl ? assetUrl(s.iconImageUrl) : null }));
+
+export function useSpacesPage(enabled = true) {
   const { token } = useSession();
   return useQuery({
     queryKey: ["spaces"],
-    // #623 slice 12b: the route pages now, so this walks it and hands its callers the same complete
-    // array they had before. The sidebar switcher and the API-key space picker both filter on the
-    // client and both say how many are hidden — paging THEM would turn "filter" into "filter this
-    // page" and make the hidden count a lie, which is acceptance 1 and 2 and needs its own slice.
-    //
-    // What this does fix is the payload: a tenant with 253 spaces no longer receives all of them in one
-    // response. The walk keeps going while `nextCursor` is non-null, INCLUDING over pages that came
-    // back empty — the server filters by authorization after the SQL, so an empty page does not mean
-    // the end (see `listSpaces`). Stopping early would silently shorten somebody's space list.
     queryFn: async () => {
-      const out: Space[] = [];
-      let cursor: string | null = null;
-      do {
-        const page: { spaces: Space[]; nextCursor: string | null } | null = await apiFetch(
-          `/spaces${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, token,
-        );
-        out.push(...(page?.spaces ?? []));
-        cursor = page?.nextCursor ?? null;
-      } while (cursor);
-      return out.map((s) => ({ ...s, iconImageUrl: s.iconImageUrl ? assetUrl(s.iconImageUrl) : null }));
+      const page = await apiFetch<{ spaces: Space[]; nextCursor: string | null }>(`/spaces`, token);
+      return { spaces: prefixIcons(page?.spaces ?? []), hasMore: (page?.nextCursor ?? null) != null };
     },
+    enabled,
+  });
+}
+
+// #710 A: resolve spaces BY ID (POST /spaces/resolve) — the id-holding surfaces' path: the sidebar's
+// active space, pins/recents, home normalization, deleteMode, pickers' selected rows, search-hit and
+// graph-node space names. One batch per distinct id-set (React Query dedupes identical sets), never
+// an id-per-request fan-out. The server answers EVERY id, uniformly: null means "not yours to see",
+// byte-identical for a space that does not exist — so a null is safe to treat as gone.
+export function useResolvedSpaces(ids: string[], enabled = true) {
+  const { token } = useSession();
+  const wanted = useMemo(() => [...new Set(ids.filter(Boolean))].sort(), [ids]);
+  return useQuery({
+    queryKey: ["spaces-resolve", wanted],
+    queryFn: async () => {
+      const res = await apiFetch<{ spaces: Record<string, Space | null> }>(`/spaces/resolve`, token, {
+        method: "POST",
+        body: JSON.stringify({ ids: wanted }),
+      });
+      const out: Record<string, Space | null> = {};
+      for (const id of wanted) {
+        const s = res?.spaces?.[id] ?? null;
+        out[id] = s ? { ...s, iconImageUrl: s.iconImageUrl ? assetUrl(s.iconImageUrl) : null } : null;
+      }
+      return out;
+    },
+    enabled: enabled && wanted.length > 0,
+  });
+}
+
+/** One id through the batch resolver. undefined = still resolving; null = not visible / gone. */
+export function useResolvedSpace(id: string | undefined | null, enabled = true): Space | null | undefined {
+  const q = useResolvedSpaces(id ? [id] : [], enabled);
+  if (!id) return null;
+  return q.data === undefined ? undefined : (q.data[id] ?? null);
+}
+
+// #710 C: the NAME-ORDERED browse (#287's "show all"), paged — the reader pages through on demand;
+// the client never walks the whole roster on its own.
+export function useSpacesByName(enabled = true) {
+  const { token } = useSession();
+  return useInfiniteQuery({
+    queryKey: ["spaces-by-name"],
+    queryFn: async ({ pageParam }) => {
+      const page = await apiFetch<{ spaces: Space[]; nextCursor: string | null }>(
+        `/spaces?order=name${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`, token,
+      );
+      return { spaces: prefixIcons(page?.spaces ?? []), nextCursor: page?.nextCursor ?? null };
+    },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled,
   });
 }

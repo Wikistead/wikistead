@@ -5,7 +5,7 @@ import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
 import { useActiveSpace } from "../app/ActiveSpace";
 import { useSession } from "../session/SessionProvider";
-import { useSpaces, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon, usePublicSurface, useSpacePublic, useSetSpacePublic, usePageCreationPolicy, useSetPageCreationPolicy, useSpaceDeleteMode, useSetSpaceDeleteMode } from "../data/queries";
+import { useResolvedSpace, useRenameSpace, useDeleteSpace, useUploadSpaceIcon, useRemoveSpaceIcon, usePublicSurface, useSpacePublic, useSetSpacePublic, usePageCreationPolicy, useSetPageCreationPolicy, useSpaceDeleteMode, useSetSpaceDeleteMode } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ShareDialog } from "../ui/ShareDialog";
 import { Input } from "../ui/Input";
@@ -44,7 +44,7 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
 // #607: through the shared resolver, so a new verb cannot land somebody on a tab they cannot see.
 function SpaceSettingsIndex() {
   const { spaceId } = useParams<{ spaceId: string }>();
-  const space = (useSpaces().data ?? []).find((s) => s.id === spaceId);
+  const space = useResolvedSpace(spaceId) ?? undefined; // #710: by id, not roster membership
   // `space == null` means the list has not answered yet; general is where a manager goes and the
   // layout denies anyone else before this renders.
   return <Navigate to={space == null ? "general" : landingSpaceTab(space) ?? "general"} replace />;
@@ -55,7 +55,7 @@ function SpaceSettingsLayout() {
   const { spaceId } = useParams<{ spaceId: string }>();
   const { status, logout } = useSession();
   const { setActiveSpaceId } = useActiveSpace();
-  const spacesQ = useSpaces();
+  const resolvedSpace = useResolvedSpace(spaceId); // #710: by id — the roster page is irrelevant here
   const allTabs = useSpaceTabs(spaceId ?? "");
   const location = useLocation();
 
@@ -65,13 +65,13 @@ function SpaceSettingsLayout() {
 
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
-  if (spacesQ.isLoading) return <AppShell onLogout={logout}><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (resolvedSpace === undefined) return <AppShell onLogout={logout}><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
 
-  // useSpaces is FGA-filtered: a space the user cannot VIEW never appears here.
-  // Leak rule: not viewable → 404 (hide its existence); viewable but not manage →
-  // 403 (it's in their tree, so existence is already known — deny by permission).
+  // Resolution is FGA-filtered exactly like the listing was: a space the user cannot VIEW answers
+  // null, byte-identical to one that does not exist (#710 kept the leak rule: not viewable → 404
+  // face). Viewable but no tab open → 403 (existence already known — deny by permission).
   // The server stays the fortress: rename/delete re-check space#manage regardless.
-  const space = (spacesQ.data ?? []).find((s) => s.id === spaceId);
+  const space = resolvedSpace;
   if (!space) return <AppShell onLogout={logout}><SettingsDenied kind="notFound" /></AppShell>;
   // #326: a space MODERATOR is not a manager, but the moderation queue is theirs. They may enter
   // settings to reach that one tab; every other tab stays manager-only, and each of those surfaces
