@@ -19,6 +19,16 @@ import { fileURLToPath } from 'node:url'
 // whole tokens.css (internal tokens stay internal), never a hand copy (a copy is a second truth).
 const BRAND_TOKENS = ['bg', 'fg', 'fg-dim', 'panel', 'panel-2', 'panel-3', 'border', 'accent', 'accent-fg'] as const
 
+// #709: the TYPE tokens ride the kit too — colours alone left the consuming sites hand-picking
+// faces (the docs set body text in the wordmark face; the exact double bookkeeping the kit exists
+// to end). Theme-independent, extracted once, emitted on :root. Internal var() references are
+// rewritten to the kit's own names so the emitted values resolve without the product stylesheet.
+const FONT_TOKENS: readonly { from: string; to: string }[] = [
+  { from: 'font', to: 'font' }, // body/UI: Inter + Noto Sans JP
+  { from: 'font-code', to: 'font-mono' }, // code: Wikistead Mono
+  { from: 'font-wordmark', to: 'font-wordmark' }, // the wordmark face, wordmark-ONLY
+]
+
 function renderBrandCss(): string {
   const src = readFileSync(join(root, 'apps/web/src/styles/tokens.css'), 'utf8')
   const themes: Record<'light' | 'dark', Record<string, string>> = { light: {}, dark: {} }
@@ -38,14 +48,31 @@ function renderBrandCss(): string {
       if (!(name in themes[t])) throw new Error(`brand kit: token --${name} not found for ${t} in tokens.css — the extraction or the token moved`)
     }
   }
+  // #709: fonts — first declaration wins (they are theme-independent); a missing one is the same
+  // hard error as a missing colour. var(--font) inside a value is rewritten to var(--wks-font) so
+  // the emitted chain resolves inside the consuming site.
+  const fonts: Record<string, string> = {}
+  for (const line of src.split('\n')) {
+    const decl = line.match(/^\s*--([a-z0-9-]+):\s*([^;]+);/)
+    if (!decl) continue
+    const [, name, value] = decl
+    const spec = FONT_TOKENS.find((f) => f.from === name)
+    if (spec && !(spec.to in fonts)) fonts[spec.to] = value!.trim().replace(/var\(--font\)/g, 'var(--wks-font)')
+  }
+  for (const spec of FONT_TOKENS) {
+    if (!(spec.to in fonts)) throw new Error(`brand kit: font token --${spec.from} not found in tokens.css — the extraction or the token moved`)
+  }
   const block = (vars: Record<string, string>) => BRAND_TOKENS.map((n) => `  --wks-${n}: ${vars[n]};`).join('\n')
   return [
     '/* AUTO-GENERATED — DO NOT EDIT BY HAND.',
-    ' * Source: apps/web/src/styles/tokens.css (the public brand subset, #706).',
+    ' * Source: apps/web/src/styles/tokens.css (the public brand subset, #706; type tokens #709).',
     ' * Regenerate: pnpm docs:gen · Verify (CI): pnpm docs:check',
-    ' * Consumed by the docs site (and the LP) through the pinned generated-docs pull. */',
+    ' * Consumed by the docs site (and the LP) through the pinned generated-docs pull.',
+    ' * Font FACES are not in the kit: Inter / Noto Sans JP / Plus Jakarta Sans ship as @fontsource',
+    ' * packages (the same delivery the product uses); Wikistead Mono woff2 rides beside this file. */',
     ':root {',
     block(themes.light),
+    FONT_TOKENS.map((f) => `  --wks-${f.to}: ${fonts[f.to]};`).join('\n'),
     '}',
     ":root[data-theme='dark'] {",
     block(themes.dark),

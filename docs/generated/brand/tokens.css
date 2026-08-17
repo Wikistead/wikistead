@@ -1,7 +1,9 @@
 /* AUTO-GENERATED — DO NOT EDIT BY HAND.
- * Source: apps/web/src/styles/tokens.css (the public brand subset, #706).
+ * Source: apps/web/src/styles/tokens.css (the public brand subset, #706; type tokens #709).
  * Regenerate: pnpm docs:gen · Verify (CI): pnpm docs:check
- * Consumed by the docs site (and the LP) through the pinned generated-docs pull. */
+ * Consumed by the docs site (and the LP) through the pinned generated-docs pull.
+ * Font FACES are not in the kit: Inter / Noto Sans JP / Plus Jakarta Sans ship as @fontsource
+ * packages (the same delivery the product uses); Wikistead Mono woff2 rides beside this file. */
 :root {
   --wks-bg: #ffffff;
   --wks-fg: #1f2328;
@@ -12,6 +14,9 @@
   --wks-border: #d0d7de;
   --wks-accent: #2563eb;
   --wks-accent-fg: #ffffff;
+  --wks-font: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  --wks-font-mono: "Wikistead Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --wks-font-wordmark: "Plus Jakarta Sans", var(--wks-font);
 }
 :root[data-theme='dark'] {
   --wks-bg: #1e1e1e;

@@ -23,7 +23,7 @@ export function BrandLockup() {
   return (
     <span className="inline-flex items-center gap-2 text-foreground" data-testid="brand">
       <WikisteadMark />
-      <span className="text-[18px] font-semibold leading-none tracking-[-0.02em]" style={{ fontFamily: '"Plus Jakarta Sans", var(--font)' }}>Wikistead</span>
+      <span className="text-[18px] font-semibold leading-none tracking-[-0.02em]" style={{ fontFamily: "var(--font-wordmark)" }}>Wikistead</span>
     </span>
   );
 }
