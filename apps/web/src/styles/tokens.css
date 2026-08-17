@@ -298,6 +298,10 @@
   --font-body: var(--font);
   --font-body-vim: "UDEV Gothic", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-code: "Wikistead Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* #709: the wordmark face, AS A TOKEN — it was an inline literal in BrandLockup, which left the
+     brand kit unable to derive it and the docs site hand-picking a body face (the exact double
+     bookkeeping #706 exists to end). Wordmark-ONLY: nothing else may ride this token. */
+  --font-wordmark: "Plus Jakarta Sans", var(--font);
 
   /* Type scale (Group C). Two tiers: reading/prose content is 16px (--text-body,
      inherited by the editor), the operating surface (sidebar, buttons, toolbar,
