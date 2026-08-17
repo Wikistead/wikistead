@@ -23,6 +23,7 @@ import { macroFold } from "./macros";
 import { registerVimFold } from "./live-preview/vim-fold";
 import { registerVimHalfPage } from "./live-preview/vim-halfpage";
 import { atomDelete, atomYank, vimWysiwygCaretGuard } from "./live-preview/vim-atom";
+import { vimClipboardPaste } from "./live-preview/vim-clipboard";
 import { blockDrag } from "./live-preview/block-drag";
 import { everforestHighlight } from "./everforest-highlight";
 import { mathField } from "./live-preview/math";
@@ -238,6 +239,9 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     // key lands ON the atom, the next steps past it (macros stay rendered; non-macro
     // blocks reveal on landing). motionKeyTracker gates the overshoot clamp. Editable only.
     ...(readOnly ? [] : [motionKeyTracker, blockEntry, wysiwygInlineSkip, atomDelete, atomYank, vimWysiwygCaretGuard]),
+    // ADR-105 / #225: vim p/P read the OS clipboard when the account setting opts in ('paste').
+    // Nested islands paste WITHOUT linkify (Ctrl+V parity — paste-linkify's island bypass).
+    ...(readOnly ? [] : [vimClipboardPaste(env.nested === true)]),
     // #84: a left-gutter grip per top-level block; drag it to reorder (one Yjs op). Display-only gutter +
     // drop indicator; editable surface only. NOT in a nested island — block reorder is a page-structure
     // affordance, and a drag crossing the island boundary has no defined target.

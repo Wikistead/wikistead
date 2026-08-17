@@ -5,7 +5,7 @@ import type { StorageDriver } from '../storage/index.js'
 import { isSpaceCreator } from '@wikistead/authz' // #445 the caller's own space-creation capability
 // Account settings option sets live in the pure settings-catalog leaf (#139 doc↔code linkage):
 // the SINGLE source for both this route's validation and the generated settings reference.
-import { KEYMAP_MODES, DISPLAY_MODE_PREFS, REMAPPABLE_COMMANDS, RESERVED_KEYS, validateEditorChrome, type KeymapMode, type DisplayModePref, type EditorChromeVisibility } from '../settings-catalog.js'
+import { KEYMAP_MODES, DISPLAY_MODE_PREFS, VIM_CLIPBOARD_MODES, REMAPPABLE_COMMANDS, RESERVED_KEYS, validateEditorChrome, type KeymapMode, type DisplayModePref, type VimClipboardMode, type EditorChromeVisibility } from '../settings-catalog.js'
 export type { KeymapMode, DisplayModePref, EditorChromeVisibility }
 
 // ADR-020 — personal account settings. SELF-SCOPE: every read/write is keyed to the
@@ -51,6 +51,7 @@ export interface AccountSettings {
   identitySource: string
   editorKeymap: KeymapMode            // startup-mode preference (keymap)
   editorDisplayMode: DisplayModePref  // startup display mode (ADR-056 / #164)
+  editorVimClipboard: VimClipboardMode // vim ⇄ OS clipboard mode (ADR-105 / #225); 'off' = pure vim
   keybindings: Record<string, string> // commandId → chord override (ADR-021); {} = defaults
   hasAvatar: boolean                  // an uploaded avatar exists (else OIDC/initials)
   // #289 / ADR-115: chrome visibility (null = never enrolled → all shown) + the first-run gate
@@ -69,8 +70,8 @@ export interface AccountSettings {
 }
 
 export async function getAccountSettings(db: TenantDb, args: { subject: string }): Promise<AccountSettings> {
-  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null; notifications_enabled: boolean | null; default_event_mask: string[] | null; email_immediate: boolean | null; email_digest: boolean | null; identity_source: string }?]>`
-    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, keybindings, editor_chrome, onboarding_completed_at, notifications_enabled, default_event_mask, email_immediate, email_digest, identity_source
+  const [m] = await db.sql<[{ display_name: string | null; display_name_override: string | null; avatar_image_key: string | null; editor_keymap: string | null; editor_display_mode: string | null; editor_vim_clipboard: string | null; keybindings: unknown; editor_chrome: unknown; onboarding_completed_at: Date | string | null; notifications_enabled: boolean | null; default_event_mask: string[] | null; email_immediate: boolean | null; email_digest: boolean | null; identity_source: string }?]>`
+    SELECT display_name, display_name_override, avatar_image_key, editor_keymap, editor_display_mode, editor_vim_clipboard, keybindings, editor_chrome, onboarding_completed_at, notifications_enabled, default_event_mask, email_immediate, email_digest, identity_source
     FROM members WHERE sub = ${args.subject} LIMIT 1`
   if (!m) throw Object.assign(new Error('no member row'), { statusCode: 404 })
   // JSONB comes back as a raw JSON string from this pg driver — parse it (null → {}).
@@ -83,6 +84,7 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
     identitySource: m.identity_source ?? 'oidc',
     editorKeymap: (KEYMAP_MODES as string[]).includes(m.editor_keymap ?? '') ? (m.editor_keymap as KeymapMode) : 'local',
     editorDisplayMode: (DISPLAY_MODE_PREFS as string[]).includes(m.editor_display_mode ?? '') ? (m.editor_display_mode as DisplayModePref) : 'local',
+    editorVimClipboard: (VIM_CLIPBOARD_MODES as string[]).includes(m.editor_vim_clipboard ?? '') ? (m.editor_vim_clipboard as VimClipboardMode) : 'off',
     keybindings: kb as Record<string, string>,
     hasAvatar: !!m.avatar_image_key,
     editorChrome: chromeRaw as EditorChromeVisibility | null,
@@ -143,13 +145,16 @@ export async function getMyActivity(db: TenantDb, args: { subject: string; tz?: 
 // only display_name, so the override set here survives re-login (ADR-020 D2).
 export async function updateAccountSettings(
   db: TenantDb,
-  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean },
+  args: { subject: string; displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; editorVimClipboard?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean },
 ): Promise<AccountSettings> {
   if (args.editorKeymap !== undefined && !(KEYMAP_MODES as string[]).includes(args.editorKeymap)) {
     throw Object.assign(new Error('invalid keymap'), { statusCode: 400 })
   }
   if (args.editorDisplayMode !== undefined && !(DISPLAY_MODE_PREFS as string[]).includes(args.editorDisplayMode)) {
     throw Object.assign(new Error('invalid display mode'), { statusCode: 400 })
+  }
+  if (args.editorVimClipboard !== undefined && !(VIM_CLIPBOARD_MODES as string[]).includes(args.editorVimClipboard)) {
+    throw Object.assign(new Error('invalid vim clipboard mode'), { statusCode: 400 })
   }
   if (args.keybindings !== undefined) validateKeybindings(args.keybindings)
   // #289: chrome visibility — strict shape (or explicit null = reset to defaults/all-shown).
@@ -177,6 +182,9 @@ export async function updateAccountSettings(
   }
   if (args.editorDisplayMode !== undefined) {
     await db.sql`UPDATE members SET editor_display_mode = ${args.editorDisplayMode}, updated_at = now() WHERE sub = ${args.subject}`
+  }
+  if (args.editorVimClipboard !== undefined) {
+    await db.sql`UPDATE members SET editor_vim_clipboard = ${args.editorVimClipboard}, updated_at = now() WHERE sub = ${args.subject}`
   }
   if (args.keybindings !== undefined) {
     await db.sql`UPDATE members SET keybindings = ${JSON.stringify(args.keybindings)}::jsonb, updated_at = now() WHERE sub = ${args.subject}`
@@ -262,13 +270,13 @@ export async function accountPlugin(app: FastifyInstance) {
   // boundary. An empty history returns an empty `days` array (not an error).
   app.get<{ Querystring: { tz?: string } }>('/me/activity', async (req) => getMyActivity(req.db, { subject: req.user.sub, tz: req.query?.tz }))
 
-  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean } }>('/me/settings', async (req) =>
+  app.patch<{ Body: { displayNameOverride?: string | null; editorKeymap?: string; editorDisplayMode?: string; editorVimClipboard?: string; keybindings?: Record<string, string>; editorChrome?: unknown; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean } }>('/me/settings', async (req) =>
     // #583: emailImmediate/emailDigest were DECLARED in the body type and then not forwarded, so the
     // two toggles on /settings/account returned 204 and changed nothing. Both fields are optional, so
     // nothing in the type system noticed; the tests all called updateAccountSettings directly, so
     // nothing in the suite noticed either. account-settings-wiring-583.test.ts now compares the
     // declared keys against the forwarded ones, which catches the next field to be added and dropped.
-    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted, notificationsEnabled: req.body?.notificationsEnabled, defaultEventMask: req.body?.defaultEventMask, emailImmediate: req.body?.emailImmediate, emailDigest: req.body?.emailDigest }),
+    updateAccountSettings(req.db, { subject: req.user.sub, displayNameOverride: req.body?.displayNameOverride, editorKeymap: req.body?.editorKeymap, editorDisplayMode: req.body?.editorDisplayMode, editorVimClipboard: req.body?.editorVimClipboard, keybindings: req.body?.keybindings, editorChrome: req.body?.editorChrome, onboardingCompleted: req.body?.onboardingCompleted, notificationsEnabled: req.body?.notificationsEnabled, defaultEventMask: req.body?.defaultEventMask, emailImmediate: req.body?.emailImmediate, emailDigest: req.body?.emailDigest }),
   )
 
   app.put<{ Body: { data?: string } }>('/me/avatar', { bodyLimit: AVATAR_BODY_LIMIT }, async (req, reply) => {

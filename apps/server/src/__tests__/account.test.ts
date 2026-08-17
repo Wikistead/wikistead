@@ -94,6 +94,17 @@ describe('account settings (ADR-020)', () => {
     await expect(updateAccountSettings(db, { subject: SUB_A, editorKeymap: 'emacs' })).rejects.toMatchObject({ statusCode: 400 })
   })
 
+  it('vim clipboard mode round-trips (off/paste), defaults to off, rejects invalid (ADR-105 / #225)', async () => {
+    expect((await getAccountSettings(db, { subject: SUB_B })).editorVimClipboard).toBe('off') // null → 'off' (pure vim)
+    for (const m of ['paste', 'off'] as const) {
+      expect((await updateAccountSettings(db, { subject: SUB_A, editorVimClipboard: m })).editorVimClipboard).toBe(m)
+    }
+    // 'full' is deliberately NOT a value (ruled out on #225/) — it must 400 like any junk.
+    for (const bad of ['full', 'unnamedplus', '']) {
+      await expect(updateAccountSettings(db, { subject: SUB_A, editorVimClipboard: bad })).rejects.toMatchObject({ statusCode: 400 })
+    }
+  })
+
   it('display-mode pref round-trips (live/source/wysiwyg/local), defaults to local, rejects invalid (#164-3 · #289)', async () => {
     expect((await getAccountSettings(db, { subject: SUB_B })).editorDisplayMode).toBe('local') // null → 'local'
     for (const m of ['live', 'source', 'wysiwyg', 'local'] as const) {

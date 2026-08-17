@@ -24,6 +24,13 @@
 | `wysiwyg` | Always start in WYSIWYG (hidden-syntax) mode. |
 | `local` | Follow this device's last choice (the default). |
 
+## Vim system clipboard (cross-device)
+
+| Value | Meaning |
+|---|---|
+| `off` | Pure vim: registers and the OS clipboard stay separate; `"+y` / `"+p` are the only bridge (the default). |
+| `paste` | A plain `p` / `P` pastes the system clipboard (URLs auto-linkify like Ctrl+V); `y`/`d` never write it. |
+
 ## Custom key bindings
 
 Rebindable commands: `editor.toggleVim`, `search.focus`, `palette.next`, `palette.prev`.
