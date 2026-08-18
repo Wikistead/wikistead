@@ -1,0 +1,68 @@
+{
+  "tabs": {
+    "analytics": {
+      "en": "Analytics",
+      "ja": "アナリティクス"
+    },
+    "api": {
+      "en": "API keys",
+      "ja": "API キー"
+    },
+    "audit": {
+      "en": "Audit log",
+      "ja": "監査ログ"
+    },
+    "auth": {
+      "en": "Authentication",
+      "ja": "認証"
+    },
+    "billing": {
+      "en": "Billing",
+      "ja": "課金"
+    },
+    "branding": {
+      "en": "Branding",
+      "ja": "ブランディング"
+    },
+    "domains": {
+      "en": "Domains",
+      "ja": "ドメイン"
+    },
+    "embeds": {
+      "en": "Embeds",
+      "ja": "外部埋め込み"
+    },
+    "members": {
+      "en": "Members",
+      "ja": "メンバー"
+    },
+    "moderation": {
+      "en": "Moderation",
+      "ja": "モデレーション"
+    },
+    "orphans": {
+      "en": "Orphaned drafts",
+      "ja": "孤立した下書き"
+    },
+    "public": {
+      "en": "Public access",
+      "ja": "公開設定"
+    },
+    "roles": {
+      "en": "Roles",
+      "ja": "ロール"
+    },
+    "scim": {
+      "en": "SCIM",
+      "ja": "SCIM"
+    },
+    "spaces": {
+      "en": "Spaces",
+      "ja": "スペース"
+    },
+    "webhooks": {
+      "en": "Webhooks",
+      "ja": "Webhook"
+    }
+  }
+}
