@@ -175,6 +175,10 @@ const CONFLUENCE: FidelitySource = {
     { id: 'image', element: 'Attached image', input: page('<p><img src="attachments/diagram.png" alt="diagram"></p>') },
     { id: 'file-link', element: 'Link to an attached file', input: page('<p>The <a href="attachments/paper.pdf">paper</a>.</p>') },
     { id: 'emoji', element: 'Emoji', input: page('<p>Ship it <img class="emoticon" src="https://old.example/images/icons/emoticons/smile.png" alt="smile"></p>') },
+    // #712 ④ split this row in two. A mapped emoticon becomes the character and loses nothing;
+    // one outside the table keeps the older fallback (its name, and a report). Both need a case, or the
+    // table shows only the happy half and the discovery walk loses its only example of that report.
+    { id: 'emoji-unmapped', element: 'Emoji with no Unicode equivalent', input: page('<p>Nice <img class="emoticon" src="https://old.example/images/icons/emoticons/party-parrot.png" alt="party-parrot"></p>') },
     { id: 'merged-cells', element: 'Table with merged cells', input: page('<table><tr><td colspan="2">One and two</td><td>Three</td></tr></table>') },
   ],
 }

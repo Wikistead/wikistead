@@ -704,7 +704,7 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
     if (node.dir) claimed.add(`${node.dir}/index.md`), claimed.add(`${node.dir}.md`)
   }
   const shared = vaultAttachments(files, { claimed, mimeOf: mimeFromName })
-  if (shared.length && ir.roots[0]) ir.roots[0].attachments.push(...shared)
+  attachSharedFiles(nodes, ir.roots[0], shared)
   // An archive with no manifest is not this product's export: it is a folder of Markdown, which is
   // what a vault is too. Either way its file names are its titles rather than a lossy guess.
   if (sourceKind === 'native' && !ir.hasManifest) sourceKind = 'obsidian'
@@ -716,6 +716,44 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
     extraDegradations: [...csvDegradations, ...confluenceDegradations, ...canvasDegradations(Object.keys(files))],
     // Counted AFTER the Notion branch, which can add a database root of its own.
     nodeCount: walkNodes(ir.roots).length,
+  }
+}
+
+/**
+ * Hang each shared file on the page that REFERENCES it.
+ *
+ * #712 ③: they all went to the first root. The bodies were rewritten correctly (fixed the
+ * lookup so any page could resolve any shared file), so this was invisible in the text — and it is
+ * exactly the half that bites later: an attachment belongs to a page, and DELETING that page takes its
+ * attachments with it. On a Confluence export the first page is whatever sorted first, so somebody
+ * tidying up an index page would silently take every image in the space with it.
+ *
+ * Matched on the body rather than on a manifest, because none of the three dialects has one for this:
+ * a vault writes `![[diagram.png]]`, Confluence writes `attachments/pic.png`, and both are just text by
+ * the time we get here. First match wins; a file two pages share can only live on one of them, and the
+ * lookup means the other page still renders it.
+ *
+ * Unreferenced files still land on the first root — that is where they were before, and dropping them
+ * would be the silent loss this importer exists not to do. They are the `.obsidian`-shaped case minus
+ * the config directories, which `vaultAttachments` now excludes outright.
+ */
+function attachSharedFiles(
+  nodes: readonly ImportNode[],
+  fallback: ImportNode | undefined,
+  shared: readonly ImportAttachment[],
+): void {
+  if (!shared.length) return
+  // One lowercase copy per node, not one per (node, file) pair: a vault with a hundred images and a
+  // thousand notes would otherwise re-lowercase every body a hundred times.
+  const bodies = nodes.map((n) => ({ node: n, text: n.markdown.toLowerCase() }))
+  for (const att of shared) {
+    const rel = att.relPath.toLowerCase()
+    const name = att.name.toLowerCase()
+    // The path first: it is the more specific claim, and two folders can hold `image.png`.
+    const owner = bodies.find((b) => b.text.includes(rel))?.node
+      ?? bodies.find((b) => b.text.includes(name))?.node
+      ?? fallback
+    owner?.attachments.push(att)
   }
 }
 
