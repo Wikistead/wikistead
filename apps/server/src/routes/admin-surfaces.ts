@@ -35,6 +35,10 @@ export const ADMIN_SURFACES: Readonly<Record<string, string>> = {
   // #723 / ADR-232: minting the bearer token an IdP needs. Admin-gated like the rest of the
   // credential surfaces; EE-composed, so the filter below hides it in a CE build.
   scim: 'admin',
+  // #721 / ADR-230 §3: the custom-domain surface. Admin-gated like its routes; NOT
+  // composition-filtered, because these routes are CE (the entitlement, not the edition, decides
+  // who may use them — the tab shows the upgrade for a plan without it, per ADR-072).
+  domains: 'admin',
 }
 
 // The surfaces `userId` may enter, in registry order (the console's tab order). One batchCheck over

@@ -2050,6 +2050,62 @@ export function usePageAssignableRoles(pageId: string, enabled = true) {
 // #578 / ADR-201 slice 5: the tenant default role is retired (its meaning moved to the every-member
 // toggles on the same screen), so the two hooks that read and wrote it are gone with their routes.
 
+// #721 / ADR-230 §3: custom domains. The four routes have existed since #123 and nothing in the
+// product could reach them — a feature only an API client can use is not shipped, and the API path
+// was not even self-describing (verification under a passkey stance needs a flag whose only
+// documentation was a comment in the route).
+export interface CustomDomain {
+  domain: string;
+  status: string;
+  verifiedAt: string | null;
+  challengeRecord: string;
+  challengeValue: string;
+  passkeysStranded?: number;
+}
+
+export function useCustomDomains() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["custom-domains"],
+    queryFn: () => apiFetch<{ domains: CustomDomain[] }>("/admin/custom-domains", token).then((r) => r?.domains ?? []),
+    staleTime: 5_000,
+  });
+}
+
+export function useAddCustomDomain() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (domain: string) => apiFetch<CustomDomain>("/admin/custom-domains", token, { method: "POST", body: JSON.stringify({ domain }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["custom-domains"] }),
+  });
+}
+
+export function useVerifyCustomDomain() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    // `acknowledgePasskeyLoss` is the checkbox on the confirmation, not a parameter a caller has to
+    // find in the source: verification is the moment every enrolled passkey stops working, because
+    // a passkey is bound to the host it was created for (#664).
+    mutationFn: ({ domain, acknowledgePasskeyLoss }: { domain: string; acknowledgePasskeyLoss?: boolean }) =>
+      apiFetch<CustomDomain>(`/admin/custom-domains/${encodeURIComponent(domain)}/verify`, token, {
+        method: "POST",
+        body: JSON.stringify(acknowledgePasskeyLoss ? { acknowledgePasskeyLoss } : {}),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["custom-domains"] }),
+  });
+}
+
+export function useReleaseCustomDomain() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (domain: string) => apiFetch<void>(`/admin/custom-domains/${encodeURIComponent(domain)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["custom-domains"] }),
+  });
+}
+
 // #723 / ADR-232: the SCIM setup surface. The tab exists only where the build serves SCIM (the
 // server's surface registry decides that), and a Cloud tenant below the entitled plan gets
 // `scim_not_entitled` from the list route so the tab can offer the upgrade instead of an empty
