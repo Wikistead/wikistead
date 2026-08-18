@@ -444,7 +444,7 @@
       "space_moderation": "Space moderation",
       "members": "Members",
       "roles": "Roles",
-      "tenant_settings": "Tenant settings",
+      "tenant_settings": "Workspace settings",
       "webhooks": "Webhooks",
       "analytics": "Analytics",
       "audit": "Audit log"

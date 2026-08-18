@@ -444,7 +444,7 @@
       "space_moderation": "スペースのモデレーション",
       "members": "メンバー",
       "roles": "ロール",
-      "tenant_settings": "テナント設定",
+      "tenant_settings": "ワークスペース設定",
       "webhooks": "Webhook",
       "analytics": "アナリティクス",
       "audit": "監査ログ"
