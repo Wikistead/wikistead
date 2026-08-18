@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useBillingStatus, useBillingUsage, useEntitlements, useCheckout, usePortal, type UsageResource } from "../data/queries";
+import { useBillingStatus, useBillingUsage, useEntitlements, useCheckout, usePortal, useCustomDomains, type UsageResource } from "../data/queries";
 import { Button } from "../ui/Button";
 import { notify } from "../ui/toast";
 import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
@@ -42,6 +42,8 @@ export function AdminBillingTab() {
   const ent = useEntitlements();
   const checkout = useCheckout();
   const portal = usePortal();
+  // ADR-230 §3 / #721 what a downgrade takes away, said where the plan is changed.
+  const domains = useCustomDomains();
 
   const plan = status.data?.plan ?? "free";
   const planLabel = t([`billing.plan_${plan}`, "billing.plan_free"]);
@@ -82,6 +84,20 @@ export function AdminBillingTab() {
         )}
         <Button variant="default" size="sm" disabled={portal.isPending} onClick={goPortal} data-testid="billing-manage">{t("billing.manage")}</Button>
       </div>
+      {/* ADR-230 §3: a downgrade releases the workspace's custom domains, and getting one back means
+          proving ownership again. That is the half worth knowing BEFORE leaving: the plan is changed
+          in Stripe's portal, so this is the last screen we own on the way there. The domains are
+          NAMED, because "you may lose custom domains" is advice while "docs.example.com stops
+          resolving" is a fact somebody can act on. Silent when there are none, so it never becomes
+          furniture.
+          ⚠️ The wording here avoids the metering vocabulary on purpose: #231's pin keeps price, cap
+          constants and threshold language off this screen (#127's rulings), and it reads the file as
+          text. This sentence is about a domain being released, not about a limit being approached. */}
+      {(domains.data?.length ?? 0) > 0 && (
+        <p className="mt-4 text-sm text-fg-dim" data-testid="billing-domains-released">
+          {t("billing.domainsAtRisk", { domains: (domains.data ?? []).map((d) => d.domain).join(", ") })}
+        </p>
+      )}
       <UsageSection resources={usage.data?.resources ?? []} />
       <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 16 }}>{t("billing.teamNote")}</p>
     </div>

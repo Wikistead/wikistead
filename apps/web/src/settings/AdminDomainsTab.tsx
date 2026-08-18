@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CopyButton } from "../ui/CopyButton";
 import { Trash2 } from "lucide-react";
 import {
   useCustomDomains, useAddCustomDomain, useVerifyCustomDomain, useReleaseCustomDomain,
@@ -97,9 +98,22 @@ export function AdminDomainsTab() {
               <span className="block text-sm [overflow-wrap:anywhere]">{d.domain}</span>
               {/* While pending, the DNS record IS the instruction — without it the screen tells
                   somebody to prove ownership and does not say how. */}
+              {/* #721 the record is three fields and a DNS panel takes them in three boxes,
+                  so host and value copy SEPARATELY — one copy of the whole sentence cannot be pasted
+                  anywhere. The type (TXT) is chosen from a dropdown, never pasted, so it has no
+                  button. The control is the product's existing one (CopyButton), not a new one. */}
               {d.status !== "verified" && (
                 <span className="mt-1 block text-xs text-fg-dim" data-testid="domain-challenge">
-                  {t("adminDomains.dnsHint")} <code className="[overflow-wrap:anywhere]">TXT {d.challengeRecord} = {d.challengeValue}</code>
+                  <span className="block">{t("adminDomains.dnsHint")}</span>
+                  <span className="mt-1 flex items-center gap-1">
+                    <span className="flex-none uppercase">{t("adminDomains.dnsType")}</span>
+                    <code className="min-w-0 flex-1 [overflow-wrap:anywhere]" data-testid="domain-challenge-host">{d.challengeRecord}</code>
+                    <CopyButton value={d.challengeRecord} testId="domain-challenge-host-copy" label={t("adminDomains.copyHost")} />
+                  </span>
+                  <span className="mt-1 flex items-center gap-1">
+                    <code className="min-w-0 flex-1 [overflow-wrap:anywhere]" data-testid="domain-challenge-value">{d.challengeValue}</code>
+                    <CopyButton value={d.challengeValue} testId="domain-challenge-value-copy" label={t("adminDomains.copyValue")} />
+                  </span>
                 </span>
               )}
             </span>
