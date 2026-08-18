@@ -212,6 +212,27 @@ describe('#623 §4: what a placeholder must NOT do', () => {
       flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
     }
     if (!flag.has(a)) {
+      // FIRST, before anything else asks the store a question: re-ask the one that failed, at the width
+      // it failed at. Every earlier probe here asked about a SINGLE id, and a single id is the shape a
+      // starved store still answers — so they were always going to say "allowed", and in every run they
+      // did. Ordering is the whole point: four round trips of diagnostics give the store time to drain,
+      // and a question asked after that measures the recovery, not the failure.
+      const wide = made.slice(0, 20)
+      const wideBatch = await fgaClient.batchCheck(
+        { checks: wide.map((id, j) => ({ user: READER, relation: 'view', object: `page:${id}`, correlationId: String(j) })) },
+        { authorizationModelId: fgaModelId() },
+      ).then((r) => {
+        const errs = r.result.filter((x) => x.error).length
+        const allowed = r.result.filter((x) => !x.error && x.allowed).length
+        return `${r.result.length} of ${wide.length} answered, ${allowed} allowed, ${errs} item-errors` +
+          (errs ? ` — first: ${JSON.stringify(r.result.find((x) => x.error)?.error)}` : '')
+      }).catch((e: unknown) => `threw: ${String(e)}`)
+      // The other half of the level: does the SQL page even contain A? `listBranch` filters an SQL page
+      // by the confirm, so an empty answer has two causes that look identical from outside.
+      const [{ n } = { n: 0 }] = await db.sql<[{ n: number }?]>`
+        SELECT count(*)::int AS n FROM pages p JOIN spaces s ON s.id = p.space_id
+         WHERE p.space_id = ${spaceId} AND p.deleted_at IS NULL AND p.parent_id IS NULL
+           AND (s.home_page_id IS NULL OR p.id != s.home_page_id)`
       // Fails ONLY on the public CI (4/4 runs) while green everywhere else, and 'expected undefined'
       // names nothing. Say which link of the visibility chain broke: the SQL row, the FGA view on the
       // page, or the space viewer gate — the next reader starts from data, not from a rerun.
@@ -233,6 +254,7 @@ describe('#623 §4: what a placeholder must NOT do', () => {
         `chevron case: A is missing from the branch — sql row: ${JSON.stringify(row)}; ` +
         `view(A) unpinned: ${JSON.stringify(viewA)}; space viewer: ${JSON.stringify(viewer)}; ` +
         `pinned raw batch: ${rawBatch}; filterAuthorized([a]) now: ${refiltered}; ` +
+        `wide batch at failure: ${wideBatch}; sql roots: ${n}; ` +
         `env model pin: ${fgaModelId() ?? '(none)'}; ` +
         `returned ids: ${rows.pages.map((p) => p.id).join(', ') || '(none)'}`)
     }
