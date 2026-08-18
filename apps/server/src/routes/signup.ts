@@ -10,6 +10,7 @@ import {
 } from '../auth/signup-session.js'
 import { provisionTenant, isValidSlug } from '../auth/provisioning.js'
 import { loginMethodCeiling } from '../auth/login-methods.js'
+import { reportWorkspaceCreated } from '../funnel/sink.js'
 
 // Cloud self-serve signup (P1.2 P2d). All routes are PUBLIC (no tenant — they
 // CREATE one) and skipped by the auth hook. They use the SIGNUP session, which is
@@ -72,6 +73,10 @@ export async function signupPlugin(app: FastifyInstance) {
       const code = (e as { statusCode?: number }).statusCode ?? 500
       return reply.code(code).send({ error: code === 409 ? 'workspace name taken' : 'could not create workspace' })
     }
+
+    // #715 / ADR-229: the funnel's NUMERATOR — a workspace exists that did not before. After the
+    // provision succeeded, so a failed attempt never counts.
+    reportWorkspaceCreated()
 
     await destroySignupSession(app.valkey, sid)
     reply.clearCookie(SIGNUP_COOKIE, { path: '/signup' })
