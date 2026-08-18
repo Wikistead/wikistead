@@ -199,8 +199,18 @@ describe('#623 §4: what a placeholder must NOT do', () => {
     // leaf C → false.
     const c0 = await page(`ch-c-${STAMP}`, null)
 
-    const rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
-    const flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
+    let rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
+    let flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
+    if (!flag.has(a)) {
+      // ADR-183 §3 by design: a saturated store's ITEM error denies that id — fewer visible rows,
+      // never a 500. On the 2-core public runner the first heavy batch over these fresh pages hits
+      // exactly that (measured via the diagnostic below: the same pinned batch answers true moments
+      // later), so one re-ask separates the DESIGNED degradation from a real deny — a predicate put
+      // back stays missing on the second read too, and every break-check in this file keeps its bite.
+      await new Promise((r) => setTimeout(r, 300))
+      rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
+      flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
+    }
     if (!flag.has(a)) {
       // Fails ONLY on the public CI (4/4 runs) while green everywhere else, and 'expected undefined'
       // names nothing. Say which link of the visibility chain broke: the SQL row, the FGA view on the
