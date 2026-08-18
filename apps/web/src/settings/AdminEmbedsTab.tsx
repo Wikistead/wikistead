@@ -7,7 +7,7 @@ import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 const label = "mb-1.5 mt-[18px] block text-sm text-fg-dim";
 
@@ -53,9 +53,7 @@ export function AdminEmbedsTab() {
     });
 
   return (
-    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="admin-embeds">
-      <h2 className="mt-0">{t("adminEmbeds.title")}</h2>
-      <p className="mt-0 text-sm text-fg-dim">{t("adminEmbeds.body")}</p>
+    <SettingsPane width="form" testId="admin-embeds" title={t("adminEmbeds.title")} description={t("adminEmbeds.body")}>
 
       <label className={label}>{t("adminEmbeds.addTitle")}</label>
       <FormRow>
@@ -87,6 +85,6 @@ export function AdminEmbedsTab() {
       <div className="mt-5 flex gap-2">
         <Button variant="primary" size="sm" disabled={!dirty || update.isPending} onClick={save} data-testid="embed-save">{t("common.save")}</Button>
       </div>
-    </div>
+    </SettingsPane>
   );
 }

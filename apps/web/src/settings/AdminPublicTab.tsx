@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { usePublicSurface, useSetPublicSurface } from "../data/queries";
 import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 // #253 / ADR-113: the tenant PARENT SWITCH for the anonymous public surface. tenant#admin only (the GET/PUT
 // re-check, 403 otherwise). Default OFF = fail-safe: the whole public surface 404s until an admin turns it on
@@ -21,9 +21,7 @@ export function AdminPublicTab() {
     });
 
   return (
-    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="admin-public">
-      <h2 className="mt-0">{t("adminPublic.title")}</h2>
-      <p className="mt-0 text-sm text-fg-dim">{t("adminPublic.body")}</p>
+    <SettingsPane width="form" testId="admin-public" title={t("adminPublic.title")} description={t("adminPublic.body")}>
 
       <label className="mt-4 flex items-start gap-2 rounded-md border border-border p-3" data-testid="public-surface-row">
         {/* #389 / ADR-146: bare checkbox -> DS Switch (on/off state). */}
@@ -39,6 +37,6 @@ export function AdminPublicTab() {
           <span className="block text-xs text-fg-dim">{enabled ? t("adminPublic.onHint") : t("adminPublic.offHint")}</span>
         </span>
       </label>
-    </div>
+    </SettingsPane>
   );
 }

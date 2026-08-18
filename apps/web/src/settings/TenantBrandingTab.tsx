@@ -10,7 +10,7 @@ import { AccentPicker } from "./AccentPicker";
 import { assetUrl } from "../data/apiClient";
 import { UpgradeNotice } from "../ui/UpgradeNotice";
 import { useSession } from "../session/SessionProvider";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 const LOGO_MAX_BYTES = 512 * 1024;
 const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
@@ -72,9 +72,7 @@ export function TenantBrandingTab() {
   };
 
   return (
-    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="tenant-branding">
-      <h2 style={{ marginTop: 0 }}>{t("tenantBranding.title")}</h2>
-      <p className="mt-0 text-sm text-fg-dim">{t("tenantBranding.body")}</p>
+    <SettingsPane width="form" testId="tenant-branding" title={t("tenantBranding.title")} description={t("tenantBranding.body")}>
 
       {/* Display name + accent are BASIC — no upgrade notice, never disabled by plan. */}
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("tenantBranding.displayName")}</label>
@@ -110,6 +108,6 @@ export function TenantBrandingTab() {
             onClick={() => removeLogo.mutate(undefined, { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("toast.actionFailed")) })}>{t("tenantBranding.logoRemove")}</Button>
         )}
       </div>
-    </div>
+    </SettingsPane>
   );
 }

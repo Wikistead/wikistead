@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAbuseFilterConfig, useUpdateAbuseFilterConfig } from "../data/queries";
 import { notify } from "../ui/toast";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 // #491 / ADR-140: tenant-admin config for the publish-boundary abuse filter. The two knobs
 // (mass-delete shrink ratio + banned words) were DB-direct-only; this is their UI. tenant#admin only
@@ -35,9 +35,7 @@ export function AdminModerationTab() {
   };
 
   return (
-    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="admin-moderation">
-      <h2 className="mt-0">{t("adminModeration.title")}</h2>
-      <p className="mt-0 text-sm text-fg-dim">{t("adminModeration.body")}</p>
+    <SettingsPane width="form" testId="admin-moderation" title={t("adminModeration.title")} description={t("adminModeration.body")}>
 
       <label className="mt-4 block">
         <span className="block text-sm text-foreground">{t("adminModeration.shrinkLabel")}</span>
@@ -67,6 +65,6 @@ export function AdminModerationTab() {
       >
         {t("common.save")}
       </button>
-    </div>
+    </SettingsPane>
   );
 }

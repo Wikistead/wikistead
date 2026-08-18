@@ -27,7 +27,7 @@ import { tenantTierCaps } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
 import { MemberStatusIcons, memberMenuValues, passwordAction, type MemberMenuValue } from "./member-status"; // #614: origin / password / suspended, beside the name
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -229,14 +229,15 @@ export function MembersPage() {
 
   if (forbidden) {
     // #735: the refusal is a tab too — it gets the same frame rather than its own inline one.
-    return <div data-settings-pane="form" className={SETTINGS_WIDTHS.form}><h2>{t("members.title")}</h2><p style={{ color: "var(--fg-dim)" }}>{t("members.adminOnly")}</p></div>;
+    return <SettingsPane width="form" title={t("members.title")} description={t("members.adminOnly")} />;
   }
 
   return (
-    // #735: an inline-style frame, like the analytics dashboard — invisible to a sweep over Tailwind
-    // classes, and the source of the 24-vs-26 difference the ticket measured.
-    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list}>
-      <h2 style={{ marginTop: 0 }}>{t("members.title")}</h2>
+    // #735: this screen used to write its frame in INLINE STYLES (`style={{ padding: 24 }}`), which is
+    // invisible to a sweep over Tailwind classes and was the source of the 24-vs-26 difference the
+    // ticket measured — and its heading in a third spelling again (`style={{ marginTop: 0 }}`). Neither
+    // is written here any more, so neither can drift.
+    <SettingsPane width="list" title={t("members.title")}>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
       {/* #579 (review rejection ②, 2026-08-04): .
@@ -686,6 +687,6 @@ export function MembersPage() {
         onClose={() => setConfirming(null)}
         onConfirm={() => { confirming?.run(); setConfirming(null); }}
       />
-    </div>
+    </SettingsPane>
   );
 }

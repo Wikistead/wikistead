@@ -9,6 +9,7 @@ import { importSpaceArchive, IMPORT_MAX_ARCHIVE_BYTES, type ImportDegradation, t
 import { Button } from "../ui/Button";
 import { SwitchRow } from "../ui/Switch";
 import { useProductName } from "../app/product-name";
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 interface SpaceCtx { spaceId: string; name: string }
 
@@ -238,9 +239,11 @@ export function SpaceImportTab() {
   };
 
   return (
-    <div className="max-w-[720px] p-6" data-testid="space-import-screen">
-      <h2 className="mt-0">{t("import.title")}</h2>
-      <p className="text-sm text-fg-dim">{t("import.hint")}</p>
+    // #735 (second round): this screen landed AFTER the frame moved into the shell and wrote its own
+    // anyway — `max-w-[720px] p-6` on top of the shell's own padding, and a fourth spelling of the
+    // heading. It is the case the ticket is named for, arriving one week later, and the walk only
+    // caught it because the space console was added to the walk in the same change.
+    <SettingsPane width="list" testId="space-import-screen" title={t("import.title")} description={t("import.hint")}>
 
       {report && (
         <>
@@ -308,6 +311,6 @@ export function SpaceImportTab() {
           {error && <p className="text-sm text-destructive" data-testid="import-error">{error}</p>}
         </div>
       )}
-    </div>
+    </SettingsPane>
   );
 }

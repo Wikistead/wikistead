@@ -9,7 +9,7 @@ import { Button } from "../ui/Button";
 import { UpgradeNotice } from "../ui/UpgradeNotice";
 import { disclosureKindFromError } from "../ui/upgrade-affordance";
 import { notify } from "../ui/toast";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 // #401 / ADR-155: the tenant-admin Audit tab — the read surface over the hash-chained compliance
 // ledger. Newest-first table with keyset "load more", a Verify-chain button (verdict inline, showing
@@ -87,17 +87,14 @@ export function AdminAuditTab() {
 
   if (locked) {
     return (
-      <div data-settings-pane="wide" className={SETTINGS_WIDTHS.wide} data-testid="admin-audit">
-        <h2 className="mt-0">{t("adminAudit.title")}</h2>
+      <SettingsPane width="wide" testId="admin-audit" title={t("adminAudit.title")}>
         <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="audit-upgrade" title={t("adminAudit.lockedTitle")} body={t("adminAudit.lockedBody")} />
-      </div>
+      </SettingsPane>
     );
   }
 
   return (
-    <div data-settings-pane="wide" className={SETTINGS_WIDTHS.wide} data-testid="admin-audit">
-      <h2 className="mt-0">{t("adminAudit.title")}</h2>
-      <p className="mt-0 text-sm text-fg-dim">{t("adminAudit.body")}</p>
+    <SettingsPane width="wide" testId="admin-audit" title={t("adminAudit.title")} description={t("adminAudit.body")}>
 
       <div className="mb-3 flex items-center gap-2">
         <Button variant="default" size="sm" disabled={verify.isPending} onClick={onVerify} data-testid="audit-verify">{t("adminAudit.verify")}</Button>
@@ -164,7 +161,7 @@ export function AdminAuditTab() {
       </div>
 
       <VendorAccessSection />
-    </div>
+    </SettingsPane>
   );
 }
 

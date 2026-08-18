@@ -40,12 +40,10 @@ const backLink = "mb-2 inline-flex w-fit items-center gap-1.5 rounded px-2 py-1 
  * The PADDING is not here — it is the shell's, unconditionally (see the section below). This decides
  * how wide the column is, and nothing about whether a tab that forgets it looks broken.
  *
- * A tab spells its choice as `data-settings-pane="<step>" className={SETTINGS_WIDTHS.<step>}` on its
- * root. The attribute is what the discovery walk reads, and the walk cross-checks it against the
+ * A pane spells its choice as `<SettingsPane width="<step>">`, which writes both the attribute and the
+ * class. The attribute is what the discovery walk reads, and the walk cross-checks it against the
  * width the browser actually computed — so a root that names one step and wears another is red rather
- * than merely odd. (A `<SettingsPane>` wrapper was written first and thrown away: every root here
- * already carries a testid, a semantic element and its own classes, so the component would have added
- * a div around each one to save a pair of attributes.)
+ * than merely odd.
  */
 export const SETTINGS_WIDTHS = {
   form: "max-w-[560px]",
@@ -53,6 +51,85 @@ export const SETTINGS_WIDTHS = {
   wide: "max-w-[920px]",
 } as const;
 export type SettingsWidth = keyof typeof SETTINGS_WIDTHS;
+
+/**
+ * #735 (second round): the pane, INCLUDING ITS HEADING.
+ *
+ * The first round moved the padding and the width into the shell and deliberately did NOT add this
+ * component: every root already carried a testid, a semantic element and its own classes, so a
+ * wrapper would have bought two attributes for a div. That reasoning was about ATTRIBUTES. The
+ * heading is not an attribute — it is drawn — and the ruling that sent this back said so: what a
+ * component adds here is the rendering, and a tab that forgets to ask for it shows no heading at
+ * all, which is a defect anybody can see rather than one only a designer notices.
+ *
+ * What was actually on the screen, measured across the fourteen admin tabs:
+ *
+ *   12   <h2 className="mt-0">            the Tailwind preflight strips h1-h6, and these panes live
+ *                                         OUTSIDE `.wks-prose` (the shell's section is bare), and no
+ *                                         global heading rule exists — so twelve "headings" were
+ *                                         painted at body size and body weight;
+ *    2   <h2 className="text-lg font-semibold">   SCIM and custom domains, the two written last,
+ *                                         which is why the owner saw exactly those two as bold;
+ *    +   `style={{ marginTop: 0 }}` on some of the twelve — a third spelling of the same intent.
+ *
+ * The size is `--text-xl` ("headings in chrome", tokens.css) rather than a Tailwind step, and the
+ * account settings screens have been drawing their heading exactly this way since #466 — so this is
+ * the existing answer applied to everyone, not a fourth opinion. The heading TEXT still comes from
+ * the surface, because the rail label and the pane title are not always the same words (the rail
+ * says "Domains", the pane says "Custom domains"); making them agree is a naming question (#671),
+ * not a formatting one, and quietly rewriting five headings under a formatting ticket would be a
+ * copy change nobody asked for.
+ *
+ * `data-settings-heading` is how the discovery walk finds the heading. A tab that goes back to
+ * hand-writing an `<h2>` has no such node, and the walk names it — which is the case that let two
+ * formats become three while every existing check stayed green.
+ */
+export function SettingsPane({
+  width,
+  title,
+  description,
+  icon: Icon,
+  testId,
+  as: As = "div",
+  className,
+  children,
+}: {
+  width: SettingsWidth;
+  /**
+   * Required on purpose. Every settings surface has a name — it is in the rail already — and making
+   * this optional would restore the state this ticket exists to end: a pane that renders without one
+   * and nobody notices until somebody looks at that tab. The locked and loading branches carry it
+   * too, so "which tab am I on" survives a plan check and a slow request.
+   */
+  title: ReactNode;
+  description?: ReactNode;
+  icon?: ComponentType<{ size?: number | string; className?: string }>;
+  testId?: string;
+  as?: "div" | "section";
+  className?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <As data-settings-pane={width} className={cn(SETTINGS_WIDTHS[width], className)} data-testid={testId}>
+      {/* One block, one gap below it, whether or not there is a description — so the distance from
+          the title to the first control is the same number on every tab, instead of the description's
+          presence deciding it. */}
+      <header className="mb-6">
+        <h2
+          data-settings-heading=""
+          className="m-0 flex items-center gap-2 text-[length:var(--text-xl)] font-medium text-foreground"
+        >
+          {Icon && <Icon size={20} className="flex-none text-fg-dim" />}
+          {title}
+        </h2>
+        {description !== undefined && (
+          <p className="mb-0 mt-1 text-[length:var(--text-ui)] text-fg-dim">{description}</p>
+        )}
+      </header>
+      {children}
+    </As>
+  );
+}
 
 // Two-tier settings layout (Notion/Confluence style): a left vertical tab rail +
 // a content pane. Used by both the tenant admin console and the per-space settings
@@ -115,11 +192,15 @@ export function SettingsShell({
 export function SettingsDenied({ kind }: { kind: "forbidden" | "notFound" }) {
   const { t } = useTranslation();
   return (
-    <div data-settings-pane="form" className={`${SETTINGS_WIDTHS.form} py-2 text-fg-dim`} data-testid={kind === "forbidden" ? "settings-forbidden" : "settings-notfound"}>
-      <h2 className="mt-0 text-foreground">{t(kind === "forbidden" ? "settings.forbiddenTitle" : "settings.notFoundTitle")}</h2>
-      <p>{t(kind === "forbidden" ? "settings.forbiddenBody" : "settings.notFoundBody")}</p>
+    <SettingsPane
+      width="form"
+      className="text-fg-dim"
+      testId={kind === "forbidden" ? "settings-forbidden" : "settings-notfound"}
+      title={t(kind === "forbidden" ? "settings.forbiddenTitle" : "settings.notFoundTitle")}
+      description={t(kind === "forbidden" ? "settings.forbiddenBody" : "settings.notFoundBody")}
+    >
       <NavLink to="/" className={backLink}><ArrowLeft size={14} /> {t("settings.back")}</NavLink>
-    </div>
+    </SettingsPane>
   );
 }
 
@@ -127,9 +208,6 @@ export function SettingsDenied({ kind }: { kind: "forbidden" | "notFound" }) {
 export function SettingsPlaceholder({ label }: { label: string }) {
   const { t } = useTranslation();
   return (
-    <div data-settings-pane="form" className={`${SETTINGS_WIDTHS.form} py-2 text-fg-dim`} data-testid="settings-placeholder">
-      <h2 className="mt-0 text-foreground">{label}</h2>
-      <p>{t("settings.placeholder")}</p>
-    </div>
+    <SettingsPane width="form" className="text-fg-dim" testId="settings-placeholder" title={label} description={t("settings.placeholder")} />
   );
 }

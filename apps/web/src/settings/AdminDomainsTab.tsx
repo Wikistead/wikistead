@@ -13,7 +13,7 @@ import { ConfirmDialog } from "../ui/dialogs";
 import { UpgradeNotice } from "../ui/UpgradeNotice";
 import { disclosureKindFromError } from "../ui/upgrade-affordance";
 import { notify } from "../ui/toast";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 // #721 / ADR-230 §3: the custom-domain surface.
 //
@@ -64,17 +64,15 @@ export function AdminDomainsTab() {
   // #735: in the pane, like the subscriber view it replaces — a locked tab is still a tab.
   if (locked) {
     return (
-      <div data-settings-pane="list" className={SETTINGS_WIDTHS.list}>
+      <SettingsPane width="list" title={t("adminDomains.title")}>
         <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="domains-upgrade"
           title={t("adminDomains.lockedTitle")} body={t("adminDomains.lockedBody")} />
-      </div>
+      </SettingsPane>
     );
   }
 
   return (
-    <section data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="admin-domains">
-      <h2 className="text-lg font-semibold">{t("adminDomains.title")}</h2>
-      <p className="mt-1 text-sm text-fg-dim">{t("adminDomains.body")}</p>
+    <SettingsPane as="section" width="list" testId="admin-domains" title={t("adminDomains.title")} description={t("adminDomains.body")}>
 
       <div className="mt-5 flex flex-wrap items-end gap-2">
         <label className="flex-1 min-w-[14rem] text-sm">
@@ -164,6 +162,6 @@ export function AdminDomainsTab() {
           setPendingRelease(null);
         }}
       />
-    </section>
+    </SettingsPane>
   );
 }

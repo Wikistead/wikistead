@@ -6,7 +6,7 @@ import { useSpaceTrash, useRestorePage, usePurgePage, type TrashEntry } from "..
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 interface SpaceCtx { spaceId: string; name: string }
 
@@ -28,9 +28,7 @@ export function SpaceTrashTab() {
     });
 
   return (
-    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="space-trash">
-      <h2 className="mt-0">{t("spaceTrash.title")}</h2>
-      <p className="text-sm text-fg-dim">{t("spaceTrash.hint")}</p>
+    <SettingsPane width="list" testId="space-trash" title={t("spaceTrash.title")} description={t("spaceTrash.hint")}>
       {trash.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
       {!trash.isLoading && (trash.data?.length ?? 0) === 0 && (
         <p className="text-sm text-fg-dim" data-testid="space-trash-empty">{t("spaceTrash.empty")}</p>
@@ -92,6 +90,6 @@ export function SpaceTrashTab() {
           setPurging(null);
         }}
       />
-    </div>
+    </SettingsPane>
   );
 }
