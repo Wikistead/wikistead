@@ -21,6 +21,7 @@ import { useAccountSettings, useUpdateAccountSettings, useUploadAvatar, useRemov
 import { ActivityHeatmap } from "./ActivityHeatmap"; // #483 / ADR-180: personal contribution heatmap
 import { ApiKeysPanel } from "./ApiKeysPanel"; // #462: shared with the admin console's key list
 import { SecondFactorPanel } from "./SecondFactorPanel"; // #653 / ADR-219
+import { RecoveryCodesPanel } from "./RecoveryCodesPanel"; // #650 / ADR-226
 import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
 import { EditorOnboardingDialog } from "../app/EditorOnboarding"; // #289: "redo the setup questions"
 import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
@@ -572,6 +573,10 @@ function SecurityTab() {
       description={t("account.factorsDesc", { kinds: factorKindsPhrase(acceptedFactorKinds(factors.data?.stance), t, "presented") })}
     >
       <SecondFactorPanel />
+      {/* #650 / ADR-226: on the SAME tab as the factors, because it is the same subject — what happens
+          when the device holding them is gone. A tab of its own would be a place nobody visits until
+          they cannot reach it. */}
+      <RecoveryCodesPanel />
     </SettingsPage>
   );
 }

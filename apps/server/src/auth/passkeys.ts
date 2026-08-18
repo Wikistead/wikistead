@@ -301,6 +301,61 @@ export async function verifyPasskeyForRemoval(
 }
 
 /**
+ * Options for RE-AUTHENTICATING with any passkey the member holds (#650 / ADR-226 §4).
+ *
+ * Deliberately NOT `passkeyRemovalOptions` with a different argument. Removal asks for the key being
+ * given up, because possession must be proof of THAT thing; re-authentication asks "is the person at
+ * this keyboard still the account holder", and any key they registered answers it. Reusing the removal
+ * helper would have meant picking one of the member's keys arbitrarily and refusing the others.
+ */
+export async function passkeyReauthOptions(
+  deps: { db: TenantDb; valkey: IORedis },
+  args: { tenantId: string; memberSub: string; host: string | undefined },
+) {
+  const stored = await passkeysFor(deps.db, args.memberSub)
+  if (stored.length === 0) return null
+  const options = await generateAuthenticationOptions({
+    rpID: rpIdFromHost(args.host),
+    allowCredentials: stored.map((p) => ({ id: p.credentialId, transports: p.transports as never })),
+    userVerification: 'preferred',
+  })
+  await putChallenge(deps.valkey, args.tenantId, args.memberSub, options.challenge)
+  // The library's options WHOLE, for the reason `passkeyRemovalOptions` records: rebuilding them by hand
+  // drops `type: 'public-key'` and the browser refuses the call before touching a key.
+  return options
+}
+
+/** Verify a re-authentication assertion against ANY of the member's keys. */
+export async function verifyPasskeyReauth(
+  deps: { db: TenantDb; valkey: IORedis },
+  args: { tenantId: string; memberSub: string; host: string | undefined; response: AuthenticationResponseJSON },
+): Promise<boolean> {
+  // Spent whatever happens — a failed attempt must not leave a live challenge for a better-formed try.
+  const expectedChallenge = await takeChallenge(deps.valkey, args.tenantId, args.memberSub)
+  if (!expectedChallenge) return false
+  const stored = (await passkeysFor(deps.db, args.memberSub)).find((p) => p.credentialId === args.response?.id)
+  if (!stored) return false
+  try {
+    const verified = await verifyAuthenticationResponse({
+      response: args.response,
+      expectedChallenge,
+      expectedOrigin: originFromHost(args.host),
+      expectedRPID: rpIdFromHost(args.host),
+      credential: {
+        id: stored.credentialId,
+        publicKey: Buffer.from(stored.publicKey, 'base64url'),
+        counter: stored.signCount,
+        transports: stored.transports as never,
+      },
+      requireUserVerification: false,
+    })
+    return verified.verified === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Check an assertion. Returns the factor it proved, or null.
  *
  * The SIGN COUNTER is the one interesting rule. A counter that goes BACKWARDS is the signal the spec

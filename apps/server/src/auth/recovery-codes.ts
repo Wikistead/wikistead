@@ -116,6 +116,22 @@ export async function mintRecoveryCodes(
   return codes
 }
 
+/**
+ * Take the member's live set out of service without deleting the history.
+ *
+ * Called wherever the FACTORS are cleared by somebody other than the door: the administrator reset
+ * (#644 §10a) and the password take-away. Leaving a set alive across those would be the printout in a
+ * drawer still able to wipe the factor the member enrols tomorrow — a reset that resets less than it
+ * appears to. Returns how many were still live, so the caller can decide whether anything happened.
+ */
+export async function revokeRecoveryCodes(db: TenantDb, memberSub: string): Promise<number> {
+  const rows = await db.sql<{ id: string }[]>`
+    UPDATE member_recovery_codes SET revoked_at = now()
+    WHERE member_sub = ${memberSub} AND used_at IS NULL AND revoked_at IS NULL
+    RETURNING id`
+  return rows.length
+}
+
 export type RecoveryOutcome =
   | { ok: true; memberSub: string; factorsRemoved: number }
   | { ok: false }
@@ -135,7 +151,16 @@ export type RecoveryOutcome =
  */
 export async function spendRecoveryCode(
   db: TenantDb,
-  args: { memberSub?: string; code: string },
+  args: {
+    memberSub?: string
+    code: string
+    /**
+     * Runs INSIDE the spending transaction, once, only when a code was actually spent. The ledger entry
+     * for "this account's factors were wiped" must not be able to survive a rollback of the wipe, nor
+     * the wipe survive a failure to record it — ADR-226 §5's "in-transaction, like their §10a siblings".
+     */
+    inTx?: (sql: TenantDb['sql']) => Promise<void>
+  },
 ): Promise<RecoveryOutcome> {
   const enabled = recoveryEnabled()
   const normalized = normalizeCode(args.code ?? '')
@@ -162,6 +187,7 @@ export async function spendRecoveryCode(
       UPDATE member_recovery_codes SET revoked_at = now()
       WHERE member_sub = ${memberSub} AND used_at IS NULL AND revoked_at IS NULL`
     const removed = await sql<{ id: string }[]>`DELETE FROM member_factors WHERE member_sub = ${memberSub} RETURNING id`
+    await args.inTx?.(sql as unknown as TenantDb['sql'])
     return { ok: true, memberSub, factorsRemoved: removed.length }
   })
 }

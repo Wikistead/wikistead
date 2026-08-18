@@ -58,6 +58,11 @@ const EXCLUDED_PATHS = new Set([
   '/me/factors', '/me/factors/totp', '/me/factors/:id/confirm', '/me/factors/:id',
   '/me/factors/passkey', '/me/factors/:id/passkey', // #663: the same account-screen plumbing
   '/me/factors/:id/remove-challenge', // #666: the proof a passkey gives before it goes
+  // #650 / ADR-226: minting recovery codes is the same account-screen plumbing. The plaintext exists
+  // exactly once, in the response that made it, and is shown to a person who is about to write it on
+  // paper — an integrator driving this would be storing ten standing credentials somewhere, which is the
+  // opposite of what the codes are for.
+  '/me/recovery-codes', '/me/recovery-codes/challenge',
   // #652: the interstitial's own doors live under /auth/, which the prefix list above already excludes;
   // named here only so a reader looking for them finds them beside their siblings.
   '/me/settings', '/me/capabilities', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', '/members/invites/:id/reissue', // account/invite UI plumbing (#638: handing a pending invitation over again is the same console surface)

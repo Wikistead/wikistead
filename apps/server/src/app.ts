@@ -248,6 +248,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // can resolve them; registration is idempotent (a Map set).
   await import('./email/mention-builder.js')
   await import('./email/digest.js') // #547 S4: the digest builder
+  await import('./email/security-builder.js') // #650 / ADR-226 §5: the recovery-code notices
 
   const verifyMember = makeMemberVerifier({
     issuer: process.env.OIDC_ISSUER!,

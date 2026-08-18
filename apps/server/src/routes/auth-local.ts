@@ -36,6 +36,9 @@ import { hashPassword, verifyPassword, needsRehash, dummyHash } from '../auth/pa
 import { safeReturnTo } from '../auth/return-to.js'
 import { validatePasswordPolicy, PASSWORD_MIN_LENGTH } from '../auth/password-policy.js'
 import { productName } from '../product-name.js'
+import { spendRecoveryCode, recoveryCodesUsable } from '../auth/recovery-codes.js' // #650 / ADR-226 §4: the recovery door
+import { enqueueEmailOutbox } from '../email/outbox.js'
+import { RECOVERY_USED_CLASS } from '../email/security-builder.js'
 
 // ADR-198 §5, ruled on #568: an identifier is locked after 5 failures in 15 minutes, an IP after 30,
 // and a lock lasts 30 minutes. Env-overridable because the e2e and server suites hammer this path
@@ -494,6 +497,14 @@ export async function authLocalPlugin(app: FastifyInstance) {
           ok: false,
           factor: enrolled ? 'required' : 'enrolment-required' as const,
           kinds: enrolled ? usable : acceptedKinds(factorStance),
+          // #650 / ADR-226: may this member fall back to a recovery code? Answered HERE for the same
+          // reason `usable` is — the receipt holder has no session, so the screen cannot ask later. Only
+          // in the `required` branch: somebody being sent to ENROL has nothing to recover, and offering
+          // to wipe their factors there would be an instruction with no problem attached.
+          //
+          // Naming it is not an oracle. It is a fact about the caller's own account, and they have just
+          // proved its password; the door itself answers the same for every stranger.
+          ...(enrolled ? { recovery: await recoveryCodesUsable(req.db, row.member_sub) } : {}),
         }
       }
 
@@ -657,6 +668,105 @@ export async function authLocalPlugin(app: FastifyInstance) {
     reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
     emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: pending.sub, method: 'local' })
     return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
+  })
+
+  /**
+   * Spend a RECOVERY CODE at the same door (#650 / ADR-226 §4).
+   *
+   * PUBLIC and receipt-bound, exactly like the route above: the password was already correct, so this is
+   * never anonymous, and the body carries a code and nothing else — no `sub` is addressable from
+   * outside, which is what keeps the uniform refusal from being an enumeration oracle in the first
+   * place (there is nothing to enumerate).
+   *
+   * ⚠️ THIS IS A RESET, NOT A SHORTCUT. A code does not stand in for a factor: spending one DELETES
+   * every factor the member holds, revokes the rest of the set and signs every session out. That is the
+   * self-service twin of the administrator reset (#644 §10a), and the distinction is the whole reason
+   * ADR-210 §2(b)'s refusal of "a way past the second factor" is not what this is. What the presenter
+   * gets back is a session opened through door `local` — HONESTLY named, because no factor was answered
+   * — so if the tenant later turns a stance on, #679's sweep closes it like any other factorless
+   * session, and the member's next sign-in lands in §6's enrol-first flow.
+   *
+   * The four refusals ADR-226 §4 requires to be indistinguishable — wrong code, no set, revoked set,
+   * deployment switch off — are ONE return value out of `spendRecoveryCode`, so this route cannot tell
+   * them apart even if a later editor wanted to.
+   */
+  app.post<{ Body: { code?: string; returnTo?: string } }>('/auth/local/factor/recovery', { config: { public: true } }, async (req, reply) => {
+    if (!sameOriginOk(req.headers as Record<string, unknown>, req.headers.host)) {
+      return reply.code(403).send({ error: 'cross-origin sign-in refused' })
+    }
+    const fsid = req.cookies?.[FACTOR_COOKIE]
+    const pending = await readFactorSession(app.valkey, fsid)
+    if (!pending || pending.tenantId !== req.tenant.id) {
+      return reply.code(401).send({ error: 'sign in again', code: 'factor_session_expired' })
+    }
+    // The same limiter, keyed the same way as the factor door beside it. A code is one guess in 2^80, so
+    // this is not what stops a search — it is what stops the door being usable as a wipe-the-account
+    // hammer by somebody who has the password and is guessing.
+    const ipKey = `authlocal:ip:${req.ip}`
+    const idKey = `authlocal:id:${pending.sub}`
+    if (await overLimit(app.valkey, idKey, LOCAL_LOGIN_ID_MAX) || await overLimit(app.valkey, ipKey, LOCAL_LOGIN_IP_MAX)) {
+      return reply.code(429).send({ error: 'too many attempts — try again later', code: 'locked' })
+    }
+
+    // NOT gated on the tenant's accepted KINDS (ADR-226 §6). A recovery code is not a factor kind — it is
+    // the path back when no kind can be presented — so a passkey-only workspace refusing it would refuse
+    // the one door that exists for the member whose key is at the bottom of a river. The admin reset
+    // ignores kind policy for the same reason.
+    const outcome = await spendRecoveryCode(req.db, {
+      memberSub: pending.sub,
+      code: typeof req.body?.code === 'string' ? req.body.code : '',
+      // In the spending transaction: the ledger cannot record a wipe that rolled back, and a wipe cannot
+      // land unrecorded. `actor === target` is the fact that distinguishes this from #644's entry.
+      inTx: async (tx) => {
+        await auditIfEntitled(tx as never, req.tenant, {
+          actor: `user:${pending.sub}`, action: 'member.factors_reset', target: `member:${pending.sub}`,
+        })
+        await auditIfEntitled(tx as never, req.tenant, {
+          actor: `user:${pending.sub}`, action: 'member.recovery_codes_revoked', target: `member:${pending.sub}`,
+        })
+      },
+    })
+    if (!outcome.ok) {
+      await countFailure(app.valkey, idKey, LOCAL_LOGIN_WINDOW_S)
+      await countFailure(app.valkey, ipKey, LOCAL_LOGIN_WINDOW_S)
+      emit({ type: 'auth.failed', tenantId: req.tenant.id, method: 'local', reason: 'invalid credentials' })
+      return reply.code(401).send({ error: 'that code did not match', code: 'recovery_code_invalid' })
+    }
+
+    // #474: every session goes, and BEFORE the new one exists — the order is the bug waiting to happen
+    // here, since a sweep run afterwards would take the session this request just issued. The old device,
+    // which is the reason a recovery was needed, must not keep the account.
+    await destroyMemberSessions(app.valkey, req.tenant.id, pending.sub)
+    // ADR-226 §5: the member is told. This is the ONLY way somebody learns that their factors were
+    // emptied by a code they did not spend, so it is queued even though the request is about to succeed —
+    // the notice is for the person who is NOT holding this browser.
+    await enqueueEmailOutbox([{ tenantId: req.tenant.id, memberSub: pending.sub, class: RECOVERY_USED_CLASS }])
+      .catch((err: unknown) => req.log.warn({ err }, 'recovery-code use notice could not be queued'))
+
+    const sid = await establishMemberSession(
+      { db: req.db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver },
+      req.tenant,
+      { sub: pending.sub },
+      // `local`, not `local+factor`. Nothing was presented; claiming otherwise would be the same lie the
+      // password step refuses to tell, and it is the value #679's sweep needs to find this session.
+      { localIdentity: true, door: 'local' },
+    )
+    await destroyFactorSession(app.valkey, fsid)
+    reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
+    await app.valkey.del(idKey).catch(() => {})
+    reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+    // Both halves of what happened, under the names ADR-226 §5 gives them: the factors are gone (the same
+    // verb #644 emits, with `reason` naming who did it) and the set is spent.
+    emit({
+      type: 'member.factors_reset', tenantId: req.tenant.id, actorId: pending.sub, targetSub: pending.sub,
+      count: outcome.factorsRemoved, reason: 'recovery_code',
+    })
+    emit({
+      type: 'member.recovery_codes_revoked', tenantId: req.tenant.id, actorId: pending.sub,
+      targetSub: pending.sub, reason: 'used',
+    })
+    emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: pending.sub, method: 'local' })
+    return { ok: true, returnTo: safeReturnTo(req.body?.returnTo), factorsRemoved: outcome.factorsRemoved }
   })
 
   /**

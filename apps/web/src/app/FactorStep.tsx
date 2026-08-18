@@ -22,14 +22,21 @@ import { factorKindsPhrase, browserCanUseFactorKind } from "../settings/factor-k
 // Two stages, not one. "Enter your code" is unanswerable to somebody who has never enrolled — §6's
 // circle in miniature — so the server says which situation this is and the screen asks accordingly.
 export function FactorStep(
-  { stage, kinds, returnTo }: { stage: "required" | "enrolment-required"; kinds?: string[]; returnTo: string },
+  { stage, kinds, recovery, returnTo }: {
+    stage: "required" | "enrolment-required"; kinds?: string[]; recovery?: boolean; returnTo: string;
+  },
 ) {
   const { t } = useTranslation();
   const [code, setCode] = useState("");
+  // #650 / ADR-226: the recovery code box is BEHIND a link rather than beside the factor box. Somebody
+  // who can reach their authenticator should use it — spending a code deletes every factor they hold
+  // so the way in that costs nothing stays the obvious one, and this is the door you go looking for.
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [busy, setBusy] = useState(false);
   // #681: "that code is wrong" is a claim about the CODE. A 500 is not, and a person told their
   // correct code is wrong will keep re-reading their authenticator while the outage continues.
-  const [failed, setFailed] = useState<false | "code" | "badCode" | "unavailable">(false);
+  const [failed, setFailed] = useState<false | "code" | "badCode" | "recovery" | "unavailable">(false);
   // #653`uri` was in this response all along and the TYPE dropped it, so the sign-in screen
   // offered typing and nothing else while the settings screen — same server field — drew a QR. Reading
   // it here is the whole fix; the server is untouched.
@@ -81,6 +88,22 @@ export function FactorStep(
     setBusy(true); setFailed(false);
     const res = await post("/auth/local/factor", { code: code.trim(), returnTo }).catch(() => null);
     if (!res?.ok) { setFailed(await classify(res)); setBusy(false); return; }
+    await arrive(res);
+  };
+
+  /**
+   * #650 / ADR-226 §4: spend a recovery code.
+   *
+   * The server answers ONE refusal for a wrong code, no set, a revoked set and the switch being off, so
+   * there is nothing here to classify — `badCode` would be a claim the response does not make. On
+   * success the session cookie comes back on this call, exactly as the factor door's does, and the
+   * member arrives with no factors and a fresh set to enrol.
+   */
+  const presentRecovery = async () => {
+    if (busy || !recoveryCode.trim()) return;
+    setBusy(true); setFailed(false);
+    const res = await post("/auth/local/factor/recovery", { code: recoveryCode.trim(), returnTo }).catch(() => null);
+    if (!res?.ok) { setFailed(isServerFault(res) ? "unavailable" : "recovery"); setBusy(false); return; }
     await arrive(res);
   };
 
@@ -173,6 +196,9 @@ export function FactorStep(
           data-testid="login-factor-error" role="alert">
           {t(failed === "unavailable" ? "auth.temporarilyUnavailable"
             : failed === "badCode" ? "account.factorCodeWrong"
+            // #650: the recovery door answers one refusal for four causes on purpose, so the sentence
+            // must not name one of them ("that code is wrong" would be a guess about which it was).
+            : failed === "recovery" ? "auth.recoveryCodeFailed"
             : "auth.factorFailed")}
         </div>
       )}
@@ -204,6 +230,37 @@ export function FactorStep(
               {t("auth.factorNoWebauthn")}
             </p>
           )}
+          {/* #650 / ADR-226: the way back for the person whose device is gone. Offered only when the
+              server says this member holds a live set — a link to a box they cannot fill is the #606
+              shape, a control whose only outcome is a refusal.
+
+              NOT gated on `accepts()`: a recovery code is not a factor kind, so a passkey-only
+              workspace does not refuse it. It is the reset path, and the reset path ignores kind
+              policy exactly as the administrator's does. */}
+          {recovery && (recovering ? (
+            <form className="flex flex-col gap-2" data-testid="login-recovery-form"
+              onSubmit={(e) => { e.preventDefault(); void presentRecovery(); }}>
+              {/* Said BEFORE the box, not after: spending a code deletes every factor on the account,
+                  and somebody who reads that afterwards has already pressed the button. */}
+              <p className="m-0 text-sm text-fg-dim" data-testid="login-recovery-warning">
+                {t("auth.recoveryCodeWarning")}
+              </p>
+              <Input value={recoveryCode} onChange={(e) => setRecoveryCode(e.target.value)}
+                autoComplete="one-time-code" autoFocus disabled={busy}
+                placeholder={t("auth.recoveryCodePlaceholder")} aria-label={t("auth.recoveryCode")}
+                data-testid="login-recovery-code" />
+              <Button variant="primary" type="submit" className="w-full"
+                disabled={busy || !recoveryCode.trim()} data-testid="login-recovery-submit">
+                {busy && <Loader2 size={16} className="animate-spin" />}
+                {t("auth.recoveryCodeSubmit")}
+              </Button>
+            </form>
+          ) : (
+            <button type="button" className="self-start text-xs underline text-fg-dim"
+              onClick={() => setRecovering(true)} data-testid="login-recovery-open">
+              {t("auth.recoveryCodeOpen")}
+            </button>
+          ))}
         </>
       ) : enrolling ? (
         <>

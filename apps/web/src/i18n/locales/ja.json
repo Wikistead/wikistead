@@ -288,7 +288,25 @@
     "factorKeyCancelled": "登録を取り消しました。",
     "factorKeyAlready": "このパスキーはすでに登録されています。上の一覧にあります。",
     "factorNotCounted": "対象外",
-    "factorNotCountedTip": "このワークスペースは現在この種類の要素を受け付けていないため、これではサインインできません。設定が戻る場合に備えて残してあります。"
+    "factorNotCountedTip": "このワークスペースは現在この種類の要素を受け付けていないため、これではサインインできません。設定が戻る場合に備えて残してあります。",
+    "recoveryTitle": "リカバリコード",
+    "recoveryExplainer": "認証アプリやキーが手元から失われたときに、自分でサインインし直すための使い切りコードです。1 本使うとこのアカウントの第 2 要素はすべて解除されるので、入り直したあとで登録し直してください。",
+    "recoveryRemaining_other": "残り {{count}} 本です。",
+    "recoveryNone": "リカバリコードはまだありません。",
+    "recoveryMint": "リカバリコードを作成",
+    "recoveryRemint": "作り直す",
+    "recoveryRemintNote": "作り直すと、いま持っているコードは使えなくなります。",
+    "recoveryMinted": "リカバリコードを作成しました。",
+    "recoverySaved": "控えました",
+    "recoveryStoreNote": "スマートフォンが無くても取り出せる場所に控えてください。",
+    "recoveryOneShotNote_other": "{{count}} 本あります。1 本につき 1 回だけ使えます。",
+    "recoveryReauthPrompt": "作成の前に、本人であることを確認します。",
+    "recoveryReauthPassword": "パスワード",
+    "recoveryReauthPasskey": "パスキーで確認する",
+    "recoveryReauthFailed": "本人確認ができませんでした。認証アプリのコード・パスキー・パスワードのいずれかでお試しください。",
+    "recoveryNeedsFactor": "先に第 2 要素を登録してください。リカバリコードはその第 2 要素を通れなくなったときの入り口です。",
+    "recoveryDisabled": "この環境ではリカバリコードが無効になっています。管理者に第 2 要素の解除を依頼してください。",
+    "recoveryMintFailed": "リカバリコードを作成できませんでした。もう一度お試しください。"
   },
   "settings": {
     "back": "アプリに戻る",
@@ -754,7 +772,13 @@
     "factorEnrolHint": "このキーを認証アプリに入力し、表示されたコードを入れてください。",
     "factorSecretNote": "認証アプリに入力してください。",
     "factorEnrolPasskey": "パスキーを設定する",
-    "factorNoWebauthn": "このワークスペースはセキュリティキーを求めていますが、このブラウザは対応していません。別のブラウザを試すか、管理者にご連絡ください。"
+    "factorNoWebauthn": "このワークスペースはセキュリティキーを求めていますが、このブラウザは対応していません。別のブラウザを試すか、管理者にご連絡ください。",
+    "recoveryCodeOpen": "端末が手元にない場合はリカバリコードを使う",
+    "recoveryCode": "リカバリコード",
+    "recoveryCodePlaceholder": "xxxx-xxxx-xxxx-xxxx",
+    "recoveryCodeSubmit": "このコードを使う",
+    "recoveryCodeWarning": "コードを使うと、このアカウントの第 2 要素はすべて解除され、開いているセッションもすべて終了します。入り直したあとで認証アプリを登録し直してください。",
+    "recoveryCodeFailed": "このコードは使えません。コードは 1 本につき 1 回きりで、新しいセットを作ると古いセットは無効になります。"
   },
   "share": {
     "invalid": "この共有リンクは無効・期限切れ・取り消し済みです。",

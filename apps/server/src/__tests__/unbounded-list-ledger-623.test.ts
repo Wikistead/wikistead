@@ -85,6 +85,7 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'spaces.ts:/spaces/:spaceId/icon-image': { kind: 'bounded', why: 'one image for one space — a settings record.' },
   'spaces.ts:/spaces/:spaceId/page-creation-policy': { kind: 'bounded', why: 'one policy for one space — a settings record.' },
   'second-factor.ts:/me/factors': { kind: 'bounded', why: 'MAX_FACTORS_PER_MEMBER refuses the enrolment past 10, so the list cannot grow (#657). A cap and not a page: paging authenticators would let somebody hold more than they can see.' },
+  'second-factor.ts:/me/recovery-codes': { kind: 'bounded', why: 'Not a list at all: the GET answers a COUNT, a date and the deployment switch — the codes themselves exist once, in the POST that minted them, and no route can return them again (#650 / ADR-226 §5). The set is RECOVERY_CODE_COUNT rows by construction, and re-minting revokes the previous set rather than adding to it, so there is nothing here that grows.' },
   // …single-resource routes surfaced by the tighter window: each returns ONE record by id.
   'pages.ts:/pages/:pageId': { kind: 'bounded', why: 'one page by id — a row, not a list.' },
   'pages.ts:/pages/:pageId/published': { kind: 'bounded', why: 'one published page by id — a row, not a list.' },

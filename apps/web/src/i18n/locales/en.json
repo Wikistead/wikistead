@@ -288,7 +288,27 @@
     "factorKeyCancelled": "Registration cancelled.",
     "factorKeyAlready": "This passkey is already registered. It is in the list above.",
     "factorNotCounted": "Not accepted",
-    "factorNotCountedTip": "This workspace no longer accepts this kind of factor, so it will not get you in. It is kept in case the setting changes back."
+    "factorNotCountedTip": "This workspace no longer accepts this kind of factor, so it will not get you in. It is kept in case the setting changes back.",
+    "recoveryTitle": "Recovery codes",
+    "recoveryExplainer": "Single-use codes that get you back in when your authenticator is gone. Using one removes every second factor from your account, so you set up a new one afterwards.",
+    "recoveryRemaining_one": "{{count}} code left.",
+    "recoveryRemaining_other": "{{count}} codes left.",
+    "recoveryNone": "You have no recovery codes.",
+    "recoveryMint": "Create recovery codes",
+    "recoveryRemint": "Create a new set",
+    "recoveryRemintNote": "A new set retires the one you have now.",
+    "recoveryMinted": "Recovery codes created.",
+    "recoverySaved": "I have saved them",
+    "recoveryStoreNote": "Keep these where you can reach them without your phone.",
+    "recoveryOneShotNote_one": "{{count}} code. It works once.",
+    "recoveryOneShotNote_other": "{{count}} codes. Each works once.",
+    "recoveryReauthPrompt": "Confirm it is you before the codes are created.",
+    "recoveryReauthPassword": "Your password",
+    "recoveryReauthPasskey": "Use your passkey instead",
+    "recoveryReauthFailed": "That did not confirm it was you. Try your authenticator code, your passkey, or your password.",
+    "recoveryNeedsFactor": "Set up a second factor first. Recovery codes are the way back past one.",
+    "recoveryDisabled": "Recovery codes are turned off for this deployment. An administrator can clear your second factors for you.",
+    "recoveryMintFailed": "The codes could not be created. Try again."
   },
   "settings": {
     "back": "Back to app",
@@ -755,7 +775,13 @@
     "factorEnrolHint": "Enter this key in your authenticator app, then type the code it shows.",
     "factorSecretNote": "Enter it in your authenticator app.",
     "factorEnrolPasskey": "Set up a passkey",
-    "factorNoWebauthn": "This workspace asks for a security key, and this browser does not support them. Try another browser, or ask an administrator."
+    "factorNoWebauthn": "This workspace asks for a security key, and this browser does not support them. Try another browser, or ask an administrator.",
+    "recoveryCodeOpen": "Lost your device? Use a recovery code",
+    "recoveryCode": "Recovery code",
+    "recoveryCodePlaceholder": "xxxx-xxxx-xxxx-xxxx",
+    "recoveryCodeSubmit": "Use this code",
+    "recoveryCodeWarning": "Using a code removes every second factor from your account and signs out all your sessions. You will set up a new authenticator afterwards.",
+    "recoveryCodeFailed": "That code cannot be used. Each code works once, and creating a new set retires the old one."
   },
   "share": {
     "invalid": "This share link is invalid, expired, or revoked.",

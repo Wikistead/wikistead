@@ -2840,6 +2840,51 @@ export function useRenameFactor() {
   });
 }
 
+// ── recovery codes (#650 / ADR-226) ─────────────────────────────────────────────────────────────
+
+/**
+ * The member's own set: how many are left, when it was made, and whether the deployment allows them.
+ * NEVER the codes — the plaintext exists once, in the mint response, and nothing can ask for it again.
+ */
+export function useMyRecoveryCodes() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["me", "recovery-codes"],
+    queryFn: () => apiFetch<{ remaining: number; mintedAt: string | null; enabled: boolean }>("/me/recovery-codes", token)
+      .then((r) => ({ remaining: r?.remaining ?? 0, mintedAt: r?.mintedAt ?? null, enabled: r?.enabled !== false })),
+  });
+}
+
+/** A challenge for re-authenticating with a passkey before minting (ADR-226 §4). */
+export function useRecoveryReauthChallenge() {
+  const { token } = useSession();
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<{ options: PublicKeyCredentialRequestOptionsJSON }>(
+        "/me/recovery-codes/challenge", token, { method: "POST", body: "{}" }),
+  });
+}
+
+/**
+ * Mint — or RE-mint, which is the same call: the old set is revoked as the new one is written, so there
+ * is never more than one live set.
+ *
+ * ⚠️ The returned `codes` are the ONLY time the plaintext exists. They are handed to the component that
+ * shows them once and are deliberately NOT put in the query cache: a cached copy would survive the
+ * screen, and the whole promise of a one-time display is that it does not.
+ */
+export function useMintRecoveryCodes() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (proof: { password?: string; code?: string; passkey?: unknown }) =>
+      apiFetch<{ codes: string[] }>("/me/recovery-codes", token, {
+        method: "POST", body: JSON.stringify(proof),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "recovery-codes"] }),
+  });
+}
+
 /** #660: removing one needs a current code FROM it — possession, not a password (ADR-219 §8). */
 export function useRemoveFactor() {
   const { token } = useSession();
