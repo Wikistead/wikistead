@@ -2050,6 +2050,43 @@ export function usePageAssignableRoles(pageId: string, enabled = true) {
 // #578 / ADR-201 slice 5: the tenant default role is retired (its meaning moved to the every-member
 // toggles on the same screen), so the two hooks that read and wrote it are gone with their routes.
 
+// #723 / ADR-232: the SCIM setup surface. The tab exists only where the build serves SCIM (the
+// server's surface registry decides that), and a Cloud tenant below the entitled plan gets
+// `scim_not_entitled` from the list route so the tab can offer the upgrade instead of an empty
+// table that reads like a feature nobody used (ADR-072).
+export interface ScimToken { id: string; name: string; tokenPrefix: string; createdAt: string; lastUsedAt: string | null }
+export interface ScimTokenCreated extends ScimToken { plaintext: string }
+
+export function useScimTokens() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["scim-tokens"],
+    queryFn: () => apiFetch<ScimToken[]>("/admin/scim-tokens", token).then((r) => r ?? []),
+    staleTime: 5_000,
+  });
+}
+
+export function useCreateScimToken() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => apiFetch<ScimTokenCreated>("/admin/scim-tokens", token, { method: "POST", body: JSON.stringify({ name }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["scim-tokens"] }),
+  });
+}
+
+export function useRevokeScimToken() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    // The route is idempotent (204 even when no live row matched), so there is no 404 for the
+    // client to interpret — revoking twice is not an error, and a destructive action never reports
+    // success on the strength of a status that also means "not mounted".
+    mutationFn: (id: string) => apiFetch<void>(`/admin/scim-tokens/${id}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["scim-tokens"] }),
+  });
+}
+
 export function useAuditLog(before: number | null, enabled = true) {
   const { token } = useSession();
   return useQuery({

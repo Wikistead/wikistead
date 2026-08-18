@@ -47,6 +47,9 @@ export type { PageViewEvent, PageViewCollector } from './analytics/sink.js'
 export { entitlementDenied } from './entitlement-ux.js'
 // #475: SCIM deprovisioning revokes the member's API keys, so the EE side needs the same key
 // primitives the CE routes use — additive re-exports of CE code, no EE dependency added.
+// #723 / ADR-232: the EE composition root registers SCIM's presence the way it registers the
+// audit ledger — the CE marker lives in apps/server, the decision to light it lives in ee/.
+export { registerScim } from './scim/sink.js'
 export { createApiKey } from './routes/api-keys.js'
 export { verifyApiKey } from './api-key-auth.js'
 
