@@ -238,6 +238,28 @@ describe('#650 §4: minting proves the account again', () => {
     ))).every((r) => !r.ok), 'a printout you replaced is worthless').toBe(true)
   }, 180_000)
 
+  it('says whether a password entrance exists, so the screen stops offering one that does not', async () => {
+    // it did not. The screen can read its own factors, so the code box and the passkey button already
+    // came and went, but a password entrance is NOT a factor and appears in no list it can fetch. This
+    // is the only place that can answer, so the answer lives here.
+    const m = await localMember('haspw')
+    await enrolTotp(m.sub)
+    await setStance(false)
+    const session = cookie(await signIn(m.email), SESSION_COOKIE)!
+    const read = () => app.inject({
+      method: 'GET', url: '/me/recovery-codes', headers: { ...WEB, cookie: `${SESSION_COOKIE}=${session}` },
+    })
+
+    expect((await read()).json<{ hasPassword: boolean }>().hasPassword, 'they signed in with one').toBe(true)
+    // The body carries existence and NOTHING else — the hash never rides this response, which is the
+    // reason `local_credentials` is a table of its own (#614's rule, applied to the member's own view).
+    expect(JSON.stringify((await read()).json()), 'no hash, no identifier').not.toMatch(/\$argon|\$scrypt|password_hash/)
+
+    // Take the entrance away, exactly as an administrator's removal does, and the answer follows.
+    await adminPool`DELETE FROM local_credentials WHERE tenant_id = ${TENANT} AND member_sub = ${m.sub}`
+    expect((await read()).json<{ hasPassword: boolean }>().hasPassword, 'and it follows the removal').toBe(false)
+  }, 180_000)
+
   it('refuses a member with nothing to recover', async () => {
     const m = await localMember('nofactor')
     await setStance(false)

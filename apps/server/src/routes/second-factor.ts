@@ -33,9 +33,9 @@ import { productName } from '../product-name.js'
 // write is keyed to `req.user.sub`, never to a parameter. Guests have no member row and never reach
 // here — the default guard requires `req.user`.
 //
-// NOT here, deliberately:
-//   - The tenant POLICY and its enforcement (#652). Nothing in this file asks whether a factor is
-//     required; it only lets somebody get one.
+// NOT here, deliberately
+// - The tenant POLICY and its enforcement (#652). Nothing in this file asks whether a factor is
+// required; it only lets somebody get one.
 //
 // REMOVING a factor is here as of #660, with ADR-219 §8's re-authentication taking the form of a code
 // FROM THE FACTOR BEING REMOVED. Re-authenticating with a password would only work for members who have
@@ -255,7 +255,7 @@ export async function secondFactorPlugin(app: FastifyInstance) {
    */
   app.post<{ Params: { id: string }; Body: { code?: string } }>('/me/factors/:id/confirm', async (req, reply) => {
     const { id } = req.params
-    // #677 review: the START refused an unaccepted kind and this did not, which left a way round it —
+    // #677 review: the START refused an unaccepted kind and this did not, which left a way round it
     // a pending row created while the tenant accepted the kind can be confirmed after it stopped, and
     // this route is where the enrolment becomes real. Pending rows have no TTL, so the window is not
     // a race: it is "start one now, finish it whenever".
@@ -458,9 +458,21 @@ export async function secondFactorPlugin(app: FastifyInstance) {
    */
   app.get('/me/recovery-codes', async (req) => {
     const status = await recoverySetStatus(req.db, req.user.sub)
+    // could tell which FACTORS a member holds (it has the factor list), so the code box and the passkey
+    // button already came and went with them, but the password box was drawn unconditionally: somebody
+    // who signs in through an IdP, or whose password entrance an administrator removed, was shown a
+    // field they can never fill under a sentence promising any one of these is enough.
+    //
+    // The screen cannot derive this — a password is not a factor and appears in no list it can read — so
+    // the answer is given here. EXISTENCE ONLY, exactly as the admin members list reports it (#614): the
+    // hash never rides this SELECT, which is the reason `local_credentials` is a table of its own. It is
+    // also nothing new to the caller: this is their own account, and the sign-in screen they used already
+    // told them whether a password works.
+    const [pw] = await req.db.sql<[{ one: number }?]>`
+      SELECT 1 AS one FROM local_credentials WHERE member_sub = ${req.user.sub}`
     // The switch is reported so the screen can say "your operator has turned this off" rather than
     // offering a button that will be refused. Read through the ONE predicate's module (§4.1).
-    return { ...status, enabled: recoveryEnabled() }
+    return { ...status, enabled: recoveryEnabled(), hasPassword: !!pw }
   })
 
   /**

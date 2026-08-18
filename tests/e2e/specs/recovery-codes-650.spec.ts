@@ -192,13 +192,23 @@ test("#650: a lost device, a code from the drawer, and back in", async ({ page, 
   // A session alone must not be enough — that is the whole re-authentication rule, and here it is a
   // form the reader has to fill rather than a promise in an ADR.
   await expect(page.getByTestId("recovery-reauth"), "it asks who this is").toBeVisible({ timeout: 10_000 });
-  // #650/(user, twice, at this exact form): it has to say WHAT it wants and that ONE of the
-  // three is enough. Read as text a browser laid out, because the defect was a `placeholder` — an
-  // attribute a person loses the moment they start typing, and which `toContainText` does not see.
+  // #650(user, at this exact form): PICK a method, then prove. This member holds an authenticator
+  // and a password, so the chooser stands — and it offers those two and nothing else. Read as laid-out
+  // text and as real clicks, because both defects this form has had were invisible from the source: a
+  // `placeholder` that vanishes on the first keystroke, and a box drawn for a proof nobody holds.
   const reauth = page.getByTestId("recovery-reauth");
-  await expect(reauth, "the code field is named on screen").toContainText("Authenticator code");
-  await expect(reauth, "the password field is named on screen").toContainText("Your password");
-  await expect(reauth, "…and one of them is enough").toContainText("Any one of these is enough");
+  await expect(reauth, "the two proofs this member holds are offered").toContainText("Authenticator code");
+  await expect(reauth, "…including the password entrance").toContainText("Your password");
+  await expect(page.getByTestId("recovery-reauth-choose-passkey"),
+    "and NOT a passkey, which this member has never enrolled").toHaveCount(0);
+  // Nothing to type until a method is picked: a box beside the choices is the checklist shape again.
+  await expect(page.getByTestId("recovery-reauth-password"), "no field while choosing").toHaveCount(0);
+
+  await page.getByTestId("recovery-reauth-choose-password").click();
+  // The visible label survives the new shape — it is thefix, and still the only thing naming the
+  // box once a finger has cleared the placeholder away.
+  await expect(reauth, "the chosen proof is named on screen").toContainText("Your password");
+  await expect(page.getByTestId("recovery-reauth-code"), "and only the chosen one is asked for").toHaveCount(0);
   await page.getByTestId("recovery-reauth-password").fill(PASSWORD);
   await page.getByTestId("recovery-reauth-submit").click();
 
