@@ -15,7 +15,8 @@ import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-19
 import { auditIfEntitled } from '../audit/sink.js'
 import { deletePinsForResources } from './pins.js'
 import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
-import { importArchive, ImportTooLargeError, ImportInvalidError } from '../import/index.js'
+import { prepareImport, runPreparedImport, ImportTooLargeError, ImportInvalidError } from '../import/index.js'
+import { IMPORT_SYNC_MAX_NODES, enqueueImportJob, assertCanQueueImport, readImportStatus, ImportBusyError } from '../import/jobs.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
 
@@ -1912,9 +1913,24 @@ export async function spacesPlugin(app: FastifyInstance) {
       const archive = Buffer.from(req.body?.zipBase64 ?? '', 'base64')
       if (archive.length === 0) return reply.code(400).send({ error: 'empty archive' })
       try {
-        return await importArchive(
+        // #712 / ADR-227 §7: read the archive first — cheap, already capped, and it is the only way to
+        // know how much work this is before deciding whether one HTTP request can honestly carry it.
+        const prepared = prepareImport(new Uint8Array(archive))
+        if (prepared.nodeCount > IMPORT_SYNC_MAX_NODES) {
+          // The synchronous path is gated per page inside createPage; a 202 returns before any of that
+          // runs, so the space gate is asked HERE too — otherwise a tenant member with no write access
+          // could park a 200 MiB archive in object storage and be told 202.
+          await assertCanQueueImport(app.fga, req.user.sub, req.params.spaceId)
+          const importId = await enqueueImportJob({ storage: app.storageDriver }, new Uint8Array(archive), {
+            tenantId: req.tenant.id, spaceId: req.params.spaceId, userId: req.user.sub,
+            parentPageId: req.body?.parentPageId ?? null, publish: req.body?.publish === true,
+            nodesTotal: prepared.nodeCount,
+          })
+          return reply.code(202).send({ importId, status: 'queued', nodesTotal: prepared.nodeCount })
+        }
+        return await runPreparedImport(
           { db: req.db, fga: app.fga, storage: app.storageDriver, driver: app.searchDriver },
-          new Uint8Array(archive),
+          prepared,
           {
             tenantId: req.tenant.id, spaceId: req.params.spaceId, userId: req.user.sub, plan: req.tenant.plan,
             parentPageId: req.body?.parentPageId ?? null, publish: req.body?.publish === true,
@@ -1922,11 +1938,23 @@ export async function spacesPlugin(app: FastifyInstance) {
         )
       } catch (e) {
         if ((e as { statusCode?: number })?.statusCode === 403) return reply.code(403).send({ error: 'forbidden' })
+        if (e instanceof ImportBusyError) return reply.code(409).send({ error: 'an import is already running for this space' })
         if (e instanceof ImportTooLargeError) return reply.code(413).send({ error: 'archive too large' })
         if (e instanceof ImportInvalidError) return reply.code(400).send({ error: 'invalid archive' })
         throw e
       }
     })
+
+  // #712 / ADR-227 §7: the progress + report surface for a queued import. This is where a report LIVES
+  // once the connection that started the import is long gone — the whole reason §7 exists. Member-only
+  // (no `config.guest`) and gated on space `edit`, the same authority that could have started it; the
+  // row itself is matched on (id, tenant, space) because `imports` is a queue table without RLS.
+  app.get<{ Params: { spaceId: string; importId: string } }>('/spaces/:spaceId/imports/:importId', async (req, reply) => {
+    await assertCanQueueImport(app.fga, req.user.sub, req.params.spaceId)
+    const row = await readImportStatus({ id: req.params.importId, tenantId: req.tenant.id, spaceId: req.params.spaceId })
+    if (!row) return reply.code(404).send({ error: 'not found' })
+    return row
+  })
 
   // PUBLIC icon bytes (read public, write strict — mirrors the tenant logo). The query
   // is RLS-scoped to the Host-resolved tenant, so a space id from another tenant yields

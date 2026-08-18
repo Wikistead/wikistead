@@ -65,6 +65,15 @@ export async function startServer(): Promise<FastifyInstance> {
   const { startDigestProducerWorker } = await import('./email/digest.js')
   startDigestProducerWorker((m) => app.log.info(m))
 
+  // Background import drain (#712 / ADR-227 §7): runs the imports that were too large to finish inside
+  // one request. Started here (not buildApp) so inject-driven tests don't spawn a timer — they call
+  // drainImportJobs directly; THIS is what runs a queued import in production.
+  const { startImportJobWorker } = await import('./import/jobs.js')
+  startImportJobWorker(
+    { fga: fgaClient, storage: app.storageDriver, driver: app.searchDriver },
+    Number(process.env.IMPORT_JOB_POLL_MS ?? 5000),
+  )
+
   // Background trash retention purge (#411 / ADR-153): permanently deletes trash entries older than
   // TRASH_RETENTION_DAYS (30). Hourly is plenty for a 30-day horizon; started here (not buildApp) so
   // inject-driven tests don't spawn a timer.

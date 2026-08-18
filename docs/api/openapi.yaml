@@ -559,7 +559,14 @@ paths:
       tags: [spaces]
       summary: Import Markdown content into a space (ZIP / files)
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "201": { description: Imported pages }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
+      responses: { "200": { description: "Imported synchronously (small archive) — body is the fidelity report" }, "201": { description: Imported pages }, "202": { description: "Too large for one request (over IMPORT_SYNC_MAX_NODES nodes, ADR-227 §7) — queued as a job. Body: { importId, status, nodesTotal }; poll GET /spaces/{spaceId}/imports/{importId}" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, "409": { description: "An import is already running for this space (one at a time, ADR-227 §7)" }, "413": { description: Archive exceeds a size cap }, default: { $ref: "#/components/responses/Error" } }
+  /spaces/{spaceId}/imports/{importId}:
+    get:
+      operationId: getSpaceImport
+      tags: [spaces]
+      summary: Progress and fidelity report of a queued import (ADR-227 §7)
+      parameters: [ { $ref: "#/components/parameters/spaceId" }, { name: importId, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: "Status. Body: { id, status: queued|running|done|failed, nodesTotal, nodesDone, report, error }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /export:
     get:
       operationId: listExport

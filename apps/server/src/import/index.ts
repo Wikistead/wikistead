@@ -356,7 +356,7 @@ function rewriteBody(
 export async function materializeImport(
   deps: { db: TenantDb; fga: OpenFgaClient; storage: StorageDriver; driver: SearchDriver },
   ir: ImportIR,
-  args: { tenantId: string; spaceId: string; userId: string; plan: string; parentPageId?: string | null; publish?: boolean },
+  args: { tenantId: string; spaceId: string; userId: string; plan: string; parentPageId?: string | null; publish?: boolean; onProgress?: (done: number) => void },
 ): Promise<ImportReport> {
   const { db, fga, storage, driver } = deps
   const report: ImportReport = {
@@ -391,6 +391,9 @@ export async function materializeImport(
         else report.attachmentsSkipped.push({ name: att.name, reason: 'storage quota' })
       }
       created.push({ node, newId: page.id, attByRel })
+      // §7 progress. Pass 1 is where the minutes go (a page + its attachments each), so counting it is
+      // what makes a job's progress mean anything to the person watching it.
+      args.onProgress?.(created.length)
       for (const child of node.children) await createNode(child, page.id)
     }
     for (const root of ir.roots) await createNode(root, args.parentPageId ?? null)
@@ -455,13 +458,18 @@ export async function materializeImport(
   }
 }
 
-// Top-level entry: unzip (streaming, capped) → IR → materialize. The route calls this after decoding the
-// uploaded base64 ZIP and gating the executor as a MEMBER (ADR-132 §4).
-export async function importArchive(
-  deps: { db: TenantDb; fga: OpenFgaClient; storage: StorageDriver; driver: SearchDriver },
-  archive: Uint8Array,
-  args: { tenantId: string; spaceId: string; userId: string; plan: string; parentPageId?: string | null; publish?: boolean },
-): Promise<ImportReport> {
+// #712 / ADR-227 §7: the ARCHIVE-READING half, split out from importArchive so the node count can be known
+// before anything is written. It is pure and cheap (unzip is already capped, the dialects only rewrite
+// strings), which is what lets the route decide "synchronous or job" without a speculative write.
+export interface PreparedImport {
+  ir: ImportIR
+  /** Degradations discovered while reading the archive — they belong to the report the materializer returns. */
+  extraDegradations: ImportDegradation[]
+  /** Pages this archive would create. The §7 threshold is measured against exactly this. */
+  nodeCount: number
+}
+
+export function prepareImport(archive: Uint8Array): PreparedImport {
   let files = streamingUnzip(archive)
   const confluenceDegradations: ImportDegradation[] = []
   // #712 / ADR-227 §6 — Confluence. The shared builder speaks Markdown, so the conversion happens
@@ -539,10 +547,35 @@ export async function importArchive(
   }
   const shared = vaultAttachments(files, { claimed, mimeOf: mimeFromName })
   if (shared.length && ir.roots[0]) ir.roots[0].attachments.push(...shared)
-  const report = await materializeImport(deps, ir, args)
-  report.degraded.push(...csvDegradations, ...confluenceDegradations)
-  // Canvas files never became pages — reported rather than silently absent, which is the difference
-  // between "we could not represent this" and "your vault came in fine".
-  report.degraded.push(...canvasDegradations(Object.keys(files)))
+  return {
+    ir,
+    // Canvas files never became pages — reported rather than silently absent, which is the difference
+    // between "we could not represent this" and "your vault came in fine".
+    extraDegradations: [...csvDegradations, ...confluenceDegradations, ...canvasDegradations(Object.keys(files))],
+    // Counted AFTER the Notion branch, which can add a database root of its own.
+    nodeCount: walkNodes(ir.roots).length,
+  }
+}
+
+// The WRITING half. Separate from prepareImport so the background job (§7) runs exactly the same
+// materialization the synchronous route does — one code path, two callers, no second implementation of
+// "what an import does" that could drift out of agreement with the tested one.
+export async function runPreparedImport(
+  deps: { db: TenantDb; fga: OpenFgaClient; storage: StorageDriver; driver: SearchDriver },
+  prepared: PreparedImport,
+  args: { tenantId: string; spaceId: string; userId: string; plan: string; parentPageId?: string | null; publish?: boolean; onProgress?: (done: number) => void },
+): Promise<ImportReport> {
+  const report = await materializeImport(deps, prepared.ir, args)
+  report.degraded.push(...prepared.extraDegradations)
   return report
+}
+
+// Top-level entry: unzip (streaming, capped) → IR → materialize. The route calls this after decoding the
+// uploaded base64 ZIP and gating the executor as a MEMBER (ADR-132 §4).
+export async function importArchive(
+  deps: { db: TenantDb; fga: OpenFgaClient; storage: StorageDriver; driver: SearchDriver },
+  archive: Uint8Array,
+  args: { tenantId: string; spaceId: string; userId: string; plan: string; parentPageId?: string | null; publish?: boolean },
+): Promise<ImportReport> {
+  return runPreparedImport(deps, prepareImport(archive), args)
 }
