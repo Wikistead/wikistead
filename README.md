@@ -7,7 +7,9 @@
 
 # Wikistead
 
-**A self-hostable collaborative knowledge base.**
+**Share a link, write together.**
+
+A Markdown-first collaborative knowledge base.
 
 Markdown-first, real-time, and open to people who don't have an account.
 
