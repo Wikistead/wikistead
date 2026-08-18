@@ -30,6 +30,29 @@ const FONT_TOKENS: readonly { from: string; to: string }[] = [
 ]
 
 /**
+ * #729 slice C: the capabilities this product SHIPS, emitted for the landing page to answer for.
+ *
+ * The landing page already checks one direction — every claim it makes names evidence, and a claim
+ * whose evidence stops resolving turns the build red (#696 ③). The other direction had no
+ * check at all: a capability could ship and the page could simply never mention it, which is the
+ * silence this ticket exists to break.
+ *
+ * It is EMITTED rather than listed on the landing side, for the same reason every other ledger here
+ * is walked rather than transcribed: a hand-kept list is green on the day something new lands, which
+ * is the day it is wrong. The ids are the ones the documentation ledger already uses, so a reader
+ * comparing the two files is comparing the same vocabulary.
+ *
+ * ⚠️ Registered SURFACES (macros, admin tabs, routes) are deliberately NOT here. The landing page is
+ * not a feature list — it sells six north-star values — and asking it to answer for seventeen macro
+ * names would make the ledger a wall of `none:` rows, which is a ledger nobody reads. What it must
+ * answer for is a capability a buyer would choose the product FOR.
+ */
+function renderCapabilitiesJson(): string {
+  const ids = Object.keys(SURFACE_DOCS.capability).sort()
+  return JSON.stringify({ capabilities: ids }, null, 2) + '\n'
+}
+
+/**
  * #731: the admin tab labels, per locale, straight out of the product's own strings.
  *
  * Keys are the registry ids (`ADMIN_SURFACES` / `adminNav`), which is what makes this checkable from
@@ -117,6 +140,8 @@ const BRAND_ASSETS: { from: string; to: string }[] = [
 import { renderEntitlementsMarkdown } from '../packages/entitlements/src/index.js'
 import { renderEventsMarkdown } from '../packages/events/src/index.js'
 import { renderAccountSettingsMarkdown } from '../apps/server/src/settings-catalog.js'
+// @ts-expect-error — repo-root script module, no types (#621 convention)
+import { SURFACE_DOCS } from './doc-code-map.mjs'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 
@@ -157,6 +182,12 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     name: 'admin tab labels',
     outPath: join(root, 'docs/generated/admin-tabs.json'),
     render: renderAdminTabsJson,
+  },
+  {
+    // #729 slice C: the capability ids the landing page's coverage ledger answers for.
+    name: 'shipped capabilities',
+    outPath: join(root, 'docs/generated/capabilities.json'),
+    render: renderCapabilitiesJson,
   },
   {
     // #180 / ADR-225 §3(a): the VERSION MARKER the docs-site pull verifies against its SOURCE_TAG

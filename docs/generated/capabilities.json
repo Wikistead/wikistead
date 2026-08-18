@@ -1,0 +1,18 @@
+{
+  "capabilities": [
+    "import:confluence",
+    "import:native",
+    "import:notion",
+    "import:obsidian",
+    "mcp:create_comment",
+    "mcp:create_page",
+    "mcp:edit_body",
+    "mcp:get_backlinks",
+    "mcp:get_page",
+    "mcp:get_syntax_reference",
+    "mcp:list_pages",
+    "mcp:list_spaces",
+    "mcp:publish_page",
+    "mcp:search"
+  ]
+}
