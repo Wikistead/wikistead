@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SELECTED_ROW } from "../ui/selected-row"; // #632: shared with the settings nav
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
@@ -28,6 +28,20 @@ export interface PageTreeNode {
   taskTotal: number;
   pinned?: boolean; // #284: this page is pinned by the CURRENT member (drives the ★ toggle state)
   children?: PageTreeNode[];
+}
+
+/**
+ * #736: is this row anywhere in the tree we are about to render? The scroll-to-selection effect waits
+ * for the selected row to EXIST (a page created a moment ago arrives only with the refetch, #274),
+ * and a presence answer is what lets it stop depending on the identity of `nodes` — which paging
+ * changes on every `more:` fetch without the selection having moved at all.
+ */
+function containsRow(nodes: PageTreeNode[], rowId: string): boolean {
+  for (const n of nodes) {
+    if (n.id === rowId) return true;
+    if (n.children?.length && containsRow(n.children, rowId)) return true;
+  }
+  return false;
 }
 
 // #193: measure the tree container via a CALLBACK ref, not an effect keyed on a stable ref object. The
@@ -102,14 +116,32 @@ export function PageTree({
 }) {
   const { t } = useTranslation();
   const { ref: treeBox, size } = useSize();
-  // #274(3): keep the ACTIVE row visible — after creating a page the app navigates to it,
-  // but in a long (virtualized) tree the new row could sit outside the viewport. `nodes` is a dep on
-  // purpose: the freshly created row only exists after the tree refetch, so the scroll fires once it
-  // renders. nearest-style scrolling (react-arborist keeps it minimal), never a jump on ordinary clicks.
+  // #274(3): keep the ACTIVE row visible — after creating a page the app navigates to it, but
+  // in a long (virtualized) tree the new row only exists after the refetch, so the scroll has to wait
+  // for it to appear. #736: that used to be spelled `nodes` in the dep list, which meant EVERY change
+  // to the tree scrolled back to the open page — including §1's paging, where `more:` appends into the
+  // same cache entry and hands us a new array. A reader scrolling past the open page was pulled back
+  // on every page they loaded. The trigger is now the event, not the identity: scroll when the
+  // SELECTION changes, or when the selected row APPEARS for the first time (which is #274's case, and
+  // is why that behaviour survives). Paging changes neither, so it no longer moves the viewport.
   const treeRef = useRef<TreeApi<PageTreeNode> | null>(null);
+  const selectedRowExists = useMemo(
+    () => (selectedId ? containsRow(nodes, `page:${selectedId}`) : false),
+    [nodes, selectedId],
+  );
+  const scrolledForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedId) treeRef.current?.scrollTo(`page:${selectedId}`);
-  }, [selectedId, nodes]);
+    if (!selectedId) {
+      scrolledForRef.current = null;
+      return;
+    }
+    // Not in the tree yet (a just-created page, a branch still loading): wait for it to arrive
+    // rather than scrolling to nothing — arriving is what fires this effect again.
+    if (!selectedRowExists) return;
+    if (scrolledForRef.current === selectedId) return;
+    scrolledForRef.current = selectedId;
+    treeRef.current?.scrollTo(`page:${selectedId}`);
+  }, [selectedId, selectedRowExists]);
 
   // Route the row action through a ref so NodeRow's identity does NOT depend on it. NodeRow is the
   // react-arborist row renderer: if its identity changes on a re-render, react-arborist REMOUNTS every row —
