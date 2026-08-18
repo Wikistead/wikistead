@@ -255,7 +255,11 @@ If a tenant's OIDC config locks everyone out, see
 
 ## Configuration reference
 
-`.env.example` is the authoritative, commented list. The highlights:
+**[`docs/generated/env-reference.md`](generated/env-reference.md) is the complete list** — every
+variable this product reads, with its default and what it does, generated from the code itself, so a
+knob added in a release is in it. `.env.example` is the smaller set a fresh checkout needs to start.
+
+The ones a deployment almost always sets:
 
 | Variable | Notes |
 |---|---|

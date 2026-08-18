@@ -15,7 +15,19 @@
 import type { TenantDb } from '../db/index.js'
 import { encryptSecret, decryptSecret } from './secret-crypto.js'
 
-export type FactorKind = 'totp' | 'passkey'
+/**
+ * The kinds of second factor this product ships, as a RUNTIME value (#734 / ADR-237 §2.1).
+ *
+ * It was a type and a database CHECK constraint, which meant nothing could walk it: a type does not
+ * exist at run time, so the documentation ledger had no way to ask "what factors are there?" and a
+ * third kind could ship undocumented. Same move #729 made for the importer's dialects — one constant,
+ * and the type derived from it so the two cannot drift apart.
+ *
+ * The recovery path (ADR-226) is not a kind — it is how a member gets back when every kind is gone —
+ * so it is enumerated beside these rather than inside them (see RECOVERY_CAPABILITY_ID).
+ */
+export const SECOND_FACTOR_KINDS = ['totp', 'passkey'] as const
+export type FactorKind = (typeof SECOND_FACTOR_KINDS)[number]
 
 /** A factor as the member's own list shows it. Deliberately carries no secret. */
 export type MemberFactor = {

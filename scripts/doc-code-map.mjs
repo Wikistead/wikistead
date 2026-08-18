@@ -39,6 +39,16 @@ export const DOC_CODE_MAP = [
     doc: 'docs/generated/account-settings.md',
   },
   {
+    // #734 / ADR-237 §2.2: the environment reference is generated from a walk of the code, so the
+    // prose file and the generator have to move with the committed output. The walk itself already
+    // fails on an undocumented variable — this row catches the other half, where somebody edits a
+    // description and forgets to regenerate.
+    label: 'environment reference',
+    kind: 'generated',
+    code: ['scripts/env-catalog.mjs', 'packages/ee-server/scripts/gen-env-reference-ee.ts'],
+    doc: 'docs/generated/env-reference.md',
+  },
+  {
     // #706: the docs/LP brand kit derives from the product tokens — a token change must ship the
     // regenerated kit in the same change (the asset copies are byte-checked by docs:check besides).
     label: 'brand kit',
@@ -298,6 +308,13 @@ export const SURFACE_DOCS = {
     'import:obsidian': 'wikistead-docs/src/content/docs/guides/import.md',
     'import:notion': 'wikistead-docs/src/content/docs/guides/import.md',
     'import:confluence': 'wikistead-docs/src/content/docs/guides/import.md',
+    // #734 / ADR-237 §2.1: the second factors. They were a TYPE and a database constraint, which no
+    // walk can read, so a third kind could have shipped with nobody noticing the page said nothing
+    // about it. The kinds and the recovery path are enumerated at run time now, and land on the
+    // account page — the screen a member actually uses to enrol them.
+    'factor:totp': 'wikistead-docs/src/content/docs/settings/account.md',
+    'factor:passkey': 'wikistead-docs/src/content/docs/settings/account.md',
+    'factor:recovery-code': 'wikistead-docs/src/content/docs/settings/account.md',
   },
 }
 

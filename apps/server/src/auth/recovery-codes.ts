@@ -16,6 +16,13 @@ import type { TenantDb } from '../db/index.js'
 
 /** Codes per set. Ten is the industry's shape and the number the mint response promises. */
 export const RECOVERY_CODE_COUNT = 10
+
+/**
+ * How the documentation ledger names the recovery path (#734 / ADR-237 §2.1). It sits beside the
+ * factor kinds rather than among them: a recovery code is not a factor a member enrols and presents,
+ * it is the way back when the factors are gone, and the page a reader needs says so.
+ */
+export const RECOVERY_CAPABILITY_ID = 'recovery-code'
 /** 80 bits, so an offline guess is out of reach with no KDF at all (ADR-226 §3). */
 const CODE_BYTES = 10
 // Crockford base32 without the ambiguous glyphs: no I, L, O or U. These get read off a screen and
