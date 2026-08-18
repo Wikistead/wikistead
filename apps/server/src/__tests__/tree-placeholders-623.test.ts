@@ -11,7 +11,7 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples } from '@wikistead/authz'
+import { fgaClient, writeTuples, checkRelation } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
@@ -201,6 +201,19 @@ describe('#623 §4: what a placeholder must NOT do', () => {
 
     const rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
     const flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
+    if (!flag.has(a)) {
+      // Fails ONLY on the public CI (4/4 runs) while green everywhere else, and 'expected undefined'
+      // names nothing. Say which link of the visibility chain broke: the SQL row, the FGA view on the
+      // page, or the space viewer gate — the next reader starts from data, not from a rerun.
+      const [row] = await db.sql<[{ published_at: Date | null; deleted_at: Date | null; parent_id: string | null }?]>`
+        SELECT published_at, deleted_at, parent_id FROM pages WHERE id = ${a}`
+      const viewA = await checkRelation(fgaClient, READER, 'view', { type: 'page', id: a }).catch((e: unknown) => `threw: ${String(e)}`)
+      const viewer = await checkRelation(fgaClient, READER, 'viewer', { type: 'space', id: spaceId }).catch((e: unknown) => `threw: ${String(e)}`)
+      throw new Error(
+        `chevron case: A is missing from the branch — sql row: ${JSON.stringify(row)}; ` +
+        `view(A) for READER: ${JSON.stringify(viewA)}; space viewer: ${JSON.stringify(viewer)}; ` +
+        `returned ids: ${rows.pages.map((p) => p.id).join(', ') || '(none)'}`)
+    }
     expect(flag.get(a), 'a visible child earns the chevron').toBe(true)
     expect(flag.get(b0), 'an invisible-only child must read as NO children').toBe(false)
     expect(flag.get(c0), 'a leaf draws no chevron').toBe(false)
