@@ -305,9 +305,15 @@ export function AdminRolesTab() {
           - Custom rows: live per-op capability toggles (#445), pencil rename, #504 red delete. */}
       <div className="mb-2 flex flex-col gap-4" data-testid="roles-list">
         {/* #581: the two groups are SURFACES, not a pair of small grey labels above a continuous run of
-            rows. A card each — border, panel background, its own heading bar — so the boundary is
-            visible before you read anything, which is what lets the per-row scope badge go away. */}
-        <section className="rounded-md border border-border bg-panel">  {/* list-box-ok: a SECTION frame, not a row — #581 made each scope its own surface deliberately */}
+            rows. A card each — border and its own heading bar — so the boundary is visible before you
+            read anything, which is what lets the per-row scope badge go away.
+            . The FILL is gone; the boundary is not. `bg-panel` is the
+            sidebar's own token, and this was the only screen in the console painting a large area with
+            it — every other list (API keys, webhooks, SCIM, domains, orphaned drafts) draws through the
+            shared `ListBox`, which paints nothing. The card was carrying the boundary twice, in a
+            border and in a fill, and the fill is the half that made this tab read as heavier than its
+            neighbours. Do not put it back without measuring the boundary problem #581 solved. */}
+        <section className="rounded-md border border-border">  {/* list-box-ok: a SECTION frame, not a row — #581's scope surface, unpainted since #752 */}
           <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-tenant">{t("adminRoles.sectionTenant")}</h3>
           {/* #539 / #521 / #503: the same 26rem box + inner scroll, because this list grows with the
               tenant's roles and this is the fourth list to hit that. The page keeps its own scroll. */}
@@ -340,7 +346,7 @@ export function AdminRolesTab() {
           {(roles.data?.custom ?? []).filter((r) => r.scope === "tenant").map(renderCustomRole)}
           </div>
         </section>
-        <section className="rounded-md border border-border bg-panel">  {/* list-box-ok: a SECTION frame, not a row — the resource-scope surface, same as above */}
+        <section className="rounded-md border border-border">  {/* list-box-ok: a SECTION frame, not a row — the resource-scope surface, same as above */}
           <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-resource">{t("adminRoles.sectionResource")}</h3>
           <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-resource">
           {(roles.data?.builtIn ?? []).map((r) => (
@@ -378,7 +384,7 @@ export function AdminRolesTab() {
           edited (it cannot; that is what a custom role is for), and that the row's vocabulary was the
           policy's (it was longer, and the extra boxes were clickable and saved nothing). Here they are
           a POLICY about every member, in their own section, showing only what this endpoint stores. */}
-      <section className="mt-8 rounded-md border border-border bg-panel" data-testid="member-defaults">
+      <section className="mt-8 rounded-md border border-border" data-testid="member-defaults">
         <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim">{t("adminRoles.memberDefaultsTitle")}</h3>
         <div className="p-3">
           <p className="mt-0 mb-2 text-sm text-fg-dim">{t("adminRoles.memberDefaultsBody")}</p>

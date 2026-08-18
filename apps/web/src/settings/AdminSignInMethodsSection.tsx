@@ -132,7 +132,14 @@ export const CONFIRM_COPY: Record<string, { title: string; message: string }> = 
  */
 export const HEADLESS_CONFIRMS = ["sso-exemption-revoke-confirm"] as const;
 
-const METHOD_ROW = "flex flex-col gap-1.5 rounded-md border border-border bg-panel px-3 py-2 text-sm";
+// #752 asked whether this row belongs to the same family as the roles tab's painted sections, and the
+// answer came from measuring rather than from reading: with fourteen of these stacked, `bg-panel` covered
+// 68% of this pane, against 85% on the roles tab before its fill came off and 0% on every list that draws
+// through the shared `ListBox` (API keys, webhooks, SCIM, domains). A row repeated fourteen times is a
+// surface — the user's words were , and this tab was the
+// second-heaviest example of exactly that. The border stays and still separates the methods; only the
+// fill, which said the same thing a second time, is gone.
+const METHOD_ROW = "flex flex-col gap-1.5 rounded-md border border-border px-3 py-2 text-sm";
 const METHOD_ROW_HEAD = "flex items-center gap-2";
 
 export function AdminSignInMethodsSection() {
