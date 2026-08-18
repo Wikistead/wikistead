@@ -52,7 +52,7 @@
   },
   "embedUrl": {
     "title": "Embed URL",
-    "degradeWarning": "This host isn't on the tenant's embed allowlist, so it will show as a link, not an embed. An admin can add it under Admin → Embeds."
+    "degradeWarning": "This host isn't on the workspace's embed allowlist, so it will show as a link, not an embed. An admin can add it under Admin → Embeds."
   },
   "toc": {
     "copyAnchor": "Copy link to heading",
@@ -147,7 +147,7 @@
   "userMenu": {
     "label": "Account",
     "accountSettings": "Account settings",
-    "tenantAdmin": "Tenant admin",
+    "tenantAdmin": "Workspace admin",
     "devModeTitle": "Dev-token bypass identity (dev-user). Sign in to use your real identity."
   },
   "accountNav": {
@@ -300,17 +300,17 @@
     "notFoundBody": "This page doesn't exist, or you don't have access to it."
   },
   "adminNav": {
-    "title": "Tenant admin",
+    "title": "Workspace admin",
     "members": "Members",
     "spaces": "Spaces",
     "branding": "Branding",
     "auth": "Authentication",
-    "api": "API",
+    "api": "API keys",
     "embeds": "Embeds",
     "public": "Public access",
     "moderation": "Moderation",
     "billing": "Billing",
-    "orphans": "Orphan drafts",
+    "orphans": "Orphaned drafts",
     "webhooks": "Webhooks",
     "audit": "Audit log",
     "analytics": "Analytics",
@@ -358,7 +358,7 @@
     "ownOrigin": "This app's own origin can't be embedded."
   },
   "adminOrphans": {
-    "title": "Orphan drafts",
+    "title": "Orphaned drafts",
     "body": "Drafts whose creator was deleted and that no one else can see. Claim one to read it, then reassign it to a member. Claiming grants you temporary access that is revoked on reassign (or expires automatically).",
     "empty": "No orphaned drafts.",
     "untitled": "Untitled",
@@ -391,7 +391,7 @@
   "adminApi": {
     "title": "API",
     "body": "API keys act with your own permissions. A read key can only read; the scope never grants more than you have.",
-    "policy": "Maximum key scope (tenant policy)",
+    "policy": "Maximum key scope (workspace policy)",
     "policyWrite": "Allow read & write keys",
     "policyRead": "Read-only keys only",
     "createTitle": "Create an API key",
@@ -565,8 +565,8 @@
     "manage": "Manage",
     "empty": "No spaces yet.",
     "creationMovedToRoles": "Who may create spaces is now configured in Roles (the member default role).",
-    "deleteModeTitle": "Deletion pathway (tenant default)",
-    "deleteModeBody": "Choose how pages are deleted across the tenant (spaces can override). Deleting is always manager-only; this setting only chooses reversibility."
+    "deleteModeTitle": "Deletion pathway (workspace default)",
+    "deleteModeBody": "Choose how pages are deleted across the workspace (spaces can override). Deleting is always manager-only; this setting only chooses reversibility."
   },
   "spaceSettings": {
     "title": "{{name}} · Settings",
@@ -601,7 +601,7 @@
     "pageCreationManagers": "Space managers only",
     "deleteModeTitle": "Deletion pathway",
     "deleteModeBody": "Choose how pages in this space are deleted. Deleting is always manager-only; this setting only chooses reversibility.",
-    "deleteModeInherit": "Inherit tenant default ({{mode}})",
+    "deleteModeInherit": "Inherit workspace default ({{mode}})",
     "moderation": "Moderation"
   },
   "spaceTrash": {
@@ -695,7 +695,7 @@
     "ceilingRefused": "You cannot change what {{who}} is. Running the roster does not include appointing or removing an administrator.",
     "managedByMapping": "Conferred by a group mapping. Group mappings are retired, so this becomes an ordinary grant you can revoke once this workspace’s data upgrade has run.",
     "replaceConfirm": "Replace {{who}}'s current role ({{current}}) with {{next}}?",
-    "managerReplaceConfirm": "{{who}} is a MANAGER of this space. Replace their manager role with {{next}}? They lose every management capability here; a tenant admin can restore it.",
+    "managerReplaceConfirm": "{{who}} is a MANAGER of this space. Replace their manager role with {{next}}? They lose every management capability here; a workspace admin can restore it.",
     "replaceAction": "Replace",
     "groupNamePlaceholder": "Search or type a group name",
     "groupUnconfirmed": "No member carries this group yet. The grant applies as soon as one signs in."
@@ -1193,16 +1193,16 @@
     "scope": {
       "personal": "Personal",
       "space": "This space",
-      "tenant": "Whole tenant"
+      "tenant": "Whole workspace"
     },
     "scopeHint": {
-      "personal": "Only you (and tenant admins) can use it.",
+      "personal": "Only you (and workspace admins) can use it.",
       "space": "Everyone who can view this space can use it.",
-      "tenant": "Everyone in the tenant can use it."
+      "tenant": "Everyone in the workspace can use it."
     },
     "warning": {
       "space": "Heads up: the current content becomes visible to everyone who can view this space.",
-      "tenant": "Heads up: the current content becomes visible to everyone in the tenant."
+      "tenant": "Heads up: the current content becomes visible to everyone in the workspace."
     },
     "needsPublish": "Publish the page first to save it as a template."
   },
@@ -1260,7 +1260,7 @@
   "export": {
     "spaceItem": "Export space",
     "tenantTitle": "Export everything",
-    "tenantHint": "Download every space and page you can view as a Markdown ZIP (images included). Large tenants can take a moment.",
+    "tenantHint": "Download every space and page you can view as a Markdown ZIP (images included). Large workspaces can take a moment.",
     "tenantButton": "Export all as Markdown ZIP",
     "done": "Export downloaded",
     "tooLarge": "The export exceeds the size limit. Try exporting spaces individually."
@@ -1380,7 +1380,7 @@
   },
   "adminAudit": {
     "title": "Audit log",
-    "body": "The tenant's tamper-evident activity ledger (hash-chained, append-only). Admin actions, membership and access changes.",
+    "body": "The workspace's tamper-evident activity ledger (hash-chained, append-only). Admin actions, membership and access changes.",
     "verify": "Verify chain",
     "export": "Export JSONL",
     "verified": "Chain verified. {{count}} entries intact.",
@@ -1430,15 +1430,15 @@
       "manageAccess": "Manage access"
     },
     "scopeResource": "Space / page",
-    "scopeTenant": "Tenant",
+    "scopeTenant": "Workspace",
     "deleteConfirm": "Delete the role \"{{name}}\"? Its assignments are removed with it. This cannot be undone.",
-    "tenantAssignTitle": "Tenant role assignments",
-    "tenantAssignBody": "A tenant role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
-    "sectionTenant": "Tenant",
+    "tenantAssignTitle": "Workspace role assignments",
+    "tenantAssignBody": "A workspace role (like creating spaces) is an attribute of a member, so it is granted here. Roles for a SPACE are granted in that space's Members tab.",
+    "sectionTenant": "Workspace",
     "sectionResource": "Space / Page",
     "memberDefaultsTitle": "Member defaults",
-    "memberDefaultsBody": "What every member of this tenant can do, whatever role they hold.",
-    "groupAssignBody": "Assign a tenant role to an IdP group. Everyone in the group gets it, and loses it when they leave the group.",
+    "memberDefaultsBody": "What every member of this workspace can do, whatever role they hold.",
+    "groupAssignBody": "Assign a workspace role to an IdP group. Everyone in the group gets it, and loses it when they leave the group.",
     "scopeQuestion": "Which kind of role is this?",
     "impliedBy": "(included in {{cap}})",
     "editCaps": "Edit capabilities"
@@ -1458,7 +1458,7 @@
   },
   "transparency": {
     "title": "Vendor access",
-    "body": "Emergency (break-glass) accesses to this tenant by the service operator (vendor), disclosed with a per-tenant chain you can verify for tampering.",
+    "body": "Emergency (break-glass) accesses to this workspace by the service operator (vendor), disclosed with a per-workspace chain you can verify for tampering.",
     "empty": "No operator access has occurred.",
     "operator": "Operator",
     "reason": "Reason",
@@ -1473,7 +1473,7 @@
   "accountApiKeys": {
     "title": "API keys",
     "body": "Keys act with your own permissions, so a key can never do more than you can. The plaintext is shown once, when you create it.",
-    "restricted": "This tenant lets only administrators create API keys. Any key you already hold still works, and you can revoke it here.",
+    "restricted": "This workspace lets only administrators create API keys. Any key you already hold still works, and you can revoke it here.",
     "empty": "You have no API keys."
   },
   "moderation": {
