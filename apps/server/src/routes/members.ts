@@ -15,6 +15,7 @@ import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: O
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
+import { revokeRecoveryCodes } from '../auth/recovery-codes.js' // #650 / ADR-226 §5: the set goes with them
 import { holdsAConfirmedFactor } from '../auth/factor-policy.js' // #644 / #675: the condition, named once
 
 // #623: how many members one answer carries. Small enough that the screen paints at once, large enough
@@ -424,6 +425,11 @@ export async function membersPlugin(app: FastifyInstance) {
       // they would attach to whoever holds this `sub` next — the same reason the credential goes — and
       // in the meantime they would be an authenticator for a password that no longer exists.
       await tx`DELETE FROM member_factors WHERE member_sub = ${sub}`
+      // #650 / ADR-226: the recovery set guarded the factors that just went. Left live it would be a
+      // credential with nothing behind it — and the first factor the member enrols afterwards would be
+      // wipeable by a code minted for a door that no longer exists.
+      await tx`UPDATE member_recovery_codes SET revoked_at = now()
+               WHERE member_sub = ${sub} AND used_at IS NULL AND revoked_at IS NULL`
       await auditIfEntitled(tx, req.tenant, {
         actor: `user:${req.user.sub}`, action: 'member.password_removed', target: `member:${sub}`,
       })
@@ -468,12 +474,17 @@ export async function membersPlugin(app: FastifyInstance) {
       })
     }
 
+    let revokedCodes = 0
     const removed = await req.db.tx(async (tx) => {
       // The shared verb rather than the DELETE written out again: a member deletion, the password
       // take-away and this reset must clear the SAME set, and the two-copies failure is this
       // repository's standing lesson (#605's guard). The cast adapts a tx to the helper's `db.sql`
       // shape, as `email/outbox.ts:118` already does.
       const n = await deleteAllFactors({ sql: tx } as never, sub)
+      // #650 / ADR-226 §5: and the recovery set, in the SAME transaction. A reset that left codes alive
+      // would be a reset in name only — the printout in the drawer (which is why the reset was asked
+      // for, if the drawer is not the member's any more) still wipes whatever factor they enrol next.
+      revokedCodes = await revokeRecoveryCodes({ sql: tx } as never, sub)
       // Audited in the SAME transaction, and audited even when it removed nothing: "an admin aimed a
       // factor reset at this account" is the fact an investigation wants, and it is equally true of an
       // account that turned out to hold none.
@@ -486,7 +497,15 @@ export async function membersPlugin(app: FastifyInstance) {
     // opened by satisfying a factor that no longer exists, and leaving it up would let the old device —
     // if it is in somebody else's hands, which is why a reset was asked for — keep the account.
     await destroyMemberSessions(app.valkey, req.tenant.id, sub)
-    emit({ type: 'member.factors_reset', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: sub, count: removed })
+    emit({ type: 'member.factors_reset', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: sub, count: removed, reason: 'admin' })
+    // Only when there was something to revoke: an event saying a set was taken away from a member who
+    // never had one is a line an investigator has to rule out by hand.
+    if (revokedCodes > 0) {
+      emit({
+        type: 'member.recovery_codes_revoked', tenantId: req.tenant.id, actorId: req.user.sub,
+        targetSub: sub, reason: 'admin_reset',
+      })
+    }
     return reply.code(200).send({ removed })
   })
 
@@ -558,6 +577,11 @@ export async function membersPlugin(app: FastifyInstance) {
       // deletion that depends on which isolation strategy a tenant happens to be on is one that works
       // until somebody is promoted.
       await tx`DELETE FROM member_factors WHERE member_sub = ${req.params.sub}`
+      // #650 / ADR-226. DELETED rather than revoked, unlike everywhere else this set is taken out of
+      // service: the member is GONE, so there is no history to keep for them, and a row keyed by a bare
+      // `member_sub` would attach to whoever holds this subject next — the same reason the factors and
+      // the password go out explicitly one line up rather than being left to a cascade.
+      await tx`DELETE FROM member_recovery_codes WHERE member_sub = ${req.params.sub}`
       await tx`DELETE FROM page_view_roster WHERE member_sub = ${req.params.sub}`
       await tx`DELETE FROM analytics_outbox WHERE tenant_id = ${req.tenant.id} AND viewer_class = 'member' AND member_sub = ${req.params.sub}`
       // #474: the member's API keys go too. Removal already strips every other credential — sessions

@@ -150,7 +150,22 @@ type RawDomainEvent =
   // device. Separate from `member.factor_removed` because the ACTOR is a different person from the
   // target — that is the whole security interest of it. An investigator asking "who took this account's
   // second factor away" must not have to infer it from a self-service verb.
-  | { type: 'member.factors_reset'; tenantId: string; actorId: string; targetSub: string; count: number }
+  // #650 / ADR-226 §5: `reason` says WHICH of the two resets this was. The act is the same one — the
+  // member's factors are gone and their sessions with them — so it keeps one verb (#671's rule), and
+  // the field names who performed it: an admin (`admin`) or the member themselves with a recovery code
+  // (`recovery_code`, where `actorId === targetSub`). OPTIONAL, per #228: a subscriber written against
+  // #644 keeps working, and an absent value reads as the admin reset it was then the only form of.
+  | { type: 'member.factors_reset'; tenantId: string; actorId: string; targetSub: string; count: number; reason?: 'admin' | 'recovery_code' }
+  // #650 / ADR-226 §5: a member minted a set of recovery codes for themselves. COUNT ONLY — an event
+  // carrying a code would put the one-time secret in the webhook log, which is the one place it must
+  // never be. Something changed about who can get back into this account, which is the same reason
+  // `member.factor_enrolled` is an event.
+  | { type: 'member.recovery_codes_minted'; tenantId: string; actorId: string; targetSub: string; count: number }
+  // …and the set stopping being usable, with WHY. `re-mint` is housekeeping (a fresh set replaced it),
+  // `used` means somebody spent one and the remaining nine went with it, `admin_reset` is #644 §10a
+  // clearing the account. An investigator asking "were these codes still live when the account was
+  // taken" cannot answer it from the mint alone.
+  | { type: 'member.recovery_codes_revoked'; tenantId: string; actorId: string; targetSub: string; reason: 're-mint' | 'used' | 'admin_reset' }
   // #652: the tenant's stance on second factors. A change to who may get in at all, which is why it is
   // an event rather than a settings write nobody hears about.
   // #676 / ADR-222: `kinds` is which factors the tenant now accepts ('off' | 'any' | 'passkey' |

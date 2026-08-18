@@ -42,8 +42,13 @@ export function OneTimeSecret({ value, note, testId, grouped }: {
         {/* #653 ④: a key meant to be TYPED, in groups of four and a size a person can read off a
           screen while holding a phone. `grouped` is display only — `data-testid`'s text is the raw
           value, so a test (and a copy) still gets exactly what the server sent. */}
+        {/* #650: `whitespace-pre-wrap` because a secret may be a SET — the ten recovery codes arrive as
+            ten lines, and HTML's default collapses every one of them into a single run-on string.
+            Measured, and it is invisible to a test that reads the value it passed IN rather than the
+            text the browser laid out. A no-op for the single-line secrets above: they contain no
+            newlines, and the wrapping is unchanged. */}
       <code
-        className={`flex-1 font-mono [overflow-wrap:anywhere] ${grouped ? "text-sm tracking-wider" : "text-xs"}`}
+        className={`flex-1 whitespace-pre-wrap font-mono [overflow-wrap:anywhere] ${grouped ? "text-sm tracking-wider" : "text-xs"}`}
         data-testid={testId ? `${testId}-value` : undefined}
       >{grouped ? value.replace(/(.{4})/g, "$1 ").trim() : value}</code>
         <IconButton

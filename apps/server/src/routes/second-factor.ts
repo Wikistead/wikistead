@@ -4,7 +4,7 @@ import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/sink.js'
 import {
   startTotpEnrolment, totpSecretFor, confirmFactor, listFactors, markFactorUsed, deleteFactor,
-  discardPendingFactors, startPasskeyEnrolment, type FactorKind,
+  discardPendingFactors, startPasskeyEnrolment, hasConfirmedFactor, type FactorKind,
 } from '../auth/second-factors.js'
 import type { TenantDb } from '../db/index.js'
 import { generateTotpSecret, totpUri, verifyTotp } from '../auth/totp.js'
@@ -14,6 +14,13 @@ import {
 } from '../auth/factor-policy.js' // #652: the floor, #677: the kinds, #679: the row mark
 import { passkeyRegistrationOptions, verifyPasskeyRegistration, storePasskey } from '../auth/passkeys.js' // #663
 import { passkeyRemovalOptions, verifyPasskeyForRemoval } from '../auth/passkeys.js' // #666
+import { passkeyReauthOptions, verifyPasskeyReauth } from '../auth/passkeys.js' // #650 / ADR-226 §4
+import { verifyPassword } from '../auth/password-hash.js'
+import {
+  mintRecoveryCodes, recoverySetStatus, recoveryEnabled,
+} from '../auth/recovery-codes.js' // #650 / ADR-226
+import { enqueueEmailOutbox } from '../email/outbox.js'
+import { RECOVERY_MINTED_CLASS } from '../email/security-builder.js'
 
 /** The assertion arrives as a query string, so a malformed one is an answer rather than a 500. */
 function parseAssertion(raw: unknown): unknown {
@@ -110,6 +117,55 @@ async function clearFailures(valkey: IORedis, tenantId: string, sub: string): Pr
   try {
     await valkey.del(attemptKey(tenantId, sub), lockKey(tenantId, sub))
   } catch { /* a stale counter costs the member a wait, never access */ }
+}
+
+/**
+ * ADR-226 §4's re-authentication, for minting recovery codes.
+ *
+ * THREE proofs, any one of which is enough: a current code from a confirmed TOTP factor, an assertion
+ * from any registered passkey, or the account password.
+ *
+ * Why not #660's rule (the factor's OWN code)? Because there is no "own" here — a set of recovery codes
+ * is not a factor being given up, it is a credential being created, and the question is only whether the
+ * person at the keyboard is still the account holder. Accepting three proofs is also what keeps this
+ * reachable for everybody: a passkey-only member has no code to type, and a federated member has no
+ * password, and refusing either would make the feature exist for some doors and not others — the shape
+ * #613 and #605 both had to undo.
+ *
+ * A session alone is NOT enough, which is the whole point: a stolen session that could mint codes could
+ * mint itself a permanent way past the factor.
+ */
+async function reauthenticated(
+  app: FastifyInstance,
+  req: { db: TenantDb; tenant: { id: string }; user: { sub: string }; headers: { host?: string } },
+  proof: { password?: unknown; code?: unknown; passkey?: unknown },
+): Promise<boolean> {
+  if (typeof proof.password === 'string' && proof.password.length > 0) {
+    const [cred] = await req.db.sql<[{ password_hash: string }?]>`
+      SELECT password_hash FROM local_credentials WHERE member_sub = ${req.user.sub}`
+    if (cred && await verifyPassword(proof.password, cred.password_hash)) return true
+  }
+  if (typeof proof.code === 'string' && proof.code.length > 0) {
+    // #675's rule: the confirmed-factor condition is spelled in ONE place, so this reads the shared
+    // list rather than writing the SQL again. Filtered HERE and deliberately not through
+    // `presentableHere`: re-authentication asks "is this the account holder", not "may they sign in
+    // from this host" — a member whose passkey a domain move stranded is exactly who needs codes.
+    const rows = (await listFactors(req.db, req.user.sub)).filter((f) => f.kind === 'totp' && f.confirmedAt)
+    for (const r of rows) {
+      const secret = await totpSecretFor(req.db, r.id)
+      const counter = secret ? verifyTotp(secret, proof.code, Date.now()) : null
+      // Spend the counter, exactly as the door does. A code proved something once; letting the same six
+      // digits re-prove it inside the window would make a shoulder-surfed code good for a mint too.
+      if (counter !== null && await spendTotpCounter(req.db, r.id, counter)) return true
+    }
+  }
+  if (proof.passkey) {
+    return verifyPasskeyReauth(
+      { db: req.db, valkey: app.valkey },
+      { tenantId: req.tenant.id, memberSub: req.user.sub, host: req.headers.host, response: proof.passkey as never },
+    )
+  }
+  return false
 }
 
 export async function secondFactorPlugin(app: FastifyInstance) {
@@ -384,6 +440,117 @@ export async function secondFactorPlugin(app: FastifyInstance) {
     // between the entries that do — the same reason an abandoned enrolment's tidy-up is not recorded
     // just below.
     return reply.code(204).send()
+  })
+
+  // ── recovery codes (#650 / ADR-226) ─────────────────────────────────────────────────────────────
+  //
+  // SELF-SCOPE like the rest of this file: every read and write is keyed to `req.user.sub`. There is no
+  // administrator route to mint somebody else's codes and there must not be — a set minted by another
+  // person is a credential for this account that its holder never saw.
+
+  /**
+   * What the member may know about their own set: how many are left and when it was made. NEVER a code —
+   * the plaintext exists once, in the mint response, and this route is what the settings screen shows
+   * ever after.
+   *
+   * No re-authentication: a count is not the secret. ADR-226 §4's "displaying" is the mint response's
+   * one-time display, which is guarded where it is produced.
+   */
+  app.get('/me/recovery-codes', async (req) => {
+    const status = await recoverySetStatus(req.db, req.user.sub)
+    // The switch is reported so the screen can say "your operator has turned this off" rather than
+    // offering a button that will be refused. Read through the ONE predicate's module (§4.1).
+    return { ...status, enabled: recoveryEnabled() }
+  })
+
+  /**
+   * A challenge for re-authenticating with a passkey before minting.
+   *
+   * POST because it WRITES — issuing options banks a challenge, and one minted by a cacheable GET is one
+   * a proxy can hand to the next caller (the same reason `/me/factors/:id/remove-challenge` is a POST).
+   */
+  app.post('/me/recovery-codes/challenge', async (req, reply) => {
+    const options = await passkeyReauthOptions(
+      { db: req.db, valkey: app.valkey },
+      { tenantId: req.tenant.id, memberSub: req.user.sub, host: req.headers.host },
+    )
+    if (!options) return reply.code(404).send({ error: 'no passkey registered', code: 'passkey_none' })
+    return reply.code(200).send({ options })
+  })
+
+  /**
+   * Mint a set — and RE-mint one, which is the same act: the old set is revoked in the same transaction,
+   * so there is never more than one live set (ADR-226 §4).
+   *
+   * ⚠️ The response body is the ONLY time the codes exist in plaintext. Nothing stores them, nothing logs
+   * them, and the event carries the COUNT and not the codes (§5) — a webhook subscriber must not be
+   * handed ten standing credentials for somebody else's account.
+   */
+  app.post<{ Body: { password?: unknown; code?: unknown; passkey?: unknown } }>('/me/recovery-codes', async (req, reply) => {
+    // The deployment switch, read through §4.1's one predicate. An operator who turned recovery off has
+    // said the administrator reset is the only path; minting under that would leave a set that works.
+    if (!recoveryEnabled()) {
+      return reply.code(409).send({ error: 'recovery codes are turned off for this deployment', code: 'recovery_disabled' })
+    }
+    if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
+      return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
+    }
+    // The one precondition ADR-226 §2 names: something to recover. A member with no confirmed factor is
+    // never asked for one at the door, so a set would be ten strings that do nothing — and the first
+    // thing one of them WOULD do is wipe the factor they enrol next.
+    //
+    // This is a fact about the MEMBER'S OWN ROWS. It is not the predicate the ruling removed: nothing
+    // here counts members or reads a role, and the acceptance tests exist to keep it that way.
+    //
+    // `hasConfirmedFactor` and NOT `presentableKinds` — the one case its docstring's warning does not
+    // cover, and the reason is the inverse of the usual one. A door wants "could they present something
+    // this tenant accepts, here"; this asks "is there anything worth recovering", and the member whose
+    // only key was stranded by a domain move (#664) answers NO to the first and YES to the second. They
+    // are precisely who the codes exist for, so the narrower question would refuse the person it is for.
+    if (!(await hasConfirmedFactor(req.db, req.user.sub))) {
+      return reply.code(409).send({
+        error: 'enrol a second factor first — recovery codes are the way back past one',
+        code: 'recovery_no_factors',
+      })
+    }
+    if (!(await reauthenticated(app, req as never, req.body ?? {}))) {
+      await countFailure(app.valkey, req.tenant.id, req.user.sub)
+      return reply.code(401).send({
+        error: 'confirm it is you: a code from your authenticator, your passkey, or your password',
+        code: 'reauth_required',
+      })
+    }
+    await clearFailures(app.valkey, req.tenant.id, req.user.sub)
+
+    const had = await recoverySetStatus(req.db, req.user.sub)
+    const codes = await mintRecoveryCodes(req.db, { tenantId: req.tenant.id, memberSub: req.user.sub })
+    await req.db.tx(async (tx) => {
+      await auditIfEntitled(tx, req.tenant, {
+        actor: `user:${req.user.sub}`, action: 'member.recovery_codes_minted', target: `member:${req.user.sub}`,
+      })
+      // The revocation is its own entry when there WAS a set. An investigation asking "were the codes
+      // from March still live in June" cannot answer it from a second mint that looks like a first.
+      if (had.remaining > 0) {
+        await auditIfEntitled(tx, req.tenant, {
+          actor: `user:${req.user.sub}`, action: 'member.recovery_codes_revoked', target: `member:${req.user.sub}`,
+        })
+      }
+    }).catch((err: unknown) => req.log.warn({ err }, 'recovery code mint audit failed'))
+    // §5: the member is told. A mint they did not perform is the signal that somebody else is holding
+    // their session, and this notice is the only place they would learn it.
+    await enqueueEmailOutbox([{ tenantId: req.tenant.id, memberSub: req.user.sub, class: RECOVERY_MINTED_CLASS }])
+      .catch((err: unknown) => req.log.warn({ err }, 'recovery-code mint notice could not be queued'))
+    emit({
+      type: 'member.recovery_codes_minted', tenantId: req.tenant.id, actorId: req.user.sub,
+      targetSub: req.user.sub, count: codes.length,
+    })
+    if (had.remaining > 0) {
+      emit({
+        type: 'member.recovery_codes_revoked', tenantId: req.tenant.id, actorId: req.user.sub,
+        targetSub: req.user.sub, reason: 're-mint',
+      })
+    }
+    return reply.code(201).send({ codes })
   })
 
   app.delete<{ Params: { id: string }; Querystring: { code?: string; passkey?: string } }>('/me/factors/:id', async (req, reply) => {

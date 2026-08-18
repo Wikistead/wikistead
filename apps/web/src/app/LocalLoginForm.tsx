@@ -29,6 +29,11 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
   // cannot ask `/me/factors` — the sign-in response is the only place this can arrive. Without it a
   // member sent to enrol under a passkey stance meets a form offering an authenticator app.
   const [kinds, setKinds] = useState<string[]>([]);
+  // #650 / ADR-226: whether this member holds a live set of recovery codes. Same reason `kinds` arrives
+  // this way — the receipt holder has no session, so the sign-in response is the only place it can come
+  // from. Absent (an older server, or the deployment switch off) reads as false, which offers nothing
+  // rather than offering a door that would be refused.
+  const [recovery, setRecovery] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,11 +51,14 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
       // sends everyone to the reset flow and leaves the operator with no signal at all.
       if (!res.ok) { setFailed(isServerFault(res) ? "unavailable" : "credentials"); setBusy(false); return; }
       const body = (await res.json().catch(() => null)) as
-        { returnTo?: string; factor?: "required" | "enrolment-required"; kinds?: string[] } | null;
+        { returnTo?: string; factor?: "required" | "enrolment-required"; kinds?: string[]; recovery?: boolean } | null;
       // #652 / ADR-219 §6: the password was right and there is still one thing to prove. The server
       // set a receipt cookie and NO session, so there is nothing to navigate to yet — the same screen
       // asks for the next thing rather than sending the reader somewhere that would bounce them back.
-      if (body?.factor) { setStage(body.factor); setKinds(body.kinds ?? []); setBusy(false); return; }
+      if (body?.factor) {
+        setStage(body.factor); setKinds(body.kinds ?? []); setRecovery(body.recovery === true);
+        setBusy(false); return;
+      }
       // A full navigation, not a router push: the session cookie is new, and every query in the app
       // was made by whoever was here before.
       window.location.href = body?.returnTo || returnTo || "/";
@@ -61,7 +69,7 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
     }
   };
 
-  if (stage) return <FactorStep stage={stage} kinds={kinds} returnTo={returnTo} />;
+  if (stage) return <FactorStep stage={stage} kinds={kinds} recovery={recovery} returnTo={returnTo} />;
 
   return (
     <form className="flex flex-col gap-2" onSubmit={submit} data-testid="login-local">
