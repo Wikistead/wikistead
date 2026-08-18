@@ -93,7 +93,13 @@ export function databaseDegradation(name: string, rowCount: number): ImportDegra
  * not resolve is LEFT ALONE and counted, the same rule every other source gets — a rewritten guess
  * is worse than a link the reader can see is stale.
  */
-const MD_LINK = /\[([^\]]*)\]\(([^)\s]+)\)/g
+// ⚠️ The leading `!` is CAPTURED, not ignored. Without it this matched the `![alt](path)` of an
+// EMBED, and a Notion export puts its assets under `Page <32hex>/asset.png` — so the page's own hex
+// was found inside the image's PATH and the picture was rewritten into a link to the page containing
+// it. The file imported fine and the report said so; only the body pointed somewhere else, which is
+// the worst shape a fidelity report can be wrong in. Embeds are resolved by the attachment map, not
+// here.
+const MD_LINK = /(!?)\[([^\]]*)\]\(([^)\s]+)\)/g
 const HEX_ANYWHERE = /([0-9a-f]{32})/i
 
 export function rewriteNotionLinks(
@@ -101,7 +107,8 @@ export function rewriteNotionLinks(
   hrefByHex: ReadonlyMap<string, string>,
 ): { markdown: string; deadLinks: number } {
   let deadLinks = 0
-  const out = markdown.replace(MD_LINK, (whole, label: string, target: string) => {
+  const out = markdown.replace(MD_LINK, (whole, bang: string, label: string, target: string) => {
+    if (bang) return whole // an embed — the attachment map owns it
     if (/^(https?:\/\/(?!(www\.)?notion\.so)|mailto:|wks-attachment:)/i.test(target)) return whole
     const decoded = safeDecode(target)
     const hex = HEX_ANYWHERE.exec(decoded)?.[1]?.toLowerCase()

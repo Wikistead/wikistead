@@ -23,12 +23,19 @@ export function looksLikeConfluenceExport(paths: readonly string[]): boolean {
 }
 
 const BLOCK_MACROS = new Map<string, string>([
-  ['info', 'note'], ['note', 'note'], ['tip', 'tip'], ['warning', 'warning'], ['panel', 'note'],
+  // ⚠️ `information` is the class Confluence's own "Info" macro emits
+  // (`confluence-information-macro-information`), and it is the one people use most. Mapping `info`
+  // and not `information` meant the most common macro in a real export was the one that came out as
+  // an unrepresentable block quote while its rarer siblings converted cleanly.
+  ['info', 'note'], ['information', 'note'], ['note', 'note'], ['tip', 'tip'],
+  ['warning', 'warning'], ['panel', 'note'],
 ])
 
 interface Ctx {
   degraded: ImportDegradation[]
   title: string
+  /** Lower-cased page names the ARCHIVE carries — a link outside this set cannot become a wikilink. */
+  pageNames: ReadonlySet<string>
 }
 
 /**
@@ -38,8 +45,8 @@ interface Ctx {
  * LABELLED block quote naming the macro, and is reported. Silent deletion is the single thing this
  * must never do — a migration that quietly drops a jira macro is how a wiki loses its own history.
  */
-export function confluenceHtmlToMarkdown(html: string, title: string): { markdown: string; degraded: ImportDegradation[] } {
-  const ctx: Ctx = { degraded: [], title }
+export function confluenceHtmlToMarkdown(html: string, title: string, pageNames: ReadonlySet<string> = new Set()): { markdown: string; degraded: ImportDegradation[] } {
+  const ctx: Ctx = { degraded: [], title, pageNames }
   const root = parse(html, { blockTextElements: { script: false, style: false, pre: true, code: true } })
   // The export wraps the real content; fall back to the whole document when the wrapper is absent.
   const body = root.querySelector('#main-content') ?? root.querySelector('body') ?? root
@@ -207,7 +214,28 @@ function inlineNode(node: Node, ctx: Ctx): string {
       if (internal) {
         const base = internal[1]!
         const leaf = base.slice(base.lastIndexOf('/') + 1)
-        return `[[${leaf}|${text}]]`
+        // ⚠️ The wikilink is an INTERNAL hand-off to the shared resolver, not something a reader may
+        // ever see. When the target is outside the import the resolver leaves the text alone, and an
+        // unresolved `[[Gone|gone]]` then sits in the page as notation this product does not even
+        // parse. So the fallback is registered here: `ctx.unresolved` records the shape, and
+        // `settleWikilinks` below turns whatever the resolver did not claim back into plain text.
+        // ⚠️ ONLY when the archive really carries that page. The wikilink is an internal hand-off to
+        // the shared resolver; when the target is outside the import the resolver correctly leaves it
+        // alone, and an unresolved `[[Gone|gone]]` then sits in the page as notation THIS PRODUCT
+        // DOES NOT PARSE — a Confluence import writing Obsidian syntax at the reader. So a link to a
+        // page the export does not contain becomes plain text, and is reported.
+        if (ctx.pageNames.has(leaf.toLowerCase())) return `[[${leaf}|${text}]]`
+        ctx.degraded.push({ node: ctx.title, what: 'link to a page outside the export', detail: leaf })
+        return text
+      }
+      // ⚠️ An `<a href="attachments/…">` is a FILE, not a page, and nothing ever rewrote it: every
+      // attachment LINK in a migrated wiki pointed at a path this product does not serve. The file
+      // itself imports fine, so the report said "imported" while the link was dead. Binding it to the
+      // attachment id needs the id, which does not exist until materialisation — so for now it is
+      // REPORTED by name rather than left silent, which is the half that can be got right here.
+      if (/^(?!https?:|mailto:|#)/.test(href) && !/\.html?$/i.test(decodeSafe(href))) {
+        const file = decodeSafe(href).split('/').pop() ?? ''
+        if (file) ctx.degraded.push({ node: ctx.title, what: 'link to an attached file is not re-pointed', detail: file })
       }
       return `[${text}](${href})`
     }

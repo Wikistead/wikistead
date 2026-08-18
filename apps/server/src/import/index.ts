@@ -270,6 +270,8 @@ export interface ImportReport {
 }
 
 const ATTACHMENT_REF = /!\[([^\]]*)\]\(([^)\s]+)\)/g
+/** Exports percent-encode spaces in asset paths; the name has to be compared decoded. */
+function decodeAttUrl(u: string): string { try { return decodeURIComponent(u) } catch { return u } }
 const INTERNAL_LINK = /\/p\/([A-Za-z0-9_-]+)/g
 
 interface Created { node: ImportNode; newId: string; attByRel: Map<string, string> }
@@ -322,9 +324,17 @@ function rewriteBody(
   // #712 / ADR-227 §5: Notion's own link shape, resolved through the same generic map idea — one
   // rewrite pass, one dead-link rule, three sources.
   notionHrefByHex?: ReadonlyMap<string, string>,
+  /** Every node's attachments keyed by lower-cased FILE NAME — the cross-page fallback above. */
+  attByName?: ReadonlyMap<string, string>,
 ): string {
   let md = markdown.replace(ATTACHMENT_REF, (m, alt: string, url: string) => {
-    const newId = attByRel.get(url)
+    // ⚠️ The per-node map first, then EVERY node's attachments by FILE NAME. A Confluence export
+    // keeps its images in one shared `attachments/` folder, and the collector hangs those on the
+    // FIRST root — so only the first page could resolve `![](attachments/pic.png)` and every other
+    // page kept the raw path while the report still counted the file as imported. Measured with a
+    // two-page archive: put the referencing page second and its image broke. Real exports have many
+    // pages, so in practice this was "the first page works".
+    const newId = attByRel.get(url) ?? attByName?.get(decodeAttUrl(url).split('/').pop()?.toLowerCase() ?? '')
     return newId ? `![${alt}](wks-attachment:${newId})` : m
   })
   md = md.replace(INTERNAL_LINK, (m, oldId: string) => {
@@ -419,10 +429,14 @@ export async function materializeImport(
     // EVERY node's attachments, not just the embedding node's: `![[diagram.png]]` in one note refers
     // to a file the vault stores once, and a per-node map could never see it.
     const embedByName = new Map<string, string>()
+    // …and the same index as bare ids, for the Markdown-image rewrite (see rewriteBody): a shared
+    // attachment folder belongs to the ARCHIVE, not to whichever page happened to be created first.
+    const attByName = new Map<string, string>()
     for (const c of created) {
       for (const [rel, attId] of c.attByRel) {
         const fileName = rel.slice(rel.lastIndexOf('/') + 1).toLowerCase()
         if (fileName && !embedByName.has(fileName)) embedByName.set(fileName, `![${fileName}](wks-attachment:${attId})`)
+        if (fileName && !attByName.has(fileName)) attByName.set(fileName, attId)
       }
     }
 
@@ -438,7 +452,7 @@ export async function materializeImport(
       report.degraded.push(...detectVaultDegradations({ title: c.node.title || c.node.dir, markdown: c.node.markdown }))
       const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report, {
         node: { title: c.node.title || c.node.dir }, hrefByName, embedByName,
-      }, notionHrefByHex)
+      }, notionHrefByHex, attByName)
       await setDraftBody(db, c.newId, md)
       if (args.publish && c.node.published && md.trim() !== '') {
         await publishPage(db, fga, driver, storage, { pageId: c.newId, subject: `user:${args.userId}`, createdBy: `user:${args.userId}` })
@@ -478,6 +492,13 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
   // source, and guarantees no raw HTML ever reaches a page body (ADR-132 §3).
   if (looksLikeConfluenceExport(Object.keys(files))) {
     const converted: Record<string, Uint8Array> = {}
+    // The pages the archive actually carries, so a link OUT of the export is not turned into
+    // wikilink notation nobody can resolve (see the `<a>` case in confluence.ts).
+    const pageNames = new Set(
+      Object.keys(files)
+        .filter((p) => /\.html?$/i.test(p))
+        .map((p) => p.replace(/\.html?$/i, '').split('/').pop()!.toLowerCase()),
+    )
     for (const [path, bytes] of Object.entries(files)) {
       if (!/\.html?$/i.test(path)) { converted[path] = bytes; continue }
       const base = path.replace(/\.html?$/i, '')
@@ -485,7 +506,7 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
       // The export's own index is navigation, not knowledge — importing it would create a page whose
       // entire body is a link list that the page tree already expresses.
       if (/^(index|main)$/i.test(leaf)) continue
-      const { markdown, degraded } = confluenceHtmlToMarkdown(strFromU8(bytes), leaf)
+      const { markdown, degraded } = confluenceHtmlToMarkdown(strFromU8(bytes), leaf, pageNames)
       converted[`${base}.md`] = strToU8(markdown)
       confluenceDegradations.push(...degraded)
     }
@@ -515,9 +536,19 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
     // A database exports as `<name> <hex>.csv` beside a directory of row pages. It becomes ONE page
     // carrying a GFM table, with the rows as children (north star 2: this product does not grow a
     // database object). Reported per database — the views, filters and sorts genuinely do not survive.
+    // ⚠️ Notion writes a database TWICE: `X <hex>.csv` is the current view and `X <hex>_all.csv` is
+    // every row. Importing both made the same database appear as two pages, each reporting the same
+    // degrade. The `_all` file is the superset, so it is the one that survives — taking the view
+    // instead would silently drop whatever its filter hid, which is the thing this feature promises
+    // not to do.
+    const csvPaths = Object.keys(files).filter((p) => /\.csv$/i.test(p))
+    const supersededByAll = new Set(
+      csvPaths.filter((p) => csvPaths.includes(p.replace(/\.csv$/i, '_all.csv'))),
+    )
     for (const [path, bytes] of Object.entries(files)) {
       if (!/\.csv$/i.test(path)) continue
-      const base = path.replace(/\.csv$/i, '')
+      if (supersededByAll.has(path)) continue
+      const base = path.replace(/(_all)?\.csv$/i, '')
       const rows = parseCsv(strFromU8(bytes))
       const { title, hex } = splitNotionName(base.slice(base.lastIndexOf('/') + 1))
       const owner = nodes.find((n) => n.dir === base)
