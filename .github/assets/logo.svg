@@ -1,0 +1,8 @@
+<!-- README lockup mark. The product's own mark (apps/web/public/icon-solid.svg) paints itself
+     from `currentColor` and a CSS variable, which GitHub strips when it renders an <img> — this
+     copy carries the brand accent literally so it reads on both the light and the dark theme. -->
+<svg width="76" height="76" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Wikistead">
+  <rect width="48" height="48" rx="11" fill="#2563eb"/>
+  <path d="M11 22 L24 11 L37 22 L37 33 Q37 35 35 35 L28 35 L24 40 L24 35 L13 35 Q11 35 11 33 Z" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 25 L30 25 M18 30 L25 30" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+</svg>

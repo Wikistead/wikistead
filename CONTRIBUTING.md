@@ -31,10 +31,41 @@ Please open an **Issue**:
 Please do **not** file security vulnerabilities in public issues. Report them privately —
 see [`SECURITY.md`](./SECURITY.md) for the process (GitHub private vulnerability reporting).
 
-## Building from source (self-hosting / inspection)
+## Running it from source
 
-- Dev: `docker compose up -d` (middleware) → `pnpm install` → `pnpm dev`
-- Checks: `pnpm build` / `pnpm typecheck` / `pnpm test` / `pnpm license:check`
+```bash
+cp .env.example .env
+cp apps/web/.env.example apps/web/.env.local   # web → API on dev.localhost (tenant routing)
+pnpm install
+pnpm dev:up                                    # middleware + first-run bootstrap
+pnpm dev                                       # server, collab and web on the host
+```
+
+`pnpm dev:up` is `docker compose up -d` plus `dev:setup`, which migrates and seeds the
+application database (a demo tenant, space and page) and creates the OpenFGA store and
+authorization model. Running `pnpm dev` without it leaves you on an empty database with no
+authorization model, which looks like a broken app. The bootstrap is idempotent and
+first-run-only: OpenFGA persists to Postgres, so a restart never needs it again — only
+`docker compose down -v` does.
+
+Then open **http://localhost:5173/p/demo**. The API resolves the tenant from the `Host`
+header, so the web app calls it on `dev.localhost:4000`.
+
+To run the app services in containers instead:
+`docker compose --profile apps up -d --build`.
+
+### Checks
+
+```bash
+pnpm build && pnpm typecheck && pnpm license:check
+pnpm setup:server-test        # server integration tests get their own stack: separate
+pnpm test                     # containers, ports and volumes — dev data is never touched
+pnpm teardown:server-test     # optional
+```
+
+The server suite runs against a real Postgres and a real OpenFGA, not fakes;
+`apps/server/vitest.config.ts` points it at that isolated stack. Set it up once — the
+containers persist between runs.
 
 ## Licensing of contributions
 

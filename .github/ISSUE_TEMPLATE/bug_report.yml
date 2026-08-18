@@ -6,7 +6,8 @@ body:
     attributes:
       value: |
         Thanks for taking the time to file a bug. Please do **not** report security
-        vulnerabilities here — see [SECURITY.md](../blob/main/SECURITY.md) for the private channel.
+        vulnerabilities here — see the [security policy](https://github.com/wikistead/wikistead/security/policy)
+        for the private channel.
   - type: textarea
     id: what-happened
     attributes:
