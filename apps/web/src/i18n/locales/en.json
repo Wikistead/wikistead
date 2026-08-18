@@ -879,7 +879,8 @@
     "deleteForeverTitle": "Delete permanently",
     "deleteForeverConfirm": "Permanently delete \"{{name}}\" and its sub-pages? This cannot be undone; there is no trash to restore from.",
     "moreSpaceMatches": "More matches. Keep typing to narrow",
-    "moreSpaces": "More spaces…"
+    "moreSpaces": "More spaces…",
+    "resize": "Resize the sidebar"
   },
   "dialogs": {
     "renamePageTitle": "Rename page",
@@ -1123,7 +1124,7 @@
     "eraseAnalytics": "Erase analytics",
     "inviteTitle": "Invite a member",
     "emailPlaceholder": "email@example.com",
-    "inviteEmail": "invite email",
+    "inviteEmail": "Email address",
     "inviteRole": "invite role",
     "roleFor": "role for {{sub}}",
     "sendInvite": "Send invite",

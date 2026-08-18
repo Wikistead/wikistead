@@ -217,7 +217,13 @@ export function ApiKeysPanel({
           <label className="mb-1.5 mt-[18px] block text-sm text-fg-dim">{t("adminApi.createTitle")}</label>
           {/* #535: the row carries the scale, so no control here states its own. */}
           <FormRow>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} aria-label={t("adminApi.name")} data-testid="api-key-name" />
+            {/* #740the heading above says what the FORM is for; this says what the FIELD is.
+                The two are not the same sentence, and the placeholder is an example that leaves at the
+                first keystroke. Same shape as the role name beside it. */}
+            <label className="flex flex-col gap-1 text-xs text-fg-dim">
+              {t("adminApi.name")}
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} data-testid="api-key-name" />
+            </label>
             {/* #667 §5: two controls became one. With a matrix picked the scope is derived and the
                 Select goes away rather than sitting there showing a value nobody chose — the
                 the ruling named. It returns the moment the matrix is empty again. */}

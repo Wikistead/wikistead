@@ -57,14 +57,17 @@ export function AdminEmbedsTab() {
 
       <label className={label}>{t("adminEmbeds.addTitle")}</label>
       <FormRow>
-        <Input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-          placeholder="youtube.com"
-          aria-label={t("adminEmbeds.host")}
-          data-testid="embed-host-input"
-        />
+        {/* #740`youtube.com` is one of the answers, not the question. */}
+        <label className="flex flex-col gap-1 text-xs text-fg-dim">
+          {t("adminEmbeds.host")}
+          <Input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            placeholder="youtube.com"
+            data-testid="embed-host-input"
+          />
+        </label>
         <Button variant="default" disabled={!draft.trim()} onClick={add} data-testid="embed-host-add">{t("adminEmbeds.add")}</Button>
       </FormRow>
 

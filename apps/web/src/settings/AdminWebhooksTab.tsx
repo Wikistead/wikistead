@@ -38,7 +38,11 @@ export function AdminWebhooksTab() {
 
       <label className={label}>{t("adminWebhooks.createTitle")}</label>
       <FormRow>
-        <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/webhook" aria-label={t("adminWebhooks.url")} data-testid="webhook-url" />
+        {/* #740an example URL shows the shape of an answer and names nothing. */}
+        <label className="flex flex-col gap-1 text-xs text-fg-dim">
+          {t("adminWebhooks.url")}
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/webhook" data-testid="webhook-url" />
+        </label>
         <Button variant="primary" disabled={!url.trim() || create.isPending} onClick={onCreate} data-testid="webhook-create">{t("adminWebhooks.create")}</Button>
       </FormRow>
 
