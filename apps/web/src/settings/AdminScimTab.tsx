@@ -11,7 +11,7 @@ import { UpgradeNotice } from "../ui/UpgradeNotice";
 import { disclosureKindFromError } from "../ui/upgrade-affordance";
 import { relTime } from "../ui/relative-time";
 import { notify } from "../ui/toast";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 // #723 / ADR-232: the SCIM setup surface.
 //
@@ -67,16 +67,14 @@ export function AdminScimTab() {
   // is about.
   if (locked) {
     return (
-      <div data-settings-pane="list" className={SETTINGS_WIDTHS.list}>
+      <SettingsPane width="list" title={t("adminScim.title")}>
         <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="scim-upgrade" title={t("adminScim.lockedTitle")} body={t("adminScim.lockedBody")} />
-      </div>
+      </SettingsPane>
     );
   }
 
   return (
-    <section data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="admin-scim">
-      <h2 className="text-lg font-semibold">{t("adminScim.title")}</h2>
-      <p className="mt-1 text-sm text-fg-dim">{t("adminScim.body")}</p>
+    <SettingsPane as="section" width="list" testId="admin-scim" title={t("adminScim.title")} description={t("adminScim.body")}>
 
       {/* The base URL first: an administrator setting SCIM up needs this string before anything
           else, and until now it appeared in no product surface at all. */}
@@ -130,6 +128,6 @@ export function AdminScimTab() {
           setPendingRevoke(null);
         }}
       />
-    </section>
+    </SettingsPane>
   );
 }

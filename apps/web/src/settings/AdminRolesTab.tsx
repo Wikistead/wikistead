@@ -13,7 +13,7 @@ import { Input } from "../ui/Input";
 import { RadioGroup } from "../ui/RadioGroup";
 import { notify } from "../ui/toast";
 import { Pencil, SlidersHorizontal, X } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 // #420 / ADR-164 increment 5: the custom-role manager (tenant-admin console). Definitions =
 // named bundles of the atomic capabilities; assignments expand to fixed FGA tuples server-side.
@@ -288,8 +288,7 @@ export function AdminRolesTab() {
   };
 
   return (
-    <div data-settings-pane="wide" className={SETTINGS_WIDTHS.wide} data-testid="admin-roles">
-      <h2 className="mt-0">{t("adminRoles.title")}</h2>
+    <SettingsPane width="wide" testId="admin-roles" title={t("adminRoles.title")}>
 
       {/* #536 (user re-ruling) + ④: ONE set of roles, presented in TWO scope sections
           "Tenant" above, "Space / Page" below (the ruling: tenant roles and resource roles mixed in one
@@ -426,6 +425,6 @@ export function AdminRolesTab() {
           setDeletingRole(null);
         }}
       />
-    </div>
+    </SettingsPane>
   );
 }

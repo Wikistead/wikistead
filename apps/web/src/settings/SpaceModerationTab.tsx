@@ -6,7 +6,7 @@ import { usePatrolQueue, useTogglePatrol, type FeedItem } from "../notifications
 import { eventLabel } from "../notifications/feedLabels";
 import { useSpaceAbuseFilterConfig, useUpdateSpaceAbuseFilterConfig } from "../data/queries";
 import { notify } from "../ui/toast";
-import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
+import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
 // #326 / ADR-142 Addendum 2: the space MODERATION tab — the patrol queue for the people who manage
 // this space. It shows the supply the 2026-07-14 ruling named: refusals at the abuse boundaries
@@ -28,9 +28,7 @@ export function SpaceModerationTab() {
   const denied = (error as { status?: number } | null)?.status === 403;
 
   return (
-    <div data-settings-pane="wide" className={SETTINGS_WIDTHS.wide} data-testid="space-moderation">
-      <h2 className="mt-0 flex items-center gap-2"><ShieldAlert size={18} /> {t("moderation.title")}</h2>
-      <p className="mt-0 mb-4 text-sm text-fg-dim">{t("moderation.body")}</p>
+    <SettingsPane width="wide" testId="space-moderation" icon={ShieldAlert} title={t("moderation.title")} description={t("moderation.body")}>
 
       {denied ? (
         <p className="text-sm text-fg-dim" data-testid="moderation-denied">{t("moderation.denied")}</p>
@@ -91,7 +89,7 @@ export function SpaceModerationTab() {
           <SpaceAbuseFilterSection spaceId={spaceId} />
         </>
       )}
-    </div>
+    </SettingsPane>
   );
 }
 

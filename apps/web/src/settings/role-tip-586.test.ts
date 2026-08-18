@@ -85,7 +85,14 @@ describe("#586: role-derived and individually granted are told apart, without be
   it("the space screen explains its roles from the shared component, and only from it", () => {
     expect(spaceTab, "the row's options carry the shared panel content").toContain("<RoleCaps");
     expect(spaceTab, "and the wrapper that produced a second panel is gone").not.toContain("<RoleTip");
-    expect(spaceTab, "and no hand-rolled tooltip grew beside it").not.toMatch(/title=\{t\(/);
+    // ⚠️ `title` became a PROP on <SettingsPane> when #735 moved the pane heading into the shell, so a
+    // bare search for `title={t(` now matches the screen's own heading — which is not a tooltip and
+    // never was. What this pin is about is the NATIVE title attribute, the hand-rolled explanation the
+    // ruling replaced with the shared panel, so the pane's opening tag is taken out and everything else
+    // still has to be clean. (Widening the pattern instead would have been the easy way to keep it
+    // green, and would have retired the assertion.)
+    const beside = spaceTab.replace(/<SettingsPane[\s\S]*?>/, "");
+    expect(beside, "and no hand-rolled tooltip grew beside it").not.toMatch(/title=\{t\(/);
   });
 });
 
