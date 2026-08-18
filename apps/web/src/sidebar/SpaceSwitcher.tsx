@@ -15,7 +15,7 @@ import { visibleSpaces, recordRecentSpace } from "./space-recent";
 
 export function SpaceSwitcher({
   spaces, hasMoreSpaces = false, currentId, currentSpace, canManage, onSelect, onRename, onNewSpace, canCreateSpace = true, onExportSpace, exportingSpace = false,
-  onImportSpace, importingSpace = false,
+  onImportSpace,
   pinnedSpaceIds = [], onTogglePin, onMovePin,
 }: {
   spaces: Space[];
@@ -44,13 +44,11 @@ export function SpaceSwitcher({
   onExportSpace?: () => void;
   exportingSpace?: boolean;
   // #308 / ADR-132: import an export ZIP into the current space (manage-gated UI; server gates edit). The
-  // item opens a file picker; onImportSpace gets the chosen .zip. importingSpace disables + spins it.
-  onImportSpace?: (file: File) => void;
-  importingSpace?: boolean;
+  // #725: the item navigates to the space's import screen; the caller decides where that is.
+  onImportSpace?: () => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const importInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(false); // #287: "show all" — full name-sorted list
   const boxRef = useRef<HTMLDivElement>(null);
@@ -193,12 +191,13 @@ export function SpaceSwitcher({
                     {exportingSpace ? <Loader2 size={13} className="animate-spin" /> : <FolderDown size={13} />} {t("export.spaceItem")}
                   </CommandItem>
                 )}
-                {/* #308: import an export ZIP into this space (manage-gated; the server also gates edit). The
-                    item triggers a hidden file input; the menu stays open + spinning while the archive uploads
-                    and materializes, then the caller's toast reports the result. */}
+                {/* #725 / ADR-236: import OPENS ITS SCREEN. It used to run from a hidden file input here
+                    and report a two-number toast, which threw away the fidelity report ADR-227 exists to
+                    produce and had nowhere to put the progress of a large (202) import. The menu keeps
+                    the entry because this is where people look for it; the work happens on the tab. */}
                 {currentSpace && canManage && onImportSpace && (
-                  <CommandItem value="__import" disabled={importingSpace} onSelect={() => { if (!importingSpace) importInputRef.current?.click(); }} data-testid="space-import">
-                    {importingSpace ? <Loader2 size={13} className="animate-spin" /> : <FolderUp size={13} />} {t("import.spaceItem")}
+                  <CommandItem value="__import" onSelect={() => { setOpen(false); onImportSpace(); }} data-testid="space-import">
+                    <FolderUp size={13} /> {t("import.spaceItem")}
                   </CommandItem>
                 )}
                 {canCreateSpace && (
@@ -211,16 +210,6 @@ export function SpaceSwitcher({
           </Command>
         </div>
       )}
-      {/* #308: hidden picker for the import item. Reset value after each pick so choosing the SAME file twice
-          still fires onChange. */}
-      <input
-        ref={importInputRef}
-        type="file"
-        accept=".zip,application/zip"
-        className="hidden"
-        data-testid="space-import-input"
-        onChange={(e) => { const f = e.target.files?.[0]; e.currentTarget.value = ""; if (f && onImportSpace) { setOpen(false); onImportSpace(f); } }}
-      />
     </div>
   );
 }

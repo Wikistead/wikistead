@@ -16,7 +16,7 @@ export interface SpaceSignals {
 }
 
 /** The tab keys, in the order they are shown. */
-export const SPACE_TAB_KEYS = ["general", "members", "pages", "analytics", "trash", "moderation"] as const;
+export const SPACE_TAB_KEYS = ["general", "members", "pages", "import", "analytics", "trash", "moderation"] as const;
 export type SpaceTabKey = (typeof SPACE_TAB_KEYS)[number];
 
 /**

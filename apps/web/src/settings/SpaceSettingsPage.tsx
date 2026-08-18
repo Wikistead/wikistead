@@ -18,6 +18,7 @@ import { SettingsShell, SettingsDenied, SETTINGS_WIDTHS, type SettingsTab } from
 import { reachableSpaceTabs, landingSpaceTab, type SpaceTabKey } from "./space-tabs";
 import { SpaceMembersTab } from "./SpaceMembersTab";
 import { SpacePagesTab } from "./SpacePagesTab";
+import { SpaceImportTab } from "./SpaceImportTab";
 import { SpaceTrashTab } from "./SpaceTrashTab";
 import { SpaceModerationTab } from "./SpaceModerationTab";
 import { SpaceAnalyticsTab } from "./SpaceAnalyticsTab";
@@ -33,6 +34,10 @@ function useSpaceTabs(spaceId: string): SettingsTab[] {
     { key: "general", label: t("spaceSettings.general"), to: `/spaces/${spaceId}/settings/general` },
     { key: "members", label: t("spaceSettings.members"), to: `/spaces/${spaceId}/settings/members` },
     { key: "pages", label: t("spaceSettings.pages"), to: `/spaces/${spaceId}/settings/pages` },
+    // #725 / ADR-236: import is space-scoped management, so it lives where the space's other
+    // management lives. Manager-only by the same rule as the rest of the strip (the route itself is
+    // gated on space `edit` server-side, which is the gate that matters).
+    { key: "import", label: t("spaceSettings.import"), to: `/spaces/${spaceId}/settings/import` },
     { key: "analytics", label: t("spaceSettings.analytics"), to: `/spaces/${spaceId}/settings/analytics` },
     { key: "trash", label: t("spaceSettings.trash"), to: `/spaces/${spaceId}/settings/trash` },
     // #326: the patrol queue lives with the space it moderates (ruling ②), not in a cross-space page.
@@ -317,6 +322,7 @@ export function SpaceSettingsRoot() {
       <Route path="general" element={<SpaceGeneralTab />} />
       <Route path="members" element={<SpaceMembersTab />} />
       <Route path="pages" element={<SpacePagesTab />} />
+      <Route path="import" element={<SpaceImportTab />} />
       <Route path="analytics" element={<SpaceAnalyticsTab />} />
       <Route path="trash" element={<SpaceTrashTab />} />
       <Route path="moderation" element={<SpaceModerationTab />} />
