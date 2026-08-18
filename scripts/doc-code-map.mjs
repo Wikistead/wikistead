@@ -247,6 +247,10 @@ export const SURFACE_DOCS = {
   // IS the router registry; there is no composition to miss). `none:` rows are redirects and the
   // catch-all — not screens a reader can be on.
   'web-route': {
+    // #726 the home landing. Mostly it redirects (first visible space → its home page), so the
+    // only state a reader can actually SIT on is "you are in no space yet" — which is a fact about
+    // spaces, and belongs on the page that explains them.
+    '/': 'wikistead-docs/src/content/docs/guides/spaces.md',
     '/p/:pageId': 'wikistead-docs/src/content/docs/guides/pages.md',
     '/spaces/:spaceId': 'wikistead-docs/src/content/docs/guides/spaces.md',
     '/pub/space/:spaceId': 'wikistead-docs/src/content/docs/publishing/public-spaces.md',

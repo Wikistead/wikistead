@@ -125,6 +125,13 @@ services:
       MEILI_HOST: ""
       S3_ENDPOINT: ""
       SMTP_HOST: ""
+      # #726 follow-up: this one was missed by the list above, and `lint:selfhost-profile` was
+      # RED ON MASTER because of it — collab inherited the developer's own `.env` value
+      # (`http://localhost:5173`), so what the profile advertised depended on whose machine built it.
+      # Blanked rather than pointed at `https://${SITE_HOST}` for the same reason as its neighbours:
+      # collab reads this variable nowhere (checked), and a value nothing consults is one more thing
+      # that can be wrong without anything noticing.
+      WKS_PUBLIC_BASE_URL: ""
     depends_on: { valkey: { condition: service_started } }
     profiles: ["apps"]
 

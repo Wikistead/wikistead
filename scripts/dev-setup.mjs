@@ -40,6 +40,23 @@ async function storeExists(id) {
   }
 }
 
+// #726 BUILD THE WORKSPACE PACKAGES, and do it BEFORE the store check below.
+//
+// `db:seed` imports `@wikistead/authz`, whose `dist/` is gitignored and whose package has no `prepare`
+// script — so `pnpm install` does not produce it. On a checkout that has ever run `pnpm build` this is
+// invisible; on a FRESH CLONE, which is exactly what the self-hosting guide describes, the very next
+// command dies with `Cannot find module .../@wikistead/authz/dist/index.js`.
+//
+// Fixed HERE rather than by adding a line to the three guides: a guide that has to name a step the
+// tooling could take is a guide that will be wrong again the next time the dependency graph moves.
+//
+// ⚠️ ABOVE the early exit, not below it. Put after, and a fresh clone pointed at an FGA volume that
+// already holds a store returns at that line with nothing built — `pnpm dev` then fails with the same
+// missing module, one command later and further from its cause. Turbo caches this, so a warm re-run
+// pays nothing for the guarantee.
+console.log("[dev:setup] building workspace packages…");
+execFileSync("pnpm", ["turbo", "run", "build", "--filter=./packages/*"], { cwd: root, stdio: "inherit" });
+
 if (await storeExists(storeId)) {
   console.log(`[dev:setup] OpenFGA store ${storeId} exists — authz OK, nothing to do.`);
   process.exit(0);

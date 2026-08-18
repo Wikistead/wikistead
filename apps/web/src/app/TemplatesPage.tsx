@@ -25,7 +25,7 @@ export function TemplatesRoute() {
 
   return (
     <div className="mx-auto max-w-[46rem] px-4 py-8 text-[length:var(--text-ui)]" data-testid="templates-page">
-      <Link to="/p/demo" className="mb-4 inline-flex items-center gap-1 text-fg-dim hover:text-foreground" data-testid="templates-back">
+      <Link to="/" className="mb-4 inline-flex items-center gap-1 text-fg-dim hover:text-foreground" data-testid="templates-back">
         <ArrowLeft size={14} /> {t("templates.back")}
       </Link>
       <h1 className="mb-4 flex items-center gap-2 text-[length:var(--text-lg)] font-semibold">

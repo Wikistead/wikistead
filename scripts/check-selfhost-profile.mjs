@@ -117,6 +117,28 @@ for (const f of ['docs/self-hosting.md', 'README.md', 'CONTRIBUTING.md']) {
   if (!text.includes(CMD)) problems.push(`${f} no longer prints \`${CMD}\` — if the command changed, this check has to change with it`)
 }
 
+// ── …and the guide's ORDER works on a clone that has never built ─────────────────────────────
+// #726 the guides say `pnpm install` then `pnpm dev:up`, and on a fresh clone that fails —
+// `db:seed` imports `@wikistead/authz`, whose `dist/` is gitignored and which no `prepare` script
+// builds. The fix is that `dev:setup` builds the packages itself, so the guides stay two commands.
+//
+// Checked HERE by asserting the step EXISTS and runs BEFORE the early exit. A check that only asked
+// "does the guide mention build" would go green on a guide that grew a line, which is the outcome
+// this fix deliberately avoided; and one that ignored the ordering would go green on the version of
+// this fix that returned before building (measured while writing it).
+{
+  const setup = readFileSync(join(root, 'scripts/dev-setup.mjs'), 'utf8')
+  // Quote-agnostic: the source spells this with double quotes, and matching one style is how a check
+  // reports its own formatting preference as a product defect (measured — this fired on the fix).
+  const build = setup.search(/["']build["'],\s*["']--filter=\.\/packages\/\*["']/)
+  const earlyExit = setup.indexOf('process.exit(0)')
+  if (build < 0) {
+    problems.push('scripts/dev-setup.mjs no longer builds the workspace packages — a fresh clone dies in db:seed with a missing @wikistead/authz/dist (#726)')
+  } else if (earlyExit >= 0 && build > earlyExit) {
+    problems.push('scripts/dev-setup.mjs builds the packages AFTER its early exit — a fresh clone against an existing FGA store returns with nothing built')
+  }
+}
+
 if (problems.length) {
   console.error('check-selfhost-profile: the `apps` profile could not serve the product (#726 / ADR-233):')
   for (const p of problems) console.error('  ' + p)
