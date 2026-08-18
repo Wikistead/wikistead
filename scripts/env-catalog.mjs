@@ -142,7 +142,7 @@ export const ENV_DOCS = {
   MEILI_MASTER_KEY: {
     group: 'Search',
     default: 'unset',
-    what: 'Meilisearch master key. Production refuses to start on the value published in this repository\'s fixtures, so generate one.',
+    what: 'Meilisearch master key. Production refuses to start on the value published in the public repository\'s fixtures, so generate one.',
   },
   SEARCH_CURSOR_SECRET: {
     group: 'Search',
@@ -199,7 +199,7 @@ export const ENV_DOCS = {
     group: 'Sign-in',
     default: 'unset (required)',
     indirect: true,
-    what: 'Base64 AES-256 key that encrypts tenant OIDC client secrets at rest. The server refuses to start without it rather than storing those secrets in plaintext, and refuses to start on the key published in this repository\'s fixtures.',
+    what: 'Base64 AES-256 key that encrypts tenant OIDC client secrets at rest. The server refuses to start without it rather than storing those secrets in plaintext, and refuses to start on the key published in the public repository\'s fixtures.',
   },
   OIDC_ISSUER: { group: 'Sign-in', default: 'unset', what: 'Issuer the collaboration server validates member tokens against. Per-workspace OIDC is configured in the product; this is the deployment-wide one collab checks.' },
   OIDC_CLIENT_ID: {
@@ -255,7 +255,7 @@ export const ENV_DOCS = {
   GUEST_TOKEN_SECRET: {
     group: 'Guests and sharing',
     default: 'unset (required)',
-    what: 'Signs the short-lived tokens anonymous share-link visitors carry. Production refuses to start on the value published in this repository\'s fixtures.',
+    what: 'Signs the short-lived tokens anonymous share-link visitors carry. Production refuses to start on the value published in the public repository\'s fixtures.',
   },
   GUEST_TOKEN_TTL_SECONDS: {
     group: 'Guests and sharing',

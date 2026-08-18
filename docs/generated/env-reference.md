@@ -48,7 +48,7 @@ A blank value is not the same as a missing one: unless a row says otherwise, uns
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MEILI_HOST` | http://localhost:7700 | Meilisearch endpoint. |
-| `MEILI_MASTER_KEY` | unset | Meilisearch master key. Production refuses to start on the value published in this repository's fixtures, so generate one. |
+| `MEILI_MASTER_KEY` | unset | Meilisearch master key. Production refuses to start on the value published in the public repository's fixtures, so generate one. |
 | `SEARCH_CURSOR_SECRET` | falls back to GUEST_TOKEN_SECRET | Signs search pagination cursors so a cursor cannot be edited into a query the caller was not authorized for. |
 
 ## Object storage
@@ -85,7 +85,7 @@ A blank value is not the same as a missing one: unless a row says otherwise, uns
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `OIDC_SECRET_ENC_KEY` | unset (required) | Base64 AES-256 key that encrypts tenant OIDC client secrets at rest. The server refuses to start without it rather than storing those secrets in plaintext, and refuses to start on the key published in this repository's fixtures. |
+| `OIDC_SECRET_ENC_KEY` | unset (required) | Base64 AES-256 key that encrypts tenant OIDC client secrets at rest. The server refuses to start without it rather than storing those secrets in plaintext, and refuses to start on the key published in the public repository's fixtures. |
 | `OIDC_ISSUER` | unset | Issuer the collaboration server validates member tokens against. Per-workspace OIDC is configured in the product; this is the deployment-wide one collab checks. |
 | `OIDC_CLIENT_ID` | unset | Client id the development seed writes into the dev workspace's OIDC connection. Production workspaces register their own in the admin console, so this is a seeding convenience rather than a deployment setting. |
 | `OIDC_CLIENT_SECRET` | unset (a public client) | Client secret for the seeded development connection. It is encrypted with OIDC_SECRET_ENC_KEY before it reaches the database, exactly as a secret entered in the console would be. |
@@ -119,7 +119,7 @@ A blank value is not the same as a missing one: unless a row says otherwise, uns
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `GUEST_TOKEN_SECRET` | unset (required) | Signs the short-lived tokens anonymous share-link visitors carry. Production refuses to start on the value published in this repository's fixtures. |
+| `GUEST_TOKEN_SECRET` | unset (required) | Signs the short-lived tokens anonymous share-link visitors carry. Production refuses to start on the value published in the public repository's fixtures. |
 | `GUEST_TOKEN_TTL_SECONDS` | 3600 | How long a guest token lives. Keep it short: after a link is revoked an already-connected guest keeps access until their token expires, and this is the length of that window. |
 | `EXCHANGE_RL_IP_MAX` | 30 | Share-link token exchanges accepted per source address per minute. |
 | `EXCHANGE_RL_LINK_MAX` | 10 | Token exchanges accepted per share link per minute, which bounds one leaked link rather than one visitor. |
