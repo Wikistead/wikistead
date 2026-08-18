@@ -306,3 +306,83 @@ describe('#712H: a Confluence emoji does not become a broken image', () => {
     expect(markdown).toContain('![pic](attachments/pic.png)')
   })
 })
+
+// ── #712 ③ (② / c5556-3): the input this adapter does NOT read ────────────────────────
+//
+// ADR-227 §6 scoped Confluence to the HTML export. c5489-3 then measured what happens when storage
+// format arrives anyway: `<ac:structured-macro ac:name="jira">` matched nothing in the walk, fell to
+// `default:`, and was flattened to its inner text — the string `ENG-1` alone in a paragraph, with an
+// EMPTY report. The scope was never the problem. The silence was.
+//
+// The decision (report rather than refuse at the door) is recorded in confluence.ts: an export is one
+// archive of several hundred pages, the reader did not choose which format their admin console
+// produced, and refusing the archive costs them every page that would have imported cleanly.
+describe('#712 ③: storage-format markup is declared, not swallowed', () => {
+  it('names the macro it could not read, and keeps the text that was inside it', () => {
+    const { markdown, degraded } = confluenceHtmlToMarkdown(
+      '<div id="main-content"><p>Before</p><ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">ENG-1</ac:parameter></ac:structured-macro><p>After</p></div>',
+      'Ticket page')
+    // The measured defect: `ENG-1` used to be the entire trace of the macro.
+    expect(degraded.map((d) => `${d.what} ${d.detail ?? ''}`).join(' | '), 'the macro is named')
+      .toMatch(/storage-format markup not converted jira/)
+    expect(degraded[0]?.node, 'and attributed to the page it was on').toBe('Ticket page')
+    expect(markdown, 'the text inside it is not lost').toContain('ENG-1')
+    expect(markdown, 'and it is labelled where it sits').toContain('[Confluence storage format: jira]')
+    expect(markdown, 'the rest of the page is untouched').toContain('Before')
+    expect(markdown).toContain('After')
+  })
+
+  it('names the attachment a storage-format image points at, since the file IS in the archive', () => {
+    const { degraded } = confluenceHtmlToMarkdown(
+      '<div id="main-content"><ac:image ac:height="250"><ri:attachment ri:filename="pic.png"/></ac:image></div>', 'T')
+    // "something was lost" versus "go and look at pic.png" — the second is actionable, and the file
+    // really is sitting in the archive under that name.
+    expect(degraded.map((d) => d.detail ?? '').join(' ')).toContain('pic.png')
+  })
+
+  it('reports an INLINE storage element too — a link inside a sentence never reaches the block walk', () => {
+    const { markdown, degraded } = confluenceHtmlToMarkdown(
+      '<div id="main-content"><p>See <ac:link><ri:page ri:content-title="Other"/>the other page</ac:link> for more.</p></div>', 'T')
+    expect(degraded.length, 'the link is declared').toBeGreaterThan(0)
+    expect(degraded.map((d) => d.detail ?? '').join(' ')).toMatch(/ac:link/)
+    expect(markdown, 'and the sentence still reads').toContain('for more')
+    expect(markdown, 'without a block marker cutting it in half').not.toContain('[Confluence storage format: ac:link]')
+  })
+
+  it('says it ONCE per page, however many times the markup repeats', () => {
+    // A page migrated from an older instance can carry the same element forty times. Forty identical
+    // rows say nothing the first one did not, and they bury every other finding in the report.
+    const body = Array.from({ length: 12 }, () => '<p><ac:link>x</ac:link></p>').join('')
+    const { degraded } = confluenceHtmlToMarkdown(`<div id="main-content">${body}</div>`, 'T')
+    expect(degraded.filter((d) => (d.detail ?? '').includes('ac:link')), 'one row, not twelve').toHaveLength(1)
+  })
+
+  it('does not fire on the HTML export — the existing dialect is untouched', () => {
+    // The control. A detector that matched ordinary containers would put a "not converted" line on
+    // every page of every clean export, which is the recurring failure this file already documents
+    // (a warning that is always present is a warning nobody reads).
+    const { degraded } = confluenceHtmlToMarkdown(PAGE_HTML, 'Runbook')
+    expect(degraded.map((d) => d.what).join(' '), 'nothing here is storage format')
+      .not.toMatch(/storage-format/)
+  })
+
+  it('the archive still imports, and the report reaches the caller', async () => {
+    // The decision under test: a page carrying `ac:` markup does not cost the reader the pages
+    // beside it. Both come in; one of them is declared.
+    await freshSpace()
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        'index.html': strToU8('<html><body>nav</body></html>'),
+        'Clean.html': strToU8('<html><body><div id="main-content"><h1>Clean</h1><p>ordinary page</p></div></body></html>'),
+        'Legacy.html': strToU8('<html><body><div id="main-content"><h1>Legacy</h1><ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">ENG-7</ac:parameter></ac:structured-macro></div></body></html>'),
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    expect(report.pagesCreated, 'the clean page is not punished for its neighbour').toBeGreaterThanOrEqual(2)
+    expect(report.degraded.some((d) => d.node === 'Legacy' && (d.detail ?? '').includes('jira')),
+      `the report names it :: ${JSON.stringify(report.degraded)}`).toBe(true)
+    expect(await bodyOfPage('Legacy'), 'and the value survives in the body').toContain('ENG-7')
+    expect(await bodyOfPage('Clean'), 'the neighbour is intact').toContain('ordinary page')
+  }, 300_000)
+})
