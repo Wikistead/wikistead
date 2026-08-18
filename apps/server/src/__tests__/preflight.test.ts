@@ -108,11 +108,28 @@ describe('runHttpPreflight (orchestration, injected fetch — no network)', () =
     const items = await runHttpPreflight('https://t1.example', fetchImpl)
     const { allPass, skipped } = formatReport(items)
     expect(allPass).toBe(true)
-    expect(items.map((i) => i.name)).toEqual(['security-headers', 'api-404-json', 'api-no-cache', 'assets-long-cache', 'cookie-host-only', 'public-page-noindex'])
+    expect(items.map((i) => i.name)).toEqual(['security-headers', 'api-reachable', 'api-404-json', 'api-no-cache', 'assets-long-cache', 'cookie-host-only', 'public-page-noindex'])
     // ...but the three probe-dependent rows were NOT observed here, and say so rather than reading green.
     expect(skipped).toBe(3)
     expect(items.filter((i) => i.verdict.skipped).map((i) => i.name)).toEqual(['assets-long-cache', 'cookie-host-only', 'public-page-noindex'])
   })
+  // #724: the row that would have caught the /api prefix break. Every other /api row answers a
+  // question about a response's SHAPE, and a stack where nothing routes to the server satisfies
+  // them all — a JSON 404 is exactly what a missing route produces.
+  it('FAILS api-reachable on the shape of a broken edge (JSON 404 everywhere), which the other /api rows call compliant', async () => {
+    const brokenEdge: FetchLike = async () => ({ status: 404, headers: { ...okHeaders, 'content-type': 'application/json' }, text: async () => '{"message":"Route GET:/api/healthz not found"}' })
+    const items = await runHttpPreflight('https://t1.example', brokenEdge)
+    expect(items.find((i) => i.name === 'api-404-json')!.verdict.pass, 'the old row calls total breakage compliant').toBe(true)
+    expect(items.find((i) => i.name === 'api-reachable')!.verdict.pass, 'the new row is the one that notices').toBe(false)
+  })
+  it('FAILS api-reachable when the SPA answers /api (the edge has no rule for it)', async () => {
+    const spaEverywhere: FetchLike = async () => ({ status: 200, headers: { ...okHeaders, 'content-type': 'text/html' }, text: async () => '<!doctype html><div id="root"></div>' })
+    const items = await runHttpPreflight('https://t1.example', spaEverywhere)
+    const row = items.find((i) => i.name === 'api-reachable')!
+    expect(row.verdict.pass).toBe(false)
+    expect(row.verdict.detail).toContain('SPA')
+  })
+
   it('records a FAIL (not a crash) when a row errors, and when a header is wrong', async () => {
     const fetchImpl: FetchLike = async (url) => {
       if (url.includes('_missing_')) return { status: 200, headers: { 'content-type': 'text/html' }, text: async () => '<html>' } // wrong: 200 + html

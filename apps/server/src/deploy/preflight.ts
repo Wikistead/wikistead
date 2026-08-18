@@ -89,6 +89,17 @@ export function notFoundIsJsonVerdict(status: number, contentType: string): Chec
   return { pass: status === 404 && isJson && !isHtml, detail: `status=${status} content-type=${contentType || '(none)'}${isHtml ? ' — HTML! (SPA catch-all leaked into /api)' : ''}` }
 }
 
+// Row: the API is REACHABLE through the edge (#724 / ADR-231). Every other /api row here answers
+// a question about a response's shape, and a fully broken edge answers all of them correctly: the
+// 404-JSON row in particular PASSES when nothing routes to the server at all, because a stack that
+// never strips /api returns exactly a JSON 404. So one row has to ask whether a real endpoint
+// answers, or the gate certifies the break it exists to catch.
+export function apiReachableVerdict(status: number, contentType: string, body: string): CheckVerdict {
+  const isHtml = /text\/html/i.test(contentType || '') || /^\s*<!doctype html/i.test(body)
+  if (isHtml) return { pass: false, detail: `the SPA answered (status=${status}) — /api is not reaching the server; the edge is not stripping the prefix, or has no rule for it` }
+  return { pass: status === 200, detail: status === 200 ? 'a real API endpoint answered through the edge' : `status=${status} content-type=${contentType || '(none)'}` }
+}
+
 // Row: caching posture. /api and /collab must be non-cacheable (dynamic/authz-sensitive); /assets must
 // be long-cache (immutable hashed assets). Pass criterion per the deploy-gate description.
 export function cacheControlVerdict(pathKind: 'dynamic' | 'assets', cacheControl: string): CheckVerdict {
@@ -157,16 +168,22 @@ export async function runHttpPreflight(
     return r
   }
 
+  // /healthz is the route that EXISTS (app.ts). These rows used to probe /api/health, which the
+  // server has never served — so they were reading a 404's headers and calling it a posture check.
   await run('security-headers', async () => {
-    const r = await get(`${base}/api/health`)
+    const r = await get(`${base}/api/healthz`)
     return securityHeadersVerdict(lowerHeaders(r.headers), isHttps)
+  })
+  await run('api-reachable', async () => {
+    const r = await get(`${base}/api/healthz`)
+    return apiReachableVerdict(r.status, lowerHeaders(r.headers)['content-type'] || '', await r.text())
   })
   await run('api-404-json', async () => {
     const r = await get(`${base}/api/__preflight_definitely_missing__`)
     return notFoundIsJsonVerdict(r.status, lowerHeaders(r.headers)['content-type'] || '')
   })
   await run('api-no-cache', async () => {
-    const r = await get(`${base}/api/health`)
+    const r = await get(`${base}/api/healthz`)
     return cacheControlVerdict('dynamic', lowerHeaders(r.headers)['cache-control'] || '')
   })
 
