@@ -38,7 +38,8 @@
     "teardown:e2e": "node tests/e2e/scripts/down.mjs",
     "setup:server-test": "node scripts/server-test-up.mjs",
     "teardown:server-test": "node scripts/server-test-down.mjs",
-    "release:pr": "node scripts/release-pr.mjs"
+    "release:pr": "node scripts/release-pr.mjs",
+    "gate:acceptance": "node scripts/gate-acceptance-730.mjs"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^7.0.0",
