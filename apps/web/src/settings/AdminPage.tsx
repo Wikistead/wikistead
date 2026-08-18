@@ -13,6 +13,7 @@ import { AdminAuditTab } from "./AdminAuditTab";
 import { AdminRolesTab } from "./AdminRolesTab";
 import { AdminAnalyticsTab } from "./AdminAnalyticsTab";
 import { AdminScimTab } from "./AdminScimTab";
+import { AdminDomainsTab } from "./AdminDomainsTab";
 import { AdminEmbedsTab } from "./AdminEmbedsTab";
 import { AdminPublicTab } from "./AdminPublicTab";
 import { AdminBillingTab } from "./AdminBillingTab";
@@ -42,7 +43,8 @@ function useAdminTabs(): SettingsTab[] {
     { key: "webhooks", label: t("adminNav.webhooks"), to: "/admin/webhooks" },
     { key: "audit", label: t("adminNav.audit"), to: "/admin/audit" },
     { key: "analytics", label: t("adminNav.analytics"), to: "/admin/analytics" }, // #520 / ADR-189: tenant roll-up
-    { key: "scim", label: t("adminNav.scim"), to: "/admin/scim" }, // #723 / ADR-232: mint the IdP's token
+    { key: "scim", label: t("adminNav.scim"), to: "/admin/scim" },
+    { key: "domains", label: t("adminNav.domains"), to: "/admin/domains" }, // #721 / ADR-230 // #723 / ADR-232: mint the IdP's token
     { key: "roles", label: t("adminNav.roles"), to: "/admin/roles" },
     { key: "embeds", label: t("adminNav.embeds"), to: "/admin/embeds" },
     { key: "public", label: t("adminNav.public"), to: "/admin/public" },
@@ -118,6 +120,7 @@ export function AdminRoot() {
         <Route path="audit" element={<Surface name="audit"><AdminAuditTab /></Surface>} />
         <Route path="analytics" element={<Surface name="analytics"><AdminAnalyticsTab /></Surface>} />
         <Route path="scim" element={<Surface name="scim"><AdminScimTab /></Surface>} />
+        <Route path="domains" element={<Surface name="domains"><AdminDomainsTab /></Surface>} />
         <Route path="roles" element={<Surface name="roles"><AdminRolesTab /></Surface>} />
         <Route path="embeds" element={<Surface name="embeds"><AdminEmbedsTab /></Surface>} />
         <Route path="public" element={<Surface name="public"><AdminPublicTab /></Surface>} />

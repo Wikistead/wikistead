@@ -316,7 +316,8 @@
     "audit": "Audit log",
     "analytics": "Analytics",
     "roles": "Roles",
-    "scim": "SCIM"
+    "scim": "SCIM",
+    "domains": "Domains"
   },
   "adminModeration": {
     "title": "Abuse filter",
@@ -1510,5 +1511,25 @@
     "revokeBody": "Provisioning through “{{name}}” stops immediately, and your identity provider will need a new token.",
     "lockedTitle": "SCIM provisioning is a Business feature",
     "lockedBody": "Upgrade to connect your identity provider and provision members automatically."
+  },
+  "adminDomains": {
+    "title": "Custom domains",
+    "body": "Serve your workspace on your own hostname. Add the domain, publish the DNS record we show you, then verify.",
+    "domain": "Domain",
+    "add": "Add domain",
+    "verify": "Verify",
+    "verified": "Verified",
+    "pending": "Pending",
+    "release": "Release",
+    "empty": "No custom domains yet.",
+    "dnsHint": "Publish this DNS record, then verify:",
+    "passkeyTitle": "Verifying will invalidate every passkey",
+    "passkeyBody": "A passkey only works on the host it was created for, so {{count}} member(s) will have to enrol again after this domain takes over. Continue?",
+    "passkeyRetry": "Passkeys would be lost. Confirm on the dialog to continue.",
+    "stanceBlocked": "This workspace accepts passkeys only, so moving hosts would lock everyone out. Allow another second factor first, then verify.",
+    "releaseTitle": "Release this domain?",
+    "releaseBody": "{{domain}} stops resolving immediately, and adding it back means proving ownership again.",
+    "lockedTitle": "Custom domains are a paid feature",
+    "lockedBody": "Upgrade to serve your workspace on your own hostname."
   }
 }

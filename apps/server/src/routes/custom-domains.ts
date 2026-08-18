@@ -389,6 +389,33 @@ export async function removeCustomDomain(db: TenantDb, args: { tenantId: string;
   emit({ type: 'tenant.custom_domain_removed', tenantId: args.tenantId, domain })
 }
 
+// Revoke EVERY domain a tenant holds — the entitlement-loss path (#721 / ADR-230 §2, ruling).
+//
+// ADR-065 promised three-point revocation on release OR entitlement loss, and the release half has
+// worked all along. The other half never ran: `removeCustomDomain` had exactly one caller, the
+// button a human presses, and nothing in the downgrade batch mentioned custom domains. So a
+// downgraded tenant kept its public address, resolving to a plan that no longer includes it.
+//
+// This is the same two points the single-domain path does — drop the row, then RE-DERIVE the
+// mapping — deliberately in one transaction per domain and never as a bespoke DELETE: #576 was a
+// hand-cleared mapping that left links pointing at a host nothing resolved for six hours.
+// The third point (the cert-manager Certificate) stays with #235, which is Blocked and has no
+// cert-manager in any environment this repo can reach; the domains are RETURNED so the batch can
+// print them and an operator can reconcile certs by hand until then, rather than dropping the fact.
+//
+// It takes a plain Sql (not a TenantDb) because the batch runs on the admin pool with no request
+// context — and it stays in this file so the derivation lives in exactly one place.
+export async function revokeAllCustomDomains(sql: Sql, tenantId: string): Promise<string[]> {
+  const rows = await sql<{ domain: string }[]>`SELECT domain FROM custom_domains WHERE tenant_id = ${tenantId}`
+  if (rows.length === 0) return []
+  await sql.begin(async (tx) => {
+    await tx`DELETE FROM custom_domains WHERE tenant_id = ${tenantId}`
+    await syncDomainMapping(tx as unknown as Sql, tenantId)
+  })
+  for (const r of rows) emit({ type: 'tenant.custom_domain_removed', tenantId, domain: r.domain })
+  return rows.map((r) => r.domain)
+}
+
 export async function customDomainsPlugin(app: FastifyInstance) {
   app.get<{ Querystring: { limit?: string; cursor?: string } }>('/admin/custom-domains', async (req) => {
     await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
