@@ -262,3 +262,32 @@ describe('#712 the report names what was actually lost', () => {
     expect(said, 'and the block id residue is named').toMatch(/block identifier/)
   })
 })
+
+describe('#712 G/H: the last of the silences', () => {
+  it('turns an Excalidraw note into a drawing, and reports the one it cannot read', async () => {
+    const { convertExcalidrawNote, isExcalidrawNote } = await import('../import/obsidian.js')
+    expect(isExcalidrawNote('Sketch.excalidraw.md')).toBe(true)
+    expect(isExcalidrawNote('Notes.md')).toBe(false)
+
+    const scene = '{"elements":[],"appState":{}}'
+    const parsed = convertExcalidrawNote(
+      `# Excalidraw Data\n\n## Drawing\n\`\`\`json\n${scene}\n\`\`\`\n`, { title: 'Sketch' })
+    expect(parsed.markdown, 'the product renders it as a drawing').toContain('```excalidraw')
+    expect(parsed.markdown, 'and the scene is the note\'s own').toContain('"elements"')
+    expect(parsed.degraded, 'a drawing that arrives is not a degrade').toEqual([])
+
+    // The plugin's compressed variant cannot be read here — reported, not left as an unexplained blob.
+    const compressed = convertExcalidrawNote('## Drawing\n```compressed-json\nN4Ig…\n```\n', { title: 'Sketch' })
+    expect(compressed.degraded.map((d) => d.what).join(' ')).toMatch(/compressed/)
+    expect(compressed.markdown, 'the source is kept rather than thrown away').toContain('compressed-json')
+  })
+
+  it('reports raw HTML blocks a Notion export leaves in the Markdown', async () => {
+    const { detectVaultDegradations } = await import('../import/obsidian.js')
+    const said = detectVaultDegradations({
+      title: 'N', markdown: '<aside>note to self</aside>\n\n<details><summary>more</summary>body</details>\n',
+    }).map((d) => `${d.what} ${d.detail ?? ''}`).join(' | ')
+    expect(said, 'the reader is told the markup is showing').toMatch(/raw HTML/)
+    expect(said).toMatch(/aside/)
+  })
+})

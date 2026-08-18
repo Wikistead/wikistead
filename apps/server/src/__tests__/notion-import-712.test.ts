@@ -226,3 +226,18 @@ describe('#712 D: a database becomes one page, not two', () => {
     expect(body, 'the surviving page carries EVERY row, not the filtered view').toContain('Beta')
   }, 300_000)
 })
+
+describe('#712 a third-party import is not "lossy titles"', () => {
+  it('reports lossyTitles only for this product\'s own export arriving without its manifest', async () => {
+    await admin`DELETE FROM pages WHERE tenant_id = ${TENANT}`
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({ 'Runbook 5566778899aabbccddeeff0011223344.md': strToU8('# Runbook\n\nbody\n') }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    // A Notion export has no manifest BY DEFINITION and its file names ARE its titles. Flagging that
+    // is a warning true of every third-party import forever — one nobody can act on, and one the
+    // upload screen (#725) would show every single time until people stopped reading it.
+    expect(report.lossyTitles, 'the titles came from the source, not from a guess').toBe(false)
+  }, 300_000)
+})

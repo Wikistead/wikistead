@@ -21,7 +21,7 @@ import type { SearchDriver } from '../search/index.js'
 import { makeS3Key } from '../storage/driver.js'
 import { sniffInlineKind } from '../routes/attachments.js'
 import { createPage, publishPage, deletePage } from '../routes/pages.js'
-import { noteNameOf, rewriteWikilinks, detectVaultDegradations, canvasDegradations, walkNodes, vaultAttachments, convertVaultCallouts } from './obsidian.js'
+import { noteNameOf, rewriteWikilinks, detectVaultDegradations, canvasDegradations, walkNodes, vaultAttachments, convertVaultCallouts, isExcalidrawNote, convertExcalidrawNote } from './obsidian.js'
 import { looksLikeNotionExport, splitNotionName, parseCsv, csvToMarkdownTable, databaseDegradation, rewriteNotionLinks } from './notion.js'
 import { looksLikeConfluenceExport, confluenceHtmlToMarkdown } from './confluence.js'
 
@@ -101,6 +101,8 @@ export interface ImportNode {
   sourceRef?: string
   /** #712 §5: the 32-hex id a Notion export puts in every filename — the key its links point at. */
   notionHex?: string | null
+  /** #712 G: true when this node came from an Obsidian Excalidraw note (`*.excalidraw.md`). */
+  excalidrawNote?: boolean
   // `frontmatter`: structured metadata an adapter carries over. Serialised as YAML at the top of the
   // body, which is where tags already live (ADR-145), so no second tag path appears.
   frontmatter?: Record<string, unknown>
@@ -456,6 +458,12 @@ export async function materializeImport(
       const calls = convertVaultCallouts(c.node.markdown, { title: nodeTitle })
       c.node.markdown = calls.markdown
       report.degraded.push(...calls.degraded)
+      // #712 G: a `.excalidraw.md` note carries a drawing, and this product can render it.
+      if (c.node.excalidrawNote) {
+        const drawing = convertExcalidrawNote(c.node.markdown, { title: nodeTitle })
+        c.node.markdown = drawing.markdown
+        report.degraded.push(...drawing.degraded)
+      }
       const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report, {
         node: { title: c.node.title || c.node.dir }, hrefByName, embedByName,
       }, notionHrefByHex, attByName)
@@ -483,6 +491,8 @@ export async function materializeImport(
 // strings), which is what lets the route decide "synchronous or job" without a speculative write.
 export interface PreparedImport {
   ir: ImportIR
+  /** Which dialect this archive turned out to be. `native` is the export this product itself writes. */
+  sourceKind: 'native' | 'obsidian' | 'notion' | 'confluence'
   /** Degradations discovered while reading the archive — they belong to the report the materializer returns. */
   extraDegradations: ImportDegradation[]
   /** Pages this archive would create. The §7 threshold is measured against exactly this. */
@@ -491,12 +501,14 @@ export interface PreparedImport {
 
 export function prepareImport(archive: Uint8Array): PreparedImport {
   let files = streamingUnzip(archive)
+  let sourceKind: PreparedImport['sourceKind'] = 'native'
   const confluenceDegradations: ImportDegradation[] = []
   // #712 / ADR-227 §6 — Confluence. The shared builder speaks Markdown, so the conversion happens
   // FIRST and hands it an archive it already understands: each `.html` becomes a `.md` of the same
   // name. That keeps the tree logic, the attachment rules and the authz path identical for every
   // source, and guarantees no raw HTML ever reaches a page body (ADR-132 §3).
   if (looksLikeConfluenceExport(Object.keys(files))) {
+    sourceKind = 'confluence'
     const converted: Record<string, Uint8Array> = {}
     // The pages the archive actually carries, so a link OUT of the export is not turned into
     // wikilink notation nobody can resolve (see the `<a>` case in confluence.ts).
@@ -525,13 +537,19 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
   // sourceRef before materialisation (the link map is keyed on it). Doing it here rather than in
   // buildIR keeps the shared builder free of any one source's vocabulary.
   const nodes = walkNodes(ir.roots)
-  for (const node of nodes) node.sourceRef ??= noteNameOf(node.dir)
+  for (const node of nodes) {
+    node.sourceRef ??= noteNameOf(node.dir)
+    // The `.excalidraw` half of the name is stripped by the tree builder, so the flag is set here
+    // where the ARCHIVE path is still visible.
+    if (isExcalidrawNote(`${node.dir}.md`) || isExcalidrawNote(`${node.dir}/index.md`)) node.excalidrawNote = true
+  }
 
   // #712 / ADR-227 §5 — Notion. Detected from the export's own fingerprint (the 32-hex filename
   // suffix) rather than asked for: a user uploads "my export", not "my export, format N", and the
   // shapes are distinguishable without guessing. A Wikistead ZIP and a plain vault carry no such
   // suffix, so this branch cannot fire on them.
   if (looksLikeNotionExport(Object.keys(files))) {
+    sourceKind = 'notion'
     for (const node of nodes) {
       const { title, hex } = splitNotionName(noteNameOf(node.dir))
       node.notionHex = hex
@@ -584,8 +602,12 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
   }
   const shared = vaultAttachments(files, { claimed, mimeOf: mimeFromName })
   if (shared.length && ir.roots[0]) ir.roots[0].attachments.push(...shared)
+  // An archive with no manifest is not this product's export: it is a folder of Markdown, which is
+  // what a vault is too. Either way its file names are its titles rather than a lossy guess.
+  if (sourceKind === 'native' && !ir.hasManifest) sourceKind = 'obsidian'
   return {
     ir,
+    sourceKind,
     // Canvas files never became pages — reported rather than silently absent, which is the difference
     // between "we could not represent this" and "your vault came in fine".
     extraDegradations: [...csvDegradations, ...confluenceDegradations, ...canvasDegradations(Object.keys(files))],
@@ -604,6 +626,11 @@ export async function runPreparedImport(
 ): Promise<ImportReport> {
   const report = await materializeImport(deps, prepared.ir, args)
   report.degraded.push(...prepared.extraDegradations)
+  // ⚠️ `lossyTitles` means "this product's own export arrived without its manifest, so the titles are
+  // guesses from directory names". A THIRD-PARTY export has no manifest by definition and its file
+  // names ARE its titles — flagging those is a warning that is true of every Notion, Confluence and
+  // Obsidian import forever, which is a warning nobody can act on and everybody learns to ignore.
+  if (prepared.sourceKind !== 'native') report.lossyTitles = false
   return report
 }
 

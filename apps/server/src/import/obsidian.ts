@@ -181,6 +181,19 @@ export function detectVaultDegradations(node: { title: string; markdown: string 
       detail: `${inlineDv.length} expression(s)`,
     })
   }
+  // ⚠️ Notion writes `<aside>` and `<details>` as RAW HTML in its Markdown export. They survive as
+  // literal tags in the body, and this product renders Markdown — so the reader sees the markup. It
+  // is reported here rather than converted because the two are not equivalents: `<aside>` has no
+  // block in this product, and `<details>` maps to `:::details` only when its `<summary>` can be
+  // read, which is a conversion worth doing deliberately rather than guessing at now.
+  const rawBlocks = node.markdown.match(/<(aside|details|summary)\b/gi)
+  if (rawBlocks) {
+    out.push({
+      node: node.title,
+      what: 'raw HTML block kept as text',
+      detail: `${rawBlocks.length} tag(s): ${[...new Set(rawBlocks.map((t) => t.replace('<', '').toLowerCase()))].join(', ')}`,
+    })
+  }
   // A block id is Obsidian's anchor for "this paragraph". Nothing here refers to it, so it stays in
   // the text as a stray `^id` — visible to the reader and meaningless, which is worth saying.
   const blockIds = node.markdown.match(/(?:^|\s)\^[A-Za-z0-9-]+\s*$/gm)
@@ -192,6 +205,43 @@ export function detectVaultDegradations(node: { title: string; markdown: string 
     })
   }
   return out
+}
+
+// #712 G: an Obsidian Excalidraw note is a DRAWING, not a page of JSON.
+//
+// The plugin stores each drawing as `Name.excalidraw.md`: a Markdown file whose `## Drawing` section
+// holds the scene. Imported as an ordinary note, the reader gets a page whose body is a wall of JSON
+// and no report saying why — while THIS PRODUCT HAS an excalidraw macro that renders exactly that
+// scene. So the scene is lifted into the macro when it can be read, and when it cannot (the plugin
+// also writes a `compressed-json` variant this cannot decompress) the note is reported rather than
+// left as an unexplained blob.
+const EXCALIDRAW_NOTE = /\.excalidraw\.md$/i
+const DRAWING_JSON = /```json\s*\n([\s\S]*?)\n```/
+const DRAWING_COMPRESSED = /```compressed-json/
+
+export function isExcalidrawNote(path: string): boolean { return EXCALIDRAW_NOTE.test(path) }
+
+export function convertExcalidrawNote(
+  markdown: string,
+  node: { title: string },
+): { markdown: string; degraded: ImportDegradation[] } {
+  const degraded: ImportDegradation[] = []
+  const scene = DRAWING_JSON.exec(markdown)?.[1]
+  if (scene) {
+    // Sanity: it must parse, or it is not a scene and pretending otherwise ships a broken macro.
+    try {
+      JSON.parse(scene)
+      return { markdown: ['```excalidraw', scene.trim(), '```', ''].join('\n'), degraded }
+    } catch { /* fall through to the report */ }
+  }
+  degraded.push({
+    node: node.title,
+    what: DRAWING_COMPRESSED.test(markdown)
+      ? 'Excalidraw drawing is stored compressed and was kept as its source'
+      : 'Excalidraw drawing could not be read and was kept as its source',
+    detail: node.title,
+  })
+  return { markdown, degraded }
 }
 
 /** `.canvas` files are not pages — reported once per file rather than silently skipped. */

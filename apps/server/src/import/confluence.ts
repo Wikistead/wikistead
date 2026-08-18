@@ -96,7 +96,7 @@ function renderBlock(node: Node, ctx: Ctx): string {
       return children(el, ctx).join('\n\n')
     }
     case 'img':
-      return image(el)
+      return image(el, ctx)
     case 'script': case 'style':
       return ''
     default:
@@ -184,10 +184,20 @@ function table(el: HTMLElement, ctx: Ctx): string {
   return out.join('\n')
 }
 
-function image(el: HTMLElement): string {
+function image(el: HTMLElement, ctx?: Ctx): string {
   const src = el.getAttribute('src') ?? ''
   const alt = el.getAttribute('alt') ?? ''
-  return src ? `![${alt}](${src})` : ''
+  if (!src) return ''
+  // ⚠️ Confluence renders EMOJI as `<img>` pointing into its own installation
+  // (`/images/icons/emoticons/smile.png`, or an absolute URL at the old host). Carried over verbatim
+  // those become broken images on every page that used one — and the alt text is usually the emoji's
+  // name, which reads better than a missing picture. So the picture is dropped for the name, and the
+  // substitution is REPORTED rather than done quietly.
+  if (/(^|\/)(images\/icons\/emoticons|emoticons)\//i.test(src) || /^https?:\/\/[^/]+\/(?:wiki\/)?images\/icons\//i.test(src)) {
+    ctx?.degraded.push({ node: ctx.title, what: 'emoji image replaced by its name', detail: alt || src })
+    return alt ? `:${alt}:` : ''
+  }
+  return `![${alt}](${src})`
 }
 
 /** Inline rendering for a container's own text, optionally skipping nested blocks. */
@@ -248,7 +258,7 @@ function inlineNode(node: Node, ctx: Ctx): string {
       }
       return `[${text}](${href})`
     }
-    case 'img': return image(el)
+    case 'img': return image(el, ctx)
     case 'br': return '\n'
     case 'ul': case 'ol': return `\n${list(el, ctx, tag === 'ol')}\n`
     default: return inline(el, ctx)

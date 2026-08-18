@@ -268,3 +268,20 @@ describe('#712 E: Confluence shapes GFM can carry are carried', () => {
     expect(markdown).not.toContain('- [ ]')
   })
 })
+
+describe('#712 H: a Confluence emoji does not become a broken image', () => {
+  it('substitutes the name and says it did', () => {
+    const { markdown, degraded } = confluenceHtmlToMarkdown(
+      '<html><body><h1>T</h1><p>nice <img class="emoticon" src="/images/icons/emoticons/smile.png" alt="smile"/></p></body></html>',
+      'T')
+    expect(markdown, 'no link into the old installation').not.toContain('/images/icons/')
+    expect(markdown, 'the name reads better than a missing picture').toContain(':smile:')
+    expect(degraded.map((d) => d.what).join(' ')).toMatch(/emoji/)
+  })
+
+  it('leaves an ordinary image alone', () => {
+    const { markdown } = confluenceHtmlToMarkdown(
+      '<html><body><img src="attachments/pic.png" alt="pic"/></body></html>', 'T')
+    expect(markdown).toContain('![pic](attachments/pic.png)')
+  })
+})
