@@ -1221,8 +1221,11 @@ export function useSetPrivate(pageId: string) {
     mutationFn: (makePrivate: boolean) =>
       apiFetch<null>(`/pages/${encodeURIComponent(pageId)}/private`, token, { method: makePrivate ? "POST" : "DELETE" }),
     // Access-set and public/is_public change with privacy → refresh the access list too.
-    // #109 Fix B: the private flag drives the lock badge in the tree (usePages) and beside the
-    // title (usePage), so invalidate both so the lock appears/disappears immediately.
+    // #109 Fix B: the private flag drives the lock badge in the tree and beside the title
+    // (usePage), so invalidate both so the lock appears/disappears immediately. The tree's own
+    // query lives in sidebar/lazy-tree.ts under the `["pages", …]` prefix these invalidations
+    // reach; the `usePages` this line used to name was removed by #753 for having no callers.
+    // A comment that names something the file no longer exports sends the next reader looking.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["page-private", pageId] });
       qc.invalidateQueries({ queryKey: ["page-access", pageId] });
