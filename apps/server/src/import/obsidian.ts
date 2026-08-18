@@ -61,10 +61,20 @@ export function rewriteWikilinks(
     if (isEmbed) {
       // An embed of a FILE is an attachment; an embed of a NOTE degrades to a link (ADR-227 ruling 3).
       const inline = resolve.embedByName.get(key)
-      if (inline) return inline
+      if (inline) {
+        // ⚠️ `![[pic.png|300]]` carries a DISPLAY SIZE (and `|caption|300` a caption too). The image
+        // survives; the sizing does not, because it is Obsidian's own extension rather than anything
+        // Markdown says. It used to vanish without a word, which is the same silence the heading
+        // anchor was given a report for.
+        if (label) degraded.push({ node: node.title, what: 'embed display size or caption dropped', detail: `${target}|${label}` })
+        return inline
+      }
       const href = resolve.hrefByName.get(key)
       if (href) {
-        degraded.push({ node: node.title, what: 'note embed became a link', detail: target })
+        // The FRAGMENT matters here as much as the note does: `![[Runbook#Rollback]]` becomes a link
+        // to the whole page, and a report naming only `Runbook` does not tell the reader that the
+        // section they pointed at is the part that was lost.
+        degraded.push({ node: node.title, what: 'note embed became a link', detail: `${target}${anchor ?? ''}` })
         return `[${label || target}](${href})`
       }
       deadLinks++
@@ -74,11 +84,74 @@ export function rewriteWikilinks(
     const href = resolve.hrefByName.get(key)
     if (!href) { deadLinks++; return whole }
     if (anchor) {
-      degraded.push({ node: node.title, what: 'wikilink heading anchor dropped', detail: `${target}${anchor}` })
+      // ⚠️ `#^id` is a BLOCK REFERENCE, not a heading anchor — a different thing that is lost a
+      // different way (a heading anchor has an equivalent here; a block id has none at all). Calling
+      // both "heading anchor" told the reader the wrong story about what they lost.
+      const isBlockRef = anchor.startsWith('#^')
+      degraded.push({
+        node: node.title,
+        what: isBlockRef ? 'wikilink block reference dropped' : 'wikilink heading anchor dropped',
+        detail: `${target}${anchor}`,
+      })
     }
     return `[${label || target}](${href})`
   })
   return { markdown: out, degraded, deadLinks }
+}
+
+// #712H: Obsidian CALLOUTS convert; they do not survive as quotes.
+//
+// A vault writes `> [!warning] Title` with the body in the same block quote. Left alone, the reader
+// of the imported page sees a quote whose first characters are the literal `[!warning]` — the shape
+// is lost AND a piece of foreign notation is on screen. This product has the same feature under
+// `:::warning[Title]`, so the honest move is to convert rather than to report a loss that need not
+// happen. Types Obsidian has and this product does not are folded onto `note` and REPORTED, because
+// that one is a real loss of meaning.
+const CALLOUT_TYPES = new Map<string, string>([
+  ['note', 'note'], ['info', 'info'], ['todo', 'note'], ['abstract', 'note'], ['summary', 'note'],
+  ['tip', 'tip'], ['hint', 'tip'], ['important', 'tip'], ['success', 'tip'], ['check', 'tip'], ['done', 'tip'],
+  ['question', 'note'], ['help', 'note'], ['faq', 'note'], ['example', 'note'], ['quote', 'note'], ['cite', 'note'],
+  ['warning', 'warning'], ['caution', 'warning'], ['attention', 'warning'],
+  ['danger', 'danger'], ['error', 'danger'], ['failure', 'danger'], ['fail', 'danger'], ['missing', 'danger'], ['bug', 'danger'],
+])
+const CALLOUT_HEAD = /^(\s*)>\s*\[!([A-Za-z]+)\]([+-]?)\s*(.*)$/
+
+export function convertVaultCallouts(
+  markdown: string,
+  node: { title: string },
+): { markdown: string; degraded: ImportDegradation[] } {
+  const degraded: ImportDegradation[] = []
+  const lines = markdown.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const head = CALLOUT_HEAD.exec(lines[i]!)
+    if (!head) { out.push(lines[i]!); continue }
+    const [, , rawType, fold, title] = head
+    const kind = rawType!.toLowerCase()
+    const mapped = CALLOUT_TYPES.get(kind)
+    if (!mapped) { out.push(lines[i]!); continue } // not a callout we recognise — leave the quote alone
+    if (mapped === 'note' && kind !== 'note') {
+      degraded.push({ node: node.title, what: `callout type "${kind}" has no equivalent — shown as a note`, detail: kind })
+    }
+    if (fold) {
+      // `>[!note]-` is a COLLAPSED callout. The panel here does not fold, so say so rather than let
+      // a reader wonder why the page is longer than it was.
+      degraded.push({ node: node.title, what: 'collapsible callout is shown expanded', detail: kind })
+    }
+    // Consume the rest of the block quote as the body.
+    const body: string[] = []
+    let j = i + 1
+    for (; j < lines.length; j++) {
+      const cont = /^\s*>\s?(.*)$/.exec(lines[j]!)
+      if (!cont) break
+      body.push(cont[1]!)
+    }
+    out.push(`:::${mapped}${title ? `[${title.trim()}]` : ''}`)
+    out.push(...body)
+    out.push(':::')
+    i = j - 1
+  }
+  return { markdown: out.join('\n'), degraded }
 }
 
 /**
@@ -97,6 +170,26 @@ export function detectVaultDegradations(node: { title: string; markdown: string 
   }
   if (/%%[\s\S]*?%%/.test(node.markdown)) {
     out.push({ node: node.title, what: 'Obsidian comment (%%…%%) kept as text' })
+  }
+  // ⚠️ The INLINE form was reported nowhere while the fenced one was — an asymmetry that made the
+  // report look complete on a vault that used the short form.
+  const inlineDv = node.markdown.match(/`=[^`\n]+`/g)
+  if (inlineDv) {
+    out.push({
+      node: node.title,
+      what: 'inline Dataview expression kept as text',
+      detail: `${inlineDv.length} expression(s)`,
+    })
+  }
+  // A block id is Obsidian's anchor for "this paragraph". Nothing here refers to it, so it stays in
+  // the text as a stray `^id` — visible to the reader and meaningless, which is worth saying.
+  const blockIds = node.markdown.match(/(?:^|\s)\^[A-Za-z0-9-]+\s*$/gm)
+  if (blockIds) {
+    out.push({
+      node: node.title,
+      what: 'block identifier (^id) left in the text',
+      detail: `${blockIds.length} paragraph(s)`,
+    })
   }
   return out
 }

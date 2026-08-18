@@ -149,10 +149,16 @@ function codeLanguage(el: HTMLElement): string {
 
 function list(el: HTMLElement, ctx: Ctx, ordered: boolean): string {
   const items = el.querySelectorAll('> li')
+  // ⚠️ A Confluence TASK LIST is a `<ul class="inline-task-list">` whose items carry `checked`.
+  // Rendering it as a plain bullet list threw away both the checkbox and whether it was done — this
+  // product has GFM task lists, so the shape has somewhere to go.
+  const isTasks = /(^|\s)inline-task-list(\s|$)/.test(el.getAttribute('class') ?? '')
   return items.map((li, i) => {
     const nested = li.querySelectorAll('> ul, > ol')
     const own = inline(li, ctx, nested).trim()
-    const marker = ordered ? `${i + 1}.` : '-'
+    const marker = isTasks
+      ? `- [${/(^|\s)checked(\s|$)/.test(li.getAttribute('class') ?? '') ? 'x' : ' '}]`
+      : ordered ? `${i + 1}.` : '-'
     const sub = nested.map((n) => list(n, ctx, (n.rawTagName ?? '').toLowerCase() === 'ol')
       .split('\n').map((l) => `  ${l}`).join('\n')).join('\n')
     return sub ? `${marker} ${own}\n${sub}` : `${marker} ${own}`
@@ -201,6 +207,9 @@ function inlineNode(node: Node, ctx: Ctx): string {
   switch (tag) {
     case 'strong': case 'b': return `**${inline(el, ctx).trim()}**`
     case 'em': case 'i': return `*${inline(el, ctx).trim()}*`
+    // ⚠️ GFM has strikethrough, so losing it was a plain omission rather than a limitation: the text
+    // came through with the line silently removed, which changes what the sentence means.
+    case 's': case 'del': case 'strike': return `~~${inline(el, ctx).trim()}~~`
     case 'code': return `\`${el.text}\``
     case 'a': {
       const href = el.getAttribute('href') ?? ''

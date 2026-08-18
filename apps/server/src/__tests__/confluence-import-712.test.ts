@@ -250,3 +250,21 @@ describe('#712B: an attachment LINK is not silently dead', () => {
       .toMatch(/attached file[\s\S]*paper\.pdf|paper\.pdf/)
   }, 300_000)
 })
+
+describe('#712E: Confluence shapes GFM can carry are carried', () => {
+  it('keeps strikethrough and the state of a task list', async () => {
+    const { markdown } = confluenceHtmlToMarkdown(
+      '<html><body><h1>T</h1><p>this is <s>gone</s> now</p>' +
+      '<ul class="inline-task-list"><li class="checked">shipped</li><li class="unchecked">pending</li></ul>' +
+      '</body></html>', 'T')
+    expect(markdown, 'strikethrough survives as GFM').toContain('~~gone~~')
+    expect(markdown, 'a done task is a ticked box').toContain('- [x] shipped')
+    expect(markdown, 'an open task is an empty box').toContain('- [ ] pending')
+  })
+
+  it('leaves an ordinary list alone', () => {
+    const { markdown } = confluenceHtmlToMarkdown('<html><body><ul><li>one</li><li>two</li></ul></body></html>', 'T')
+    expect(markdown).toContain('- one')
+    expect(markdown).not.toContain('- [ ]')
+  })
+})

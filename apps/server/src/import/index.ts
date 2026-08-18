@@ -21,7 +21,7 @@ import type { SearchDriver } from '../search/index.js'
 import { makeS3Key } from '../storage/driver.js'
 import { sniffInlineKind } from '../routes/attachments.js'
 import { createPage, publishPage, deletePage } from '../routes/pages.js'
-import { noteNameOf, rewriteWikilinks, detectVaultDegradations, canvasDegradations, walkNodes, vaultAttachments } from './obsidian.js'
+import { noteNameOf, rewriteWikilinks, detectVaultDegradations, canvasDegradations, walkNodes, vaultAttachments, convertVaultCallouts } from './obsidian.js'
 import { looksLikeNotionExport, splitNotionName, parseCsv, csvToMarkdownTable, databaseDegradation, rewriteNotionLinks } from './notion.js'
 import { looksLikeConfluenceExport, confluenceHtmlToMarkdown } from './confluence.js'
 
@@ -449,7 +449,13 @@ export async function materializeImport(
 
     // Pass 2 — now every id is known: rewrite each body (images + cross-links) and set the draft; optional publish.
     for (const c of created) {
-      report.degraded.push(...detectVaultDegradations({ title: c.node.title || c.node.dir, markdown: c.node.markdown }))
+      const nodeTitle = c.node.title || c.node.dir
+      report.degraded.push(...detectVaultDegradations({ title: nodeTitle, markdown: c.node.markdown }))
+      // #712H: a vault callout becomes THIS product's callout. Done before the link rewrite so
+      // a `[[link]]` inside a callout body is resolved by the same pass everything else uses.
+      const calls = convertVaultCallouts(c.node.markdown, { title: nodeTitle })
+      c.node.markdown = calls.markdown
+      report.degraded.push(...calls.degraded)
       const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report, {
         node: { title: c.node.title || c.node.dir }, hrefByName, embedByName,
       }, notionHrefByHex, attByName)
