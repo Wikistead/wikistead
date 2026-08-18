@@ -23,7 +23,7 @@ import { claimOutboxBatch, startOutboxDrainWorker } from '../db/outbox-lease.js'
 import { registry, acquireTenantDb } from '../db/index.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { SearchDriver } from '../search/index.js'
-import { prepareImport, runPreparedImport, type ImportReport, type PreparedImport } from './index.js'
+import { prepareImport, runPreparedImport, type ImportReport, type PreparedImport, resolveImportPublish } from './index.js'
 
 // ADR-227 §9 answer 1 (owner ruling): 200 nodes. Deliberately a starting value measured later, not
 // a law — env-overridable so a deployment that learns better does not need a release.
@@ -93,7 +93,7 @@ export async function enqueueImportJob(
     await pool`
       INSERT INTO imports (id, tenant_id, space_id, executor_sub, parent_page_id, publish, archive_key, status, nodes_total)
       VALUES (${id}, ${args.tenantId}, ${args.spaceId}, ${args.userId}, ${args.parentPageId ?? null},
-              ${args.publish === true}, ${key}, 'queued', ${args.nodesTotal})`
+              ${resolveImportPublish(args.publish)}, ${key}, 'queued', ${args.nodesTotal})`
   } catch (e) {
     await deps.storage.deleteObject(key).catch(() => {})
     // The partial unique index (migration 124) is the one-import-per-space bound. Losing that race is a

@@ -131,10 +131,12 @@ describe('#712 §7: the threshold decides whether one request can carry the impo
     expect(degraded.map((d: { what: string }) => d.what).join(' '), 'the canvas is named, not silently absent')
       .toMatch(/canvas/i)
 
-    // Nothing lands published (ADR-132's draft default holds across the job boundary too).
+    // #746 reversed the default, and the point of measuring it HERE is that the queued path and the
+    // synchronous path must agree about the same upload. They resolve it through one function for
+    // exactly that reason; before, each coerced the flag on its own.
     const [{ published }] = await admin<{ published: string }[]>`
       SELECT count(*)::text AS published FROM pages WHERE tenant_id = ${TENANT} AND published_at IS NOT NULL`
-    expect(published, 'a job import publishes nothing either').toBe('0')
+    expect(Number(published), 'a job import publishes, the same as the synchronous one').toBeGreaterThan(0)
   }, 600_000)
 
   it('refuses a second import for the same space while one is pending (409), and frees the slot when it settles', async () => {

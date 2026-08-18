@@ -286,6 +286,17 @@ export interface ImportDegradation {
   params?: Record<string, string | number>
 }
 
+// #746 (user ruling, 2026-08-19): an import PUBLISHES unless the caller says otherwise. ADR-132 chose the
+// opposite, and the way that showed on the running product was a successful import whose pages read as
+// empty — the read surface and the export both show the published version, and nothing had been published.
+// ADR-236 gave the report a sentence to explain it. A default that has to be explained is the wrong one.
+//
+// ONE definition, resolved here rather than at each entry point. Before this, the synchronous route and the
+// job row each coerced the flag on their own (`=== true` in two places); with the default moving, two
+// coercions is two chances for the sync path and the queued path to disagree about the same upload.
+export const IMPORT_PUBLISHES_BY_DEFAULT = true
+export const resolveImportPublish = (v: boolean | undefined): boolean => v ?? IMPORT_PUBLISHES_BY_DEFAULT
+
 export interface ImportReport {
   degraded: ImportDegradation[]
   pagesCreated: number

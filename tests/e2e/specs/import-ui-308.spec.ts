@@ -47,13 +47,90 @@ test("#725 import an export ZIP through the import screen (report names what hap
 
   const report = page.getByTestId("import-report");
   await expect(report).toBeVisible({ timeout: 30000 });
-  // The draft default is on the report in words: this archive is imported unpublished, and the read
-  // surface will say the pages are empty until somebody publishes them.
+  // #746 turned publishing on by default, and this round-trip STILL reports drafts — correctly. The
+  // source page here is created by the API and never typed into, so its published Markdown is empty,
+  // and the materializer does not publish an empty body (there is nothing to publish). So the draft
+  // sentence is the right one on this report, and it is asserted rather than removed: measured, not
+  // assumed, because "the default changed" would otherwise have been reason enough to delete a line
+  // that is still true. The default itself is pinned where real content goes through the shipped route
+  // (server: import-publish-default-746), and the OFF branch by the spec below.
   await expect(page.getByTestId("import-draft-notice")).toBeVisible();
   // …and the imported page is really there, under the destination space.
   await page.getByTestId("import-open-space").click();
   await expect(page.getByText(pageTitle, { exact: false }).first()).toBeVisible({ timeout: 15000 });
 });
+
+// #746: the other half of the ruling — the choice was kept, only its default moved. Driven through the
+// real switch, because "the switch still works" is the claim, and a stubbed report cannot make it.
+const BODY = "# Draft Me" + String.fromCharCode(10) + String.fromCharCode(10) + "Quietly, please." + String.fromCharCode(10);
+
+test("#746 turning publishing off still brings the archive in as drafts", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openDemo(page);
+  const spaceId = await page.evaluate(async (api) => {
+    const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
+    const s = await (await fetch(`${api}/spaces`, { method: "POST", headers: H, body: JSON.stringify({ name: `Imp Draft ${Date.now()}` }) })).json() as { id: string };
+    return s.id;
+  }, API);
+
+  await page.goto(`/spaces/${spaceId}/settings/import`);
+  await expect(page.getByTestId("import-publish")).toHaveAttribute("aria-checked", "true");
+  await page.getByTestId("import-publish").click();
+  await expect(page.getByTestId("import-publish"), "the switch turns off").toHaveAttribute("aria-checked", "false");
+
+  await page.getByTestId("space-import-input").setInputFiles({
+    name: "quiet.zip", mimeType: "application/zip",
+    // A real zip of one Markdown file: stored (no compression), which the importer accepts.
+    buffer: zipOne("Draft Me.md", Buffer.from(BODY, "utf8")),
+  });
+  await page.getByTestId("import-start").click();
+
+  await expect(page.getByTestId("import-report")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByTestId("import-draft-notice"), "the line that explains the empty page is here")
+    .toBeVisible();
+  await expect(page.getByTestId("import-published-notice")).toHaveCount(0);
+});
+
+/** A minimal STORED-method zip of a single file — enough for the importer, with no fixture on disk. */
+function zipOne(name: string, data: Buffer): Buffer {
+  const nameBuf = Buffer.from(name, "utf8");
+  const crcTable = (() => {
+    const t: number[] = [];
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  let crc = 0xffffffff;
+  for (const b of data) crc = crcTable[(crc ^ b) & 0xff]! ^ (crc >>> 8);
+  crc = (crc ^ 0xffffffff) >>> 0;
+
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6);
+  local.writeUInt16LE(0, 8); local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12);
+  local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(nameBuf.length, 26); local.writeUInt16LE(0, 28);
+
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0, 8); central.writeUInt16LE(0, 10); central.writeUInt16LE(0, 12);
+  central.writeUInt16LE(0, 14); central.writeUInt32LE(crc, 16);
+  central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24);
+  central.writeUInt16LE(nameBuf.length, 28); central.writeUInt16LE(0, 30); central.writeUInt16LE(0, 32);
+  central.writeUInt16LE(0, 34); central.writeUInt16LE(0, 36); central.writeUInt32LE(0, 38);
+  central.writeUInt32LE(0, 42);
+
+  const centralStart = local.length + nameBuf.length + data.length;
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + nameBuf.length, 12); end.writeUInt32LE(centralStart, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([local, nameBuf, data, central, nameBuf, end]);
+}
 
 test("#725 a degradation is shown by NAME on the report, not as a count", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
