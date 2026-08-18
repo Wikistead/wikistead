@@ -5,6 +5,7 @@ import { useAdminSpaces, useAdminDeleteMode, useSetAdminDeleteMode } from "../da
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // Tenant admin → Spaces overview (Phase 5 #4). Lists every space in the tenant
 // with page + direct-grant counts, and links to each space's settings. tenant#admin
@@ -18,7 +19,7 @@ export function AdminSpacesTab() {
   const setDeleteMode = useSetAdminDeleteMode();
 
   return (
-    <div className="max-w-[720px] p-6" data-testid="admin-spaces">
+    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="admin-spaces">
       <h2 className="mt-0">{t("adminSpaces.title")}</h2>
 
       {/* #445 / ADR-171: who may create spaces moved to Admin → Roles (the member default-role

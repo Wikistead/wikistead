@@ -5,6 +5,7 @@ import { useOrphanDrafts, useClaimOrphanDraft, useReassignOrphanDraft } from "..
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // Orphan-draft admin handoff (#99 / ADR-061), tenant#admin only. On-demand list of stranded
 // strict-private drafts (creator gone, no live viewer). Recovery is two-stage: CLAIM grants the
@@ -23,7 +24,7 @@ export function AdminOrphanDraftsTab() {
   const list = orphans.data ?? [];
 
   return (
-    <div className="max-w-[640px] p-6" data-testid="admin-orphans">
+    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="admin-orphans">
       <h2 className="mt-0">{t("adminOrphans.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("adminOrphans.body")}</p>
 

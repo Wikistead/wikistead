@@ -14,7 +14,7 @@ import { Switch } from "../ui/Switch";
 import { Select } from "../ui/Select";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
-import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
+import { SettingsShell, SettingsDenied, SETTINGS_WIDTHS, type SettingsTab } from "./SettingsShell";
 import { reachableSpaceTabs, landingSpaceTab, type SpaceTabKey } from "./space-tabs";
 import { SpaceMembersTab } from "./SpaceMembersTab";
 import { SpacePagesTab } from "./SpacePagesTab";
@@ -166,7 +166,9 @@ function SpaceGeneralTab() {
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 560 }} data-testid="space-general">
+    // #735: another inline-style frame (see AnalyticsDashboard) — now the shared `form` step, with the
+    // padding coming from the shell like every other tab's.
+    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="space-general">
       <h2 style={{ marginTop: 0 }}>{t("spaceSettings.general")}</h2>
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 6 }}>{t("spaceSettings.nameLabel")}</label>

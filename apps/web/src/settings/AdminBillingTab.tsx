@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useBillingStatus, useBillingUsage, useEntitlements, useCheckout, usePortal, type UsageResource } from "../data/queries";
 import { Button } from "../ui/Button";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // Billing (Phase 5g, /admin/billing, tenant#admin). On self-host (billing disabled)
 // it shows the "all features included" state. On Cloud it shows the current plan +
@@ -54,12 +55,12 @@ export function AdminBillingTab() {
     onError: () => notify.error(t("billing.portalUnavailable")),
   });
 
-  if (status.isLoading) return <div className="max-w-[560px] p-6"><p className="mt-0 text-sm text-fg-dim">{t("common.loading")}</p></div>;
+  if (status.isLoading) return <div data-settings-pane="form" className={SETTINGS_WIDTHS.form}><p className="mt-0 text-sm text-fg-dim">{t("common.loading")}</p></div>;
 
   // Self-host / CE: no billing.
   if (!status.data?.billingEnabled) {
     return (
-      <div className="max-w-[560px] p-6" data-testid="admin-billing">
+      <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="admin-billing">
         <h2 style={{ marginTop: 0 }}>{t("billing.title")}</h2>
         <p className="mt-0 text-sm text-fg-dim" data-testid="billing-selfhosted">{t("billing.selfHosted")}</p>
         {/* Metering runs on self-host too, and "what has this deployment used" is a real question
@@ -70,7 +71,7 @@ export function AdminBillingTab() {
   }
 
   return (
-    <div className="max-w-[560px] p-6" data-testid="admin-billing">
+    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="admin-billing">
       <h2 style={{ marginTop: 0 }}>{t("billing.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("billing.currentPlan")} <strong data-testid="billing-plan">{planLabel}</strong></p>
       <p className="mt-0 text-sm text-fg-dim">{t("billing.branding")}: {ent.data?.branding ? t("billing.included") : t("billing.notIncluded")}</p>

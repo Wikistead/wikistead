@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { AdminEnrollmentSection } from "./AdminEnrollmentSection";
 import { AdminSignInMethodsSection } from "./AdminSignInMethodsSection";
 import { useLoginMethods } from "../data/queries";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // The tenant's ways in (tenant#admin). #589 / ADR-195 addendum reduced this tab to two questions:
 // HOW someone signs in (one list of sign-in methods, each row edited in place) and WHO becomes a
@@ -19,7 +20,7 @@ export function AdminAuthTab() {
   // every read would 403. The server names the line; the screen does not infer it.
   const canManageStance = useLoginMethods().data?.canManageStance !== false;
   return (
-    <div className="max-w-[560px] p-6" data-testid="admin-auth">
+    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="admin-auth">
       <h2 className="mt-0">{t("adminAuth.title")}</h2>
       {/* Names the tab's two questions and nothing narrower. It used to read "configure your
           organization's identity provider (OIDC)", written when OIDC was the only way in; the list

@@ -12,6 +12,7 @@ import { ConfirmDialog } from "../ui/dialogs";
 import { UpgradeNotice } from "../ui/UpgradeNotice";
 import { disclosureKindFromError } from "../ui/upgrade-affordance";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // #721 / ADR-230 §3: the custom-domain surface.
 //
@@ -59,13 +60,18 @@ export function AdminDomainsTab() {
   // always happens. Same guard as AdminSamlSection.tsx, which is the one surface that had it.
   if (domains.isPending) return null;
 
+  // #735: in the pane, like the subscriber view it replaces — a locked tab is still a tab.
   if (locked) {
-    return <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="domains-upgrade"
-      title={t("adminDomains.lockedTitle")} body={t("adminDomains.lockedBody")} />;
+    return (
+      <div data-settings-pane="list" className={SETTINGS_WIDTHS.list}>
+        <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="domains-upgrade"
+          title={t("adminDomains.lockedTitle")} body={t("adminDomains.lockedBody")} />
+      </div>
+    );
   }
 
   return (
-    <section data-testid="admin-domains">
+    <section data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="admin-domains">
       <h2 className="text-lg font-semibold">{t("adminDomains.title")}</h2>
       <p className="mt-1 text-sm text-fg-dim">{t("adminDomains.body")}</p>
 

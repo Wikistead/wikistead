@@ -27,6 +27,7 @@ import { tenantTierCaps } from "./role-nouns";
 import { GranteeRoleForm } from "./GranteeRoleForm"; // #578 bounce ④: one add-flow, shared with the space screen
 import { OverflowMenu } from "../ui/OverflowMenu"; // #579 ②: row actions fold away (the #212 pattern)
 import { MemberStatusIcons, memberMenuValues, passwordAction, type MemberMenuValue } from "./member-status"; // #614: origin / password / suspended, beside the name
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // Admin Console: member list (role change / remove) + invites (create / revoke).
 // All actions hit admin-only endpoints; a non-admin sees an "admin only" notice
@@ -227,11 +228,14 @@ export function MembersPage() {
   };
 
   if (forbidden) {
-    return <div style={{ padding: 24, maxWidth: 560 }}><h2>{t("members.title")}</h2><p style={{ color: "var(--fg-dim)" }}>{t("members.adminOnly")}</p></div>;
+    // #735: the refusal is a tab too — it gets the same frame rather than its own inline one.
+    return <div data-settings-pane="form" className={SETTINGS_WIDTHS.form}><h2>{t("members.title")}</h2><p style={{ color: "var(--fg-dim)" }}>{t("members.adminOnly")}</p></div>;
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 720 }}>
+    // #735: an inline-style frame, like the analytics dashboard — invisible to a sweep over Tailwind
+    // classes, and the source of the 24-vs-26 difference the ticket measured.
+    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list}>
       <h2 style={{ marginTop: 0 }}>{t("members.title")}</h2>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 

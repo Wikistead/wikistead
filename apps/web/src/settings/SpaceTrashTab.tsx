@@ -6,6 +6,7 @@ import { useSpaceTrash, useRestorePage, usePurgePage, type TrashEntry } from "..
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 interface SpaceCtx { spaceId: string; name: string }
 
@@ -27,7 +28,7 @@ export function SpaceTrashTab() {
     });
 
   return (
-    <div className="max-w-[720px] p-6" data-testid="space-trash">
+    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="space-trash">
       <h2 className="mt-0">{t("spaceTrash.title")}</h2>
       <p className="text-sm text-fg-dim">{t("spaceTrash.hint")}</p>
       {trash.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
