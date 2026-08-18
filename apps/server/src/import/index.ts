@@ -21,6 +21,7 @@ import type { SearchDriver } from '../search/index.js'
 import { makeS3Key } from '../storage/driver.js'
 import { sniffInlineKind } from '../routes/attachments.js'
 import { createPage, publishPage, deletePage } from '../routes/pages.js'
+import { noteNameOf, rewriteWikilinks, detectVaultDegradations, canvasDegradations, walkNodes, vaultAttachments } from './obsidian.js'
 
 // Zip-bomb caps (ADR-132 §3). The importer aborts the moment a running total is exceeded — it never buffers a
 // whole malicious archive. These are generous enough for a real workspace export yet bound worst-case memory.
@@ -90,6 +91,15 @@ export interface ImportNode {
   oldId: string | null // from manifest — used to remap /p/<oldId> cross-links
   attachments: ImportAttachment[]
   children: ImportNode[]
+  // #712 / ADR-227 §2 — the three additions every third-party adapter shares.
+  //
+  // `sourceRef`: the key THIS source uses to refer to the node in its own links (Obsidian: the note
+  // name; Notion: the 32-hex filename suffix). Never persisted as an id — cross-tenant id reuse stays
+  // refused (ADR-132 §2) — it exists only to build the link map during one import.
+  sourceRef?: string
+  // `frontmatter`: structured metadata an adapter carries over. Serialised as YAML at the top of the
+  // body, which is where tags already live (ADR-145), so no second tag path appears.
+  frontmatter?: Record<string, unknown>
   // #364 / ADR-157 §5: the archive-root `_home.md`. Imported as a regular page; the target space's
   // home pointer is set only when NONE exists (never a silent overwrite). Empty title resolves to
   // the target space's name at materialize time (the no-manifest foreign-ZIP case).
@@ -235,7 +245,17 @@ export function buildIR(files: Record<string, Uint8Array>): ImportIR {
 }
 
 // ── Materializer ─────────────────────────────────────────────────────────────
+// #712 / ADR-227 §2: what an adapter could NOT represent, named rather than counted. The existing
+// counters answer "how much"; a migration also has to answer "what did I lose", or the product that
+// sells Open formats is the one lying at the door.
+export interface ImportDegradation {
+  node: string // the node's title or dir — what the reader would recognise
+  what: string // the shape that did not survive, e.g. 'wikilink heading anchor'
+  detail?: string
+}
+
 export interface ImportReport {
+  degraded: ImportDegradation[]
   pagesCreated: number
   emptyPagesCreated: number // unpublished-source nodes created as empty drafts (#309/)
   attachmentsImported: number
@@ -286,7 +306,16 @@ async function setDraftBody(db: TenantDb, pageId: string, markdown: string): Pro
 // Rewrite a node's body for its new home: relative image links → wks-attachment:<newId>, and /p/<oldId>
 // cross-links → /p/<newId> for pages that were part of the SAME import (a link to a page OUTSIDE the import is
 // left as-is and counted — the #276 dead-link UI marks it; never a dangling rewrite to a bogus id).
-function rewriteBody(markdown: string, attByRel: Map<string, string>, pageIdMap: Map<string, string>, report: ImportReport): string {
+function rewriteBody(
+  markdown: string,
+  attByRel: Map<string, string>,
+  pageIdMap: Map<string, string>,
+  report: ImportReport,
+  // #712 / ADR-227 §3: the same two-pass rewrite now serves every source's own link shape. The
+  // Wikistead ZIP speaks `/p/<oldId>`; a vault speaks `[[Note]]`. Both resolve against maps built
+  // once all ids are known, and both leave an unresolvable link ALONE and count it.
+  wiki?: { node: { title: string }; hrefByName: Map<string, string>; embedByName: Map<string, string> },
+): string {
   let md = markdown.replace(ATTACHMENT_REF, (m, alt: string, url: string) => {
     const newId = attByRel.get(url)
     return newId ? `![${alt}](wks-attachment:${newId})` : m
@@ -297,6 +326,12 @@ function rewriteBody(markdown: string, attByRel: Map<string, string>, pageIdMap:
     report.deadCrossLinks++
     return m
   })
+  if (wiki) {
+    const r = rewriteWikilinks(md, wiki.node, { hrefByName: wiki.hrefByName, embedByName: wiki.embedByName })
+    md = r.markdown
+    report.deadCrossLinks += r.deadLinks
+    report.degraded.push(...r.degraded)
+  }
   return md
 }
 
@@ -313,7 +348,7 @@ export async function materializeImport(
 ): Promise<ImportReport> {
   const { db, fga, storage, driver } = deps
   const report: ImportReport = {
-    pagesCreated: 0, emptyPagesCreated: 0, attachmentsImported: 0, attachmentsSkipped: [],
+    degraded: [], pagesCreated: 0, emptyPagesCreated: 0, attachmentsImported: 0, attachmentsSkipped: [],
     deadCrossLinks: 0, published: 0, lossyTitles: !ir.hasManifest,
   }
   const created: Created[] = []
@@ -348,9 +383,40 @@ export async function materializeImport(
     }
     for (const root of ir.roots) await createNode(root, args.parentPageId ?? null)
 
+    // #712 / ADR-227 §4: the vault link maps, built once every id exists. Note names are matched
+    // case-insensitively (the vault's own rule) and attachments by file name, because that is what a
+    // `[[…]]` actually carries. Applied unconditionally: an archive with no wikilinks is unaffected,
+    // and a plain Markdown folder that HAPPENS to use them gets them resolved, which is the behaviour
+    // a reader expects from "import my notes".
+    const hrefByName = new Map<string, string>()
+    for (const c of created) {
+      // A vault link is written either way — `[[Roadmap]]` or `[[Projects/Roadmap]]` — and Obsidian
+      // resolves both. Measured on a real vault: keying only on the basename left every path-form
+      // link unresolved. Both keys point at the same page; the basename is registered first so a
+      // name collision keeps the shallower note, which is the vault's own precedence.
+      const full = c.node.dir.toLowerCase()
+      const base = (c.node.sourceRef ?? noteNameOf(c.node.dir)).toLowerCase()
+      if (base && !hrefByName.has(base)) hrefByName.set(base, `/p/${c.newId}`)
+      if (full && !hrefByName.has(full)) hrefByName.set(full, `/p/${c.newId}`)
+    }
+    // Same measurement, second defect: a vault keeps its attachments in ONE folder — `attachments/` —
+    // not co-located per page the way the Wikistead export does. So the embed map is built from
+    // EVERY node's attachments, not just the embedding node's: `![[diagram.png]]` in one note refers
+    // to a file the vault stores once, and a per-node map could never see it.
+    const embedByName = new Map<string, string>()
+    for (const c of created) {
+      for (const [rel, attId] of c.attByRel) {
+        const fileName = rel.slice(rel.lastIndexOf('/') + 1).toLowerCase()
+        if (fileName && !embedByName.has(fileName)) embedByName.set(fileName, `![${fileName}](wks-attachment:${attId})`)
+      }
+    }
+
     // Pass 2 — now every id is known: rewrite each body (images + cross-links) and set the draft; optional publish.
     for (const c of created) {
-      const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report)
+      report.degraded.push(...detectVaultDegradations({ title: c.node.title || c.node.dir, markdown: c.node.markdown }))
+      const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report, {
+        node: { title: c.node.title || c.node.dir }, hrefByName, embedByName,
+      })
       await setDraftBody(db, c.newId, md)
       if (args.publish && c.node.published && md.trim() !== '') {
         await publishPage(db, fga, driver, storage, { pageId: c.newId, subject: `user:${args.userId}`, createdBy: `user:${args.userId}` })
@@ -380,5 +446,27 @@ export async function importArchive(
   const files = streamingUnzip(archive)
   const ir = buildIR(files)
   if (ir.roots.length === 0) throw new ImportInvalidError('archive has no importable pages')
-  return materializeImport(deps, ir, args)
+  // #712 / ADR-227 §4: a vault's own note NAME is what `[[…]]` refers to, so it becomes each node's
+  // sourceRef before materialisation (the link map is keyed on it). Doing it here rather than in
+  // buildIR keeps the shared builder free of any one source's vocabulary.
+  const nodes = walkNodes(ir.roots)
+  for (const node of nodes) node.sourceRef ??= noteNameOf(node.dir)
+  // A vault's shared attachment folder (see vaultAttachments): whatever the tree did not already
+  // claim becomes an attachment, so `![[file]]` has something to resolve to. Anything already picked
+  // up by the `<dir>/images/` convention is skipped, so a Wikistead export imports exactly as before.
+  const claimed = new Set<string>()
+  for (const node of nodes) {
+    for (const att of node.attachments) {
+      claimed.add(att.relPath)
+      claimed.add(node.dir ? `${node.dir}/${att.relPath}` : att.relPath)
+    }
+    if (node.dir) claimed.add(`${node.dir}/index.md`), claimed.add(`${node.dir}.md`)
+  }
+  const shared = vaultAttachments(files, { claimed, mimeOf: mimeFromName })
+  if (shared.length && ir.roots[0]) ir.roots[0].attachments.push(...shared)
+  const report = await materializeImport(deps, ir, args)
+  // Canvas files never became pages — reported rather than silently absent, which is the difference
+  // between "we could not represent this" and "your vault came in fine".
+  report.degraded.push(...canvasDegradations(Object.keys(files)))
+  return report
 }
