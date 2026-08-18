@@ -60,6 +60,14 @@ describe("#536one roles list, one creation flow", () => {
 
   // #581: the sections are surfaces with a boundary, and each is bounded in height like every other
   // growing list in settings (#503 / #521 / #539 — this is the fourth).
+  //
+  // #752 (user, at the screen): the boundary stays, the FILL goes. This assertion used to name the exact
+  // class string including `bg-panel`, which made it a pin on one way of drawing a boundary rather than
+  // on the boundary — so the owner's ruling turned it red for doing what was asked. It now says what
+  // #581 was actually about (a bordered section per scope, each with its own bounded list) and, in the
+  // same breath, that the fill does not come back. Measured, the fill covered 85% of the pane with the
+  // navigation rail's own token; `settings-surface-paint-752.spec.ts` is where that half is enforced,
+  // because a fraction of a rendered area is not visible from here.
   it("each scope section is a card with its own bounded, scrollable list", () => {
     for (const id of ["roles-list-tenant", "roles-list-resource"]) {
       const at = src.indexOf(`data-testid="${id}"`);
@@ -69,7 +77,10 @@ describe("#536one roles list, one creation flow", () => {
       expect(box, `${id} is the 26rem box`).toContain("max-h-[26rem]");
       expect(box).toContain("overflow-y-auto");
     }
-    expect(src.match(/<section className="rounded-md border border-border bg-panel">/g) ?? []).toHaveLength(2);
+    const sections = src.match(/<section className="rounded-md border border-border">/g) ?? [];
+    expect(sections, "two bordered scope sections, one per scope").toHaveLength(2);
+    expect(src, "and the boundary is the border alone — the rail's fill is not painted back on (#752)")
+      .not.toMatch(/<section className="[^"]*\bbg-panel\b/);
   });
 
   // #536④: the ONE set is presented in TWO scope sections — tenant above, space/page below,
