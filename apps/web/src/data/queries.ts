@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousData, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
 import type { ImportStatusRow } from "./exportApi";
 import { useSession } from "../session/SessionProvider";
@@ -85,6 +85,28 @@ export interface Page {
 // oracle ruling: the server does not reveal how many spaces the caller cannot see past the page).
 const prefixIcons = (spaces: Space[]) =>
   spaces.map((s) => ({ ...s, iconImageUrl: s.iconImageUrl ? assetUrl(s.iconImageUrl) : null }));
+
+/**
+ * Every cache that holds a Space, and the ONE way to say "these are stale now".
+ *
+ * #737: the space listing stopped being the only way a screen learns about a space. #705 and #710
+ * added three more — resolve-by-id (the sidebar chip and the whole settings page read this one),
+ * the name-ordered walk, and search — and every mutation kept invalidating `["spaces"]` alone.
+ * React Query matches key prefixes ELEMENT BY ELEMENT, so `["spaces"]` reaches `["spaces", …]` and
+ * nothing else: `["spaces-resolve", ids]` is a different first element and was never touched. The
+ * symptom was an uploaded space icon that saved (the server returns the URL on both routes —
+ * measured) and never appeared, because the two surfaces showing it read a cache no mutation
+ * refreshed.
+ *
+ * The families live here, and `invalidateSpaces` is what mutations call. A new family is a new entry
+ * in this array; the pin walks the file and fails when one is missing.
+ */
+export const SPACE_QUERY_FAMILIES = ["spaces", "spaces-resolve", "spaces-by-name", "spaces-search"] as const;
+
+/** Mark every space-shaped cache stale. Call this instead of naming a single family. */
+export function invalidateSpaces(qc: QueryClient) {
+  for (const family of SPACE_QUERY_FAMILIES) qc.invalidateQueries({ queryKey: [family] });
+}
 
 export function useSpacesPage(enabled = true) {
   const { token } = useSession();
@@ -198,7 +220,7 @@ export function useCreateSpace() {
   return useMutation({
     mutationFn: (name: string) =>
       apiFetch<Space>("/spaces", token, { method: "POST", body: JSON.stringify({ name }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+    onSuccess: () => invalidateSpaces(qc),
   });
 }
 
@@ -208,7 +230,7 @@ export function useRenameSpace() {
   return useMutation({
     mutationFn: (args: { spaceId: string; name: string }) =>
       apiFetch<Space>(`/spaces/${args.spaceId}`, token, { method: "PATCH", body: JSON.stringify({ name: args.name }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+    onSuccess: () => invalidateSpaces(qc),
   });
 }
 
@@ -460,7 +482,7 @@ export function useSetAdminDeleteMode() {
     mutationFn: (v: string) => apiFetch<{ deleteMode: string }>(`/admin/delete-mode`, token, { method: "PUT", body: JSON.stringify({ deleteMode: v }) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-delete-mode"] });
-      qc.invalidateQueries({ queryKey: ["spaces"] }); // the resolved mode rides the spaces listing
+      invalidateSpaces(qc); // the resolved mode rides the spaces listing
     },
   });
 }
@@ -480,7 +502,7 @@ export function useSetSpaceDeleteMode() {
       apiFetch<{ deleteMode: string | null }>(`/spaces/${encodeURIComponent(args.spaceId)}/delete-mode`, token, { method: "PUT", body: JSON.stringify({ deleteMode: args.deleteMode }) }),
     onSuccess: (_r, args) => {
       qc.invalidateQueries({ queryKey: ["space-delete-mode", args.spaceId] });
-      qc.invalidateQueries({ queryKey: ["spaces"] });
+      invalidateSpaces(qc);
     },
   });
 }
@@ -546,7 +568,7 @@ export function useDeleteSpace() {
   return useMutation({
     mutationFn: (spaceId: string) =>
       apiFetch<null>(`/spaces/${spaceId}`, token, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+    onSuccess: () => invalidateSpaces(qc),
   });
 }
 
@@ -1737,7 +1759,7 @@ export function useUpdateSpaceBranding(spaceId: string) {
   return useMutation({
     mutationFn: (accentKey: string | null) =>
       apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/branding`, token, { method: "PATCH", body: JSON.stringify({ accentKey }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+    onSuccess: () => invalidateSpaces(qc),
   });
 }
 
@@ -1749,7 +1771,7 @@ export function useUploadSpaceIcon(spaceId: string) {
   return useMutation({
     mutationFn: (dataBase64: string) =>
       apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/icon-image`, token, { method: "POST", body: JSON.stringify({ data: dataBase64 }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+    onSuccess: () => invalidateSpaces(qc),
   });
 }
 export function useRemoveSpaceIcon(spaceId: string) {
@@ -1757,7 +1779,7 @@ export function useRemoveSpaceIcon(spaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/icon-image`, token, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["spaces"] }),
+    onSuccess: () => invalidateSpaces(qc),
   });
 }
 
