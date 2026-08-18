@@ -52,6 +52,13 @@ export function AdminDomainsTab() {
       },
     });
 
+  // #723an entitled surface must not be drawn while we do not yet know whether the workspace
+  // is entitled. `locked` is derived from an ERROR, and there is no error while the request is in
+  // flight — so the subscriber view rendered first, every time, and was then replaced by the upgrade
+  // notice. Not a race: on a workspace without the entitlement the 403 always arrives, so the flash
+  // always happens. Same guard as AdminSamlSection.tsx, which is the one surface that had it.
+  if (domains.isPending) return null;
+
   if (locked) {
     return <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="domains-upgrade"
       title={t("adminDomains.lockedTitle")} body={t("adminDomains.lockedBody")} />;
