@@ -6,6 +6,7 @@ import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import type { Capability, ResourceRef } from '@wikistead/types'
 import { pool } from '../db/pool.js'
+import { reportLinkVisit } from '../funnel/sink.js'
 import { withTenantTx } from '../db/index.js' // #382
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import type { TenantDb } from '../db/index.js'
@@ -602,6 +603,10 @@ export async function shareLinksPlugin(app: FastifyInstance) {
       if (!tenant) return reply.code(404).send({ error: 'not found' })
 
       const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id, req.body?.password)
+      // #715 / ADR-229: the funnel's DENOMINATOR — a visitor got in through a link. Only a minted
+      // token counts: a dead, revoked or password-refused link never reached the product, so it is
+      // not a visit. The call carries no argument, so nothing about this visitor can be recorded.
+      if (minted && minted !== 'password_required') reportLinkVisit()
       if (minted === 'password_required') {
         // #233: a live password link. Bump the DEDICATED wrong-password buckets ONLY when a password
         // was actually SUBMITTED and rejected — NOT on the prompt-display path where no password is
