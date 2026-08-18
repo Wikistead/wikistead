@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src=".github/assets/logo.svg" alt="" width="76" height="76">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
+  <img src=".github/assets/logo-light.svg" alt="" width="76" height="76">
+</picture>
 
 # Wikistead
 

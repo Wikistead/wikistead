@@ -1,0 +1,6 @@
+<!-- README lockup mark, dark theme. Same geometry as logo-light.svg with the brand's dark-theme
+     foreground neutral (#dddddd); the README picks between the two with <picture>. -->
+<svg width="76" height="76" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Wikistead">
+  <path d="M7 20 L24 5 L41 20 L41 35 Q41 38 38 38 L30 38 L24 44 L24 38 L10 38 Q7 38 7 35 Z" fill="none" stroke="#dddddd" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16 24 L32 24 M16 30 L26 30" fill="none" stroke="#dddddd" stroke-width="4" stroke-linecap="round"/>
+</svg>

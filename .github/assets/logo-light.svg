@@ -1,0 +1,7 @@
+<!-- README lockup mark, light theme. Same geometry as the shipped favicon, which paints itself
+     from `currentColor` — GitHub strips that when it renders an <img>, so the stroke is the
+     brand's own foreground neutral (#1f2328) written out literally. -->
+<svg width="76" height="76" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Wikistead">
+  <path d="M7 20 L24 5 L41 20 L41 35 Q41 38 38 38 L30 38 L24 44 L24 38 L10 38 Q7 38 7 35 Z" fill="none" stroke="#1f2328" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16 24 L32 24 M16 30 L26 30" fill="none" stroke="#1f2328" stroke-width="4" stroke-linecap="round"/>
+</svg>
