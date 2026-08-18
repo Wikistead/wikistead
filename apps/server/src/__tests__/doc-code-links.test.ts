@@ -23,7 +23,11 @@ function repoFiles(): string[] {
       else out.push(relative(repoRoot, full).split('\\').join('/'))
     }
   }
-  for (const d of ['apps', 'packages', 'docs']) walk(join(repoRoot, d))
+  // 'scripts' too — measured on the CE build the day #734 landed: its map row names
+  // scripts/env-catalog.mjs plus an EE generator, dev stayed green because the EE glob matched
+  // under packages/, and the mirror (no EE) went red because the ONLY live glob pointed at a root
+  // this walk never visited. The walk must cover every root the map may reference.
+  for (const d of ['apps', 'packages', 'docs', 'scripts']) walk(join(repoRoot, d))
   return out
 }
 
