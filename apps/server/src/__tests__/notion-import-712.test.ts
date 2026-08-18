@@ -202,6 +202,29 @@ describe('#712a Notion image stays an image', () => {
   }, 300_000)
 })
 
+describe('#747: a cross-link is not reported as a missing attachment', () => {
+  it('resolves the link and says nothing, because nothing was lost', async () => {
+    await admin`DELETE FROM pages WHERE tenant_id = ${TENANT}`
+    const hex = '3b3b3c4d5e6f70718293a4b5c6d7e8f9'
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        [`Runbook ${hex}.md`]: strToU8('# Runbook\n\nStop the writer first.\n'),
+        [`Home ${'c1'.repeat(16)}.md`]: strToU8(`# Home\n\nRead the [Runbook](Runbook%20${hex}.md).\n`),
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    // Notion links its PAGES as `.md` and its databases as `.csv`. The attachment pass ran first and
+    // treated the extension as a file the archive was supposed to carry, so every cross-link in a
+    // Notion import produced "link to an attached file the export does not carry" — while the link
+    // itself resolved correctly two passes later. A fidelity report that invents a loss is worse
+    // than a quiet one: it is the artefact a migrating reader uses to decide what to go and repair.
+    expect(await bodyOfNotionPage('Home'), 'the link resolved').toMatch(/\[Runbook\]\(\/p\//)
+    expect(report.degraded.map((d) => d.code), 'and nothing was reported as missing')
+      .not.toContain('attachmentLinkMissing')
+  }, 300_000)
+})
+
 describe('#712D: a database becomes one page, not two', () => {
   it('keeps the complete `_all` export and drops the view that duplicates it', async () => {
     await admin`DELETE FROM pages WHERE tenant_id = ${TENANT}`
