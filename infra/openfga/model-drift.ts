@@ -124,25 +124,49 @@ export async function ensureStackModel(opts: EnsureStackOpts): Promise<void> {
   const wanted = transformer.transformDSLToJSONObject(dsl)
   const fga = new OpenFgaClient({ apiUrl, storeId })
 
+  // #751: WHICH matching model is pinned matters as much as whether one matches.
+  //
+  // OpenFGA keeps its LATEST model hot and reads any other one out of the datastore per check. Measured
+  // on this stack, with the pin on an older (byte-identical) model: a 50-id batchCheck took 1111 ms
+  // against the pin and 4 ms against the store's newest — about 22 ms per check, on a store that had
+  // accumulated 63 models. `link-status`'s 256-id case is 6 sequential batches, so it timed out at 5 s
+  // as a standing red, and every other check in the suite was paying the same toll invisibly.
+  //
+  // The old logic asked only "does the pinned model's CONTENT match model.fga", which stays true
+  // forever while any number of identical models pile up behind it. So the question asked here is the
+  // NEWEST model's content, and the pin follows it. Reproducibility is untouched: the model adopted is
+  // byte-identical to the one that was pinned, by the same canonical comparison as before.
   let modelId = pinnedModelId
   let wroteModel = false
   let matches = false
-  if (modelId && !repointedStore) {
+  if (!repointedStore) {
     try {
-      const { authorization_model } = await fga.readAuthorizationModel({ authorizationModelId: modelId })
-      matches =
-        !!authorization_model &&
-        JSON.stringify(canonicalModel(authorization_model)) === JSON.stringify(canonicalModel(wanted))
-      if (matches) {
-        log(`pinned model ${modelId} matches model.fga — ok`)
+      const { authorization_models } = await fga.readAuthorizationModels({ pageSize: 1 })
+      const newest = authorization_models?.[0]
+      const newestMatches =
+        !!newest && JSON.stringify(canonicalModel(newest)) === JSON.stringify(canonicalModel(wanted))
+      if (newestMatches && newest.id === modelId) {
+        matches = true
+        log(`pinned model ${modelId} matches model.fga and is the store's newest — ok`)
+      } else if (newestMatches) {
+        // A later write produced the same model — another session's setup, or this stack being
+        // re-bootstrapped. Adopting it costs nothing and takes the per-check datastore read away.
+        matches = true
+        log(
+          `pinned model ${modelId ?? '(none)'} is behind the store's newest ${newest.id}, which is the ` +
+          'same model — re-pinning (a non-newest pin makes every check a datastore read, #751)',
+        )
+        modelId = newest.id
       } else {
-        log(`pinned model ${modelId} is STALE (model.fga moved) — rewriting`)
+        log(
+          modelId
+            ? `pinned model ${modelId} is STALE (model.fga moved) — rewriting`
+            : 'no OPENFGA_MODEL_ID pinned — writing the current model',
+        )
       }
     } catch {
-      log(`pinned model ${modelId} unreadable — rewriting`)
+      log(`could not read this store's models — rewriting`)
     }
-  } else if (!repointedStore) {
-    log('no OPENFGA_MODEL_ID pinned — writing the current model')
   }
 
   if (!matches) {
@@ -152,7 +176,7 @@ export async function ensureStackModel(opts: EnsureStackOpts): Promise<void> {
     log(`wrote model ${modelId}`)
   }
 
-  if (repointedStore || wroteModel) {
+  if (repointedStore || wroteModel || modelId !== pinnedModelId) {
     // Update the pins in the worktree-local env file only. Never touches the shared
     // committed env files (or dev/prod .env).
     let env = existsSync(localEnvPath) ? await readFile(localEnvPath, 'utf8') : ''

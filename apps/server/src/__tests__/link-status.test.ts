@@ -4,7 +4,7 @@
 // from `viewable` and INDISTINGUISHABLE from one another — no DB existence lookup, no oracle. Real Postgres
 // + OpenFGA, driven through the real HTTP stack (buildApp + inject) so the route's guest/subject + dedupe/cap
 // are exercised end-to-end.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import postgres from 'postgres'
 import type { FastifyInstance } from 'fastify'
 import { pool } from '../db/pool.js'
@@ -14,7 +14,7 @@ import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { mintGuestToken } from '@wikistead/auth'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage } from '../routes/pages.js'
+import { createPage, MAX_LINK_STATUS_IDS } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -85,16 +85,56 @@ describe('POST /pages/link-status (#276 / ADR-117)', () => {
     expect(view).toEqual([viewable])
   })
 
+  // #751: this used to prove "bounded" with the clock and nothing else — 401 ids in, a 200 out, inside
+  // the default five seconds. It had become a standing red, and the measurement says why: under the real
+  // model a `view` on a page with NO tuples costs about 15 ms, because a "no" is only reached by
+  // exhausting the union graph. 256 of them is roughly four seconds before anything else happens, so the
+  // assertion was being decided by how loaded the machine was rather than by whether the cap holds.
+  //
+  // (Measured on the isolated stack: one 50-id batchCheck of ids nobody created = 730-820 ms against the
+  // real model and 2 ms against an empty one; `filterAuthorized` over 256 = 4.8 s. The batching itself is
+  // fine — 50 real checks in ONE round-trip — so there is nothing here to make faster.)
+  //
+  // So the bound is now COUNTED instead of timed: what reaches FGA is what the cap says, in batches the
+  // store's limit allows. That is the claim anti-test 8 was making, said directly — and it is also
+  // strictly more than the clock could ever say, because a slow machine and an unbounded fan-out looked
+  // identical from the outside. The end-to-end call stays, with a budget taken from the number above.
   it('de-dupes and caps the batch (bounded work, anti-test 8)', async () => {
     const dup = await linkStatus([viewable, viewable, viewable])
     expect(dup.json().viewable).toEqual([viewable]) // duplicates collapse to one
 
-    // >cap ids are handled without error (capped/deduped, never unbounded); the viewable one still resolves
-    const many = [viewable, ...Array.from({ length: 400 }, (_v, i) => `zz-${i}`)]
-    const capped = await linkStatus(many)
-    expect(capped.statusCode).toBe(200)
-    expect(Array.isArray(capped.json().viewable)).toBe(true)
-  })
+    // Count what actually leaves for the store, per round-trip and in total.
+    const real = app.fga.batchCheck.bind(app.fga)
+    const waves: number[] = []
+    const spy = vi.spyOn(app.fga, 'batchCheck').mockImplementation((async (body: { checks: unknown[] }, ...rest: unknown[]) => {
+      waves.push(body.checks.length)
+      return real(body as never, ...(rest as []))
+    }) as never)
+    try {
+      // >cap ids are handled without error (capped/deduped, never unbounded); the viewable one still resolves
+      const many = [viewable, ...Array.from({ length: 400 }, (_v, i) => `zz-${i}`)]
+      const capped = await linkStatus(many)
+      expect(capped.statusCode).toBe(200)
+      expect(Array.isArray(capped.json().viewable)).toBe(true)
+      expect(capped.json().viewable).toEqual([viewable]) // the one real page survives the cap
+    } finally {
+      spy.mockRestore()
+    }
+    const asked = waves.reduce((a, b) => a + b, 0)
+    // The NUMBER, written out. Comparing against MAX_LINK_STATUS_IDS alone reads well and proves less
+    // than it looks: measured, raising the constant to 400 left this green, because the expectation moved
+    // with the thing it was checking. The cap is a ruling (#276 / ADR-117), so the ruling is what is
+    // pinned here and the constant is checked against it.
+    expect(MAX_LINK_STATUS_IDS, 'the cap is the ruled 256').toBe(256)
+    // 401 ids in, 256 out. Not "fewer than 401" — the exact number, so a cap that silently grew is as
+    // red as a cap that vanished.
+    expect(asked, `ids sent to the store (waves: ${waves.join(', ')})`).toBe(256)
+    // …in as few round-trips as the store's batch limit allows. `<= 50 per wave` alone would NOT say
+    // this: a regression to one check per id is 256 waves of one, and every one of them is under fifty.
+    // Counting the WAVES is what separates O(N/50) trips from O(N).
+    expect(Math.max(...waves), 'no wave exceeds the store batch limit').toBeLessThanOrEqual(50)
+    expect(waves.length, `round-trips for 256 ids (waves: ${waves.join(', ')})`).toBeLessThanOrEqual(Math.ceil(256 / 50))
+  }, 30_000)
 
   it('ignores malformed ids (non-strings / empty) without erroring', async () => {
     const res = await linkStatus([viewable, '', 123, null, { x: 1 }])
