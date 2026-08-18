@@ -68,7 +68,10 @@ interface McpTool {
   run: (req: FastifyRequest, app: FastifyInstance, principal: McpPrincipal, args: Record<string, unknown>) => Promise<string>
 }
 
-const TOOLS: McpTool[] = [
+// #729 / ADR-235: exported so the docs-coverage walk can ask the product what tools it offers. A
+// capability with no screen is invisible to the surface ledger otherwise — these eleven were the
+// worked example of "shipped, and nothing asked for a page".
+export const TOOLS: McpTool[] = [
   {
     name: 'get_page',
     description: "Fetch a page's title and published Markdown by id. Returns not-found if the page doesn't exist or you cannot view it.",

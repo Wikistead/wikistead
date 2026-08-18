@@ -66,6 +66,70 @@ export const DOC_CODE_MAP = [
     code: ['apps/web/src/settings/**'],
     doc: 'wikistead-docs/src/content/docs/settings/account.md',
   },
+  // ── #729 / ADR-235: capabilities with nothing enumerable behind them ────────────────────────────
+  //
+  // These have no registry to walk (there is no table of "print behaviours"), so they are bound as
+  // REGIONS instead: touch the code, move the page. Four of the six had zero mentions anywhere in
+  // docs/ when #729 measured them.
+  //
+  // ⚠️ DORMANT until #704. `authored` violations are warnings while `DOCS_REPO` is CHANGE_ME, so
+  // these bindings do not fail anything today. They are here so they arm themselves the day the docs
+  // repository exists — NOT so the gap can be counted as closed. The armed half of this ticket is
+  // the capability ledger above, which fails in this repository's own tests.
+  {
+    label: 'import dialects and the fidelity report',
+    kind: 'authored',
+    code: ['apps/server/src/import/**'],
+    doc: 'wikistead-docs/src/content/docs/guides/import.md',
+  },
+  {
+    label: 'export rules',
+    kind: 'authored',
+    code: ['apps/server/src/export/**'],
+    doc: 'wikistead-docs/src/content/docs/guides/pages.md',
+  },
+  {
+    // The signing and delivery both live in routes/webhooks.ts. That file is already inside the
+    // routes/** region, but that region's page is the API reference — the thing a receiver needs
+    // (how to verify x-wikistead-signature) belongs on the webhooks page, so it gets its own row
+    // rather than being assumed covered by a binding that points somewhere else.
+    label: 'webhook delivery and signing',
+    kind: 'authored',
+    code: ['apps/server/src/routes/webhooks.ts'],
+    doc: 'wikistead-docs/src/content/docs/admin/webhooks.md',
+  },
+  {
+    label: 'search semantics',
+    kind: 'authored',
+    code: ['apps/server/src/search/**'],
+    doc: 'wikistead-docs/src/content/docs/guides/search.md',
+  },
+  {
+    label: 'storage quota and attachment limits',
+    kind: 'authored',
+    code: ['apps/server/src/storage/**'],
+    doc: 'wikistead-docs/src/content/docs/admin/billing.md',
+  },
+  {
+    // ADR-191: print output has no route, so the route ledger cannot see it (ruling §4 — a
+    // section on the pages guide, not a capability id of its own).
+    label: 'print output',
+    kind: 'authored',
+    code: ['apps/web/src/pdf-frame.ts'],
+    doc: 'wikistead-docs/src/content/docs/guides/pages.md',
+  },
+  {
+    // #729 a dialog is a surface a user operates, and the route walk cannot see it — it has no
+    // <Route path>. Bound as a region instead, and this is what that does and does not catch:
+    //   CATCHES  a dialog changing while its page does not.
+    //   MISSES   a brand-new dialog whose page never existed — nothing here knows it should.
+    // Registration would catch both and was weighed (ruling §2): it puts a documentation
+    // concern into every component, so the region binding wins until the miss actually bites.
+    label: 'dialogs',
+    kind: 'authored',
+    code: ['apps/web/src/ui/dialogs.tsx', 'apps/web/src/**/*Dialog.tsx'],
+    doc: 'wikistead-docs/src/content/docs/guides/pages.md',
+  },
 ]
 
 // Minimal glob → RegExp (no dependency). Supports `**` (any path segments incl. `/`),
@@ -183,6 +247,34 @@ export const SURFACE_DOCS = {
     '/login': 'wikistead-docs/src/content/docs/guides/sign-in.md',
     '/login/recovery': 'wikistead-docs/src/content/docs/guides/sign-in.md',
     '*': 'none: catch-all redirect to the demo page, not a screen',
+  },
+  // #729 / ADR-235: CAPABILITIES — things the product can do that a user can observe, which are not
+  // a screen, a macro or an admin tab. The importer was the worked example: three dialects shipped
+  // and no guard asked for a word about them, because it is not a surface anybody registers.
+  //
+  // The ids come from the code (the MCP tool table, the importer's adapter table), never from a list
+  // written here — a hand list has the same blind spot as the gap it is closing.
+  //
+  // Several ids share a page ON PURPOSE (ruling §3): eleven MCP tools do not become eleven
+  // stubs. What the ledger requires is that every capability is ACCOUNTED FOR, not that it has a
+  // page of its own.
+  capability: {
+    'mcp:list_spaces': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:list_pages': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:get_page': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:get_backlinks': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:search': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:get_syntax_reference': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:create_page': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:publish_page': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:edit_body': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    'mcp:create_comment': 'wikistead-docs/src/content/docs/integrations/mcp.md',
+    // The importer's dialects (IMPORT_ADAPTERS). One page covers what each one carries and what it
+    // degrades — the thing #712 shipped three of without a word anywhere.
+    'import:native': 'none: this product\'s own export, described by the export page it round-trips with',
+    'import:obsidian': 'wikistead-docs/src/content/docs/guides/import.md',
+    'import:notion': 'wikistead-docs/src/content/docs/guides/import.md',
+    'import:confluence': 'wikistead-docs/src/content/docs/guides/import.md',
   },
 }
 
