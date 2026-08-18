@@ -1318,7 +1318,7 @@
     "bannerText": "Tailor the editor to how you write.",
     "bannerCta": "Set it up",
     "skippedNote": "We set up a balanced editor for you (vim off, with WYSIWYG). You can change this any time in Settings, or with “redo the questions”.",
-    "atomHint": "Tip: reference cards (embeds, transclusions, page lists) select as one unit, and Ctrl+Enter changes what they point at. Layouts and callouts open for editing when you click into them; everything else you just type into."
+    "atomHint": "Tip: reference cards (embedded content, page embeds, child page lists) select as one unit, and Ctrl+Enter changes what they point at. Layouts and callouts open for editing when you click into them; everything else you just type into."
   },
   "frontmatter": {
     "tagsLabel": "Tags",
