@@ -80,8 +80,10 @@ export function csvToMarkdownTable(rows: readonly string[][]): string {
 export function databaseDegradation(name: string, rowCount: number): ImportDegradation {
   return {
     node: name,
+    code: 'notionDatabaseFlattened',
     what: 'database became a page with a table',
     detail: `${rowCount} row(s) — Notion views (board, gallery, calendar), filters and sorts have no equivalent here`,
+    params: { rows: rowCount },
   }
 }
 

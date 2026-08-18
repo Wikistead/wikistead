@@ -72,7 +72,14 @@ export function downloadSelectionExport(token: string, spaceId: string, pageIds:
 // discriminated result makes that unrepresentable.
 export interface ImportDegradation {
   node: string; // the node's title or dir, as the reader would recognise it
-  what: string; // the shape that did not survive
+  // #725②: the SCREEN words this, from `code` and `params`. The server used to compose an
+  // English sentence and this screen printed it through, so a Japanese workspace read its headings
+  // and prose in Japanese and the one thing it was there to judge — what was lost — in English.
+  // `what`/`detail` stay as the API's own English, and as the fallback when a code is unknown to
+  // this build (an older server talking to a newer screen, or the reverse).
+  code?: string;
+  params?: Record<string, string | number>;
+  what: string; // the shape that did not survive, in English
   detail?: string;
 }
 export interface ImportReport {
@@ -90,7 +97,15 @@ export interface ImportReport {
 export type ImportStart =
   | { kind: "report"; report: ImportReport }
   | { kind: "queued"; importId: string; nodesTotal: number }
+  // #725①: a 409 names the import that is already running (#712), and that id is the
+  // only thing that makes the refusal useful — without it the screen can say "busy" and nothing
+  // else, while the progress it is telling the reader about is one link away. `running` is null
+  // when that row settled between the refusal and the read, and the screen falls back to "reload".
+  | { kind: "busy"; running: RunningImport | null }
   | { kind: "error"; status: number };
+
+/** What a 409 says about the import already in flight (server: `spaces.ts`, #712). */
+export interface RunningImport { id: string; status: string; nodesDone: number; nodesTotal: number }
 
 // The server's body limit is 280 MiB of JSON, and base64 costs a third — so the archive the browser
 // may send is three quarters of that, less the envelope. Checked before the upload because encoding
@@ -125,6 +140,12 @@ export async function importSpaceArchive(
   if (res.status === 202) {
     const q = (await res.json()) as { importId: string; nodesTotal: number };
     return { kind: "queued", importId: q.importId, nodesTotal: q.nodesTotal };
+  }
+  if (res.status === 409) {
+    // A malformed or absent body is not a reason to lose the refusal: `running: null` still means
+    // "one is already going", and the screen has an honest answer for that.
+    const b = await res.json().catch(() => null) as { running?: RunningImport | null } | null;
+    return { kind: "busy", running: b?.running ?? null };
   }
   if (!res.ok) return { kind: "error", status: res.status };
   return { kind: "report", report: (await res.json()) as ImportReport };

@@ -155,3 +155,75 @@ test("#725 a queued (202) import survives a reload and resumes on the same impor
   await expect(page.getByTestId("import-report")).toBeVisible({ timeout: 30000 });
   await expect(page.getByText("Weekly Review", { exact: false })).toBeVisible();
 });
+
+// #725① (review rejection): a 409 says WHICH import is already running, and the screen walks onto
+// it. Before #712the body carried no id, so the screen could only say "busy, reload later"
+// while the progress it was describing was one link away. The reject was that the id had landed and
+// the screen still ignored it.
+test("#725 a 409 walks onto the import that is already running", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openDemo(page);
+  const spaceId = await page.evaluate(async (api) => {
+    const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
+    const s = await (await fetch(`${api}/spaces`, { method: "POST", headers: H, body: JSON.stringify({ name: `Imp 409 ${Date.now()}` }) })).json() as { id: string };
+    return s.id;
+  }, API);
+
+  await page.route("**/spaces/*/import", (route) => route.fulfill({
+    status: 409,
+    contentType: "application/json",
+    body: JSON.stringify({
+      error: "an import is already running for this space",
+      running: { id: "imp_busy_1", status: "running", nodesDone: 120, nodesTotal: 900 },
+    }),
+  }));
+  await page.route("**/spaces/*/imports/imp_busy_1", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ id: "imp_busy_1", status: "running", nodesTotal: 900, nodesDone: 120, report: null, error: null }),
+  }));
+
+  await page.goto(`/spaces/${spaceId}/settings/import`);
+  await page.getByTestId("space-import-input").setInputFiles({ name: "second.zip", mimeType: "application/zip", buffer: Buffer.from("PK\x03\x04rest") });
+  await page.getByTestId("import-start").click();
+
+  // The address bar is the assertion: the id has to reach the URL, because that is what makes the
+  // running import shareable, reloadable and reachable from a second tab (ADR-236 §3).
+  await expect(page).toHaveURL(/import=imp_busy_1/, { timeout: 20000 });
+  await expect(page.getByTestId("import-running")).toBeVisible({ timeout: 15000 });
+});
+
+// #725③: measured on the RENDERED page, because the report was that this link did not LOOK
+// like one — same colour as the body text and no underline. A class-name assertion cannot answer
+// that (an undefined Tailwind token compiles to nothing and the test stays green, #535); the
+// browser's own computed style can.
+test("#725 the link out of the report is visibly a link", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openDemo(page);
+  await page.route("**/spaces/*/import", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      degraded: [], pagesCreated: 2, emptyPagesCreated: 0, attachmentsImported: 0,
+      attachmentsSkipped: [], deadCrossLinks: 0, published: 0, lossyTitles: false,
+    }),
+  }));
+  const spaceId = await page.evaluate(async (api) => {
+    const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
+    const s = await (await fetch(`${api}/spaces`, { method: "POST", headers: H, body: JSON.stringify({ name: `Imp Link ${Date.now()}` }) })).json() as { id: string };
+    return s.id;
+  }, API);
+
+  await page.goto(`/spaces/${spaceId}/settings/import`);
+  await page.getByTestId("space-import-input").setInputFiles({ name: "x.zip", mimeType: "application/zip", buffer: Buffer.from("PK\x03\x04rest") });
+  await page.getByTestId("import-start").click();
+  await expect(page.getByTestId("import-report")).toBeVisible({ timeout: 20000 });
+
+  const look = await page.getByTestId("import-open-space").evaluate((el) => {
+    const s = getComputedStyle(el);
+    const body = getComputedStyle(document.body);
+    return { colour: s.color, bodyColour: body.color, underline: s.textDecorationLine };
+  });
+  expect(look.underline, "underlined without waiting for a pointer").toContain("underline");
+  expect(look.colour, "not the same colour as ordinary text").not.toBe(look.bodyColour);
+});
