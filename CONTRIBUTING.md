@@ -41,7 +41,8 @@ pnpm dev:up                                    # middleware + first-run bootstra
 pnpm dev                                       # server, collab and web on the host
 ```
 
-`pnpm dev:up` is `docker compose up -d` plus `dev:setup`, which migrates and seeds the
+`pnpm dev:up` is `docker compose up -d` plus `dev:setup`, which builds the workspace packages
+(a fresh clone has no `dist/`, and the seed imports one of them), migrates and seeds the
 application database (a demo tenant, space and page) and creates the OpenFGA store and
 authorization model. Running `pnpm dev` without it leaves you on an empty database with no
 authorization model, which looks like a broken app. The bootstrap is idempotent and

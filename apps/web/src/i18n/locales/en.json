@@ -44,6 +44,10 @@
     "granteeSearch": "Search members or groups…",
     "copyOnce": "Shown only once. Copy it now."
   },
+  "home": {
+    "emptyTitle": "No spaces yet",
+    "emptyBody": "Ask an administrator to add you to a space, or create one from the spaces screen."
+  },
   "embedPicker": {
     "title": "Embed a page",
     "placeholder": "Search pages by title, or paste a page id…",

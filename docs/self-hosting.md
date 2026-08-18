@@ -79,6 +79,7 @@ Then:
 ```bash
 pnpm install
 pnpm dev:up          # docker compose up -d + first-run bootstrap (idempotent):
+                     #   - builds the workspace packages (a fresh clone has no dist/)
                      #   - migrates + seeds the app database
                      #   - creates the OpenFGA store + authorization model
                      #   - pins OPENFGA_STORE_ID / OPENFGA_MODEL_ID into .env

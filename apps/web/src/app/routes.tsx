@@ -1463,7 +1463,7 @@ function InviteRoute() {
     retry: false,
   });
   const accept = () => {
-    window.location.href = `/auth/login?invite=${encodeURIComponent(token)}&returnTo=${encodeURIComponent("/p/demo")}`;
+    window.location.href = `/auth/login?invite=${encodeURIComponent(token)}&returnTo=${encodeURIComponent("/")}`;
   };
   // A dead link degrades to the OIDC button rather than a dead end: the token may simply be for a
   // server that does not publish kinds, and the acceptance itself refuses uniformly anyway.
@@ -1981,6 +1981,39 @@ function SpaceHomeRoute() {
   );
 }
 
+/**
+ * #726where "/" actually goes.
+ *
+ * It used to go to `/p/demo` — the id `infra/db/seed.ts` gives the demo page of the DEV tenant. On a
+ * workspace created any other way that page does not exist, so a self-hoster's first screen after
+ * setting their password was the not-found pane. The fixture id had become the product's home route
+ * by being written down five times.
+ *
+ * What a home IS, asked of the member's own data: the first space they can see, and its home page if
+ * it has one. Both facts are already served — `homePageId` is view-gated by the server (ADR-157 §2),
+ * so a home page the caller may not read comes back null and this lands on the space instead of
+ * bouncing them into a refusal.
+ *
+ * A member with no space at all is NOT redirected anywhere: there is nowhere honest to send them, and
+ * a redirect to a route that redirects back is how a blank screen becomes a spin. They are told.
+ */
+function HomeLanding() {
+  const { t } = useTranslation();
+  const spaces = useSpacesPage();
+  if (spaces.isPending) return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  const first = (spaces.data?.spaces ?? [])[0];
+  if (first?.homePageId) return <Navigate to={`/p/${first.homePageId}`} replace />;
+  if (first) return <Navigate to={`/spaces/${first.id}`} replace />;
+  return (
+    <AppShell>
+      <div className="max-w-[560px] p-6 text-fg-dim" data-testid="home-no-spaces">
+        <h2 className="mt-0 text-foreground">{t("home.emptyTitle")}</h2>
+        <p>{t("home.emptyBody")}</p>
+      </div>
+    </AppShell>
+  );
+}
+
 export function AppRoutes() {
   return (
     <Routes>
@@ -2003,14 +2036,18 @@ export function AppRoutes() {
       <Route path="/join" element={<JoinRoute />} />
       <Route path="/join/workspace" element={<WorkspaceRoute />} />
       {/* #261: the auth callback redirects failures to /login?error=<kind>. A dedicated route renders the
-          sign-in screen so the error query survives (the catch-all below would rewrite it to /p/demo and
-          drop it). */}
+          sign-in screen so the error query survives (the catch-all below would rewrite it to the home
+          landing and drop it). */}
       <Route path="/login" element={<LoginScreen />} />
       {/* #605 §3 (iii): the recovery door — reachable by address, never linked from /login */}
       <Route path="/login/recovery" element={<RecoveryScreen />} />
-      {/* Dev default: the seeded demo page. Real landing/space routing is a
-          next-stage screen. */}
-      <Route path="*" element={<Navigate to="/p/demo" replace />} />
+      {/* #726the landing RESOLVES, it is no longer a literal.
+          `/p/demo` is `infra/db/seed.ts`'s fixture id for `tenant_dev`, and it was written here as
+          though it were the product's home — so the first thing an administrator of a real workspace
+          saw, immediately after setting their password, was "this page does not exist". The catch-all
+          sends unknown addresses to `/`, and `/` asks what this member actually has. */}
+      <Route path="/" element={<HomeLanding />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

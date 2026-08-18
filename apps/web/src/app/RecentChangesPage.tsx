@@ -22,7 +22,7 @@ export function RecentChangesRoute() {
 
   return (
     <div className="mx-auto max-w-[46rem] px-4 py-8 text-[length:var(--text-ui)]" data-testid="recent-changes-page">
-      <Link to="/p/demo" className="mb-4 inline-flex items-center gap-1 text-fg-dim hover:text-foreground" data-testid="recent-changes-back">
+      <Link to="/" className="mb-4 inline-flex items-center gap-1 text-fg-dim hover:text-foreground" data-testid="recent-changes-back">
         <ArrowLeft size={14} /> {t("recentChanges.back")}
       </Link>
       <div className="mb-4 flex items-center justify-between gap-2">
