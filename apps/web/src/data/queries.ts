@@ -194,15 +194,6 @@ export function useSpaceNameSearch(q: string) {
   });
 }
 
-export function usePages(spaceId: string, enabled = true) {
-  const { token } = useSession();
-  return useQuery({
-    queryKey: ["pages", spaceId],
-    queryFn: () => apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${spaceId}/pages`, token).then((r) => r?.pages ?? []),
-    enabled,
-  });
-}
-
 // #445the caller's own capabilities. Read to HIDE an affordance the server would refuse;
 // never to decide access (the server is the fortress, and the 403 path still reports the reason).
 export interface MyCapabilities { canCreateSpaces: boolean }
@@ -848,28 +839,6 @@ export function useMemberIdentity(sub: string | null | undefined) {
   return { ...q, data: q.data ?? selfIdentity };
 }
 
-// #379: the batch form for list surfaces (history). Key = the sorted member-sub set; same server
-// contract (customized-only). Small lists (history page ≤ tens of authors) — one request per set.
-export function useMemberIdentities(subs: readonly string[]) {
-  const { token, status, sub: selfSub, displayName: selfName } = useSession();
-  const memberSubs = [...new Set(subs.filter((s) => s && !s.startsWith("guest:") && !s.startsWith("anon:")))].sort();
-  const q = useQuery({
-    queryKey: ["member-identities", memberSubs.join("\u0000")],
-    enabled: status === "authed" && memberSubs.length > 0,
-    staleTime: 300_000,
-    queryFn: () =>
-      apiFetch<{ identities: Record<string, MemberIdentity> }>("/members/identities", token, {
-        method: "POST",
-        body: JSON.stringify({ subs: memberSubs }),
-      }).then((r) => r?.identities ?? {}),
-  });
-  // #431same self-resolution as the single form, so a list surface (history) labels the
-  // caller's own entries exactly like the header and the per-author chip. The server's answer wins.
-  const withSelf = selfSub && selfName && memberSubs.includes(selfSub)
-    ? { [selfSub]: { displayName: selfName, hasAvatar: false }, ...(q.data ?? {}) }
-    : q.data;
-  return { ...q, data: withSelf };
-}
 
 export function useAccountSettings() {
   const { token, status } = useSession();
@@ -1752,16 +1721,6 @@ export function useEntitlements() {
   });
 }
 
-// Set/clear a space's branding accent (Phase 5c). accentKey null = inherit.
-export function useUpdateSpaceBranding(spaceId: string) {
-  const { token } = useSession();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (accentKey: string | null) =>
-      apiFetch<null>(`/spaces/${encodeURIComponent(spaceId)}/branding`, token, { method: "PATCH", body: JSON.stringify({ accentKey }) }),
-    onSuccess: () => invalidateSpaces(qc),
-  });
-}
 
 // Upload/remove a space icon IMAGE. base64 in (no multipart); the server validates
 // magic bytes + size. Unset → the sidebar shows the initials chip.
