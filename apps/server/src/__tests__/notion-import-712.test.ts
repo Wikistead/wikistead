@@ -148,3 +148,81 @@ describe('#712: the Notion rules, as functions', () => {
     expect(r.deadLinks).toBe(1)
   })
 })
+
+// ── #712/two measured defects in the Notion dialect ──────────────────────────────
+//
+// Both have the shape the fidelity report cannot see: the file imports, the count goes up, and the
+// BODY is wrong. That is the failure this feature exists to prevent, so each is pinned on its own.
+async function bodyOfNotionPage(title: string): Promise<string> {
+  const Y = await import('yjs')
+  const [row] = await db.sql<{ ydoc: Buffer }[]>`
+    SELECT ydoc FROM pages WHERE tenant_id = ${TENANT} AND title = ${title}`
+  expect(row, `page "${title}" was created`).toBeTruthy()
+  const doc = new Y.Doc()
+  Y.applyUpdate(doc, new Uint8Array(row!.ydoc))
+  return doc.getText('content').toString()
+}
+
+describe('#712a Notion image stays an image', () => {
+  it('does not rewrite an embed into a link to the page that owns the asset folder', async () => {
+    await admin`DELETE FROM pages WHERE tenant_id = ${TENANT}`
+    const hex = '2a2b3c4d5e6f70718293a4b5c6d7e8f9'
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        [`Runbook ${hex}.md`]: strToU8(`# Runbook\n\n![diagram.png](Runbook%20${hex}/diagram.png)\n`),
+        [`Runbook ${hex}/diagram.png`]: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5, 5, 5, 5]),
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    expect(report.attachmentsImported, 'the asset is imported').toBe(1)
+    const body = await bodyOfNotionPage('Runbook')
+    // The defect: the asset PATH contains the page's own 32-hex, the link rewriter matched the
+    // embed's `![…](…)`, found that hex, and pointed the picture at the page containing it.
+    expect(body, 'the embed is still an embed').toMatch(/!\[[^\]]*\]\(wks-attachment:/)
+    expect(body, 'and not a link to the page itself').not.toMatch(/!\[[^\]]*\]\(\/p\//)
+    // …and the same for an embed whose file the archive does NOT carry. This is the case that
+    // isolates the link rewriter: with the attachment resolved there is nothing left for it to get
+    // wrong, but an unresolved embed still ran through it and came out pointing at the page whose
+    // hex happened to sit in the asset path. An embed we cannot resolve must be LEFT ALONE — the
+    // same rule the dialect already applies to links it cannot resolve.
+    await admin`DELETE FROM pages WHERE tenant_id = ${TENANT}`
+    await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({ [`Runbook ${hex}.md`]: strToU8(`# Runbook\n\n![missing.png](Runbook%20${hex}/missing.png)\n`) }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    const orphan = await bodyOfNotionPage('Runbook')
+    // ⚠️ Assert the EMBED survives, not merely that no `![…](/p/…)` exists: the broken rewrite drops
+    // the leading `!` while it retargets, so a check for "no embed pointing at a page" passes on the
+    // very output it was meant to catch. The question is "is this still an image", and that is what
+    // the `![` asks.
+    expect(orphan, 'an unresolvable embed stays an embed').toMatch(/!\[missing\.png\]/)
+    expect(orphan, 'and keeps its original target').not.toMatch(/\(\/p\//)
+  }, 300_000)
+})
+
+describe('#712D: a database becomes one page, not two', () => {
+  it('keeps the complete `_all` export and drops the view that duplicates it', async () => {
+    await admin`DELETE FROM pages WHERE tenant_id = ${TENANT}`
+    const hex = '9f8e7d6c5b4a39281706f5e4d3c2b1a0'
+    const csv = 'Name,Status\nAlpha,Done\nBeta,Doing\n'
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        // A real export always carries pages beside the database; the tree needs one to exist.
+        [`Notes 1122334455667788990011223344aabb.md`]: strToU8('# Notes\n\nplain page\n'),
+        [`Roadmap ${hex}.csv`]: strToU8('Name,Status\nAlpha,Done\n'), // the filtered view
+        [`Roadmap ${hex}_all.csv`]: strToU8(csv), // every row
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    const rows = await db.sql<{ title: string }[]>`
+      SELECT title FROM pages WHERE tenant_id = ${TENANT} ORDER BY title`
+    const dbPages = rows.filter((r) => /roadmap/i.test(r.title))
+    expect(dbPages.length, 'one database, one page (the view and the _all export are the same table)').toBe(1)
+    expect(report.pagesCreated, 'the note plus the single database page').toBe(2)
+    const body = await bodyOfNotionPage(dbPages[0]!.title)
+    expect(body, 'the surviving page carries EVERY row, not the filtered view').toContain('Beta')
+  }, 300_000)
+})

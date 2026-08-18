@@ -152,3 +152,101 @@ describe('#712: the Confluence conversion, as a function', () => {
     expect(markdown).toContain('ok')
   })
 })
+
+// Read a created page's canonical body. Each new suite below imports its own tiny archive, so the
+// space is cleared first: a fixed tenant slug means a previous run's pages would otherwise answer.
+async function freshSpace(): Promise<void> {
+  await admin`DELETE FROM pages WHERE tenant_id = ${TENANT}`
+}
+async function bodyOfPage(title: string): Promise<string> {
+  const Y = await import('yjs')
+  const [row] = await db.sql<{ ydoc: Buffer }[]>`
+    SELECT ydoc FROM pages WHERE tenant_id = ${TENANT} AND title = ${title}`
+  expect(row, `page "${title}" was created`).toBeTruthy()
+  const doc = new Y.Doc()
+  Y.applyUpdate(doc, new Uint8Array(row!.ydoc))
+  return doc.getText('content').toString()
+}
+
+// ── #712/the defects the independent verification found ──────────────────────────
+//
+// Each of these is a MEASURED failure, not a hypothesis, and each has the same shape: the file
+// imported, the report said so, and the BODY pointed somewhere the reader cannot follow. A fidelity
+// report that counts an import as successful while the page is broken is the exact failure this
+// feature exists to prevent, so they are pinned individually.
+describe('#712A: a shared attachment belongs to the archive, not to the first page', () => {
+  it('resolves an image referenced from a page that is not the first one', async () => {
+    await freshSpace()
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        'index.html': strToU8('<html><body><a href="AAA.html">AAA</a></body></html>'),
+        'AAA.html': strToU8('<html><body><h1>AAA</h1><p>no picture here</p></body></html>'),
+        'Img.html': strToU8('<html><body><h1>Img</h1><img src="attachments/pic.png" alt="pic"/></body></html>'),
+        'attachments/pic.png': new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]),
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    expect(report.attachmentsImported, 'the file is imported').toBe(1)
+    const body = await bodyOfPage('Img')
+    // The defect: `attachments/pic.png` stayed raw because the collector hung the file on the FIRST
+    // root, and only that page's own map could resolve it.
+    expect(body, 'the referencing page points at the stored attachment').toMatch(/wks-attachment:/)
+    expect(body, 'and not at the archive-relative path').not.toContain('attachments/pic.png')
+  }, 300_000)
+})
+
+describe('#712C: a Confluence import never writes notation this product cannot parse', () => {
+  it('turns a link to a page outside the export into text, and reports it', async () => {
+    await freshSpace()
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        'index.html': strToU8('<html><body>nav</body></html>'),
+        'Here.html': strToU8('<html><body><h1>Here</h1><p>See <a href="Gone.html">gone</a>.</p></body></html>'),
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    const body = await bodyOfPage('Here')
+    expect(body, 'no wikilink notation reaches the reader').not.toMatch(/\[\[/)
+    expect(body, 'the words survive as text').toContain('gone')
+    expect(report.degraded.map((d) => d.what).join(' '), 'and the lost link is named')
+      .toMatch(/outside the export/)
+  }, 300_000)
+})
+
+describe('#712F: the Confluence macro people actually use converts', () => {
+  it('renders an information macro as a callout, not as an unrepresentable quote', async () => {
+    await freshSpace()
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        'index.html': strToU8('<html><body>nav</body></html>'),
+        'Info.html': strToU8('<html><body><h1>Info</h1><div class="confluence-information-macro confluence-information-macro-information"><p>Read this first.</p></div></body></html>'),
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    const body = await bodyOfPage('Info')
+    expect(body, 'it becomes a note callout').toContain(':::note')
+    expect(body).toContain('Read this first.')
+    expect(report.degraded.map((d) => d.detail ?? '').join(' '), 'and is not reported as unrepresentable')
+      .not.toContain('information')
+  }, 300_000)
+})
+
+describe('#712B: an attachment LINK is not silently dead', () => {
+  it('names the file it could not re-point', async () => {
+    await freshSpace()
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        'index.html': strToU8('<html><body>nav</body></html>'),
+        'Doc.html': strToU8('<html><body><h1>Doc</h1><p><a href="attachments/paper.pdf">the paper</a></p></body></html>'),
+        'attachments/paper.pdf': strToU8('%PDF-1.4 fake'),
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    expect(report.degraded.map((d) => `${d.what} ${d.detail ?? ''}`).join('\n'), 'the dead file link is named')
+      .toMatch(/attached file[\s\S]*paper\.pdf|paper\.pdf/)
+  }, 300_000)
+})
