@@ -25,19 +25,83 @@
 		-Server
 	}
 
+	# ── The origin route table ────────────────────────────────────────────────
+	# These blocks are CHECKED against infra/routes/origin-routes.mjs
+	# (scripts/check-origin-routes.mjs, #724 / ADR-231). Adding a public path here without
+	# a row there — or the reverse — is a red build. Three hand-kept copies of this mapping
+	# drifted until a deployed stack answered 404 to every api call.
+
 	# API (BFF). Same origin so the session cookie is sent on every request.
-	handle /api/* {
+	# handle_path, NOT handle: the client sends /api/spaces and the server serves /spaces.
+	# `handle` preserves the path and was the whole defect (#724).
+	handle_path /api/* {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+
+	# Top-level navigation: sign-in start, the IdP callback, the SAML ACS the admin console
+	# prints. The path must survive end to end or the redirect_uri stops matching.
+	handle /auth/* {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+	handle /signup/* {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+
+	# #409 / ADR-154: the crawler-facing HTML shell — /pub is answered by the server
+	# (head-injected built index.html), never the static web container.
+	handle /pub/* {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+
+	# The crawler files are the tenant's public switch (#253 / ADR-154 §4). Served by the
+	# web container they become index.html with a 200 and the switch means nothing.
+	handle /robots.txt {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+	handle /sitemap.xml {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+
+	# MCP: the endpoint AI assistants are configured with by hand (ADR-131), its OAuth flow,
+	# and the two discovery documents whose paths the RFCs fix. The metadata advertises these
+	# absolute URLs, so they must resolve exactly as advertised.
+	handle /mcp {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+	handle /mcp/oauth/* {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+	handle /.well-known/oauth-authorization-server {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+	handle /.well-known/oauth-protected-resource {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+
+	# Stripe calls this from outside with a signed body. (The tenant-facing webhook CRUD is a
+	# different thing and lives under /api.)
+	handle /webhooks/stripe {
+		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	}
+
+	# SCIM: the customer pastes this into their IdP verbatim, so it stays top-level (ADR-070,
+	# ruling).
+	handle /scim/v2/* {
 		reverse_proxy {$SERVER_UPSTREAM:server:4000}
 	}
 
 	# Collab WebSocket (Hocuspocus). Caddy v2 upgrades WebSockets automatically; the long
 	# transport timeouts keep idle collab connections alive (mirrors the nginx ingress 1h).
-	# #409 / ADR-154: the crawler-facing HTML shell — /pub is answered by the server (head-injected
-	# built index.html), never the static web container.
-	handle /pub/* {
-		reverse_proxy {$SERVER_UPSTREAM:server:4000}
+	# BOTH matchers: the provider opens the BARE /collab, which `/collab/*` does not match —
+	# that mismatch sent every socket to the static site while the ingress routed it fine.
+	handle /collab {
+		reverse_proxy {$COLLAB_UPSTREAM:collab:4100} {
+			transport http {
+				read_timeout 1h
+				write_timeout 1h
+			}
+		}
 	}
-
 	handle /collab/* {
 		reverse_proxy {$COLLAB_UPSTREAM:collab:4100} {
 			transport http {
