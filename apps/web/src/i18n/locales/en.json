@@ -23,7 +23,6 @@
     "entraPlaceholder": "Entra tenant ID (GUID)",
     "clientIdPlaceholder": "Client ID",
     "secretPlaceholder": "Client secret (leave empty for a public client)",
-    "redirectPlaceholder": "Redirect URI",
     "groupsClaimPlaceholder": "Groups claim (blank: groups)",
     "mcpEnabled": "AI tool access (MCP)",
     "mcpUnavailable": "(not available for this connection)"
@@ -461,7 +460,7 @@
     "clientSecret": "Client secret",
     "clientSecretKeep": "Leave blank to keep the current secret",
     "scopes": "Scopes",
-    "redirectUri": "Redirect URI",
+    "oidcRedirectHint": "Add this exact URL to your IdP's allowed redirect URIs. It is the only one {{product}} uses:",
     "test": "Test connection",
     "testing": "Testing…",
     "testOk": "Discovery succeeded. This issuer looks reachable.",

@@ -78,7 +78,7 @@ export async function updateTenantOidc(
   args: {
     tenantId: string; userId: string;
     issuer: string; clientId: string; clientSecret?: string | null;
-    scopes?: string; redirectUri: string; enabled: boolean; groupsClaim?: string | null;
+    scopes?: string; redirectUri?: string; enabled: boolean; groupsClaim?: string | null;
     plan: string; // #537: the lockout guard consults SAML entitlement
   },
   fetchJson: DiscoveryFetch = safeFetchJson, // injectable for tests; prod uses the hardened default
@@ -86,11 +86,13 @@ export async function updateTenantOidc(
   await requireTenantAdmin(fga, args.userId, args.tenantId)
   const issuer = args.issuer.trim()
   const clientId = args.clientId.trim()
-  const redirectUri = args.redirectUri.trim()
+  // #733: not required — see admin-connections.ts. The flow derives the redirect URI per request and
+  // never reads this column; the column is kept (ruling) so an existing value survives.
+  const redirectUri = (args.redirectUri ?? '').trim()
   const scopes = (args.scopes ?? '').trim() || 'openid email profile'
   const groupsClaim = args.groupsClaim?.trim() ? args.groupsClaim.trim() : null // #102: null → default 'groups'
-  if (!issuer || !clientId || !redirectUri) {
-    throw Object.assign(new Error('issuer, client id and redirect URI are required'), { statusCode: 400 })
+  if (!issuer || !clientId) {
+    throw Object.assign(new Error('issuer and client id are required'), { statusCode: 400 })
   }
   // Enabling a broken IdP would lock everyone out — validate discovery first.
   if (args.enabled) {
@@ -174,7 +176,7 @@ export async function tenantOidcPlugin(app: FastifyInstance) {
     return getTenantOidc(req.db)
   })
 
-  app.patch<{ Body: { issuer: string; clientId: string; clientSecret?: string | null; scopes?: string; redirectUri: string; enabled: boolean; groupsClaim?: string | null } }>('/admin/oidc', async (req, reply) => {
+  app.patch<{ Body: { issuer: string; clientId: string; clientSecret?: string | null; scopes?: string; redirectUri?: string; enabled: boolean; groupsClaim?: string | null } }>('/admin/oidc', async (req, reply) => {
     await updateTenantOidc(req.db, app.fga, {
       tenantId: req.tenant.id, userId: req.user.sub,
       issuer: req.body?.issuer ?? '', clientId: req.body?.clientId ?? '',

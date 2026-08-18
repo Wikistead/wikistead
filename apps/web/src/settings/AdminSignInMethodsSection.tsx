@@ -15,6 +15,7 @@ import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 import { memberLabel } from "../ui/principal-label"; // #578
+import { useProductName } from "../app/product-name"; // #575: the product name is interpolated, never written in copy
 import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { MemberSearchInput } from "../ui/MemberSearchInput"; // #617 ①: the one pick-a-member surface (#416 / ADR-161)
@@ -37,11 +38,11 @@ import { methodBadge } from "./login-method-badge";
 
 // A blank editor form for a connection row.
 interface Draft {
-  issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes: string
+  issuer: string; clientId: string; clientSecret: string; scopes: string
   groupsClaim: string; label: string; trustGroups: boolean
 }
 const draftOf = (c: AdminConnectionDTO): Draft => ({
-  issuer: c.issuer, clientId: c.clientId, clientSecret: "", redirectUri: c.redirectUri,
+  issuer: c.issuer, clientId: c.clientId, clientSecret: "",
   scopes: c.scopes ?? "", groupsClaim: c.groupsClaim ?? "", label: c.label ?? "",
   // review F6: the two trust flags are part of the DRAFT, not immediate switches. An editor where
   // some controls apply on Save and others apply on touch has a Cancel button that silently means
@@ -136,6 +137,12 @@ const METHOD_ROW_HEAD = "flex items-center gap-2";
 
 export function AdminSignInMethodsSection() {
   const { t } = useTranslation();
+  // #733: the ONE redirect URI the login flow actually uses. Derived from the current origin exactly
+  // as the server derives it per request (`${protocol}://${host}/auth/callback`), which is also why a
+  // stored value would be wrong: a workspace that moves to a custom domain keeps working here and
+  // would not with a value frozen at configuration time.
+  const productName = useProductName();
+  const oidcRedirectUri = `${window.location.origin.replace(/\/$/, "")}/auth/callback`;
   const connections = useAdminConnections();
   const create = useCreateConnection();
   const update = useUpdateConnection();
@@ -180,7 +187,7 @@ export function AdminSignInMethodsSection() {
   const [testResult, setTestResult] = useState<{ ok: boolean; error: string | null } | null>(null);
   const [adding, setAdding] = useState(false);
   const [preset, setPreset] = useState("");
-  const [form, setForm] = useState({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "", groupsClaim: "" });
+  const [form, setForm] = useState({ issuer: "", clientId: "", clientSecret: "", label: "", entraTenantId: "", groupsClaim: "" });
   const [flags, setFlags] = useState({ trustGroups: false });
   const [deleting, setDeleting] = useState<AdminConnectionDTO | null>(null);
   // #504: revoking an exemption removes somebody's break-glass — confirm first, like every removal here
@@ -302,7 +309,6 @@ export function AdminSignInMethodsSection() {
         ...(c.preset ? {} : { issuer: draft.issuer, label: draft.label }),
         clientId: draft.clientId,
         ...(draft.clientSecret ? { clientSecret: draft.clientSecret } : {}),
-        redirectUri: draft.redirectUri,
         scopes: draft.scopes,
         groupsClaim: draft.groupsClaim.trim() || null,
         trustGroups: draft.trustGroups,
@@ -322,15 +328,15 @@ export function AdminSignInMethodsSection() {
   };
   const submitNew = () => {
     const base =
-      preset === "google" ? { preset, clientId: form.clientId, clientSecret: form.clientSecret || undefined, redirectUri: form.redirectUri }
-      : preset === "microsoft" ? { preset, clientId: form.clientId, clientSecret: form.clientSecret || undefined, redirectUri: form.redirectUri, entraTenantId: form.entraTenantId }
-      : { issuer: form.issuer, clientId: form.clientId, clientSecret: form.clientSecret || undefined, redirectUri: form.redirectUri, label: form.label || undefined };
+      preset === "google" ? { preset, clientId: form.clientId, clientSecret: form.clientSecret || undefined }
+      : preset === "microsoft" ? { preset, clientId: form.clientId, clientSecret: form.clientSecret || undefined, entraTenantId: form.entraTenantId }
+      : { issuer: form.issuer, clientId: form.clientId, clientSecret: form.clientSecret || undefined, label: form.label || undefined };
     // ADR-197 §2 rev2 / §6: the two TRUST flags are explicit and default off. They are editable on the
     // row now (#589), but a connection still starts without either.
     // #615: the claim name travels with the flags — blank stays null so the server's default (`groups`)
     // keeps deciding, exactly as it did when this could only be set after the fact.
     create.mutate({ ...base, trustGroups: flags.trustGroups, groupsClaim: form.groupsClaim.trim() || null }, {
-      onSuccess: () => { setAdding(false); setForm({ issuer: "", clientId: "", clientSecret: "", redirectUri: "", label: "", entraTenantId: "", groupsClaim: "" }); notify.success(t("adminConnections.created")); },
+      onSuccess: () => { setAdding(false); setForm({ issuer: "", clientId: "", clientSecret: "", label: "", entraTenantId: "", groupsClaim: "" }); notify.success(t("adminConnections.created")); },
       onError,
     });
   };
@@ -498,11 +504,15 @@ export function AdminSignInMethodsSection() {
                   <Input inputSize="sm" value={draft.scopes} data-testid="oidc-scopes"
                     onChange={(e) => setDraft({ ...draft, scopes: e.target.value })} />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-fg-dim">
-                  {t("adminAuth.redirectUri")}
-                  <Input inputSize="sm" value={draft.redirectUri} data-testid="oidc-redirect"
-                    onChange={(e) => setDraft({ ...draft, redirectUri: e.target.value })} />
-                </label>
+                {/* #733: the redirect URI is SHOWN, not asked for. The login flow derives it from the
+                    request, so the field this replaced wrote a column nothing reads — an administrator
+                    who typed a different value was told nothing here and failed at the IdP. Same shape
+                    as the SAML ACS hint and the SCIM endpoint (#723): derived from the origin,
+                    select-all, copyable. */}
+                <p className="flex flex-col gap-1 text-xs text-fg-dim">
+                  {t("adminAuth.oidcRedirectHint", { product: productName })}
+                  <code className="select-all" data-testid="oidc-redirect">{oidcRedirectUri}</code>
+                </p>
                 {/* #102 / ADR-055: the id_token claim that carries the user's groups (blank → 'groups'). */}
                 <label className="flex flex-col gap-1 text-xs text-fg-dim">
                   {t("adminAuth.groupsClaim")}
@@ -825,8 +835,11 @@ export function AdminSignInMethodsSection() {
               onChange={(e) => setForm({ ...form, clientId: e.target.value })} data-testid="admin-connection-clientid" />
             <Input inputSize="sm" type="password" placeholder={t("adminConnections.secretPlaceholder")} value={form.clientSecret} aria-label="client secret"
               onChange={(e) => setForm({ ...form, clientSecret: e.target.value })} />
-            <Input inputSize="sm" placeholder={t("adminConnections.redirectPlaceholder")} value={form.redirectUri} aria-label="redirect uri"
-              onChange={(e) => setForm({ ...form, redirectUri: e.target.value })} data-testid="admin-connection-redirect" />
+            {/* #733: shown, not asked for — see the note on the edit form above. */}
+            <p className="flex flex-col gap-1 text-xs text-fg-dim">
+              {t("adminAuth.oidcRedirectHint", { product: productName })}
+              <code className="select-all" data-testid="admin-connection-redirect">{oidcRedirectUri}</code>
+            </p>
             {/* #615: the groups CLAIM belongs with the trust switch beside it. Configuring the trust and
                 then having to reopen the row to say WHICH claim carries the groups is the two-step this
                 ticket removes — and the pair is what decides whether group sync works at all. Blank

@@ -23,7 +23,6 @@
     "entraPlaceholder": "Entra テナント ID（GUID）",
     "clientIdPlaceholder": "クライアント ID",
     "secretPlaceholder": "クライアントシークレット（public client は空欄）",
-    "redirectPlaceholder": "リダイレクト URI",
     "groupsClaimPlaceholder": "groups クレーム名（空欄なら groups）",
     "mcpEnabled": "AI ツール接続（MCP）",
     "mcpUnavailable": "（この接続では設定できません）"
@@ -461,7 +460,7 @@
     "clientSecret": "クライアントシークレット",
     "clientSecretKeep": "空欄にすると現在のシークレットを維持",
     "scopes": "スコープ",
-    "redirectUri": "リダイレクト URI",
+    "oidcRedirectHint": "この URL をそのまま IdP の許可リダイレクト URI に登録してください。{{product}} が使うのはこの値だけです:",
     "test": "接続テスト",
     "testing": "テスト中…",
     "testOk": "ディスカバリに成功しました。この issuer に到達できます。",
