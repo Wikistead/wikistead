@@ -22,6 +22,7 @@ import { makeS3Key } from '../storage/driver.js'
 import { sniffInlineKind } from '../routes/attachments.js'
 import { createPage, publishPage, deletePage } from '../routes/pages.js'
 import { noteNameOf, rewriteWikilinks, detectVaultDegradations, canvasDegradations, walkNodes, vaultAttachments } from './obsidian.js'
+import { looksLikeNotionExport, splitNotionName, parseCsv, csvToMarkdownTable, databaseDegradation, rewriteNotionLinks } from './notion.js'
 
 // Zip-bomb caps (ADR-132 §3). The importer aborts the moment a running total is exceeded — it never buffers a
 // whole malicious archive. These are generous enough for a real workspace export yet bound worst-case memory.
@@ -97,6 +98,8 @@ export interface ImportNode {
   // name; Notion: the 32-hex filename suffix). Never persisted as an id — cross-tenant id reuse stays
   // refused (ADR-132 §2) — it exists only to build the link map during one import.
   sourceRef?: string
+  /** #712 §5: the 32-hex id a Notion export puts in every filename — the key its links point at. */
+  notionHex?: string | null
   // `frontmatter`: structured metadata an adapter carries over. Serialised as YAML at the top of the
   // body, which is where tags already live (ADR-145), so no second tag path appears.
   frontmatter?: Record<string, unknown>
@@ -315,6 +318,9 @@ function rewriteBody(
   // Wikistead ZIP speaks `/p/<oldId>`; a vault speaks `[[Note]]`. Both resolve against maps built
   // once all ids are known, and both leave an unresolvable link ALONE and count it.
   wiki?: { node: { title: string }; hrefByName: Map<string, string>; embedByName: Map<string, string> },
+  // #712 / ADR-227 §5: Notion's own link shape, resolved through the same generic map idea — one
+  // rewrite pass, one dead-link rule, three sources.
+  notionHrefByHex?: ReadonlyMap<string, string>,
 ): string {
   let md = markdown.replace(ATTACHMENT_REF, (m, alt: string, url: string) => {
     const newId = attByRel.get(url)
@@ -326,6 +332,11 @@ function rewriteBody(
     report.deadCrossLinks++
     return m
   })
+  if (notionHrefByHex && notionHrefByHex.size) {
+    const r = rewriteNotionLinks(md, notionHrefByHex)
+    md = r.markdown
+    report.deadCrossLinks += r.deadLinks
+  }
   if (wiki) {
     const r = rewriteWikilinks(md, wiki.node, { hrefByName: wiki.hrefByName, embedByName: wiki.embedByName })
     md = r.markdown
@@ -411,12 +422,19 @@ export async function materializeImport(
       }
     }
 
+    // Notion's links point at the 32-hex id in a filename, so the map is keyed on that.
+    const notionHrefByHex = new Map<string, string>()
+    for (const c of created) {
+      const hex = c.node.notionHex
+      if (hex && !notionHrefByHex.has(hex)) notionHrefByHex.set(hex, `/p/${c.newId}`)
+    }
+
     // Pass 2 — now every id is known: rewrite each body (images + cross-links) and set the draft; optional publish.
     for (const c of created) {
       report.degraded.push(...detectVaultDegradations({ title: c.node.title || c.node.dir, markdown: c.node.markdown }))
       const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report, {
         node: { title: c.node.title || c.node.dir }, hrefByName, embedByName,
-      })
+      }, notionHrefByHex)
       await setDraftBody(db, c.newId, md)
       if (args.publish && c.node.published && md.trim() !== '') {
         await publishPage(db, fga, driver, storage, { pageId: c.newId, subject: `user:${args.userId}`, createdBy: `user:${args.userId}` })
@@ -446,11 +464,47 @@ export async function importArchive(
   const files = streamingUnzip(archive)
   const ir = buildIR(files)
   if (ir.roots.length === 0) throw new ImportInvalidError('archive has no importable pages')
+  const csvDegradations: ImportDegradation[] = []
   // #712 / ADR-227 §4: a vault's own note NAME is what `[[…]]` refers to, so it becomes each node's
   // sourceRef before materialisation (the link map is keyed on it). Doing it here rather than in
   // buildIR keeps the shared builder free of any one source's vocabulary.
   const nodes = walkNodes(ir.roots)
   for (const node of nodes) node.sourceRef ??= noteNameOf(node.dir)
+
+  // #712 / ADR-227 §5 — Notion. Detected from the export's own fingerprint (the 32-hex filename
+  // suffix) rather than asked for: a user uploads "my export", not "my export, format N", and the
+  // shapes are distinguishable without guessing. A Wikistead ZIP and a plain vault carry no such
+  // suffix, so this branch cannot fire on them.
+  if (looksLikeNotionExport(Object.keys(files))) {
+    for (const node of nodes) {
+      const { title, hex } = splitNotionName(noteNameOf(node.dir))
+      node.notionHex = hex
+      // The id is noise in a title and load-bearing in a link: strip it from what the reader sees,
+      // keep it as the link key. A node whose title came from a manifest is left alone.
+      if (hex && title) node.title = title
+    }
+    // A database exports as `<name> <hex>.csv` beside a directory of row pages. It becomes ONE page
+    // carrying a GFM table, with the rows as children (north star 2: this product does not grow a
+    // database object). Reported per database — the views, filters and sorts genuinely do not survive.
+    for (const [path, bytes] of Object.entries(files)) {
+      if (!/\.csv$/i.test(path)) continue
+      const base = path.replace(/\.csv$/i, '')
+      const rows = parseCsv(strFromU8(bytes))
+      const { title, hex } = splitNotionName(base.slice(base.lastIndexOf('/') + 1))
+      const owner = nodes.find((n) => n.dir === base)
+      const table = csvToMarkdownTable(rows)
+      if (owner) {
+        // The directory already became a page (its own `index.md`): append the table to it.
+        owner.markdown = owner.markdown.trim() ? `${owner.markdown.trimEnd()}\n\n${table}\n` : `${table}\n`
+      } else {
+        ir.roots.push({
+          dir: base, title: title || base, markdown: `${table}\n`, published: true,
+          oldId: null, attachments: [], children: [], sourceRef: base, notionHex: hex,
+        })
+      }
+      csvDegradations.push(databaseDegradation(title || base, Math.max(0, rows.length - 1)))
+    }
+  }
   // A vault's shared attachment folder (see vaultAttachments): whatever the tree did not already
   // claim becomes an attachment, so `![[file]]` has something to resolve to. Anything already picked
   // up by the `<dir>/images/` convention is skipped, so a Wikistead export imports exactly as before.
@@ -465,6 +519,7 @@ export async function importArchive(
   const shared = vaultAttachments(files, { claimed, mimeOf: mimeFromName })
   if (shared.length && ir.roots[0]) ir.roots[0].attachments.push(...shared)
   const report = await materializeImport(deps, ir, args)
+  report.degraded.push(...csvDegradations)
   // Canvas files never became pages — reported rather than silently absent, which is the difference
   // between "we could not represent this" and "your vault came in fine".
   report.degraded.push(...canvasDegradations(Object.keys(files)))
