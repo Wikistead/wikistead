@@ -1,9 +1,9 @@
 #!/usr/bin/env tsx
 // "Code is truth" docs generator + CI stale-guard (#139 / ADR-080 doc↔code linkage).
 //
-//   pnpm docs:gen     → (re)write the generated Markdown from code.
-//   pnpm docs:check   → regenerate in memory and FAIL if the committed file differs
-//                       (the CI stale-guard: no stale generated docs can land).
+// pnpm docs:gen → (re)write the generated Markdown from code.
+// pnpm docs:check → regenerate in memory and FAIL if the committed file differs
+// (the CI stale-guard: no stale generated docs can land).
 //
 // The generated Markdown is the SSG's "code is truth" source (fed to wikistead-docs).
 // Generation is a CI build step over CE code only — it never runtime-imports product
@@ -21,13 +21,34 @@ const BRAND_TOKENS = ['bg', 'fg', 'fg-dim', 'panel', 'panel-2', 'panel-3', 'bord
 
 // #709: the TYPE tokens ride the kit too — colours alone left the consuming sites hand-picking
 // faces (the docs set body text in the wordmark face; the exact double bookkeeping the kit exists
-// to end). Theme-independent, extracted once, emitted on :root. Internal var() references are
+// to end). Theme-independent, extracted once, emitted on :root. Internal var references are
 // rewritten to the kit's own names so the emitted values resolve without the product stylesheet.
 const FONT_TOKENS: readonly { from: string; to: string }[] = [
   { from: 'font', to: 'font' }, // body/UI: Inter + Noto Sans JP
   { from: 'font-code', to: 'font-mono' }, // code: Wikistead Mono
   { from: 'font-wordmark', to: 'font-wordmark' }, // the wordmark face, wordmark-ONLY
 ]
+
+/**
+ * #731: the admin tab labels, per locale, straight out of the product's own strings.
+ *
+ * Keys are the registry ids (`ADMIN_SURFACES` / `adminNav`), which is what makes this checkable from
+ * the other side: the documentation's ledger already binds a page to each id, so a doc page can be
+ * compared with the label its id carries. A tab added tomorrow appears here without anyone
+ * remembering to add it — and the docs check goes red because that id has no page named after it.
+ */
+function renderAdminTabsJson(): string {
+  const nav = (locale: string) =>
+    (JSON.parse(readFileSync(join(root, `apps/web/src/i18n/locales/${locale}.json`), 'utf8')) as {
+      adminNav: Record<string, string>
+    }).adminNav
+  const en = nav('en')
+  const ja = nav('ja')
+  // `title` is the console's own heading, not a tab; the tabs are everything else.
+  const ids = Object.keys(en).filter((k) => k !== 'title').sort()
+  const tabs = Object.fromEntries(ids.map((id) => [id, { en: en[id], ja: ja[id] }]))
+  return JSON.stringify({ tabs }, null, 2) + '\n'
+}
 
 function renderBrandCss(): string {
   const src = readFileSync(join(root, 'apps/web/src/styles/tokens.css'), 'utf8')
@@ -121,6 +142,21 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     name: 'brand kit (tokens)',
     outPath: join(root, 'docs/generated/brand/tokens.css'),
     render: renderBrandCss,
+  },
+  {
+    // #731: the admin console's TAB LABELS, as the product spells them, so the documentation can be
+    // checked against the screen instead of against somebody's memory of it. The docs had drifted to
+    // three names the product does not use ("Sign-in methods" for a tab called Authentication,
+    // "Embeds policy" for , "Publishing" for ), and nothing could notice: the two
+    // vocabularies live in different repositories.
+    //
+    // Emitted rather than hand-copied for the usual reason, and one more: #732 renamed several of
+    // these labels on the same day. A documentation check that spelled the words out would have gone
+    // red on that landing while being perfectly correct — so the check compares against THIS, and
+    // follows the product wherever it goes.
+    name: 'admin tab labels',
+    outPath: join(root, 'docs/generated/admin-tabs.json'),
+    render: renderAdminTabsJson,
   },
   {
     // #180 / ADR-225 §3(a): the VERSION MARKER the docs-site pull verifies against its SOURCE_TAG
