@@ -3,7 +3,7 @@ import type { OpenFgaClient, ClientBatchCheckSingleResponse } from '@openfga/sdk
 import { fgaModelId } from '@wikistead/authz'
 import { auditLedgerRegistered } from '../audit/sink.js' // #688: EE-composed features only surface when composed
 import { analyticsRegistered } from '../analytics/sink.js'
-import { scimRegistered } from '../scim/sink.js' // #723: SCIM is EE-composed too
+import { scimRegistered } from '../scim-sink.js' // #723: SCIM is EE-composed too
 
 // #604 / ADR-208 (ruling B,): WHICH admin surfaces may this caller enter?
 //

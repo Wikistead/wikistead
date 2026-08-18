@@ -49,7 +49,7 @@ export { entitlementDenied } from './entitlement-ux.js'
 // primitives the CE routes use — additive re-exports of CE code, no EE dependency added.
 // #723 / ADR-232: the EE composition root registers SCIM's presence the way it registers the
 // audit ledger — the CE marker lives in apps/server, the decision to light it lives in ee/.
-export { registerScim } from './scim/sink.js'
+export { registerScim } from './scim-sink.js'
 // #715 / ADR-229: the funnel collector seam. The report calls stay in CE; only the recording is EE.
 export { registerFunnelCollector, funnelRegistered, resetFunnelCollector, reportLinkVisit, reportWorkspaceCreated } from './funnel/sink.js'
 export { createApiKey } from './routes/api-keys.js'

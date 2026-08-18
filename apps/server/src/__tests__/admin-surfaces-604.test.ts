@@ -23,7 +23,7 @@ import { ADMIN_SURFACES, readableAdminSurfaces } from '../routes/admin-surfaces.
 import { TENANT_CAP_RELATION } from '../routes/roles.js'
 import { auditLedgerRegistered } from '../audit/sink.js'
 import { analyticsRegistered } from '../analytics/sink.js'
-import { scimRegistered } from '../scim/sink.js'
+import { scimRegistered } from '../scim-sink.js'
 
 // #692 B: `audit` and `analytics` exist in the registry but only SURFACE when their EE mount
 // registered (#688) — the dev suite composes EE through the vitest alias, the CE build composes
