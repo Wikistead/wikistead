@@ -234,8 +234,11 @@ describe('#712 F: the Confluence macro people actually use converts', () => {
   }, 300_000)
 })
 
-describe('#712 B: an attachment LINK is not silently dead', () => {
-  it('names the file it could not re-point', async () => {
+describe('#712 B: an attachment LINK reaches the file it names', () => {
+  // ① closed: the link is now RE-POINTED rather than reported as lost. Reporting it was the
+  // half that could be done at parse time (the attachment id does not exist until materialisation);
+  // the rewrite pass has the id, so the link becomes the product's own file notation.
+  it('re-points a link to a file the archive carries', async () => {
     await freshSpace()
     const report = await importArchive(
       { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
@@ -246,8 +249,26 @@ describe('#712 B: an attachment LINK is not silently dead', () => {
       }),
       { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
     )
-    expect(report.degraded.map((d) => `${d.what} ${d.detail ?? ''}`).join('\n'), 'the dead file link is named')
-      .toMatch(/attached file[\s\S]*paper\.pdf|paper\.pdf/)
+    const body = await bodyOfPage('Doc')
+    expect(body, 'the link points at the imported attachment, in the notation this product reads (#273)')
+      .toMatch(/\[the paper\]\(wks-attachment:[0-9a-f-]+\)/)
+    expect(body, 'and no longer at a path the product does not serve').not.toContain('attachments/paper.pdf')
+    expect(report.degraded.map((d) => d.what).join('\n'), 'nothing was lost, so nothing is reported lost')
+      .not.toMatch(/attached file/)
+  }, 300_000)
+
+  it('reports a link to a file the archive does NOT carry (measured, not predicted)', async () => {
+    await freshSpace()
+    const report = await importArchive(
+      { db, fga: fgaClient, storage: new LogicalStorageDriver(), driver: new LogicalSearchDriver() },
+      zipSync({
+        'index.html': strToU8('<html><body>nav</body></html>'),
+        'Doc.html': strToU8('<html><body><h1>Doc</h1><p><a href="attachments/missing.pdf">the paper</a></p></body></html>'),
+      }),
+      { tenantId: TENANT, spaceId: SPACE, userId: USER, plan: 'free' },
+    )
+    expect(report.degraded.map((d) => `${d.what} ${d.detail ?? ''}`).join('\n'), 'the file that is not there is named')
+      .toMatch(/attached file[\s\S]*missing\.pdf|missing\.pdf/)
   }, 300_000)
 })
 
