@@ -14,6 +14,8 @@ import { describe, it, expect } from 'vitest'
 import { ADMIN_SURFACES } from '../routes/admin-surfaces.js'
 import { TOOLS } from '../routes/mcp.js'
 import { IMPORT_ADAPTERS } from '../import/index.js'
+import { SECOND_FACTOR_KINDS } from '../auth/second-factors.js'
+import { RECOVERY_CAPABILITY_ID } from '../auth/recovery-codes.js'
 // @ts-expect-error — repo-root script module, no types (#621 convention)
 import { evaluateSurfaceDocs, DOC_CODE_MAP, matchesAny } from '../../../../scripts/doc-code-map.mjs'
 
@@ -36,11 +38,18 @@ describe('#697 §4.2: every registered server surface names its docs page', () =
   // report the other half as rows for surfaces that no longer exist. (Measured: splitting this in
   // two failed both ways round.)
   it('capabilities: every MCP tool and import dialect has a ledger row (both directions)', () => {
-    const ids = [...TOOLS.map((t) => `mcp:${t.name}`), ...IMPORT_ADAPTERS.map((a) => `import:${a.id}`)]
+    const ids = [
+      ...TOOLS.map((t) => `mcp:${t.name}`),
+      ...IMPORT_ADAPTERS.map((a) => `import:${a.id}`),
+      // #734 / ADR-237 §2.1: the second factors joined this walk when they stopped being a type.
+      ...SECOND_FACTOR_KINDS.map((k) => `factor:${k}`),
+      `factor:${RECOVERY_CAPABILITY_ID}`,
+    ]
     // A walk that came back empty would make the assertion below pass while measuring nothing —
     // exactly the failure the ledger exists to prevent, arriving through the ledger's own door.
     expect(TOOLS.length, 'the MCP tool table walked empty — the walk is broken, not the coverage').toBeGreaterThan(5)
     expect(IMPORT_ADAPTERS.length, 'the adapter table walked empty — the walk is broken').toBeGreaterThan(2)
+    expect(SECOND_FACTOR_KINDS.length, 'the factor-kind table walked empty — the walk is broken').toBeGreaterThan(1)
     const violations = evaluateSurfaceDocs({ capability: ids })
     expect(violations, fmt(violations)).toEqual([])
   })

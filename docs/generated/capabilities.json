@@ -1,5 +1,8 @@
 {
   "capabilities": [
+    "factor:passkey",
+    "factor:recovery-code",
+    "factor:totp",
     "import:confluence",
     "import:native",
     "import:notion",
