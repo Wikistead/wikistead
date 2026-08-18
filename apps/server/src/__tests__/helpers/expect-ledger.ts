@@ -22,7 +22,13 @@ import { auditLedgerRegistered } from '../../audit/sink.js'
  */
 export async function drainLedgerFor(sql: Sql, tenantId: string): Promise<void> {
   if (!auditLedgerRegistered()) return
-  const { drainAuditFor } = await import('./audit-drain.js')
+  // The specifier is a VALUE, not a literal: tsc resolves literal dynamic imports at type level,
+  // and audit-drain.ts does not ship in the CE build (its import names the EE namespace) — so the
+  // literal form made the public repo's first `turbo run typecheck` red with TS2307 while every
+  // runtime path was green. The indirection changes nothing at runtime; the narrow structural type
+  // keeps the call checked without naming the module.
+  const drainModule = './audit-drain.js'
+  const { drainAuditFor } = await import(drainModule) as { drainAuditFor: (sql: Sql, tenantId: string) => Promise<void> }
   await drainAuditFor(sql, tenantId)
 }
 
