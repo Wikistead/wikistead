@@ -98,7 +98,8 @@ function reportStorage(el: HTMLElement, tag: string, ctx: Ctx): void {
   const key = JSON.stringify([ctx.title, detail])
   if (ctx.storageSeen.has(key)) return
   ctx.storageSeen.add(key)
-  ctx.degraded.push({ node: ctx.title, what: 'Confluence storage-format markup not converted', detail })
+  ctx.degraded.push({ node: ctx.title, code: 'confluenceStorageFormat',
+    what: 'Confluence storage-format markup not converted', detail, params: { name: detail } })
 }
 
 /**
@@ -212,7 +213,8 @@ function renderMacro(el: HTMLElement, macro: string, ctx: Ctx): string {
   }
   if (macro === 'toc') return ':::toc\n:::'
   // No Markdown form: keep a labelled marker so the reader sees WHAT was there, and report it.
-  ctx.degraded.push({ node: ctx.title, what: 'Confluence macro has no equivalent', detail: macro })
+  ctx.degraded.push({ node: ctx.title, code: 'confluenceMacroNoEquivalent',
+    what: 'Confluence macro has no equivalent', detail: macro, params: { macro } })
   const inner = children(el, ctx).join('\n\n').trim()
   return inner ? `> [Confluence macro: ${macro}]\n>\n${inner.split('\n').map((l) => `> ${l}`).join('\n')}`
     : `> [Confluence macro: ${macro}]`
@@ -264,7 +266,8 @@ function table(el: HTMLElement, ctx: Ctx): string {
   }
   // A merged cell cannot survive a GFM pipe table — say so rather than let the row silently shift.
   if (el.querySelector('[colspan], [rowspan]')) {
-    ctx.degraded.push({ node: ctx.title, what: 'merged table cells flattened', detail: 'GFM tables have no rowspan/colspan' })
+    ctx.degraded.push({ node: ctx.title, code: 'mergedCellsFlattened',
+      what: 'merged table cells flattened', detail: 'GFM tables have no rowspan/colspan' })
   }
   return out.join('\n')
 }
@@ -279,7 +282,8 @@ function image(el: HTMLElement, ctx?: Ctx): string {
   // name, which reads better than a missing picture. So the picture is dropped for the name, and the
   // substitution is REPORTED rather than done quietly.
   if (/(^|\/)(images\/icons\/emoticons|emoticons)\//i.test(src) || /^https?:\/\/[^/]+\/(?:wiki\/)?images\/icons\//i.test(src)) {
-    ctx?.degraded.push({ node: ctx.title, what: 'emoji image replaced by its name', detail: alt || src })
+    ctx?.degraded.push({ node: ctx.title, code: 'emojiReplacedByName',
+      what: 'emoji image replaced by its name', detail: alt || src, params: { name: alt || src } })
     return alt ? `:${alt}:` : ''
   }
   return `![${alt}](${src})`
@@ -337,7 +341,8 @@ function inlineNode(node: Node, ctx: Ctx): string {
         // DOES NOT PARSE — a Confluence import writing Obsidian syntax at the reader. So a link to a
         // page the export does not contain becomes plain text, and is reported.
         if (ctx.pageNames.has(leaf.toLowerCase())) return `[[${leaf}|${text}]]`
-        ctx.degraded.push({ node: ctx.title, what: 'link to a page outside the export', detail: leaf })
+        ctx.degraded.push({ node: ctx.title, code: 'linkOutsideExport',
+          what: 'link to a page outside the export', detail: leaf, params: { target: leaf } })
         return text
       }
       // ⚠️ An `<a href="attachments/…">` is a FILE, not a page. It is left exactly as written here and

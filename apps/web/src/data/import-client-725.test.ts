@@ -45,11 +45,38 @@ describe("#725: the import client tells a queued job from a finished report", ()
   });
 
   it("each refusal keeps its status, so the screen can say which one it was", async () => {
-    for (const status of [400, 403, 409, 413]) {
+    for (const status of [400, 403, 413]) {
       respond(status, { error: "no" });
       const res = await importSpaceArchive("tok", "sp1", file);
       expect(res).toEqual({ kind: "error", status });
     }
+  });
+
+  // #725 ①: 409 is not "an error" — it is a POINTER. #712 put the running import's id in
+  // that body, and ADR-236 §5 named "show me the one that is running" as the only useful thing the
+  // screen can offer. Collapsing it into `{ kind: "error", status: 409 }` throws the id away at the
+  // client, one layer below the screen, where nobody looking at the screen would find it.
+  it("a 409 hands back the import that is already running", async () => {
+    respond(409, { error: "already running", running: { id: "imp_9", status: "running", nodesDone: 12, nodesTotal: 900 } });
+    const res = await importSpaceArchive("tok", "sp1", file);
+    expect(res.kind).toBe("busy");
+    if (res.kind === "busy") expect(res.running).toMatchObject({ id: "imp_9", nodesDone: 12 });
+  });
+
+  it("…and stays a refusal when that row settled before it could be read", async () => {
+    // `running: null` is the honest case, not an error case: the import finished between the index
+    // refusing this upload and the server reading the row back. There is nothing to walk onto.
+    respond(409, { error: "already running", running: null });
+    expect(await importSpaceArchive("tok", "sp1", file)).toEqual({ kind: "busy", running: null });
+  });
+
+  it("…and survives a 409 with no body at all", async () => {
+    // An older server, a proxy that ate the body, a truncated response. Losing the refusal because
+    // the JSON did not parse would let the screen report success-shaped nothing.
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      status: 409, ok: false, json: async () => { throw new SyntaxError("not json"); },
+    })));
+    expect(await importSpaceArchive("tok", "sp1", file)).toEqual({ kind: "busy", running: null });
   });
 
   it("a network failure is an error, not a silent success", async () => {

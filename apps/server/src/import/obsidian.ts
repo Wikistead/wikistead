@@ -66,7 +66,8 @@ export function rewriteWikilinks(
         // survives; the sizing does not, because it is Obsidian's own extension rather than anything
         // Markdown says. It used to vanish without a word, which is the same silence the heading
         // anchor was given a report for.
-        if (label) degraded.push({ node: node.title, what: 'embed display size or caption dropped', detail: `${target}|${label}` })
+        if (label) degraded.push({ node: node.title, code: 'embedSizeDropped',
+          what: 'embed display size or caption dropped', detail: `${target}|${label}`, params: { target, label } })
         return inline
       }
       const href = resolve.hrefByName.get(key)
@@ -74,7 +75,9 @@ export function rewriteWikilinks(
         // The FRAGMENT matters here as much as the note does: `![[Runbook#Rollback]]` becomes a link
         // to the whole page, and a report naming only `Runbook` does not tell the reader that the
         // section they pointed at is the part that was lost.
-        degraded.push({ node: node.title, what: 'note embed became a link', detail: `${target}${anchor ?? ''}` })
+        degraded.push({ node: node.title, code: 'noteEmbedBecameLink',
+          what: 'note embed became a link', detail: `${target}${anchor ?? ''}`,
+          params: { target, section: anchor ?? '' } })
         return `[${label || target}](${href})`
       }
       deadLinks++
@@ -90,8 +93,10 @@ export function rewriteWikilinks(
       const isBlockRef = anchor.startsWith('#^')
       degraded.push({
         node: node.title,
+        code: isBlockRef ? 'blockRefDropped' : 'headingAnchorDropped',
         what: isBlockRef ? 'wikilink block reference dropped' : 'wikilink heading anchor dropped',
         detail: `${target}${anchor}`,
+        params: { target, anchor },
       })
     }
     return `[${label || target}](${href})`
@@ -131,12 +136,14 @@ export function convertVaultCallouts(
     const mapped = CALLOUT_TYPES.get(kind)
     if (!mapped) { out.push(lines[i]!); continue } // not a callout we recognise — leave the quote alone
     if (mapped === 'note' && kind !== 'note') {
-      degraded.push({ node: node.title, what: `callout type "${kind}" has no equivalent — shown as a note`, detail: kind })
+      degraded.push({ node: node.title, code: 'calloutTypeMapped',
+        what: `callout type "${kind}" has no equivalent — shown as a note`, detail: kind, params: { kind } })
     }
     if (fold) {
       // `>[!note]-` is a COLLAPSED callout. The panel here does not fold, so say so rather than let
       // a reader wonder why the page is longer than it was.
-      degraded.push({ node: node.title, what: 'collapsible callout is shown expanded', detail: kind })
+      degraded.push({ node: node.title, code: 'calloutExpanded',
+        what: 'collapsible callout is shown expanded', detail: kind, params: { kind } })
     }
     // Consume the rest of the block quote as the body.
     const body: string[] = []
@@ -164,12 +171,14 @@ export function detectVaultDegradations(node: { title: string; markdown: string 
   if (fences) {
     out.push({
       node: node.title,
+      code: 'dataviewKeptAsSource',
       what: 'Dataview query kept as source',
       detail: `${fences.length} block(s) — the query text is preserved and renders as a code block`,
+      params: { count: fences.length },
     })
   }
   if (/%%[\s\S]*?%%/.test(node.markdown)) {
-    out.push({ node: node.title, what: 'Obsidian comment (%%…%%) kept as text' })
+    out.push({ node: node.title, code: 'obsidianCommentKept', what: 'Obsidian comment (%%…%%) kept as text' })
   }
   // ⚠️ The INLINE form was reported nowhere while the fenced one was — an asymmetry that made the
   // report look complete on a vault that used the short form.
@@ -177,8 +186,10 @@ export function detectVaultDegradations(node: { title: string; markdown: string 
   if (inlineDv) {
     out.push({
       node: node.title,
+      code: 'inlineDataviewKept',
       what: 'inline Dataview expression kept as text',
       detail: `${inlineDv.length} expression(s)`,
+      params: { count: inlineDv.length },
     })
   }
   // ⚠️ Notion writes `<aside>` and `<details>` as RAW HTML in its Markdown export. They survive as
@@ -188,10 +199,13 @@ export function detectVaultDegradations(node: { title: string; markdown: string 
   // read, which is a conversion worth doing deliberately rather than guessing at now.
   const rawBlocks = node.markdown.match(/<(aside|details|summary)\b/gi)
   if (rawBlocks) {
+    const tags = [...new Set(rawBlocks.map((t) => t.replace('<', '').toLowerCase()))].join(', ')
     out.push({
       node: node.title,
+      code: 'rawHtmlKept',
       what: 'raw HTML block kept as text',
-      detail: `${rawBlocks.length} tag(s): ${[...new Set(rawBlocks.map((t) => t.replace('<', '').toLowerCase()))].join(', ')}`,
+      detail: `${rawBlocks.length} tag(s): ${tags}`,
+      params: { count: rawBlocks.length, tags },
     })
   }
   // A block id is Obsidian's anchor for "this paragraph". Nothing here refers to it, so it stays in
@@ -200,8 +214,10 @@ export function detectVaultDegradations(node: { title: string; markdown: string 
   if (blockIds) {
     out.push({
       node: node.title,
+      code: 'blockIdLeft',
       what: 'block identifier (^id) left in the text',
       detail: `${blockIds.length} paragraph(s)`,
+      params: { count: blockIds.length },
     })
   }
   return out
@@ -234,9 +250,11 @@ export function convertExcalidrawNote(
       return { markdown: ['```excalidraw', scene.trim(), '```', ''].join('\n'), degraded }
     } catch { /* fall through to the report */ }
   }
+  const compressed = DRAWING_COMPRESSED.test(markdown)
   degraded.push({
     node: node.title,
-    what: DRAWING_COMPRESSED.test(markdown)
+    code: compressed ? 'excalidrawCompressed' : 'excalidrawUnreadable',
+    what: compressed
       ? 'Excalidraw drawing is stored compressed and was kept as its source'
       : 'Excalidraw drawing could not be read and was kept as its source',
     detail: node.title,
@@ -248,7 +266,8 @@ export function convertExcalidrawNote(
 export function canvasDegradations(fileNames: readonly string[]): ImportDegradation[] {
   return fileNames
     .filter((n) => n.toLowerCase().endsWith('.canvas'))
-    .map((n) => ({ node: n, what: 'Canvas file not imported', detail: 'Canvas has no Markdown representation' }))
+    .map((n) => ({ node: n, code: 'canvasNotImported' as const,
+      what: 'Canvas file not imported', detail: 'Canvas has no Markdown representation' }))
 }
 
 /**

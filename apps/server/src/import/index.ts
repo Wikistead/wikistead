@@ -254,10 +254,36 @@ export function buildIR(files: Record<string, Uint8Array>): ImportIR {
 // #712 / ADR-227 §2: what an adapter could NOT represent, named rather than counted. The existing
 // counters answer "how much"; a migration also has to answer "what did I lose", or the product that
 // sells Open formats is the one lying at the door.
+// #725 ②: this report IS the feature, and in a Japanese workspace it was the only English left
+// on the screen. The headings and the page's prose translated; the words a reader uses to judge what
+// they lost ("wikilink heading anchor dropped") did not, because the server composed them here as
+// English sentences and the screen printed them through.
+//
+// So a degradation carries a CODE and its variables, and the SCREEN owns the wording. The other
+// option — a lookup table in the client, keyed on the English sentence — fails the day the server
+// adds a kind: an unknown sentence has no entry, so the gap shows up as ENGLISH rather than as a red
+// test, which is exactly the failure that produced this ticket.
+//
+// `what` stays, in English, for two reasons: it is what the API has always handed anything reading a
+// report programmatically, and it is the screen's fallback. The pin (`degradation-i18n-725`) walks
+// this list against both locale bundles, so a new code with no wording is red before it can ship.
+export const DEGRADATION_CODES = [
+  'embedSizeDropped', 'noteEmbedBecameLink', 'blockRefDropped', 'headingAnchorDropped',
+  'calloutTypeMapped', 'calloutExpanded', 'dataviewKeptAsSource', 'obsidianCommentKept',
+  'inlineDataviewKept', 'rawHtmlKept', 'blockIdLeft', 'excalidrawCompressed',
+  'excalidrawUnreadable', 'canvasNotImported', 'notionDatabaseFlattened',
+  'confluenceStorageFormat', 'confluenceMacroNoEquivalent', 'mergedCellsFlattened',
+  'emojiReplacedByName', 'linkOutsideExport', 'attachmentLinkMissing',
+] as const
+export type DegradationCode = typeof DEGRADATION_CODES[number]
+
 export interface ImportDegradation {
   node: string // the node's title or dir — what the reader would recognise
-  what: string // the shape that did not survive, e.g. 'wikilink heading anchor'
-  detail?: string
+  code: DegradationCode // what the screen renders, in the reader's own language
+  what: string // the same shape in English: the API's own words, and the screen's fallback
+  detail?: string // English detail, likewise a fallback — `params` is what the wording is built from
+  /** the variables the wording interpolates: counts, link targets, file and macro names */
+  params?: Record<string, string | number>
 }
 
 export interface ImportReport {
@@ -356,7 +382,8 @@ function rewriteBody(
     // because only here is it known that the file really is absent.
     const file = decodeAttUrl(url).split('/').pop() ?? url
     if (/\.[a-z0-9]{1,8}$/i.test(file) && !/\.html?$/i.test(file)) {
-      report.degraded.push({ node: wiki?.node.title ?? '', what: 'link to an attached file the export does not carry', detail: file })
+      report.degraded.push({ node: wiki?.node.title ?? '', code: 'attachmentLinkMissing',
+        what: 'link to an attached file the export does not carry', detail: file, params: { file } })
     }
     return m
   })

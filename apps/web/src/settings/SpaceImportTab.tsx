@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useSession } from "../session/SessionProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { useImportStatus } from "../data/queries";
@@ -28,33 +29,62 @@ interface SpaceCtx { spaceId: string; name: string }
 //     node; a count is never the whole story. When a group is long the screen says how many it is
 //     holding back and offers to show them, rather than truncating silently.
 
-/** Group by `what` so a reader sees "wikilink heading anchor: these 6 pages", not 6 loose rows. */
-function groupDegradations(degraded: ImportDegradation[]): { what: string; items: ImportDegradation[] }[] {
+/**
+ * Group by KIND so a reader sees "wikilink heading anchor: these 6 pages", not 6 loose rows.
+ *
+ * #725 ②: keyed on `code`, not on the English sentence. Grouping on prose would split one kind
+ * into two groups the moment the server reworded it, and it is the wording that is about to become
+ * the screen's own (below) — after which every row of a kind would carry the same translated heading
+ * anyway. Falls back to `what` for a report from a server that predates the codes.
+ */
+function groupDegradations(degraded: ImportDegradation[]): { key: string; items: ImportDegradation[] }[] {
   const by = new Map<string, ImportDegradation[]>();
   for (const d of degraded) {
-    const list = by.get(d.what);
+    const key = d.code ?? d.what;
+    const list = by.get(key);
     if (list) list.push(d);
-    else by.set(d.what, [d]);
+    else by.set(key, [d]);
   }
-  return [...by.entries()].map(([what, items]) => ({ what, items }));
+  return [...by.entries()].map(([key, items]) => ({ key, items }));
+}
+
+/**
+ * The heading for a kind, and the detail under one node, in the READER'S language.
+ *
+ * `t()` is given the English as its default, so an unknown code degrades to what the API said rather
+ * than printing a translation key at somebody (#669 fixed that exact leak once already). A detail is
+ * optional: several kinds have nothing to add beyond the page's name, and inventing a sentence for
+ * them would be padding.
+ */
+function degradationWords(d: ImportDegradation, t: TFunction): { heading: string; detail: string } {
+  const heading = d.code ? String(t(`import.degraded.${d.code}`, { defaultValue: d.what })) : d.what;
+  const detail = d.code
+    ? String(t(`import.degradedDetail.${d.code}`, { ...(d.params ?? {}), defaultValue: d.detail ?? "" }))
+    : (d.detail ?? "");
+  return { heading, detail };
 }
 
 const GROUP_PREVIEW = 20;
 
-function DegradedGroup({ what, items }: { what: string; items: ImportDegradation[] }) {
+function DegradedGroup({ items }: { items: ImportDegradation[] }) {
   const { t } = useTranslation();
   const [all, setAll] = useState(false);
   const shown = all ? items : items.slice(0, GROUP_PREVIEW);
+  // Every item in a group is the same kind, so the heading comes from the first one.
+  const heading = degradationWords(items[0]!, t).heading;
   return (
     <div className="mt-3" data-testid="import-degraded-group">
-      <h4 className="mb-1 text-sm font-semibold">{what}</h4>
+      <h4 className="mb-1 text-sm font-semibold">{heading}</h4>
       <ul className="m-0 list-disc pl-5 text-sm">
-        {shown.map((d, i) => (
-          <li key={`${d.node}-${i}`} data-testid="import-degraded-item">
-            {d.node}
-            {d.detail ? <span className="text-fg-dim">{` (${d.detail})`}</span> : null}
-          </li>
-        ))}
+        {shown.map((d, i) => {
+          const detail = degradationWords(d, t).detail;
+          return (
+            <li key={`${d.node}-${i}`} data-testid="import-degraded-item">
+              {d.node}
+              {detail ? <span className="text-fg-dim">{` (${detail})`}</span> : null}
+            </li>
+          );
+        })}
       </ul>
       {/* Never a silent truncation: the button says how many are being held back (ADR-236 §4). */}
       {!all && items.length > GROUP_PREVIEW && (
@@ -97,7 +127,7 @@ export function ImportReportView({ report, spaceId }: { report: ImportReport; sp
         <section className="mt-4" data-testid="import-degraded">
           <h3 className="mb-0 text-base">{t("import.degradedTitle")}</h3>
           <p className="mt-1 text-sm text-fg-dim">{t("import.degradedHint")}</p>
-          {groups.map((g) => <DegradedGroup key={g.what} what={g.what} items={g.items} />)}
+          {groups.map((g) => <DegradedGroup key={g.key} items={g.items} />)}
         </section>
       )}
 
@@ -130,8 +160,15 @@ export function ImportReportView({ report, spaceId }: { report: ImportReport; sp
         <p className="mt-4 text-sm text-fg-dim" data-testid="import-lossy-titles">{t("import.lossyTitles")}</p>
       )}
 
-      <p className="mt-5">
-        <Link to={`/spaces/${spaceId}`} data-testid="import-open-space">{t("import.openSpace")}</Link>
+      {/* #725 ③: this is the reader's next move after an import, and it did not look pressable.
+          Measured on the real DOM: the same colour as body text, no underline, and at 17px next to a
+          button — so it read as a heading. It carries the product's link colour AND an underline that
+          is there before the pointer arrives, because a hover-only underline is invisible to anybody
+          deciding whether there is anything to press. Sized with the lines around it, not above them. */}
+      <p className="mt-5 text-sm">
+        <Link to={`/spaces/${spaceId}`} className="text-[var(--link)] underline" data-testid="import-open-space">
+          {t("import.openSpace")}
+        </Link>
       </p>
     </div>
   );
@@ -178,12 +215,23 @@ export function SpaceImportTab() {
       setSearch({ import: res.importId }, { replace: false });
       return;
     }
+    // #725 ① — the refusal that KNOWS the answer. #712 put the running import's id in
+    // the 409 body, and ADR-236 §5 named "show me the one that is running" as the only useful thing
+    // the screen can offer here. So it does not report an error at all: it walks onto that import,
+    // which is the same screen showing progress it would have shown had this upload been the one.
+    if (res.kind === "busy") {
+      if (res.running) {
+        setSearch({ import: res.running.id }, { replace: false });
+        return;
+      }
+      // `running: null` — the row settled between the refusal and the read. Nothing to walk onto, so
+      // the honest older answer stands: something else got there first, try again.
+      setError(t("import.busy"));
+      return;
+    }
     setError(
       res.status === 413 ? t("import.tooLarge")
         : res.status === 403 ? t("import.forbidden")
-        // 409 is honest rather than helpful: the response carries no id, so the screen cannot offer
-        // "show me the one that is running". Adding the id to that body is #712's (ADR-236 §5).
-        : res.status === 409 ? t("import.busy")
         : res.status === 400 ? t("import.invalid", { product: productName })
         : t("import.failed"),
     );
