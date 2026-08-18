@@ -821,20 +821,35 @@ export function AdminSignInMethodsSection() {
             </label>
             {preset === "" && (
               <>
-                <Input inputSize="sm" placeholder={t("adminConnections.issuerPlaceholder")} value={form.issuer} aria-label="issuer"
-                  onChange={(e) => setForm({ ...form, issuer: e.target.value })} data-testid="admin-connection-issuer" />
-                <Input inputSize="sm" placeholder={t("adminConnections.labelPlaceholder")} value={form.label} aria-label="label"
-                  onChange={(e) => setForm({ ...form, label: e.target.value })} data-testid="admin-connection-label" />
+                <label className="flex flex-col gap-1 text-xs text-fg-dim">
+                  {t("adminAuth.issuer")}
+                  <Input inputSize="sm" placeholder={t("adminConnections.issuerPlaceholder")} value={form.issuer}
+                    onChange={(e) => setForm({ ...form, issuer: e.target.value })} data-testid="admin-connection-issuer" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-fg-dim">
+                  {t("adminConnections.buttonLabel")}
+                  <Input inputSize="sm" placeholder={t("adminConnections.labelPlaceholder")} value={form.label}
+                    onChange={(e) => setForm({ ...form, label: e.target.value })} data-testid="admin-connection-label" />
+                </label>
               </>
             )}
             {preset === "microsoft" && (
-              <Input inputSize="sm" placeholder={t("adminConnections.entraPlaceholder")} value={form.entraTenantId} aria-label="entra tenant id"
-                onChange={(e) => setForm({ ...form, entraTenantId: e.target.value })} data-testid="admin-connection-entra" />
+              <label className="flex flex-col gap-1 text-xs text-fg-dim">
+                {t("adminConnections.entraTenantId")}
+                <Input inputSize="sm" placeholder={t("adminConnections.entraPlaceholder")} value={form.entraTenantId}
+                  onChange={(e) => setForm({ ...form, entraTenantId: e.target.value })} data-testid="admin-connection-entra" />
+              </label>
             )}
-            <Input inputSize="sm" placeholder={t("adminConnections.clientIdPlaceholder")} value={form.clientId} aria-label="client id"
-              onChange={(e) => setForm({ ...form, clientId: e.target.value })} data-testid="admin-connection-clientid" />
-            <Input inputSize="sm" type="password" placeholder={t("adminConnections.secretPlaceholder")} value={form.clientSecret} aria-label="client secret"
-              onChange={(e) => setForm({ ...form, clientSecret: e.target.value })} />
+            <label className="flex flex-col gap-1 text-xs text-fg-dim">
+              {t("adminAuth.clientId")}
+              <Input inputSize="sm" placeholder={t("adminConnections.clientIdPlaceholder")} value={form.clientId}
+                onChange={(e) => setForm({ ...form, clientId: e.target.value })} data-testid="admin-connection-clientid" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-fg-dim">
+              {t("adminAuth.clientSecret")}
+              <Input inputSize="sm" type="password" placeholder={t("adminConnections.secretPlaceholder")} value={form.clientSecret}
+                onChange={(e) => setForm({ ...form, clientSecret: e.target.value })} />
+            </label>
             {/* #733: shown, not asked for — see the note on the edit form above. */}
             <p className="flex flex-col gap-1 text-xs text-fg-dim">
               {t("adminAuth.oidcRedirectHint", { product: productName })}
@@ -844,9 +859,12 @@ export function AdminSignInMethodsSection() {
                 then having to reopen the row to say WHICH claim carries the groups is the two-step this
                 ticket removes — and the pair is what decides whether group sync works at all. Blank
                 means `groups` (the placeholder says so); the default is unchanged. */}
-            <Input inputSize="sm" placeholder={t("adminConnections.groupsClaimPlaceholder")} value={form.groupsClaim}
-              aria-label={t("adminAuth.groupsClaim")} data-testid="admin-connection-groups-claim"
-              onChange={(e) => setForm({ ...form, groupsClaim: e.target.value })} />
+            <label className="flex flex-col gap-1 text-xs text-fg-dim">
+              {t("adminAuth.groupsClaim")}
+              <Input inputSize="sm" placeholder={t("adminConnections.groupsClaimPlaceholder")} value={form.groupsClaim}
+                data-testid="admin-connection-groups-claim"
+                onChange={(e) => setForm({ ...form, groupsClaim: e.target.value })} />
+            </label>
             <label className="flex items-start gap-2 text-xs text-fg-dim">
               <Switch checked={flags.trustGroups} ariaLabel={t("adminConnections.trustGroups")} testId="admin-connection-trust-groups"
                 onChange={(on: boolean) => setFlags({ ...flags, trustGroups: on })} />

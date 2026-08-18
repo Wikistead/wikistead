@@ -1436,7 +1436,10 @@ function WorkspaceRoute() {
       <div style={{ padding: 24, maxWidth: 440 }}>
         <h2 style={{ marginTop: 0 }}>{t("auth.workspaceTitle")}</h2>
         <p style={{ color: "var(--fg-dim)" }}>{t("auth.workspaceBody")}</p>
-        <Input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t("auth.workspacePlaceholder")} aria-label={t("auth.workspaceName")} />
+        <label className="flex flex-col gap-1 text-xs text-fg-dim">
+            {t("auth.workspaceName")}
+            <Input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t("auth.workspacePlaceholder")} />
+          </label>
         {err && <p style={{ color: "crimson" }}>{err}</p>}
         <Button variant="primary" disabled={busy || !slug} onClick={submit}>{t("auth.createWorkspace")}</Button>
       </div>

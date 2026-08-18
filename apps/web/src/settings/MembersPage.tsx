@@ -583,7 +583,10 @@ export function MembersPage() {
           yet are different acts, and pressed together they read as one block. */}
       <h3 className="mb-2 mt-8 border-t border-border pt-6 text-sm font-medium">{t("members.inviteTitle")}</h3>
       <FormRow>
-        <Input className="max-w-xs" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("members.emailPlaceholder")} aria-label={t("members.inviteEmail")} type="email" />
+        <label className="flex flex-col gap-1 text-xs text-fg-dim">
+            {t("members.inviteEmail")}
+            <Input className="max-w-xs" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("members.emailPlaceholder")} type="email" />
+          </label>
         {/* One dropdown here too (#579, same ruling): the tiers and the tenant custom roles in one list.
             Picking a tier invites at that tier; picking a custom role invites at `member` and grants the
             role on acceptance — which is what the two Selects said together, minus the "no custom role"

@@ -56,6 +56,10 @@ const ALLOWED: Record<string, string> = {
   // Microsoft's own term for the directory id. Renaming it would send administrators looking for a
   // field their IdP does not have.
   "adminConnections.entraPlaceholder": "Entra's own term for the directory",
+  // #740 gave that field a visible label, and the label carries the same borrowed noun for the
+  // same reason: an administrator copies this value out of a Microsoft screen that calls it a
+  // tenant, and renaming it here would leave them hunting for something Entra does not have.
+  "adminConnections.entraTenantId": "Entra's own term for the directory",
 };
 
 describe("#732: the product uses one name for a workspace", () => {

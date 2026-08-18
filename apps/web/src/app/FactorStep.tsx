@@ -177,10 +177,13 @@ export function FactorStep(
 
   const codeBox = (onSubmit: () => void, testId: string) => (
     <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void onSubmit(); }}>
-      <Input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric"
-        autoComplete="one-time-code" autoFocus disabled={busy}
-        placeholder={t("auth.factorCodePlaceholder")} aria-label={t("auth.factorCode")}
-        data-testid={`${testId}-code`} />
+      <label className="flex flex-col gap-1 text-xs text-fg-dim">
+        {t("auth.factorCode")}
+        <Input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric"
+          autoComplete="one-time-code" autoFocus disabled={busy}
+          placeholder={t("auth.factorCodePlaceholder")}
+          data-testid={`${testId}-code`} />
+      </label>
       <Button variant="primary" type="submit" className="w-full" disabled={busy || !code.trim()}
         data-testid={`${testId}-submit`}>
         {busy && <Loader2 size={16} className="animate-spin" />}
@@ -245,10 +248,13 @@ export function FactorStep(
               <p className="m-0 text-sm text-fg-dim" data-testid="login-recovery-warning">
                 {t("auth.recoveryCodeWarning")}
               </p>
-              <Input value={recoveryCode} onChange={(e) => setRecoveryCode(e.target.value)}
-                autoComplete="one-time-code" autoFocus disabled={busy}
-                placeholder={t("auth.recoveryCodePlaceholder")} aria-label={t("auth.recoveryCode")}
-                data-testid="login-recovery-code" />
+              <label className="flex flex-col gap-1 text-xs text-fg-dim">
+                {t("auth.recoveryCode")}
+                <Input value={recoveryCode} onChange={(e) => setRecoveryCode(e.target.value)}
+                  autoComplete="one-time-code" autoFocus disabled={busy}
+                  placeholder={t("auth.recoveryCodePlaceholder")}
+                  data-testid="login-recovery-code" />
+              </label>
               <Button variant="primary" type="submit" className="w-full"
                 disabled={busy || !recoveryCode.trim()} data-testid="login-recovery-submit">
                 {busy && <Loader2 size={16} className="animate-spin" />}
