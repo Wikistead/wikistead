@@ -63,7 +63,6 @@ const sql = postgres(dbUrl);
 type Prefs = { second_factor_required: boolean; second_factor_kinds: string; local_login_enabled: boolean; sso_required: boolean };
 let priorPrefs: Prefs | null = null;
 /** The tenant's plan before this file raised it — see `beforeAll`. */
-let priorPlan: string | null = null;
 
 const setPrefs = (secondFactor: boolean) => sql`
   INSERT INTO tenant_login_prefs (tenant_id, second_factor_required, second_factor_kinds, local_login_enabled, sso_required)
@@ -78,30 +77,19 @@ test.beforeAll(async () => {
     FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`;
   priorPrefs = pref ?? null;
 
-  // ── the SEAT CAP, and why this file raises the plan for its own run ─────────────────────────────
+  // ── the SEAT CAP ───────────────────────────────────────────────────────────────────────────────
   //
-  // The fixture tenant is on `pro`, which is a ONE-SEAT plan (#691's ruling: Personal is a plan for one
-  // person), and since #720 gave the entitlements resolver a composition point that cap is enforced for
-  // real. So inviting the member this spec needs answers 402 `seat_limit` — measured, and it is not a
-  // fact about this ticket: every spec here that invites somebody hits it.
+  // This spec needs a SECOND member, and every Cloud plan below the top tier is one seat (#691:
+  // Personal is a plan for one person). Since #720 gave the resolver a composition point, that cap is
+  // enforced for real, so the invite answered 402 `seat_limit` — never a fact about recovery codes,
+  // and every spec here that invites somebody met it (#738).
   //
-  // Raised HERE and restored in afterAll, the same shape this file already uses for the login prefs,
-  // rather than by moving the shared fixture to `team`. That was measured too: `team` also switches on
-  // SCIM, SAML, the audit log, analytics and custom roles, and ~30 specs in this directory assert
-  // against surfaces those levers gate. Flipping a shared fixture to fix one spec is how a green run
-  // starts meaning something different.
-  //
-  // ⚠️ AND THEN WAIT. `db/registry.ts` caches the tenant row for 30 seconds, so a plan written here is
-  // NOT what the server sees if any earlier spec in the run touched this tenant inside that window —
-  // measured: alone this spec is green, run after `factor-signin-real-652` it hits the same 402, because
-  // the registry was still holding `pro`. A sleep is the honest price of mutating a cached fixture; the
-  // sound fix is a tenant that already has the seats (#738), and this spec loses the wait the day it lands.
-  const [t] = await sql<{ plan: string }[]>`SELECT plan FROM tenants WHERE id = ${TENANT}`;
-  priorPlan = t?.plan ?? null;
-  if (priorPlan !== "team") {
-    await sql`UPDATE tenants SET plan = 'team' WHERE id = ${TENANT}`;
-    await sleep(31_000); // the registry's 30s TTL, plus a second
-  }
+  // #738 seeds the e2e fixture tenant multi-seat instead (`SEED_TENANT_PLAN` in .env.e2e), so this
+  // file no longer raises the plan for its own run. It used to, and then WAIT 31 seconds: the tenant
+  // row is cached for 30 (db/registry.ts), so a plan written in `beforeAll` might not be what the
+  // server reads — measured, alone this spec was green and after `factor-signin-real-652` it hit the
+  // same 402. Nothing is mutated now, so the cache has nothing to be stale about, and nothing has to
+  // be put back in `afterAll` either.
 });
 
 test.afterAll(async () => {
@@ -123,9 +111,6 @@ test.afterAll(async () => {
           sso_required = ${priorPrefs.sso_required}
       WHERE tenant_id = ${TENANT}`.catch(() => {});
   }
-  // Put the PLAN back. Leaving the tenant on `team` would quietly open SCIM, SAML, the audit log,
-  // analytics and custom roles for every spec that runs after this one.
-  if (priorPlan) await sql`UPDATE tenants SET plan = ${priorPlan} WHERE id = ${TENANT}`.catch(() => {});
   await sql.end();
 });
 
