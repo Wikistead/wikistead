@@ -49,8 +49,20 @@ export interface ImportRow {
   updatedAt: Date
 }
 
+/**
+ * The space already has an import in flight.
+ *
+ * #712this carries the RUNNING import's id, because without it the screen can say "an import
+ * is already running" and nothing else — the status route needs an id, so the one action worth
+ * offering ("show me the one that is running") could not be built. No new authorization decision
+ * comes with it: only somebody with `edit` on the space can reach this error at all, which is the
+ * same gate the status route applies before answering.
+ */
 export class ImportBusyError extends Error {
-  constructor() { super('an import is already running for this space'); this.name = 'ImportBusyError' }
+  constructor(public readonly running: { id: string; status: ImportStatus; nodesDone: number; nodesTotal: number } | null = null) {
+    super('an import is already running for this space')
+    this.name = 'ImportBusyError'
+  }
 }
 
 function archiveKeyFor(tenantId: string, importId: string): string {
@@ -86,10 +98,28 @@ export async function enqueueImportJob(
     await deps.storage.deleteObject(key).catch(() => {})
     // The partial unique index (migration 124) is the one-import-per-space bound. Losing that race is a
     // 409, not a 500 — and it is decided by the database, so two simultaneous uploads cannot both win.
-    if ((e as postgres.PostgresError)?.code === '23505') throw new ImportBusyError()
+    if ((e as postgres.PostgresError)?.code === '23505') throw new ImportBusyError(await runningImportFor(args.tenantId, args.spaceId))
     throw e
   }
   return id
+}
+
+/**
+ * The import currently occupying this space's one slot, if any.
+ *
+ * Read AFTER the unique-index violation rather than before the insert: asking first would be a
+ * read-then-write race (two uploads could both find the slot free), and the index is what actually
+ * decides. This read only explains a decision the database already made.
+ *
+ * Same explicit isolation as `readImport` — `imports` has no RLS — and the same statuses the index
+ * treats as occupying (queued/running).
+ */
+async function runningImportFor(tenantId: string, spaceId: string) {
+  const [row] = await pool<[{ id: string; status: ImportStatus; nodes_done: number; nodes_total: number }?]>`
+    SELECT id, status, nodes_done, nodes_total FROM imports
+    WHERE tenant_id = ${tenantId} AND space_id = ${spaceId} AND status IN ('queued', 'running')
+    ORDER BY created_at DESC LIMIT 1`
+  return row ? { id: row.id, status: row.status, nodesDone: row.nodes_done, nodesTotal: row.nodes_total } : null
 }
 
 /**

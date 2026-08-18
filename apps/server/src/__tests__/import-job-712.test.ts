@@ -142,6 +142,16 @@ describe('#712 §7: the threshold decides whether one request can carry the impo
     expect(first.statusCode).toBe(202)
     const second = await post(SPACE, vaultOf(IMPORT_SYNC_MAX_NODES + 1, 'race-b'))
     expect(second.statusCode, 'one import per space — the second is refused, not queued behind it').toBe(409)
+    // #712the refusal NAMES the import that holds the slot, and the id it names is usable.
+    // Returning an id nobody can read with would leave the screen exactly where it was.
+    const busy = second.json() as { running?: { id: string; status: string; nodesTotal: number } }
+    expect(busy.running?.id, 'the 409 says WHICH import is running').toBe(first.json().importId)
+    expect(busy.running?.status, 'and what it is doing').toMatch(/queued|running/)
+    expect(busy.running?.nodesTotal, 'and how much work it holds').toBeGreaterThan(0)
+    const followed = await app.inject({
+      method: 'GET', url: `/spaces/${SPACE}/imports/${busy.running!.id}`, headers: H,
+    })
+    expect(followed.statusCode, 'the id from a 409 reads on the status route — that is the point of returning it').toBe(200)
     // A DIFFERENT space is not blocked by it: the bound is per space, not per tenant.
     const elsewhere = await post(OTHER_SPACE, vaultOf(IMPORT_SYNC_MAX_NODES + 1, 'race-c'))
     expect(elsewhere.statusCode, 'another space may still start one').toBe(202)

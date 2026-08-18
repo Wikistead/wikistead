@@ -247,15 +247,11 @@ function inlineNode(node: Node, ctx: Ctx): string {
         ctx.degraded.push({ node: ctx.title, what: 'link to a page outside the export', detail: leaf })
         return text
       }
-      // ⚠️ An `<a href="attachments/…">` is a FILE, not a page, and nothing ever rewrote it: every
-      // attachment LINK in a migrated wiki pointed at a path this product does not serve. The file
-      // itself imports fine, so the report said "imported" while the link was dead. Binding it to the
-      // attachment id needs the id, which does not exist until materialisation — so for now it is
-      // REPORTED by name rather than left silent, which is the half that can be got right here.
-      if (/^(?!https?:|mailto:|#)/.test(href) && !/\.html?$/i.test(decodeSafe(href))) {
-        const file = decodeSafe(href).split('/').pop() ?? ''
-        if (file) ctx.degraded.push({ node: ctx.title, what: 'link to an attached file is not re-pointed', detail: file })
-      }
+      // ⚠️ An `<a href="attachments/…">` is a FILE, not a page. It is left exactly as written here and
+      // re-pointed during materialisation (`rewriteBody`), where the attachment id exists — the same
+      // place the image pass resolves the same files. Reporting it as lost from here would be a
+      // prediction, and after #712① it would be a wrong one: what cannot be resolved is
+      // reported there, from the fact rather than from the guess.
       return `[${text}](${href})`
     }
     case 'img': return image(el, ctx)

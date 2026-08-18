@@ -1938,7 +1938,14 @@ export async function spacesPlugin(app: FastifyInstance) {
         )
       } catch (e) {
         if ((e as { statusCode?: number })?.statusCode === 403) return reply.code(403).send({ error: 'forbidden' })
-        if (e instanceof ImportBusyError) return reply.code(409).send({ error: 'an import is already running for this space' })
+        // #712the 409 carries the RUNNING import, so the screen can offer the one action worth
+        // offering — "show me the one that is running" — instead of saying "busy" and stopping. The
+        // status route needs an id, and without this the caller had no way to obtain one. `running`
+        // is null only if the row vanished between the conflict and the read (finished a moment
+        // later), and the client's fallback for that is the same as for any 409: try again.
+        if (e instanceof ImportBusyError) {
+          return reply.code(409).send({ error: 'an import is already running for this space', running: e.running })
+        }
         if (e instanceof ImportTooLargeError) return reply.code(413).send({ error: 'archive too large' })
         if (e instanceof ImportInvalidError) return reply.code(400).send({ error: 'invalid archive' })
         throw e
