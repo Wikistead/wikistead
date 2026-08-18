@@ -78,7 +78,14 @@ jobs:
       # dies at load.
       - run: pnpm build
       - run: pnpm setup:server-test     # compose up --wait + migrate + fga bootstrap/seed + db seed (#268)
-      - run: pnpm test                  # unit (web / macro-render / …) + server integration (real PG + OpenFGA)
+      # --concurrency=1: one package's suite at a time. The repo's own merge-gate policy already
+      # concedes that turbo-parallel runs flake (the project design notes: a lone-green server suite counts when
+      # parallelism is the cause; the live-preview unit tests are on record flaking ONLY under full
+      # parallelism) — and the 2-core runner makes that contention a certainty, not a tail risk.
+      # Measured across the first day's runs: hook timeouts at 60/120s and a live-preview decoration
+      # mismatch, every one green in isolation. Wall-clock is the price; a red that means nothing
+      # costs more.
+      - run: pnpm test -- --concurrency=1   # unit (web / macro-render / …) + server integration (real PG + OpenFGA)
       - if: always()
         run: pnpm teardown:server-test || true
   license-check:
