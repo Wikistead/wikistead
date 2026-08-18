@@ -196,3 +196,69 @@ describe('#712: the dialect rules, as functions', () => {
     expect(canvasDegradations(['a.canvas', 'b.md', 'c.CANVAS']).map((d) => d.node)).toEqual(['a.canvas', 'c.CANVAS'])
   })
 })
+
+// ── #712 / the silences and the mislabelled reports ────────────────────────────────
+//
+// The independent verification's second family: things that were LOST and said nothing, and things
+// that were reported under the wrong name. A report that names the wrong loss is worse than one that
+// names none, because the reader stops looking.
+describe('#712 H: a vault callout becomes this product\'s callout', () => {
+  it('converts the type and the title, and reports only what genuinely has no equivalent', async () => {
+    const { convertVaultCallouts } = await import('../import/obsidian.js')
+    const warn = convertVaultCallouts('> [!warning] Careful\n> mind the gap\n', { title: 'N' })
+    expect(warn.markdown, 'the product\'s own notation').toContain(':::warning[Careful]')
+    expect(warn.markdown, 'the body survives').toContain('mind the gap')
+    expect(warn.markdown, 'and no foreign notation is left on screen').not.toContain('[!warning]')
+    expect(warn.degraded, 'a type with an equivalent is not a degrade').toEqual([])
+
+    // A type this product does not have folds onto `note` — and SAYS so.
+    const bug = convertVaultCallouts('> [!bug] Known issue\n> it crashes\n', { title: 'N' })
+    expect(bug.markdown).toContain(':::danger[Known issue]')
+
+    const quote = convertVaultCallouts('> [!question] Why\n> because\n', { title: 'N' })
+    expect(quote.markdown).toContain(':::note[Why]')
+    expect(quote.degraded.map((d) => d.what).join(' '), 'the lost distinction is named').toMatch(/question/)
+
+    // A collapsed callout opens here, which the reader should be told.
+    const folded = convertVaultCallouts('> [!note]- Hidden\n> body\n', { title: 'N' })
+    expect(folded.degraded.map((d) => d.what).join(' ')).toMatch(/collaps/i)
+
+    // An ordinary quote is left completely alone.
+    const plain = convertVaultCallouts('> just a quote\n', { title: 'N' })
+    expect(plain.markdown).toBe('> just a quote\n')
+    expect(plain.degraded).toEqual([])
+  })
+})
+
+describe('#712 the report names what was actually lost', () => {
+  it('calls a block reference a block reference, and keeps the fragment in the detail', async () => {
+    const { rewriteWikilinks } = await import('../import/obsidian.js')
+    const hrefByName = new Map([['runbook', '/p/abc']])
+    const embedByName = new Map<string, string>()
+
+    const blockRef = rewriteWikilinks('see [[Runbook#^decision1]]', { title: 'N' }, { hrefByName, embedByName })
+    expect(blockRef.degraded[0]?.what, 'not "heading anchor"').toMatch(/block reference/)
+    expect(blockRef.degraded[0]?.detail, 'and the reader can see which one').toContain('#^decision1')
+
+    const heading = rewriteWikilinks('see [[Runbook#Rollback]]', { title: 'N' }, { hrefByName, embedByName })
+    expect(heading.degraded[0]?.what).toMatch(/heading anchor/)
+
+    // An EMBED of a section: the note is reported, and so is the section that was the point of it.
+    const embed = rewriteWikilinks('![[Runbook#Rollback]]', { title: 'N' }, { hrefByName, embedByName })
+    expect(embed.degraded[0]?.detail, 'the dropped section appears in the detail').toContain('#Rollback')
+  })
+
+  it('reports a dropped image size, an inline Dataview expression and a stray block id', async () => {
+    const { rewriteWikilinks, detectVaultDegradations } = await import('../import/obsidian.js')
+    const sized = rewriteWikilinks('![[pic.png|300]]', { title: 'N' }, {
+      hrefByName: new Map(), embedByName: new Map([['pic.png', '![pic.png](wks-attachment:1)']]),
+    })
+    expect(sized.markdown, 'the picture still arrives').toContain('wks-attachment:1')
+    expect(sized.degraded.map((d) => d.what).join(' '), 'the sizing is not silently dropped').toMatch(/size|caption/)
+
+    const shapes = detectVaultDegradations({ title: 'N', markdown: 'total `=this.file.size` bytes\n\nA paragraph. ^blk9\n' })
+    const said = shapes.map((d) => d.what).join(' | ')
+    expect(said, 'the inline Dataview form is reported like the fenced one').toMatch(/inline Dataview/)
+    expect(said, 'and the block id residue is named').toMatch(/block identifier/)
+  })
+})
