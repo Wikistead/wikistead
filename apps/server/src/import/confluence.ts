@@ -272,6 +272,25 @@ function table(el: HTMLElement, ctx: Ctx): string {
   return out.join('\n')
 }
 
+// #712④ (user ruling 2026-08-19): Confluence emoticons become the ACTUAL CHARACTER.
+//
+// They arrive as `<img class="emoticon" alt="smile" src="/images/icons/emoticons/smile.png">`: a picture
+// hosted by the instance being left, so carried over verbatim it is a broken image on every page that
+// used one.replaced it with the alt text as `:smile:` — which this product does not render (no
+// shortcode pass exists in the editor or the renderers), so the reader saw the literal colons.
+//
+// The set is small and fixed, so it maps to Unicode instead: a standard character, in the body, that
+// needs no renderer and survives an export. A mapped one is NOT reported — nothing was lost. Only a
+// name outside this table falls back to `:name:` and is reported, which is the honest half of.
+const EMOTICONS: Record<string, string> = {
+  smile: '🙂', sad: '🙁', wink: '😉', laugh: '😄', cheeky: '😜',
+  'thumbs-up': '👍', 'thumbs-down': '👎',
+  tick: '✅', cross: '❌', warning: '⚠️', information: 'ℹ️', question: '❓',
+  'light-on': '💡', 'light-off': '🔅', 'yellow-star': '⭐', 'red-star': '⭐',
+  'green-star': '⭐', 'blue-star': '⭐', heart: '❤️', broken: '💔',
+  plus: '➕', minus: '➖', check: '✅', flag: '🚩', 'star-yellow': '⭐',
+}
+
 function image(el: HTMLElement, ctx?: Ctx): string {
   const src = el.getAttribute('src') ?? ''
   const alt = el.getAttribute('alt') ?? ''
@@ -282,6 +301,9 @@ function image(el: HTMLElement, ctx?: Ctx): string {
   // name, which reads better than a missing picture. So the picture is dropped for the name, and the
   // substitution is REPORTED rather than done quietly.
   if (/(^|\/)(images\/icons\/emoticons|emoticons)\//i.test(src) || /^https?:\/\/[^/]+\/(?:wiki\/)?images\/icons\//i.test(src)) {
+    const key = alt.toLowerCase().trim()
+    const glyph = EMOTICONS[key] ?? EMOTICONS[key.replace(/[_ ]/g, '-')]
+    if (glyph) return glyph // mapped: nothing lost, so nothing to report
     ctx?.degraded.push({ node: ctx.title, code: 'emojiReplacedByName',
       what: 'emoji image replaced by its name', detail: alt || src, params: { name: alt || src } })
     return alt ? `:${alt}:` : ''

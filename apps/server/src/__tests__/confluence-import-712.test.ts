@@ -291,13 +291,18 @@ describe('#712E: Confluence shapes GFM can carry are carried', () => {
 })
 
 describe('#712H: a Confluence emoji does not become a broken image', () => {
-  it('substitutes the name and says it did', () => {
+  it('becomes the CHARACTER, not a shortcode this product cannot render', () => {
+    //substituted the alt text as `:smile:`, which was right about the broken picture and wrong
+    // about the replacement: nothing here renders shortcodes, so the reader saw the colons. #712
+    // ④ (user ruling) maps the fixed emoticon set to Unicode instead. The rest of this case is
+    // unchanged — the picture lived in the instance being left, and must not be carried over.
     const { markdown, degraded } = confluenceHtmlToMarkdown(
       '<html><body><h1>T</h1><p>nice <img class="emoticon" src="/images/icons/emoticons/smile.png" alt="smile"/></p></body></html>',
       'T')
     expect(markdown, 'no link into the old installation').not.toContain('/images/icons/')
-    expect(markdown, 'the name reads better than a missing picture').toContain(':smile:')
-    expect(degraded.map((d) => d.what).join(' ')).toMatch(/emoji/)
+    expect(markdown, 'a standard character, which needs no renderer').toContain('🙂')
+    expect(markdown, 'and not the shortcode').not.toContain(':smile:')
+    expect(degraded, 'a mapped emoticon lost nothing, so it is not reported').toHaveLength(0)
   })
 
   it('leaves an ordinary image alone', () => {

@@ -294,6 +294,16 @@ export function withFrontmatter(markdown: string, frontmatter: Record<string, un
  * existing materializer uploads them through its own quota + sniff gate (ADR-132 §3) — the embed map
  * is built across all nodes, so which node carries them does not affect resolution.
  */
+/**
+ * Directories a vault keeps for ITSELF. Nothing under them is content, in either direction: they make
+ * no pages and they make no attachments.
+ *
+ * `.trash` is Obsidian's own recycle bin — importing it would resurrect what somebody deleted, which
+ * is worse than dropping it. `.git` turns up in vaults kept under version control and would arrive as
+ * hundreds of unreadable object files.
+ */
+const IGNORED_VAULT_DIRS: readonly string[] = ['.obsidian', '.trash', '.git']
+
 export function vaultAttachments(
   files: Record<string, Uint8Array>,
   opts: { claimed: ReadonlySet<string>; mimeOf: (name: string) => string },
@@ -305,6 +315,13 @@ export function vaultAttachments(
     // Pages, the manifest and Canvas files are not attachments. A `.canvas` is reported separately;
     // importing it as a binary blob would be the silent-drop behaviour wearing a different hat.
     if (lower.endsWith('.md') || lower.endsWith('.canvas') || path === 'manifest.json') continue
+    // #712①: a vault's OWN CONFIG is not content. `.obsidian/` holds that tool's settings,
+    // workspace layout, themes and plugin state; the docs already say it is ignored, and it is — as far
+    // as PAGES go. Attachments were another matter: the shared-attachment collection added in
+    // sweeps up every unclaimed file, so `app.json`, `workspace.json` and a theme's CSS arrived as
+    // attachments on whichever page came first, counted in "2 attachments came across", and charged
+    // against the storage quota. Measured on a real vault.
+    if (lower.split('/').some((seg) => IGNORED_VAULT_DIRS.includes(seg))) continue
     const name = path.slice(path.lastIndexOf('/') + 1)
     if (!name) continue
     out.push({ relPath: path, name, bytes, mime: opts.mimeOf(name) })

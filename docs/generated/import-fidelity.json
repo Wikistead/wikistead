@@ -491,12 +491,21 @@
           "element": "Emoji",
           "input": "<html><body><div id=\"main-content\"><p>Ship it <img class=\"emoticon\" src=\"https://old.example/images/icons/emoticons/smile.png\" alt=\"smile\"></p></div></body></html>",
           "title": "emoji",
-          "output": "Ship it :smile:",
+          "output": "Ship it 🙂",
+          "reports": [],
+          "verdict": "converted"
+        },
+        {
+          "id": "emoji-unmapped",
+          "element": "Emoji with no Unicode equivalent",
+          "input": "<html><body><div id=\"main-content\"><p>Nice <img class=\"emoticon\" src=\"https://old.example/images/icons/emoticons/party-parrot.png\" alt=\"party-parrot\"></p></div></body></html>",
+          "title": "emoji-unmapped",
+          "output": "Nice :party-parrot:",
           "reports": [
             {
               "code": "emojiReplacedByName",
               "what": "emoji image replaced by its name",
-              "detail": "smile"
+              "detail": "party-parrot"
             }
           ],
           "verdict": "reported"
