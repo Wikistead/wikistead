@@ -10,6 +10,7 @@ import { AccentPicker } from "./AccentPicker";
 import { assetUrl } from "../data/apiClient";
 import { UpgradeNotice } from "../ui/UpgradeNotice";
 import { useSession } from "../session/SessionProvider";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 const LOGO_MAX_BYTES = 512 * 1024;
 const LOGO_TYPES = /^image\/(png|jpeg|webp)$/;
@@ -71,7 +72,7 @@ export function TenantBrandingTab() {
   };
 
   return (
-    <div className="max-w-[560px] p-6" data-testid="tenant-branding">
+    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="tenant-branding">
       <h2 style={{ marginTop: 0 }}>{t("tenantBranding.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("tenantBranding.body")}</p>
 

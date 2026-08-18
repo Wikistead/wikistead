@@ -5,6 +5,7 @@ import { Input } from "../ui/Input";
 import { DateRangePicker } from "../ui/DateRangePicker"; // #641 / ADR-218
 import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // #520 / ADR-189 slice 4/6: the page-view dashboard, shared by the SPACE tab and the TENANT (admin) tab so
 // the two cannot drift. Presentation only — it renders whatever the manage-gated endpoint returned. The
@@ -37,7 +38,10 @@ export function AnalyticsDashboard({
   const totals = analyticsTotals(data);
 
   return (
-    <div style={{ padding: 24, maxWidth: 640 }} data-testid={testId}>
+    // #735: this one wrote its frame as an INLINE STYLE, which is why the sweep of `max-w-[…] p-6`
+    // never found it and why the ticket measured this tab at 24px while its neighbours were at 26.
+    // Two spellings of the same intent is how a convention stops being checkable.
+    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid={testId}>
       <h2 style={{ marginTop: 0 }}>{title}</h2>
       <p style={{ color: "var(--fg-dim)", fontSize: 13, marginTop: 0 }}>{hint}</p>
 

@@ -8,6 +8,7 @@ import { FormRow } from "../ui/FormRow";
 import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting an endpoint drops its config + secret
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 const label = "mb-1.5 mt-[18px] block text-sm text-fg-dim";
 
@@ -33,7 +34,7 @@ export function AdminWebhooksTab() {
   };
 
   return (
-    <div className="max-w-[640px] p-6" data-testid="admin-webhooks">
+    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="admin-webhooks">
       <h2 className="mt-0">{t("adminWebhooks.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("adminWebhooks.body")}</p>
 

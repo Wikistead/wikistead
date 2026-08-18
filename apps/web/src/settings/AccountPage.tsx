@@ -25,7 +25,7 @@ import { RecoveryCodesPanel } from "./RecoveryCodesPanel"; // #650 / ADR-226
 import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
 import { EditorOnboardingDialog } from "../app/EditorOnboarding"; // #289: "redo the setup questions"
 import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
-import { SettingsShell, type SettingsTab } from "./SettingsShell";
+import { SettingsShell, SETTINGS_WIDTHS, type SettingsTab } from "./SettingsShell";
 import { factorKindsPhrase, acceptedFactorKinds } from "./factor-kind"; // #686
 import { useMyFactors } from "../data/queries"; // #686: the stance rides along on this query
 
@@ -66,9 +66,10 @@ function useAccountTabs(): SettingsTab[] {
 function SettingsPage({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
     // #194 (revised): the readable column is LEFT-aligned right after the rail (NO mx-auto — the
-    // earlier centering was the bug), IDENTICAL to the space/admin tabs (max-w-[560px] p-6) so every
-    // settings screen has the exact same layout. max-width caps line length for readability.
-    <div className="max-w-[560px] p-6">
+    // earlier centering was the bug). #735: the width is now the shared `form` step and the padding is
+    // the shell's, so "identical to the space/admin tabs" is enforced rather than asserted in a comment
+    // — which is what it was when SCIM and custom domains shipped with no frame at all.
+    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form}>
       <h2 className="mt-0 mb-1 text-[length:var(--text-xl)] font-medium text-foreground">{title}</h2>
       {description && <p className="mb-6 text-[length:var(--text-ui)] text-fg-dim">{description}</p>}
       <div className="flex flex-col gap-4">{children}</div>

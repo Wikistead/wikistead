@@ -23,6 +23,7 @@ import { notify } from "../ui/toast";
 import { Switch } from "../ui/Switch";
 import { ConfirmDialog } from "../ui/dialogs";
 import { ApiError } from "../data/apiClient";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 // #536the server's refusal code — the client mirrors the constant instead of a string literal.
 export const MANAGER_REPLACEMENT_CODE = "manager_replacement_requires_confirmation";
 
@@ -389,7 +390,7 @@ export function SpaceMembersTab() {
   ].sort((x, y) => x.label.localeCompare(y.label) || x.badge.localeCompare(y.badge));
 
   return (
-    <div className="max-w-[640px] p-6" data-testid="space-members">
+    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="space-members">
       <h2 className="mt-0">{t("spaceMembers.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("spaceMembers.body")}</p>
 

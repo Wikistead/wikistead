@@ -7,6 +7,7 @@ import { Button, IconButton } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { Input } from "../ui/Input";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 const label = "mb-1.5 mt-[18px] block text-sm text-fg-dim";
 
@@ -52,7 +53,7 @@ export function AdminEmbedsTab() {
     });
 
   return (
-    <div className="max-w-[560px] p-6" data-testid="admin-embeds">
+    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="admin-embeds">
       <h2 className="mt-0">{t("adminEmbeds.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("adminEmbeds.body")}</p>
 

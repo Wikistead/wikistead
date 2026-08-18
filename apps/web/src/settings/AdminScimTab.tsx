@@ -11,6 +11,7 @@ import { UpgradeNotice } from "../ui/UpgradeNotice";
 import { disclosureKindFromError } from "../ui/upgrade-affordance";
 import { relTime } from "../ui/relative-time";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // #723 / ADR-232: the SCIM setup surface.
 //
@@ -61,10 +62,19 @@ export function AdminScimTab() {
 
   // ADR-072 through the shared affordance: an entitlement loss offers the upgrade to an admin,
   // an authz loss never does. The tab is admin-gated, so isAdmin holds by construction here.
-  if (locked) return <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="scim-upgrade" title={t("adminScim.lockedTitle")} body={t("adminScim.lockedBody")} />;
+  // #735: in the pane, like the subscriber view it replaces. A tab's locked state is still a tab — an
+  // upgrade notice rendered bare would sit at the window's full width, which is the shape this ticket
+  // is about.
+  if (locked) {
+    return (
+      <div data-settings-pane="list" className={SETTINGS_WIDTHS.list}>
+        <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="scim-upgrade" title={t("adminScim.lockedTitle")} body={t("adminScim.lockedBody")} />
+      </div>
+    );
+  }
 
   return (
-    <section data-testid="admin-scim">
+    <section data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="admin-scim">
       <h2 className="text-lg font-semibold">{t("adminScim.title")}</h2>
       <p className="mt-1 text-sm text-fg-dim">{t("adminScim.body")}</p>
 

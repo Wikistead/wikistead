@@ -8,6 +8,7 @@ import { ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
 import { downloadSelectionExport } from "../data/exportApi";
 import { useSession } from "../session/SessionProvider";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 interface SpaceCtx { spaceId: string; name: string; accentKey: string | null }
 
@@ -162,7 +163,7 @@ export function SpacePagesTab() {
   return (
     // #439: widened (was 720px) + table-fixed below — the auto layout let long titles squeeze the
     // status column until its badges wrapped one glyph per line.
-    <div className="max-w-[920px] p-6" data-testid="space-pages">
+    <div data-settings-pane="wide" className={SETTINGS_WIDTHS.wide} data-testid="space-pages">
       <h2 className="mt-0">{t("spacePages.title")}</h2>
       {pages.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
       {!pages.isLoading && rows.length === 0 && <p className="text-sm text-fg-dim">{t("spacePages.empty")}</p>}

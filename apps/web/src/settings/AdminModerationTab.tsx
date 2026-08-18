@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAbuseFilterConfig, useUpdateAbuseFilterConfig } from "../data/queries";
 import { notify } from "../ui/toast";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 // #491 / ADR-140: tenant-admin config for the publish-boundary abuse filter. The two knobs
 // (mass-delete shrink ratio + banned words) were DB-direct-only; this is their UI. tenant#admin only
@@ -34,7 +35,7 @@ export function AdminModerationTab() {
   };
 
   return (
-    <div className="max-w-[560px] p-6" data-testid="admin-moderation">
+    <div data-settings-pane="form" className={SETTINGS_WIDTHS.form} data-testid="admin-moderation">
       <h2 className="mt-0">{t("adminModeration.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("adminModeration.body")}</p>
 

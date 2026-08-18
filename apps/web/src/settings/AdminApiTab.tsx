@@ -3,6 +3,7 @@ import { useApiKeys, useApiPolicy, useUpdateApiPolicy, type ApiScope } from "../
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { ApiKeysPanel } from "./ApiKeysPanel";
+import { SETTINGS_WIDTHS } from "./SettingsShell"; // #735: the column width is a named step, not a number
 
 const label = "mb-1.5 mt-[18px] block text-sm text-fg-dim";
 
@@ -23,7 +24,7 @@ export function AdminApiTab() {
   const saved = { onSuccess: () => notify.success(t("toast.saved")), onError: () => notify.error(t("toast.actionFailed")) };
 
   return (
-    <div className="max-w-[640px] p-6" data-testid="admin-api">
+    <div data-settings-pane="list" className={SETTINGS_WIDTHS.list} data-testid="admin-api">
       <h2 className="mt-0">{t("adminApi.title")}</h2>
       <p className="mt-0 text-sm text-fg-dim">{t("adminApi.body")}</p>
 
