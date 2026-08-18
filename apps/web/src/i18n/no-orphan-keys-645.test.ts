@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { LANGS } from "./index";
 
 // #645 (user ruling, 2026-08-06): a locale key nothing reads is a lie about the product.
 //
@@ -52,19 +53,33 @@ const read = (lang: string) => JSON.parse(readFileSync(resolve(LOCALES, `${lang}
 
 describe("#645: no locale key without a reader", () => {
   const en = leaves(read("en"));
-  const ja = leaves(read("ja"));
   const code = [...sourceFiles(SRC), ...sourceFiles(E2E)].map((f) => readFileSync(f, "utf8")).join("\n");
 
-  it("the two files describe the same product", () => {
+  // #713 / ADR-228 (owner ruling): the parity check reads the LANGS REGISTRY instead of naming
+  // en and ja. That is the whole preparation this ticket was cut down to — a third language must be
+  // covered the day it is added to LANGS, not the day somebody remembers to widen a test. English is
+  // the reference side because it is the source language every other file is written against.
+  it.each(LANGS.filter((l) => l !== "en"))("%s describes the same product as en", (lang) => {
     // Deleting from one side only leaves a language quietly missing a string. The sets are compared
     // rather than the counts: two files can agree on size and disagree on content.
     //
     // Plural SUFFIXES are excluded, because languages disagree about them by design: i18next gives
     // English `_one` and `_other` and Japanese only `_other`, so demanding identical sets would ask ja
-    // for a form its grammar does not have.
+    // for a form its grammar does not have — and Russian, added tomorrow, for four it does.
     const stem = (k: string) => k.replace(/_(?:zero|one|two|few|many|other)$/, "");
-    expect([...new Set(en.map(stem))].sort(), "en has a key ja does not")
-      .toEqual([...new Set(ja.map(stem))].sort());
+    const mine = new Set(leaves(read(lang)).map(stem));
+    const theirs = new Set(en.map(stem));
+    const missing = [...theirs].filter((k) => !mine.has(k)).sort();
+    const extra = [...mine].filter((k) => !theirs.has(k)).sort();
+    expect(missing, `${lang} is missing keys en has:\n${missing.join("\n")}`).toEqual([]);
+    expect(extra, `${lang} has keys en does not:\n${extra.join("\n")}`).toEqual([]);
+  });
+
+  it("the parity check covers every registered language", () => {
+    // A locale file that exists but is not in LANGS is unreachable from the switcher, and a LANGS entry
+    // with no file crashes the app. Either way the check above would be measuring the wrong set.
+    const files = readdirSync(LOCALES).filter((f) => f.endsWith(".json")).map((f) => f.replace(/\.json$/, "")).sort();
+    expect(files, "the locale files and the LANGS registry must be the same set").toEqual([...LANGS].sort());
   });
 
   it("the sweep can actually see references (a broken walk must not pass vacuously)", () => {
