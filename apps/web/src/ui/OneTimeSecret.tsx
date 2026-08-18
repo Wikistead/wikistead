@@ -1,8 +1,6 @@
 import type React from "react";
-import { Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { IconButton } from "./Button";
-import { notify } from "./toast";
+import { CopyButton } from "./CopyButton";
 
 // #638 (user ruling/): the one way this product hands somebody a secret it will never show
 // again.
@@ -51,14 +49,10 @@ export function OneTimeSecret({ value, note, testId, grouped }: {
         className={`flex-1 whitespace-pre-wrap font-mono [overflow-wrap:anywhere] ${grouped ? "text-sm tracking-wider" : "text-xs"}`}
         data-testid={testId ? `${testId}-value` : undefined}
       >{grouped ? value.replace(/(.{4})/g, "$1 ").trim() : value}</code>
-        <IconButton
-          aria-label={t("adminApi.copy")}
-          data-tip={t("adminApi.copy")}
-          data-testid={testId ? `${testId}-copy` : "one-time-secret-copy"}
-          onClick={() => { navigator.clipboard?.writeText(value); notify.success(t("toast.copied")); }}
-        >
-          <Copy size={14} />
-        </IconButton>
+        {/* #721the copying itself moved to CopyButton so the DNS record could reuse it
+            without a second spelling. The box, the "shown once" sentence and the note stay here —
+            they are what makes this a ONE-TIME secret rather than a value with a copy button. */}
+        <CopyButton value={value} testId={testId ? `${testId}-copy` : "one-time-secret-copy"} />
       </div>
       {/* #646: named, so the two doors' bodies can be compared. They could not be before, and the
           title-only pin stayed green while the same secret said different things by door. */}

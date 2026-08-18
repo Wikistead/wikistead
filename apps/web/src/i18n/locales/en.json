@@ -406,7 +406,8 @@
     "upgradePro": "Upgrade to Pro",
     "manage": "Manage billing",
     "teamNote": "Need SSO provisioning, audit logs, or annual invoicing? Contact us about the Team plan.",
-    "portalUnavailable": "No billing set up yet. Upgrade first."
+    "portalUnavailable": "No billing set up yet. Upgrade first.",
+    "domainsAtRisk": "Changing to a plan without custom domains releases {{domains}}. The workspace returns to the address it was created with, and adding a domain back means proving ownership again."
   },
   "adminApi": {
     "title": "API",
@@ -1586,6 +1587,9 @@
     "releaseTitle": "Release this domain?",
     "releaseBody": "{{domain}} stops resolving immediately, and adding it back means proving ownership again.",
     "lockedTitle": "Custom domains are a paid feature",
-    "lockedBody": "Upgrade to serve your workspace on your own hostname."
+    "lockedBody": "Upgrade to serve your workspace on your own hostname.",
+    "dnsType": "TXT",
+    "copyHost": "Copy host",
+    "copyValue": "Copy value"
   }
 }
