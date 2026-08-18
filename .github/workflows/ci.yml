@@ -85,7 +85,13 @@ jobs:
       # Measured across the first day's runs: hook timeouts at 60/120s and a live-preview decoration
       # mismatch, every one green in isolation. Wall-clock is the price; a red that means nothing
       # costs more.
+      # VITEST_MAX_THREADS=2: inside each package, vitest still runs test FILES in parallel, and on
+      # the 2-core runner that parallelism starves OpenFGA — the per-row visibility confirm is
+      # fail-closed (correct for the product), so a starved check reads as "row absent" and a
+      # presence assertion goes red. Measured: tree-placeholders' chevron case failed 3/3 in the full
+      # suite here and passed 3/3 pinned to two cores as a single file. Threads match the cores.
       - run: pnpm test -- --concurrency=1   # unit (web / macro-render / …) + server integration (real PG + OpenFGA)
+        env: { VITEST_MAX_THREADS: "2", VITEST_MIN_THREADS: "1" }
       - if: always()
         run: pnpm teardown:server-test || true
   license-check:
