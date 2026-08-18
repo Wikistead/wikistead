@@ -34,7 +34,10 @@ services:
   # runs the schema before `run` starts. dev keeps state across restarts (persistent volume semantics of
   # its stack); e2e/server-test wipe on teardown (`down -v`) by design.
   openfga-migrate:
-    image: openfga/openfga:latest
+    # Pinned (#293): CI pulls `latest` fresh while long-lived dev machines keep an old one — the two
+    # worlds ran different servers for a day and the difference cost five CI runs to corner. Upgrades
+    # are deliberate changes now, measured like any other. v1.18.3 carries the full local suite green.
+    image: openfga/openfga:v1.18.3
     command: migrate
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
@@ -42,7 +45,10 @@ services:
     restart: on-failure
 
   openfga:
-    image: openfga/openfga:latest
+    # Pinned (#293): CI pulls `latest` fresh while long-lived dev machines keep an old one — the two
+    # worlds ran different servers for a day and the difference cost five CI runs to corner. Upgrades
+    # are deliberate changes now, measured like any other. v1.18.3 carries the full local suite green.
+    image: openfga/openfga:v1.18.3
     command: run
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
