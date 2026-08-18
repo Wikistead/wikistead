@@ -392,7 +392,14 @@ function rewriteBody(
     // Unresolved: the archive linked a file it did not carry. Said here rather than at parse time,
     // because only here is it known that the file really is absent.
     const file = decodeAttUrl(url).split('/').pop() ?? url
-    if (/\.[a-z0-9]{1,8}$/i.test(file) && !/\.html?$/i.test(file)) {
+    // ⚠️ A source's own PAGE files are not attachments. `.html` was already excluded because a
+    // Confluence export links its pages that way; a Notion export links its pages as `.md` and its
+    // databases as `.csv`, and those fell through — so every cross-link in a Notion import produced
+    // "link to an attached file the export does not carry" WHILE THE LINK WAS BEING RESOLVED
+    // correctly two passes later (measured by #747's fidelity walk: body `/p/<id>`, report saying
+    // the file is missing). A fidelity report that invents losses is worse than one that is quiet,
+    // because it is the artefact the reader uses to decide what to go and fix.
+    if (/\.[a-z0-9]{1,8}$/i.test(file) && !/\.(html?|md|markdown|csv)$/i.test(file)) {
       report.degraded.push({ node: wiki?.node.title ?? '', code: 'attachmentLinkMissing',
         what: 'link to an attached file the export does not carry', detail: file, params: { file } })
     }
