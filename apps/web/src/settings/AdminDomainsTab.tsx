@@ -23,11 +23,11 @@ import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the fram
 // to succeed. That flag is this screen's confirmation checkbox.
 //
 // Two refusals travel with verification and both are shown where the attempt happens, rather than
-// as a 409 with no explanation
-// - passkeys_would_be_lost — a passkey only works on the host it was created for (#664), so
-// verifying strands every enrolled key. Confirmable.
-// - passkey_stance_blocks_move — a passkey-only tenant would lock everyone out (#680). NOT
-// confirmable: the server refuses, and the fix is to change the stance first.
+// as a 409 with no explanation:
+//   - passkeys_would_be_lost — a passkey only works on the host it was created for (#664), so
+//     verifying strands every enrolled key. Confirmable.
+//   - passkey_stance_blocks_move — a passkey-only tenant would lock everyone out (#680). NOT
+//     confirmable: the server refuses, and the fix is to change the stance first.
 
 // Every refusal this screen can meet, and the sentence it earns. Exported and pure so the mapping
 // itself is testable: it used to live inside a mutation callback, where nothing could reach it.
@@ -105,31 +105,45 @@ export function AdminDomainsTab() {
             <span className="min-w-0 flex-1">
               <span className="block text-sm [overflow-wrap:anywhere]">{d.domain}</span>
               {/* While pending, the DNS record IS the instruction — without it the screen tells
-                  somebody to prove ownership and does not say how. */}
-              {/* #721 the record is three fields and a DNS panel takes them in three boxes,
-                  so host and value copy SEPARATELY — one copy of the whole sentence cannot be pasted
-                  anywhere. The type (TXT) is chosen from a dropdown, never pasted, so it has no
-                  button. The control is the product's existing one (CopyButton), not a new one. */}
+                  somebody to prove ownership and does not say how.
+
+                  #721 host and value copy SEPARATELY, because a DNS panel takes them in
+                  different boxes and one copy of the whole sentence cannot be pasted anywhere. The
+                  type is chosen from a dropdown rather than pasted, so it has no button. */}
               {d.status !== "verified" && (
-                <span className="mt-1 block text-xs text-fg-dim" data-testid="domain-challenge">
-                  <span className="block">{t("adminDomains.dnsHint")}</span>
-                  {/* #721 ②: " 2 " — the type named itself
-                      (TXT is recognisably a record type) and the other two rows did not, so the one
-                      person who has to retype them into a DNS panel could not tell which box each
-                      belongs in. Each field carries a PERSISTENT VISIBLE name, in the same three
-                      names a DNS panel uses. Not a tooltip and not sr-only: the copy buttons already
-                      carry those, and they are exactly what was missing while reading. */}
-                  <span className="mt-1 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
-                    <span className="flex-none" data-testid="domain-challenge-type-label">{t("adminDomains.dnsTypeLabel")}</span>
-                    <code className="min-w-0 uppercase" data-testid="domain-challenge-type">{t("adminDomains.dnsType")}</code>
-                    <span aria-hidden />
-                    <span className="flex-none" data-testid="domain-challenge-host-label">{t("adminDomains.dnsHostLabel")}</span>
-                    <code className="min-w-0 [overflow-wrap:anywhere]" data-testid="domain-challenge-host">{d.challengeRecord}</code>
-                    <CopyButton value={d.challengeRecord} testId="domain-challenge-host-copy" label={t("adminDomains.copyHost")} />
-                    <span className="flex-none" data-testid="domain-challenge-value-label">{t("adminDomains.dnsValueLabel")}</span>
-                    <code className="min-w-0 [overflow-wrap:anywhere]" data-testid="domain-challenge-value">{d.challengeValue}</code>
-                    <CopyButton value={d.challengeValue} testId="domain-challenge-value-copy" label={t("adminDomains.copyValue")} />
-                  </span>
+                <span className="mt-2 block rounded-lg border border-border p-3" data-testid="domain-challenge">
+                  <span className="block text-xs text-fg-dim">{t("adminDomains.dnsHint")}</span>
+                  {/* #721 ②: the record is three fields and the person retyping them into a DNS
+                      panel puts each in a different box, so each one carries a PERSISTENT VISIBLE
+                      name. Not a tooltip and not sr-only: the copy buttons already carry those, and
+                      they are exactly what did not help while reading.
+
+                      #721 and it has to LOOK like three fields. Measured on the first version:
+                      the labels lined up and the values lined up, but the rows were 27px and 36px
+                      apart because only two of the three carried a copy button, and label and value
+                      were the same 11px in the same dim colour — so the only thing separating them
+                      was position, and the whole thing read as a paragraph that had come apart.
+
+                      The shape is the one this product already uses for a string somebody has to
+                      paste (AdminScimTab's endpoint box): a bordered box, a small dim label above,
+                      the value in `code` at body colour. Three of those stacked. Every value line
+                      reserves the button's height whether or not it has one, so the rows cannot
+                      drift apart again, and the button sits NEXT to its value rather than at the far
+                      end of a column that stretched to fill the pane. */}
+                  {[
+                    { key: "type", label: t("adminDomains.dnsTypeLabel"), value: t("adminDomains.dnsType"), copy: null, className: "uppercase" },
+                    { key: "host", label: t("adminDomains.dnsHostLabel"), value: d.challengeRecord, copy: t("adminDomains.copyHost"), className: "" },
+                    { key: "value", label: t("adminDomains.dnsValueLabel"), value: d.challengeValue, copy: t("adminDomains.copyValue"), className: "" },
+                  ].map((f) => (
+                    <span key={f.key} className="mt-2 block">
+                      <span className="block text-[11px] uppercase tracking-[0.03em] text-fg-dim"
+                        data-testid={`domain-challenge-${f.key}-label`}>{f.label}</span>
+                      <span className="flex min-h-[2rem] flex-wrap items-center gap-1">
+                        <code className={`break-all text-sm ${f.className}`} data-testid={`domain-challenge-${f.key}`}>{f.value}</code>
+                        {f.copy && <CopyButton value={f.value} testId={`domain-challenge-${f.key}-copy`} label={f.copy} />}
+                      </span>
+                    </span>
+                  ))}
                 </span>
               )}
             </span>
@@ -166,7 +180,7 @@ export function AdminDomainsTab() {
         }}
       />
 
-      {/* Releasing stops resolution immediately, and re-adding means proving ownership again
+      {/* Releasing stops resolution immediately, and re-adding means proving ownership again —
           ADR-230 §2 deliberately does not restore a domain silently. */}
       <ConfirmDialog
         open={pendingRelease !== null}
