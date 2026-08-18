@@ -33,6 +33,7 @@ jobs:
       - run: pnpm lint:no-ee-imports   # ADR-011/ADR-069 (#176): CE must not import EE namespace or any proprietary (private) pkg
       - run: pnpm lint:ee-lever-placement   # #693/#688: an EE lever's enforcement must not read in the CE tree
       - run: pnpm lint:origin-routes        # #724/ADR-231: the edge configs must match the one origin route table
+      - run: pnpm lint:selfhost-profile     # #726/ADR-233: the apps profile must be able to serve the product
       - run: pnpm lint:no-css-modules  # shadcn/Tailwind migration: no new CSS Modules
       - run: pnpm docs:check           # ADR-080 doc↔code linkage: generated docs not stale
       # #704: the docs repo lands at the path check-doc-links.mjs treats as the combined checkout

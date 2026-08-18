@@ -56,8 +56,17 @@ cp .env.example .env                          # two secrets are mandatory; the s
 cp apps/web/.env.example apps/web/.env.local
 pnpm install
 pnpm dev:up                                   # middleware + first-run bootstrap (safe to re-run)
-docker compose --profile apps up -d --build   # web, server and collab
+docker compose --profile apps up -d --build   # web, server, collab and the reverse proxy
 ```
+
+Then open **https://dev.localhost** and sign in. The proxy serves everything on one origin, which is
+what the product assumes — the SPA calls a relative `/api`, so a stack without it answers its own
+page to every API call. The certificate is Caddy's internal one, so the browser warns until you run
+`caddy trust`; `SITE_HOST=app.example.com docker compose --profile apps up -d` uses a real ACME
+certificate instead.
+
+Nobody can sign in yet: make the first administrator with
+`pnpm tenant:local-admin dev you@example.com --create`, which prints an invite link.
 
 **[docs/self-hosting.md](docs/self-hosting.md)** is the full guide: the secrets to generate, single-host
 Docker Compose and what production needs beyond it, reverse-proxy and TLS rules, the configuration

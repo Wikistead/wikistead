@@ -33,6 +33,23 @@
  * @property {string} why         why this row exists — read it before deleting a row
  */
 
+/**
+ * A route that answers on a SIBLING HOST rather than on a path of the main origin.
+ *
+ * #726 ruling 2 put attachments in and said to express them here rather than as a hand-written block
+ * beside the table — the whole reason this file exists is that the mapping used to live in three
+ * places that drifted. But an attachment host is not a path row: it cannot be `handle`d inside the
+ * main site block, and every consumer of ORIGIN_ROUTES (the dev proxy, the checker, the traversal)
+ * would mis-read it as one. So it is a second, small table with its own shape.
+ *
+ * @typedef {Object} SiblingHost
+ * @property {string} subdomain   prefixed to the site host: `s3` → s3.app.example.com
+ * @property {string} upstream    compose/k8s service name
+ * @property {number} port
+ * @property {boolean} strip      false for every row so far, and the reason is load-bearing (see why)
+ * @property {string} why
+ */
+
 /** @type {OriginRoute[]} */
 export const ORIGIN_ROUTES = [
   {
@@ -150,6 +167,24 @@ export const ORIGIN_ROUTES = [
     exact: false,
     ws: false,
     why: 'The SPA, and the fallback: anything not claimed above is a client route and must answer index.html.',
+  },
+]
+
+/**
+ * Hosts beside the main origin (#726 / ADR-233 ruling 2).
+ *
+ * @type {SiblingHost[]}
+ */
+export const SIBLING_HOSTS = [
+  {
+    subdomain: 's3',
+    upstream: 'seaweedfs',
+    port: 8333,
+    // PATH-PRESERVING, and not by taste: a presigned URL's SigV4 signature covers the path and the
+    // Host header. Rewrite either and the gateway computes a different signature and refuses every
+    // upload with a 403 that reads like a credentials problem.
+    strip: false,
+    why: 'Attachments are uploaded and fetched by the BROWSER through presigned URLs, so the object store needs a reachable public name. It cannot be a path on the main origin: the signature is bound to the host that signed it, and the server signs with the same name it reaches the store by (the compose proxy carries a network alias so both resolve).',
   },
 ]
 

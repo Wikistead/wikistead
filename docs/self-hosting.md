@@ -54,7 +54,9 @@ cp .env.example .env
 cp apps/web/.env.example apps/web/.env.local   # web → API host wiring (tenant routing)
 ```
 
-Edit `.env` — every value marked `change_me` must change, and two are mandatory:
+Edit `.env` — every value marked `change_me` must change. **Three of them are refusals, not advice**:
+under `NODE_ENV=production` (which the `apps` profile pins) the server checks them against the values
+published in this repository's fixtures and refuses to start on a match.
 
 ```bash
 # 32-byte AES key for encrypting tenant OIDC client secrets at rest (server refuses to boot without it)
@@ -62,10 +64,13 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # 
 
 # signs anonymous share-link tokens; keep the TTL short (it bounds the post-revoke window)
 openssl rand -base64 32                                                        # → GUEST_TOKEN_SECRET
+
+# the search master key. Set it BEFORE `pnpm dev:up`: the Meilisearch container takes it from this
+# same file, so changing it afterwards leaves the server unable to authenticate to search.
+openssl rand -base64 24                                                        # → MEILI_MASTER_KEY
 ```
 
-Also set real values for `MEILI_MASTER_KEY`, `S3_ACCESS_KEY`/`S3_SECRET_KEY`, and
-your IdP under the `OIDC_*` keys. `DATABASE_URL` is the restricted runtime role;
+Also set real values for `S3_ACCESS_KEY`/`S3_SECRET_KEY` and your IdP under the `OIDC_*` keys. `DATABASE_URL` is the restricted runtime role;
 `DATABASE_ADMIN_URL` is used only by the migration runner — keep it out of app
 processes.
 
@@ -77,20 +82,39 @@ pnpm dev:up          # docker compose up -d + first-run bootstrap (idempotent):
                      #   - migrates + seeds the app database
                      #   - creates the OpenFGA store + authorization model
                      #   - pins OPENFGA_STORE_ID / OPENFGA_MODEL_ID into .env
-docker compose --profile apps up -d --build   # build + run web/server/collab in containers
+docker compose --profile apps up -d --build   # web, server, collab and the reverse proxy
 # optional: server-side PlantUML rendering
 docker compose --profile diagrams up -d       # Kroki; set PLANTUML_RENDER_URL=http://localhost:8005
 ```
+
+Open **https://dev.localhost**.
+
+Three things about that URL, because each one is a way the stack silently does not work:
+
+- **One origin, and the proxy is not optional.** The SPA calls a relative `/api`, so a web container
+  on its own answers its own page to every API call. `--profile apps` starts a Caddy in front, and
+  nothing else publishes a port.
+- **HTTPS, and the browser will warn once.** The profile runs with `NODE_ENV=production`, which makes
+  the session cookie `secure` — over plain `http://` the browser drops it and sign-in fails with no
+  error at all. Caddy issues an internal certificate for a `.localhost` name without contacting a CA;
+  `caddy trust` (on the host, from a Caddy install) adds it to your trust store and the warning goes.
+- **A different host is one variable.** `SITE_HOST=app.example.com docker compose --profile apps up -d`
+  serves that name and gets a real certificate over ACME instead — which needs the name to resolve to
+  the machine from the public internet.
+
+Nobody can sign in yet: the first administrator is made below.
 
 The bootstrap (`scripts/dev-setup.mjs`) is safe to run repeatedly: on an existing
 volume it detects the store and does nothing. Because OpenFGA persists to
 Postgres, a plain restart never needs re-bootstrapping; only `docker compose down
 -v` (volume wipe) re-triggers it.
 
-Put a reverse proxy in front for anything beyond localhost evaluation:
-`deploy/caddy/Caddyfile` is a ready-made single-host config with automatic ACME
-TLS (`caddy run --config deploy/caddy/Caddyfile` with `SITE_HOST` /
-`*_UPSTREAM` env set).
+`deploy/caddy/Caddyfile` is the proxy the `apps` profile runs, and it is also the reference for
+running one yourself (`caddy run --config deploy/caddy/Caddyfile` with `SITE_HOST` / `*_UPSTREAM`
+set). Its routes are checked against `infra/routes/origin-routes.mjs` on every commit (#724), so this
+stack and a production edge answer the same paths by construction — including `s3.<SITE_HOST>`, which
+is how the browser reaches attachment uploads: a presigned URL's signature covers the host, so the
+object store needs a public name of its own rather than a path on the app.
 
 ## Production (Kubernetes)
 
@@ -189,7 +213,7 @@ credentials. If your policy needs a full single sign-out, drive it from the IdP.
 ### Making the first admin of a new tenant
 
 ```
-pnpm tenant:local-admin <tenant-slug> <email> --create [--plan=free] [--by=<you>]
+pnpm --filter @wikistead/server tenant:local-admin <tenant-slug> <email> --create [--plan=free] [--by=<you>]
 ```
 
 It creates the tenant, turns password sign-in on for it, and prints a **first-admin
@@ -212,8 +236,12 @@ The same command without `--create` works on an existing tenant that has no
 administrator — after a restore, or one that was provisioned and never used:
 
 ```
-pnpm tenant:local-admin <tenant-slug> <email>
+pnpm --filter @wikistead/server tenant:local-admin <tenant-slug> <email>
 ```
+
+For the evaluation stack that is `… tenant:local-admin dev you@example.com` — the seeded `dev` tenant
+on `dev.localhost`, with no `--create`. (`dev` is a reserved slug and cannot be *created* as a tenant
+name; recovering the one the seed already made is a different act and is allowed.)
 
 If that tenant requires SSO, the recovery goes past that requirement to issue the
 invite, **says so in its output**, and records it in the operator ledger as a

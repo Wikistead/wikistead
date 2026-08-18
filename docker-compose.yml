@@ -43,25 +43,130 @@ services:
   # -s3.allowedOrigins must list the web origin so the browser presigned-PUT/GET (CORS) works.
   seaweedfs:
     extends: { file: docker-compose.middleware.yml, service: seaweedfs }
-    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5173"
+    # Both origins: 5173 is the host-side `pnpm dev` loop, and the https one is the `apps` profile
+    # behind the proxy (#726). A presigned PUT from the browser is a CORS request either way.
+    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5173,https://${SITE_HOST:-dev.localhost}"
     ports: ["9000:8333"]
     volumes:
       - seaweeddata:/data
 
-  # Optional: run the app services in-compose too. For tight dev loops, prefer
-  # running them on the host via `pnpm dev` against the middleware above.
+  # ── The `apps` profile: the whole product, on one origin (#726 / ADR-233) ───────────────────────
+  #
+  # For tight dev loops prefer `pnpm dev` on the host against the middleware above. This profile is
+  # the SELF-HOST path, and until #726 it could not serve the product at all: there was no web
+  # service, and the three claims in docs/self-hosting.md, README.md and CONTRIBUTING.md were false.
+  #
+  # Two things are deliberate here and are the whole of the fix:
+  #
+  #  1. Each app service declares its own `environment:`. `.env` is the DEV file — its URLs say
+  #     `localhost`, which inside a container is the container itself, so server and collab died at
+  #     boot reaching for a database that was never there. `environment:` wins over `env_file:` in
+  #     compose, so `.env` keeps its real job (secrets, and the OpenFGA ids `dev:up` pins into it)
+  #     and stops doubling as a network map.
+  #  2. NODE_ENV=production is pinned. `.env` carries `development`, `env_file` OVERRIDES the image's
+  #     `ENV NODE_ENV=production`, and `app.ts` accepts the literal bearer `dev-token` whenever
+  #     NODE_ENV is not production. A self-hoster who hand-fixed the URLs would have been running an
+  #     authentication bypass on their own data with nothing in the repo saying so.
+  #
+  # No app service publishes a port: the browser reaches everything through `proxy`, which is the
+  # topology the product assumes (ADR-016) rather than a production nicety — the SPA calls a relative
+  # /api, and nginx's SPA fallback answers that with 200 + index.html when there is no proxy in
+  # front. A side benefit is that this profile no longer collides with a `pnpm dev` on the host.
   server:
     build: { context: ., dockerfile: apps/server/Dockerfile }
     env_file: [.env]
-    depends_on: { postgres: { condition: service_healthy }, openfga: { condition: service_started } }
-    ports: ["4000:4000"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+      # The superuser role, used by the storage GC to see attachment rows across tenants (RLS binds
+      # the runtime role to one). It arrives through `.env` either way — pointed at the container
+      # here so it is not a `localhost` that silently falls back to the RLS-bound pool.
+      DATABASE_ADMIN_URL: postgres://postgres:postgres@postgres:5432/app
+      VALKEY_URL: redis://valkey:6379
+      OPENFGA_API_URL: http://openfga:8080
+      # The server ASSERTS this at boot under NODE_ENV=production and refuses to start on `memory`
+      # (#338 / ADR-128: in-memory tuples vanish on restart, which collapses all access control). It
+      # states what the openfga service above is actually configured with, and the two are checked
+      # against each other by `lint:selfhost-profile` — a claim that drifted from the service would
+      # be a server that either will not boot or boots trusting a lie.
+      OPENFGA_DATASTORE_ENGINE: postgres
+      MEILI_HOST: http://meilisearch:7700
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      # The server's OWN S3 calls go to the container; the browser's presigned URLs are signed for
+      # the public host below (SigV4 covers the Host header, so the two have to be stated apart).
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_PUBLIC_ENDPOINT: https://s3.${SITE_HOST:-dev.localhost}
+      WKS_PUBLIC_BASE_URL: https://${SITE_HOST:-dev.localhost}
+      # #409 / ADR-154: without this the public HTML shell is OFF, and because the route table sends
+      # /pub to the server, every published page in this stack answers 404 — the SPA never sees the
+      # path. Same shape as the k8s initContainer (deploy/k8s/base/server.yaml).
+      PUBLIC_SHELL_INDEX: /shell/index.html
+    volumes:
+      - web-shell:/shell:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      openfga: { condition: service_started }
+      web-shell: { condition: service_completed_successfully }
     profiles: ["apps"]
 
   collab:
     build: { context: ., dockerfile: apps/collab/Dockerfile }
     env_file: [.env]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://app:app@postgres:5432/app
+      VALKEY_URL: redis://valkey:6379
+      OPENFGA_API_URL: http://openfga:8080
+      # Blanked rather than pointed somewhere: collab reads none of these (its runtime env is the
+      # database, Valkey, OpenFGA and the guest-token secret), and `.env` was handing it a SUPERUSER
+      # database credential plus three service addresses it has no use for.
+      DATABASE_ADMIN_URL: ""
+      MEILI_HOST: ""
+      S3_ENDPOINT: ""
+      SMTP_HOST: ""
     depends_on: { valkey: { condition: service_started } }
-    ports: ["4100:4100"]
+    profiles: ["apps"]
+
+  web:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    profiles: ["apps"]
+
+  # Compose has no initContainers, so the copy is a one-shot service the server waits on. It builds
+  # the SAME image `web` runs, so the shell the server injects head tags into is byte-for-byte the
+  # one the SPA serves — a second build could drift and the drift would only show as stale metadata.
+  web-shell:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    command: ["sh", "-c", "cp /usr/share/nginx/html/index.html /shell/index.html"]
+    volumes:
+      - web-shell:/shell
+    profiles: ["apps"]
+
+  # The one published port. `deploy/caddy/Caddyfile` is already the reverse-proxy reference and,
+  # since #724, is CHECKED against infra/routes/origin-routes.mjs — so this stack and the production
+  # edge answer the same paths by construction. Its upstream defaults (server:4000, collab:4100,
+  # web:80) already match these service names.
+  #
+  # HTTPS, not plain HTTP, and that is a consequence rather than a preference (#726 ruling 1):
+  # NODE_ENV=production makes the session cookie `secure`, so an http:// origin would drop it and
+  # sign-in would fail with no error. Caddy issues an INTERNAL certificate for a .localhost host
+  # without touching ACME, at the cost of a browser warning until `caddy trust` is run.
+  proxy:
+    image: caddy:2-alpine
+    environment:
+      SITE_HOST: ${SITE_HOST:-dev.localhost}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    ports: ["80:80", "443:443"]
+    networks:
+      default:
+        aliases:
+          # The attachment host resolves INSIDE the network too, so the server can talk to the same
+          # URL it signs for the browser. Without the alias the signature would be valid only for a
+          # name the server itself cannot resolve.
+          - s3.${SITE_HOST:-dev.localhost}
+    depends_on: { server: { condition: service_started }, collab: { condition: service_started }, web: { condition: service_started } }
     profiles: ["apps"]
 
   mailpit:
@@ -86,3 +191,5 @@ volumes:
   pgdata:
   meilidata:
   seaweeddata:
+  caddydata: # Caddy's internal CA and issued certs — losing it re-issues and re-warns the browser
+  web-shell: # the built index.html the server injects public head tags into (#409 / ADR-154)
