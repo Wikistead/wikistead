@@ -192,6 +192,13 @@ test("#650: a lost device, a code from the drawer, and back in", async ({ page, 
   // A session alone must not be enough — that is the whole re-authentication rule, and here it is a
   // form the reader has to fill rather than a promise in an ADR.
   await expect(page.getByTestId("recovery-reauth"), "it asks who this is").toBeVisible({ timeout: 10_000 });
+  // #650/ (user, twice, at this exact form): it has to say WHAT it wants and that ONE of the
+  // three is enough. Read as text a browser laid out, because the defect was a `placeholder` — an
+  // attribute a person loses the moment they start typing, and which `toContainText` does not see.
+  const reauth = page.getByTestId("recovery-reauth");
+  await expect(reauth, "the code field is named on screen").toContainText("Authenticator code");
+  await expect(reauth, "the password field is named on screen").toContainText("Your password");
+  await expect(reauth, "…and one of them is enough").toContainText("Any one of these is enough");
   await page.getByTestId("recovery-reauth-password").fill(PASSWORD);
   await page.getByTestId("recovery-reauth-submit").click();
 

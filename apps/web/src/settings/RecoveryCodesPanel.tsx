@@ -22,6 +22,72 @@ import {
 // NO MEMBER COUNT, NO ROLE, anywhere in this file. The ruling on ADR-226 rev1 removed the predicate that
 // made codes depend on the shape of the workspace, and a screen that hid the button for an ordinary
 // member would put it back on the only surface that matters to the person locked out.
+// #650/ (user, at the screen): 123456
+//
+// The form had `placeholder` and `aria-label` and no visible label at all, so the screen showed a box
+// containing "123456" and a box containing — which reads as two boxes to fill, when in fact
+// ANY ONE of three proofs is enough. And a placeholder is gone the moment a finger touches the key, so
+// the one moment a person wants to check what a field wants is the moment the answer disappears.
+//
+// SEPARATE from the panel so it can be RENDERED in a test. The labels are the whole fix; a pin that
+// grepped the source for `<label` would stay green against a label rendered off-screen or never
+// mounted, and this is the second time these five items have had to be asked for.
+export function RecoveryReauthForm({ proving, onChange, hasTotp, hasPasskey, busy, passkeyBusy, onSubmit, onPasskey, onCancel }: {
+  proving: { code: string; password: string };
+  onChange: (next: { code: string; password: string }) => void;
+  hasTotp: boolean;
+  hasPasskey: boolean;
+  busy: boolean;
+  passkeyBusy: boolean;
+  onSubmit: () => void;
+  onPasskey: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <form className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid="recovery-reauth"
+      onSubmit={(e) => { e.preventDefault(); onSubmit(); }}>
+      {/* ADR-226 §4: a stolen session must not be able to mint codes — that would BE the factor
+          bypass this feature is careful not to be. So the account proves itself again, with
+          whichever of the three proofs the member actually holds. The prompt says "any one of these"
+          because the form cannot: two fields stacked above two buttons look like a checklist. */}
+      <p className="m-0 text-xs text-fg-dim" data-testid="recovery-reauth-prompt">{t("account.recoveryReauthPrompt")}</p>
+      {hasTotp && (
+        <label className="flex flex-col gap-1 text-xs text-fg-dim">
+          {t("account.recoveryReauthTotp")}
+          <Input value={proving.code} onChange={(e) => onChange({ ...proving, code: e.target.value })}
+            inputMode="numeric" autoComplete="one-time-code" placeholder={t("account.factorCodePlaceholder")}
+            data-testid="recovery-reauth-code" />
+        </label>
+      )}
+      <label className="flex flex-col gap-1 text-xs text-fg-dim">
+        {t("account.recoveryReauthPassword")}
+        {/* no placeholder: it would repeat the label a centimetre lower and then vanish on the first
+            keystroke. "123456" above earns its place as an EXAMPLE of a shape; does not. */}
+        <Input type="password" value={proving.password} autoComplete="current-password"
+          onChange={(e) => onChange({ ...proving, password: e.target.value })}
+          data-testid="recovery-reauth-password" />
+      </label>
+      {/* Both buttons say CREATE. They were and — two verbs for
+          one act, which left the reader unable to tell whether the passkey button finished the job or
+          only unlocked the form (it finishes it). Three entrances, one destination, said once. */}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="primary" type="submit" data-testid="recovery-reauth-submit"
+          disabled={busy || (!proving.code.trim() && !proving.password)}>
+          {t("account.recoveryMint")}
+        </Button>
+        {hasPasskey && (
+          <Button variant="default" type="button" data-testid="recovery-reauth-passkey"
+            disabled={busy || passkeyBusy} onClick={onPasskey}>
+            {t("account.recoveryReauthPasskey")}
+          </Button>
+        )}
+        <Button variant="ghost" type="button" onClick={onCancel}>{t("common.cancel")}</Button>
+      </div>
+    </form>
+  );
+}
+
 export function RecoveryCodesPanel() {
   const { t } = useTranslation();
   const set = useMyRecoveryCodes();
@@ -101,11 +167,13 @@ export function RecoveryCodesPanel() {
         <p className="text-xs text-fg-dim" data-testid="recovery-disabled">{t("account.recoveryDisabled")}</p>
       ) : minted ? (
         <div className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid="recovery-minted">
-          {/* The same one-time box the enrolment secret and a password link use. It already says
-              "shown once, copy it now", so this note says the one thing it does not: where they go. */}
-          <OneTimeSecret value={minted.join("\n")} testId="recovery-codes"
-            note={t("account.recoveryStoreNote")} />
-          <p className="m-0 text-xs text-fg-dim">{t("account.recoveryOneShotNote", { count: minted.length })}</p>
+          {/* The same one-time box the enrolment secret and a password link use, and NOTHING under it.
+              #650/ (user, at the screen): two notes used to sit here — where to keep them,
+              and "ten codes, each works once". The box already says "shown once, copy it now"; the count
+              is the ten lines the reader is looking at; "each works once" is the first sentence of the
+              explainer above. The reader's one job at this moment is to copy, and every sentence added
+              here is a hand stopped mid-copy. Where NOT to keep them belongs above, before they exist. */}
+          <OneTimeSecret value={minted.join("\n")} testId="recovery-codes" />
           <Button variant="default" className="self-start" data-testid="recovery-done"
             onClick={() => setMinted(null)}>{t("account.recoverySaved")}</Button>
         </div>
@@ -117,35 +185,10 @@ export function RecoveryCodesPanel() {
           {!hasFactor ? (
             <p className="text-xs text-fg-dim" data-testid="recovery-needs-factor">{t("account.recoveryNeedsFactor")}</p>
           ) : proving ? (
-            <form className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid="recovery-reauth"
-              onSubmit={(e) => { e.preventDefault(); void submitProof(); }}>
-              {/* ADR-226 §4: a stolen session must not be able to mint codes — that would BE the factor
-                  bypass this feature is careful not to be. So the account proves itself again, with
-                  whichever of the three proofs the member actually holds. */}
-              <p className="m-0 text-xs text-fg-dim">{t("account.recoveryReauthPrompt")}</p>
-              {hasTotp && (
-                <Input value={proving.code} onChange={(e) => setProving({ ...proving, code: e.target.value })}
-                  inputMode="numeric" autoComplete="one-time-code" placeholder={t("account.factorCodePlaceholder")}
-                  aria-label={t("account.factorCode")} data-testid="recovery-reauth-code" />
-              )}
-              <Input type="password" value={proving.password} autoComplete="current-password"
-                onChange={(e) => setProving({ ...proving, password: e.target.value })}
-                placeholder={t("account.recoveryReauthPassword")} aria-label={t("account.recoveryReauthPassword")}
-                data-testid="recovery-reauth-password" />
-              <div className="flex flex-wrap gap-2">
-                <Button variant="primary" type="submit" data-testid="recovery-reauth-submit"
-                  disabled={mint.isPending || (!proving.code.trim() && !proving.password)}>
-                  {t("account.recoveryMint")}
-                </Button>
-                {hasPasskey && (
-                  <Button variant="default" type="button" data-testid="recovery-reauth-passkey"
-                    disabled={mint.isPending || challenge.isPending} onClick={() => void proveWithPasskey()}>
-                    {t("account.recoveryReauthPasskey")}
-                  </Button>
-                )}
-                <Button variant="ghost" type="button" onClick={() => setProving(null)}>{t("common.cancel")}</Button>
-              </div>
-            </form>
+            <RecoveryReauthForm proving={proving} onChange={setProving} hasTotp={hasTotp} hasPasskey={hasPasskey}
+              busy={mint.isPending} passkeyBusy={challenge.isPending}
+              onSubmit={() => void submitProof()} onPasskey={() => void proveWithPasskey()}
+              onCancel={() => setProving(null)} />
           ) : (
             <>
               {/* Re-minting is the SAME button, deliberately. It is one act — "give me a set that
