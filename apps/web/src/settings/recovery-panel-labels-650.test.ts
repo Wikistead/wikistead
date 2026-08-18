@@ -33,30 +33,37 @@ vi.mock("../data/queries", () => ({
 vi.mock("@simplewebauthn/browser", () => ({ startAuthentication: vi.fn() }));
 vi.mock("../ui/toast", () => ({ notify: { success: vi.fn(), error: vi.fn() } }));
 
-const { RecoveryReauthForm } = await import("./RecoveryCodesPanel");
+const { RecoveryReauthForm, proofsHeld, initialMethod } = await import("./RecoveryCodesPanel");
 
-/** renders the form the way the panel does when somebody has both a code and a password */
-const render = (l: string) => {
+type Method = "totp" | "passkey" | "password";
+
+/**
+ * Render the form as the panel would for a member holding `methods`, standing at `method`
+ * (null = still choosing).
+ */
+const render = (l: string, methods: Method[], method: Method | null) => {
   lang = l;
   document.body.innerHTML = renderToStaticMarkup(createElement(RecoveryReauthForm, {
-    proving: { code: "", password: "" }, onChange: () => {}, hasTotp: true, hasPasskey: true,
+    method, methods, proving: { code: "", password: "" }, onChange: () => {}, onPick: () => {},
     busy: false, passkeyBusy: false, onSubmit: () => {}, onPasskey: () => {}, onCancel: () => {},
   }));
   return document.body;
 };
 
+const ALL: Method[] = ["totp", "passkey", "password"];
+
 describe("#650 ①: the form says what it wants", () => {
   it("each field's name is READ OFF THE SCREEN, not out of a placeholder", () => {
     for (const l of ["en", "ja"]) {
-      const body = render(l);
-      const text = body.textContent ?? "";
-      expect(text, `${l}: the code field is named where a person can see it`)
-        .toContain(bundles[l].account.recoveryReauthTotp);
-      expect(text, `${l}: the password field is named where a person can see it`)
-        .toContain(bundles[l].account.recoveryReauthPassword);
-      // …and the name is TIED to its field, so it survives a re-layout and reaches a screen reader by
-      // the same route it reaches an eye. A paragraph that happens to sit above an input is not a label.
-      for (const testid of ["recovery-reauth-code", "recovery-reauth-password"]) {
+      for (const [method, key, testid] of [
+        ["totp", "recoveryReauthTotp", "recovery-reauth-code"],
+        ["password", "recoveryReauthPassword", "recovery-reauth-password"],
+      ] as const) {
+        const body = render(l, ALL, method);
+        expect(body.textContent ?? "", `${l}: ${method} is named where a person can see it`)
+          .toContain(bundles[l].account[key]);
+        // …and the name is TIED to its field, so it survives a re-layout and reaches a screen reader by
+        // the same route it reaches an eye. A paragraph that happens to sit above an input is not a label.
         const field = body.querySelector(`[data-testid="${testid}"]`);
         expect(field, `${l}: ${testid} is on screen`).not.toBeNull();
         expect(field?.closest("label"), `${l}: ${testid} sits inside its label`).not.toBeNull();
@@ -64,25 +71,125 @@ describe("#650 ①: the form says what it wants", () => {
     }
   });
 
-  it("the prompt says ANY ONE of these, because two stacked fields look like a checklist", () => {
-    for (const l of ["en", "ja"]) {
-      const prompt = bundles[l].account.recoveryReauthPrompt as string;
-      expect(render(l).textContent ?? "", `${l}: the prompt is on screen`).toContain(prompt);
-      expect(prompt, `${l}: the prompt says one is enough`).toMatch(l === "ja" ? /どれか 1 つ|いずれか 1 つ/ : /any one/i);
-    }
-  });
-
   it("both entrances say CREATE — three ways in, one destination", () => {
     // The reported confusion: beside. Different verbs on the
     // same act make the second button look like a step rather than the whole thing.
     for (const l of ["en", "ja"]) {
-      const body = render(l);
-      const submit = body.querySelector('[data-testid="recovery-reauth-submit"]')?.textContent ?? "";
-      const passkey = body.querySelector('[data-testid="recovery-reauth-passkey"]')?.textContent ?? "";
       const verb = l === "ja" ? "作成" : "Create";
+      const submit = render(l, ALL, "totp").querySelector('[data-testid="recovery-reauth-submit"]')?.textContent ?? "";
+      const passkey = render(l, ALL, "passkey").querySelector('[data-testid="recovery-reauth-passkey"]')?.textContent ?? "";
       expect(submit, `${l}: the submit button creates`).toContain(verb);
       expect(passkey, `${l}: the passkey button creates too, and does not merely "confirm"`).toContain(verb);
       expect(passkey, `${l}: it no longer promises only a check`).not.toMatch(/確認する|instead/i);
+    }
+  });
+});
+
+// — two of the three did, and the password box did not.
+//
+// The ruling replaced the whole shape: pick a method, then prove. So the assertions are about WHICH
+// controls exist for a given member, which is the thing that was wrong, rather than about the sentence
+// that used to apologise for the layout.
+describe("#650 the form offers what this member holds, and nothing else", () => {
+  /** every control that names a method, whichever stage the form is at */
+  const offered = (body: HTMLElement) => ({
+    chooser: ALL.filter((m) => body.querySelector(`[data-testid="recovery-reauth-choose-${m}"]`)),
+    code: !!body.querySelector('[data-testid="recovery-reauth-code"]'),
+    password: !!body.querySelector('[data-testid="recovery-reauth-password"]'),
+    passkey: !!body.querySelector('[data-testid="recovery-reauth-passkey"]'),
+  });
+
+  it("a member with no password is never shown a password box", () => {
+    // The reported case: somebody who signs in through an IdP, or whose password entrance an admin
+    // removed — which THIS feature is wired to do (a password removal revokes the codes with it).
+    for (const l of ["en", "ja"]) {
+      const chooser = offered(render(l, ["totp", "passkey"], null));
+      expect(chooser.chooser, `${l}: only the two proofs they hold are offered`).toEqual(["totp", "passkey"]);
+      expect(chooser.password, `${l}: no password box at the chooser`).toBe(false);
+      // and not through the other stage either
+      expect(offered(render(l, ["totp", "passkey"], "totp")).password, `${l}: nor once a method is picked`).toBe(false);
+    }
+  });
+
+  it("a member with only a password is taken straight to it, with no menu of one", () => {
+    // Ruling ①: a chooser with a single entry charges a keystroke for a decision that has one answer.
+    const body = render("en", ["password"], "password");
+    expect(body.querySelector('[data-testid="recovery-reauth-choices"]'), "no chooser at all").toBeNull();
+    expect(offered(body).password, "the password field is right there").toBe(true);
+    expect(offered(body).code, "and nothing they cannot use").toBe(false);
+    expect(offered(body).passkey, "…including the passkey button").toBe(false);
+    // …and no way back, because there is nowhere to go back TO.
+    expect(body.querySelector('[data-testid="recovery-reauth-back"]'), "nothing to return to").toBeNull();
+  });
+
+  it("a member with several proofs picks one, and can change their mind", () => {
+    const chooser = render("en", ALL, null);
+    expect(offered(chooser).chooser, "all three are offered").toEqual(ALL);
+    // Nothing to type at the chooser: the reader's job here is to choose, and a box beside the choices
+    // is the checklist shape all over again.
+    expect(offered(chooser).code, "no code box while choosing").toBe(false);
+    expect(offered(chooser).password, "no password box while choosing").toBe(false);
+
+    const picked = render("en", ALL, "totp");
+    expect(offered(picked).code, "the chosen proof's input is shown").toBe(true);
+    expect(offered(picked).password, "and only that one").toBe(false);
+    expect(picked.querySelector('[data-testid="recovery-reauth-back"]'), "a way back to the others").not.toBeNull();
+  });
+
+  it("the prompt no longer explains the layout, because the layout says it", () => {
+    // The old prompt ended with "any one of these is enough" — a sentence whose only job was to
+    // compensate for two fields stacked above two buttons. Ruled out with the shape it described.
+    for (const l of ["en", "ja"]) {
+      const prompt = bundles[l].account.recoveryReauthPrompt as string;
+      expect(render(l, ALL, null).textContent ?? "", `${l}: the prompt is on screen`).toContain(prompt);
+      expect(prompt, `${l}: it no longer says "any one of these"`).not.toMatch(l === "ja" ? /どれか 1 つ|いずれか 1 つ/ : /any one/i);
+    }
+  });
+});
+
+describe("#650 which proofs a member is credited with", () => {
+  // The list the form is handed. Tested as a function because the DEFECT was in the derivation, not in
+  // the drawing: the factor halves were derived correctly and came and went with the factors, while the
+  // password was simply drawn. Dropping `hasPassword` from this function turns the first case below red.
+  const totp = { kind: "totp", confirmedAt: "2026-01-01T00:00:00Z" };
+  const passkey = { kind: "passkey", confirmedAt: "2026-01-01T00:00:00Z" };
+
+  it("a password is credited ONLY when the server said there is one", () => {
+    expect(proofsHeld({ factors: [totp], hasPassword: false, webauthn: true }),
+      "no password entrance, no password box").toEqual(["totp"]);
+    expect(proofsHeld({ factors: [totp], hasPassword: true, webauthn: true }),
+      "…and it appears when there is one").toEqual(["totp", "password"]);
+  });
+
+  it("an unconfirmed factor is not a proof", () => {
+    // An abandoned enrolment is a row, not a factor: offering its box would ask for a code from a
+    // secret the member never finished installing.
+    expect(proofsHeld({ factors: [{ kind: "totp", confirmedAt: null }], hasPassword: true, webauthn: true }))
+      .toEqual(["password"]);
+  });
+
+  it("one proof means no chooser: the member starts AT it", () => {
+    // Ruling ①. Measured separately because the form is handed a method and draws it — a regression
+    // that stopped skipping the chooser would leave every rendering assertion above perfectly green.
+    expect(initialMethod(["password"]), "straight to the only thing they can do").toBe("password");
+    expect(initialMethod(["totp", "password"]), "two proofs is a choice").toBeNull();
+    expect(initialMethod([]), "and nothing to start at when there is nothing").toBeNull();
+  });
+
+  it("a key is not a proof in a window that cannot do WebAuthn", () => {
+    expect(proofsHeld({ factors: [passkey], hasPassword: false, webauthn: false }),
+      "nothing on offer rather than a prompt that cannot open").toEqual([]);
+    expect(proofsHeld({ factors: [passkey], hasPassword: false, webauthn: true })).toEqual(["passkey"]);
+  });
+
+  it("…and when that leaves nothing, the panel says so instead of opening an empty chooser", () => {
+    // The case the line above produces: a key-only member in a window with no WebAuthn and no password
+    // entrance. They HAVE something to recover, so the mint button shows — and without this the form
+    // opens with no way to prove anything in it.
+    const src = readFileSync(resolve(import.meta.dirname, "RecoveryCodesPanel.tsx"), "utf8");
+    expect(src, "the empty case is answered, not fallen through").toContain("recovery-no-proof");
+    for (const l of ["en", "ja"]) {
+      expect(bundles[l].account.recoveryNoProof, `${l}: and it says what to do next`).toBeTruthy();
     }
   });
 });

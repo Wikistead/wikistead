@@ -2890,8 +2890,16 @@ export function useMyRecoveryCodes() {
   const { token } = useSession();
   return useQuery({
     queryKey: ["me", "recovery-codes"],
-    queryFn: () => apiFetch<{ remaining: number; mintedAt: string | null; enabled: boolean }>("/me/recovery-codes", token)
-      .then((r) => ({ remaining: r?.remaining ?? 0, mintedAt: r?.mintedAt ?? null, enabled: r?.enabled !== false })),
+    // #650 `hasPassword` rides along because the screen has no other way to know. Factors it can
+    // read from its own list; a password entrance is not a factor and appears in none of them, so a form
+    // that offers "any one of these" would keep offering a box the member cannot fill (#606's shape).
+    // Defaulted to FALSE on a torn read, not true: the failure that matters is showing a proof somebody
+    // does not have, and a member who does have one still has their other proofs on the screen.
+    queryFn: () => apiFetch<{ remaining: number; mintedAt: string | null; enabled: boolean; hasPassword: boolean }>("/me/recovery-codes", token)
+      .then((r) => ({
+        remaining: r?.remaining ?? 0, mintedAt: r?.mintedAt ?? null,
+        enabled: r?.enabled !== false, hasPassword: r?.hasPassword === true,
+      })),
   });
 }
 
