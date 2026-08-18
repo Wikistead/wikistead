@@ -21,8 +21,12 @@ jobs:
       # last commit, which is a weaker check wearing the same green tick.
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      # No `version:` here on purpose — package.json's `packageManager` is the one source, and
+      # naming a second one makes action-setup refuse to run at all. Measured on the FIRST run this
+      # workflow ever had (2026-08-18, the day of publication): three jobs dead at setup with
+      # "Multiple versions of pnpm specified" while every local gate was green — a workflow file
+      # cannot be exercised without an Actions run, and this repository had none until the push.
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
@@ -58,8 +62,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No `version:` here on purpose — package.json's `packageManager` is the one source, and
+      # naming a second one makes action-setup refuse to run at all. Measured on the FIRST run this
+      # workflow ever had (2026-08-18, the day of publication): three jobs dead at setup with
+      # "Multiple versions of pnpm specified" while every local gate was green — a workflow file
+      # cannot be exercised without an Actions run, and this repository had none until the push.
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
@@ -77,8 +85,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No `version:` here on purpose — package.json's `packageManager` is the one source, and
+      # naming a second one makes action-setup refuse to run at all. Measured on the FIRST run this
+      # workflow ever had (2026-08-18, the day of publication): three jobs dead at setup with
+      # "Multiple versions of pnpm specified" while every local gate was green — a workflow file
+      # cannot be exercised without an Actions run, and this repository had none until the push.
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
