@@ -23,11 +23,28 @@ import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the fram
 // to succeed. That flag is this screen's confirmation checkbox.
 //
 // Two refusals travel with verification and both are shown where the attempt happens, rather than
-// as a 409 with no explanation:
-//   - passkeys_would_be_lost — a passkey only works on the host it was created for (#664), so
-//     verifying strands every enrolled key. Confirmable.
-//   - passkey_stance_blocks_move — a passkey-only tenant would lock everyone out (#680). NOT
-//     confirmable: the server refuses, and the fix is to change the stance first.
+// as a 409 with no explanation
+// - passkeys_would_be_lost — a passkey only works on the host it was created for (#664), so
+// verifying strands every enrolled key. Confirmable.
+// - passkey_stance_blocks_move — a passkey-only tenant would lock everyone out (#680). NOT
+// confirmable: the server refuses, and the fix is to change the stance first.
+
+// Every refusal this screen can meet, and the sentence it earns. Exported and pure so the mapping
+// itself is testable: it used to live inside a mutation callback, where nothing could reach it.
+//
+// #721 ③: `not_verified` fell through to "something went wrong". It is the MOST ORDINARY
+// outcome here (the record is not published yet, or DNS has not spread), and answering it with the
+// generic failure makes people suspect the product rather than their DNS. It gets its own sentence,
+// which names the record we looked for and says waiting is the fix.
+export function verifyErrorCopyKey(code: string | undefined): string {
+  // The stance refusal is not confirmable: say why, rather than offering a checkbox that cannot help
+  // (#680: with passkeys as the only factor, moving hosts locks everybody out).
+  if (code === "passkey_stance_blocks_move") return "adminDomains.stanceBlocked";
+  if (code === "passkeys_would_be_lost") return "adminDomains.passkeyRetry";
+  if (code === "not_verified") return "adminDomains.notVerified";
+  return "toast.actionFailed";
+}
+
 export function AdminDomainsTab() {
   const { t } = useTranslation();
   const domains = useCustomDomains();
@@ -44,14 +61,7 @@ export function AdminDomainsTab() {
 
   const runVerify = (domain: string, acknowledgePasskeyLoss?: boolean) =>
     verify.mutate({ domain, ...(acknowledgePasskeyLoss ? { acknowledgePasskeyLoss } : {}) }, {
-      onError: (e) => {
-        const code = (e as { code?: string })?.code;
-        // The stance refusal is not confirmable — say why, rather than offering a checkbox that
-        // cannot help (#680: with passkeys as the only factor, moving hosts locks everybody out).
-        if (code === "passkey_stance_blocks_move") notify.error(t("adminDomains.stanceBlocked"));
-        else if (code === "passkeys_would_be_lost") notify.error(t("adminDomains.passkeyRetry"));
-        else notify.error(t("toast.actionFailed"));
-      },
+      onError: (e) => notify.error(t(verifyErrorCopyKey((e as { code?: string })?.code))),
     });
 
   // #723 an entitled surface must not be drawn while we do not yet know whether the workspace
@@ -103,13 +113,21 @@ export function AdminDomainsTab() {
               {d.status !== "verified" && (
                 <span className="mt-1 block text-xs text-fg-dim" data-testid="domain-challenge">
                   <span className="block">{t("adminDomains.dnsHint")}</span>
-                  <span className="mt-1 flex items-center gap-1">
-                    <span className="flex-none uppercase">{t("adminDomains.dnsType")}</span>
-                    <code className="min-w-0 flex-1 [overflow-wrap:anywhere]" data-testid="domain-challenge-host">{d.challengeRecord}</code>
+                  {/* #721 ②: " 2 " — the type named itself
+                      (TXT is recognisably a record type) and the other two rows did not, so the one
+                      person who has to retype them into a DNS panel could not tell which box each
+                      belongs in. Each field carries a PERSISTENT VISIBLE name, in the same three
+                      names a DNS panel uses. Not a tooltip and not sr-only: the copy buttons already
+                      carry those, and they are exactly what was missing while reading. */}
+                  <span className="mt-1 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
+                    <span className="flex-none" data-testid="domain-challenge-type-label">{t("adminDomains.dnsTypeLabel")}</span>
+                    <code className="min-w-0 uppercase" data-testid="domain-challenge-type">{t("adminDomains.dnsType")}</code>
+                    <span aria-hidden />
+                    <span className="flex-none" data-testid="domain-challenge-host-label">{t("adminDomains.dnsHostLabel")}</span>
+                    <code className="min-w-0 [overflow-wrap:anywhere]" data-testid="domain-challenge-host">{d.challengeRecord}</code>
                     <CopyButton value={d.challengeRecord} testId="domain-challenge-host-copy" label={t("adminDomains.copyHost")} />
-                  </span>
-                  <span className="mt-1 flex items-center gap-1">
-                    <code className="min-w-0 flex-1 [overflow-wrap:anywhere]" data-testid="domain-challenge-value">{d.challengeValue}</code>
+                    <span className="flex-none" data-testid="domain-challenge-value-label">{t("adminDomains.dnsValueLabel")}</span>
+                    <code className="min-w-0 [overflow-wrap:anywhere]" data-testid="domain-challenge-value">{d.challengeValue}</code>
                     <CopyButton value={d.challengeValue} testId="domain-challenge-value-copy" label={t("adminDomains.copyValue")} />
                   </span>
                 </span>
@@ -148,7 +166,7 @@ export function AdminDomainsTab() {
         }}
       />
 
-      {/* Releasing stops resolution immediately, and re-adding means proving ownership again —
+      {/* Releasing stops resolution immediately, and re-adding means proving ownership again
           ADR-230 §2 deliberately does not restore a domain silently. */}
       <ConfirmDialog
         open={pendingRelease !== null}
