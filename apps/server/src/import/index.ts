@@ -10,7 +10,7 @@
 // aborts DURING inflation, before it can OOM). Entry names are OPAQUE tree labels only — never a write path
 // (bodies land in the DB; attachments land at server-generated S3 keys). Bodies are stored verbatim as Markdown
 // and only sanitized at RENDER time by the existing fort — import never evaluates content.
-import { Unzip, UnzipInflate, strFromU8 } from 'fflate'
+import { Unzip, UnzipInflate, strFromU8, strToU8 } from 'fflate'
 import * as Y from 'yjs'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { resolveEntitlements, decideAllowance } from '@wikistead/entitlements'
@@ -23,6 +23,7 @@ import { sniffInlineKind } from '../routes/attachments.js'
 import { createPage, publishPage, deletePage } from '../routes/pages.js'
 import { noteNameOf, rewriteWikilinks, detectVaultDegradations, canvasDegradations, walkNodes, vaultAttachments } from './obsidian.js'
 import { looksLikeNotionExport, splitNotionName, parseCsv, csvToMarkdownTable, databaseDegradation, rewriteNotionLinks } from './notion.js'
+import { looksLikeConfluenceExport, confluenceHtmlToMarkdown } from './confluence.js'
 
 // Zip-bomb caps (ADR-132 §3). The importer aborts the moment a running total is exceeded — it never buffers a
 // whole malicious archive. These are generous enough for a real workspace export yet bound worst-case memory.
@@ -461,7 +462,27 @@ export async function importArchive(
   archive: Uint8Array,
   args: { tenantId: string; spaceId: string; userId: string; plan: string; parentPageId?: string | null; publish?: boolean },
 ): Promise<ImportReport> {
-  const files = streamingUnzip(archive)
+  let files = streamingUnzip(archive)
+  const confluenceDegradations: ImportDegradation[] = []
+  // #712 / ADR-227 §6 — Confluence. The shared builder speaks Markdown, so the conversion happens
+  // FIRST and hands it an archive it already understands: each `.html` becomes a `.md` of the same
+  // name. That keeps the tree logic, the attachment rules and the authz path identical for every
+  // source, and guarantees no raw HTML ever reaches a page body (ADR-132 §3).
+  if (looksLikeConfluenceExport(Object.keys(files))) {
+    const converted: Record<string, Uint8Array> = {}
+    for (const [path, bytes] of Object.entries(files)) {
+      if (!/\.html?$/i.test(path)) { converted[path] = bytes; continue }
+      const base = path.replace(/\.html?$/i, '')
+      const leaf = base.slice(base.lastIndexOf('/') + 1)
+      // The export's own index is navigation, not knowledge — importing it would create a page whose
+      // entire body is a link list that the page tree already expresses.
+      if (/^(index|main)$/i.test(leaf)) continue
+      const { markdown, degraded } = confluenceHtmlToMarkdown(strFromU8(bytes), leaf)
+      converted[`${base}.md`] = strToU8(markdown)
+      confluenceDegradations.push(...degraded)
+    }
+    files = converted
+  }
   const ir = buildIR(files)
   if (ir.roots.length === 0) throw new ImportInvalidError('archive has no importable pages')
   const csvDegradations: ImportDegradation[] = []
@@ -519,7 +540,7 @@ export async function importArchive(
   const shared = vaultAttachments(files, { claimed, mimeOf: mimeFromName })
   if (shared.length && ir.roots[0]) ir.roots[0].attachments.push(...shared)
   const report = await materializeImport(deps, ir, args)
-  report.degraded.push(...csvDegradations)
+  report.degraded.push(...csvDegradations, ...confluenceDegradations)
   // Canvas files never became pages — reported rather than silently absent, which is the difference
   // between "we could not represent this" and "your vault came in fine".
   report.degraded.push(...canvasDegradations(Object.keys(files)))

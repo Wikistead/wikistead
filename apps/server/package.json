@@ -65,6 +65,7 @@
     "isomorphic-dompurify": "^3.18.0",
     "jsdom": "^29.1.1",
     "meilisearch": "^0.45.0",
+    "node-html-parser": "9.0.1",
     "nodemailer": "^9.0.1",
     "openid-client": "^6.8.4",
     "postgres": "^3.4.0",
