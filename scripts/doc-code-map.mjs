@@ -130,6 +130,25 @@ export const DOC_CODE_MAP = [
     code: ['apps/web/src/ui/dialogs.tsx', 'apps/web/src/**/*Dialog.tsx'],
     doc: 'wikistead-docs/src/content/docs/guides/pages.md',
   },
+  {
+    // #725 / ADR-236 §2. The import screen is a SETTINGS TAB, and the surface ledger holds
+    // `/spaces/:spaceId/settings/*` as one wildcard row — so the discovery test does NOT catch a new
+    // tab the way it catches a new top-level route or admin tab. That is the blind spot ADR-235 (#729)
+    // describes; until it is closed generally, this screen's binding is written by hand, deliberately.
+    //
+    // What it catches: the screen changing while the guide that documents it does not. What it does
+    // NOT catch: a NEW settings tab arriving with no page at all — nothing here can, which is why this
+    // is stated rather than left to be assumed. Dormant besides until #704 arms the authored side
+    // (DOCS_REPO), so it is not counted as a guard that is holding today.
+    //
+    // Distinct from #729's 'import dialects' row above, which binds the ENGINE (server/src/import/**)
+    // to the same page: what an import DOES and what its screen shows are changed independently, and
+    // a region that covers one does not notice the other moving.
+    label: 'import screen',
+    kind: 'authored',
+    code: ['apps/web/src/settings/SpaceImportTab.tsx'],
+    doc: 'wikistead-docs/src/content/docs/guides/import.md',
+  },
 ]
 
 // Minimal glob → RegExp (no dependency). Supports `**` (any path segments incl. `/`),

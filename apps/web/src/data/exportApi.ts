@@ -61,9 +61,24 @@ export function downloadSelectionExport(token: string, spaceId: string, pageIds:
 }
 
 // #308 / ADR-132: import an export ZIP into a space (member-only; the server gates `edit`). The file is sent as
-// base64 in a JSON body (no multipart dep, mirroring the icon/logo uploads). Returns { status, report } — the
-// report is the server's summary (pages/attachments created, etc.) or null on any non-2xx.
+// base64 in a JSON body (no multipart dep, mirroring the icon/logo uploads).
+//
+// #725 / ADR-236: the call answers TWO WAYS and the caller has to know which. Under the server's
+// threshold the report comes back in the response; above it the server returns 202 with an import id
+// and the report lands on the job row later. The previous shape here (`{ status, report }` with
+// `report = await res.json()` whenever `res.ok`) read a 202 body as a report: `res.ok` is true for a
+// 202, so the queued acknowledgement was cast to a report and the sidebar's toast interpolated
+// `report.pagesCreated` — undefined — for exactly the large archives the 202 path exists for. A
+// discriminated result makes that unrepresentable.
+export interface ImportDegradation {
+  node: string; // the node's title or dir, as the reader would recognise it
+  what: string; // the shape that did not survive
+  detail?: string;
+}
 export interface ImportReport {
+  // ADR-227's promise: every degradation NAMED. A screen that renders this as a count is the failure
+  // the report exists to prevent (pinned in import-report-725.test.tsx).
+  degraded: ImportDegradation[];
   pagesCreated: number;
   emptyPagesCreated: number;
   attachmentsImported: number;
@@ -72,12 +87,23 @@ export interface ImportReport {
   published: number;
   lossyTitles: boolean;
 }
+export type ImportStart =
+  | { kind: "report"; report: ImportReport }
+  | { kind: "queued"; importId: string; nodesTotal: number }
+  | { kind: "error"; status: number };
+
+// The server's body limit is 280 MiB of JSON, and base64 costs a third — so the archive the browser
+// may send is three quarters of that, less the envelope. Checked before the upload because encoding
+// and posting 200 MiB only to be told 413 is a slow way to learn the answer (ADR-236 §5). The server
+// enforces its own limit regardless; this is kindness, not a gate.
+export const IMPORT_MAX_ARCHIVE_BYTES = Math.floor((280 * 1024 * 1024 * 3) / 4) - 4096;
+
 export async function importSpaceArchive(
   token: string,
   spaceId: string,
   file: File,
-  opts: { publish?: boolean } = {},
-): Promise<{ status: number; report: ImportReport | null }> {
+  opts: { publish?: boolean; parentPageId?: string | null } = {},
+): Promise<ImportStart> {
   // File → base64 (chunked to avoid a call-stack blow-up on large archives).
   const buf = new Uint8Array(await file.arrayBuffer());
   let binary = "";
@@ -89,11 +115,31 @@ export async function importSpaceArchive(
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ zipBase64, publish: opts.publish === true }),
+      body: JSON.stringify({
+        zipBase64,
+        publish: opts.publish === true,
+        ...(opts.parentPageId ? { parentPageId: opts.parentPageId } : {}),
+      }),
     });
-  } catch { return { status: 0, report: null }; }
-  const report = res.ok ? ((await res.json()) as ImportReport) : null;
-  return { status: res.status, report };
+  } catch { return { kind: "error", status: 0 }; }
+  if (res.status === 202) {
+    const q = (await res.json()) as { importId: string; nodesTotal: number };
+    return { kind: "queued", importId: q.importId, nodesTotal: q.nodesTotal };
+  }
+  if (!res.ok) return { kind: "error", status: res.status };
+  return { kind: "report", report: (await res.json()) as ImportReport };
+}
+
+// #712 / ADR-227 §7: the job row — progress while it runs, and the report once it is done. This is
+// what makes a report outlive the connection that started it, which is why the screen keeps the
+// import id in the URL rather than in component state (ADR-236 §3).
+export interface ImportStatusRow {
+  id: string;
+  status: "queued" | "running" | "done" | "failed";
+  nodesTotal: number;
+  nodesDone: number;
+  report: ImportReport | null;
+  error: string | null;
 }
 
 // #207 part 2: print/PDF must render the WHOLE document statically — every macro rendered, no CM

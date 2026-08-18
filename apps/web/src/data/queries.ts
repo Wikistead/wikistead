@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
+import type { ImportStatusRow } from "./exportApi";
 import { useSession } from "../session/SessionProvider";
 
 // Shapes mirror the server DTOs (apps/server/src/routes/{spaces,pages}.ts).
@@ -480,6 +481,23 @@ export function useSetSpaceDeleteMode() {
     onSuccess: (_r, args) => {
       qc.invalidateQueries({ queryKey: ["space-delete-mode", args.spaceId] });
       qc.invalidateQueries({ queryKey: ["spaces"] });
+    },
+  });
+}
+
+// #725 / ADR-236 §3: an import that went to the job path (202). The row carries the progress while it
+// runs and the report once it is done, so the screen polls it — a cheap row read for an operation
+// measured in minutes, rather than a second real-time channel for a progress bar. Polling STOPS as
+// soon as the row is terminal (a finished import that keeps refetching is a page that never idles).
+export function useImportStatus(spaceId: string, importId: string | null) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["import-status", spaceId, importId],
+    queryFn: () => apiFetch<ImportStatusRow>(`/spaces/${encodeURIComponent(spaceId)}/imports/${encodeURIComponent(importId!)}`, token),
+    enabled: !!importId && spaceId.length > 0,
+    refetchInterval: (q) => {
+      const st = (q.state.data as ImportStatusRow | null | undefined)?.status;
+      return st === "done" || st === "failed" ? false : 2000;
     },
   });
 }
