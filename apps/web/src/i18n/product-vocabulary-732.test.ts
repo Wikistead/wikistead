@@ -56,10 +56,6 @@ const ALLOWED: Record<string, string> = {
   // Microsoft's own term for the directory id. Renaming it would send administrators looking for a
   // field their IdP does not have.
   "adminConnections.entraPlaceholder": "Entra's own term for the directory",
-  // The audit ledger's ACTION NAMES are identifiers, not prose: `tenant_settings` is written into
-  // rows that already exist. The display value moves; this key is the identifier's own label and is
-  // matched against historical rows, so it stays until a migration renames both together.
-  "adminApi.type.tenant_settings": "audit action identifier — renaming breaks the join with old rows",
 };
 
 describe("#732: the product uses one name for a workspace", () => {
