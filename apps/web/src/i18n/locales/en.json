@@ -21,6 +21,8 @@
     "issuerPlaceholder": "Issuer URL (https://idp.example.com)",
     "labelPlaceholder": "Button label (optional, shown on the login screen)",
     "entraPlaceholder": "Entra tenant ID (GUID)",
+    "buttonLabel": "Button label",
+    "entraTenantId": "Entra tenant ID",
     "clientIdPlaceholder": "Client ID",
     "secretPlaceholder": "Client secret (leave empty for a public client)",
     "groupsClaimPlaceholder": "Groups claim (blank: groups)",

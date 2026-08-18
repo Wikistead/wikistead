@@ -21,6 +21,8 @@
     "issuerPlaceholder": "Issuer URL（https://idp.example.com）",
     "labelPlaceholder": "ボタンラベル（任意・ログイン画面に表示）",
     "entraPlaceholder": "Entra テナント ID（GUID）",
+    "buttonLabel": "ボタンのラベル",
+    "entraTenantId": "Entra テナント ID",
     "clientIdPlaceholder": "クライアント ID",
     "secretPlaceholder": "クライアントシークレット（public client は空欄）",
     "groupsClaimPlaceholder": "groups クレーム名（空欄なら groups）",

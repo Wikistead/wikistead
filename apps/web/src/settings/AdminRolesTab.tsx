@@ -139,8 +139,11 @@ function RoleEditor({ onSave, onCancel, pending }: {
   useEffect(() => { formRef.current?.scrollIntoView({ block: "center" }); }, []);
   return (
     <div ref={formRef} className="flex flex-col gap-2 rounded-md border border-border p-3">
-      <Input inputSize="sm" className="max-w-xs" value={name} placeholder={t("adminRoles.namePlaceholder")}
-        aria-label={t("adminRoles.nameLabel")} data-testid="role-name-input" onChange={(e) => setName(e.target.value)} />
+      <label className="flex flex-col gap-1 text-xs text-fg-dim">
+            {t("adminRoles.nameLabel")}
+            <Input inputSize="sm" className="max-w-xs" value={name} placeholder={t("adminRoles.namePlaceholder")}
+              data-testid="role-name-input" onChange={(e) => setName(e.target.value)} />
+          </label>
       <div className="flex flex-col gap-1">
         <span className="text-xs text-fg-dim">{t("adminRoles.scopeQuestion")}</span>
         {/* #587: the DS segmented radiogroup, not a hand-rolled one. #580 built this by hand and had to

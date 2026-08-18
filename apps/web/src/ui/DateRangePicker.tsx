@@ -206,28 +206,36 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
             {/* the typed path, where the calendar is. `type="text"` rather than `date`: this is what
                 keeps the browser's own picker out of the product. `YYYY-MM-DD` is what the server takes
                 and what the grid writes, so the two halves of this panel speak one language. */}
-            <div className="mb-2 flex items-center gap-1.5">
-              <Input
-                inputSize="sm"
-                type="text"
-                inputMode="numeric"
-                placeholder="YYYY-MM-DD"
-                value={from ?? ""}
-                onChange={(e) => onChange({ from: e.target.value || undefined, to })}
-                data-testid={`${testId}-from`}
-                aria-label={t("spaceAnalytics.from")}
-              />
-              <ArrowRight size={12} className="flex-none text-fg-dim" aria-hidden />
-              <Input
-                inputSize="sm"
-                type="text"
-                inputMode="numeric"
-                placeholder="YYYY-MM-DD"
-                value={to ?? ""}
-                onChange={(e) => onChange({ from, to: e.target.value || undefined })}
-                data-testid={`${testId}-to`}
-                aria-label={t("spaceAnalytics.to")}
-              />
+            {/* #740: the two boxes said "YYYY-MM-DD" and nothing else, so which end of the range each
+                one was could only be inferred from left-to-right order — and the format hint vanishes
+                at the first keystroke, exactly when somebody checks what they are filling in. The
+                names are now above the boxes and stay there; the format stays as the example. */}
+            <div className="mb-2 flex items-end gap-1.5">
+              <label className="flex flex-col gap-1 text-xs text-fg-dim">
+                {t("spaceAnalytics.from")}
+                <Input
+                  inputSize="sm"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="YYYY-MM-DD"
+                  value={from ?? ""}
+                  onChange={(e) => onChange({ from: e.target.value || undefined, to })}
+                  data-testid={`${testId}-from`}
+                />
+              </label>
+              <ArrowRight size={12} className="mb-2 flex-none text-fg-dim" aria-hidden />
+              <label className="flex flex-col gap-1 text-xs text-fg-dim">
+                {t("spaceAnalytics.to")}
+                <Input
+                  inputSize="sm"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="YYYY-MM-DD"
+                  value={to ?? ""}
+                  onChange={(e) => onChange({ from, to: e.target.value || undefined })}
+                  data-testid={`${testId}-to`}
+                />
+              </label>
             </div>
             {/* #641the presets are what a reader reaches for most — a window ending today, which
                 otherwise costs two clicks in two different months. Computed in UTC like everything else

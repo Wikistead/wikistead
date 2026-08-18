@@ -27,15 +27,21 @@ export function EmbedUrlModal({ open, current, onSubmit }: { open: boolean; curr
     <Dialog open={open} onOpenChange={(o) => { if (!o) submit(null); }}>
       <DialogContent position="top">
         <DialogHeader><DialogTitle>{t("embedUrl.title")}</DialogTitle></DialogHeader>
-        <Input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://www.youtube.com/embed/…"
-          aria-label={t("embedUrl.title")}
-          data-testid="embed-url-input"
-          autoFocus
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(trimmed || null); } }}
-        />
+        {/* #740: the box showed a YouTube URL and nothing else. The example is worth keeping — it
+            says which SHAPE of URL works — but it is not a name, and it goes away as soon as anybody
+            pastes. The dialog's own title says what this is, so it is repeated here as the label the
+            field keeps. */}
+        <label className="flex flex-col gap-1 text-xs text-fg-dim">
+          {t("embedUrl.title")}
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://www.youtube.com/embed/…"
+            data-testid="embed-url-input"
+            autoFocus
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(trimmed || null); } }}
+          />
+        </label>
         {willDegrade && <p className="mt-2 text-xs text-fg-dim" data-testid="embed-url-warning">{t("embedUrl.degradeWarning")}</p>}
         <DialogFooter>
           <Button variant="default" size="sm" onClick={() => submit(null)} data-testid="embed-url-cancel">{t("common.cancel")}</Button>

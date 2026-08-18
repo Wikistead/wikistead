@@ -286,9 +286,12 @@ export function SecondFactorPanel() {
                 <>
                   {/* The code is asked for HERE rather than in a dialog, because #660 wants possession
                       and the reader has to fetch it from the device they are giving up. */}
-                  <Input value={removing.code} onChange={(e) => setRemoving({ id: f.id, code: e.target.value })}
-                    placeholder={t("account.factorCodePlaceholder")} aria-label={t("account.factorCode")}
-                    inputMode="numeric" data-testid="factor-remove-code" />
+                  <label className="flex flex-col gap-1 text-xs text-fg-dim">
+                    {t("account.factorCode")}
+                    <Input value={removing.code} onChange={(e) => setRemoving({ id: f.id, code: e.target.value })}
+                      placeholder={t("account.factorCodePlaceholder")}
+                      inputMode="numeric" data-testid="factor-remove-code" />
+                  </label>
                   <Button variant="danger" size="sm" data-testid="factor-remove-confirm"
                     disabled={!removing.code.trim()} onClick={() => void onRemove(f.id, f.kind, true)}>
                     {t("account.factorRemove")}
@@ -347,9 +350,12 @@ export function SecondFactorPanel() {
           {/* kept for the pin: what the QR was given, in a form a test can read back */}
           <span hidden data-testid="factor-uri">{pending.uri}</span>
           <FormRow>
-            <Input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric"
-              placeholder={t("account.factorCodePlaceholder")} aria-label={t("account.factorCode")}
-              data-testid="factor-confirm-code" />
+            <label className="flex flex-col gap-1 text-xs text-fg-dim">
+              {t("account.factorCode")}
+              <Input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric"
+                placeholder={t("account.factorCodePlaceholder")}
+                data-testid="factor-confirm-code" />
+            </label>
             <Button variant="primary" disabled={!code.trim() || confirm.isPending}
               onClick={() => void onConfirm()} data-testid="factor-confirm">{t("account.factorConfirm")}</Button>
             {/* Cancelling THROWS THE ROW AWAY, it does not merely stop looking at it. #660 lets a pending
