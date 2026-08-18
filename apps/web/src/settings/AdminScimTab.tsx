@@ -52,6 +52,13 @@ export function AdminScimTab() {
     });
   };
 
+  // #723 an entitled surface must not be drawn while we do not yet know whether the workspace
+  // is entitled. `locked` is derived from an ERROR, and there is no error while the request is in
+  // flight — so the subscriber view rendered first, every time, and was then replaced by the upgrade
+  // notice. Not a race: on a workspace without the entitlement the 403 always arrives, so the flash
+  // always happens. Same guard as AdminSamlSection.tsx, which is the one surface that had it.
+  if (tokens.isPending) return null;
+
   // ADR-072 through the shared affordance: an entitlement loss offers the upgrade to an admin,
   // an authz loss never does. The tab is admin-gated, so isAdmin holds by construction here.
   if (locked) return <UpgradeNotice kind={disclosureKindFromError(err)} isAdmin testId="scim-upgrade" title={t("adminScim.lockedTitle")} body={t("adminScim.lockedBody")} />;
