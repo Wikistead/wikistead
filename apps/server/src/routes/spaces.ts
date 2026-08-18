@@ -15,7 +15,7 @@ import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-19
 import { auditIfEntitled } from '../audit/sink.js'
 import { deletePinsForResources } from './pins.js'
 import { sweepWatchesForResources, sweepUnviewableWatches } from './notifications.js'
-import { prepareImport, runPreparedImport, ImportTooLargeError, ImportInvalidError } from '../import/index.js'
+import { prepareImport, runPreparedImport, resolveImportPublish, ImportTooLargeError, ImportInvalidError } from '../import/index.js'
 import { IMPORT_SYNC_MAX_NODES, enqueueImportJob, assertCanQueueImport, readImportStatus, ImportBusyError } from '../import/jobs.js'
 import type { StorageDriver } from '../storage/index.js'
 import type { TenantDb } from '../db/index.js'
@@ -1903,11 +1903,18 @@ export async function spacesPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // #308 / ADR-132: content import — materialize an export ZIP as DRAFT pages under this space. MEMBER-ONLY
+  // #308 / ADR-132: content import — materialize an export ZIP as pages under this space. MEMBER-ONLY
   // the route carries no `config.guest`, so a share_link (anonymous edit-guest, #274) is rejected before any
   // work — closing the anonymous-ZIP storage-abuse surface (§4). The executor is further gated to space `edit`
   // inside createPage (a viewer is 403'd). base64 ZIP in (no multipart dep; bodyLimit + streaming size caps
-  // bound memory). Returns the import report. `publish` opt-in bulk-publishes (else all pages land as drafts).
+  // bound memory). Returns the import report.
+  //
+  // #746 (user ruling, 2026-08-19): `publish` DEFAULTS ON, reversing ADR-132's draft-by-default. The draft
+  // default was the one place this importer behaved differently from every comparable product, and the way
+  // it showed was that the read surface said "this page is empty" and the export came back empty right
+  // after a successful import — both read the published version, and nothing had been published. ADR-236
+  // gave the report a sentence to explain that. A default that needs a sentence of explanation is the
+  // wrong default. `publish: false` still lands drafts: the choice is kept, only its default moved.
   app.post<{ Params: { spaceId: string }; Body: { zipBase64?: string; parentPageId?: string | null; publish?: boolean } }>(
     '/spaces/:spaceId/import', { bodyLimit: IMPORT_BODY_LIMIT }, async (req, reply) => {
       const archive = Buffer.from(req.body?.zipBase64 ?? '', 'base64')
@@ -1923,7 +1930,7 @@ export async function spacesPlugin(app: FastifyInstance) {
           await assertCanQueueImport(app.fga, req.user.sub, req.params.spaceId)
           const importId = await enqueueImportJob({ storage: app.storageDriver }, new Uint8Array(archive), {
             tenantId: req.tenant.id, spaceId: req.params.spaceId, userId: req.user.sub,
-            parentPageId: req.body?.parentPageId ?? null, publish: req.body?.publish === true,
+            parentPageId: req.body?.parentPageId ?? null, publish: resolveImportPublish(req.body?.publish),
             nodesTotal: prepared.nodeCount,
           })
           return reply.code(202).send({ importId, status: 'queued', nodesTotal: prepared.nodeCount })
@@ -1933,7 +1940,7 @@ export async function spacesPlugin(app: FastifyInstance) {
           prepared,
           {
             tenantId: req.tenant.id, spaceId: req.params.spaceId, userId: req.user.sub, plan: req.tenant.plan,
-            parentPageId: req.body?.parentPageId ?? null, publish: req.body?.publish === true,
+            parentPageId: req.body?.parentPageId ?? null, publish: resolveImportPublish(req.body?.publish),
           },
         )
       } catch (e) {

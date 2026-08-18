@@ -24,8 +24,11 @@ vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQue
 // The mock HONOURS the id it is given: the job row exists only when the screen actually asks for it.
 // A mock that answered regardless would let a screen keeping the id in component state pass the
 // resume pins below — the exact property they exist to check.
+let spacePublic: boolean | undefined = false;
 vi.mock("../data/queries", () => ({
   useImportStatus: (_spaceId: string, importId: string | null) => ({ data: importId ? row : null }),
+  // #746: the screen says "this space is public" beside the publish switch, and only when it is.
+  useSpacePublic: () => ({ data: spacePublic }),
 }));
 vi.mock("../app/product-name", () => ({ useProductName: () => "Wikistead" }));
 
@@ -77,7 +80,11 @@ describe("#725: the screen resumes from the URL", () => {
     expect(html).not.toContain("import-running");
   });
 
-  it("publishing is opt-in: the switch is off when the screen opens", () => {
+  it("publishing is ON when the screen opens, and the switch is still there to turn it off (#746)", () => {
+    // #746 reversed this: the draft default was the one behaviour that differed from every comparable
+    // importer, and what it produced was a successful import whose pages read as empty. The switch
+    // itself stays — importing quietly to review first is a real thing to want — so BOTH halves are
+    // asserted: the control exists, and it starts on.
     params = new URLSearchParams();
     row = null;
     const html = render();
@@ -86,6 +93,22 @@ describe("#725: the screen resumes from the URL", () => {
     // both directions is no pin at all, which is what running the break-check found.
     const sw = /<button[^>]*data-testid="import-publish"[^>]*>/.exec(html)?.[0] ?? "";
     expect(sw, "the publish switch was missing from the form").not.toBe("");
-    expect(sw, "the imported pages would have been published by default").toContain('aria-checked="false"');
+    expect(sw, "the imported pages would have arrived as invisible drafts").toContain('aria-checked="true"');
+  });
+
+  it("a PUBLIC space says so beside the switch, and a private one says nothing (#746)", () => {
+    // Importing now publishes by default, and in a public space that means readable from outside the
+    // moment it lands. Stated as a fact where the choice is made — not as a warning, because a warning
+    // that appears on every import is furniture nobody reads.
+    params = new URLSearchParams();
+    row = null;
+    spacePublic = true;
+    expect(render(), "the public space names the consequence").toContain("import-public-space-note");
+    spacePublic = false;
+    expect(render(), "a private space has nothing to say here").not.toContain("import-public-space-note");
+    // …and an unanswered query claims nothing either way (the server is the fort regardless).
+    spacePublic = undefined;
+    expect(render(), "no answer, no claim").not.toContain("import-public-space-note");
+    spacePublic = false;
   });
 });

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useSession } from "../session/SessionProvider";
 import { useQueryClient } from "@tanstack/react-query";
-import { useImportStatus } from "../data/queries";
+import { useImportStatus, useSpacePublic } from "../data/queries";
 import { importSpaceArchive, IMPORT_MAX_ARCHIVE_BYTES, type ImportDegradation, type ImportReport } from "../data/exportApi";
 import { Button } from "../ui/Button";
 import { SwitchRow } from "../ui/Switch";
@@ -109,11 +109,12 @@ export function ImportReportView({ report, spaceId }: { report: ImportReport; sp
       <h3 className="mb-1 mt-0">{t("import.reportTitle")}</h3>
       <p className="text-sm">{t("import.pagesCreated", { count: report.pagesCreated })}</p>
 
-      {/* The line every first-time importer needs. Measured on the running product (#712): after
-          an import the read surface says the page is empty and the export comes back empty, because
-          both read the PUBLISHED version and the import published nothing. A badge on a page they have
-          not opened does not answer that, so it is stated in words. */}
-      {report.published === 0 && (
+      {/* ADR-236 required this sentence because the import published nothing and the read surface then
+          said the page was empty — both it and the export read the published version. #746 reversed the
+          default, so the sentence follows the case that still needs it: somebody who turned publishing
+          OFF is the one who will open a page and find it blank. The other branch says what happened and
+          stops; a page that is visible does not need to be explained. */}
+      {report.published === 0 && report.pagesCreated > 0 && (
         <p className="text-sm font-semibold" data-testid="import-draft-notice">{t("import.draftNotice")}</p>
       )}
       {report.published > 0 && (
@@ -186,11 +187,19 @@ export function SpaceImportTab() {
   const importId = search.get("import");
 
   const [file, setFile] = useState<File | null>(null);
-  const [publish, setPublish] = useState(false);
+  // #746 (user ruling): ON. The draft default was the one behaviour that differed from every comparable
+  // importer, and what it produced was a successful import whose pages read as empty. The switch stays,
+  // because importing quietly for review first is a real thing to want; it is the default that moved.
+  const [publish, setPublish] = useState(true);
   const [busy, setBusy] = useState(false);
   const [syncReport, setSyncReport] = useState<ImportReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // #746: importing now publishes by default, and in a PUBLIC space that means readable from outside
+  // the moment it lands. Said as a fact next to the switch rather than as a warning — a warning that
+  // appears on every import becomes furniture, and this one only appears where it is true. Fail-quiet
+  // by design: if the query does not answer, nothing is claimed (the server is the fort either way).
+  const spacePublic = useSpacePublic(spaceId);
   const job = useImportStatus(spaceId, importId);
   const jobRow = job.data ?? null;
   const report = syncReport ?? jobRow?.report ?? null;
@@ -301,6 +310,11 @@ export function SpaceImportTab() {
             description={t("import.publishHint")}
             testId="import-publish"
           />
+          {publish && spacePublic.data === true && (
+            <p className="mt-1 text-sm text-fg-dim" data-testid="import-public-space-note">
+              {t("import.publicSpaceNote")}
+            </p>
+          )}
 
           <p className="mt-4">
             <Button variant="primary" disabled={!file || busy} data-testid="import-start" onClick={() => void start()}>

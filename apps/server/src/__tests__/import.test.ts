@@ -77,15 +77,19 @@ async function exportZip(): Promise<Uint8Array> {
 }
 
 describe('importArchive round-trip (#308 / ADR-132)', () => {
-  it('imports the exported tree into a new space with NEW ids, remapped links, re-uploaded attachments, as DRAFTS', async () => {
+  // #746 flipped the PRODUCT default to publish-on-import (the route resolves it). This case asks the
+  // materializer's own question instead — it passes `publish: false` explicitly, which is what the switch
+  // in the screen does when somebody turns it off. Keeping it proves the choice still exists; the default
+  // itself is pinned at the route, in import-publish-default-746.
+  it('imports the exported tree into a new space with NEW ids, remapped links, re-uploaded attachments, as drafts when publishing is declined', async () => {
     const zip = await exportZip()
     const dest = await createSpace(db, fgaClient, { tenantId: TENANT, userId: USER, plan: 'free', name: 'Import Dest' })
     try {
-      const report = await importArchive(deps, zip, { tenantId: TENANT, spaceId: dest.id, userId: USER, plan: 'free' })
+      const report = await importArchive(deps, zip, { tenantId: TENANT, spaceId: dest.id, userId: USER, plan: 'free', publish: false })
       expect(report.pagesCreated).toBe(2)
       expect(report.attachmentsImported).toBe(1)
       expect(report.lossyTitles).toBe(false) // manifest present → exact titles
-      expect(report.published).toBe(0) // draft-first
+      expect(report.published).toBe(0) // publishing was declined
 
       const rows = await db.sql<{ id: string; title: string; parent_id: string | null; published_md: string | null; ydoc: Buffer | null }[]>`
         SELECT id, title, parent_id, published_md, ydoc FROM pages WHERE space_id = ${dest.id} ORDER BY title`
@@ -95,7 +99,7 @@ describe('importArchive round-trip (#308 / ADR-132)', () => {
       // NEW ids (never the source ids) and the tree shape reproduced.
       expect(root.id).not.toBe(ROOT)
       expect(child.parent_id).toBe(root.id)
-      // draft-first: no published snapshot.
+      // publishing declined: no published snapshot.
       expect(root.published_md).toBeNull()
 
       // the draft body (Y.Text 'content') has the internal link remapped to the NEW child id and the image
