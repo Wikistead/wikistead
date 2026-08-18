@@ -93,3 +93,5 @@ to build and run the project from source.
 The Community Edition — this repository — is **AGPL-3.0**. Enterprise features are proprietary and
 live outside this source. Every bundled dependency is permissive (MIT / Apache-2.0 / BSD / ISC), so
 nothing copyleft is linked into a distributable; CI enforces that on every change.
+
+Copyright (C) 2026 4nm1tsu.
