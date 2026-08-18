@@ -61,18 +61,34 @@ export interface StorageDriver {
 // as SearchDriver and TenantDb (app never branches on isolation strategy).
 export class LogicalStorageDriver implements StorageDriver {
   private readonly s3: S3Client
+  /**
+   * The client used ONLY to sign URLs the browser will open (#726 / ADR-233 ruling 2).
+   *
+   * A SigV4 signature covers the Host header, so a URL signed for the name the SERVER reaches the
+   * store by is refused when the browser opens it under a different name. Wherever the store is not
+   * reachable from the browser at the same address — every containerised deployment, where the
+   * server says `seaweedfs:8333` and the browser cannot resolve that at all — the two have to be
+   * stated apart. Same credentials, same bucket, different endpoint.
+   *
+   * Unset (the `pnpm dev` loop, where the browser and the server both say `localhost:9000`) means
+   * "they are the same", and this is literally the same client — so nothing changes for anyone who
+   * has not set it.
+   */
+  private readonly signer: S3Client
   private readonly bucket: string
 
   constructor() {
-    this.s3 = new S3Client({
+    const common = {
       region: process.env.S3_REGION ?? 'us-east-1',
-      endpoint: process.env.S3_ENDPOINT,
       credentials: {
         accessKeyId: process.env.S3_ACCESS_KEY!,
         secretAccessKey: process.env.S3_SECRET_KEY!,
       },
       forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
-    })
+    }
+    this.s3 = new S3Client({ ...common, endpoint: process.env.S3_ENDPOINT })
+    const publicEndpoint = process.env.S3_PUBLIC_ENDPOINT
+    this.signer = publicEndpoint ? new S3Client({ ...common, endpoint: publicEndpoint }) : this.s3
     this.bucket = process.env.S3_BUCKET!
   }
 
@@ -86,7 +102,7 @@ export class LogicalStorageDriver implements StorageDriver {
 
   async presignPut(key: string, opts: { contentType: string; ttlSeconds: number }): Promise<string> {
     return getSignedUrl(
-      this.s3,
+      this.signer,
       new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: opts.contentType }),
       { expiresIn: opts.ttlSeconds },
     )
@@ -98,7 +114,7 @@ export class LogicalStorageDriver implements StorageDriver {
 
   async presignGet(key: string, opts: { ttlSeconds: number; disposition?: { type: 'attachment' | 'inline'; filename: string } }): Promise<string> {
     return getSignedUrl(
-      this.s3,
+      this.signer,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,

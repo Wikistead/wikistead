@@ -120,6 +120,29 @@
 	}
 }
 
+# ── Attachments (#726 / ADR-233 ruling 2) ────────────────────────────────────
+# The browser uploads and fetches attachments through PRESIGNED URLs, so the object store needs a
+# public name of its own. It cannot be a path on the site above: a SigV4 signature covers the path
+# and the Host header, so anything that rewrote either would make the gateway compute a different
+# signature and refuse every upload with a 403 that reads like bad credentials.
+#
+# Declared in infra/routes/origin-routes.mjs as a SIBLING HOST (`SIBLING_HOSTS`) and checked by
+# scripts/check-origin-routes.mjs — the rule this file lives under is that no route exists here
+# without a row there.
+#
+# The server signs with THIS name too (S3_PUBLIC_ENDPOINT), and the compose proxy carries a network
+# alias for it, so the name resolves on both sides of the signature.
+s3.{$SITE_HOST:app.wikistead.com} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+	# No path rewriting, and no `handle` matcher: the path IS part of what was signed.
+	reverse_proxy {$S3_UPSTREAM:seaweedfs:8333}
+}
+
 # ── Per-tenant subdomains ────────────────────────────────────────────────────
 # Tenant subdomains route to the SAME services (the Host header carries the tenant; the
 # server resolves it). Wildcard TLS needs a DNS-01 provider module (custom Caddy build) —

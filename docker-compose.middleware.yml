@@ -57,7 +57,13 @@ services:
   meilisearch:
     image: getmeili/meilisearch:v1.10
     environment:
-      MEILI_MASTER_KEY: dev_master_key_change_me
+      # Taken from the environment, defaulting to the dev fixture (#726). Hardcoded, this key could
+      # never agree with a self-hosted server: under NODE_ENV=production the server REFUSES TO BOOT
+      # on a published fixture secret, so the guide's "set a real MEILI_MASTER_KEY" produced a search
+      # service the server could not authenticate to — measured, and the reason the apps profile
+      # could not come up even after its network wiring was fixed. Dev, e2e and server-test all set
+      # the fixture value in their own .env, so nothing changes for them.
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-dev_master_key_change_me}
       MEILI_ENV: development
 
   # S3-compatible object storage: SeaweedFS (Apache-2.0, pure OSS, actively maintained). Replaces MinIO

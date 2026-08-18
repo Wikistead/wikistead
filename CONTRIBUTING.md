@@ -48,11 +48,15 @@ authorization model, which looks like a broken app. The bootstrap is idempotent 
 first-run-only: OpenFGA persists to Postgres, so a restart never needs it again — only
 `docker compose down -v` does.
 
-Then open **http://localhost:5173/p/demo**. The API resolves the tenant from the `Host`
-header, so the web app calls it on `dev.localhost:4000`.
+Then open **http://dev.localhost:5173/p/demo**. The API resolves the tenant from the `Host` header,
+and the web app calls a RELATIVE `/api` — the dev server proxies it (the proxy table is generated
+from `infra/routes/origin-routes.mjs`, #724). The host matters, not the port: `localhost:5173` and
+`dev.localhost:5173` resolve to different tenants.
 
-To run the app services in containers instead:
-`docker compose --profile apps up -d --build`.
+To run the whole product in containers instead — web, server, collab and a reverse proxy on one
+origin — `docker compose --profile apps up -d --build`, then open **https://dev.localhost**. That
+profile pins `NODE_ENV=production`, so the `dev-token` bearer the dev loop accepts does not work
+there, and the certificate is Caddy's internal one until you `caddy trust` it.
 
 ### Checks
 

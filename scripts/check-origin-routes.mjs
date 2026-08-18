@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ORIGIN_ROUTES, PROXIED_ROUTES, NOT_EDGE_ROUTES } from '../infra/routes/origin-routes.mjs'
+import { ORIGIN_ROUTES, PROXIED_ROUTES, NOT_EDGE_ROUTES, SIBLING_HOSTS } from '../infra/routes/origin-routes.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const problems = []
@@ -117,6 +117,48 @@ for (const p of ingPaths) {
   }
 }
 
+// ── Sibling hosts (#726 / ADR-233 ruling 2) ──────────────────────────────────────────────────
+// The attachment host is not a path row and cannot be checked as one: it is a SITE BLOCK of its own,
+// and its whole correctness is that nothing rewrites the request. The ruling was that it be declared
+// in the table rather than written beside it, so this is the half that makes that true — a block
+// here with no row, or a row with no block, is a red build exactly like a path route.
+// A site address is an UNINDENTED line ending in `{`. Matching on "no braces before it" looked
+// tighter and silently found nothing: the address itself contains one (`s3.{$SITE_HOST:…}`), which
+// is exactly the block this check was added for — a vacuous parse would have passed it.
+const siteBlocks = caddy
+  .split('\n')
+  .filter((l) => /^\S.*\{\s*$/.test(l) && !l.trimStart().startsWith('#'))
+  .map((l) => l.replace(/\s*\{\s*$/, '').trim())
+for (const sib of SIBLING_HOSTS) {
+  const wanted = `${sib.subdomain}.{$SITE_HOST:app.wikistead.com}`
+  if (!siteBlocks.includes(wanted)) {
+    problems.push(`Caddyfile: no site block for "${wanted}" (${sib.subdomain} → ${sib.upstream}:${sib.port}). ${sib.why}`)
+    continue
+  }
+  // The block body, up to the closing brace at column 0.
+  const body = caddy.slice(caddy.indexOf(wanted)).split(/\n\}/)[0]
+  if (!new RegExp(`reverse_proxy[^\\n]*${sib.upstream}:${sib.port}`).test(body)) {
+    problems.push(`Caddyfile: "${wanted}" does not proxy to ${sib.upstream}:${sib.port}`)
+  }
+  if (!sib.strip && /handle_path|uri\s+strip_prefix/.test(body)) {
+    problems.push(
+      `Caddyfile: "${wanted}" rewrites the path, but the row says strip=false. A presigned URL's ` +
+      'signature covers the path — rewriting it turns every upload into a 403 that reads like bad credentials.',
+    )
+  }
+}
+// …and nothing else may grow a site block quietly: the file is the reverse-proxy reference, and an
+// undeclared host is the same drift the path table exists to prevent.
+const declaredSites = new Set([
+  '{$SITE_HOST:app.wikistead.com}',
+  ...SIBLING_HOSTS.map((h) => `${h.subdomain}.{$SITE_HOST:app.wikistead.com}`),
+])
+for (const site of siteBlocks) {
+  if (!declaredSites.has(site)) {
+    problems.push(`Caddyfile: site block "${site}" is served but is not declared — add it to SIBLING_HOSTS (with its reason) or remove it`)
+  }
+}
+
 // ── The SPA catch-all must exist on both, or a client route 404s ─────────────────────────────
 if (!/^\s*handle\s*\{/m.test(caddy)) problems.push('Caddyfile: no fallback handle block — client routes would not reach the SPA')
 if (!ingPaths.some((p) => p.path === '/')) problems.push('ingress.yaml: no "/" rule — client routes would not reach the SPA')
@@ -135,6 +177,6 @@ if (problems.length) {
   process.exit(1)
 }
 console.log(
-  `check-origin-routes OK — ${ORIGIN_ROUTES.length} declared routes; Caddy and the ingress agree with the table ` +
+  `check-origin-routes OK — ${ORIGIN_ROUTES.length} declared routes + ${SIBLING_HOSTS.length} sibling host(s); Caddy and the ingress agree with the table ` +
   `(${PROXIED_ROUTES.filter((r) => r.strip).length} stripped, ${PROXIED_ROUTES.filter((r) => !r.strip).length} path-preserving).`,
 )

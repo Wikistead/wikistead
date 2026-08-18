@@ -45,7 +45,25 @@ const PROBES = {
     expect: () => null,
   },
   '/signup': { path: '/signup/login', expect: () => null },
-  '/pub': { path: '/pub/__traversal_probe__', expect: () => null },
+  '/pub': {
+    path: '/pub/__traversal_probe__',
+    // The shell IS the built index.html (#409 / ADR-154 injects head tags into that exact file), so
+    // "does this look like the SPA" cannot decide this row — measured against a stack where the
+    // shell was configured and working, and the generic check called it a failure (#726).
+    //
+    // What separates them is who answered. The server's shell route sets `cache-control: no-store`
+    // on every response and answers 404 for a page that does not exist; nginx's SPA fallback sets
+    // `no-cache` and answers 200. Non-HTML means the shell is OFF and the server answered JSON —
+    // still not the SPA, so this row passes and ADR-233 §5's separate check is what names it.
+    spaIsCorrect: true,
+    expect: (r, body, ct) => {
+      if (!/text\/html/i.test(ct || '')) return null
+      const cc = r.headers?.get?.('cache-control') ?? ''
+      return /no-store/.test(cc)
+        ? null
+        : `HTML came back without the shell's cache-control: no-store (got "${cc || 'none'}") — this is the static SPA answering, and every published page is dead`
+    },
+  },
   '/robots.txt': {
     path: '/robots.txt',
     expect: (r, body, ct) => (/text\/plain/i.test(ct || '') ? null : `robots.txt must be text/plain, got ${ct || '(none)'} — the SPA shell serves 200 HTML here and voids the public switch`),
@@ -89,12 +107,17 @@ async function probeWs(url) {
   // node:http, not fetch: undici treats a 101 as a protocol error and throws, so the first version
   // of this probe reported "status 0" for a socket curl had already shown answering 101 — a
   // measurement bug dressed as a defect.
-  const http = await import('node:http')
+  // …and node:https when the origin is TLS. The first version imported node:http unconditionally,
+  // which against an https base connects to port 80 — where a proxy answers 308 to everything. That
+  // reported "the socket is not reaching the collab service" about a socket that was never tried
+  // (#726: the self-host stack is HTTPS by consequence, so this path is now the normal one).
   const u = new URL(url)
+  const tls = u.protocol === 'https:'
+  const mod = tls ? await import('node:https') : await import('node:http')
   return await new Promise((resolve) => {
-    const req = http.request({
+    const req = mod.request({
       hostname: u.hostname,
-      port: u.port,
+      port: u.port || (tls ? 443 : 80),
       path: u.pathname,
       headers: { ...headers, connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-version': '13', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==' },
     })

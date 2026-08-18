@@ -32,6 +32,11 @@ RUN node -e "const fs=require('fs');const f='apps/server/package.json';const p=J
 # CE build context. Removing them here (image-local, like the line above) rather than excluding them from
 # the repo's tsconfig, which would stop local typechecking from seeing them.
 RUN rm -rf apps/server/src/__tests__
+# The root package.json has a `postinstall` (#694's push-guard wiring), and `pnpm install`
+# runs it — so the script has to BE here or the build dies on a missing module. It self-disables
+# outside a dev checkout (it looks for the project design notes, which no image copies), so shipping it costs a
+# 2 KB file and nothing else. Measured: without this line every image build fails (#726).
+COPY scripts/wire-git-hooks.mjs ./scripts/wire-git-hooks.mjs
 RUN pnpm install --frozen-lockfile=false
 RUN pnpm --filter @wikistead/server... build
 # Self-contained production tree: the app + its workspace deps (dist) + prod node_modules only —

@@ -12,6 +12,11 @@ COPY packages/hooks ./packages/hooks
 COPY packages/auth ./packages/auth
 COPY packages/authz ./packages/authz
 COPY apps/collab ./apps/collab
+# The root package.json has a `postinstall` (#694's push-guard wiring), and `pnpm install`
+# runs it — so the script has to BE here or the build dies on a missing module. It self-disables
+# outside a dev checkout (it looks for the project design notes, which no image copies), so shipping it costs a
+# 2 KB file and nothing else. Measured: without this line every image build fails (#726).
+COPY scripts/wire-git-hooks.mjs ./scripts/wire-git-hooks.mjs
 RUN pnpm install --frozen-lockfile=false
 RUN pnpm --filter @wikistead/collab... build
 RUN pnpm --filter @wikistead/collab deploy --prod /out

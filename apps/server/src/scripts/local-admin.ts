@@ -42,13 +42,24 @@ export async function createLocalAdmin(
   sql: postgres.Sql,
   args: { slug: string; email: string; create?: boolean; plan?: string; by?: string; origin?: string },
 ): Promise<LocalAdminResult> {
-  if (!isValidSlug(args.slug)) throw new Error(`"${args.slug}" is not a usable tenant slug`)
   if (!args.email.includes('@')) throw new Error(`"${args.email}" is not an email address — it becomes the sign-in name`)
 
   let [tenant] = await sql<{ id: string; slug: string; plan: string }[]>`
     SELECT id, slug, plan FROM tenants WHERE slug = ${args.slug}`
   let created = false
   if (!tenant) {
+    // The slug rule is a rule about MAKING a name (reserved subdomains, shape). It is checked here,
+    // where a name is minted — not above, where it also refused to recover a tenant that already
+    // holds the name.
+    //
+    // #726 measured what that cost: the self-host guide seeds a `dev` tenant on `dev.localhost` and
+    // then tells the reader to run this command for their first administrator. `dev` is RESERVED, so
+    // the command refused, and the evaluation stack had no way in at all — the seeded admin only
+    // works through the dev bearer, which the self-host profile now correctly rejects.
+    //
+    // Recovering an existing tenant cannot claim a namespace: the row is already there, and getting
+    // here requires database credentials.
+    if (!isValidSlug(args.slug)) throw new Error(`"${args.slug}" is not a usable tenant slug`)
     if (!args.create) {
       throw new Error(`no tenant "${args.slug}" — pass --create to make one, or check the slug`)
     }
