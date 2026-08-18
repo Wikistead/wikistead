@@ -315,7 +315,8 @@
     "webhooks": "Webhook",
     "audit": "監査ログ",
     "analytics": "アナリティクス",
-    "roles": "ロール"
+    "roles": "ロール",
+    "scim": "SCIM"
   },
   "adminModeration": {
     "title": "不正フィルタ",
@@ -1492,5 +1493,19 @@
     "urlLabel": "URL",
     "invalidUrl": "http(s) / mailto の URL か相対パスを入力してください。",
     "removeLink": "リンクを解除"
+  },
+  "adminScim": {
+    "title": "SCIM プロビジョニング",
+    "body": "IdP から SCIM でメンバーの作成・更新・停止ができます。下のエンドポイントと、ここで発行したトークンを IdP に設定してください。",
+    "endpoint": "SCIM のエンドポイント",
+    "tokenName": "トークンの名前",
+    "create": "トークンを作成",
+    "empty": "SCIM トークンはまだありません。",
+    "neverUsed": "接続履歴なし",
+    "revoke": "取り消す",
+    "revokeTitle": "この SCIM トークンを取り消しますか？",
+    "revokeBody": "「{{name}}」でのプロビジョニングはすぐに止まり、IdP には新しいトークンの設定が必要になります。",
+    "lockedTitle": "SCIM プロビジョニングは Business の機能です",
+    "lockedBody": "アップグレードすると、IdP を接続してメンバーを自動で管理できます。"
   }
 }

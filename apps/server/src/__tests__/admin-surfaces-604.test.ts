@@ -23,13 +23,17 @@ import { ADMIN_SURFACES, readableAdminSurfaces } from '../routes/admin-surfaces.
 import { TENANT_CAP_RELATION } from '../routes/roles.js'
 import { auditLedgerRegistered } from '../audit/sink.js'
 import { analyticsRegistered } from '../analytics/sink.js'
+import { scimRegistered } from '../scim/sink.js'
 
 // #692 B: `audit` and `analytics` exist in the registry but only SURFACE when their EE mount
 // registered (#688) — the dev suite composes EE through the vitest alias, the CE build composes
 // nothing, and a pin that hard-codes the composed answer is red exactly there. The pin asks the same
 // predicates production asks, in BOTH directions: registered → the door is offered, not → absent.
+// #723: `scim` joins the composed set. Adding a surface to ADMIN_SURFACES without teaching this
+// helper turns the assertions below red, which is how the omission announced itself.
 const composedSurface = (s: string) =>
-  (s !== 'audit' || auditLedgerRegistered()) && (s !== 'analytics' || analyticsRegistered())
+  (s !== 'audit' || auditLedgerRegistered()) && (s !== 'analytics' || analyticsRegistered()) &&
+  (s !== 'scim' || scimRegistered())
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6381')

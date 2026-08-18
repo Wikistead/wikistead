@@ -3,6 +3,7 @@ import type { OpenFgaClient, ClientBatchCheckSingleResponse } from '@openfga/sdk
 import { fgaModelId } from '@wikistead/authz'
 import { auditLedgerRegistered } from '../audit/sink.js' // #688: EE-composed features only surface when composed
 import { analyticsRegistered } from '../analytics/sink.js'
+import { scimRegistered } from '../scim/sink.js' // #723: SCIM is EE-composed too
 
 // #604 / ADR-208 (ruling B,): WHICH admin surfaces may this caller enter?
 //
@@ -31,6 +32,9 @@ export const ADMIN_SURFACES: Readonly<Record<string, string>> = {
   moderation: 'admin',
   billing: 'admin',
   orphans: 'admin',
+  // #723 / ADR-232: minting the bearer token an IdP needs. Admin-gated like the rest of the
+  // credential surfaces; EE-composed, so the filter below hides it in a CE build.
+  scim: 'admin',
 }
 
 // The surfaces `userId` may enter, in registry order (the console's tab order). One batchCheck over
@@ -58,7 +62,8 @@ export async function readableAdminSurfaces(fga: OpenFgaClient, userId: string, 
   // the tier alone would render dead navigation there. CE resolves entitlements to UNLIMITED, so the
   // honest signal is REGISTRATION: the mount registered its sink/collector, or the surface is absent.
   const composed = ([k]: [string, string]) =>
-    (k !== 'audit' || auditLedgerRegistered()) && (k !== 'analytics' || analyticsRegistered())
+    (k !== 'audit' || auditLedgerRegistered()) && (k !== 'analytics' || analyticsRegistered()) &&
+    (k !== 'scim' || scimRegistered())
   return Object.entries(ADMIN_SURFACES).filter(composed)
     .filter(([, relation]) => open.has(relation))
     .map(([surface]) => surface)

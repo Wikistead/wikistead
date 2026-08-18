@@ -136,6 +136,7 @@ export const SURFACE_DOCS = {
     moderation: 'wikistead-docs/src/content/docs/admin/moderation.md',
     billing: 'wikistead-docs/src/content/docs/admin/billing.md',
     orphans: 'wikistead-docs/src/content/docs/admin/orphaned-drafts.md',
+    scim: 'wikistead-docs/src/content/docs/admin/scim.md', // EE-badged page (#723 / ADR-232)
   },
   // Editor macros — registered fence languages and directive names (the registry walk imports
   // apps/web/src/editor/macros and asks registeredFenceLangs / registeredDirectiveNames).

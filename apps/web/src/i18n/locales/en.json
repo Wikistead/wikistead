@@ -315,7 +315,8 @@
     "webhooks": "Webhooks",
     "audit": "Audit log",
     "analytics": "Analytics",
-    "roles": "Roles"
+    "roles": "Roles",
+    "scim": "SCIM"
   },
   "adminModeration": {
     "title": "Abuse filter",
@@ -1495,5 +1496,19 @@
     "urlLabel": "URL",
     "invalidUrl": "Enter an http(s) or mailto URL, or a relative path.",
     "removeLink": "Remove link"
+  },
+  "adminScim": {
+    "title": "SCIM provisioning",
+    "body": "Your identity provider creates, updates and deactivates members through SCIM. Give it the endpoint below and a token you mint here.",
+    "endpoint": "SCIM endpoint",
+    "tokenName": "Token name",
+    "create": "Create token",
+    "empty": "No SCIM tokens yet.",
+    "neverUsed": "never connected",
+    "revoke": "Revoke",
+    "revokeTitle": "Revoke this SCIM token?",
+    "revokeBody": "Provisioning through “{{name}}” stops immediately, and your identity provider will need a new token.",
+    "lockedTitle": "SCIM provisioning is a Business feature",
+    "lockedBody": "Upgrade to connect your identity provider and provision members automatically."
   }
 }
