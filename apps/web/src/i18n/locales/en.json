@@ -1411,7 +1411,7 @@
     "nameLabel": "Role name",
     "namePlaceholder": "e.g. recycler",
     "conflict": "Name in use, or the role still has assignments. Unassign first.",
-    "notEntitled": "Custom roles are an Enterprise feature on this plan.",
+    "notEntitled": "Custom roles are a Team feature.",
     "rolePlaceholder": "Select role",
     "cap": {
       "view": "View",
@@ -1499,9 +1499,9 @@
     "removeLink": "Remove link"
   },
   "adminScim": {
-    "title": "SCIM provisioning",
-    "body": "Your identity provider creates, updates and deactivates members through SCIM. Give it the endpoint below and a token you mint here.",
-    "endpoint": "SCIM endpoint",
+    "title": "Automatic provisioning (SCIM)",
+    "body": "Let your identity provider create, update and deactivate members automatically. Give it the endpoint below and a token you mint here.",
+    "endpoint": "Provisioning endpoint",
     "tokenName": "Token name",
     "create": "Create token",
     "empty": "No SCIM tokens yet.",
@@ -1509,8 +1509,8 @@
     "revoke": "Revoke",
     "revokeTitle": "Revoke this SCIM token?",
     "revokeBody": "Provisioning through “{{name}}” stops immediately, and your identity provider will need a new token.",
-    "lockedTitle": "SCIM provisioning is a Business feature",
-    "lockedBody": "Upgrade to connect your identity provider and provision members automatically."
+    "lockedTitle": "Automatic provisioning is a Team feature",
+    "lockedBody": "Upgrade to let your identity provider create and deactivate members automatically."
   },
   "adminDomains": {
     "title": "Custom domains",
