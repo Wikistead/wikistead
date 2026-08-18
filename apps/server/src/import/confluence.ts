@@ -36,6 +36,69 @@ interface Ctx {
   title: string
   /** Lower-cased page names the ARCHIVE carries — a link outside this set cannot become a wikilink. */
   pageNames: ReadonlySet<string>
+  /** storage-format labels already reported for THIS page — see `reportStorage` */
+  storageSeen: Set<string>
+}
+
+// #712 ③ — STORAGE FORMAT, the input this adapter does not read.
+//
+// ADR-227 §6 scoped Confluence to the HTML export; the XML/storage format stayed out on purpose. But
+// an archive can still carry storage markup — `<ac:structured-macro ac:name="jira">` and friends turn
+// up inside HTML exports of older instances, and people hand this converter what their admin console
+// gave them rather than what an ADR chose. Those tags matched nothing in the walk below, so they fell
+// to `default:` and were flattened to their inner text: a jira macro left the string `ENG-1` sitting
+// in a paragraph, with an EMPTY report. That is the one failure ADR-227 exists to prevent — not that
+// the element was unsupported, but that the archive was told nothing about it.
+//
+// WHY REPORT RATHER THAN REFUSE (the decision behind #712 ③): a Confluence export is one archive of
+// several hundred pages. Rejecting all of it because one page carries `ac:` markup costs the reader
+// the 499 pages that would have imported cleanly, and they did not choose which format their admin
+// console produced — so a refusal leaves them with no next move, in the ticket whose whole purpose is
+// removing the friction of moving. Reporting keeps the pages, keeps the text, and names what this
+// adapter could not read. The SCOPE is unchanged: storage format is still not converted. It is now
+// declared instead of swallowed.
+const STORAGE_PREFIXES = ['ac:', 'ri:']
+const isStorageTag = (tag: string) => STORAGE_PREFIXES.some((p) => tag.startsWith(p))
+
+/** What to call this element in the report: the macro's own name where it has one, else the tag. */
+function storageLabel(el: HTMLElement, tag: string): string {
+  if (tag === 'ac:structured-macro') {
+    const name = el.getAttribute('ac:name')
+    if (name) return name.toLowerCase()
+  }
+  // `<ac:image><ri:attachment ri:filename="pic.png"/></ac:image>` — the file is IN the archive, so
+  // naming it is the difference between "something was lost" and "go and look at pic.png".
+  const file = attachmentFilename(el)
+  return file ? `${tag} (${file})` : tag
+}
+
+function attachmentFilename(el: HTMLElement): string | null {
+  const own = el.getAttribute('ri:filename')
+  if (own) return own
+  for (const child of el.childNodes) {
+    const found = (child as HTMLElement).rawTagName ? attachmentFilename(child as HTMLElement) : null
+    if (found) return found
+  }
+  return null
+}
+
+/**
+ * Report a storage-format element, ONCE per label per page.
+ *
+ * Deduplicated because a page migrated from an older instance can carry the same `ac:link` forty
+ * times, and forty identical rows do not tell the reader anything the first one did not — they bury
+ * the other findings, which is its own way of losing them.
+ */
+function reportStorage(el: HTMLElement, tag: string, ctx: Ctx): void {
+  const detail = storageLabel(el, tag)
+  // The key is JSON rather than a joined string with a delimiter. The obvious delimiter here is
+  // NUL, and writing one puts a raw NUL BYTE in this source file — which makes the file binary
+  // to git, so it can no longer be diffed or reviewed. (Nine files in this tree are already in
+  // that state; filed separately.)
+  const key = JSON.stringify([ctx.title, detail])
+  if (ctx.storageSeen.has(key)) return
+  ctx.storageSeen.add(key)
+  ctx.degraded.push({ node: ctx.title, what: 'Confluence storage-format markup not converted', detail })
 }
 
 /**
@@ -46,7 +109,7 @@ interface Ctx {
  * must never do — a migration that quietly drops a jira macro is how a wiki loses its own history.
  */
 export function confluenceHtmlToMarkdown(html: string, title: string, pageNames: ReadonlySet<string> = new Set()): { markdown: string; degraded: ImportDegradation[] } {
-  const ctx: Ctx = { degraded: [], title, pageNames }
+  const ctx: Ctx = { degraded: [], title, pageNames, storageSeen: new Set() }
   const root = parse(html, { blockTextElements: { script: false, style: false, pre: true, code: true } })
   // The export wraps the real content; fall back to the whole document when the wrapper is absent.
   const body = root.querySelector('#main-content') ?? root.querySelector('body') ?? root
@@ -70,6 +133,9 @@ function renderBlock(node: Node, ctx: Ctx): string {
     const text = inlineText(node).trim()
     return text
   }
+  // Before the walk, not inside `default:` — a storage element can be spelled `ac:layout` and would
+  // otherwise be indistinguishable from an ordinary unknown container that is fine to flatten.
+  if (isStorageTag(tag)) return renderStorage(el, tag, ctx)
   switch (tag) {
     case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
       return `${'#'.repeat(Number(tag[1]))} ${inline(el, ctx).trim()}`
@@ -102,6 +168,25 @@ function renderBlock(node: Node, ctx: Ctx): string {
     default:
       return children(el, ctx).join('\n\n') || inline(el, ctx).trim()
   }
+}
+
+/**
+ * A storage-format element: reported, and its text kept under a label saying what it was.
+ *
+ * The marker is the SAME shape the HTML export's unrepresentable macros already use, so a reader
+ * meeting both in one import learns one convention rather than two. What differs is the `what` in
+ * the report, because the two situations are genuinely different: one is a macro this product has no
+ * equivalent for, the other is markup this adapter does not read at all.
+ */
+function renderStorage(el: HTMLElement, tag: string, ctx: Ctx): string {
+  reportStorage(el, tag, ctx)
+  const label = storageLabel(el, tag)
+  // The children are walked normally: text inside a storage macro is still the author's text, and
+  // dropping it here would be exactly the silent loss this branch was added to stop. Nested storage
+  // elements report themselves on the way through (deduplicated), so a wrapper does not hide them.
+  const inner = children(el, ctx).join('\n\n').trim()
+  return inner ? `> [Confluence storage format: ${label}]\n>\n${inner.split('\n').map((l) => `> ${l}`).join('\n')}`
+    : `> [Confluence storage format: ${label}]`
 }
 
 /** Confluence marks its macros on the wrapper; both export vintages are handled. */
@@ -214,6 +299,14 @@ function inlineNode(node: Node, ctx: Ctx): string {
   const el = node as HTMLElement
   const tag = (el.rawTagName ?? '').toLowerCase()
   if (!tag) return inlineText(node)
+  // The same declaration, from the inline side. A `<ac:link>` sits inside a paragraph, so it never
+  // reaches `renderBlock` — and `default:` below flattens it to its text with nothing said, which is
+  // how a page's links quietly become words. No block-quote marker here (it would break the
+  // sentence): the text is kept, and the report carries the name.
+  if (isStorageTag(tag)) {
+    reportStorage(el, tag, ctx)
+    return inline(el, ctx)
+  }
   switch (tag) {
     case 'strong': case 'b': return `**${inline(el, ctx).trim()}**`
     case 'em': case 'i': return `*${inline(el, ctx).trim()}*`
