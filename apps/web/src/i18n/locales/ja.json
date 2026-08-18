@@ -877,7 +877,8 @@
     "deleteForeverTitle": "完全に削除",
     "deleteForeverConfirm": "「{{name}}」とその下位ページを完全に削除しますか？この操作は取り消せません（ゴミ箱からの復元はできません）。",
     "moreSpaceMatches": "さらに一致があります。入力で絞り込めます",
-    "moreSpaces": "さらに表示…"
+    "moreSpaces": "さらに表示…",
+    "resize": "サイドバーの幅を変える"
   },
   "dialogs": {
     "renamePageTitle": "ページ名を変更",
@@ -1119,7 +1120,7 @@
     "eraseAnalytics": "閲覧履歴を消去",
     "inviteTitle": "メンバーを招待",
     "emailPlaceholder": "email@example.com",
-    "inviteEmail": "招待メール",
+    "inviteEmail": "メールアドレス",
     "inviteRole": "招待ロール",
     "roleFor": "{{sub}} のロール",
     "sendInvite": "招待を送信",

@@ -25,6 +25,7 @@ import { resolve, join } from "node:path";
 
 const WEB_SRC = resolve(import.meta.dirname, "..");
 const en = JSON.parse(readFileSync(resolve(WEB_SRC, "i18n/locales/en.json"), "utf8")) as Record<string, unknown>;
+const ja = JSON.parse(readFileSync(resolve(WEB_SRC, "i18n/locales/ja.json"), "utf8")) as Record<string, unknown>;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -35,10 +36,12 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const lookup = (key: string): string | null => {
-  const hit = key.split(".").reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], en);
-  return typeof hit === "string" ? hit : null;
+const at = (cat: Record<string, unknown>, key: string): string | null => {
+  const hit = key.split(".").reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], cat);
+  return typeof hit === "string" && hit.trim() !== "" ? hit : null;
 };
+const lookup = (key: string): string | null => at(en, key);
+const lookupJa = (key: string): string | null => at(ja, key);
 
 /**
  * Does this placeholder show an EXAMPLE ANSWER rather than name the field?
@@ -57,13 +60,119 @@ function isSampleValue(text: string): boolean {
   if (/^https?:\/\/\S+$/.test(t)) return true;                // a bare example URL
   // A single lower-case token with a hyphen and no spaces reads as a value, not a name ("my-team").
   if (/^[a-z0-9]+(-[a-z0-9]+)+$/.test(t)) return true;
+  // #740 three shapes the first version could not see, found by counting the family by hand.
+  // A bare host name (`youtube.com`, `docs.example.com`) is one of the answers, not the question.
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(t)) return true;
+  // A comma-separated list of examples ("engineering, admins") is two answers, not a name.
+  if (/^[a-z0-9-]+(,\s*[a-z0-9-]+)+$/.test(t)) return true;
+  // A pasted document's first line (`-----BEGIN CERTIFICATE-----`) shows the shape of the paste.
+  if (/^-{3,}BEGIN /.test(t)) return true;
   return false;
 }
 
-/** the visible-label idiom this codebase uses: a <label> wrapping the control, or an htmlFor */
-const LABEL_NEAR = /<label|htmlFor=|<FieldLabel/;
+/**
+ * Is the control INSIDE a label, and does that label say anything?
+ *
+ * #740 measured the first version of this and it had no teeth. It looked for the string
+ * `<label` in an eight-line window, which is true of two different situations:
+ *
+ *   - the idiom this codebase uses, `<label>{t("…")}<Input …/></label>` — correct;
+ *   - a SECTION HEADING three lines above an unwrapped input, `<label>Create an API key</label>` —
+ *     which names the form, not the field, and was passing on three screens.
+ *
+ * And it stayed green when the label element was kept and its TEXT deleted, which is the reported
+ * defect exactly: a box with an example in it and nothing saying what it wants. So the window is
+ * gone. The label has to ENCLOSE the control (no `</label>` between the two), and it has to contain
+ * a translation key that resolves to real words in BOTH locales — an empty label, or one whose key
+ * has no Japanese, is the same blank screen to the reader who needed it.
+ */
+const LABEL_OPEN = /<label\b([^>]*)>/;
 
-interface Finding { file: string; line: number; placeholder: string }
+/**
+ * The only English literals a screen reader may hear: names that are the same word in every locale.
+ *
+ * #740 the first version exempted anything starting with a capital, and the only live defect
+ * left in the tree started with a capital — `aria-label="Resize sidebar"`, read out in English to
+ * somebody looking at a Japanese screen. A rule shaped around the current spelling habits exempts
+ * exactly the thing it was written to catch. The exception is a list now, and each entry has to be
+ * a name rather than a sentence.
+ */
+const PROPER_NOUNS = new Set(["Wikistead"]);
+
+/** A label the reader cannot see is the defect wearing the accessible name's clothes. */
+const HIDDEN = /sr-only|\bhidden\b|opacity-0/;
+
+interface Finding { file: string; line: number; placeholder: string; why?: string }
+
+/**
+ * Why this control has no usable label, or null when it has one.
+ *
+ * Two questions, because the defect has two shapes.
+ *
+ * FIRST, does a label exist and say anything? Walking backwards finds the nearest `<label>`, and its
+ * CONTENT has to resolve to real words in both locales. That is the half the first version missed:
+ * keep the element and delete its text and the screen shows a box with an example in it and nothing
+ * else, which is the report verbatim — and it stayed green (#740, measured).
+ *
+ * SECOND, is the field's name only in the screen reader? A sample-value field carrying an
+ * `aria-label` is an author saying "this field needs its own name" and then putting that name where
+ * it cannot be seen. That signal is what separated the three screens the review found from the ones
+ * that were fine: `<label>Create an API key</label>` above an `aria-label`led input names the FORM,
+ * and the field's own name was audible only.
+ *
+ * ⚠️ WHAT THIS CANNOT SEE, said rather than implied: a section heading sitting directly above a lone
+ * field, with no `aria-label` on it, is indistinguishable from a field label at this level. Telling
+ * them apart means reading the words, and a rule that guesses at prose goes red on correct pages.
+ * The `aria-label` signal covers every instance in the tree today; a future one written without it
+ * would need the walk to render, which is #650's shape and costs a mock per screen.
+ */
+function labelProblem(lines: string[], at: number): string | null {
+  for (let i = at; i >= 0 && i > at - 40; i--) {
+    const open = LABEL_OPEN.exec(lines[i]!);
+    if (!open) continue;
+    if (HIDDEN.test(open[1] ?? "")) return "the label is hidden from sight";
+    // The label's OWN words end where its control begins. Reading past that point finds the
+    // placeholder's `t(...)` and calls it the label — which is how an empty label passed: the very
+    // string this walk exists to distrust was being counted as the name of the field it sits in.
+    let textEnd = i;
+    while (textEnd < at && !/<(Input|input|textarea|Textarea|Select)\b/.test(lines[textEnd]!)) textEnd += 1;
+    const span = lines.slice(i, textEnd).join("\n").replace(LABEL_OPEN, "")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/.*$/gm, "");
+    const key = /\{\s*t\("([^"]+)"[^}]*\}/.exec(span)?.[1];
+    if (key) {
+      if (!lookup(key)) return `the label reads t("${key}"), which resolves to nothing in English`;
+      if (!lookupJa(key)) return `the label reads t("${key}"), which has no Japanese`;
+    } else if (!/\S/.test(span.replace(/\{\s*(""|''|``|null|false|undefined)\s*\}/g, ""))) {
+      // Nothing renders here. A label element whose content is `{}` reads to a person exactly like
+      // no label at all, and that is the state the report described. An expression this walk cannot
+      // follow (`{NAME[method]}`, built from `t(...)` above) is accepted rather than guessed at
+      // said here so nobody reads the check as stronger than it is.
+      return "the label element has no words in it";
+    }
+    // The label exists and says something — but does it name THIS field? An `aria-label` carrying a
+    // DIFFERENT name is the author answering that question themselves: the visible words belong to
+    // the form, and the field's own name was put where only a screen reader finds it. Where the two
+    // names agree the aria-label is merely redundant, which is not this ticket's defect.
+    // Scoped to THIS control's own element: start at the tag that opens it and read to the end of
+    // its attributes. A fixed window backwards reads the field ABOVE this one, and then a dialog
+    // with two properly labelled fields reports the first one's name against the second one's label
+    // (measured, on the link dialog).
+    let from = at;
+    while (from > 0 && !/<(Input|input|textarea|Textarea)\b/.test(lines[from]!)) from -= 1;
+    const aria = /aria-label=\{\s*t\("([^"]+)"[^}]*\}|aria-label="([^"]*)"/.exec(
+      lines.slice(from, at + 4).join("\n"),
+    );
+    const ariaName = aria ? (aria[1] ? lookup(aria[1]) : aria[2]) : null;
+    // Only comparable when the label's words are a key this walk can resolve; a label built from an
+    // expression is accepted above and cannot be compared here either.
+    const shown = key ? lookup(key) : null;
+    if (ariaName && shown && ariaName !== shown) {
+      return `the label above says ${JSON.stringify(shown)} while the field's own name, ${JSON.stringify(ariaName)}, is in its aria-label where only a screen reader finds it`;
+    }
+    return null;
+  }
+  return "no label names this control";
+}
 
 function scan(): { checked: number; unlabelled: Finding[]; hardcodedAria: Finding[] } {
   let checked = 0;
@@ -72,22 +181,21 @@ function scan(): { checked: number; unlabelled: Finding[]; hardcodedAria: Findin
   for (const file of walk(WEB_SRC)) {
     const lines = readFileSync(file, "utf8").split("\n");
     lines.forEach((line, i) => {
-      // Looking BACK as well as forward: the idiom wraps the control, so the opening <label> is above.
-      const window = lines.slice(Math.max(0, i - 8), i + 4).join("\n");
       if (line.includes("placeholder=")) {
         const m = /placeholder=\{t\("([^"]+)"\)\}|placeholder="([^"]+)"/.exec(line);
         const text = m ? (m[1] ? lookup(m[1]) : m[2]) : null;
         if (text && isSampleValue(text)) {
           checked += 1;
-          if (!LABEL_NEAR.test(window)) {
-            unlabelled.push({ file: file.slice(WEB_SRC.length + 1), line: i + 1, placeholder: text });
+          const why = labelProblem(lines, i);
+          if (why) {
+            unlabelled.push({ file: file.slice(WEB_SRC.length + 1), line: i + 1, placeholder: text, why });
           }
         }
       }
       // The other half of the report: a screen-reader label written as an English literal never
       // becomes Japanese, and nothing about the screen shows that it happened.
       const aria = /aria-label="([^"]*)"/.exec(line);
-      if (aria && aria[1] && !/^[A-Z]/.test(aria[1].trim())) {
+      if (aria && aria[1] && !PROPER_NOUNS.has(aria[1].trim())) {
         hardcodedAria.push({ file: file.slice(WEB_SRC.length + 1), line: i + 1, placeholder: aria[1] });
       }
     });
@@ -106,15 +214,14 @@ describe("#740: a field whose placeholder is an EXAMPLE has a label that stays",
   });
 
   it("every one of them has a visible label", () => {
-    const listed = result.unlabelled.map((f) => `${f.file}:${f.line}  placeholder=${JSON.stringify(f.placeholder)}`);
+    const listed = result.unlabelled.map((f) => `${f.file}:${f.line}  placeholder=${JSON.stringify(f.placeholder)} — ${f.why}`);
     expect(listed, `these fields show an example and never say what they want:\n${listed.join("\n")}`).toEqual([]);
   });
 
   it("no screen-reader label is an English literal", () => {
     // #740 family B: five of these sat in one form, so a Japanese admin heard "issuer", "client id",
-    // "client secret" read out in English. Proper nouns start with a capital and are allowed
-    // (a product's own name is the same word in both locales); anything lower-case is prose that
-    // was never translated.
+    // "client secret" read out in English. The exemption is the named list above — a product's own
+    // name is the same word in both locales, and everything else is prose that was never translated.
     const listed = result.hardcodedAria.map((f) => `${f.file}:${f.line}  aria-label=${JSON.stringify(f.placeholder)}`);
     expect(listed, `screen-reader text that never becomes Japanese:\n${listed.join("\n")}`).toEqual([]);
   });
