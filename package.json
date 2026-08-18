@@ -21,6 +21,7 @@
     "lint:no-css-modules": "node scripts/check-no-css-modules.mjs",
     "lint:no-control-bytes": "node scripts/check-no-control-bytes.mjs",
     "lint:doc-links": "node scripts/check-doc-links.mjs",
+    "lint:docs-publish-links": "node scripts/check-docs-publish-links.mjs",
     "lint:deploy-secrets": "node scripts/check-deploy-secrets.mjs",
     "lint:origin-routes": "node scripts/check-origin-routes.mjs",
     "lint:selfhost-profile": "node scripts/check-selfhost-profile.mjs",
