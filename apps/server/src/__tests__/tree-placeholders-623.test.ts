@@ -11,7 +11,7 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples, checkRelation } from '@wikistead/authz'
+import { fgaClient, writeTuples, checkRelation, filterAuthorized, fgaModelId } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { LogicalStorageDriver } from '../storage/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
@@ -209,9 +209,21 @@ describe('#623 §4: what a placeholder must NOT do', () => {
         SELECT published_at, deleted_at, parent_id FROM pages WHERE id = ${a}`
       const viewA = await checkRelation(fgaClient, READER, 'view', { type: 'page', id: a }).catch((e: unknown) => `threw: ${String(e)}`)
       const viewer = await checkRelation(fgaClient, READER, 'viewer', { type: 'space', id: spaceId }).catch((e: unknown) => `threw: ${String(e)}`)
+      // …and the two shapes the confirm actually uses, side by side: the model-PINNED raw batch
+      // (allowed / item error, verbatim) and filterAuthorized itself, re-run for [a] alone. Together
+      // with the unpinned single check above, one line now separates 'stale model pin', 'item error
+      // under load', and 'the confirm's own mapping' — the three explanations left standing.
+      const rawBatch = await fgaClient.batchCheck(
+        { checks: [{ user: READER, relation: 'view', object: `page:${a}`, correlationId: '0' }] },
+        { authorizationModelId: fgaModelId() },
+      ).then((r) => JSON.stringify(r.result)).catch((e: unknown) => `threw: ${String(e)}`)
+      const refiltered = await filterAuthorized(fgaClient, READER, 'view', [a])
+        .then((set) => `kept ${set.size} of 1`).catch((e: unknown) => `threw: ${String(e)}`)
       throw new Error(
         `chevron case: A is missing from the branch — sql row: ${JSON.stringify(row)}; ` +
-        `view(A) for READER: ${JSON.stringify(viewA)}; space viewer: ${JSON.stringify(viewer)}; ` +
+        `view(A) unpinned: ${JSON.stringify(viewA)}; space viewer: ${JSON.stringify(viewer)}; ` +
+        `pinned raw batch: ${rawBatch}; filterAuthorized([a]) now: ${refiltered}; ` +
+        `env model pin: ${fgaModelId() ?? '(none)'}; ` +
         `returned ids: ${rows.pages.map((p) => p.id).join(', ') || '(none)'}`)
     }
     expect(flag.get(a), 'a visible child earns the chevron').toBe(true)
