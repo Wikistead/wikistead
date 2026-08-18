@@ -12,6 +12,8 @@
 //     binding is the one move that would quietly retire the whole mechanism).
 import { describe, it, expect } from 'vitest'
 import { ADMIN_SURFACES } from '../routes/admin-surfaces.js'
+import { TOOLS } from '../routes/mcp.js'
+import { IMPORT_ADAPTERS } from '../import/index.js'
 // @ts-expect-error — repo-root script module, no types (#621 convention)
 import { evaluateSurfaceDocs, DOC_CODE_MAP, matchesAny } from '../../../../scripts/doc-code-map.mjs'
 
@@ -22,6 +24,24 @@ describe('#697 §4.2: every registered server surface names its docs page', () =
   it('admin tabs: every ADMIN_SURFACES key has a ledger row (both directions)', () => {
     const discovered = { 'admin-surface': Object.keys(ADMIN_SURFACES) }
     const violations = evaluateSurfaceDocs(discovered)
+    expect(violations, fmt(violations)).toEqual([])
+  })
+
+  // #729 / ADR-235: CAPABILITIES — what the product can do that has no screen to register. The
+  // importer shipped three dialects and nothing asked for a page, because a capability is not a
+  // surface anybody enrols; the MCP tools were the other half of the same gap.
+  //
+  // Both sources are checked in ONE assertion because they share one registry namespace, and the
+  // evaluator reports staleness as well as absence — asking it about half the capabilities would
+  // report the other half as rows for surfaces that no longer exist. (Measured: splitting this in
+  // two failed both ways round.)
+  it('capabilities: every MCP tool and import dialect has a ledger row (both directions)', () => {
+    const ids = [...TOOLS.map((t) => `mcp:${t.name}`), ...IMPORT_ADAPTERS.map((a) => `import:${a.id}`)]
+    // A walk that came back empty would make the assertion below pass while measuring nothing —
+    // exactly the failure the ledger exists to prevent, arriving through the ledger's own door.
+    expect(TOOLS.length, 'the MCP tool table walked empty — the walk is broken, not the coverage').toBeGreaterThan(5)
+    expect(IMPORT_ADAPTERS.length, 'the adapter table walked empty — the walk is broken').toBeGreaterThan(2)
+    const violations = evaluateSurfaceDocs({ capability: ids })
     expect(violations, fmt(violations)).toEqual([])
   })
 

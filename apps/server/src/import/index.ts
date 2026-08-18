@@ -486,13 +486,50 @@ export async function materializeImport(
   }
 }
 
+/**
+ * #729 / ADR-235: the dialects this importer speaks, as a TABLE the product can be asked about.
+ *
+ * Before this, the dialects were `if` branches inside prepareImport and nothing could enumerate
+ * them — which is why three of them shipped without a word of documentation and no guard noticed
+ * (#712). The docs-coverage walk reads this array, so a fourth dialect is in the ledger on the day
+ * it is added rather than on the day somebody remembers.
+ *
+ * `detect` is the archive fingerprint, where the dialect has one. The two without it are not gaps:
+ * `native` is identified by the manifest OUR OWN export writes, and `obsidian` is what a folder of
+ * Markdown with no manifest and no other fingerprint is — a fallback cannot be a fingerprint. That
+ * is stated here rather than left as an absent field for the next reader to interpret.
+ *
+ * #728 adds Docmost and Outline to this array. The union below is derived from it, so a dialect
+ * that reaches `sourceKind` without a row here does not compile.
+ */
+export const IMPORT_ADAPTERS = [
+  { id: 'native', detect: null },
+  { id: 'obsidian', detect: null },
+  { id: 'notion', detect: (names: string[]) => looksLikeNotionExport(names) },
+  { id: 'confluence', detect: (names: string[]) => looksLikeConfluenceExport(names) },
+] as const
+
+export type ImportSourceKind = (typeof IMPORT_ADAPTERS)[number]['id']
+
+/**
+ * Ask ONE adapter whether this archive is its dialect.
+ *
+ * Deliberately not "find the first adapter that matches": the fingerprints are checked at different
+ * points in prepareImport (Confluence converts before the tree is built, Notion reads names after),
+ * and collapsing them into one ordered search would change which branch wins for an archive that
+ * trips two fingerprints. Same question, same answer as before — just asked of the table.
+ */
+export function matchesAdapter(id: ImportSourceKind, fileNames: string[]): boolean {
+  return IMPORT_ADAPTERS.find((a) => a.id === id)?.detect?.(fileNames) ?? false
+}
+
 // #712 / ADR-227 §7: the ARCHIVE-READING half, split out from importArchive so the node count can be known
 // before anything is written. It is pure and cheap (unzip is already capped, the dialects only rewrite
 // strings), which is what lets the route decide "synchronous or job" without a speculative write.
 export interface PreparedImport {
   ir: ImportIR
   /** Which dialect this archive turned out to be. `native` is the export this product itself writes. */
-  sourceKind: 'native' | 'obsidian' | 'notion' | 'confluence'
+  sourceKind: ImportSourceKind
   /** Degradations discovered while reading the archive — they belong to the report the materializer returns. */
   extraDegradations: ImportDegradation[]
   /** Pages this archive would create. The §7 threshold is measured against exactly this. */
@@ -507,7 +544,7 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
   // FIRST and hands it an archive it already understands: each `.html` becomes a `.md` of the same
   // name. That keeps the tree logic, the attachment rules and the authz path identical for every
   // source, and guarantees no raw HTML ever reaches a page body (ADR-132 §3).
-  if (looksLikeConfluenceExport(Object.keys(files))) {
+  if (matchesAdapter('confluence', Object.keys(files))) {
     sourceKind = 'confluence'
     const converted: Record<string, Uint8Array> = {}
     // The pages the archive actually carries, so a link OUT of the export is not turned into
@@ -548,7 +585,7 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
   // suffix) rather than asked for: a user uploads "my export", not "my export, format N", and the
   // shapes are distinguishable without guessing. A Wikistead ZIP and a plain vault carry no such
   // suffix, so this branch cannot fire on them.
-  if (looksLikeNotionExport(Object.keys(files))) {
+  if (matchesAdapter('notion', Object.keys(files))) {
     sourceKind = 'notion'
     for (const node of nodes) {
       const { title, hex } = splitNotionName(noteNameOf(node.dir))
