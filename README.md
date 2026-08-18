@@ -66,7 +66,7 @@ page to every API call. The certificate is Caddy's internal one, so the browser 
 certificate instead.
 
 Nobody can sign in yet: make the first administrator with
-`pnpm tenant:local-admin dev you@example.com --create`, which prints an invite link.
+`pnpm --filter @wikistead/server tenant:local-admin dev you@example.com --create`, which prints an invite link.
 
 **[docs/self-hosting.md](docs/self-hosting.md)** is the full guide: the secrets to generate, single-host
 Docker Compose and what production needs beyond it, reverse-proxy and TLS rules, the configuration
