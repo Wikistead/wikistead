@@ -24,6 +24,25 @@ import { assertStackTarget } from '../../scripts/assert-stack-target.mjs'
     // real fixture (dev-user / demo page are re-seeded below, and only test-shaped rows are removed).
     //   - throwaway members that seat-cap tests mint (they change "who is the newest member")
     await tx`DELETE FROM members WHERE tenant_id = 'tenant_dev' AND (sub LIKE 'gate-%' OR sub LIKE 'pf-out-%' OR sub LIKE 'inv-%' OR sub LIKE 'seat-%')`
+    // #738: the fixture tenant's PLAN, when the stack asks for one.
+    //
+    // Nine specs invite a second member, and every Cloud plan below the top tier is one seat (#691's
+    // ruling: Personal is a one-person plan). Once #720 made the resolver actually decide, those nine
+    // started answering 402 seat_limit — two correct changes meeting in a fixture that was never
+    // sized for them.
+    //
+    // The plan is SEEDED rather than flipped by the specs that need it. `db/registry.ts` caches a
+    // tenant row for 30 seconds, so a spec that raises the plan in `beforeAll` may run against the
+    // cached old value — and worse, a spec that lowers it back leaves the NEXT spec looking at the
+    // raised one for up to 30 seconds. That failure depends only on execution ORDER, which is why
+    // running a spec alone said it was fixed (#738, measured). Nothing mutates here, so the
+    // cache has nothing to be stale about.
+    //
+    // Set per stack (`.env.e2e`), so the dev and server-test fixtures keep the plan they had.
+    if (process.env.SEED_TENANT_PLAN) {
+      await tx`UPDATE tenants SET plan = ${process.env.SEED_TENANT_PLAN} WHERE id = 'tenant_dev'`
+      console.log(`seeded: tenant_dev / plan = ${process.env.SEED_TENANT_PLAN} (SEED_TENANT_PLAN)`)
+    }
     //   - the tenant's abuse policy: a suite sets it and resets, but a kill mid-run leaves it armed,
     //     which turns every later publish in an unrelated test into a 422 (reset to permissive here)
     await tx`UPDATE tenant_settings SET abuse_banned_words = '{}', abuse_shrink_ratio = NULL,
