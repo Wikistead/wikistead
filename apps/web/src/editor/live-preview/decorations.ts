@@ -1502,7 +1502,7 @@ class StandaloneImageWidget extends WidgetType {
   // #255`align` is NOT in the reuse key — an align-only change updates the DOM in place
   // (updateDOM), never rebuilds. A rebuild re-resolves the <img> async, so its height collapses to 0
   // while it reloads, the doc shrinks, and CM loses its scroll position (jumps to top).
-  private key() { return `${this.id} ${this.alt}`; }
+  private key() { return `${this.id}\x00${this.alt}`; }
   eq(o: StandaloneImageWidget) { return o.id === this.id && o.alt === this.alt && o.align === this.align && o.selected === this.selected; }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div") as SiDom;

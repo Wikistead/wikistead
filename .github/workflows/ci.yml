@@ -39,6 +39,7 @@ jobs:
       - run: pnpm lint:origin-routes        # #724/ADR-231: the edge configs must match the one origin route table
       - run: pnpm lint:selfhost-profile     # #726/ADR-233: the apps profile must be able to serve the product
       - run: pnpm lint:no-css-modules  # shadcn/Tailwind migration: no new CSS Modules
+      - run: pnpm lint:no-control-bytes     # #744: a raw NUL makes git call a source file binary, and a binary file has no diff to review
       - run: pnpm docs:check           # ADR-080 doc↔code linkage: generated docs not stale
       # #704: the docs repo lands at the path check-doc-links.mjs treats as the combined checkout
       # (`wikistead-docs/`), arming the authored half of the strict gate below.

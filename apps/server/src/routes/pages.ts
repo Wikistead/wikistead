@@ -3426,7 +3426,7 @@ export function extractPageLinks(md: string, selfId: string): PageLinkEdge[] {
   const edges = new Map<string, PageLinkEdge>()
   const add = (toId: string, type: PageLinkType) => {
     const id = toId.toLowerCase()
-    if (id && id !== selfId.toLowerCase()) edges.set(`${id} ${type}`, { toId: id, type })
+    if (id && id !== selfId.toLowerCase()) edges.set(`${id}\x00${type}`, { toId: id, type })
   }
   for (const m of md.matchAll(LINK_REF_RE)) add(m[1], 'link')
   for (const m of md.matchAll(EMBED_REF_RE)) add(m[1], 'embed')
