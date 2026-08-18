@@ -15,7 +15,7 @@
 // which is exactly how `handle /collab/*` failed against the bare `/collab` the provider opens. The
 // release-side traversal (one probe per row, through a built image and a real proxy) is the
 // primary defence; this is the cheap one that runs on every commit.
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ORIGIN_ROUTES, PROXIED_ROUTES, NOT_EDGE_ROUTES, SIBLING_HOSTS } from '../infra/routes/origin-routes.mjs'
@@ -62,10 +62,19 @@ for (const block of caddyBlocks) {
 }
 
 // ── Kubernetes ingress ───────────────────────────────────────────────────────────────────────
+// The whole half sleeps when deploy/k8s is not in this checkout: the manifests are private-overlay
+// material the CE build deliberately does not carry (#178), so on the public
+// repository this check has no subject — measured on the public CI's first day, where the ENOENT
+// here killed the build job before the sibling-host checks below ever ran. A dev checkout keeps
+// the full check; the mirror says so and moves on.
+const ingressPath = join(root, 'deploy/k8s/base/ingress.yaml')
+if (!existsSync(ingressPath)) {
+  console.log('origin-routes: deploy/k8s absent in this checkout (CE build) — the ingress half sleeps; Caddyfile still checked.')
+} else {
 // Comments are stripped FIRST. The first version of this check read the prose that explains
 // rewrite-target as if it were the annotation, decided every Ingress stripped, and reported eleven
 // failures that did not exist — the same shape as #693's lint reading an i18n string as code.
-const ing = readFileSync(join(root, 'deploy/k8s/base/ingress.yaml'), 'utf8')
+const ing = readFileSync(ingressPath, 'utf8')
   .split('\n')
   .map((line) => line.replace(/(^|\s)#.*$/, '$1'))
   .join('\n')
@@ -117,6 +126,8 @@ for (const p of ingPaths) {
   }
 }
 
+}
+
 // ── Sibling hosts (#726 / ADR-233 ruling 2) ──────────────────────────────────────────────────
 // The attachment host is not a path row and cannot be checked as one: it is a SITE BLOCK of its own,
 // and its whole correctness is that nothing rewrites the request. The ruling was that it be declared
@@ -161,7 +172,10 @@ for (const site of siteBlocks) {
 
 // ── The SPA catch-all must exist on both, or a client route 404s ─────────────────────────────
 if (!/^\s*handle\s*\{/m.test(caddy)) problems.push('Caddyfile: no fallback handle block — client routes would not reach the SPA')
-if (!ingPaths.some((p) => p.path === '/')) problems.push('ingress.yaml: no "/" rule — client routes would not reach the SPA')
+if (existsSync(ingressPath)) {
+  const spaPaths = [...readFileSync(ingressPath, 'utf8').matchAll(/\{\s*path:\s*(\S+?),/g)].map((m) => m[1])
+  if (!spaPaths.includes('/')) problems.push('ingress.yaml: no "/" rule — client routes would not reach the SPA')
+}
 
 // ── Health endpoints are deliberately NOT edge rows ──────────────────────────────────────────
 for (const h of NOT_EDGE_ROUTES) {
@@ -178,5 +192,6 @@ if (problems.length) {
 }
 console.log(
   `check-origin-routes OK — ${ORIGIN_ROUTES.length} declared routes + ${SIBLING_HOSTS.length} sibling host(s); Caddy and the ingress agree with the table ` +
-  `(${PROXIED_ROUTES.filter((r) => r.strip).length} stripped, ${PROXIED_ROUTES.filter((r) => !r.strip).length} path-preserving).`,
+  `(${PROXIED_ROUTES.filter((r) => r.strip).length} stripped, ${PROXIED_ROUTES.filter((r) => !r.strip).length} path-preserving` +
+  (existsSync(ingressPath) ? ').' : '; ingress half asleep — deploy/k8s not in this checkout).'),
 )
