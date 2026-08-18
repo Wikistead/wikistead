@@ -1635,6 +1635,10 @@
     "lockedBody": "Upgrade to serve your workspace on your own hostname.",
     "dnsType": "TXT",
     "copyHost": "Copy host",
-    "copyValue": "Copy value"
+    "copyValue": "Copy value",
+    "dnsTypeLabel": "Type",
+    "dnsHostLabel": "Host",
+    "dnsValueLabel": "Value",
+    "notVerified": "We could not find that TXT record yet. If you published it a moment ago, DNS can take a few minutes to spread. Wait, then verify again."
   }
 }

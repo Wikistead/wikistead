@@ -1627,6 +1627,10 @@
     "lockedBody": "アップグレードすると、自分のホスト名でワークスペースを配信できます。",
     "dnsType": "TXT",
     "copyHost": "ホスト名をコピー",
-    "copyValue": "値をコピー"
+    "copyValue": "値をコピー",
+    "dnsTypeLabel": "種別",
+    "dnsHostLabel": "ホスト名",
+    "dnsValueLabel": "値",
+    "notVerified": "TXT レコードがまだ見つかりません。公開した直後であれば、DNS が行き渡るまで数分かかることがあります。少し待ってからもう一度検証してください。"
   }
 }
