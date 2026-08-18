@@ -131,6 +131,61 @@ For evaluation, the compose bootstrap seeds a `dev` tenant (host `dev.localhost`
 wired to whatever IdP your `OIDC_*` env points at. Guests never touch the IdP —
 share links mint short-lived app-signed tokens (`GUEST_TOKEN_SECRET`).
 
+### Connecting an identity provider
+
+What to register **on the IdP side**, before filling in the console:
+
+| The IdP asks for | Give it |
+|---|---|
+| Redirect / callback URI | `https://<the workspace's host>/auth/callback` |
+| Scopes | `openid email profile` (the default; the console can change it) |
+| Response type / flow | Authorization code with PKCE |
+| Client type | Confidential (a client secret) or public (no secret) — both work |
+
+**The redirect URI is derived from the request**, not from configuration: the server
+builds it as `<scheme>://<host>/auth/callback` for whichever host the browser used.
+A workspace reached on two hosts (for example after moving to a custom domain) needs
+**both** registered at the IdP. The console shows the URI for the host you are on;
+that is the value to paste, and there is nothing to type back.
+
+**Discovery is required.** Only the issuer URL is configured, and the server fetches
+`<issuer>/.well-known/openid-configuration` to find the authorization, token and JWKS
+endpoints. There is no manual-endpoint mode. Enabling a connection **fails with a 400
+if discovery fails** — deliberately, since a broken IdP that saves cleanly locks out
+every future login.
+
+That fetch is SSRF-hardened: **https only, no private or link-local addresses**, no
+redirects, no credentials, a 5-second timeout and a 256 KiB cap. A self-hosted IdP on
+a private network therefore needs the operator (not a tenant admin) to set
+`OIDC_ALLOW_PRIVATE_ISSUER=1`.
+
+**Claims the server reads** from the verified `id_token`
+
+| Claim | Used for |
+|---|---|
+| `sub` | the member's identity (prefixed per connection — see the invite note below) |
+| `email` | the member's address; `email_verified` gates domain auto-enrolment |
+| `name` | the display name (ADR-190: the IdP is authoritative, the member may override it) |
+| `picture` | the avatar shown on the collab cursor and member list |
+| `groups` | group sync, when the connection trusts groups |
+
+The groups claim's **name** is configurable per connection (blank means `groups`,
+which is what Authentik and Keycloak emit; Entra ID and others often use `roles`).
+Its **value must be a JSON array of strings** — a comma-separated string is not
+accepted. Entries are trimmed, de-duplicated and bounded (at most 100 groups, 200
+characters each); anything dropped is logged rather than silently ignored. Group sync
+only happens when the connection is marked as trusting groups, because the claim
+rides a token the IdP controls.
+
+**Presets.** Google and Microsoft are offered as presets: the issuer and branding are
+fixed by the product, so only the client id and secret are needed (Entra additionally
+needs its directory GUID). Any other provider is configured with an issuer URL.
+
+**Sign-out is local.** `POST /auth/logout` destroys the Wikistead session and clears
+the cookie; it does not call the IdP's end-session endpoint, so a member who signs
+out here is still signed in to the IdP and can return without re-entering
+credentials. If your policy needs a full single sign-out, drive it from the IdP.
+
 ### Making the first admin of a new tenant
 
 ```

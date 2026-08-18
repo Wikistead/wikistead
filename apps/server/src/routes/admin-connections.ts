@@ -149,9 +149,15 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     const labelRes = sanitizeConnectionLabel(b.label)
     if (!labelRes.ok) throw Object.assign(new Error('invalid label'), { statusCode: 400 })
     const clientId = (b.clientId ?? '').trim()
+    // #733: the redirect URI is NOT required, because it is not used. The login flow derives it from
+    // the request (`${protocol}://${host}/auth/callback`, auth.ts) and passes that to buildLogin; the
+    // stored column has never been read. Demanding a value the product ignores is worse than not
+    // asking: the form made administrators believe their value was in force, and a wrong one failed
+    // at the IdP with nothing here to explain it. The column stays (owner rulingresidual,
+    // removal is its own ticket) and a value sent by an older client is still accepted and stored.
     const redirectUri = (b.redirectUri ?? '').trim()
-    if (!issuer || !clientId || !redirectUri) {
-      throw Object.assign(new Error('issuer, client id and redirect URI are required'), { statusCode: 400 })
+    if (!issuer || !clientId) {
+      throw Object.assign(new Error('issuer and client id are required'), { statusCode: 400 })
     }
     if (!validIssuerShape(issuer)) {
       throw Object.assign(new Error('issuer must be an http(s) URL'), { statusCode: 400 })
