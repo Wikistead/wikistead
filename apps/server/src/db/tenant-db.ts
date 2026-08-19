@@ -1,6 +1,6 @@
 import type { Sql } from 'postgres'
 import type { Tenant } from '@wikistead/types'
-import { pool } from './pool.js'
+import { pool, reserveTracked } from './pool.js'
 import { acquireNamespace } from './namespace.js'
 
 // The only DB interface features ever see. Isolation strategy is invisible here.
@@ -28,7 +28,9 @@ export async function acquireTenantDb(tenant: Tenant): Promise<TenantDb> {
 }
 
 async function acquireLogical(tenant: Tenant): Promise<TenantDb> {
-  const reserved = await pool.reserve()
+  // #773: reserveTracked, not pool.reserve — the pool must not be ended while this handle is on
+  // its way back. See pool.ts.
+  const reserved = await reserveTracked()
   // Session-level: holds for the lifetime of this reserved connection.
   // Cleared in release() before returning the connection to the pool.
   await reserved`SELECT set_config('app.tenant_id', ${tenant.id}, false)`
