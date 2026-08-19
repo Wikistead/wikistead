@@ -21,6 +21,33 @@ import { factorKindsPhrase, browserCanUseFactorKind } from "../settings/factor-k
 //
 // Two stages, not one. "Enter your code" is unanswerable to somebody who has never enrolled — §6's
 // circle in miniature — so the server says which situation this is and the screen asks accordingly.
+/**
+ * The kinds the door offers, and where the member starts.
+ *
+ * #745 / ADR-240: a chooser is a new RENDERING of a set that already crossed the wire, so the property
+ * worth holding is that the set is unchanged. Both halves are functions, and exported, for the reason
+ * #650 found the hard way: the rendering assertions stay green while the derivation quietly changes,
+ * so the derivation is the thing a pin has to be able to read.
+ *
+ * `kinds` is what the SERVER sent for this member — at `required` it is what THEY can present
+ * (`auth-local.ts` sends `usable`, not the tenant's stance, and #687 recorded why that discloses
+ * nothing new). The only filter added here is the device one: a key this browser cannot perform is a
+ * fact about the window, not about the account, and offering it would be #606's refusal-only control.
+ */
+export function doorProofs(kinds: string[] | undefined, webauthn: boolean): string[] {
+  // Absent kinds reads as "both" — an older server, or `off`. That was the screen's behaviour before
+  // #678 existed, and a default that hides a door is worse than one that adds nothing.
+  const offered = kinds?.length ? kinds : ['totp', 'passkey']
+  // ⚠️ FIXED ORDER (owner ruling): authenticator app, then passkey. Not "the one you used last"
+  // — that needs the door to carry state it has never had, and about the member at that.
+  return ['totp', 'passkey'].filter((k) => offered.includes(k) && (k !== 'passkey' || webauthn))
+}
+
+/** One usable proof means no chooser: a menu with one item charges a click and answers nothing. */
+export function doorInitialProof(proofs: readonly string[]): string | null {
+  return proofs.length === 1 ? proofs[0]! : null
+}
+
 export function FactorStep(
   { stage, kinds, recovery, returnTo }: {
     stage: "required" | "enrolment-required"; kinds?: string[]; recovery?: boolean; returnTo: string;
@@ -51,6 +78,13 @@ export function FactorStep(
   // own, and the two surfaces drifted. The sync-only rule (#672 ruling ③: no platform-authenticator
   // probe) now lives in factor-kind.ts with the rest of the kind facts.
   const webauthn = browserCanUseFactorKind("passkey");
+  // #745 / ADR-240: what this member may pick, and where they start. `picked === null` is the chooser;
+  // a lone proof skips it (`doorInitialProof`) so nobody is charged a click for a decision with one
+  // answer. The initial value is computed once — re-deriving it on every render would drag somebody
+  // back to their single proof after they pressed "use something else", which only exists when there
+  // is more than one.
+  const proofs = doorProofs(kinds, webauthn);
+  const [picked, setPicked] = useState<string | null>(() => doorInitialProof(doorProofs(kinds, webauthn)));
 
   const post = async (path: string, body: unknown) =>
     fetch(assetUrl(path), {
@@ -208,30 +242,48 @@ export function FactorStep(
 
       {stage === "required" ? (
         <>
-          {/* #687: the sentence names what THIS member can present (the server sends their own usable
-              kinds at this stage, not the tenant's stance), the same way #686 made the enrolment
-              prompt name what may be installed. It used to say "your authenticator app" to somebody
-              whose only factor was a security key. */}
-          <p className="m-0 text-sm text-fg-dim" data-testid="login-factor-prompt">
-            {t("auth.factorPrompt", { kinds: factorKindsPhrase(kinds, t, "presented") })}
-          </p>
-          {/* The code box belongs to the person who can answer with a code. Showing it to somebody who
-              holds only a passkey is the #606 shape — a control whose only outcome is a refusal. */}
-          {accepts("totp") && codeBox(present, "login-factor")}
-          {accepts("passkey") && webauthn && (
-            <Button variant={accepts("totp") ? "default" : "primary"} className="w-full" disabled={busy}
-              onClick={() => void presentPasskey()} data-testid="login-factor-passkey">
-              {busy && <Loader2 size={16} className="animate-spin" />}
-              {t("auth.factorPresentPasskey")}
-            </Button>
-          )}
-          {/* Nothing on offer: the member's only accepted kind needs WebAuthn and this browser has
-              none. Same ruling as the enrolment side (#672 ③) — the lock-out is accepted, but it must
-              be legible rather than an empty panel. */}
-          {!accepts("totp") && !webauthn && (
+          {/* #745 / ADR-240: pick the proof, then use it — the same three steps, in the same order, as
+              the recovery-code screen, so a member who has met one recognises the other. The prompt
+              sentence went with the change (owner ruling): a button that says "authenticator
+              app" already says what the sentence said.
+
+              ⚠️ The chooser NEVER shrinks on a refusal, and the refusal keeps the door's single
+              sentence. Removing the kind that just failed would turn offering into probing, and
+              naming the cause would undo #650's four-causes-one-answer. */}
+          {proofs.length === 0 ? (
+            /* Nothing on offer: the member's only accepted kind needs WebAuthn and this browser has
+               none. Same ruling as the enrolment side (#672 ③) — the lock-out is accepted, but it
+               must be legible rather than an empty panel, and "no entries" is exactly the panel a
+               chooser draws when nobody thinks about it. */
             <p className="m-0 text-sm text-[var(--danger)]" data-testid="login-factor-unsupported">
               {t("auth.factorNoWebauthn")}
             </p>
+          ) : picked === null ? (
+            <div className="flex flex-col gap-2" data-testid="login-factor-choices">
+              {proofs.map((k, i) => (
+                <Button key={k} variant={i === 0 ? "primary" : "default"} className="w-full" type="button"
+                  data-testid={`login-factor-choose-${k}`} onClick={() => setPicked(k)}>
+                  {t(k === "totp" ? "auth.factorChooseTotp" : "auth.factorChoosePasskey")}
+                </Button>
+              ))}
+            </div>
+          ) : (
+            <>
+              {picked === "totp" && codeBox(present, "login-factor")}
+              {picked === "passkey" && (
+                <Button variant="primary" className="w-full" disabled={busy}
+                  onClick={() => void presentPasskey()} data-testid="login-factor-passkey">
+                  {busy && <Loader2 size={16} className="animate-spin" />}
+                  {t("auth.factorPresentPasskey")}
+                </Button>
+              )}
+              {/* Only when there WAS a fork: where one proof exists the member never chose, so "use
+                  something else" would point at a screen they have not seen. */}
+              {proofs.length > 1 && (
+                <Button variant="ghost" className="w-full" type="button" data-testid="login-factor-back"
+                  onClick={() => setPicked(null)}>{t("auth.factorChooseOther")}</Button>
+              )}
+            </>
           )}
           {/* #650 / ADR-226: the way back for the person whose device is gone. Offered only when the
               server says this member holds a live set — a link to a box they cannot fill is the #606

@@ -15,10 +15,19 @@
 // back" is a browser ceremony. `passkey-signin-687.spec.ts` walks it end to end (enrol → sign out →
 // sign in with only the key), because #666 shipped eight green refusal assertions over a broken
 // accepting path.
+//
+// ⚠️ #745 / ADR-240 changed the SHAPE this file used to read. The door now draws a chooser over the
+// same set instead of stacking one affordance per kind, and the owner's ruling deleted the
+// prompt sentence because a button that says "authenticator app" already said it. The PROPERTY is
+// untouched and is what this file still holds: the door offers exactly the kinds the server reported
+// as presentable — no more (a disclosure), no fewer (a lock-out). The assertions moved from the old
+// `accepts(kind)` spelling to the derivation that replaced it, which is a stronger place to stand
+// `doorProofs` is a function a test can drive, where the old form could only be read as text.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ALL_FACTOR_KINDS } from "../settings/factor-kind";
+import { doorProofs } from "./FactorStep";
 
 const STEP = readFileSync(resolve(import.meta.dirname, "FactorStep.tsx"), "utf8");
 const en = JSON.parse(readFileSync(resolve(import.meta.dirname, "../i18n/locales/en.json"), "utf8"));
@@ -34,13 +43,18 @@ const requiredBranch = (() => {
 })();
 
 describe("#687: the door offers what the member holds", () => {
-  it("every kind has an affordance in the required branch, and each is gated on that kind", () => {
+  it("every kind the server reports is offered, and nothing else is", () => {
     // Computed from the kind list, so a third kind is covered by the walk rather than by somebody
-    // remembering this file. `accepts(k)` is the door's own predicate over the server's `kinds`.
+    // remembering this file. The set equality is the rule — a pin naming one kind goes silent in the
+    // mirror-image tenant (#686 hit exactly that).
     for (const kind of ALL_FACTOR_KINDS) {
-      expect(requiredBranch, `the door has no gate for ${kind} — it offers it unconditionally, or not at all`)
-        .toContain(`accepts("${kind}")`);
+      expect(doorProofs([kind], true), `the door drops ${kind} even though the server sent it`).toEqual([kind]);
+      const others = ALL_FACTOR_KINDS.filter((k) => k !== kind);
+      for (const other of others) {
+        expect(doorProofs([kind], true), `the door offers ${other}, which this member cannot present`).not.toContain(other);
+      }
     }
+    expect(doorProofs([...ALL_FACTOR_KINDS], true).sort()).toEqual([...ALL_FACTOR_KINDS].sort());
   });
 
   it("the passkey affordance actually presents — it calls the routes #665 shipped", () => {
@@ -55,24 +69,33 @@ describe("#687: the door offers what the member holds", () => {
 
   it("the code box belongs to somebody who can answer with a code", () => {
     // #606: a control whose only possible outcome is a refusal. Under a passkey-only member the box
-    // was the ONLY thing on screen, which is the lock-out itself.
-    expect(requiredBranch, "the code box is drawn regardless of what the member can present")
-      .toMatch(/accepts\("totp"\)\s*&&\s*codeBox\(/);
+    // was the ONLY thing on screen, which is the lock-out itself. In the chooser shape the box is
+    // reached by PICKING totp, and totp can only be picked when the server offered it — so the gate
+    // is the derivation above plus this: the box is drawn for the picked kind, never unconditionally.
+    expect(requiredBranch, "the code box is drawn regardless of which proof was chosen")
+      .toMatch(/picked === "totp" && codeBox\(/);
+    expect(doorProofs(["passkey"], true), "totp is offered to a member who cannot present it").not.toContain("totp");
   });
 
-  it("the prompt names the kinds rather than one hard-coded kind", () => {
-    // #686added the sentence SHAPE, and the door is a "present it" sentence — the noun has to
-    // be what you hand over (a code from your app), not what you install. Asserted with the shape, so
-    // a call site switched to "setup" here is caught rather than read as "still interpolating".
-    expect(requiredBranch, "the prompt does not interpolate the kinds in the presented shape")
-      .toContain('factorKindsPhrase(kinds, t, "presented")');
+  it("the screen names the kinds rather than one hard-coded kind", () => {
+    // #686put the kind nouns in an interpolated sentence, because the old prose named the
+    // authenticator app to somebody holding a key. #745 / ADR-240 deleted that sentence (owner ruling
+    //) — but only because the CHOOSER now says it: each button names the kind it stands for.
+    // The property is the same one, held one layer down, so this asserts the buttons carry per-kind
+    // copy and that neither locale hard-codes a kind in a sentence around them.
+    expect(requiredBranch, "the chooser does not label its entries per kind")
+      .toMatch(/auth\.factorChooseTotp.*auth\.factorChoosePasskey|factorChoose/s);
     for (const [lang, dict] of [["en", en], ["ja", ja]] as const) {
-      const copy: string = dict.auth.factorPrompt;
-      expect(copy, `${lang}: the prompt does not take the kinds`).toContain("{{kinds}}");
-      // The old sentence named the authenticator app unconditionally — to somebody holding a key. The
-      // kind nouns now live only in the interpolated value, never in the sentence around it.
-      expect(copy.toLowerCase(), `${lang}: the prompt still names one kind in prose`)
-        .not.toMatch(/authenticator|認証アプリ|passkey|パスキー/);
+      expect(dict.auth.factorPrompt, `${lang}: the deleted prompt came back — the buttons already name the kinds`).toBeUndefined();
+      const totp: string = dict.auth.factorChooseTotp;
+      const passkey: string = dict.auth.factorChoosePasskey;
+      expect(totp.toLowerCase(), `${lang}: the authenticator button does not name the authenticator`)
+        .toMatch(/authenticator|認証アプリ/);
+      expect(passkey.toLowerCase(), `${lang}: the passkey button does not name the passkey`)
+        .toMatch(/passkey|パスキー/);
+      // …and neither names the OTHER kind, which is how a copy edit turns one button into a lie.
+      expect(totp.toLowerCase(), `${lang}: the authenticator button also names a passkey`).not.toMatch(/passkey|パスキー/);
+      expect(passkey.toLowerCase(), `${lang}: the passkey button also names an authenticator`).not.toMatch(/authenticator|認証アプリ/);
     }
   });
 

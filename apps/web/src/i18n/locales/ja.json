@@ -771,7 +771,6 @@
     "recoveryLink": "別の方法でサインインする",
     "recoveryTitle": "復旧用サインイン",
     "recoveryBody": "SSO 必須の間、例外に指名されたメンバー用の入り口です。メールアドレスとパスワードでサインインしてください。",
-    "factorPrompt": "続けるには{{kinds}}で確認してください。",
     "factorPresentPasskey": "パスキーで確認する",
     "factorCode": "コード",
     "factorCodePlaceholder": "123456",
@@ -788,7 +787,10 @@
     "recoveryCodePlaceholder": "xxxx-xxxx-xxxx-xxxx",
     "recoveryCodeSubmit": "このコードを使う",
     "recoveryCodeWarning": "コードを使うと、このアカウントの第 2 要素はすべて解除され、開いているセッションもすべて終了します。入り直したあとで認証アプリを登録し直してください。",
-    "recoveryCodeFailed": "このコードは使えません。コードは 1 本につき 1 回きりで、新しいセットを作ると古いセットは無効になります。"
+    "recoveryCodeFailed": "このコードは使えません。コードは 1 本につき 1 回きりで、新しいセットを作ると古いセットは無効になります。",
+    "factorChooseTotp": "認証アプリを使う",
+    "factorChoosePasskey": "パスキーを使う",
+    "factorChooseOther": "別の方法を使う"
   },
   "share": {
     "invalid": "この共有リンクは無効・期限切れ・取り消し済みです。",
