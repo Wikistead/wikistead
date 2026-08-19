@@ -84,6 +84,36 @@ describe('#500 / ADR-183: filterAuthorized over server-side BatchCheck', () => {
     await expect(filterAuthorized(client, 'user:u', 'view', ['a', 'b'])).rejects.toThrow(/transport/)
   })
 
+  // #756. 4a and 4b sat next to each other for months and left the room between them empty: 4a errors ONE
+  // id, 4b kills the TRANSPORT, and neither asks what happens when the call succeeds and every item inside
+  // it errors. Applying 4a's rule that many times lands on 4b's forbidden outcome by arithmetic — deny-all,
+  // 200 + empty, the lying-empty this ADR names by that word. It is not hypothetical: a CPU-starved store
+  // returns exactly this (`18 of 18 answered, 0 allowed, 18 item-errors — deadline_exceeded`) and the page
+  // tree went empty while nine rows sat in SQL. It was the public CI's standing red.
+  it('4c: EVERY item erroring is a failure, not a set of denials (the room between 4a and 4b)', async () => {
+    const { client } = fakeFga(() => true, { errorFor: () => true })
+    await expect(filterAuthorized(client, 'user:u', 'view', ['a', 'b', 'c']))
+      .rejects.toThrow(/answered none of 3/)
+  })
+
+  it('4d: a chunk that answers nothing fails the whole call — a later good chunk cannot cover for it', async () => {
+    // The same loss at 50-id granularity: with 60 ids the first chunk errors wholesale and the second
+    // answers cleanly. Reporting the survivors would be a shorter list that looks complete, which is the
+    // silent truncation anti-test 3 exists to forbid — the caller cannot tell 50 denials from 50 silences.
+    const ids = Array.from({ length: 60 }, (_, i) => `r${i}`)
+    const { client } = fakeFga(() => true, { errorFor: (id) => Number(id.slice(1)) < 50 })
+    await expect(filterAuthorized(client, 'user:u', 'view', ids)).rejects.toThrow(/answered none of 50/)
+  })
+
+  it('4e: the INTENDED degradation survives — a partly-errored chunk still answers, minus those ids', async () => {
+    // The break-check for the fix itself: it must not have turned "fewer rows" into "an error page".
+    // Half the ids error, half answer; the caller gets the half that answered.
+    const ids = Array.from({ length: 10 }, (_, i) => `s${i}`)
+    const { client } = fakeFga(() => true, { errorFor: (id) => Number(id.slice(1)) % 2 === 0 })
+    const out = await filterAuthorized(client, 'user:u', 'view', ids)
+    expect(out).toEqual(new Set(ids.filter((id) => Number(id.slice(1)) % 2 === 1)))
+  })
+
   it('5a: beforeCheck short-circuits per id BEFORE the batch (short-circuited ids never enter it)', async () => {
     const seenByBatch: string[] = []
     const { client } = (() => {
