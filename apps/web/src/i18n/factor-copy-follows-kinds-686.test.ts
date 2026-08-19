@@ -49,13 +49,20 @@ describe("#686 族 A: the copy names what the workspace accepts", () => {
             i18n.t("auth.factorEnrolPrompt", { kinds: factorKindsPhrase(accepted, t, "setup") })],
           ["the account panel", "presented" as const,
             i18n.t("account.factorsDesc", { kinds: factorKindsPhrase(accepted, t, "presented") })],
+          // ⚠️ #745 / ADR-240 deleted the door's sentence (owner ruling) because the chooser's
+          // buttons name the kinds now. The PROPERTY this file holds — the screen names exactly the
+          // kinds on offer, never one hard-coded kind — moved with it: the door's line is the two
+          // button labels joined, which is what a member actually reads there.
           ["the sign-in door", "presented" as const,
-            i18n.t("auth.factorPrompt", { kinds: factorKindsPhrase(accepted, t, "presented") })],
+            accepted.map((k) => i18n.t("auth.factorChoose", { kind: factorKindName(k, t) })).join(" ")],
         ] as const;
 
         for (const [where, shape, sentence] of said) {
           for (const kind of ALL_FACTOR_KINDS) {
-            const noun = factorKindPhrase(kind, t, shape);
+            // ⚠️ A BUTTON says the noun; a sentence says the articled phrase ("a passkey"). Both are
+            // the same claim about which kinds the screen names, so the door is compared against the
+            // bare name — asking a button for an article would fail on correct copy.
+            const noun = where === "the sign-in door" ? factorKindName(kind, t) : factorKindPhrase(kind, t, shape);
             const shouldName = accepted.includes(kind);
             expect(sentence.includes(noun), `${where} ${shouldName ? "omits" : "names"} ${kind} :: ${sentence}`)
               .toBe(shouldName);
@@ -118,7 +125,9 @@ describe("#686 族 A: the copy names what the workspace accepts", () => {
     await i18n.changeLanguage("en");
     const t = i18n.t.bind(i18n) as never;
     for (const [key, shape] of [
-      ["auth.factorEnrolPrompt", "setup"], ["account.factorsDesc", "presented"], ["auth.factorPrompt", "presented"],
+      // The door's sentence is gone (#745); its buttons are checked for the same defect below, and a
+      // button label is a label by design — the rule here is about labels dropped into PROSE.
+      ["auth.factorEnrolPrompt", "setup"], ["account.factorsDesc", "presented"],
     ] as const) {
       const sentence = i18n.t(key, { kinds: factorKindsPhrase(["totp"], t, shape) });
       expect(sentence, `${key} still drops the label into prose`).not.toContain(factorKindName("totp", t));

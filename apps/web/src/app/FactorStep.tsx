@@ -8,7 +8,7 @@ import { QrCode } from "../ui/QrCode"; // #653the same code the settings screen 
 import { assetUrl } from "../data/apiClient";
 import { startRegistration, startAuthentication } from "@simplewebauthn/browser"; // #678: a key made at the door; #687: and presented at it
 import { isServerFault } from "./serverFault";
-import { factorKindsPhrase, browserCanUseFactorKind } from "../settings/factor-kind"; // #686: one home for the kind nouns
+import { factorKindsPhrase, factorKindName, browserCanUseFactorKind } from "../settings/factor-kind"; // #686: one home for the kind nouns
 
 // #652 / ADR-219 §6: the half-authenticated step. The password was right; the tenant requires one more
 // thing, and there is no session yet — what stands in for one is a receipt cookie the server set, which
@@ -263,7 +263,9 @@ export function FactorStep(
               {proofs.map((k, i) => (
                 <Button key={k} variant={i === 0 ? "primary" : "default"} className="w-full" type="button"
                   data-testid={`login-factor-choose-${k}`} onClick={() => setPicked(k)}>
-                  {t(k === "totp" ? "auth.factorChooseTotp" : "auth.factorChoosePasskey")}
+                  {/* #671 / #686: the button says the product's own noun for the kind, from the one
+                      place that owns those nouns — not a second copy of them living in this file. */}
+                  {t("auth.factorChoose", { kind: factorKindName(k, t) })}
                 </Button>
               ))}
             </div>

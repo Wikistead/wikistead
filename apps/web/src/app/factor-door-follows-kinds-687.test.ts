@@ -83,19 +83,18 @@ describe("#687: the door offers what the member holds", () => {
     //) — but only because the CHOOSER now says it: each button names the kind it stands for.
     // The property is the same one, held one layer down, so this asserts the buttons carry per-kind
     // copy and that neither locale hard-codes a kind in a sentence around them.
-    expect(requiredBranch, "the chooser does not label its entries per kind")
-      .toMatch(/auth\.factorChooseTotp.*auth\.factorChoosePasskey|factorChoose/s);
+    // The chooser labels each entry with the PRODUCT's noun for that kind, taken from the one module
+    // that owns those nouns (#686) — not a second copy of them in the door.
+    expect(requiredBranch, "the chooser does not label its entries with the kind's name")
+      .toContain('factorKindName(k, t)');
     for (const [lang, dict] of [["en", en], ["ja", ja]] as const) {
       expect(dict.auth.factorPrompt, `${lang}: the deleted prompt came back — the buttons already name the kinds`).toBeUndefined();
-      const totp: string = dict.auth.factorChooseTotp;
-      const passkey: string = dict.auth.factorChoosePasskey;
-      expect(totp.toLowerCase(), `${lang}: the authenticator button does not name the authenticator`)
-        .toMatch(/authenticator|認証アプリ/);
-      expect(passkey.toLowerCase(), `${lang}: the passkey button does not name the passkey`)
-        .toMatch(/passkey|パスキー/);
-      // …and neither names the OTHER kind, which is how a copy edit turns one button into a lie.
-      expect(totp.toLowerCase(), `${lang}: the authenticator button also names a passkey`).not.toMatch(/passkey|パスキー/);
-      expect(passkey.toLowerCase(), `${lang}: the passkey button also names an authenticator`).not.toMatch(/authenticator|認証アプリ/);
+      const tmpl: string = dict.auth.factorChoose;
+      expect(tmpl, `${lang}: the chooser label does not take the kind`).toContain("{{kind}}");
+      // …and the sentence around the noun names no kind of its own, which is the defect #686 measured
+      // ("Set up Authenticator app" named one kind to somebody holding the other).
+      expect(tmpl.toLowerCase(), `${lang}: the chooser label hard-codes a kind around the noun`)
+        .not.toMatch(/authenticator|認証アプリ|passkey|パスキー/);
     }
   });
 
