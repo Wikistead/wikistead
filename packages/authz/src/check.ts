@@ -262,9 +262,19 @@ export async function filterAuthorized(
     //
     // ⚠️ The degradation above is reported FIRST, on purpose: when the store goes silent the operator
     // wants both facts — that a batch was thinned to nothing, and that the request then failed.
+    //
+    // ⚠️ The message names the store FIRST, and that word is load-bearing. `app.ts`'s error handler
+    // withholds the text of anything that speaks FGA's words and answers `authz_store_error` instead,
+    // logging the original for the operator. Everything after the colon here — how many checks were in
+    // flight, which relation, which type — is for that log. `chunk.length` is a count of CANDIDATES
+    // taken before any authorization ran, so on the tree it is "how many pages exist in this branch",
+    // private and draft ones included; #623 §4 redesigned the chevron to stop telling a reader exactly
+    // that. `relation` is a name out of model.fga (`access_manager`, `settings_editor`), which #619
+    // ruled stays inside. Neither may reach a response body, and the anti-test asks the shipped handler,
+    // not a copy of its pattern.
     if (chunk.length > 0 && unanswered === chunk.length) {
       throw new Error(
-        `authorization store answered none of ${chunk.length} checks ` +
+        `openfga answered none of ${chunk.length} checks in a batch ` +
         `(${relation} on ${resourceType}) — refusing to report that as "denied"`)
     }
   }
