@@ -10,3 +10,6 @@ export type { AuthzScope } from './scope.js'
 // #637 / ADR-216 §5, §7: the AND at the primitives — CE owns the seam and the refusal, EE the rule.
 export { registerAuthzRestrictionEvaluator, getAuthzRestrictionEvaluator, resetAuthzRestrictionEvaluator, restrictionAllows } from './restriction.js'
 export type { AuthzRestrictionEvaluator } from './restriction.js'
+// #758 / ADR-183 §3: the observation port for a thinned batch. A sink cannot change a verdict.
+export { registerAuthzDegradationSink, resetAuthzDegradationSink, hasAuthzDegradationSink } from './degradation.js'
+export type { AuthzDegradation, AuthzDegradationSink } from './degradation.js'
