@@ -2,6 +2,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import type { Capability, ResourceRef } from '@wikistead/types'
 import { authzScopeForCheck } from './scope.js'
 import { restrictionAllows } from './restriction.js'
+import { reportAuthzDegradation } from './degradation.js'
 import { getAuthzHooks } from '@wikistead/hooks'
 import { fgaModelId } from './client.js' // #500: batchCheck needs the model id passed explicitly
 
@@ -214,11 +215,20 @@ export async function filterAuthorized(
     }, { authorizationModelId: fgaModelId() })
     // Walk the response by correlation id. Fail closed: an id with NO response entry is simply never
     // added to `out` (a missing verdict is a deny, never a silent allow).
+    let unanswered = 0
+    let firstError = ''
     for (const r of result) {
       const id = byCorr.get(r.correlationId)
       if (id === undefined) continue
       // item error → deny that id (ADR-183 §3). Do not consult afterCheck on an errored item.
-      if (r.error) continue
+      if (r.error) {
+        // #758: counted, not just skipped. This is the branch where a reader loses a row they were
+        // entitled to see, and until now it left no trace of any kind — the thinner list is
+        // indistinguishable from an honest one.
+        unanswered += 1
+        if (!firstError) firstError = JSON.stringify(r.error)
+        continue
+      }
       const fgaAllowed = Boolean(r.allowed)
       const final = hooks.afterCheck
         ? (await hooks.afterCheck({ user, relation, resource: { type: resourceType, id }, tenantId: '' }, fgaAllowed) ?? fgaAllowed)
@@ -226,6 +236,13 @@ export async function filterAuthorized(
       if (final) out.add(id)
     }
     // Any chunk id with no response entry is denied (fail closed) — never silently treated as allowed.
+
+    // #758 / ADR-183 §3 ("accept for v1 … log a warn per degraded batch" — the half never built).
+    // Reported AFTER the verdicts are settled and with its result ignored, so the port cannot reach
+    // into the answer. `out` is already what it is going to be.
+    if (unanswered > 0) {
+      reportAuthzDegradation({ relation, resourceType, candidates: chunk.length, unanswered, firstError })
+    }
   }
   // Run the chunks `lanes` at a time. With the default of 1 this is exactly the old sequential loop.
   for (let i = 0; i < chunks.length; i += lanes) {

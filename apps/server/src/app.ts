@@ -9,7 +9,7 @@ import { acquireTenantDb } from './db/index.js'
 import { pool } from './db/pool.js'
 import { checkReadiness } from './readiness.js'
 import type { TenantDb } from './db/index.js'
-import { fgaClient, isTenantMember, openAuthzScope, setAuthzRestriction, setAuthzApiKey, currentAuthzScope } from '@wikistead/authz'
+import { fgaClient, isTenantMember, openAuthzScope, setAuthzRestriction, setAuthzApiKey, currentAuthzScope, registerAuthzDegradationSink } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
 import { isNarrowedKey, getNarrowedKeyGate } from '@wikistead/hooks'
@@ -193,6 +193,20 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(formbody) // SAML ACS uses the form-urlencoded POST binding (#135)
 
   app.decorate('fga', fgaClient)
+
+  // #758 / ADR-183 §3: give the authorization layer's observation port somewhere to report.
+  //
+  // `filterAuthorized` denies any id the store could not answer for, on purpose — a read surface with
+  // fewer rows beats a 500. The cost is that the thinned list is INDISTINGUISHABLE from an honest one
+  // no error, no status, no gap, just a tree with fewer pages in it, exactly like a tree with fewer
+  // pages in it. Without this line, "a page disappeared from my sidebar" is unanswerable — there is no
+  // record anywhere that the store ever failed to speak.
+  //
+  // A warn, not an error: the request succeeded and the trade was the designed one. What it buys is a
+  // number an operator can watch, and a timestamp to line up against a support ticket.
+  registerAuthzDegradationSink((d) => {
+    app.log.warn(d, 'the permission store could not answer for some ids; they were reported as denied')
+  })
 
   // EE may register an alternative SearchDriver via registerSearchDriver(@wikistead/hooks).
   const searchDriver = getSearchDriver(new LogicalSearchDriver())
