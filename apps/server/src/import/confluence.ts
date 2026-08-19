@@ -300,13 +300,30 @@ function image(el: HTMLElement, ctx?: Ctx): string {
   // those become broken images on every page that used one — and the alt text is usually the emoji's
   // name, which reads better than a missing picture. So the picture is dropped for the name, and the
   // substitution is REPORTED rather than done quietly.
-  if (/(^|\/)(images\/icons\/emoticons|emoticons)\//i.test(src) || /^https?:\/\/[^/]+\/(?:wiki\/)?images\/icons\//i.test(src)) {
-    const key = alt.toLowerCase().trim()
+  const byPath = /(^|\/)(images\/icons\/emoticons|emoticons)\//i.test(src)
+    || /^https?:\/\/[^/]+\/(?:wiki\/)?images\/icons\//i.test(src)
+  // Those two paths are the Server / Data Center shape.asked, without being able to measure
+  // it, whether Cloud's emoji reach them — they do not: Cloud serves emoji from an emoji CDN under a
+  // host this rule has never heard of, so a Cloud export would keep the `<img>` and hotlink Atlassian
+  // forever. The one thing BOTH vintages say about the picture is that it IS an emoji, and they say
+  // it in the class, so that is what the second arm reads: no hostname is invented to match.
+  // It is deliberately narrowed to a REMOTE src — a class-tagged picture the export actually carries
+  // still becomes an image, because that one survives the import and there is nothing to repair.
+  const byClass = /(^|\s)(emoji|emoticon)(-[\w-]+)?(\s|$)/i.test(el.getAttribute('class') ?? '')
+    && /^https?:\/\//i.test(src)
+  if (byPath || byClass) {
+    // Confluence writes the emoji's name into `alt` in two spellings depending on the export's
+    // vintage: bare (`smile`) and already wrapped in colons (`:smile:`). Matching only the bare one
+    // failed twice over on the wrapped one — the table lookup missed a name that IS in the table,
+    // and the fallback then wrapped it a second time, so the reader got `::smile::`. The name is
+    // normalised once, here, and everything below reads the normalised form.
+    const name = alt.trim().replace(/^:+/, '').replace(/:+$/, '')
+    const key = name.toLowerCase()
     const glyph = EMOTICONS[key] ?? EMOTICONS[key.replace(/[_ ]/g, '-')]
     if (glyph) return glyph // mapped: nothing lost, so nothing to report
     ctx?.degraded.push({ node: ctx.title, code: 'emojiReplacedByName',
-      what: 'emoji image replaced by its name', detail: alt || src, params: { name: alt || src } })
-    return alt ? `:${alt}:` : ''
+      what: 'emoji image replaced by its name', detail: name || src, params: { name: name || src } })
+    return name ? `:${name}:` : ''
   }
   return `![${alt}](${src})`
 }

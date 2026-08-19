@@ -211,6 +211,50 @@ describe('#712④: a Confluence emoticon becomes the character', () => {
     expect(degraded.map((d) => d.code)).toContain('emojiReplacedByName')
   })
 
+  // #712the pins above only ever wrote `alt="smile"`. Confluence also exports the name
+  // ALREADY wrapped in colons, and on that spelling the rule failed twice: the table lookup missed a
+  // name that is in it, and the fallback wrapped it again, so a real export produced `::smile::` —
+  // neither the character nor an honest fallback. The property is that the SPELLING OF THE ALT does
+  // not change the answer, so both spellings are driven through and compared to each other rather
+  // than to a hard-coded string: a fix that normalises one path and not the other cannot pass.
+  it.each([
+    ['bare', 'smile', 'party-parrot'],
+    ['colon-wrapped', ':smile:', ':party-parrot:'],
+  ])('reads a %s alt the same way', (_shape, mapped, unmapped) => {
+    const hit = confluenceHtmlToMarkdown(
+      `<div id="main-content"><p><img class="emoticon" src="/images/icons/emoticons/smile.png" alt="${mapped}"/></p></div>`, 'T')
+    expect(hit.markdown, 'a name that is in the table maps, however the alt spells it').toContain('🙂')
+    expect(hit.markdown, 'no colons survive a mapped emoji').not.toContain(':')
+    expect(hit.degraded, `nothing was lost :: ${JSON.stringify(hit.degraded)}`).toHaveLength(0)
+
+    const miss = confluenceHtmlToMarkdown(
+      `<div id="main-content"><p><img class="emoticon" src="/images/icons/emoticons/party-parrot.png" alt="${unmapped}"/></p></div>`, 'T')
+    expect(miss.markdown, 'the fallback is one pair of colons, never two').toContain(':party-parrot:')
+    expect(miss.markdown, 'a doubled colon is not a shortcode anyone renders').not.toContain('::')
+    // The report names the emoji the reader will look for, so it carries the bare name too.
+    expect(miss.degraded.map((d) => d.params?.name)).toEqual(['party-parrot'])
+  })
+
+  //could not measure Confluence CLOUD, whose emoji come from an emoji CDN rather than from
+  // `/images/icons/emoticons/`. On the path rule alone a Cloud export hotlinks Atlassian on every
+  // page that used an emoji, which is the exact failure the rule exists to prevent — one host away.
+  it('a remote emoji the path rule has never heard of is still read as an emoji', () => {
+    const { markdown, degraded } = confluenceHtmlToMarkdown(
+      '<div id="main-content"><p>Ship it <img class="emoji" alt=":smile:"'
+      + ' src="https://pf-emoji-service--cdn.example.net/48x48/atlassian/smile.png"/></p></div>', 'T')
+    expect(markdown, 'the character, not a link into someone else\'s CDN').toContain('🙂')
+    expect(markdown, 'no hotlink survives').not.toContain('http')
+    expect(degraded).toHaveLength(0)
+  })
+
+  it('a class-tagged picture the export CARRIES stays a picture', () => {
+    // The narrowing on the arm above. A relative src is a file in the zip: it survives the import,
+    // so there is nothing to repair and dropping it for a name would lose the reader an image.
+    const { markdown } = confluenceHtmlToMarkdown(
+      '<div id="main-content"><p><img class="emoji" alt="team-logo" src="attachments/team-logo.png"/></p></div>', 'T')
+    expect(markdown).toContain('![team-logo](attachments/team-logo.png)')
+  })
+
   it('an ordinary image is not touched by the emoticon rule', () => {
     const { markdown, degraded } = confluenceHtmlToMarkdown(
       '<div id="main-content"><img src="attachments/pic.png" alt="tick"/></div>', 'T')
