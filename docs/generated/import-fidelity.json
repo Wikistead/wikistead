@@ -72,6 +72,21 @@
           "verdict": "kept"
         },
         {
+          "id": "page-link-as-path",
+          "element": "Link to another page written as a file path",
+          "input": "See [the runbook](Runbook.md).",
+          "title": "page-link-as-path",
+          "output": "See [the runbook](Runbook.md).",
+          "reports": [
+            {
+              "code": "sourcePageLinkKept",
+              "what": "link to a page in the export, left as written",
+              "detail": "Runbook.md"
+            }
+          ],
+          "verdict": "reported"
+        },
+        {
           "id": "embed-image",
           "element": "Embedded image",
           "input": "Here it is: ![[diagram.png]]",
