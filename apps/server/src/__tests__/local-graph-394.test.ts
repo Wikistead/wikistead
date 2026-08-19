@@ -198,7 +198,16 @@ describe('GET /pages/:id/graph route (#394 — members only)', () => {
     expect(garbage.statusCode).toBe(200)
     const zero = await app.inject({ method: 'GET', url: `/pages/${P}/graph?depth=0`, headers: H2 })
     expect(zero.statusCode).toBe(200)
-  })
+    // #763: four graph walks, and each node in them costs a `view` — the one relation that unions the
+    // whole capability lattice, measured at 15-25 ms per id (#755). On a machine running one suite that
+    // fits inside vitest's five-second default; on a machine running three it does not, and then the
+    // default is what decides the result. Measured here: red twice at 5s, 15/15 green at 30s in 20.7s,
+    // with the server tree byte-identical both times.
+    //
+    // The claim is that depth 9 comes back as the depth-3 graph. Nothing about it is a claim about time,
+    // so the budget is set where it stops answering a question nobody asked. This does not make anything
+    // faster and is not meant to: the slowness is real, it belongs to #755, and the numbers live there.
+  }, 30_000)
 
   it('ANTI-TEST 5: a share_link (guest) token is REJECTED — the graph is member-only', async () => {
     const res = await app.inject({ method: 'GET', url: '/pages/demo/graph?depth=2', headers: { host: 'dev.localhost', authorization: `Bearer ${guestTok}` } })
