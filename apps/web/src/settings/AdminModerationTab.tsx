@@ -42,7 +42,7 @@ export function AdminModerationTab() {
         <span className="block text-xs text-fg-dim">{t("adminModeration.shrinkHint")}</span>
         <input
           type="number" min="0" max="1" step="0.05" data-testid="abuse-shrink-ratio"
-          className="mt-1 w-32 rounded-md border border-border bg-panel px-2 py-1 text-sm"
+          className="mt-1 w-32 rounded-md border border-border bg-background px-2 py-1 text-sm"
           value={ratio} onChange={(e) => setRatio(e.target.value)}
           placeholder={t("adminModeration.off")} disabled={isLoading}
         />
@@ -51,9 +51,14 @@ export function AdminModerationTab() {
       <label className="mt-4 block">
         <span className="block text-sm text-foreground">{t("adminModeration.wordsLabel")}</span>
         <span className="block text-xs text-fg-dim">{t("adminModeration.wordsHint")}</span>
+          {/* #761: the paint every other field in the product uses. The comment box and the page
+              title are `bg-background`, and the shared `Input` is transparent — these two moderation
+              screens were the only grey fields. Aligned rather than re-coloured: the ruling was
+              "match the majority", not "pick a colour". No shared Textarea exists, and inventing one
+              to change a background would be a larger change than the ruling asked for. */}
         <textarea
           rows={6} data-testid="abuse-banned-words" spellCheck={false}
-          className="mt-1 w-full rounded-md border border-border bg-panel px-2 py-1 font-mono text-sm"
+          className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-sm"
           value={words} onChange={(e) => setWords(e.target.value)} disabled={isLoading}
         />
       </label>

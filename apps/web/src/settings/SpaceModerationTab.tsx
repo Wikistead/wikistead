@@ -142,7 +142,7 @@ function SpaceAbuseFilterSection({ spaceId }: { spaceId: string | undefined }) {
         <span className="block text-xs text-fg-dim">{t("spaceModeration.shrinkHint")}</span>
         <input
           type="number" min="0" max="1" step="0.05" data-testid="space-abuse-shrink"
-          className="mt-1 w-32 rounded-md border border-border bg-panel px-2 py-1 text-sm"
+          className="mt-1 w-32 rounded-md border border-border bg-background px-2 py-1 text-sm"
           value={ratio} onChange={(e) => setRatio(e.target.value)}
           placeholder={t("spaceModeration.inherit")} disabled={update.isPending}
         />
@@ -151,9 +151,11 @@ function SpaceAbuseFilterSection({ spaceId }: { spaceId: string | undefined }) {
       <label className="mt-4 block">
         <span className="block text-sm text-foreground">{t("spaceModeration.wordsLabel")}</span>
         <span className="block text-xs text-fg-dim">{t("spaceModeration.wordsHint")}</span>
+        {/* #761: aligned with the paint every other field uses (the comment box, the page title),
+            which is what the ruling asked for — the admin twin carries the same note. */}
         <textarea
           rows={5} data-testid="space-abuse-words" spellCheck={false}
-          className="mt-1 w-full rounded-md border border-border bg-panel px-2 py-1 font-mono text-sm"
+          className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-sm"
           value={words} onChange={(e) => setWords(e.target.value)} disabled={update.isPending}
         />
       </label>

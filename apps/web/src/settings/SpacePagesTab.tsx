@@ -210,7 +210,7 @@ export function SpacePagesTab() {
           placeholder={t("spacePages.filter")}
           aria-label={t("spacePages.filter")}
           data-testid="space-pages-filter"
-          className="w-full max-w-[320px] rounded-md border border-border bg-panel px-2 py-1.5 text-sm"
+          className="w-full max-w-[320px] rounded-md border border-border bg-background px-2 py-1.5 text-sm"
         />
       </div>
       {rows.length > 0 && (
@@ -309,7 +309,7 @@ export function SpacePagesTab() {
           <div className="flex flex-col gap-2">
             {/* #710: type to find a destination past the first roster page — the server answers. */}
             <input
-              className="rounded-md border border-border bg-panel p-1 text-sm"
+              className="rounded-md border border-border bg-background p-1 text-sm"
               data-testid="bulk-move-filter"
               placeholder={t("spacePages.moveFilterPlaceholder")}
               value={moveFilter}
@@ -321,7 +321,7 @@ export function SpacePagesTab() {
                 <label className="flex flex-col gap-1 text-sm">
                   {t("spacePages.moveTarget")}
                   <select
-                    className="rounded-md border border-border bg-panel p-1"
+                    className="rounded-md border border-border bg-background p-1"
                     data-testid="bulk-move-target"
                     value={moveTarget}
                     onChange={(e) => setMoveTarget(e.target.value)}
