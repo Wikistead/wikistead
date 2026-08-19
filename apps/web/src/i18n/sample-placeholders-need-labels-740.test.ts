@@ -103,6 +103,19 @@ const PROPER_NOUNS = new Set(["Wikistead"]);
 const HIDDEN = /sr-only|\bhidden\b|opacity-0/;
 
 interface Finding { file: string; line: number; placeholder: string; why?: string }
+/** A field that passed: what it shows as an example, and what it calls itself. */
+interface Named { file: string; line: number; placeholder: string; label: string }
+
+/**
+ * Two fields may show the same example and still be asking different questions.
+ *
+ * Each entry is a placeholder whose sample is a FORMAT rather than an answer, so repeating it across
+ * differently-named fields is correct. Written out with the reason, because the alternative — letting
+ * the naming check off whenever it finds a disagreement — is the check not existing.
+ */
+const SAME_EXAMPLE_DIFFERENT_QUESTION: Record<string, string> = {
+  "YYYY-MM-DD": "the two ends of one date range; the example is the FORMAT both ends take, and 'From' and 'To' are the whole difference between them",
+};
 
 /**
  * Why this control has no usable label, or null when it has one.
@@ -174,10 +187,31 @@ function labelProblem(lines: string[], at: number): string | null {
   return "no label names this control";
 }
 
-function scan(): { checked: number; unlabelled: Finding[]; hardcodedAria: Finding[] } {
+/**
+ * The words this field calls itself, in English, or null when they cannot be resolved.
+ *
+ * Only called for fields `labelProblem` already passed, so the label is known to exist and to resolve
+ * in both locales; this repeats the walk back to read the key rather than threading it out, because
+ * the two questions are asked for different reasons and one of them may stop being asked.
+ */
+function labelShown(lines: string[], at: number): string | null {
+  for (let i = at; i >= 0 && i > at - 40; i--) {
+    if (!LABEL_OPEN.test(lines[i]!)) continue;
+    let textEnd = i;
+    while (textEnd < at && !/<(Input|input|textarea|Textarea|Select)\b/.test(lines[textEnd]!)) textEnd += 1;
+    const span = lines.slice(i, textEnd).join("\n").replace(LABEL_OPEN, "")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/.*$/gm, "");
+    const key = /\{\s*t\("([^"]+)"[^}]*\}/.exec(span)?.[1];
+    return key ? lookup(key) : null;
+  }
+  return null;
+}
+
+function scan(): { checked: number; unlabelled: Finding[]; hardcodedAria: Finding[]; named: Named[] } {
   let checked = 0;
   const unlabelled: Finding[] = [];
   const hardcodedAria: Finding[] = [];
+  const named: Named[] = [];
   for (const file of walk(WEB_SRC)) {
     const lines = readFileSync(file, "utf8").split("\n");
     lines.forEach((line, i) => {
@@ -189,6 +223,9 @@ function scan(): { checked: number; unlabelled: Finding[]; hardcodedAria: Findin
           const why = labelProblem(lines, i);
           if (why) {
             unlabelled.push({ file: file.slice(WEB_SRC.length + 1), line: i + 1, placeholder: text, why });
+          } else {
+            const label = labelShown(lines, i);
+            if (label) named.push({ file: file.slice(WEB_SRC.length + 1), line: i + 1, placeholder: text, label });
           }
         }
       }
@@ -200,7 +237,7 @@ function scan(): { checked: number; unlabelled: Finding[]; hardcodedAria: Findin
       }
     });
   }
-  return { checked, unlabelled, hardcodedAria };
+  return { checked, unlabelled, hardcodedAria, named };
 }
 
 describe("#740: a field whose placeholder is an EXAMPLE has a label that stays", () => {
@@ -216,6 +253,32 @@ describe("#740: a field whose placeholder is an EXAMPLE has a label that stays",
   it("every one of them has a visible label", () => {
     const listed = result.unlabelled.map((f) => `${f.file}:${f.line}  placeholder=${JSON.stringify(f.placeholder)} — ${f.why}`);
     expect(listed, `these fields show an example and never say what they want:\n${listed.join("\n")}`).toEqual([]);
+  });
+
+  it("fields showing the same example call themselves the same thing", () => {
+    // #671, arrived at through this ticket (user ruling). The sign-in door asked for "Code", the
+    // enrolment confirm asked for "Code", the factor-removal confirm asked for "Code", and the recovery
+    // re-auth — written last, by the ticket that started all this — asked for "Authenticator code".
+    // Four boxes containing `123456`, three of them named after the noun and one after the question.
+    // Fixing the three named in the ruling would have left the rule where it was: in nobody's head.
+    //
+    // The family is DISCOVERED from the example each field shows, not listed. A fifth screen asking for
+    // a code, written by somebody who never read this ticket, is grouped with the other four the day it
+    // is written and has to agree with them.
+    const groups = new Map<string, Named[]>();
+    for (const f of result.named) {
+      if (SAME_EXAMPLE_DIFFERENT_QUESTION[f.placeholder]) continue;
+      const g = groups.get(f.placeholder) ?? [];
+      g.push(f);
+      groups.set(f.placeholder, g);
+    }
+    const shared = [...groups.values()].filter((g) => g.length > 1);
+    expect(shared.length, "no example is shown by two fields at all — the grouping stopped working")
+      .toBeGreaterThan(0);
+    const split = shared
+      .filter((g) => new Set(g.map((f) => f.label)).size > 1)
+      .map((g) => `placeholder ${JSON.stringify(g[0]!.placeholder)} is asked for under ${new Set(g.map((f) => f.label)).size} names:\n${g.map((f) => `    ${f.file}:${f.line}  ${JSON.stringify(f.label)}`).join("\n")}`);
+    expect(split, `one question, more than one name:\n${split.join("\n")}`).toEqual([]);
   });
 
   it("no screen-reader label is an English literal", () => {
