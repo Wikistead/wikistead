@@ -773,7 +773,6 @@
     "recoveryLink": "Sign in another way",
     "recoveryTitle": "Recovery sign-in",
     "recoveryBody": "For members named as exceptions while SSO is required. Sign in with your email address and password.",
-    "factorPrompt": "Confirm with {{kinds}} to continue.",
     "factorPresentPasskey": "Use your passkey",
     "factorCode": "Code",
     "factorCodePlaceholder": "123456",
@@ -790,7 +789,10 @@
     "recoveryCodePlaceholder": "xxxx-xxxx-xxxx-xxxx",
     "recoveryCodeSubmit": "Use this code",
     "recoveryCodeWarning": "Using a code removes every second factor from your account and signs out all your sessions. You will set up a new authenticator afterwards.",
-    "recoveryCodeFailed": "That code cannot be used. Each code works once, and creating a new set retires the old one."
+    "recoveryCodeFailed": "That code cannot be used. Each code works once, and creating a new set retires the old one.",
+    "factorChooseTotp": "Use my authenticator app",
+    "factorChoosePasskey": "Use my passkey",
+    "factorChooseOther": "Use something else"
   },
   "share": {
     "invalid": "This share link is invalid, expired, or revoked.",
