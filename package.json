@@ -41,7 +41,8 @@
     "setup:server-test": "node scripts/server-test-up.mjs",
     "teardown:server-test": "node scripts/server-test-down.mjs",
     "release:pr": "node scripts/release-pr.mjs",
-    "gate:acceptance": "node scripts/gate-acceptance-730.mjs"
+    "gate:acceptance": "node scripts/gate-acceptance-730.mjs",
+    "publish-gate": "node scripts/publish-gate.mjs"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^7.0.0",
