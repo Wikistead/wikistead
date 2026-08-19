@@ -20,17 +20,28 @@ describe('#796: the collab suite is inside the isolated stack', () => {
     expect(isolatedStackFacts(root).marker).toBe('server-test')
   })
 
-  it('neither the database nor the permission store is the developer\'s own', () => {
-    // Skipped value by value rather than as a whole: a machine with no dev environment (CI, a fresh
-    // clone) has nothing to be confused with, and a suite that silently asserts nothing there is the
-    // failure this family keeps producing — so the count of what was compared is part of the message.
+  it('neither the database nor the permission store is the developer\'s own', (ctx) => {
+    // A machine with no dev environment (public CI, a fresh clone) has nothing to be confused with,
+    // and this SAYS SO rather than passing quietly: a green tick that compared nothing is how this
+    // family keeps shipping. (The first version counted "compared plus skipped equals the total",
+    // which is a tautology — the two sets are complements, so no input could fail it. An empty facts
+    // list passed it too, which is the exact shape of every vacuous walk this repository has fixed.)
     const { facts } = isolatedStackFacts(root) as { facts: { what: string; actual?: string; dev: string | null }[] }
-    const compared: string[] = []
-    for (const f of facts) {
-      if (!f.dev || !f.actual) continue
-      compared.push(f.what)
+    // FIRST, before any skip can swallow it: an empty definition would make every loop below run
+    // zero times, and a skip is not a finding — a definition that returned nothing has to be red
+    // wherever it happens, including on the machine that has nothing to compare against.
+    expect(facts.length, 'the shared definition returned no facts to check').toBeGreaterThan(1)
+    const dev = facts.filter((f) => f.dev)
+    if (dev.length === 0) {
+      ctx.skip()
+      return
+    }
+
+    for (const f of dev) {
+      // A fact the dev environment names but this process does not is a finding, not a skip: the
+      // suite is missing a variable it is supposed to have been given by the isolated stack.
+      expect(f.actual, `${f.what} — this process has no value for it at all`).toBeTruthy()
       expect(f.actual, f.what).not.toBe(f.dev)
     }
-    expect(compared.length + facts.filter((f) => !f.dev || !f.actual).length, 'every fact was either compared or had no dev value to compare with').toBe(facts.length)
   })
 })
