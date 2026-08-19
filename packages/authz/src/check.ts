@@ -224,7 +224,8 @@ export async function filterAuthorized(
       if (r.error) {
         // #758: counted, not just skipped. This is the branch where a reader loses a row they were
         // entitled to see, and until now it left no trace of any kind — the thinner list is
-        // indistinguishable from an honest one.
+        // indistinguishable from an honest one. The count is also what #756 below reads to tell a
+        // thinned answer from no answer at all.
         unanswered += 1
         if (!firstError) firstError = JSON.stringify(r.error)
         continue
@@ -242,6 +243,29 @@ export async function filterAuthorized(
     // into the answer. `out` is already what it is going to be.
     if (unanswered > 0) {
       reportAuthzDegradation({ relation, resourceType, candidates: chunk.length, unanswered, firstError })
+    }
+
+    // #756: a chunk that answered NOTHING is a failure, not a set of denials.
+    //
+    // ADR-183 §3 already rules this out — a batch-level error "must NOT become deny-all: the tree would
+    // then return 200 + empty, which is exactly the lying-empty the #500 frontend fix exists to prevent".
+    // But it named only the TRANSPORT error, and the store has a second door to the same room: the call
+    // succeeds and every item inside comes back errored. Applying the per-item rule to all of them
+    // reaches deny-all by arithmetic. Measured on a CPU-starved store, and on the 2-core public runner
+    // where it was a standing red: `18 of 18 answered, 0 allowed, 18 item-errors — deadline_exceeded`,
+    // against nine rows sitting in SQL. The reader saw a space with no pages in it.
+    //
+    // The intended degradation is UNCHANGED: when some ids error, those ids are denied and the caller
+    // shows fewer rows. What is refused is the case where nothing was answerable — that is not a verdict
+    // about anyone's access, it is the store failing to speak, and it belongs on the error path where
+    // the caller's retry already lives.
+    //
+    // ⚠️ The degradation above is reported FIRST, on purpose: when the store goes silent the operator
+    // wants both facts — that a batch was thinned to nothing, and that the request then failed.
+    if (chunk.length > 0 && unanswered === chunk.length) {
+      throw new Error(
+        `authorization store answered none of ${chunk.length} checks ` +
+        `(${relation} on ${resourceType}) — refusing to report that as "denied"`)
     }
   }
   // Run the chunks `lanes` at a time. With the default of 1 this is exactly the old sequential loop.
