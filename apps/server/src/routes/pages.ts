@@ -4927,7 +4927,23 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.post<{ Body: { ids?: unknown } }>('/pages/link-status', { config: { guest: 'view' } }, async (req, reply) => {
     const { subject, context } = batchPrincipal(req)
     const raw = Array.isArray(req.body?.ids) ? req.body!.ids : []
-    const ids = [...new Set(raw.filter((x): x is string => typeof x === 'string' && x.length > 0))].slice(0, MAX_LINK_STATUS_IDS)
+    const ids = [...new Set(raw.filter((x): x is string => typeof x === 'string' && x.length > 0))]
+    // #762: OVER THE CAP IS A REFUSAL, not a shorter answer.
+    //
+    // The response is the set of ids the caller MAY VIEW, so an id that is absent from it was denied
+    // and an id the route never looked at is absent in exactly the same way. Nothing in the body
+    // separates them. The editor reads absence as "dead link", so a document with more than the cap
+    // used to strike through live links past that point: the truncation was invisible to the only
+    // caller that could have compensated for it.
+    //
+    // ADR-117 ruled that an over-cap request must not do unbounded work ("capped/paged"), and left the
+    // ANSWER open; the 200 was an implementation detail nobody chose. Refusing is the reading that
+    // cannot lie — and the editor already degrades a non-200 to "unknown", which leaves every link
+    // alive rather than inventing dead ones. The cap itself (256, the number ADR-117 fixed) is
+    // unchanged, and so is the promise that the store never sees more than that.
+    if (ids.length > MAX_LINK_STATUS_IDS) {
+      return reply.code(400).send({ error: `too many ids: ${ids.length} (max ${MAX_LINK_STATUS_IDS})`, code: 'too_many_ids' })
+    }
     const viewable = await filterAuthorized(app.fga, subject, 'view', ids, context) // FGA-only; no existence lookup
     return reply.send({ viewable: [...viewable] })
   })

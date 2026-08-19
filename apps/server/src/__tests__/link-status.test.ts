@@ -111,12 +111,24 @@ describe('POST /pages/link-status (#276 / ADR-117)', () => {
       return real(body as never, ...(rest as []))
     }) as never)
     try {
-      // >cap ids are handled without error (capped/deduped, never unbounded); the viewable one still resolves
+      // #762: over the cap is REFUSED, not silently shortened. The response is the set of viewable ids,
+      // so a truncated id is absent exactly the way a denied one is — the caller reads both as "dead"
+      // and strikes through live links. ADR-117 ruled the WORK bound ("capped/paged") and left the
+      // answer open; this is that answer, and the editor already treats a non-200 as "unknown", which
+      // keeps every link alive rather than inventing dead ones.
       const many = [viewable, ...Array.from({ length: 400 }, (_v, i) => `zz-${i}`)]
       const capped = await linkStatus(many)
-      expect(capped.statusCode).toBe(200)
-      expect(Array.isArray(capped.json().viewable)).toBe(true)
-      expect(capped.json().viewable).toEqual([viewable]) // the one real page survives the cap
+      expect(capped.statusCode, 'an over-cap request is refused, not quietly truncated').toBe(400)
+      expect(capped.json().code, 'the refusal says which limit was passed').toBe('too_many_ids')
+      // …and the store was never asked. The BOUND is the property ADR-117 fixed; refusing is simply
+      // the cheapest way to keep it.
+      expect(waves.length, 'a refused request still reached the store').toBe(0)
+
+      // At the cap it answers normally — the boundary is inclusive, and this is what proves the refusal
+      // above is about the excess rather than about large requests in general.
+      const atCap = await linkStatus([viewable, ...Array.from({ length: 255 }, (_v, i) => `zz-${i}`)])
+      expect(atCap.statusCode, 'a request exactly at the cap is answered').toBe(200)
+      expect(atCap.json().viewable).toEqual([viewable])
     } finally {
       spy.mockRestore()
     }
@@ -126,8 +138,9 @@ describe('POST /pages/link-status (#276 / ADR-117)', () => {
     // with the thing it was checking. The cap is a ruling (#276 / ADR-117), so the ruling is what is
     // pinned here and the constant is checked against it.
     expect(MAX_LINK_STATUS_IDS, 'the cap is the ruled 256').toBe(256)
-    // 401 ids in, 256 out. Not "fewer than 401" — the exact number, so a cap that silently grew is as
-    // red as a cap that vanished.
+    // 256 ids in, 256 out. Not "fewer than 401" — the exact number, so a cap that silently grew is as
+    // red as a cap that vanished. (#762: the 401-id request no longer contributes, because it is
+    // refused before the store is asked; the at-cap request is what exercises the batching below.)
     expect(asked, `ids sent to the store (waves: ${waves.join(', ')})`).toBe(256)
     // …in as few round-trips as the store's batch limit allows. `<= 50 per wave` alone would NOT say
     // this: a regression to one check per id is 256 waves of one, and every one of them is under fifty.
