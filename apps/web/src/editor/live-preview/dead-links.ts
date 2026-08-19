@@ -18,19 +18,65 @@ const deadMark = Decoration.mark({ class: "cm-lp-link-dead", attributes: { title
 // attachment links (`wks-attachment:`) yield a non-`/p/` href or null → excluded. #224 title auto-links are
 // display-only marks (no Link node) and are viewer-scoped by construction, so they never appear here.
 // Exported for unit testing.
-export function collectInternalLinks(state: EditorState): { from: number; to: number; id: string }[] {
+export function collectInternalLinks(
+  state: EditorState,
+  // #755 / ADR-241 decision 2: which part of the doc to look at. Omitted = the whole thing, which is what
+  // the decoration build wants (it lays marks over what it already knows). The FETCH passes the viewport,
+  // because a link the reader cannot see does not need an answer yet.
+  ranges?: readonly { from: number; to: number }[],
+): { from: number; to: number; id: string }[] {
   const out: { from: number; to: number; id: string }[] = [];
-  syntaxTree(state).iterate({
-    enter: (node) => {
-      if (node.name !== "Link") return;
-      const href = linkHref(state.doc.sliceString(node.from, node.to));
-      if (!href) return;
-      const m = INTERNAL_LINK_RE.exec(href);
-      if (m) out.push({ from: node.from, to: node.to, id: m[1]! });
-    },
-  });
+  const seen = new Set<number>(); // a Link straddling two ranges is entered twice; keyed by start offset
+  const enter = (node: { name: string; from: number; to: number }) => {
+    if (node.name !== "Link") return;
+    if (seen.has(node.from)) return;
+    const href = linkHref(state.doc.sliceString(node.from, node.to));
+    if (!href) return;
+    const m = INTERNAL_LINK_RE.exec(href);
+    if (m) { seen.add(node.from); out.push({ from: node.from, to: node.to, id: m[1]! }); }
+  };
+  if (!ranges) syntaxTree(state).iterate({ enter });
+  else for (const r of ranges) syntaxTree(state).iterate({ from: r.from, to: r.to, enter });
   return out;
 }
+
+// #755 / ADR-241 decision 2 + the truncation it uncovered. Which ids to put in the next request.
+//
+// Two jobs, and the second one is a bug fix. The obvious one: never re-ask for an id already answered or
+// already in flight. The other: NEVER SEND MORE THAN THE SERVER WILL ANSWER. `/pages/link-status` caps the
+// list at MAX_LINK_STATUS_IDS and silently drops the rest, and the caller then reads every id it sent as
+// answered — so an id past the cap came back absent, and absent is how this overlay spells "dead". A
+// document with more internal links than the cap struck through the ones past it, all of them alive.
+//
+// Exported and pure so the cap and the de-dup are measurable without a laid-out editor.
+export function planLinkStatusRequest(
+  candidates: readonly { id: string }[],
+  known: ReadonlyMap<string, boolean>,
+  pending: ReadonlySet<string>,
+  cap: number,
+): string[] {
+  const batch: string[] = [];
+  const taken = new Set<string>();
+  for (const c of candidates) {
+    if (batch.length >= cap) break;
+    if (known.has(c.id) || pending.has(c.id) || taken.has(c.id)) continue;
+    taken.add(c.id);
+    batch.push(c.id);
+  }
+  return batch;
+}
+
+// Mirrors MAX_LINK_STATUS_IDS on the server, and staying under it is THIS side's job.
+//
+// The route trims an over-long list to its cap and answers 200 without saying it trimmed. The response
+// lists the ids the caller may VIEW, so a dead one is absent — and an id the route never looked at is
+// absent in exactly the same way. Nothing in the body separates them, which is why the caller must not
+// ask for more than will be answered: a document with more internal links than the cap used to wear a
+// strike-through on the ones past it, every one of them alive.
+//
+// That the route trims silently is its own defect and is filed separately; a client that respects the
+// cap does not depend on how that is settled.
+export const LINK_STATUS_REQUEST_CAP = 256;
 
 // Fired when a batch resolves, so the plugin re-runs its decoration build with the freshly-known dead ids.
 const bumpDeadLinks = StateEffect.define<null>();
@@ -63,12 +109,18 @@ class DeadLinkPlugin {
   fetchUnknown() {
     const resolve = this.view.state.facet(linkStatusResolver);
     if (!resolve) return; // no host seam (guest/picker-less surface) → nothing is struck
-    const ids = new Set<string>();
-    for (const l of collectInternalLinks(this.view.state)) {
-      if (!this.#known.has(l.id) && !this.#pending.has(l.id)) ids.add(l.id);
-    }
-    if (!ids.size) return;
-    const batch = [...ids];
+    // #755 / ADR-241 decision 2: ask about the links the reader can SEE, not every link in the document.
+    //
+    // Each `view` costs the store far more than the other page relations — it is the one relation that
+    // unions the whole capability lattice — and opening a page used to buy an answer for every link at
+    // once, including the ones a thousand lines further down that nobody has looked at. The answers are
+    // identical either way; this changes WHEN they are asked. The plugin already re-runs on
+    // `viewportChanged`, so scrolling asks for the next screenful on its own.
+    const batch = planLinkStatusRequest(
+      collectInternalLinks(this.view.state, this.view.visibleRanges),
+      this.#known, this.#pending, LINK_STATUS_REQUEST_CAP,
+    );
+    if (!batch.length) return;
     batch.forEach((id) => this.#pending.add(id));
     void resolve(batch).then((viewable) => {
       batch.forEach((id) => this.#pending.delete(id));
