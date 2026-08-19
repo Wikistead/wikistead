@@ -64,6 +64,41 @@ function renderCapabilitiesJson(): string {
  * compared with the label its id carries. A tab added tomorrow appears here without anyone
  * remembering to add it — and the docs check goes red because that id has no page named after it.
  */
+/**
+ * #741 / ADR-239 (a): the SCREEN VOCABULARY — each surface's actions and states, in every locale.
+ *
+ * #731's check compares the documentation's name for an admin TAB with the product's label, and sees
+ * nothing else. Everything a reader actually hunts for on the screen is one level below it: the button
+ * they must press, the badge telling them what state a row is in. The page written during #731 itself
+ * drifted on three of them ( for , for , for ) and was in
+ * quotation marks, presented as the words on the screen. A reader looking for it finds nothing.
+ *
+ * WHICH keys count is declared in `screen-vocabulary.mjs`; the WORDS come from the locale files, so a
+ * rename moves the check instead of breaking it.
+ */
+function renderScreenVocabularyJson(): string {
+  const bundle = (locale: string) =>
+    JSON.parse(readFileSync(join(root, `apps/web/src/i18n/locales/${locale}.json`), 'utf8')) as
+      Record<string, Record<string, string>>
+  const en = bundle('en')
+  const ja = bundle('ja')
+  const surfaces: Record<string, Record<string, { en: string; ja: string }>> = {}
+  for (const [surface, spec] of Object.entries(SCREEN_VOCABULARY).sort(([a], [b]) => a.localeCompare(b))) {
+    const words: Record<string, { en: string; ja: string }> = {}
+    for (const key of [...spec.keys].sort()) {
+      const e = en[spec.ns]?.[key]
+      const j = ja[spec.ns]?.[key]
+      // A declared key with no string is a declaration that has outlived the screen. Throwing here
+      // means `docs:check` refuses it, rather than the docs-site check going quiet about a key it
+      // cannot look up — the failure would land in the wrong repository.
+      if (!e || !j) throw new Error(`screen vocabulary: ${surface} declares ${spec.ns}.${key}, which ${!e ? 'en' : 'ja'} does not have`)
+      words[key] = { en: e, ja: j }
+    }
+    surfaces[surface] = words
+  }
+  return JSON.stringify({ surfaces }, null, 2) + '\n'
+}
+
 function renderAdminTabsJson(): string {
   const nav = (locale: string) =>
     (JSON.parse(readFileSync(join(root, `apps/web/src/i18n/locales/${locale}.json`), 'utf8')) as {
@@ -232,6 +267,7 @@ import { renderEventsMarkdown } from '../packages/events/src/index.js'
 import { renderAccountSettingsMarkdown } from '../apps/server/src/settings-catalog.js'
 // @ts-expect-error — repo-root script module, no types (#621 convention)
 import { SURFACE_DOCS } from './doc-code-map.mjs'
+import { SCREEN_VOCABULARY } from './screen-vocabulary.mjs'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 
@@ -275,6 +311,13 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     name: 'admin tab labels',
     outPath: join(root, 'docs/generated/admin-tabs.json'),
     render: renderAdminTabsJson,
+  },
+  {
+    // #741 / ADR-239 (a): each screen's ACTIONS and STATES, so the documentation can be checked
+    // against the words on the button rather than against somebody's memory of them.
+    name: 'screen vocabulary',
+    outPath: join(root, 'docs/generated/screen-vocabulary.json'),
+    render: renderScreenVocabularyJson,
   },
   {
     // #729 slice C: the capability ids the landing page's coverage ledger answers for.

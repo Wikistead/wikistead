@@ -1,0 +1,22 @@
+{
+  "surfaces": {
+    "admin-surface:domains": {
+      "pending": {
+        "en": "Pending",
+        "ja": "未検証"
+      },
+      "release": {
+        "en": "Release",
+        "ja": "解放する"
+      },
+      "verified": {
+        "en": "Verified",
+        "ja": "検証済み"
+      },
+      "verify": {
+        "en": "Verify",
+        "ja": "検証する"
+      }
+    }
+  }
+}
