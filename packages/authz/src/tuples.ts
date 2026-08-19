@@ -170,11 +170,24 @@ export async function readUserTuplesByType(
   fga: OpenFgaClient,
   user: string,
   typePrefix: `${string}:`,
+  /**
+   * #788: narrow the read to ONE relation, in the store, instead of reading everything and filtering
+   * here. The set is identical either way — the caller's filter and this predicate are the same
+   * question — but the wide read carries the whole type home first.
+   *
+   * Measured on a store with 41,257 `user:*` page tuples (published pages, mostly): the retention
+   * sweep spent 43 seconds reading them all to find the ONE marked `trashed`. That cost grows with
+   * how much a workspace has PUBLISHED, which has nothing to do with how much it has thrown away.
+   */
+  relation?: string,
 ): Promise<{ user: string; relation: string; object: string }[]> {
   const out: { user: string; relation: string; object: string }[] = []
   let continuationToken: string | undefined
   do {
-    const res = await fga.read({ user, object: typePrefix }, { ...(continuationToken ? { continuationToken } : {}) })
+    const res = await fga.read(
+      { user, object: typePrefix, ...(relation ? { relation } : {}) },
+      { ...(continuationToken ? { continuationToken } : {}) },
+    )
     for (const t of res.tuples ?? []) {
       const k = t.key
       if (k?.user && k.relation && k.object) out.push({ user: k.user, relation: k.relation, object: k.object })

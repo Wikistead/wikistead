@@ -3350,8 +3350,11 @@ async function physicalDeletePage(
 // self-heals with no manual repair path.
 export async function sweepExpiredTrash(fga: OpenFgaClient, driver: SearchDriver): Promise<number> {
   // All trashed markers, read ONCE (the store spans tenants; RLS scopes the row work per tenant below).
-  const marked = (await readUserTuplesByType(fga, 'user:*', 'page:'))
-    .filter((t) => t.relation === 'trashed')
+  // #788: ask the store for the `trashed` markers rather than for every `user:*` tuple on every page.
+  // The set is the same — this is the filter that used to run here, moved to where the rows are
+  // and the cost stops scaling with how much the workspace has PUBLISHED. Measured before: 41,257
+  // tuples read in 43 seconds to find the one marker that mattered, on every sweep.
+  const marked = (await readUserTuplesByType(fga, 'user:*', 'page:', 'trashed'))
     .map((t) => t.object.slice('page:'.length))
   const tenants = await pool<{ id: string }[]>`SELECT id FROM tenants`
   let purged = 0
