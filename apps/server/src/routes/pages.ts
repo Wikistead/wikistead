@@ -1953,6 +1953,137 @@ export async function listBranch(
 }
 
 /**
+ * How many siblings one level of the path walk may examine, shared across the whole chain.
+ *
+ * The rank query is a window function over ONE branch, so the cost is that branch's width. A budget
+ * rather than a per-level cap because a chain of twelve 200-wide branches should not cost twelve times
+ * what the ADR bounded; when it runs out the answer says `exhausted` and the sidebar stays put, which
+ * is the state ADR-238 §2.3 already defined.
+ */
+export const PATH_SCAN_MAX = 2_000
+
+/** One level of the path: the branch to fetch, and the cursor that puts the target's row inside it. */
+export interface PagePathLevel {
+  parentId: string | null
+  /** null = the target is in the branch's FIRST window, which is what the paint already fetched. */
+  cursor: string | null
+}
+
+/**
+ * ADR-238 §2: WHERE is this row? Answered in one round trip, so the client never reads until it finds.
+ *
+ * The sidebar's problem is not that it cannot reach a deep row — `paintTree` already fetches the branch
+ * of every ancestor. It is that each of those branches comes back as its FIRST window, and the row the
+ * reader opened may be the 400th child. The naive fix is a client loop over `more:` until the row shows
+ * up, which is unbounded in exactly the shape #705 / #710 ruled against, and the cost lands on whoever
+ * was merely sent a link. The server already knows the ordering, so it can say which window to ask for.
+ *
+ * ⚠️ THE RANK IS COUNTED OVER THE UNFILTERED SQL ORDERING, not over the rows the reader may see, because
+ * that is what `listBranch` pages over: it takes `limit + 1` SQL rows and only then drops the ones the
+ * reader cannot view. A rank computed after the authorization filter would name a window that does not
+ * contain the target — and would do it only for readers who cannot see some of its siblings, which is the
+ * hardest kind of bug to be told about.
+ *
+ * ⚠️ The cursor may therefore name a row the caller cannot view — and this is NOT a new disclosure:
+ * `listBranch` already hands back `nextCursor` taken from the last SQL row rather than the last visible
+ * one, for the same reason (a cursor from the filtered set leaves the walk unable to resume). This route
+ * says nothing a branch fetch would not have said, which is the property ADR-238 §2.2 requires.
+ *
+ * The refusals are `listBranch`'s, unchanged: a page that is absent, trashed, in another space, or one
+ * the caller cannot view all answer ONE 404, so the route cannot be used to test whether an id exists.
+ */
+export async function pathToPage(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: {
+    spaceId: string
+    pageId: string
+    subject: string
+    context?: { current_time: string }
+    limit?: number
+    /**
+     * The scan budget, so the bound can be MEASURED with a small fixture rather than by reading
+     * `PATH_SCAN_MAX`. The route never sets it; a pin that asserted the constant would still pass on
+     * an implementation that scanned the whole branch and then compared.
+     */
+    scanMax?: number
+  },
+): Promise<{ levels: PagePathLevel[]; exhausted: boolean }> {
+  const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
+  // The same clamp `listBranch` applies, because the cursor is only correct for the window size the
+  // client will actually ask for. A path computed for 30 and fetched with 100 lands short.
+  const limit = Math.min(500, Math.max(1, args.limit ?? BRANCH_PAGE_LIMIT))
+
+  const [target] = await db.sql<[{ space_id: string; deleted_at: Date | null }?]>`
+    SELECT space_id, deleted_at FROM pages WHERE id = ${args.pageId}`
+  if (!target || target.deleted_at || target.space_id !== args.spaceId) throw notFound()
+  if (!(await checkRelation(fga, args.subject, 'view', { type: 'page', id: args.pageId }, args.context))) {
+    throw notFound()
+  }
+
+  // The ancestors, root-first, inside this space — the same recursive walk and the same depth cap
+  // `paintTree` uses. Reusing the bound is the point: ADR-238 §2.3 chose not to invent a second one.
+  const rows = await db.sql<{ id: string; parent_id: string | null; depth: number }[]>`
+    WITH RECURSIVE anc AS (
+      SELECT id, parent_id, 0 AS depth FROM pages
+       WHERE id = ${args.pageId} AND space_id = ${args.spaceId} AND deleted_at IS NULL
+      UNION ALL
+      SELECT p.id, p.parent_id, anc.depth + 1 FROM pages p
+        JOIN anc ON p.id = anc.parent_id
+       WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL AND anc.depth < ${MAX_PAGE_DEPTH}
+    )
+    SELECT id, parent_id, depth FROM anc ORDER BY depth DESC
+  `
+  // The walk stopped at the cap while a parent was still named: the chain we hold does not reach the
+  // root, so the levels below are un-fetchable and the honest answer is "as far as I got".
+  // A chain that does not reach the root cannot be anchored: the branch holding its topmost row is one
+  // we never found, so there is no first level to hand the client. Saying `exhausted` with no levels is
+  // the honest answer, and it is the state §2.3 already defines — the sidebar leaves the reader put.
+  const top = rows[0]
+  if (!top || top.parent_id) return { levels: [], exhausted: true }
+  // Root-first. Level i fetches the branch of chain[i-1] (the root branch for i = 0) and wants chain[i]
+  // inside its window.
+  const chain = rows.map((r) => r.id)
+
+  const levels: PagePathLevel[] = []
+  let exhausted = false
+  let budget = Math.max(1, args.scanMax ?? PATH_SCAN_MAX)
+  for (let i = 0; i < chain.length; i++) {
+    const childId = chain[i]!
+    const parentId = i === 0 ? null : chain[i - 1]!
+    // The branch's own gate, identical to `listBranch`'s §2 — an ancestor the reader cannot view
+    // truncates the path rather than failing it, exactly as `paintTree` truncates its paint.
+    const ok = parentId === null
+      ? await checkRelation(fga, args.subject, 'viewer', { type: 'space', id: args.spaceId }, args.context)
+      : await checkRelation(fga, args.subject, 'view', { type: 'page', id: parentId }, args.context)
+    if (!ok) { exhausted = true; break }
+    if (budget <= 0) { exhausted = true; break }
+    // `sib` is the branch exactly as `listBranch` reads it — same predicates, same order, home page
+    // excluded on every row. `t` is the target's 0-based rank; the cursor is the LAST row of the window
+    // before the target's, because the branch cursor is exclusive.
+    const [found] = await db.sql<[{ rank: string; cursor: string | null }?]>`
+      WITH sib AS (
+        SELECT p.id, ROW_NUMBER() OVER (ORDER BY p.position, p.created_at) - 1 AS rn
+        FROM pages p JOIN spaces s ON s.id = p.space_id
+        WHERE p.space_id = ${args.spaceId} AND p.deleted_at IS NULL
+          AND (s.home_page_id IS NULL OR p.id != s.home_page_id)
+          AND ${parentId === null ? db.sql`p.parent_id IS NULL` : db.sql`p.parent_id = ${parentId}`}
+        ORDER BY p.position, p.created_at
+        LIMIT ${budget}
+      ), t AS (SELECT rn FROM sib WHERE id = ${childId})
+      SELECT t.rn::text AS rank,
+             (SELECT s2.id FROM sib s2 WHERE s2.rn = (t.rn / ${limit}) * ${limit} - 1) AS cursor
+        FROM t`
+    // Not inside the scanned prefix: the row is further out than the walk is allowed to look, so the
+    // chain stops here rather than pointing the client at a window that does not hold it.
+    if (!found) { exhausted = true; break }
+    budget -= Number(found.rank) + 1
+    levels.push({ parentId, cursor: found.cursor })
+  }
+  return { levels, exhausted }
+}
+
+/**
  * #623②: §4's placeholder chains, as a FOLLOW-UP — never on the paint path.
  *
  * Resolving them inline read a creator's whole grant roster on every branch of every cold open
@@ -4336,6 +4467,32 @@ export async function pagesPlugin(app: FastifyInstance) {
         ...(context ? { context } : {}),
         ...(Number.isFinite(asked) ? { limit: asked } : {}),
         ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+      })
+    })
+
+  // ADR-238 / #739: WHERE is this row in the tree? One round trip, so the sidebar never reads until it
+  // finds. Guest-capable on the same terms as the branch route it feeds: a space link may ask about its
+  // own space, and every refusal is the branch route's single 404.
+  app.get<{ Params: { spaceId: string; pageId: string }; Querystring: { limit?: string } }>(
+    '/spaces/:spaceId/pages/:pageId/path', { config: { guest: 'view' } }, async (req, reply) => {
+      let subject: string
+      let context: { current_time: string } | undefined
+      if (req.user) {
+        subject = `user:${req.user.sub}`
+      } else if (req.guest) {
+        if (req.guest.resource.type !== 'space' || req.guest.resource.id !== req.params.spaceId) {
+          return reply.code(403).send({ error: 'forbidden' })
+        }
+        subject = `share_link:${req.guest.shareLinkId}`
+        context = { current_time: new Date().toISOString() }
+      } else {
+        return reply.code(401).send({ error: 'unauthorized' })
+      }
+      const asked = Number.parseInt(req.query.limit ?? '', 10)
+      return pathToPage(req.db, app.fga, {
+        spaceId: req.params.spaceId, pageId: req.params.pageId, subject,
+        ...(context ? { context } : {}),
+        ...(Number.isFinite(asked) ? { limit: asked } : {}),
       })
     })
 

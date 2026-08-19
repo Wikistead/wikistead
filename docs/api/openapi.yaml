@@ -395,6 +395,29 @@ paths:
         - { name: limit, in: query, required: false, schema: { type: integer }, description: "Rows per response (clamped)." }
       responses: { "200": { description: One page of the branch }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
 
+  /spaces/{spaceId}/pages/{pageId}/path:
+    get:
+      operationId: getSpacePagePath
+      tags: [spaces]
+      summary: Where a page's row sits in the tree — one level per ancestor, root-first
+      description: >-
+        ADR-238. The paint fetches the branch of every ancestor, but each comes back as its FIRST
+        window, so a page past the window's end is not in the tree at all when the reader lands on a
+        link to it. Reading the branch until the row turns up would be unbounded, and the cost would
+        fall on whoever was merely sent the link, so this answers WHICH WINDOW instead: for each
+        level, the branch to fetch and the cursor that puts the row inside it (`null` means the first
+        window, which the paint already has). The rank is counted over the same unfiltered ordering
+        the branch route pages over, so the cursor may name a row the caller cannot view — the same
+        thing `nextCursor` has always done, and for the same reason. The walk reuses the ancestor
+        depth cap and a scan budget; when it runs out the answer says `exhausted` and stops rather
+        than pointing at a window that does not hold the row. Every refusal — absent, trashed,
+        another space's, not viewable — is one identical 404.
+      parameters:
+        - { $ref: "#/components/parameters/spaceId" }
+        - { name: pageId, in: path, required: true, schema: { type: string }, description: "The page whose row the caller wants to reach." }
+        - { name: limit, in: query, required: false, schema: { type: integer }, description: "The window size the caller will fetch with; the cursors are only correct for this size." }
+      responses: { "200": { description: "One level per ancestor (root-first) and whether the walk was exhausted" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
+
   /spaces/{spaceId}/pages/tree-placeholders:
     get:
       operationId: listSpaceTreePlaceholders

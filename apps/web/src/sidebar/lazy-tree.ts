@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../data/apiClient";
 import type { Page } from "../data/queries";
@@ -28,6 +28,12 @@ export interface BranchAnswer {
 
 interface PaintAnswer {
   branches: (BranchAnswer & { parentId: string | null })[];
+}
+
+/** ADR-238 §2: where the open row is — one level per ancestor, root-first. */
+interface PathAnswer {
+  levels: { parentId: string | null; cursor: string | null }[];
+  exhausted: boolean;
 }
 
 const ROOT = "root";
@@ -140,6 +146,55 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       placeholders: r.placeholders ?? have.placeholders,
     });
   }, [spaceId, token, qc]);
+
+  // ADR-238 / #739: REACH the open row when the paint did not already hold it.
+  //
+  // The paint fetches the branch of every ancestor, but each comes back as its FIRST window — so a page
+  // past row 30 of its branch is simply not in the tree, and the reader who was sent a link lands on a
+  // sidebar that does not show where they are. Measured on a 60-page space: the row never appeared.
+  //
+  // What this is NOT is a loop over `more:` until the row turns up. That is unbounded in exactly the
+  // shape #705 / #710 ruled against, and the cost falls on the reader who did the least to deserve it.
+  // The server knows the ordering, so it answers WHICH WINDOW in one round trip, and this fetches only
+  // the levels whose window the paint got wrong — usually one, never more than the depth of the page.
+  //
+  // ⚠️ It runs only when the row is ABSENT. Nothing happens for a page in the first window of its
+  // branch, which is nearly every page: the common navigation costs no extra request at all.
+  const reachedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!spaceId || !openPageId) return;
+    if (reachedFor.current === openPageId) return;
+    // Wait for the paint. Acting before it lands would ask for a path the paint is about to deliver.
+    if (!paint.data) return;
+    const held = [...byParent.values()].some((b) => b.pages.some((p) => p.id === openPageId));
+    reachedFor.current = openPageId;
+    if (held) return;
+    const wantedFor = openPageId;
+    void (async () => {
+      const r = await apiFetch<PathAnswer>(
+        `/spaces/${spaceId}/pages/${encodeURIComponent(wantedFor)}/path?limit=${PAINT_LIMIT}`, token,
+      );
+      // A page the reader cannot view answers 404 and `apiFetch` yields nothing. There is no fallback
+      // to try: the row is not theirs to see, and the sidebar simply stays as the paint drew it.
+      if (!r) return;
+      for (const level of r.levels) {
+        // No cursor means the target is in the branch's first window, which the paint already fetched.
+        if (!level.cursor) continue;
+        const qs = new URLSearchParams();
+        if (level.parentId) qs.set("parent", level.parentId);
+        qs.set("cursor", level.cursor);
+        qs.set("limit", String(PAINT_LIMIT));
+        const b = await apiFetch<BranchAnswer>(`/spaces/${spaceId}/pages/branch?${qs}`, token);
+        // REPLACE rather than append: this window is somewhere else in the branch entirely, and
+        // concatenating it onto the first one would draw the two runs as if they were adjacent.
+        if (b) qc.setQueryData(branchKey(spaceId, level.parentId), b);
+      }
+      // Ruling ③: expand the chain even where the reader had collapsed it — they asked for this page by
+      // opening it. Done after the fetches so each key already holds its window when the query mounts.
+      const chain = r.levels.map((l) => l.parentId).filter((id): id is string => !!id);
+      if (chain.length) setExpanded((prev) => new Set([...prev, ...chain]));
+    })();
+  }, [spaceId, openPageId, paint.data, byParent, token, qc]);
 
   return { paint, byParent, expanded, expand, collapse, loadMore };
 }
