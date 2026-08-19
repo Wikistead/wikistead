@@ -70,6 +70,10 @@ const OBSIDIAN: FidelitySource = {
     { id: 'wikilink-heading', element: 'Wikilink to a heading', input: 'See [[Runbook#Rollback]].' },
     { id: 'wikilink-block', element: 'Wikilink to a block reference', input: 'See [[Runbook#^decision1]].' },
     { id: 'wikilink-dead', element: 'Wikilink to a note that is not in the export', input: 'See [[Deleted note]].' },
+    // #728 / ADR-242 §3. A vault can write this, and so does every Docmost export — which lands on
+    // this dialect, because nothing else claims an archive with no manifest. The link is not rewritten
+    // (that is what the Docmost dialect is for); the row exists so the table says so out loud.
+    { id: 'page-link-as-path', element: 'Link to another page written as a file path', input: 'See [the runbook](Runbook.md).' },
     { id: 'embed-image', element: 'Embedded image', input: 'Here it is: ![[diagram.png]]' },
     { id: 'embed-image-size', element: 'Embedded image with a display size', input: 'Here it is: ![[diagram.png|300]]' },
     { id: 'embed-note', element: 'Embedded note', input: 'Here it is: ![[Runbook]]' },

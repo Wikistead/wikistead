@@ -274,6 +274,7 @@ export const DEGRADATION_CODES = [
   'excalidrawUnreadable', 'canvasNotImported', 'notionDatabaseFlattened',
   'confluenceStorageFormat', 'confluenceMacroNoEquivalent', 'mergedCellsFlattened',
   'emojiReplacedByName', 'linkOutsideExport', 'attachmentLinkMissing',
+  'sourcePageLinkKept',
 ] as const
 export type DegradationCode = typeof DEGRADATION_CODES[number]
 
@@ -361,7 +362,7 @@ function rewriteBody(
   // #712 / ADR-227 §3: the same two-pass rewrite now serves every source's own link shape. The
   // Wikistead ZIP speaks `/p/<oldId>`; a vault speaks `[[Note]]`. Both resolve against maps built
   // once all ids are known, and both leave an unresolvable link ALONE and count it.
-  wiki?: { node: { title: string }; hrefByName: Map<string, string>; embedByName: Map<string, string> },
+  wiki?: { node: { title: string; dir: string }; hrefByName: Map<string, string>; embedByName: Map<string, string> },
   // #712 / ADR-227 §5: Notion's own link shape, resolved through the same generic map idea — one
   // rewrite pass, one dead-link rule, three sources.
   notionHrefByHex?: ReadonlyMap<string, string>,
@@ -422,7 +423,78 @@ function rewriteBody(
     report.deadCrossLinks += r.deadLinks
     report.degraded.push(...r.degraded)
   }
+  if (wiki) reportSourcePageLinks(md, wiki, report)
   return md
+}
+
+// Anything still shaped like a Markdown link once every pass above has run. Read AFTER them on
+// purpose: what is left here is what the reader will actually be holding, so nothing is reported on
+// a prediction that a later pass then falsifies (the mistake #712② was made of).
+const REMAINING_LINK = /(!?)\[([^\]]*)\]\(([^)\s]+)\)/g
+/** Outline writes its own documents as `/doc/<slug>-<id>`; nothing else in a Markdown export does. */
+const OUTLINE_DOC_LINK = /^\/doc\/[0-9A-Za-z-_~]+$/
+
+/**
+ * #728 / ADR-242 §3: say the links this import could not resolve.
+ *
+ * A Docmost or Outline export carries no manifest and no fingerprint the importer knows, so it lands
+ * on the vault dialect — and a vault resolves `[[wikilink]]`, which neither product writes. Docmost
+ * links its pages by RELATIVE FILE PATH and Outline by `/doc/<id>`. Neither resolves, and until now
+ * neither was SAID: from the vault reader's point of view nothing was lost, so the report stayed
+ * quiet while every internal link in the archive stopped pointing anywhere. A clean report over a
+ * body full of dead links is the exact failure ADR-227 exists to prevent.
+ *
+ * The relative arm asks whether the target is a page THIS archive brought, which is the difference
+ * between "we could not address it" and "it was never here". The second is already `deadCrossLinks`
+ * and reporting it again would double-count it — the defect #712(c) was about.
+ *
+ * Report-only, deliberately. Rewriting these is what the Docmost and Outline dialects are for, and
+ * mixing the two in one change would leave nobody able to tell which one made the links work.
+ */
+function reportSourcePageLinks(
+  md: string,
+  wiki: { node: { title: string; dir: string }; hrefByName: Map<string, string> },
+  report: ImportReport,
+): void {
+  const seen = new Set<string>()
+  for (const m of md.matchAll(REMAINING_LINK)) {
+    if (m[1]) continue // an image: not a page link, and the attachment passes own it
+    const url = m[3]!
+    if (/^(https?:|mailto:|#|\/p\/|wks-attachment:)/i.test(url)) continue
+    const known = OUTLINE_DOC_LINK.test(url) || wiki.hrefByName.has(pageKeyOf(url, wiki.node.dir))
+    if (!known || seen.has(url)) continue
+    seen.add(url)
+    report.degraded.push({
+      node: wiki.node.title,
+      code: 'sourcePageLinkKept',
+      what: 'link to a page in the export, left as written',
+      detail: url,
+      params: { target: url },
+    })
+  }
+}
+
+/**
+ * A relative link's target as the page maps key them: archive-relative, no extension, lower-case.
+ *
+ * Docmost builds its zip paths with `encodeURIComponent`, so a page whose title is not ASCII is
+ * `%E3%83%9B…` in the archive AND in every link to it — decoding first is what makes a Japanese
+ * export answer the same as an English one.
+ */
+function pageKeyOf(url: string, fromDir: string): string {
+  let path = url.split(/[?#]/)[0] ?? ''
+  try { path = decodeURIComponent(path) } catch { /* a stray % is not an escape; use it as written */ }
+  path = path.replace(/\.(md|markdown|html?|csv)$/i, '').replace(/\/$/, '')
+  const base = fromDir.includes('/') ? fromDir.slice(0, fromDir.lastIndexOf('/')).split('/') : []
+  const out: string[] = path.startsWith('/') ? [] : base
+  const parts = out.concat(path.split('/'))
+  const stack: string[] = []
+  for (const part of parts) {
+    if (!part || part === '.') continue
+    if (part === '..') { stack.pop(); continue }
+    stack.push(part)
+  }
+  return stack.join('/').toLowerCase()
 }
 
 // Materialize an IR into DRAFT pages under a destination space (optionally under a parent page). Every node goes
@@ -531,7 +603,7 @@ export async function materializeImport(
         report.degraded.push(...drawing.degraded)
       }
       const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report, {
-        node: { title: c.node.title || c.node.dir }, hrefByName, embedByName,
+        node: { title: c.node.title || c.node.dir, dir: c.node.dir }, hrefByName, embedByName,
       }, notionHrefByHex, attByName)
       await setDraftBody(db, c.newId, md)
       if (args.publish && c.node.published && md.trim() !== '') {
