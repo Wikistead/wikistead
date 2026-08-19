@@ -14,7 +14,13 @@ import { isServerFault } from "./serverFault";
 // The failure copy is ONE message for every cause, matching what the server answers. Saying "no such
 // account" here would hand back the enumeration answer the API deliberately withholds — and the
 // screen is the easiest place in the product to ask that question a thousand times.
-export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disabled?: boolean }) {
+// #745 `onStage` lets the SCREEN above stop describing a stage the reader has left. It is a
+// notification, not a control — this component still owns which stage it is on. The screens need it
+// because the card's chrome (its title, and on the sign-in screen the other ways in) lives outside
+// this component and would otherwise keep offering a password door to somebody who is past it.
+export function LocalLoginForm({ returnTo, disabled, onStage }: {
+  returnTo: string; disabled?: boolean; onStage?: (stage: "required" | "enrolment-required" | null) => void;
+}) {
   const { t } = useTranslation();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -57,6 +63,7 @@ export function LocalLoginForm({ returnTo, disabled }: { returnTo: string; disab
       // asks for the next thing rather than sending the reader somewhere that would bounce them back.
       if (body?.factor) {
         setStage(body.factor); setKinds(body.kinds ?? []); setRecovery(body.recovery === true);
+        onStage?.(body.factor);
         setBusy(false); return;
       }
       // A full navigation, not a router push: the session cookie is new, and every query in the app

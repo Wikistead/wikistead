@@ -88,12 +88,21 @@ export function connectionButtonText(conn: LoginConnection, t: (k: string, o?: R
 // attempt fails exactly like a wrong password (no oracle here either).
 export function RecoveryScreen() {
   const { t } = useTranslation();
+  // #745 this card's own words describe the PASSWORD stage ("sign in with your email address
+  // and password"). Once the form hands over to the second-factor step they are an instruction the
+  // reader has already carried out, sitting directly above buttons that ask for something else. The
+  // step brings its own title, so this one steps aside rather than being restated in two voices.
+  const [half, setHalf] = useState(false);
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-lg border border-border bg-panel p-6" data-testid="login-recovery">
-        <h1 className="mb-1 text-xl font-semibold">{t("auth.recoveryTitle")}</h1>
-        <p className="mb-5 text-sm text-fg-dim">{t("auth.recoveryBody")}</p>
-        <LocalLoginForm returnTo="/" />
+        {!half && (
+          <>
+            <h1 className="mb-1 text-xl font-semibold">{t("auth.recoveryTitle")}</h1>
+            <p className="mb-5 text-sm text-fg-dim">{t("auth.recoveryBody")}</p>
+          </>
+        )}
+        <LocalLoginForm returnTo="/" onStage={(stage) => setHalf(stage !== null)} />
       </div>
     </div>
   );
@@ -137,6 +146,11 @@ export function LoginScreen() {
   // (not inline in the handler) so React commits+paints the spinner BEFORE the browser starts unloading — a
   // synchronous `location.href =` right after setState would navigate before the spinner ever renders. The state
   // persists until the page unloads, so no reset is needed.
+  // #745 true once the password was accepted and one more proof is owed. Everything the card
+  // offers as a WAY IN belongs to the stage before this — a reader looking at "use your passkey" must
+  // not also be looking at "Sign in with Google", which would start the whole thing again and throw
+  // away the receipt they are holding.
+  const [half, setHalf] = useState(false);
   const [pending, setPending] = useState<{ key: string; url: string } | null>(null);
   useEffect(() => { if (pending) window.location.href = pending.url; }, [pending]);
   const navigating = pending?.key ?? null;
@@ -159,7 +173,7 @@ export function LoginScreen() {
               organisation's identity provider. It said nothing the screen was not already showing — the
               buttons below wear the connection names, a password entrance shows its own fields — and on
               a tenant with only a password it was untrue. The title keeps the spacing the pair had. */}
-          <h1 className="mb-5 text-xl font-semibold">{t("auth.signInTitle", { product })}</h1>
+          {!half && <h1 className="mb-5 text-xl font-semibold">{t("auth.signInTitle", { product })}</h1>}
           {error && (
             <div
               className="wks-left-bar mb-4 rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
@@ -178,8 +192,10 @@ export function LoginScreen() {
               )}
             </div>
           )}
-          {hasLocal && localLeads && <LocalLoginForm returnTo={returnTo} disabled={navigating !== null} />}
-          {primary !== null && (
+          {hasLocal && localLeads && (
+            <LocalLoginForm returnTo={returnTo} disabled={navigating !== null} onStage={(stage) => setHalf(stage !== null)} />
+          )}
+          {!half && primary !== null && (
             <Button
               variant="primary"
               className="w-full"
@@ -197,15 +213,17 @@ export function LoginScreen() {
             <p className="text-sm text-fg-dim" data-testid="login-none">{t("auth.noMethods")}</p>
           )}
           {hasLocal && !localLeads && (
-            <div className="mt-4 border-t border-border pt-4">
-              <LocalLoginForm returnTo={returnTo} disabled={navigating !== null} />
+            /* The rule above separates the password door from the buttons; with the buttons gone
+               there is nothing to separate it from. */
+            <div className={half ? "" : "mt-4 border-t border-border pt-4"}>
+              <LocalLoginForm returnTo={returnTo} disabled={navigating !== null} onStage={(stage) => setHalf(stage !== null)} />
             </div>
           )}
           {/* #554 S3 / ADR-197 §3: every non-primary connection folds behind "sign in another way",
               in the tenant's sort order. rev3 labels: a free label renders only when the server sent
               one (preset-less custom OIDC — S4 fills the column); everything else wears fixed
               first-party wording. */}
-          {secondary.length > 0 && (
+          {!half && secondary.length > 0 && (
             <details className="mt-4" data-testid="login-more">
               <summary className="cursor-pointer text-xs text-fg-dim">{t("auth.moreWays")}</summary>
               <div className="mt-2 flex flex-col gap-2">
