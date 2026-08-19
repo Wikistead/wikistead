@@ -283,7 +283,13 @@ export function SecondFactorPanel() {
                 </IconButton>
               )}
               {removing?.id === f.id ? (
-                <>
+                /* #740a FormRow, not three loose children. A list row centres what it holds,
+                   which is right for a row of names and marks and wrong the moment one child grows a
+                   label above it — the field then hangs below the two buttons it belongs with. This is
+                   the same shape the ruling measured at 11px on three other screens, in the one place
+                   it appears inside a LIST rather than a form; putting the cluster in the row that
+                   owns the rule fixes it here and keeps a single answer to the question. */
+                <FormRow>
                   {/* The code is asked for HERE rather than in a dialog, because #660 wants possession
                       and the reader has to fetch it from the device they are giving up. */}
                   <label className="flex flex-col gap-1 text-xs text-fg-dim">
@@ -297,7 +303,7 @@ export function SecondFactorPanel() {
                     {t("account.factorRemove")}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setRemoving(null)}>{t("common.cancel")}</Button>
-                </>
+                </FormRow>
               ) : renaming?.id === f.id ? null : (
                 /* #673 ①: ONE way in, whatever the row holds. Removing an authenticator app and
                    removing a key are the same act with the same consequence, and the kind decides only

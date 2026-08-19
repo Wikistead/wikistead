@@ -25,7 +25,19 @@ export function useControlScale(explicit: ControlScale | null | undefined, fallb
 
 /**
  * One line of a form. Compact (`sm`, 32px) by default — that is what the settings screens already use.
- * Children are laid out in a wrapping flex row, centred, so the heights that now agree also line up.
+ * Children are laid out in a wrapping flex row, and they line up along their BOTTOMS.
+ *
+ * #740 (ruling): bottoms, not centres. Once a field carries a visible label the label sits above
+ * the box, so that child is a line taller than the button beside it — and centring made the box hang
+ * 11px below every plain control on the row. Measured at that exact figure on three screens (the API
+ * key row, the webhook row, the invite row), which is what "not one broken screen" looks like: it was
+ * the row's rule, applied faithfully to a child whose shape had changed.
+ *
+ * Bottom alignment is what the eye reads as "these belong to one line" when one control wears a name
+ * and its neighbour does not, and it costs nothing where nobody wears one — a row of equal-height
+ * controls lays out identically either way, which is every other row in the product today. The
+ * alternative on the table was padding the unlabelled side up to match, which is the same fix written
+ * once per row and forgotten on the next one.
  */
 export function FormRow({
   scale = "sm",
@@ -35,7 +47,7 @@ export function FormRow({
 }: { scale?: ControlScale } & HTMLAttributes<HTMLDivElement>) {
   return (
     <FormScaleContext.Provider value={scale}>
-      <div className={cn("flex flex-wrap items-center gap-2", className)} {...rest}>
+      <div data-form-row="" className={cn("flex flex-wrap items-end gap-2", className)} {...rest}>
         {children}
       </div>
     </FormScaleContext.Provider>
