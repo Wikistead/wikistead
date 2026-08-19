@@ -13,7 +13,8 @@ const HEADER = `<!--
 
 export function renderEventsMarkdown(): string {
   const lines: string[] = []
-  lines.push(HEADER, '', '# Domain events', '')
+  // #748: "domain event" is a design term. The reader is here because they are wiring a webhook.
+  lines.push(HEADER, '', '# Webhook events', '')
   lines.push(
     'The CE event bus emits a `DomainEvent` after each successful operation. EE features',
     '(webhooks, audit log, compliance export) subscribe to these. Events carry only ids,',

@@ -255,7 +255,7 @@ If a tenant's OIDC config locks everyone out, see
 
 ## Configuration reference
 
-**[`docs/generated/env-reference.md`](generated/env-reference.md) is the complete list** — every
+**[`docs/generated/environment-variables.md`](generated/environment-variables.md) is the complete list** — every
 variable this product reads, with its default and what it does, generated from the code itself, so a
 knob added in a release is in it. `.env.example` is the smaller set a fresh checkout needs to start.
 

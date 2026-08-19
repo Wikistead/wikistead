@@ -32,7 +32,7 @@ function repoFiles(): string[] {
 }
 
 const MAP = [
-  { label: 'levers', kind: 'generated', code: ['packages/entitlements/src/index.ts'], doc: 'docs/generated/entitlement-levers.md' },
+  { label: 'levers', kind: 'generated', code: ['packages/entitlements/src/index.ts'], doc: 'docs/generated/plan-contents.md' },
   { label: 'macros', kind: 'authored', code: ['apps/web/src/editor/macros/**'], doc: 'wikistead-docs/macros.md' },
 ]
 
@@ -45,7 +45,7 @@ describe('doc↔code linkage evaluator (#139 / ADR-080)', () => {
   })
 
   it('passes when the docs page changed WITH the code', () => {
-    const v = evaluateDocLinks(['packages/entitlements/src/index.ts', 'docs/generated/entitlement-levers.md'], MAP)
+    const v = evaluateDocLinks(['packages/entitlements/src/index.ts', 'docs/generated/plan-contents.md'], MAP)
     expect(v).toHaveLength(0)
   })
 

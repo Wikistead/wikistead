@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest'
 import { LEVER_CATALOG, UNLIMITED, renderEntitlementsMarkdown } from '@wikistead/entitlements'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
-const generatedPath = join(repoRoot, 'docs/generated/entitlement-levers.md')
+const generatedPath = join(repoRoot, 'docs/generated/plan-contents.md')
 
 describe('entitlement levers doc (#139 / ADR-080 doc↔code linkage)', () => {
   it('catalog covers EXACTLY the resolver levers (no doc↔code drift)', () => {
