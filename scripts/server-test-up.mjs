@@ -94,6 +94,13 @@ console.log(`[server-test] wrote .env.server-test.local (store ${storeId}, pg ${
 console.log("[server-test] fga seed…");
 run(`npx tsx ${ENVS} infra/openfga/seed.ts`);
 
+// #788: drop what earlier runs left behind BEFORE seeding. `sweepExpiredTrash` walks every tenant,
+// so a stack that has been up for hours pays for hundreds of fixtures nobody collected — measured at
+// 33 seconds to purge one page tree with 979 of them present. The seed below re-establishes the two
+// tenants this keeps.
+console.log("[server-test] prune leftover test tenants…");
+run(`npx tsx ${ENVS} infra/db/prune-test-tenants.ts`);
+
 console.log("[server-test] db seed…");
 run(`npx tsx --env-file=.env.server-test infra/db/seed.ts`);
 
