@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest'
 import { EVENT_CATALOG, renderEventsMarkdown } from '@wikistead/events'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
-const generatedPath = join(repoRoot, 'docs/generated/domain-events.md')
+const generatedPath = join(repoRoot, 'docs/generated/webhook-events.md')
 
 describe('domain events doc (#139 / ADR-080 doc↔code linkage)', () => {
   it('every catalogued event has a non-empty description', () => {

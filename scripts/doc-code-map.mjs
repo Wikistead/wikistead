@@ -24,13 +24,13 @@ export const DOC_CODE_MAP = [
     label: 'entitlement levers',
     kind: 'generated',
     code: ['packages/entitlements/src/index.ts', 'packages/entitlements/src/catalog.ts'],
-    doc: 'docs/generated/entitlement-levers.md',
+    doc: 'docs/generated/plan-contents.md',
   },
   {
     label: 'domain events',
     kind: 'generated',
     code: ['packages/events/src/index.ts', 'packages/events/src/catalog.ts'],
-    doc: 'docs/generated/domain-events.md',
+    doc: 'docs/generated/webhook-events.md',
   },
   {
     label: 'account settings',
@@ -46,7 +46,7 @@ export const DOC_CODE_MAP = [
     label: 'environment reference',
     kind: 'generated',
     code: ['scripts/env-catalog.mjs', 'packages/ee-server/scripts/gen-env-reference-ee.ts'],
-    doc: 'docs/generated/env-reference.md',
+    doc: 'docs/generated/environment-variables.md',
   },
   {
     // #706: the docs/LP brand kit derives from the product tokens — a token change must ship the

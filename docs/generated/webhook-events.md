@@ -5,7 +5,7 @@
   This is the "code is truth" domain-event reference (the EE webhook / audit surface).
 -->
 
-# Domain events
+# Webhook events
 
 The CE event bus emits a `DomainEvent` after each successful operation. EE features
 (webhooks, audit log, compliance export) subscribe to these. Events carry only ids,

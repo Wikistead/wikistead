@@ -5,7 +5,7 @@
   This is the "code is truth" levers reference fed to the docs SSG (ADR-080).
 -->
 
-# Entitlement levers
+# What each plan includes
 
 Every paid lever is an `Entitlements` field resolved in one place
 (`resolveEntitlements(plan)`). Self-hosted Community/Enterprise builds are

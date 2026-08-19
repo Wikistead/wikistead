@@ -45,7 +45,11 @@ const HEADER = `<!--
 // LEVER_CATALOG / UNLIMITED, iterated in their declared (stable) order.
 export function renderEntitlementsMarkdown(): string {
   const lines: string[] = []
-  lines.push(HEADER, '', '# Entitlement levers', '')
+  // #748 (owner ruling): the READER's name for this page, not ours. "Entitlement lever" is the word
+  // the code uses for the switch; what somebody arrives looking for is what their plan includes.
+  // Same family as #671 (one feature, one name) and #732 (internal vocabulary stays out of the UI) —
+  // this is the documentation half of it.
+  lines.push(HEADER, '', '# What each plan includes', '')
   lines.push(
     'Every paid lever is an `Entitlements` field resolved in one place',
     '(`resolveEntitlements(plan)`). Self-hosted Community/Enterprise builds are',

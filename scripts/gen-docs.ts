@@ -239,12 +239,15 @@ const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const SURFACES: { name: string; outPath: string; render: () => string }[] = [
   {
     name: 'entitlement levers',
-    outPath: join(root, 'docs/generated/entitlement-levers.md'),
+    // #748: the FILE NAME is the reader's URL once the docs site pulls it, so it carries the reader's
+    // word too. `docs/generated/` itself keeps its name — that folder is the artifact store nobody
+    // reads, and the ruling was about what the reader sees.
+    outPath: join(root, 'docs/generated/plan-contents.md'),
     render: renderEntitlementsMarkdown,
   },
   {
     name: 'domain events',
-    outPath: join(root, 'docs/generated/domain-events.md'),
+    outPath: join(root, 'docs/generated/webhook-events.md'),
     render: renderEventsMarkdown,
   },
   {
@@ -282,7 +285,7 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     // #734 / ADR-237 §2.2: the ENVIRONMENT REFERENCE — the one item in that ticket's comparison table
     // that can carry a real guard, which is why it is here rather than in the declared IA spine.
     name: 'environment reference',
-    outPath: join(root, 'docs/generated/env-reference.md'),
+    outPath: join(root, 'docs/generated/environment-variables.md'),
     render: renderEnvReference,
   },
   {
