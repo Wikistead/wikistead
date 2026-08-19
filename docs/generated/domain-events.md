@@ -33,7 +33,7 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `page.unfrozen` | A page was unfrozen (both freeze markers cleared; every edit path restored). |
 | `space.created` | A space was created. |
 | `space.updated` | A space was updated. |
-| `vendor.access` | An operator break-glass access touched this tenant (Access Transparency, #435) |
+| `vendor.access` | An operator break-glass access touched this tenant (Access Transparency) |
 | `space.deleted` | A space was deleted. |
 | `space.access_granted` | A principal was granted a relation on a space. |
 | `space.access_revoked` | A principal lost a relation on a space. |
@@ -41,20 +41,20 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `space.made_public` | A space was made anonymously public (space viewer user:* granted; noindex on). |
 | `space.made_non_public` | A space was made non-public (the anonymous space viewer grant revoked). |
 | `tenant.branding_updated` | The tenant branding (accent + logo) was changed. |
-| `tenant.embed_providers_updated` | A tenant admin changed the external-embed host allowlist (#108). |
+| `tenant.embed_providers_updated` | A tenant admin changed the external-embed host allowlist. |
 | `tenant.oidc_updated` | The tenant OIDC login configuration was changed. |
-| `tenant.login_methods_updated` | A tenant admin changed which login methods the tenant offers (#537: the platform-login toggle). |
+| `tenant.login_methods_updated` | A tenant admin changed which login methods the tenant offers (the platform-login toggle). |
 | `tenant.oidc_recovered` | An operator disabled a locked-out tenant's OIDC out of band (break-glass). |
 | `tenant.login_methods_recovered` | An operator set a tenant's login-method selection out of band (break-glass, enable direction included). |
 | `tenant.saml_recovered` | An operator disabled a locked-out tenant's SAML out of band (break-glass). |
 | `tenant.custom_domain_added` | A custom domain was added (pending verification). |
 | `tenant.custom_domain_verified` | A custom domain was verified and activated. |
 | `tenant.custom_domain_removed` | A custom domain was removed (three-point revocation). |
-| `tenant.custom_domain_unverified` | A verified custom domain stopped proving ownership and was demoted to pending (#576); links fall back to the platform URL until it is verified again. |
+| `tenant.custom_domain_unverified` | A verified custom domain stopped proving ownership and was demoted to pending; links fall back to the platform URL until it is verified again. |
 | `tenant.saml_updated` | The tenant SAML SSO configuration was changed (EE). |
 | `tenant.plan_changed` | The tenant plan changed (billing). |
-| `tenant.ai_toggled` | A tenant admin enabled/disabled AI for the tenant (ADR-077 consent). |
-| `usage.threshold_crossed` | Metered usage crossed an alert threshold (#128 / ADR-082) — warn before the soft-cap wall; EE/Cloud notifies the admin. |
+| `tenant.ai_toggled` | A tenant admin enabled/disabled AI for the tenant. |
+| `usage.threshold_crossed` | Metered usage crossed an alert threshold — warn before the soft-cap wall; EE/Cloud notifies the admin. |
 | `orphan_draft.enumerated` | An admin enumerated orphaned strict-private drafts. |
 | `orphan_draft.claimed` | An admin took a temporary audited claim on an orphaned draft. |
 | `orphan_draft.reassigned` | An orphaned draft was reassigned to a live member. |
@@ -76,12 +76,12 @@ actors, and timestamps — never page content or secrets. Generated from the cod
 | `member.suspended` | An admin suspended a member: sign-in blocked, grants stripped, API keys revoked, sessions ended. The row and the seat stay. |
 | `member.reactivated` | An admin brought a suspended member back. Group-derived roles are not restored — the directory re-adds those. |
 | `member.password_enabled` | An admin gave an existing member a password entrance (the account had none before). |
-| `member.factor_enrolled` | A member enrolled a second factor (TOTP) on their own account (#657 / ADR-219). |
-| `member.factor_removed` | A member removed a second factor from their own account, proving possession of it first (#660 / ADR-219 §8). |
-| `member.factors_reset` | A member's second factors were cleared so they could enrol again after losing the device; their sessions were ended with it. `reason` says who did it: an admin (#644 / ADR-219 §4) or the member themselves with a recovery code (#650 / ADR-226). |
-| `member.recovery_codes_minted` | A member minted a set of recovery codes for their own account. The count is recorded; the codes themselves are shown once and never leave the response (#650 / ADR-226 §5). |
-| `member.recovery_codes_revoked` | A set of recovery codes stopped being usable — replaced by a fresh set (`re-mint`), spent to recover the account (`used`), or cleared with the factors by an admin (`admin_reset`) (#650 / ADR-226 §5). |
-| `tenant.second_factor_policy_changed` | A tenant changed which second factors it requires: off, any, passkeys only or authenticator apps only (#652 / ADR-219 §4, #676 / ADR-222). |
+| `member.factor_enrolled` | A member enrolled a second factor (TOTP) on their own account. |
+| `member.factor_removed` | A member removed a second factor from their own account, proving possession of it first. |
+| `member.factors_reset` | A member's second factors were cleared so they could enrol again after losing the device; their sessions were ended with it. `reason` says who did it: an admin, or the member themselves with a recovery code. |
+| `member.recovery_codes_minted` | A member minted a set of recovery codes for their own account. The count is recorded; the codes themselves are shown once and never leave the response. |
+| `member.recovery_codes_revoked` | A set of recovery codes stopped being usable — replaced by a fresh set (`re-mint`), spent to recover the account (`used`), or cleared with the factors by an admin (`admin_reset`). |
+| `tenant.second_factor_policy_changed` | A tenant changed which second factors it requires: off, any, passkeys only or authenticator apps only. |
 | `member.password_removed` | An admin removed a member's password entrance; their sessions were ended with it. |
 | `member.password_reset_requested` | A password reset link was requested for a member. |
 | `member.password_reset_completed` | A member completed a password reset (all their sessions were signed out). |
