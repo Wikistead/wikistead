@@ -274,7 +274,7 @@ export const ENV_DOCS = {
   PLAN_DOWNGRADE_GRACE_S: {
     group: 'Billing',
     default: '604800 (7 days)',
-    what: 'How long a workspace keeps its old entitlements after a downgrade, so a lapsed card does not take a feature away the same minute.',
+    what: 'How long a workspace keeps the features of its old plan after a downgrade, so a lapsed card does not take one away the same minute.',
   },
 
   // ── Background workers ────────────────────────────────────────────────────────────────────────
@@ -347,7 +347,7 @@ export const ENV_DOCS = {
   },
   POOL_END_QUIESCE_MS: {
     group: 'Development and tooling',
-    internal: 'How long a shutdown waits for tenant connections that are on their way back before it forces the close (#773). It exists so a machine slow enough to miss the default can be given room; a deployment has no shutdown path to tune, and setting it high enough to matter would trade a reported hang for a silent one.',
+    internal: 'How long a shutdown waits for tenant connections that are on their way back before it forces the close. It exists so a machine slow enough to miss the default can be given room; a deployment has no shutdown path to tune, and setting it high enough to matter would trade a reported hang for a silent one.',
   },
 }
 
