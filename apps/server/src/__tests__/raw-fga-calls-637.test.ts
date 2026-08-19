@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 
 // #637 / ADR-216 §5 (ruling: raised to an acceptance criterion): count the calls the AND cannot reach.
 //
@@ -39,7 +39,9 @@ function rawCalls(): { file: string; count: number }[] {
         // comments explain these calls; counting the prose would count the explanation
         .split('\n').map((l) => l.replace(/^\s*(?:\/\/|\*|\/\*).*$/, '')).join('\n')
       const n = (src.match(RAW) ?? []).length
-      if (n > 0) out.push({ file: file.slice(file.indexOf('wikistead') + 12), count: n })
+      // Paths are keyed relative to the repo root, not to whatever directory the checkout happens
+      // to live in — the same scan has to produce the same keys from any clone.
+      if (n > 0) out.push({ file: relative(resolve(import.meta.dirname, '..', '..', '..', '..'), file), count: n })
     }
   }
   return out.sort((a, b) => a.file.localeCompare(b.file))
