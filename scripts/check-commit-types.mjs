@@ -69,14 +69,51 @@ const base = process.argv[2] ?? (() => {
   return 'HEAD~1'
 })()
 
-const bad = commitsToCheck(base).filter(({ subject }) => !SUBJECT.test(subject))
-if (bad.length > 0) {
-  for (const { sha, subject } of bad) console.error(`FAIL: ${sha.slice(0, 8)} ${subject}`)
+// #743 (owner ruling): the SHAPE of the subject, beside its type.
+//
+// Measured over 2,530 commits when the ticket was written: median 80 characters, 70% past 72, 213
+// subjects joining two claims with ", and ", and 2,053 carrying a ticket number that ate about a
+// tenth of the width. The body is untouched — writing WHY at length is the half this project does
+// better than most — and so is the past: rewriting 2,530 subjects means retyping them, since prose
+// cannot be made imperative by a script. This governs what is written from here, which is why it
+// reads the same range as the type check: this branch's own commits, never the history behind them.
+//
+// Imperative mood is NOT checked. A machine cannot tell "fix the drift" from "fixes the drift"
+// without guessing at English, and a guard that guesses teaches people to phrase around it.
+const LIMIT = 72
+const RULES = [
+  {
+    bad: (s) => s.length > LIMIT,
+    say: (s) => `${s.length} characters (limit ${LIMIT}) — move the detail into the body`,
+  },
+  {
+    bad: (s) => s.endsWith('.'),
+    say: () => 'ends with a period — a subject is a title, not a sentence',
+  },
+  {
+    // ", and " is the shape the measurement found: one subject describing two landings, which is
+    // either two commits or a line in the body.
+    bad: (s) => s.includes(', and '),
+    say: () => 'joins two claims with ", and " — that is two commits, or one line in the body',
+  },
+]
+
+const commits = commitsToCheck(base)
+const failures = []
+for (const { sha, subject } of commits) {
+  if (!SUBJECT.test(subject)) failures.push({ sha, subject, why: `unknown type (expected one of: ${TYPES.join(' | ')})` })
+  for (const rule of RULES) if (rule.bad(subject)) failures.push({ sha, subject, why: rule.say(subject) })
+}
+
+if (failures.length > 0) {
+  for (const { sha, subject, why } of failures) console.error(`FAIL: ${sha.slice(0, 8)} ${subject}\n      ${why}`)
   console.error('')
-  console.error(`A commit subject is \`type(scope): subject\`, type one of: ${TYPES.join(' | ')}.`)
-  console.error('The list is fixed because the release tooling maps each type to a version bump —')
+  console.error(`A subject is \`type(scope): subject\`, type one of: ${TYPES.join(' | ')},`)
+  console.error(`at most ${LIMIT} characters, one claim, no trailing period. The ticket number goes in`)
+  console.error('the footer (`Refs: #123`), not the subject — it cost about a tenth of the width.')
+  console.error('The type list is fixed because the release tooling maps each type to a version bump —')
   console.error('an unrecognised one maps to nothing, and the mistake surfaces at release time.')
   process.exit(1)
 }
 
-console.log(`OK: every commit since ${base} names a known type`)
+console.log(`OK: ${commits.length} commit(s) since ${base} — known type, within ${LIMIT}, one claim each`)
