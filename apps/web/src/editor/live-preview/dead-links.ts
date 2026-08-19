@@ -44,9 +44,8 @@ export function collectInternalLinks(
 //
 // Two jobs, and the second one is a bug fix. The obvious one: never re-ask for an id already answered or
 // already in flight. The other: NEVER SEND MORE THAN THE SERVER WILL ANSWER. `/pages/link-status` caps the
-// list at MAX_LINK_STATUS_IDS and silently drops the rest, and the caller then reads every id it sent as
-// answered — so an id past the cap came back absent, and absent is how this overlay spells "dead". A
-// document with more internal links than the cap struck through the ones past it, all of them alive.
+// list at MAX_LINK_STATUS_IDS, and an over-cap request is refused (#762) — so a document with more
+// internal links than the cap would resolve nothing at all rather than resolve the first capful.
 //
 // Exported and pure so the cap and the de-dup are measurable without a laid-out editor.
 export function planLinkStatusRequest(
@@ -68,14 +67,15 @@ export function planLinkStatusRequest(
 
 // Mirrors MAX_LINK_STATUS_IDS on the server, and staying under it is THIS side's job.
 //
-// The route trims an over-long list to its cap and answers 200 without saying it trimmed. The response
-// lists the ids the caller may VIEW, so a dead one is absent — and an id the route never looked at is
-// absent in exactly the same way. Nothing in the body separates them, which is why the caller must not
-// ask for more than will be answered: a document with more internal links than the cap used to wear a
-// strike-through on the ones past it, every one of them alive.
+// The route answers 400 for an over-cap list (#762). It used to trim to the cap and answer 200 without
+// saying it trimmed, which this side could not detect: the response lists the ids the caller may VIEW, so
+// a dead one is absent — and an id the route never looked at was absent in exactly the same way. A
+// document with more internal links than the cap wore a strike-through on the ones past it, every one of
+// them alive.
 //
-// That the route trims silently is its own defect and is filed separately; a client that respects the
-// cap does not depend on how that is settled.
+// The refusal removed the silent case, and this cap stays for the other one: a request the server would
+// refuse resolves NOTHING, so every link in a large document waits on a 400 instead of being answered a
+// capful at a time. Staying under the limit is still THIS side's job.
 export const LINK_STATUS_REQUEST_CAP = 256;
 
 // Fired when a batch resolves, so the plugin re-runs its decoration build with the freshly-known dead ids.
