@@ -68,6 +68,20 @@ afterAll(async () => {
   await pool.end()
 })
 
+// #786: the claim here is not about time, and it kept losing to the clock anyway. The drain WAITS
+// for Meili to apply each document (the driver calls waitForTask), so this file's cost is however
+// long a busy store takes to index three pages — not work this test does.
+//
+// Measured, same three pages, same assertions: 0.4s of drain against an idle store (1.5s for the
+// file), and past the 5s default when the rest of the suite is driving Meili at the same time
+// where it reported "Test timed out", which reads as a broken drain rather than a busy index. A
+// file-level reading right after a full suite came back at 18s.
+//
+// Same reasoning the owner accepted on #763: an assertion that is not about duration gets a budget
+// it cannot lose to the machine. This is NOT a licence to widen a budget when the thing under
+// test IS the time.
+const BUDGET = 30_000
+
 describe('search:sync CLI drain (runSearchSync)', () => {
   it('drains the accumulated rows, returns the count, and reflects them in Meili', async () => {
     // Before: none of the body tokens are searchable (the rows are still pending).
@@ -84,12 +98,19 @@ describe('search:sync CLI drain (runSearchSync)', () => {
     // …and our rows were consumed.
     const [{ n: left }] = await admin<[{ n: number }]>`SELECT count(*)::int AS n FROM search_outbox WHERE page_id = ANY(${PAGES.map((p) => p.id)})`
     expect(left).toBe(0)
-  })
+  }, BUDGET)
 
   it('is a no-op on a clean queue (the original smoke case still holds)', async () => {
     // #618: the loop reports what it left behind as well as what it indexed — a clean queue is
     // all three at zero, which is a different fact from "indexed nothing" (the case that used to
     // end the run early).
+    //
+    // #786: it makes its OWN clean queue rather than inheriting the one above. When the drain above
+    // died part-way, this reported `processed: 5` against an expected 0 — a second red, about a
+    // fact that was never in question, for a failure that had already been reported once. One slow
+    // run should show up once. (Files in this package run one at a time, so nothing enqueues
+    // between the two calls.)
+    await runSearchSync(app.searchDriver)
     expect(await runSearchSync(app.searchDriver)).toEqual({ processed: 0, failed: 0, dropped: 0 })
-  })
+  }, BUDGET)
 })
