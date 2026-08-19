@@ -228,6 +228,21 @@ export function FactorStep(
 
   return (
     <div className="flex flex-col gap-2" data-testid="login-factor-step">
+      {/* #745the STEP owns the heading. The password was already accepted by the time this
+          renders, and the screens above kept saying what the previous stage wanted — the recovery door
+          still read "sign in with your email address and password" directly over a row of second-factor
+          buttons. A card whose title belongs to the screen cannot follow a reader who moves inside it,
+          so the title moves in with the thing that changes. The hosts render their own only while no
+          stage is up (they take `onStage` for exactly that). */}
+      <div data-testid="login-factor-heading">
+        <h1 className="mb-1 text-xl font-semibold">
+          {t(stage === "required" ? "auth.factorTitle" : "auth.factorEnrolTitle")}
+        </h1>
+        {/* The enrolment stage says its piece further down, and it needs `kinds` to say it. */}
+        {stage === "required" && (
+          <p className="m-0 text-sm text-fg-dim" data-testid="login-factor-body">{t("auth.factorBody")}</p>
+        )}
+      </div>
       {failed && (
         <div className="wks-left-bar rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
           data-testid="login-factor-error" role="alert">
