@@ -12,4 +12,4 @@ Variables read only by the Enterprise Edition server: **3**. Everything else it 
 
 ## Shared with the Community Edition
 
-This package also reads `DATABASE_ADMIN_URL`, `DATABASE_URL`, `EMAIL_FROM`, `WIKISTEAD_OPERATOR`, `WKS_BRAND_NAME` — see the main environment reference for those.
+This package also reads `DATABASE_ADMIN_URL`, `DATABASE_URL`, `EMAIL_FROM`, `WIKISTEAD_OPERATOR`, `WIKISTEAD_TEST_STACK`, `WKS_BRAND_NAME` — see the main environment reference for those.
