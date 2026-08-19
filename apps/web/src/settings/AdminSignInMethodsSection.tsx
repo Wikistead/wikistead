@@ -754,17 +754,27 @@ export function AdminSignInMethodsSection() {
                 <div className="font-medium">{t("adminAuth.secondFactorRequired")}</div>
                 <div className="text-xs text-fg-dim">{t("adminAuth.secondFactorRequiredBody")}</div>
               </div>
-              {!methods.data.secondFactorRequired.entitled ? (
+              {!methods.data.secondFactorRequired.entitled && (
                 <span className="text-xs text-fg-dim" data-testid="second-factor-unentitled">{t("adminAuth.method_unentitled")}</span>
-              ) : !methods.data.secondFactorRequired.canEnable && !methods.data.secondFactorRequired.selected ? (
-                <span className="text-xs text-[var(--warning,#b45309)]" data-testid="second-factor-no-admin">{t("adminAuth.secondFactorNoAdmin")}</span>
-              ) : null}
+              )}
               <Switch checked={!!methods.data.secondFactorRequired.selected} testId="second-factor-required-toggle"
                 ariaLabel={t("adminAuth.secondFactorRequired")}
                 disabled={!canManageStance || !methods.data.secondFactorRequired.entitled
                   || (!methods.data.secondFactorRequired.selected && !methods.data.secondFactorRequired.canEnable)}
                 onChange={(on: boolean) => setConfirming({ stance: "factor", to: on })} />
             </div>
+            {/* #757: the reason belongs UNDER the head, not beside the title.
+                Measured on the real DOM: this is a SENTENCE (109 characters), and as a sibling of the
+                title inside `flex items-center` it took the whole 534px row — which shrank the
+                `min-w-0 flex-1` column holding the title and the description to a clientWidth of
+                ZERO. The row's own name disappeared at exactly the moment it was explaining why the
+                switch would not move. The lapsed marker on the SSO row above stays in the head
+                because it is one word; a sentence is not a badge. */}
+            {methods.data.secondFactorRequired.entitled
+              && !methods.data.secondFactorRequired.canEnable
+              && !methods.data.secondFactorRequired.selected && (
+              <div className="text-xs text-[var(--warning,#b45309)]" data-testid="second-factor-no-admin">{t("adminAuth.secondFactorNoAdmin")}</div>
+            )}
             {/* #679 / ADR-222 §1: WHICH kinds, once something is required. The two are not
                 interchangeable — a passkey resists phishing and dies when the host changes (#664), a
                 code does neither — so a workspace that has decided to require one still has a decision
