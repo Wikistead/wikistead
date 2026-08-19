@@ -1,6 +1,6 @@
 import postgres, { type Sql } from 'postgres'
 import type { Tenant } from '@wikistead/types'
-import { pool } from './pool.js'
+import { pool, reserveTracked } from './pool.js'
 import type { TenantDb } from './tenant-db.js'
 
 // Namespace isolation driver (ADR-047 / #117): a promoted tenant gets a DEDICATED Postgres SCHEMA
@@ -35,7 +35,9 @@ export function namespaceSchema(tenantId: string): string {
 export async function acquireNamespace(tenant: Tenant): Promise<TenantDb> {
   const schema = namespaceSchema(tenant.id)
   const searchPath = `${schema}, public`
-  const reserved = await pool.reserve()
+  // #773: reserveTracked, not pool.reserve — the pool must not be ended while this handle is on
+  // its way back. See pool.ts.
+  const reserved = await reserveTracked()
   await reserved`SELECT set_config('search_path', ${searchPath}, false)`
   await reserved`SELECT set_config('app.tenant_id', ${tenant.id}, false)`
   return {

@@ -345,6 +345,10 @@ export const ENV_DOCS = {
     group: 'Development and tooling',
     internal: 'The test runner sets this to prove a suite is pointed at the isolated stack rather than a development database. Setting it by hand tells that guard a lie.',
   },
+  POOL_END_QUIESCE_MS: {
+    group: 'Development and tooling',
+    internal: 'How long a shutdown waits for tenant connections that are on their way back before it forces the close (#773). It exists so a machine slow enough to miss the default can be given room; a deployment has no shutdown path to tune, and setting it high enough to matter would trade a reported hang for a silent one.',
+  },
 }
 
 // ── The walk and the comparison (pure, so both the generator and the suite use one implementation) ──
