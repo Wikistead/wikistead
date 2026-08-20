@@ -67,7 +67,7 @@ function confinementTip(k: ApiKeySummary, t: TFunction): string {
     const hidden = k.spaces.count - named.length;
     lines.push([...named, hidden > 0 ? t("adminApi.confinedHidden", { count: hidden }) : null].filter(Boolean).join(", "));
   }
-  // #662: the LIST had the same defect as the form, under a different invented namespace
+  // #662: the LIST had the same defect as the form, under a different invented namespace —
   // `adminApi.cap_*` exists in neither locale either, and `defaultValue: c` painted the wire verb. Both
   // now read the one vocabulary that exists. Found by the scan, not by looking: the form was the
   // reported symptom and this line renders the same capabilities two panels down.
@@ -100,7 +100,7 @@ export function ApiKeysPanel({
   const revoke = admin ? revokeAdmin : revokeOwn;
   const [name, setName] = useState("");
   const [scope, setScope] = useState<ApiScope>("read");
-  // #628: how long the key should live. = no expiry, which the server refuses when the tenant has a
+  // #628: how long the key should live. "" = no expiry, which the server refuses when the tenant has a
   // ceiling — the choice is offered rather than pre-decided, so somebody who wants a permanent key on a
   // tenant that forbids them is told, instead of quietly getting a short one.
   // Starts on the longest lifetime the tenant permits, which is always a value that EXISTS in the list.
@@ -155,7 +155,7 @@ export function ApiKeysPanel({
   const effScope: ApiScope = maxScope === "read" ? "read"
     : matrixPicked ? derivedScope(matrix) : scope;
   // #628the choices are DERIVED from the ceiling, not a fixed ladder filtered by it. Filtering
-  // left a 3-day policy with nothing to offer, so the form refused what the API would have granted
+  // left a 3-day policy with nothing to offer, so the form refused what the API would have granted —
   // see `key-expiry-choices`.
   const expiryOptions = expiryChoices(maxAgeDays).map((c) => ({
     value: c.value,
@@ -225,8 +225,8 @@ export function ApiKeysPanel({
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("adminApi.namePlaceholder")} data-testid="api-key-name" />
             </label>
             {/* #667 §5: two controls became one. With a matrix picked the scope is derived and the
-                Select goes away rather than sitting there showing a value nobody chose — the
-                the ruling named. It returns the moment the matrix is empty again. */}
+                Select goes away rather than sitting there showing a value nobody chose — the sense of
+                duplication the ruling named. It returns the moment the matrix is empty again. */}
             {!matrixPicked && (
               <Select value={effScope} onChange={(v) => setScope(v as ApiScope)} ariaLabel={t("adminApi.scope")} testId="api-key-scope" options={scopeOptions} />
             )}
@@ -376,7 +376,7 @@ export function ApiKeysPanel({
                 data-tip={confinementTip(k, t)}
               >{confinementLabel(k, t)}</span>
             )}
-            {/* #667 / ADR-221 §3: a key issued under the old model keeps behaving exactly as it did
+            {/* #667 / ADR-221 §3: a key issued under the old model keeps behaving exactly as it did —
                 the mapping onto resource types cannot exist without widening, so v1 keys are frozen
                 rather than remapped. Marked so somebody taking inventory can see WHICH keys still read
                 by the old rule, and re-issue when they choose to. Never automatic: silently upgrading a

@@ -83,7 +83,7 @@ export function GuestSidebar({ pages, loading = false, space, openId, onOpen, on
       </div>
       {/* #364①: the fixed Home entry, member-parity (§6b) — shown only when the server exposed a
           VIEW-GATED homePageId (an unpublished/unviewable home is null = no entry, existence-hidden).
-          The label is the viewer-language "<space> Home / " (a UI i18n label, never stored). */}
+          The label is the viewer-language space-home phrase (a UI i18n label, never stored). */}
       {homePageId && (
         <div
           className={`mb-1 flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border-b border-border px-2 pb-1 transition-colors duration-[120ms] ${openId === homePageId ? "bg-[color-mix(in_srgb,var(--accent)_12%,var(--panel-3))] font-medium" : "hover:bg-panel-2"}`}
