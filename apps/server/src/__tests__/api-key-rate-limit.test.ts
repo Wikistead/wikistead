@@ -67,7 +67,7 @@ describe('API key request rate limiting (#175)', () => {
   })
 })
 
-// #126 (review rejection): apiAccess must be re-checked on the REQUEST path, not only at key
+// #126 (bounced on review): apiAccess must be re-checked on the REQUEST path, not only at key
 // creation — a plan downgrade that strips apiAccess has to stop ALREADY-ISSUED keys immediately.
 describe('API key apiAccess request-path gate (#126)', () => {
   it('apiAccess:true (default) lets a valid key through (200)', async () => {

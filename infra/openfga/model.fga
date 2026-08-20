@@ -110,7 +110,7 @@ type space
     # #274 / ADR-135: viewer_member references editor_MEMBER (never `editor`) — a space EDIT share-link
     # guest must not inherit viewer_member, or template#view would leak space templates to anonymous
     # guests (the leak the editor split exists to prevent; anti-test-pinned).
-    # #330 / ADR-141 §1b (user-approved option 1 2026-07-15): `or moderator` — a space moderator IS a member
+    # #330 / ADR-141 §1b (user-approved option 1, 2026-07-15): `or moderator` — a space moderator IS a member
     # viewer, so their space appears in listSpaces (space#view = viewer), space-watch/pins work, and they
     # can read + save the space's templates (deliberate widening; moderator has NO share_link type, so
     # the #258 guest boundary is untouched). The page-view SET is unchanged — moderate already implied
