@@ -51,12 +51,12 @@ export function renderEntitlementsMarkdown(): string {
   // this is the documentation half of it.
   lines.push(HEADER, '', '# What each plan includes', '')
   // #814 (owner ruling, follows #748): the intro speaks the reader's language too — no code
-  // identifiers in the prose. The generated-ness stays on the page as a trust statement.
+  // identifiers in the prose. No generated-ness sentence here: the docs-site pull stamps a
+  // provenance note on every generated page already, and saying it twice reads as a tic.
   lines.push(
     'Each row is one feature or limit a plan can include. Self-hosted',
     'Community/Enterprise builds have every one of them enabled or unlimited;',
-    'the per-tier Cloud values are published separately. This page is generated',
-    'from the product source, so it cannot drift from what the product does.',
+    'the per-tier Cloud values are published separately.',
     '',
   )
   // #693: the EDITION column mirrors catalog `edition` — 'EE' rows are levers whose enforcement
