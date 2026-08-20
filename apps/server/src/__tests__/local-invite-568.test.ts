@@ -150,6 +150,54 @@ describe('#568 §2: acceptance creates the member and the credential together', 
   }, 120_000)
 })
 
+// #807: the local door mints an identity, so it is the only place that can learn the person's name.
+// It wrote `name: null` outright, and the first administrator of a self-hosted workspace then appeared
+// in the roster, on presence carets and in mentions as a bare `wlocal_…` sub. The name is optional ON
+// THE WIRE and required by the screen — a tab opened before that shipped must still accept a real
+// invitation rather than be told its link is dead.
+describe('#807: accepting a password invite records what to call them', () => {
+  it('stores the name the acceptance was given, trimmed', async () => {
+    const addr = email('named')
+    const { token } = await makeInvite(addr)
+    const res = await app.inject({
+      method: 'POST', url: '/auth/local/accept', headers: H,
+      payload: { token, password: PASSWORD, displayName: '  Alex Rivera  ' },
+    })
+    expect(res.statusCode, res.body).toBe(201)
+    const [row] = await db.sql<{ display_name: string | null }[]>`
+      SELECT display_name FROM members WHERE email = ${addr}`
+    expect(row?.display_name).toBe('Alex Rivera')
+  }, 120_000)
+
+  it('still accepts a request that carries no name, and leaves it unset', async () => {
+    // The old screen's shape. It must not be refused: a 404 here would tell somebody holding a REAL
+    // invitation that their link is dead, which is what this flow's uniform not-found exists to avoid
+    // saying wrongly. The member is nameless, exactly as before — the screen is what prevents that.
+    const addr = email('unnamed')
+    const { token } = await makeInvite(addr)
+    const res = await app.inject({
+      method: 'POST', url: '/auth/local/accept', headers: H, payload: { token, password: PASSWORD },
+    })
+    expect(res.statusCode, res.body).toBe(201)
+    const [row] = await db.sql<{ display_name: string | null }[]>`
+      SELECT display_name FROM members WHERE email = ${addr}`
+    expect(row?.display_name).toBeNull()
+  }, 120_000)
+
+  it('treats a name of only spaces as no name at all', async () => {
+    const addr = email('spaces')
+    const { token } = await makeInvite(addr)
+    const res = await app.inject({
+      method: 'POST', url: '/auth/local/accept', headers: H,
+      payload: { token, password: PASSWORD, displayName: '   ' },
+    })
+    expect(res.statusCode, res.body).toBe(201)
+    const [row] = await db.sql<{ display_name: string | null }[]>`
+      SELECT display_name FROM members WHERE email = ${addr}`
+    expect(row?.display_name).toBeNull()
+  }, 120_000)
+})
+
 describe('#568 review B2: the two invite doors do not accept each other\'s tokens', () => {
   it('a PASSWORD invite cannot be consumed by signing in at the IdP', async () => {
     // Without the kind filter this burned the token on a member seated as identity_source='oidc',

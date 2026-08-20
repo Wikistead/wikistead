@@ -749,6 +749,8 @@
     "createWorkspace": "Create workspace",
     "createWorkspaceError": "Could not create workspace",
     "inviteLocalBody": "Choose a password to finish joining.",
+    "displayName": "Your display name",
+    "displayNameHint": "Other members see this name. You can change it later in your account settings.",
     "newPassword": "New password",
     "confirmPassword": "Confirm password",
     "setPassword": "Set password",

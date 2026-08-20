@@ -294,6 +294,16 @@ export async function acceptLocalInvite(
   tenant: { id: string; plan: string },
   token: string,
   password: string,
+  // #807: the name this person will be known by here. A local invite mints a brand-new identity, and
+  // nothing else in this flow knows what to call them — an OIDC invite gets a name from the IdP at
+  // every login, this one had no source at all, so the initial administrator of a self-hosted
+  // workspace appeared nameless in the roster, on presence carets and in mentions.
+  //
+  // Optional on the wire on purpose. The screen asks for it and will not submit without one, but a
+  // tab opened before that shipped must still be able to accept its invitation: refusing here would
+  // tell somebody holding a REAL invite that their link is dead, which is the one thing this flow's
+  // uniform 404 exists to avoid saying wrongly.
+  displayName?: string,
 ): Promise<{ ok: true; sub: string; operatorIssued: boolean } | { ok: false }> {
   const { localLoginEnabled } = await import('./login-methods.js')
   if (!(await localLoginEnabled(deps.db))) return { ok: false }
@@ -336,7 +346,9 @@ export async function acceptLocalInvite(
     const invite = flipped[0]!
     const identifier = (invite.email ?? '').trim().toLowerCase()
     if (!identifier) return { ok: false as const } // the CHECK makes this unreachable; belt and braces
-    const claims = { sub, email: identifier, name: null }
+    // Trimmed, and empty means absent — the same normalisation the account screen applies to an
+    // edited display name (`account.ts`), so the two doors cannot disagree about what a name is.
+    const claims = { sub, email: identifier, name: displayName?.trim() ? displayName.trim() : null }
     // review N3: the identifier collision is checked BEFORE any FGA write. enrolUnderSeatCap writes
     // the membership tuple, and FGA does not roll back with the transaction — so a UNIQUE violation
     // on the credential INSERT afterwards left a tuple for a member the database then discarded.
