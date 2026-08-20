@@ -105,7 +105,7 @@ describe('#531 banned words in non-word-segmented scripts (CJK → substring, La
   it('the union of a tenant floor and a space overlay (#509) enforces BOTH words', () => {
     // #509/ADR-187 resolves the effective policy as a union of word lists; the judge must apply each word's
     // own mode within that merged list.
-    const union = ban('spam', 'ほげ') // floor: spam / overlay:
+    const union = ban('spam', 'ほげ') // floor: spam / overlay: the CJK term
     expect(evaluatePublishAbuse(null, 'ほげほげです。', union)).toEqual({ ok: false, reason: 'banned_content' })
     expect(evaluatePublishAbuse(null, 'buy spam now', union)).toEqual({ ok: false, reason: 'banned_content' })
   })
