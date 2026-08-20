@@ -45,12 +45,12 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     title: 'Guest access',
     summary: 'Issuing anonymous share links for real-time collaboration. Free on every plan.',
     unit: 'boolean',
-    enforcedAt: 'share-link issuance (existing links are never re-checked, so they survive a downgrade)',
+    enforcedAt: 'share-link issuance (already-issued links keep working after a downgrade; revoking a link still works as normal)',
     downgrade: 'issuance gated; previously issued links keep working',
   },
   maxSeats: {
     title: 'Member seats',
-    summary: 'Billable members (seats). The main thing paid plans are priced on.',
+    summary: 'Billable members (seats). The main limit that separates plans.',
     unit: 'count',
     // Where the seat cap actually REFUSES, which is not where an invite is created. Creating one only
     // warns (`invites.ts:129` returns `seatWarning`); the cap is enforced when the invitee ACCEPTS
@@ -75,7 +75,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
   },
   webhooks: {
     title: 'Outbound webhooks',
-    summary: 'Event-notification webhooks. Self-host on (Community First); Cloud is Personal and up.',
+    summary: 'Event-notification webhooks. On for self-hosted builds; on Cloud, Personal and up.',
     unit: 'boolean',
     enforcedAt: 'POST /webhooks (creation)',
     downgrade: 'creation blocked; already-created hooks keep delivering',
@@ -91,7 +91,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     title: 'Storage',
     summary: 'Total confirmed attachment storage per workspace, in bytes.',
     unit: 'bytes',
-    enforcedAt: 'attachment presign (+ metered overage where configured)',
+    enforcedAt: 'when an upload is authorized (plus metered overage where configured)',
     downgrade: 'new uploads freeze; existing attachments are kept',
   },
   branding: {
@@ -113,7 +113,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     summary: 'A custom domain for the workspace, such as docs.acme.com.',
     unit: 'boolean',
     enforcedAt: 'custom-domain add/verify',
-    downgrade: 'fully revoked on loss — the domain, its routing, and its certificate are all removed',
+    downgrade: 'revoked on loss — the domain stops serving the workspace and is removed from routing',
   },
   scim: {
     edition: 'ee',
@@ -150,7 +150,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     summary: 'Notification email is sent through the managed provider instead of self-hosted SMTP.',
     unit: 'boolean',
     enforcedAt: 'whenever an email is sent (immediate sends and queued deliveries)',
-    downgrade: 'transport falls back to the CE default (SMTP/no-op); the feature itself is CE and never gated',
+    downgrade: 'sending falls back to the self-hosted default (SMTP, or nothing if none is configured); the feature itself is never gated',
   },
   auditLog: {
     edition: 'ee',
@@ -173,7 +173,7 @@ export const LEVER_CATALOG: Record<keyof Entitlements, LeverDoc> = {
     title: 'Page analytics (who-viewed)',
     summary: 'Per-viewer page analytics: members named in a roster, guests/anonymous aggregated (EE).',
     unit: 'boolean',
-    enforcedAt: 'collection enqueue + dashboard (collection itself is gated — no history for CE/free)',
+    enforcedAt: 'when views are collected, and at the dashboard (collection itself is gated — no history accrues for CE/free plans)',
     downgrade: 'gated; collection stops, retained rows follow the retention/erasure policy',
   },
   userMacros: {
