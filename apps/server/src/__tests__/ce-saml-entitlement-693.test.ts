@@ -36,6 +36,11 @@ const PRIOR_ENV = process.env.PLATFORM_OIDC_ISSUER
 
 beforeAll(async () => {
   db = await acquireTenantDb(tenant)
+  // #797: same self-healing as the EE twin. A run that dies before afterAll leaves this row, and one
+  // row per tenant means the next run cannot insert its own. Scoped to THIS fixture's idp_entity_id
+  // so the twin's live row is never the casualty.
+  await admin`
+    DELETE FROM tenant_saml WHERE tenant_id = ${TENANT} AND idp_entity_id = 'https://idp.example'`
   // The scenario the ruling names: an enabled tenant_saml row EXISTS in the data…
   const [row] = await admin<{ id: string }[]>`
     INSERT INTO tenant_saml (id, tenant_id, idp_entity_id, sso_url, idp_cert_enc, sp_entity_id, acs_url, enabled)
