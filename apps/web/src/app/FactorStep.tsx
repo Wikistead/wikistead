@@ -8,7 +8,7 @@ import { QrCode } from "../ui/QrCode"; // #653 the same code the settings screen
 import { assetUrl } from "../data/apiClient";
 import { startRegistration, startAuthentication } from "@simplewebauthn/browser"; // #678: a key made at the door; #687: and presented at it
 import { isServerFault } from "./serverFault";
-import { factorKindsPhrase, factorKindName, browserCanUseFactorKind } from "../settings/factor-kind"; // #686: one home for the kind nouns
+import { factorKindsPhrase, factorKindName, browserCanUseFactorKind, proofBeginsOnChoice } from "../settings/factor-kind"; // #686: one home for the kind nouns
 
 // #652 / ADR-219 §6: the half-authenticated step. The password was right; the tenant requires one more
 // thing, and there is no session yet — what stands in for one is a receipt cookie the server set, which
@@ -277,7 +277,12 @@ export function FactorStep(
             <div className="flex flex-col gap-2" data-testid="login-factor-choices">
               {proofs.map((k, i) => (
                 <Button key={k} variant={i === 0 ? "primary" : "default"} className="w-full" type="button"
-                  data-testid={`login-factor-choose-${k}`} onClick={() => setPicked(k)}>
+                  data-testid={`login-factor-choose-${k}`}
+                  /* #745 choosing a passkey IS presenting it — the click that picks the kind is
+                     the user activation the ceremony needs, so a second button asking to confirm was
+                     a step with nothing in it. A code still has to be typed, which is why the rule
+                     belongs to the kind (factor-kind.ts) rather than to this screen. */
+                  onClick={() => { setPicked(k); if (proofBeginsOnChoice(k)) void presentPasskey(); }}>
                   {/* #671 / #686: the button says the product's own noun for the kind, from the one
                       place that owns those nouns — not a second copy of them living in this file. */}
                   {t("auth.factorChoose", { kind: factorKindName(k, t) })}
@@ -288,10 +293,14 @@ export function FactorStep(
             <>
               {picked === "totp" && codeBox(present, "login-factor")}
               {picked === "passkey" && (
+                /* Still here, and now it means "again": the ceremony started when the kind was chosen
+                   (or, for a member with one proof, when they arrived and pressed this), and a reader
+                   who dismissed the browser's prompt needs a way back in. Pressing it a second time is
+                   a decision; pressing it the first time never was. */
                 <Button variant="primary" className="w-full" disabled={busy}
                   onClick={() => void presentPasskey()} data-testid="login-factor-passkey">
                   {busy && <Loader2 size={16} className="animate-spin" />}
-                  {t("auth.factorPresentPasskey")}
+                  {t(failed ? "auth.factorPresentPasskeyAgain" : "auth.factorPresentPasskey")}
                 </Button>
               )}
               {/* Only when there WAS a fork: where one proof exists the member never chose, so "use

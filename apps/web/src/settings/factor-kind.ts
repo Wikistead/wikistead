@@ -123,3 +123,21 @@ export function browserCanUseFactorKind(kind: string): boolean {
   if (kind === "passkey") return typeof window !== "undefined" && "PublicKeyCredential" in window;
   return true;
 }
+
+/**
+ * Whether CHOOSING this proof is already USING it (#745, owner at the screen).
+ *
+ * The door and the recovery-code screen both let a member pick which proof to present, and the first
+ * shape of both charged a second click for the passkey: "Use passkey" only revealed another button
+ * that said "confirm with your passkey". The owner's words
+ * — and they are right that the click is unnecessary, since
+ * the choice itself is the user activation the ceremony needs.
+ *
+ * The rule is about the KIND, not about either screen. A code has to be typed, so choosing it can
+ * only ever reveal a field; a browser ceremony has nothing to fill in, so choosing it can start it.
+ * One definition, because this is the second time these two screens grew the same shape separately
+ * and the first time they were fixed one at a time.
+ */
+export function proofBeginsOnChoice(kind: string): boolean {
+  return kind === "passkey";
+}

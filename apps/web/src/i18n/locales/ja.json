@@ -792,7 +792,8 @@
     "recoveryCodeWarning": "コードを使うと、このアカウントの第 2 要素はすべて解除され、開いているセッションもすべて終了します。入り直したあとで認証アプリを登録し直してください。",
     "recoveryCodeFailed": "このコードは使えません。コードは 1 本につき 1 回きりで、新しいセットを作ると古いセットは無効になります。",
     "factorChooseOther": "別の方法を使う",
-    "factorChoose": "{{kind}}を使う"
+    "factorChoose": "{{kind}}を使う",
+    "factorPresentPasskeyAgain": "もう一度パスキーを使う"
   },
   "share": {
     "invalid": "この共有リンクは無効・期限切れ・取り消し済みです。",
