@@ -126,7 +126,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
   // Every refusal answers the SAME shape: an unknown, expired, consumed or revoked token, a token for
   // an OIDC invite, and a tenant that has since switched password sign-in off are one response. The
   // holder of a dead link learns "this link does not work", never anything about the tenant.
-  app.post<{ Body: { token?: string; password?: string } }>(
+  app.post<{ Body: { token?: string; password?: string; displayName?: string } }>(
     '/auth/local/accept', { config: { public: true } }, async (req, reply) => {
       // #613 / ADR-198 §3 M8: the deployment CEILING gates the endpoint, not just the screen. Same
       // uniform not-found as the OIDC/SAML surfaces (ADR-195 §7) — a deployment that excludes `local`
@@ -139,6 +139,8 @@ export async function authLocalPlugin(app: FastifyInstance) {
       }
       const token = (req.body?.token ?? '').trim()
       const password = req.body?.password ?? ''
+      // #807: what to call them. Optional on the wire (see acceptLocalInvite) — the screen requires it.
+      const displayName = typeof req.body?.displayName === 'string' ? req.body.displayName : undefined
       if (!token) return reply.code(404).send({ error: 'invite not available' })
       // The policy failure is its own answer, and deliberately so: the person is choosing a password
       // right now and needs to know it was too short. It says nothing about the invite.
@@ -155,7 +157,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       const { acceptLocalInvite } = await import('../auth/invites.js')
       let outcome: Awaited<ReturnType<typeof acceptLocalInvite>>
       try {
-        outcome = await acceptLocalInvite({ db: req.db, fga: app.fga }, req.tenant, token, password)
+        outcome = await acceptLocalInvite({ db: req.db, fga: app.fga }, req.tenant, token, password, displayName)
       } catch (e) {
         // A seat-cap refusal is its own answer (402), as it is for every other acceptance path: it is
         // about the tenant's plan, not about whether the link is real.

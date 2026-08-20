@@ -18,6 +18,12 @@ export const PASSWORD_MIN = 12;
 
 export function SetPasswordForm({ token, mode, onDone }: { token: string; mode: "accept" | "reset"; onDone: () => void }) {
   const { t } = useTranslation();
+  // #807: what to call them here. Accepting a password invite MINTS a brand-new identity, and nothing
+  // else in the flow knows their name — an OIDC invite gets one from the IdP at every login, this one
+  // had no source at all, so a self-hosted workspace's first administrator appeared nameless in the
+  // roster, on presence carets and in mentions. A reset is a member who already has a name, so the
+  // field belongs to `accept` only.
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,7 +41,7 @@ export function SetPasswordForm({ token, mode, onDone }: { token: string; mode: 
         method: "POST",
         credentials: "include", // accepting signs them in — the response sets the session cookie
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ token, password, ...(mode === "accept" ? { displayName: displayName.trim() } : {}) }),
       });
       if (res.ok) { onDone(); return; }
       // The server's own weak-password refusal (its policy is the authority; ours is a courtesy so
@@ -60,14 +66,20 @@ export function SetPasswordForm({ token, mode, onDone }: { token: string; mode: 
           {t(error === "weak" ? "auth.passwordTooShort" : error === "mismatch" ? "auth.passwordMismatch" : error === "unavailable" ? "auth.temporarilyUnavailable" : "auth.linkDead")}
         </div>
       )}
+      {mode === "accept" && (
+        <Input value={displayName} disabled={busy} autoComplete="name"
+          placeholder={t("auth.displayName")} aria-label={t("auth.displayName")}
+          data-testid="set-password-display-name" onChange={(e) => setDisplayName(e.target.value)} />
+      )}
       <Input type="password" autoComplete="new-password" value={password} disabled={busy}
         placeholder={t("auth.newPassword")} aria-label={t("auth.newPassword")}
         data-testid="set-password-input" onChange={(e) => setPassword(e.target.value)} />
       <Input type="password" autoComplete="new-password" value={confirm} disabled={busy}
         placeholder={t("auth.confirmPassword")} aria-label={t("auth.confirmPassword")}
         data-testid="set-password-confirm" onChange={(e) => setConfirm(e.target.value)} />
+      {mode === "accept" && <p className="m-0 text-xs text-fg-dim">{t("auth.displayNameHint")}</p>}
       <p className="m-0 text-xs text-fg-dim">{t("auth.passwordHint", { min: PASSWORD_MIN })}</p>
-      <Button variant="primary" type="submit" className="w-full" data-testid="set-password-submit" disabled={busy || !password || !confirm}>
+      <Button variant="primary" type="submit" className="w-full" data-testid="set-password-submit" disabled={busy || !password || !confirm || (mode === "accept" && !displayName.trim())}>
         {busy && <Loader2 size={16} className="animate-spin" />}
         {t("auth.setPassword")}
       </Button>
