@@ -10,7 +10,7 @@ import { authenticate, parseDocName } from "../authenticate.js";
 
 const cfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
 // #417: a SCRATCH page/space owned by this suite — the tests used to ride the shared dev
-// `page:demo`, so any residue on it (e.g. a stale private-marker pair from device testing)
+// `page:demo`, so any residue on it (e.g. a stale private-marker pair from manual testing)
 // turned the whole suite red for every session (#279's scratch-fixture rule, applied here).
 const PAGE = "collab-authz-417";
 const SUITE_SPACE = "collab-authz-417-space";

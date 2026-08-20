@@ -8,7 +8,7 @@ import { projectTransparency } from './sink.js' // #688: the disclosure projecti
 // chain: the chain primitive's tenant slot is a fixed scope tag ('@operator') so `chain.ts` is reused
 // unchanged. Records integrity fields ONLY (actor/action/target/time/seq) — never secrets/config
 // (ADR-070). Writes go through the operator/admin connection (BYPASSRLS); the tenant `app` role has no
-// access (migration 047). See docs/adr/089-operator-audit-ledger.md.
+// access (migration 047). See ADR-089.
 
 export const OPERATOR_SCOPE = '@operator'
 // A fixed advisory-lock key for the operator chain: SERIALIZE appends within their transaction so two

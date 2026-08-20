@@ -76,7 +76,7 @@ jobs:
       # Build BEFORE the seed: setup's seed imports workspace packages by their dist entrypoints,
       # and a fresh runner has none. Local machines carry stale dist from earlier builds, which is
       # why this gap survived until CI's first real run (2026-08-18: "Cannot find module
-      # @wikistead/authz/dist/index.js"). Same rule as the CE build acceptance: build, or the suite
+      # @wikistead/authz/dist/index.js"). Same rule as every packaged build: build, or the suite
       # dies at load.
       - run: pnpm build
       - run: pnpm setup:server-test     # compose up --wait + migrate + fga bootstrap/seed + db seed (#268)

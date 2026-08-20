@@ -25,12 +25,12 @@ import { execFileSync } from 'node:child_process'
 // duplicated — the two lists could drift and nobody would notice; now a type added to either
 // place without the other fails loudly (an unreadable config is a hard error, not a fallback).
 // The vocabulary source is the release machinery, which the CE build deliberately does not
-// carry (#717②) — on the public repository this check has no subject and sleeps, saying so.
+// carry (#717②) — in the CE build this check has no subject and sleeps, saying so.
 // Measured on the public CI's first day: the unconditional read below killed the build job there.
 // A dev checkout without the file is still a hard error (the extraction moved), as before.
 const releaseConfigUrl = new URL('../release.config.mjs', import.meta.url)
 if (!existsSync(releaseConfigUrl)) {
-  console.log('check-commit-types: release.config.mjs not in this checkout (CE build carries no release machinery) — sleeping.')
+  console.log('check-commit-types: release.config.mjs not in this checkout (the CE build carries no release machinery) — sleeping.')
   process.exit(0)
 }
 const releaseConfig = readFileSync(releaseConfigUrl, 'utf8')
