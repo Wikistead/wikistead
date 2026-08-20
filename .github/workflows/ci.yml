@@ -16,8 +16,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # fetch-depth 0: `lint:commit-types` compares this branch against master, and the default
-      # shallow clone has no master to compare with — it would silently fall back to checking only the
+      # fetch-depth 0: `lint:commit-types` compares this branch against the integration branch, and
+      # the default shallow clone has no such ref to compare with — it would silently fall back to checking only the
       # last commit, which is a weaker check wearing the same green tick.
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
