@@ -20,7 +20,7 @@ let tenant: Tenant
 let app: FastifyInstance
 
 // Test doc ids (cleaned up afterwards).
-const HIT = 'cjk-hit-1' // authorized, body has
+const HIT = 'cjk-hit-1' // authorized, body has the CJK phrase
 const ENG = 'cjk-eng-1' // english body (non-regression)
 const MIX = 'cjk-mix-1' // english + japanese body
 const STALE = 'cjk-stale-1' // stage1 passes (viewerUsers) but NO FGA grant → stage2 drops
