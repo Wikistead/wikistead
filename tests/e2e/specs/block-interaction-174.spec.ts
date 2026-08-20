@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// #174 (review rejection comment 1071): four block-interaction fixes for nested macros, all in WYSIWYG.
+// #174 (bounced on review): four block-interaction fixes for nested macros, all in WYSIWYG.
 // Real Chromium — nested-widget hit-testing / :has hover suppression / re-render tab state can't be
 // exercised in happy-dom.
 

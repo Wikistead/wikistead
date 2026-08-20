@@ -1,4 +1,4 @@
-// #330 / ADR-141 §1b (user-approved option 1 2026-07-15): moderator DISCOVERABILITY.
+// #330 / ADR-141 §1b (user-approved option 1, 2026-07-15): moderator DISCOVERABILITY.
 //   A: viewer_member gains `or moderator` → a pure space moderator's space appears in listAllSpaces
 //      (space#view = viewer ⊇ viewer_member ⊇ moderator) and they can READ + SAVE the space's
 //      templates (deliberate widening; the #258 guest boundary is untouched — moderator has no

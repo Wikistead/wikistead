@@ -4950,7 +4950,7 @@ function enterDeclaredSlot(view: EditorView, dir: { from: number; to: number; ma
   return true; // the rebuild mounts the island and focuses it — do NOT focus the outer view here
 }
 
-// #502 rework (review rejection — correctness FLOOR): is ANOTHER client already co-editing the macro
+// #502 rework (bounced on review — correctness FLOOR): is ANOTHER client already co-editing the macro
 // at `macroFrom`? The inline RichUI paths (table grid / callout / fence editUI) write straight to the
 // canonical Y.Text via replaceSource, so opening one WHILE a peer holds the macro's ephemeral co-edit doc
 // (source island) lets the two clobber each other (LWW re-emergence — the very loss ADR-184 prevents for
