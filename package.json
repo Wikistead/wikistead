@@ -26,6 +26,7 @@
     "lint:origin-routes": "node scripts/check-origin-routes.mjs",
     "lint:selfhost-profile": "node scripts/check-selfhost-profile.mjs",
     "lint:overlay-sync": "node scripts/check-overlay-sync.mjs",
+    "lint:no-japanese-comments": "node scripts/check-no-japanese-comments.mjs",
     "lint:commit-types": "node scripts/check-commit-types.mjs",
     "release": "semantic-release --no-ci --extends ./release.publish.config.mjs",
     "release:dry": "semantic-release --dry-run --no-ci",
