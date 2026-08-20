@@ -182,7 +182,7 @@ describe('#364(plan A): the STORED home title is the space name — no language 
     sid = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: jaName })).id
     hid = (await createSpaceHome(db, fgaClient, driver, { tenantId: TENANT, spaceId: sid, userId: 'dev-user' })).id
     const [ja] = await admin`SELECT title FROM pages WHERE id = ${hid}`
-    expect(ja!.title).toBe(jaName) // bare space name — no suffix even under default_lang=ja
+    expect(ja!.title).toBe(jaName) // bare space name — no home suffix even under default_lang=ja
     await admin`UPDATE tenant_settings SET default_lang = 'en'`
     const enName = `home364t-en-${Date.now().toString(36)}`
     const sid2 = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: enName })).id

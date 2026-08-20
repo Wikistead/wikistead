@@ -68,7 +68,7 @@ test(":::warning[label] renders the warning panel with a large icon column + tit
   const geo = await icon.evaluate((el) => ({ w: parseFloat(getComputedStyle(el).width) }));
   expect(geo.w).toBeGreaterThan(18);
   const display = await panel.evaluate((el) => getComputedStyle(el).display);
-  expect(display).toBe("flex"); // the Y flex panel (not the old per-line boxes)
+  expect(display).toBe("flex"); // the option-Y flex panel (not the old per-line boxes)
   const visible = await page.locator("[data-pane=preview] .cm-content").innerText();
   expect(visible).not.toContain(":::warning[Server down]"); // raw hidden (no linkification — #94)
 });
