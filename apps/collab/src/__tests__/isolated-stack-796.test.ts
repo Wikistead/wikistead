@@ -11,37 +11,34 @@
 import { describe, it, expect } from 'vitest'
 import { resolve } from 'node:path'
 // @ts-expect-error — plain .mjs, deliberately not a TS module (each package has its own rootDir)
-import { isolatedStackFacts } from '../../../../infra/testing/isolated-stack.mjs'
+import { isolatedStackVerdict } from '../../../../infra/testing/isolated-stack.mjs'
 
 const root = resolve(import.meta.dirname, '../../../..')
 
+type Verdict = { marker?: string; definitionEmpty: boolean; compared: number; problems: string[] }
+
 describe('#796: the collab suite is inside the isolated stack', () => {
   it('the stack marker says server-test — #269\'s valve, which this package got in #789', () => {
-    expect(isolatedStackFacts(root).marker).toBe('server-test')
+    expect((isolatedStackVerdict(root) as Verdict).marker).toBe('server-test')
   })
 
   it('neither the database nor the permission store is the developer\'s own', (ctx) => {
-    // A machine with no dev environment (public CI, a fresh clone) has nothing to be confused with,
-    // and this SAYS SO rather than passing quietly: a green tick that compared nothing is how this
-    // family keeps shipping. (The first version counted "compared plus skipped equals the total",
-    // which is a tautology — the two sets are complements, so no input could fail it. An empty facts
-    // list passed it too, which is the exact shape of every vacuous walk this repository has fixed.)
-    const { facts } = isolatedStackFacts(root) as { facts: { what: string; actual?: string; dev: string | null }[] }
-    // FIRST, before any skip can swallow it: an empty definition would make every loop below run
-    // zero times, and a skip is not a finding — a definition that returned nothing has to be red
+    // #819: the verdict is the shared definition's now, not a comparison restated here. This pin used
+    // to carry its own copy of the rule — an empty definition is red, no dev environment is a declared
+    // skip, a missing value is a finding and not a skip — and so did the EE one. Two copies of a rule
+    // is the shape this whole family is made of. (The tautology the first version measured, "compared
+    // plus skipped equals the total", is gone with it: no input could ever have failed it.)
+    const verdict = isolatedStackVerdict(root) as Verdict
+    // FIRST, before any skip can swallow it: a definition that returned nothing has to be red
     // wherever it happens, including on the machine that has nothing to compare against.
-    expect(facts.length, 'the shared definition returned no facts to check').toBeGreaterThan(1)
-    const dev = facts.filter((f) => f.dev)
-    if (dev.length === 0) {
+    expect(verdict.definitionEmpty, 'the shared definition returned no facts to check').toBe(false)
+    if (verdict.compared === 0) {
+      // A machine with no dev environment (public CI, a fresh clone) has nothing to be confused with,
+      // and this SAYS SO rather than passing quietly: a green tick that compared nothing is how this
+      // family keeps shipping.
       ctx.skip()
       return
     }
-
-    for (const f of dev) {
-      // A fact the dev environment names but this process does not is a finding, not a skip: the
-      // suite is missing a variable it is supposed to have been given by the isolated stack.
-      expect(f.actual, `${f.what} — this process has no value for it at all`).toBeTruthy()
-      expect(f.actual, f.what).not.toBe(f.dev)
-    }
+    expect(verdict.problems, `compared ${verdict.compared} value(s) with the dev environment`).toEqual([])
   })
 })
