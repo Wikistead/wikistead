@@ -1,7 +1,8 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { openDemo, enterEdit, resetDoc, sleep } from "../helpers";
 
-// #612 (user request): the format buttons PREVIEW their effect — "
+// #612 (user request): the format buttons PREVIEW their effect — bold rendered actually bold, italic
+// actually italic, the marker button's glyph wearing the marker, and link as an icon.
 // Measured from COMPUTED STYLE in a real browser, per the acceptance: a class name proves nothing about
 // what paints (the Tailwind-undefined-token lesson), and marker legibility is a contrast, not a colour.
 const relLum = (r: number, g: number, b: number): number => {
@@ -28,7 +29,7 @@ async function assertHighlightLegible(scope: Locator, theme: string) {
     // the marker tint is semi-transparent — composite it over the BUTTON's own background to get the
     // colour a person actually reads against
     const cs = getComputedStyle(el);
-    // Chromium serialises color-mix results as `color(srgb r g b / a)` (0-1 floats), NOT rgba
+    // Chromium serialises color-mix results as `color(srgb r g b / a)` (0-1 floats), NOT rgba —
     // the #598 measurement trap, handled here on purpose rather than rediscovered
     const parse = (c: string) => {
       const srgb = /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)/.exec(c);

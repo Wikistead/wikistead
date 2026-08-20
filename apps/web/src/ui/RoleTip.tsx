@@ -10,16 +10,16 @@ import { graced } from "./use-hint-presence";
 // looking, and the screens papered over it with sentences ("managers and moderators can always
 // comment…"). Showing the actual list is the fix; the sentences go with it.
 //
-// Two decisions worth stating, because both were nearly got wrong
+// Two decisions worth stating, because both were nearly got wrong:
 //
-// The delegated `data-tip` tooltip renders ONE LINE of text (`tip.textContent = …`), so it cannot show
-// a list. This uses the React tooltip, whose content is nodes.
+//   The delegated `data-tip` tooltip renders ONE LINE of text (`tip.textContent = …`), so it cannot show
+//   a list. This uses the React tooltip, whose content is nodes.
 //
-// A Radix tooltip opens on hover and focus, and a coarse pointer has neither — `tooltip-host.ts`
-// deliberately does not install on touch (ADR-159/#406). that only works with a mouse
-// is not the feature, so the tooltip is CONTROLLED: hover and focus open it, and a tap toggles it. A
-// trigger left uncontrolled closes itself on pointerdown, which on a tablet means the tap that should
-// show it is the tap that hides it.
+//   A Radix tooltip opens on hover and focus, and a coarse pointer has neither — `tooltip-host.ts`
+//   deliberately does not install on touch (ADR-159/#406). "Easy to check" that only works with a mouse
+//   is not the feature, so the tooltip is CONTROLLED: hover and focus open it, and a tap toggles it. A
+//   trigger left uncontrolled closes itself on pointerdown, which on a tablet means the tap that should
+//   show it is the tap that hides it.
 //
 // The list is not a sentence (#585): no dash, no explanation of why a bundle is what it is.
 export function RoleTip({
@@ -90,7 +90,7 @@ export function RoleTip({
         ref={anchor}
         tabIndex={option || control ? undefined : 0}
         // Only on a badge. Inside a listbox the span's label BECOMES the option's accessible name, so
-        // labelling it with the capability list renamed every option after what it confers — measured
+        // labelling it with the capability list renamed every option after what it confers — measured:
         // the option "editor" announced itself as "Can: View, Edit, Publish". The option keeps its name;
         // Radix links the tooltip as its description.
         aria-label={option || control ? undefined : label}
@@ -115,8 +115,8 @@ export function RoleTip({
  * The PANEL: a heading that says where the capabilities come from, and the capabilities under it, one
  * per line.
  *
- * #582 (review rejection, 2026-08-04): "
- * ". The badge tooltip was already exactly that,
+ * #582 (review rejection, 2026-08-04): hovering a role should raise another window-like popup — a hint
+ * listing what the role can do. The badge tooltip was already exactly that,
  * so the option hint is the SAME component in a different host rather than a second design — which is
  * what the in-place reveal it replaces had become.
  */

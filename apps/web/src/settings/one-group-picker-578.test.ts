@@ -17,7 +17,8 @@ describe("#578: the group name control has one implementation", () => {
   const space = read("./SpaceMembersTab.tsx");
   // RE-AIMED by #579 ① (2026-08-03): the tenant screen no longer has a group SECTION — groups are rows
   // in the member table, and a group nobody carries yet is named from the table's own search, which is
-  // "). So the tenant half of every assertion below points at the member table now. The
+  // what the ruling asked for (the member search covers users AND groups, and naming a not-yet-
+  // confirmed group is absorbed into it). So the tenant half of every assertion below points at the member table now. The
   // subject is unchanged: there is ONE implementation of "name a group", and neither screen grows a
   // second one.
   const tenant = read("./MembersPage.tsx");
@@ -29,8 +30,8 @@ describe("#578: the group name control has one implementation", () => {
     const form = read("./GranteeRoleForm.tsx");
     expect(form, "the shared form owns the group control").toMatch(/<GroupPicker\b/);
     expect(space, "space Members tab").toMatch(/<GranteeRoleForm\b/);
-    // RE-AIMED AGAIN by the bounce (2026-08-04, user ruling " UI
-    // "): naming a group from the FILTER field was rejected on the device — nothing on the screen
+    // RE-AIMED AGAIN by the bounce (2026-08-04, user ruling: match the space screen and unify the UI
+    // as far as possible): naming a group from the FILTER field was rejected on the device — nothing on the screen
     // said the route existed, and it gave neither completion nor the confirmed/unconfirmed distinction
     // the space side has. Both screens render the shared form now, so both get all three for free.
     expect(tenant, "tenant member table").toMatch(/<GranteeRoleForm\b/);
@@ -51,7 +52,7 @@ describe("#578: the group name control has one implementation", () => {
     expect(picker, "the marker appears only for a name the directory has not produced").toMatch(/!isKnown/);
   });
 
-  // #578 bounce ②: " UI UI UI ". The stacked
+  // #578 bounce ②: do not stack a selection UI above an input UI — give the input completion instead. The stacked
   // Select is gone; what is left is one input that completes, the same shape the person picker beside
   // it already had. A pin on the ABSENCE, because a second control creeping back is exactly how these
   // two halves drifted apart the first time.
@@ -69,7 +70,8 @@ describe("#578: the group name control has one implementation", () => {
   });
 });
 
-// UI ". The FLOW is now one component — grantee type, then who, then which
+// #578 bounce ③: tenant-settings Members should, like the space settings, pick a user or a group and
+// grant the role from there — with the same UI. The FLOW is now one component — grantee type, then who, then which
 // role — and each screen differs only in the arguments it passes.
 //
 // One difference is deliberate and is pinned as such: the tenant screen offers groups only, because
@@ -81,7 +83,8 @@ describe("#578 ③: both screens run the same add-flow", () => {
   const space = read("./SpaceMembersTab.tsx");
   // RE-AIMED by #579 ① (2026-08-03): the tenant screen no longer has a group SECTION — groups are rows
   // in the member table, and a group nobody carries yet is named from the table's own search, which is
-  // "). So the tenant half of every assertion below points at the member table now. The
+  // what the ruling asked for (the member search covers users AND groups, and naming a not-yet-
+  // confirmed group is absorbed into it). So the tenant half of every assertion below points at the member table now. The
   // subject is unchanged: there is ONE implementation of "name a group", and neither screen grows a
   // second one.
   const tenant = read("./MembersPage.tsx");
@@ -104,8 +107,8 @@ describe("#578 ③: both screens run the same add-flow", () => {
     expect(form).toMatch(/types\.length > 1/);
     expect(space, "the space screen offers both").toMatch(/types=\{\["user", "group"\]\}/);
     // OVERRIDDEN (user ruling, 2026-08-04): the tenant screen offered groups only, deferring people to
-    // their row (#579) — and the review asked "
-    // ". So both screens run the full toggle now; the row keeps working, and both doors
+    // their row (#579) — and the review asked why the form no longer switches between user and
+    // group like it used to. So both screens run the full toggle now; the row keeps working, and both doors
     // converge on the server's 1-principal-1-role state.
     expect(tenant, "the tenant screen offers both too").toMatch(/types=\{\["user", "group"\]\}/);
   });

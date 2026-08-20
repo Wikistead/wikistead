@@ -10,7 +10,7 @@ import { visibleSpaces, recordRecentSpace } from "./space-recent";
 // #263: the space switcher. #226 auto-creates a personal space per member, so a flat list of every
 // viewable space grows unbounded (a tenant admin sees everyone's). The default view is now BOUNDED — the
 // current space + recently-used spaces (space-recent.ts) — with an incremental SEARCH over ALL viewable
-// spaces (client-side, over the server's FGA-filtered useSpaces set only, so no new permission surface).
+// spaces (client-side, over the server's FGA-filtered useSpaces() set only, so no new permission surface).
 // cmdk gives ↑↓/Enter.
 
 export function SpaceSwitcher({
@@ -62,7 +62,7 @@ export function SpaceSwitcher({
     return () => { document.removeEventListener("mousedown", onDown, true); document.removeEventListener("keydown", onKey, true); };
   }, [open]);
 
-  // #263 rejection ②: focus the search input WITHOUT scrolling. cmdk's `autoFocus` calls focus plainly,
+  // #263 rejection ②: focus the search input WITHOUT scrolling. cmdk's `autoFocus` calls focus() plainly,
   // whose scroll-into-view drags the overflow-hidden sidebar root horizontally (scrollLeft>0) → the whole
   // header row visibly shifts left. Focusing with { preventScroll: true } ourselves eliminates that shift.
   const focusSearch = () => boxRef.current?.querySelector<HTMLInputElement>("[data-slot=command-input]")?.focus({ preventScroll: true });
@@ -75,7 +75,7 @@ export function SpaceSwitcher({
   // hasMore drives a non-numeric "more matches" line (no total — the review's density-oracle ruling).
   const search = useSpaceNameSearch(query);
   const searching = query.trim().length > 0;
-  // #710 C: "show all" pages the SERVER's name-ordered walk (#287's order, keyset (name, id))
+  // #710 C: "show all" pages the SERVER's name-ordered walk (#287's order, keyset (name, id)) —
   // the client no longer sorts a roster it no longer holds. Pages accumulate only as the reader
   // asks for them (the load-more item below); nothing walks on its own.
   const byName = useSpacesByName(!searching && expanded);
@@ -89,7 +89,7 @@ export function SpaceSwitcher({
   // #710 D: the entry point is offered whenever the bounded default may be hiding something — the
   // pool folded some spaces, or the roster has pages beyond the first. NO NUMBER: the old count
   // came from holding the whole roster, and a first-page count would silently under-state (the
-  // " N N " failure names). Non-numeric copy instead.
+  // silently-understated "N of all M" failure names). Non-numeric copy instead.
   const showAllEntry = !searching && !expanded && (hasMoreSpaces || spaces.length > list.length);
   const moreMatches = searching && (search.data?.hasMore ?? false);
 

@@ -32,7 +32,7 @@ async function filterMembers(page: Page, q: string): Promise<void> {
 // it always did (it is EXACTLY ONE — a column on the member).
 const H = { authorization: "Bearer dev-token", "content-type": "application/json" };
 // A bodyless DELETE must NOT announce a JSON body: Fastify answers 400 FST_ERR_CTP_EMPTY_JSON_BODY, which
-// is not the 409 this cleanup is about and which the old `.catch` also swallowed.
+// is not the 409 this cleanup is about and which the old `.catch()` also swallowed.
 const H_NO_BODY = { authorization: "Bearer dev-token" };
 
 /**
@@ -84,7 +84,8 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(page.getByTestId("tenant-assign-form")).toHaveCount(0);
     await expect(page.getByTestId("tenant-assignment-list")).toHaveCount(0);
     // OVERRIDDEN (user ruling, 2026-08-04): this used to pin the add flow to groups only ("a person's
-    // tenant role is given on their row and nowhere else"), and the review overturned it
+    // tenant role is given on their row and nowhere else"), and the review overturned it —
+    // asking why the user/group toggle from before was gone. The form now carries the same
     // user/group toggle the space screen has; the ROW still works (below, unchanged), and both doors
     // converge on the server's one-role-per-principal state, so this is a second door, not a second state.
     await expect(page.getByTestId("tenant-grant-type"), "the grantee-kind toggle exists").toHaveCount(1);
@@ -97,8 +98,8 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     expect(await topOf("tenant-grant-type"), "kind toggle on the form's line").toBe(inputY);
     expect(await topOf("tenant-grant-role"), "role picker on the form's line").toBe(inputY);
     expect(await topOf("tenant-grant-add"), "add button on the form's line").toBe(inputY);
-    // …and it is VISIBLY a different operation from the filter (the second half of the same reject
-    // ). Separated, not merely on two lines
+    // …and it is VISIBLY a different operation from the filter (the second half of the same reject:
+    // filtering and adding are different operations, so separate them visually). Separated, not merely on two lines —
     // the two rows nearly touching is what read as one four-control mess.
     const filterY = await topOf("members-filter");
     expect(Math.abs(filterY - inputY), "the filter is not on the form's line").toBeGreaterThan(24);
@@ -111,12 +112,12 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
     await expect(page.getByTestId("member-roles").first()).toBeVisible({ timeout: 8000 });
     const rowRoles = page.getByTestId("member-roles").first();
 
-    // RE-AIMED by #579 (2026-08-03 ruling): . This used to add roleA, then add
+    // RE-AIMED by #579 (2026-08-03 ruling): roles cannot stack anyway. This used to add roleA, then add
     // roleB beside it, then remove one and check the other survived — the additive model. The server now
     // converges a tenant principal to ONE role, so that sequence describes a state the mechanism does not
     // produce. What replaces it is the property a person can see: the control SHOWS the role they have,
     // and choosing another REPLACES it (across a reload, so it is the server's answer and not local
-    // state). The per-assignment removal it used to prove has moved to where stacking still happens
+    // state). The per-assignment removal it used to prove has moved to where stacking still happens —
     // the space composite's two arms, in builtin-grant-equivalence-514.
     await rowRoles.getByTestId("member-role-select").click();
     await expect(page.getByRole("option", { name: roleA }), "every tenant role is offered, held or not").toBeVisible();
@@ -171,8 +172,8 @@ test("#579: tenant roles live on the member row, and only there", async ({ page,
 test("#579 ①: a group gets a tenant role from the MEMBER TABLE, by name", async ({ page, request }) => {
   // RE-AIMED, not deleted. The subject was "a group is given a tenant role by NAME, and the screen shows
   // the name rather than the hash" — that still holds; what changed is where it happens. The ruling
-  // folded the group section into the member table ("
-  // "), so the same act is now: type the name in the table's search,
+  // folded the group section into the member table (no separate group-roles surface — merge groups
+  // into the members table), so the same act is now: type the name in the table's search,
   // and the row it offers takes a role.
   const stamp = Date.now();
   const roleName = `e2e-579g-${stamp}`;

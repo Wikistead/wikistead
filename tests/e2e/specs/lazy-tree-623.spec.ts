@@ -71,8 +71,8 @@ test("#623 ①: a row with a visible child expands; a leaf draws no chevron at a
   expect(requested.filter((r) => r === "p-top"), "a branch was fetched before its row was opened").toHaveLength(0);
 
   // ①: the chevron follows the server's hasChildren. The leaf must NOT be expandable — the
-  // retracted ruling drew a chevron on every row, and the rejection's words for it were "
-  // > UI". A chevron in arborist exists only when a row has children,
+  // retracted ruling drew a chevron on every row, and the rejection called showing ">" on a row
+  // with no child pages awful UI. A chevron in arborist exists only when a row has children,
   // so the leaf's svg count is the measurable difference.
   const leaf = page.locator('[data-testid="tree-page"]', { hasText: "Plain leaf" }).first();
   await expect(leaf).toBeVisible();

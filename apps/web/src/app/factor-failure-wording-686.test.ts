@@ -1,4 +1,4 @@
-// #686 B: a code the server refused is told apart from everything else that can go wrong.
+// #686 family B: a code the server refused is told apart from everything else that can go wrong.
 //
 // The account panel has said "that code did not match" since #657. The two sign-in surfaces — the door
 // asking for a code, and the enrolment confirm during sign-in — collapsed every non-5xx failure into

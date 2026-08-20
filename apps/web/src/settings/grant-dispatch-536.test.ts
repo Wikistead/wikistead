@@ -1,4 +1,4 @@
-// #536 review 7: the merged picker's dispatch, exercised as behaviour — all four combinations of
+// #536 review point 7: the merged picker's dispatch, exercised as behaviour — all four combinations of
 // {user, group} × {built-in, custom role}. The bug (a hand-built `group:<name>#member` principal
 // that pointed at nothing) lived exactly here, inside a click handler no test could reach; the decision
 // is a pure function now, so the four cases are values.
@@ -76,7 +76,7 @@ describe("#497: resolveMappingDispatch", () => {
 // #553 review F: the display fold and its revoke set, pinned as values (the component only executes).
 import { foldGrantsByPrincipal, revokeCapsForRow } from "./grant-dispatch";
 
-// #607 ("Dev User 2 …"): the roster answers one row per CAPABILITY,
+// #607 ("Dev User" showed twice, flagged as a likely bug): the roster answers one row per CAPABILITY,
 // and a principal holding several of them appeared several times. #553's editor fold already merged one
 // specific pair; this is that rule generalised, so the screen shows what #536 / #579 settled — one
 // principal, one role.

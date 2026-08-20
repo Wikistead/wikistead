@@ -10,9 +10,9 @@
 // ordinary case before the dangerous one.
 //
 // #667 (ruling, 2026-08-09): the types no longer carry an `admin` flag. §10 used it to shorten the
-// default lifetime for administrative keys, which left everything else defaulting to NEVER EXPIRES
+// default lifetime for administrative keys, which left everything else defaulting to NEVER EXPIRES —
 // the most dangerous option, as the default, on the majority of keys. The distinction is gone and the
-// thirty-day default applies to all of them. It also removes a judgement nobody could make reliably
+// thirty-day default applies to all of them. It also removes a judgement nobody could make reliably:
 // every new type would have asked "is this administrative?", and the answer drifting is how `audit` and
 // `webhooks` — a tenant's security ledger and a content egress — ended up on the long side.
 export type Action = "read" | "write";
@@ -66,7 +66,7 @@ export const derivedScope = (matrix: Matrix): Action =>
 /**
  * #667 (ruling): the lifetime EVERY new key starts on.
  *
- * The user's words: 30 . It used to depend on whether
+ * The user's words: the inconsistency is off-putting — just default everything to 30 days. It used to depend on whether
  * an administrative type was selected, which meant an ordinary key defaulted to never expiring — the
  * most dangerous choice, pre-selected, on most keys. One default is both consistent and safer.
  *

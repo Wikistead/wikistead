@@ -171,7 +171,8 @@ describe('#623 §4: what a placeholder must NOT do', () => {
   }, 300_000)
 
   it(' ②: the PAINT resolves no chains — a hidden grant is absent there and present in the follow-up', async () => {
-    // The regression pin the rejection asked for: " paint ". A fixture
+    // The regression pin the rejection asked for: go red if placeholder resolution returns to the
+    // paint path. A fixture
     // with a real hidden-grant chain paints WITHOUT it (nothing visible waits on a roster read), and
     // the follow-up resolver DOES place it (the feature is not lost).
     const parent = await page(`ph-paint-${STAMP}`, null)
@@ -192,7 +193,7 @@ describe('#623 §4: what a placeholder must NOT do', () => {
     // visible parent A with a visible child → hasChildren true.
     const a = await page(`ch-a-${STAMP}`, null)
     await page(`ch-a-kid-${STAMP}`, a)
-    // visible parent B with an INVISIBLE-only child (draft; READER holds no grant) → hasChildren false
+    // visible parent B with an INVISIBLE-only child (draft; READER holds no grant) → hasChildren false:
     // the corrected leak reading — an invisible child is reported as ABSENT, telling nothing.
     const b0 = await page(`ch-b-${STAMP}`, null)
     await page(`ch-b-kid-${STAMP}`, b0, { publish: false })

@@ -1,6 +1,6 @@
 // SearchDriver and SearchHit are the CE-published extension point defined in
 // @wikistead/hooks. LogicalSearchDriver is CE's built-in implementation.
-// EE registers an alternative via registerSearchDriver from @wikistead/hooks.
+// EE registers an alternative via registerSearchDriver() from @wikistead/hooks.
 import { MeiliSearch } from 'meilisearch'
 import type { SearchDoc } from '@wikistead/types'
 import type { SearchDriver, SearchHit } from '@wikistead/hooks'
@@ -31,7 +31,8 @@ export class LogicalSearchDriver implements SearchDriver {
       // Order = ranking priority: title outranks body. body is the page text
       // extracted from the ydoc snapshot (doc-builder). Making it searchable is
       // what enables in-body matches, including CJK — Meili's default tokenizer
-      // segments Japanese (charabia/lindera), so matches body .
+      // segments Japanese (charabia/lindera), so a Japanese place-name query matches a body
+      // where it sits inside a longer unspaced compound.
       'title',
       'body',
     ])
@@ -39,7 +40,7 @@ export class LogicalSearchDriver implements SearchDriver {
     // locales + English instead of relying on per-document language auto-detection, which is
     // unreliable for short or mixed-script text (a 2-3 char Japanese query, or JP body with a
     // few ASCII words). localizedAttributes (Meili 1.10) applies the jpn/cmn/kor segmenters
-    // deterministically so reliably matches a body containing it.
+    // deterministically so a katakana query reliably matches a body containing it.
     const t3 = await index.updateLocalizedAttributes([
       { attributePatterns: ['title', 'body'], locales: ['jpn', 'cmn', 'kor', 'eng'] },
     ])

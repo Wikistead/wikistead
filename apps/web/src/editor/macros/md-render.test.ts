@@ -447,7 +447,7 @@ describe("renderMarkdownToDom — nested macro dispatch (ADR-085 / #185)", () =>
   });
 });
 
-// #170 / ADR-049 (Y): a CONTAINER directive with an icon (a typed callout, no liveRender) renders
+// #170 / ADR-049 (option Y): a CONTAINER directive with an icon (a typed callout, no liveRender) renders
 // as the shared callout PANEL — icon + variant title + nested Markdown body — both as the CM widget
 // and via this nested dispatch (callouts inside transclude/columns). renderCalloutPanel is the single
 // source of truth.

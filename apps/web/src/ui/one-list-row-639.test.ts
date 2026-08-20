@@ -28,7 +28,7 @@ function tsxFiles(dir: string): string[] {
   return out;
 }
 
-/** Rows — the elements a `.map` produces — that draw themselves as a box.
+/** Rows — the elements a `.map()` produces — that draw themselves as a box.
  *
  *  Narrowed to rows on purpose. "Has a rounded border" alone matches 224 lines in these two directories:
  *  section frames, dialogs, inputs, buttons, badges. Those are not what the ruling is about, and asking
@@ -92,7 +92,7 @@ describe("#639: an administrative list separates its rows with a line", () => {
   });
 
   it("a list grows with its content and scrolls only once it is tall", () => {
-    // A fixed height gives a two-item list a mostly-empty frame — .
+    // A fixed height gives a two-item list a mostly-empty frame — the ruling: no box drawn by default.
     // Only lists are checked: `h-` is ordinary on an icon, an avatar, a spinner.
     const fixed: string[] = [];
     for (const f of files) {

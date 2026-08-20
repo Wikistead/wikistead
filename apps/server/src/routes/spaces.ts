@@ -227,7 +227,7 @@ export const SPACES_RESOLVE_LIMIT = 100
 
 // #710 A: resolve spaces BY ID for the surfaces that hold an id and need the space (sidebar active
 // space, pins/recents, home normalization, deleteMode, pickers' selected entries) — so holding an id
-// no longer requires walking the whole roster. The answer maps EVERY requested id, uniformly
+// no longer requires walking the whole roster. The answer maps EVERY requested id, uniformly:
 // a space the caller cannot view and a space that does not exist are both `null` — byte-identical,
 // never an existence oracle (the 404-unification rule, applied per id). No partial infrastructure
 // success: an FGA error rejects the whole request (enrichSpaceRows throws) rather than returning a
@@ -433,7 +433,7 @@ export async function deleteSpace(
     // not depend on this — the pin display gate drops orphans — it's row hygiene.
     await deletePinsForResources(tx, [args.spaceId, ...pages.map((p) => p.id)])
     await sweepWatchesForResources(tx, [args.spaceId, ...pages.map((p) => p.id)]) // #320 / ADR-126: watch row hygiene
-    // #536 review 4: assignment rows on the space (and its pages) go with it. FGA is the authz truth
+    // #536 review point 4: assignment rows on the space (and its pages) go with it. FGA is the authz truth
     // so orphans confer nothing — this is row hygiene, and it matters more now that every built-in grant
     // leaves a row (the pre-536 orphan population was custom-role assignments only).
     await tx`DELETE FROM role_assignments WHERE (resource_type = 'space' AND resource_id = ${args.spaceId})
@@ -459,7 +459,7 @@ export async function updateSpace(
   const name = args.name.trim()
   if (!name) throw Object.assign(new Error('empty name'), { statusCode: 400 })
   // #364 → (user ruling, plan A): the home page's title IS the space name — no language
-  // suffix is ever STORED (the "Home / " wording is a pure UI label the viewer's i18n renders).
+  // suffix is ever STORED (the "Home" wording, in any language, is a pure UI label the viewer's i18n renders).
   // A space rename re-writes the home title in the same tx (and re-indexes it for search).
   let outboxId: string | null = null
   let homeId: string | null = null
@@ -571,7 +571,7 @@ async function requireSpaceManage(fga: OpenFgaClient, userId: string, spaceId: s
 // capability admin-class", which is the one-boolean hole rev1 shipped: `replace: true` sweeps whatever
 // the principal held, INCLUDING the manager row and the rowless owner mark, so a call that names only
 // `view` can demote the space's owner. Admin-class = the set the code already has
-// (ADMIN_CLASS_ROLE_CAPS: delete/share/settings/publish/moderate) plus `manage` and — deliberately
+// (ADMIN_CLASS_ROLE_CAPS: delete/share/settings/publish/moderate) plus `manage` and — deliberately —
 // `manageAccess` itself: without that, a holder could appoint further holders with no manager involved
 // and no record of who delegated to whom (the page-scope answer to the same question).
 // In one sentence: this verb runs the roster of READERS and EDITORS; it cannot appoint or remove a
@@ -592,8 +592,8 @@ export function spaceCallMovesAdminClass(
   if (replace !== true) return false
   // #607 (user ruling): `replace` used to require `manage` unconditionally, which was correct but
   // too wide — it meant the roster verb could ADD and REMOVE but never CHANGE anybody, so turning a
-  // viewer into an editor took a revoke and a re-grant. has to be
-  // able to do that.
+  // viewer into an editor took a revoke and a re-grant. A capability whose point is running the roster
+  // of viewers and editors has to be able to do that.
   //
   // The test stays an OPERATION test — this is the difference from ADR-209 rev1, which was rejected for
   // replacing the axis with "is the requested capability admin-class" and thereby stopping looking at
@@ -727,15 +727,15 @@ export async function backfillSpaceViewerMembers(fga: OpenFgaClient, spaceIds: s
 // and the Members picker offers no way to see why the add was refused. Two layers: the UI confirms the
 // replacement; the server converges regardless of who calls (a direct API double-grant cannot stack).
 //
-// Boundaries
+// Boundaries:
 // - SPACE scope only — the ruling is about the space Members surface; page/tenant assignment semantics
-// are unchanged.
+//   are unchanged.
 // - A MACHINE-owned row (origin mapping/default) is never replaced by a manual add — ADR-183 §1: the
-// mapping owns its assignment. The add is refused up front (409) so the machine state stays intact.
+//   mapping owns its assignment. The add is refused up front (409) so the machine state stays intact.
 // - Legacy ROWLESS grants (pre-086 FGA tuples with no role_assignments row) are swept in the same pass,
-// so the principal converges to exactly the new role. This IS the recorded migration policy for
-// pre-existing duplicate data: it is cleaned up on the next add for that principal (no bulk backfill
-// untouched principals keep their historical rows/tuples until someone edits them).
+//   so the principal converges to exactly the new role. This IS the recorded migration policy for
+//   pre-existing duplicate data: it is cleaned up on the next add for that principal (no bulk backfill —
+//   untouched principals keep their historical rows/tuples until someone edits them).
 
 // The up-front refusal: adding a role to a principal whose CURRENT role is machine-managed would replace
 // machine state. Runs BEFORE any write so a 409 leaves everything untouched.
@@ -757,10 +757,10 @@ export async function assertNoMachineSpaceRole(
 
 // #536, the user's ruling on the one case the convergence sweep could not decide by itself.
 // A manager holding a weaker role too is the last "1 principal = 2 rows" state left, and neither
-// automatic answer is acceptable
-// - sweeping their manage silently is the owner-lockout footgun the exemption exists to prevent;
-// - dropping the new weaker role silently (keep manage, discard the add) is a success toast that
-// changed nothing — the same "granted, but not really" lie #536 has been removing all along.
+// automatic answer is acceptable:
+//   - sweeping their manage silently is the owner-lockout footgun the exemption exists to prevent;
+//   - dropping the new weaker role silently (keep manage, discard the add) is a success toast that
+//     changed nothing — the same "granted, but not really" lie #536 has been removing all along.
 // So the decision belongs to a person, and the server is where it is enforced: adding a weaker role
 // to a manager is REFUSED (409, with a code the UI turns into "replace their manager role?") unless
 // the caller says replace. The UI dialog is convenience; this is the wall.
@@ -847,7 +847,7 @@ export async function sweepOtherSpaceRoles(
   // #536 re-review 2: group by capability through the EXPANSION, not through RELATION_TO_CAP alone.
   // That table maps a relation to the capability it displays as, and `viewer_member` is deliberately
   // absent from it (a view grant writes viewer + viewer_member, and listing both would draw one grant
-  // as two rows). Using it to decide what to DELETE meant a swept `view` left viewer_member behind
+  // as two rows). Using it to decide what to DELETE meant a swept `view` left viewer_member behind —
   // and model.fga:108 defines `viewer: … or viewer_member`, so the principal kept viewing after
   // everything they held was "removed" (measured by the reviewer). Sweeping deletes the whole grant.
   const held = new Set((tuples ?? []).map((t) => t.key?.relation ?? ''))
@@ -954,7 +954,7 @@ export async function grantSpaceAccess(
 // sweep keeping both arms. The bare-capability form stays exactly what it says (an API that quietly
 // granted more than asked would be the same lie #553 removes); the bundle lives only where the noun is.
 // The server's ONE bundle table lives in roles.ts (builtinBundle); this surface derives from it
-// rather than restating it (#497 re-review: three copies of the same table — web, roles, spaces
+// rather than restating it (#497 re-review: three copies of the same table — web, roles, spaces —
 // with nothing pinning them equal, and a drift meant "the mapping creates arms the Members
 // composite then refuses with 400").
 const sameCapSet = (a: readonly string[], b: readonly string[]): boolean =>
@@ -1152,7 +1152,7 @@ export async function revokeSpaceAccess(
     stillCovered = r.stillCovered
   } else {
     // A grant made before migration 086 has no row (deliberately — see 086: reconstructing rows from
-    // tuples would assert grants nobody made). It stays revocable — but not refcount-blind (#536 review)
+    // tuples would assert grants nobody made). It stays revocable — but not refcount-blind (#536 review):
     // this pre-086 delete path knows nothing about assignment rows, so with a live custom-role assignment
     // bundling the same capability it deleted the shared leaf out from under it. If any row still covers
     // the capability, the tuples stay — the rowless grant is subsumed and "revoking" it removes nothing
@@ -1623,8 +1623,8 @@ export async function searchMemberCandidates(
 // name) and points `spaces.home_page_id` at it ATOMICALLY (the pointer write rides createPage's own
 // transaction via onCreatedInTx; a lost race rolls the page insert back and 409s). Gate = space `edit`
 // (owner ruling 3); the policy knob (#399) applies inside createPage's chokepoint like every create.
-// #364 (user ruling, plan A): the home page's STORED title is the space name, nothing else
-// deriveHomeTitle (the language-suffixed variant) is retired. The "Home / " suffix is rendered
+// #364 (user ruling, plan A): the home page's STORED title is the space name, nothing else —
+// deriveHomeTitle (the language-suffixed variant) is retired. The "Home" suffix (in the viewer's language) is rendered
 // by the viewer's UI from an i18n key, so search / pins / breadcrumbs keep one language-stable stored
 // value, every surface follows the VIEWER's language (anonymous/guest included), and the export
 // `_home.md` H1 is simply the space name. The title stays locked (updatePage refuses a home rename).
@@ -1832,7 +1832,7 @@ export async function spacesPlugin(app: FastifyInstance) {
     }
   })
 
-  // Comment audience setting (#100 / ADR-029): read + toggle who may comment on this space's pages
+  // Comment audience setting (#100 / ADR-029): read + toggle who may comment on this space's pages —
   // guests (any view link) and/or public members. manage-gated (it's an administrative setting).
   // #277 / ADR-116: space-level anonymous public toggle. GET = current state (manage-gated).
   // POST makes the space public — ONLY while the tenant parent switch is ON (OFF ⇒ 403, mirroring
@@ -1903,7 +1903,7 @@ export async function spacesPlugin(app: FastifyInstance) {
     return reply.code(204).send()
   })
 
-  // #308 / ADR-132: content import — materialize an export ZIP as pages under this space. MEMBER-ONLY
+  // #308 / ADR-132: content import — materialize an export ZIP as pages under this space. MEMBER-ONLY:
   // the route carries no `config.guest`, so a share_link (anonymous edit-guest, #274) is rejected before any
   // work — closing the anonymous-ZIP storage-abuse surface (§4). The executor is further gated to space `edit`
   // inside createPage (a viewer is 403'd). base64 ZIP in (no multipart dep; bodyLimit + streaming size caps

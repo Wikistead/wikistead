@@ -1,8 +1,8 @@
 import { RoleCaps } from "../ui/RoleTip";
 import type { SelectOption } from "../ui/Select";
 
-// #586 (review rejection, 2026-08-03): — every surface that
-// shows a role name shows the NAME, and says what it confers when asked.
+// #586 (review rejection, 2026-08-03): show only the role name, reveal capabilities on hover — every
+// surface that shows a role name shows the NAME, and says what it confers when asked.
 //
 // One place, because the alternative is what the last two rounds produced: each screen deciding for
 // itself whether a picker explains its choices, and a reviewer discovering the ninth one that does not.

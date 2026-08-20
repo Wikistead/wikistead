@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
-// M1 slice 2 (ADR-022) + #150 typed callouts (ADR-049) + #170 Y: the ::: container directive path.
+// M1 slice 2 (ADR-022) + #150 typed callouts (ADR-049) + #170 option Y: the ::: container directive path.
 // A typed callout (:::note/:::info/:::tip/:::warning/:::danger) renders as a single-container PANEL
 // widget (enter-to-edit, like columns/tabs): caret-OUT shows a flex 2-column panel (large icon +
 // variant title + nested Markdown body), caret-IN reveals the raw ::: source. An unknown type falls
@@ -38,7 +38,7 @@ test(":::note directive: panel widget, nested markdown, hide-fence + round-trip"
   expect(await page.locator("[data-pane=preview] .cm-content").innerText()).toContain(":::note");
 });
 
-// #150 / #170 Y: each type renders its own modifier class + a large icon column + a [label] (#94)
+// #150 / #170 option Y: each type renders its own modifier class + a large icon column + a [label] (#94)
 // title, laid out as the flex panel (icon vertically centred, not a tiny top-left glyph).
 test(":::warning[label] renders the warning panel with a large icon column + title", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();

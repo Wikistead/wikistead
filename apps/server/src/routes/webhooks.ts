@@ -15,7 +15,7 @@ import { pageEventDisposition } from '../page-disposition.js'
 // #228 / ADR-108: outbound webhooks. A subscription is admin-managed (RLS) and gated by the `webhooks`
 // entitlement at CREATION. Events are enqueued IN the operation's tx (enqueueWebhookOutbox — like the audit
 // outbox, NOT the fire-and-forget emit bus), so a commit-then-crash still delivers. A cross-tenant worker
-// drains the outbox, signs each delivery with HMAC, and uses the PINNED SSRF-safe client (guardedFetch
+// drains the outbox, signs each delivery with HMAC, and uses the PINNED SSRF-safe client (guardedFetch:
 // re-resolve+re-screen per delivery, no redirect follow — a 3xx is a FAILURE). N consecutive failures
 // auto-disable a hook. Payload is THIN (ids/type/actor/timestamp — never title/content), and events about a
 // PRIVATE or UNPUBLISHED-DRAFT page are never delivered (instance-level existence-hiding, comment 1000).
@@ -43,7 +43,7 @@ export async function createWebhook(
   // https-only, so accepting an http:// URL at creation would produce a hook that can NEVER deliver (it
   // fails every send and auto-disables) — a silently-dead config. Reject http here so creation and delivery
   // agree. A self-host http / internal-egress path is a deliberate SSRF-surface expansion → future ADR, not
-  // a create-time opt-in (#228 review 1).
+  // a create-time opt-in (#228 review point 1).
   if (u.protocol !== 'https:') throw Object.assign(new Error('url must be https'), { statusCode: 400 })
   const secret = randomBytes(24).toString('base64url')
   const filter = args.eventFilter && args.eventFilter.length ? args.eventFilter : null
@@ -68,8 +68,8 @@ export async function listWebhooks(
   const at = opts.cursor?.indexOf('|') ?? -1
   const after = opts.cursor && at > 0 ? { at: opts.cursor.slice(0, at), id: opts.cursor.slice(at + 1) } : null
   // #623: the cursor travels as an epoch NUMERIC, never as an ISO string. `created_at` is a
-  // timestamptz(6) and `toISOString` stops at milliseconds, so a cursor built from one names an
-  // earlier instant than the row it came from. On this DESC walk that does not duplicate — it SKIPS
+  // timestamptz(6) and `toISOString()` stops at milliseconds, so a cursor built from one names an
+  // earlier instant than the row it came from. On this DESC walk that does not duplicate — it SKIPS:
   // every row between the truncated instant and the true one is on the wrong side of `<` and appears
   // on no page at all. A webhook that silently vanishes from its own list is worse than one listed
   // twice. Same spelling as `/spaces` and `/members`; two spellings is how one of them stays wrong.
@@ -116,7 +116,7 @@ const signBody = (secret: string, ts: string, body: string) => `sha256=${createH
 // Drain a batch of due outbox rows and deliver each to every matching, active hook of its tenant.
 //
 // #385: the LEASE pattern, identical to the audit/search outboxes (the repo's established reliability
-// shape): a SHORT claim UPDATE (`claimed_at = now`, FOR UPDATE SKIP LOCKED — disjoint across workers,
+// shape): a SHORT claim UPDATE (`claimed_at = now()`, FOR UPDATE SKIP LOCKED — disjoint across workers,
 // stale claims re-claimed after 2 minutes) — then ALL external HTTP happens OUTSIDE any transaction (the
 // old shape held a pooled connection + row locks across every 10s-timeout delivery round-trip), and
 // bookkeeping (hook failure counts, outbox delete/reschedule) commits in a second short tx per row.
@@ -147,7 +147,7 @@ export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: num
     try {
       // Instance-level existence-hiding (tri-state). A private page → drop now (never deliver). A page whose
       // page#space link hasn't landed yet (publish writes it just after the tx) → RETRY, don't permanently
-      // drop a legitimate page.published (#228 review 2); dropped only once attempts are exhausted, and it
+      // drop a legitimate page.published (#228 review point 2); dropped only once attempts are exhausted, and it
       // never delivers while unlinked so a genuine draft stays hidden.
       const disp = await pageEventDisposition(fga, row.payload)
       if (disp === 'suppress') { await pool`DELETE FROM webhook_outbox WHERE id = ${row.id}`; handled++; continue }
@@ -197,7 +197,7 @@ export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: num
 }
 
 // Poll-loop worker (mirrors startAuditDrainWorker). A per-instance in-flight guard prevents overlap; FOR
-// UPDATE SKIP LOCKED handles across instances. Returns a stop for graceful shutdown.
+// UPDATE SKIP LOCKED handles across instances. Returns a stop() for graceful shutdown.
 export function startWebhookDrainWorker(fga: OpenFgaClient, intervalMs = 5000): () => void {
   let running = false
   let stopped = false

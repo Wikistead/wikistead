@@ -67,7 +67,7 @@ describe("#579: one target, one role control", () => {
   }
 });
 
-// #579 (2026-08-03 ruling): — the vocabulary goes with the concept.
+// #579 (2026-08-03 ruling): "adding a role" is not a thing here — the vocabulary goes with the concept.
 //
 // The control is now a single Select whose value is the role the member has, so there is nothing to
 // "add": choosing a different value replaces, and the server converges (a71d8100). A screen that still
@@ -93,7 +93,7 @@ describe("#579: the tenant member screen has no ADD-a-role vocabulary left", () 
   });
 
   it("and the row's control shows a value rather than a placeholder", () => {
-    // value= is the shape of a picker that hides what you have — the thing chips existed to work around
+    // value="" is the shape of a picker that hides what you have — the thing chips existed to work around
     expect(page).toMatch(/value=\{currentRoleValue\(/);
     expect(page).not.toMatch(/testId="member-role-select"[\s\S]{0,200}value=""/);
   });

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { enterEdit, openScratch, sleep } from "../helpers";
 
 // #267 the REAL standing QA torture-page body (fixtures/torture-page.md — copied from the
-// "QA" template). The synthetic heavy fixture below passed while THIS body
+// standing rendering-QA torture-page template). The synthetic heavy fixture below passed while THIS body
 // still burst the picker's two-pane row out of the dialog, so the geometry tests must use the real thing.
 const TORTURE = readFileSync(fileURLToPath(new URL("../fixtures/torture-page.md", import.meta.url)), "utf8");
 

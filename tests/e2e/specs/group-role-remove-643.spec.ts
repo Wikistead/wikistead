@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
+// #643 (user ruling): the user noticed this page offers no way to remove a role granted to a group.
 //
 // It was not missing — it was hidden. Choosing the picker's placeholder ("choose a role") performed the
 // revocation, which nobody reads it as, and which put a destructive act in the same list as every
@@ -37,7 +38,7 @@ async function stub(page: Page) {
 }
 
 // by the row's OWN testid and its own label: a person can be IN "wiki Editors", so a text match on the
-// table finds their row too, and `.first` then measures whichever happens to be higher.
+// table finds their row too, and `.first()` then measures whichever happens to be higher.
 const groupRow = (page: Page, name: string) =>
   page.locator('[data-testid="member-row-group"]').filter({ hasText: name }).first();
 

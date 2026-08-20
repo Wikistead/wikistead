@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { openDemo, createScratchPage, sleep } from "../helpers";
 
 // #320 / ADR-126: the watch toggle + notification bell UI. The fan-out + read-path authz are pinned by the
-// server anti-tests (notifications-320.test.ts); this covers the real-browser wiring — the 🔔 toggle persists a
+// server anti-tests (notifications-320.test.ts); this covers the real-browser wiring — the bell toggle persists a
 // watch (POST/DELETE /watches) and the bell renders + opens its inbox. Real Chromium.
 
 test("#320 the page watch toggle persists a subscription (POST then DELETE /watches)", async ({ browser }) => {

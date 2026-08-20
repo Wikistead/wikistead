@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit } from "../helpers";
 
-// #587 bounce (user, on the device): " pill ".
+// #587 bounce (user, on the device): do not change the floating display-mode pill.
 //
 // Adopting the DS radiogroup gave this surface arrow keys, roving focus and real `aria-checked` — all
 // of which stay — but it also swapped the shape underneath: the 28x28 round segments became the DS

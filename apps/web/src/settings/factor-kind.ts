@@ -36,14 +36,14 @@ export function factorKindName(kind: string | null | undefined, t: TFunction): s
  *
  *     en  "Set up Authenticator app to continue."          no article, and mid-sentence capital
  *     en  "…signing in also asks for Authenticator app."   no article — and the wrong noun besides
- * ja … what is asked for is the CODE, not the app
+ *     ja  (asked for "your authenticator app" beside the password)   what is asked for is the CODE, not the app
  *
  * Two shapes, because the two sentence types want different nouns, and one shared noun cannot be right
  * for both. What you INSTALL is an app; what you PRESENT is a code from it. A passkey happens to be the
  * same word in both, which is exactly why a single function looked correct for a year.
  *
- * setup ja / en a passkey / an authenticator app
- * presented ja / en a passkey / a code from your authenticator app
+ *     setup      ja "passkey" / "authenticator app"          en a passkey / an authenticator app
+ *     presented  ja "passkey" / "authenticator-app code"     en a passkey / a code from your authenticator app
  *
  * ⚠️ The ARTICLES live in the locale strings, never in this code. Adding "a"/"an" here would put an
  * English grammar rule inside logic every language has to pass through, and the next locale would have
@@ -61,7 +61,7 @@ export function factorKindPhrase(kind: string | null | undefined, t: TFunction, 
 }
 
 /**
- * The kinds a workspace accepts, written out for a reader (#686 A).
+ * The kinds a workspace accepts, written out for a reader (#686 family A).
  *
  * Three sentences named a kind while the tenant's stance was already in hand one line away: the
  * interstitial's prompt said "set up an authenticator app" beside a button offering only a passkey, and
@@ -92,7 +92,7 @@ export function factorKindsPhrase(
 }
 
 /**
- * The kinds a stance accepts, as the screen sees it (#686 A ②).
+ * The kinds a stance accepts, as the screen sees it (#686 family A ②).
  *
  * The server answers the same question per ROW (`counts`), deliberately, because it also needs the host
  * — a passkey made before a domain move is a row nobody can present. This is the coarser question the
@@ -129,8 +129,9 @@ export function browserCanUseFactorKind(kind: string): boolean {
  *
  * The door and the recovery-code screen both let a member pick which proof to present, and the first
  * shape of both charged a second click for the passkey: "Use passkey" only revealed another button
- * that said "confirm with your passkey". The owner's words
- * — and they are right that the click is unnecessary, since
+ * that said "confirm with your passkey". The owner's words: having to press yet another
+ * confirm-with-passkey button after already choosing it feels deeply wrong — and they are right
+ * that the click is unnecessary, since
  * the choice itself is the user activation the ceremony needs.
  *
  * The rule is about the KIND, not about either screen. A code has to be typed, so choosing it can

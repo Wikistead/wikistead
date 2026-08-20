@@ -21,7 +21,7 @@ export const HINT_PANEL =
  *  panel that lists capabilities, and it is here so its box and its width stay together. */
 export const HINT_PANEL_W = "w-[220px]";
 
-// #630 (user ruling, 2026-08-05): " tooltip ".
+// #630 (user ruling, 2026-08-05): unify ALL tooltip-like surfaces completely, delays included.
 //
 // Placement was unified in #603 and the box in #582 ⑤; what was left drifting is the BEHAVIOUR.
 // Measured before this: four implementations, three different open delays (180 / 180 / 0), two different
@@ -41,8 +41,8 @@ export const HINT_CLOSE_GRACE_MS = TOOLTIP_CLOSE_GRACE_MS;
 // The entrance: a pop, at the motion tokens' values.
 //
 // #630 first replaced the pop with a bare fade at `--dur-fast`, and the result was invisible — a 120ms
-// cross-fade on a panel the eye is already resting on reads as nothing happening ("
-// "). `--dur-fast` is the token for "hover / press / small state
+// cross-fade on a panel the eye is already resting on reads as nothing happening (reported as "the
+// pop-in animation seems unimplemented"). `--dur-fast` is the token for "hover / press / small state
 // changes"; a floating panel arriving is what `--dur-base` is for, which is what `.wks-pop` in tokens.css
 // already used.
 //

@@ -1,5 +1,6 @@
 // #632 (user ruling, 2026-08-05): how a list says which row you are on.
 //
+// Fix the designs that read as obviously AI-made — the curved bar jutting out on the left looks AI-ish.
 // The settings nav marked its selection with `inset 2px 0 0 accent` on a `rounded-md` box, so the bar
 // curved inward at both ends — the shape the ruling names. The page tree had already answered the same
 // question differently, with a wash of accent and no bar at all, and the ruling picks that one.

@@ -1,15 +1,15 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
-// #659 (user ruling, 2026-08-06)
+// #659 (user ruling, 2026-08-06): just call it "Advanced settings" or the like.
 //
-// The toggle was called (narrow what it reaches) when closed and (close the
-// narrowing) when open. Two problems in one control
+// The toggle was labelled "narrow what it reaches" when closed and "close the narrowing" when open.
+// Two problems in one control:
 //
-// 1. It renamed itself. A control whose label changes with its state asks the reader to learn two
-// words for one thing, and the second word describes the ACTION rather than what is behind it.
-// 2. (what it reaches) names half of what is inside. The panel holds spaces AND capabilities,
-// and a capability is not a destination — it is what may be done once there.
+//   1. It renamed itself. A control whose label changes with its state asks the reader to learn two
+//      words for one thing, and the second word describes the ACTION rather than what is behind it.
+//   2. "What it reaches" names half of what is inside. The panel holds spaces AND capabilities,
+//      and a capability is not a destination — it is what may be done once there.
 //
 // Measured with the panel OPEN and CLOSED and the two labels compared, because each reads fine on its
 // own; the defect only exists across the two states. The chevron is asserted separately, by ROTATION

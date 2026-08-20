@@ -456,7 +456,7 @@ describe('cross-space move (security)', () => {
 
 // ── tree listing is FGA-filtered, not just RLS-filtered ────────────────────
 //
-// the project design notes " OpenFGA ": the page tree must not list (or leak the
+// the project design notes (confirm with OpenFGA right before display): the page tree must not list (or leak the
 // title of) a resource the user cannot view. RLS only enforces tenant isolation.
 // Anti-trivial design: the locked space/page are in the SAME tenant (so RLS
 // DOES return them) and we assert the user genuinely cannot view them — the only

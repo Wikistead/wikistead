@@ -4,7 +4,7 @@ import { EditorState } from "@codemirror/state";
 import { markdownExtension } from "../markdown-config";
 import { linkCopyRange } from "./paste-linkify";
 
-// #223 comment 895 (A): CM's copy is a raw doc-slice, so copying a rendered `[hoge](url)` over a
+// #223 comment 895 (root cause A): CM's copy is a raw doc-slice, so copying a rendered `[hoge](url)` over a
 // selection that maps through the hidden markers yields a fragment (`hoge](`). linkCopyRange expands the
 // copied range to whole Link nodes so text/plain is the COMPLETE source. Pure — driven by a real state.
 const stateOf = (doc: string) => EditorState.create({ doc, extensions: [markdownExtension()] });

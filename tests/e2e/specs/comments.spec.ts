@@ -110,7 +110,7 @@ test("comments panel: × and Esc close it; outside-click and editor-Esc do not",
 });
 
 // #214 comment 751: (1) the reply banner previews the TARGET comment's content; (2) deleting the last
-// comment of a thread leaves NO empty thread frame; (3) no resolve wording //"resolved")
+// comment of a thread leaves NO empty thread frame; (3) no resolve wording ("resolved"/"unresolved" in any locale)
 // appears anywhere — the empty state is resolve-agnostic. Verified by real rendered DOM (not just testids).
 test("#214 comment 751: reply preview, no empty thread on delete, no resolve wording", async ({ page }) => {
   await openDemo(page);

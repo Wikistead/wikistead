@@ -3,15 +3,16 @@ import { openDemo, sleep } from "../helpers";
 
 // #662: the capability checkboxes in the API key form read `roleCaps.${c}` — a namespace present in
 // neither locale — and i18next's fallback painted the raw wire verb. A Japanese admin was offered
-// "view edit publish delete comment manage" beside .
+// "view edit publish delete comment manage" beside the localised "target spaces" label.
 //
 // What makes this worth an e2e rather than only the unit scan: the unit scan proves the KEY exists, and
 // the screen is where "does a Japanese reader see Japanese" is actually answered. The two measure
 // different things, and the reason this shipped at all is that everything upstream of the screen was
 // green.
 //
-// Measured as "no raw wire verb survives", not as "some Japanese appears". A pin that looked for
-// would stay green if five of the six labels were still English, and a pin that asserted a specific
+// Measured as "no raw wire verb survives", not as "some Japanese appears". A pin hunting the Japanese
+// word for "view" would stay green if five of the six labels were still English, and a pin that
+// asserted a specific
 // string would break the day the copy is reworded — which #659 just did to its neighbours.
 // ⚠️ #667 replaced the six borrowed role verbs with the resource-type x read/write table, so the list
 // this spec was written against no longer exists and it went red on master. What it measures survives

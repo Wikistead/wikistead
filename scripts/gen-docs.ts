@@ -1,9 +1,9 @@
 #!/usr/bin/env tsx
 // "Code is truth" docs generator + CI stale-guard (#139 / ADR-080 doc↔code linkage).
 //
-// pnpm docs:gen → (re)write the generated Markdown from code.
-// pnpm docs:check → regenerate in memory and FAIL if the committed file differs
-// (the CI stale-guard: no stale generated docs can land).
+//   pnpm docs:gen     → (re)write the generated Markdown from code.
+//   pnpm docs:check   → regenerate in memory and FAIL if the committed file differs
+//                       (the CI stale-guard: no stale generated docs can land).
 //
 // The generated Markdown is the SSG's "code is truth" source (fed to wikistead-docs).
 // Generation is a CI build step over CE code only — it never runtime-imports product
@@ -25,7 +25,7 @@ const BRAND_TOKENS = ['bg', 'fg', 'fg-dim', 'panel', 'panel-2', 'panel-3', 'bord
 
 // #709: the TYPE tokens ride the kit too — colours alone left the consuming sites hand-picking
 // faces (the docs set body text in the wordmark face; the exact double bookkeeping the kit exists
-// to end). Theme-independent, extracted once, emitted on :root. Internal var references are
+// to end). Theme-independent, extracted once, emitted on :root. Internal var() references are
 // rewritten to the kit's own names so the emitted values resolve without the product stylesheet.
 const FONT_TOKENS: readonly { from: string; to: string }[] = [
   { from: 'font', to: 'font' }, // body/UI: Inter + Noto Sans JP
@@ -70,8 +70,9 @@ function renderCapabilitiesJson(): string {
  * #731's check compares the documentation's name for an admin TAB with the product's label, and sees
  * nothing else. Everything a reader actually hunts for on the screen is one level below it: the button
  * they must press, the badge telling them what state a row is in. The page written during #731 itself
- * drifted on three of them ( for , for , for ) and was in
- * quotation marks, presented as the words on the screen. A reader looking for it finds nothing.
+ * drifted on three of them (a near-synonym in place of the verify / pending / release labels), and one
+ * drifted word sat in quotation marks, presented as the words on the screen. A reader looking for it
+ * finds nothing.
  *
  * WHICH keys count is declared in `screen-vocabulary.mjs`; the WORDS come from the locale files, so a
  * rename moves the check instead of breaking it.
@@ -301,8 +302,8 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
     // #731: the admin console's TAB LABELS, as the product spells them, so the documentation can be
     // checked against the screen instead of against somebody's memory of it. The docs had drifted to
     // three names the product does not use ("Sign-in methods" for a tab called Authentication,
-    // "Embeds policy" for , "Publishing" for ), and nothing could notice: the two
-    // vocabularies live in different repositories.
+    // "Embeds policy" for the external-embeds tab, "Publishing" for the publish-settings tab), and
+    // nothing could notice: the two vocabularies live in different repositories.
     //
     // Emitted rather than hand-copied for the usual reason, and one more: #732 renamed several of
     // these labels on the same day. A documentation check that spelled the words out would have gone

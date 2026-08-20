@@ -235,7 +235,7 @@ describe('#712 F: the Confluence macro people actually use converts', () => {
 })
 
 describe('#712 B: an attachment LINK reaches the file it names', () => {
-  // ① closed: the link is now RE-POINTED rather than reported as lost. Reporting it was the
+  // leftover ① closed: the link is now RE-POINTED rather than reported as lost. Reporting it was the
   // half that could be done at parse time (the attachment id does not exist until materialisation);
   // the rewrite pass has the id, so the link becomes the product's own file notation.
   it('re-points a link to a file the archive carries', async () => {
@@ -312,7 +312,7 @@ describe('#712 H: a Confluence emoji does not become a broken image', () => {
   })
 })
 
-// ── #712 ③ (② / c5556-3): the input this adapter does NOT read ────────────────────────
+// ── #712 ③ (leftover ② / c5556-3): the input this adapter does NOT read ──────────────────
 //
 // ADR-227 §6 scoped Confluence to the HTML export. c5489-3 then measured what happens when storage
 // format arrives anyway: `<ac:structured-macro ac:name="jira">` matched nothing in the walk, fell to

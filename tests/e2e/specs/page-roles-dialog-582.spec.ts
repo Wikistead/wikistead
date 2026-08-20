@@ -91,7 +91,7 @@ test("#586: a role badge lists what it lets someone do", async ({ page }) => {
 
     const badge = page.getByTestId("grant-origin").first();
     await expect(badge, "the granted row is there to describe").toBeVisible({ timeout: 8000 });
-    // keyboard first: a tooltip only a mouse can reach is not
+    // keyboard first: a tooltip only a mouse can reach does not count as "easy to check"
     await badge.focus();
     const tip = page.getByRole("tooltip").first();
     await expect(tip).toBeVisible({ timeout: 4000 });
@@ -110,7 +110,7 @@ test("#586: a role badge lists what it lets someone do", async ({ page }) => {
     const editBadge = editRow.getByTestId("grant-origin");
     await editBadge.focus();
     // …and read the tooltip THIS badge points at. The manage row's tooltip is still open from the focus
-    // above, so `getByRole("tooltip").first` reads that one — which it did, and passed for the wrong
+    // above, so `getByRole("tooltip").first()` reads that one — which it did, and passed for the wrong
     // reason until the rendered text was actually looked at.
     const tipId = await editBadge.getAttribute("aria-describedby");
     expect(tipId, "the badge names its own tooltip").toBeTruthy();
@@ -135,7 +135,7 @@ test("#586: a role badge lists what it lets someone do", async ({ page }) => {
     expect(atRest, "the option is the role's name and nothing else").toBe("manager");
 
     // Pointing at it reveals what it confers…
-    // Two moves, not `hover`: a single placement leaves the page with no pointer MOVEMENT to react to
+    // Two moves, not `hover()`: a single placement leaves the page with no pointer MOVEMENT to react to
     // (measured — `[role=option]:hover` matched nothing afterwards). The assertion then reads whichever
     // option the pointer actually ended on, because the list settles after the box is measured and the
     // row under the pointer is not always the row that was aimed at — an earlier version of this test
@@ -145,7 +145,7 @@ test("#586: a role badge lists what it lets someone do", async ({ page }) => {
     await page.mouse.move(box.x + box.width / 2 + 2, box.y + box.height / 2 + 1);
     await sleep(400);
     // RE-AIMED by #582 (review rejection, 2026-08-04): what is revealed is a FLOATING PANEL beside the list,
-    // not text inside the option — . So the option is read for its
+    // not text inside the option — the reject described a second window-like thing appearing. So the option is read for its
     // name and the panel for the capabilities. A custom role can be highlighted here (the space specs
     // leave some behind), and its panel lists what IT confers, so the assertion is that the panel is
     // showing something rather than that it contains one particular word.

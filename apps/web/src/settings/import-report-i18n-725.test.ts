@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // #725 (review rejection) — the three things a reader could not do on this screen.
 //
-// ② was the serious one: UI . The headings and the page's own
+// ② was the serious one: in a Japanese UI, every degrade reason came out in English. The headings and the page's own
 // prose translated; `degraded[]` did not, because the server wrote those sentences in English and the
 // screen printed them through. This is the report — the feature's whole point is that a person can
 // read it and decide what to redo by hand — so English in the middle of it is the defect, not a

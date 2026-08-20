@@ -2,11 +2,12 @@ import { test, expect } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
 // #639 (user ruling, 2026-08-06): the source sweep says no screen WRITES a boxed row; this says the rows
-// a reader actually sees behave. Three things the ruling asks for that only the real DOM can answer
+// a reader actually sees behave. Three things the ruling asks for that only the real DOM can answer:
 //
-// long one scrolls. A fixed height would satisfy a source check and still show an empty frame.
-// Rows in one list are the same height (#586's lesson, where built-in and custom rows differed).
-// The separator is a rule under each row and not under the last one.
+//   Scroll once the list grows, instead of showing an empty box by default — a short list is short, and only a
+//   long one scrolls. A fixed height would satisfy a source check and still show an empty frame.
+//   Rows in one list are the same height (#586's lesson, where built-in and custom rows differed).
+//   The separator is a rule under each row and not under the last one.
 //
 // Both lists are SUPPLIED rather than taken from whatever the fixture happens to hold: these are the
 // screens where a tenant may legitimately have none, and a spec that measures an empty list measures
@@ -64,7 +65,7 @@ for (const l of LISTS) {
     expect(m.ruled, "every row but the last carries the separating rule").toBeGreaterThanOrEqual(m.rows - 1);
     expect(m.lastRuled, "…and the last does not — a trailing rule reads as a list that continues").toBe(false);
     expect(m.heights.length, `rows in one list are the same height (saw ${JSON.stringify(m.heights)})`).toBe(1);
-    // : a short list does not reserve space it is not using
+    // "no default empty box": a short list does not reserve space it is not using
     expect(m.scrolls, "a list this short does not scroll").toBe(false);
     expect(m.boxHeight, `the box is its rows (${m.boxHeight}px around ${Math.round(m.rowsHeight)}px of rows)`)
       .toBeLessThan(m.rowsHeight + 24);
@@ -100,7 +101,7 @@ test("#639: …and once there are many rows the box stops growing and scrolls", 
 
   expect(m.rows, "the stub actually filled the list").toBeGreaterThan(20);
   expect(m.scrolls, "a long list scrolls inside its own box").toBe(true);
-  // and the PAGE does not grow with the list, which is what meant
+  // and the PAGE does not grow with the list, which is what "stretches downward forever" meant
   expect(m.docHeight, `the page is ${m.docHeight}px tall with ${m.rows} rows in it`)
     .toBeLessThan(m.viewport * 2);
 });

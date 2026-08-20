@@ -24,7 +24,7 @@ export function colorFromString(seed: string): string {
 }
 
 // #440 the same colour as a HEX string. WebGL renderers (sigma, in the local graph) parse
-// colours themselves and do not understand `hsl` — a space-separated one least of all — so a node
+// colours themselves and do not understand `hsl()` — a space-separated one least of all — so a node
 // handed the CSS form silently fell back to the default paint while the DOM legend swatch beside it,
 // which the browser resolved, showed the real colour. One seed, two renderers, two answers. Both
 // sides now take this, so they cannot disagree.
@@ -54,10 +54,11 @@ export function initials(name: string): string {
   const trimmed = (name ?? "").trim();
   if (!trimmed) return "?";
   const graphemes = Array.from(trimmed);
-  // #288: any non-ASCII glyph (CJK / emoji) → a SINGLE glyph. A half-width + full-width pair like "2"
-  // (from "246 …") has an unstable width, so the chip stretches and wraps differently per size /
-  // per call site. Pick ONE glyph: a leading LETTER (ASCII or CJK) is meaningful on its own; a leading
-  // digit/symbol is not, so skip to the first non-ASCII glyph (the meaningful CJK/emoji) — "246 …" → .
+  // #288: any non-ASCII glyph (CJK / emoji) → a SINGLE glyph. A half-width digit + full-width CJK pair
+  // (e.g. from a CJK page title starting "246 …") has an unstable width, so the chip stretches and wraps
+  // differently per size / per call site. Pick ONE glyph: a leading LETTER (ASCII or CJK) is meaningful
+  // on its own; a leading digit/symbol is not, so skip to the first non-ASCII glyph (the meaningful
+  // CJK/emoji) — a digit-prefixed CJK name yields its first CJK glyph.
   if (graphemes.some((g) => /[^\x00-\x7F]/.test(g))) {
     const first = graphemes[0]!;
     if (/\p{L}/u.test(first)) return first;

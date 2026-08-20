@@ -2,7 +2,8 @@
 // a border.
 //
 // A `border-left` follows the box's corner radius. Against a rounded edge it curves inward at both ends
-// — the the ruling names — and the fix is NOT to square the corners ("
+// — the "boomerang" the ruling names — and the fix is NOT to square the corners (the ruling was explicit
+// that the frame's rounding may stay; the complaint is the line bending, not the radius). The frame stays round; the
 // bar becomes a rectangle that ignores it.
 //
 // The list of macros comes from the REGISTRY. caught this exact ticket shipping a fix that reached
@@ -47,6 +48,7 @@ describe("#632: a container macro's left bar is a strip, not a border", () => {
     const sources = [css(), baseTheme()].join("\n");
     // The bar still existing is what makes the previous assertion mean something: without it, deleting
     // the border would satisfy that test by removing the bar entirely, which the ruling refused outright
+    // (keep the band, just straighten it).
     //
     // #632 it is a BACKGROUND BAND now, not an absolutely-positioned child. A child could not be
     // clipped by the box's corners — given `border-radius: inherit` its radius was clamped to half its

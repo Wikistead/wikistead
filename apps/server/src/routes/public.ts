@@ -51,7 +51,8 @@ export async function tenantPublicEnabled(tenantId: string): Promise<boolean> {
 }
 
 // Read page from DB under RLS — tenant isolation is maintained even for public pages.
-// #227: a page can carry the public grant (view_base@user:*) yet be UNPUBLISHED (published_at NULL)
+// Never bypass RLS on the grounds that the visitor is anonymous.
+// #227: a page can carry the public grant (view_base@user:*) yet be UNPUBLISHED (published_at NULL) —
 // a draft that was toggled public, or public-before-publish. Its title/content/existence must NOT leak
 // to anonymous visitors. Every public read here ALSO requires `published_at IS NOT NULL` (unpublished →
 // treated as absent → 404), alongside the FGA view check. The public surface exposes only the PUBLISHED
@@ -247,7 +248,7 @@ export async function listPublicBranch(
 
 // ── #376 / ADR-149 §2: public resource gates ─────────────────────────────
 //
-// Every /public/* RESOURCE route runs the SAME ordered gate before touching bytes
+// Every /public/* RESOURCE route runs the SAME ordered gate before touching bytes:
 // tenant from Host → tenant public master switch (#253) → FGA ANON view on the OWNING page →
 // `published_at IS NOT NULL` (LOAD-BEARING: the direct `user:*` public toggle carries no `published`
 // requirement in the model, so ANON view alone would leak a public-toggled DRAFT's resources).
@@ -306,11 +307,11 @@ const PUBLIC_RENDER_CACHE_TTL_S = 600
 // behaviour is pinnable with client-shaped stubs (a real 1000-page fixture would poison the shared
 // store — same reasoning as the #540 pin).
 //
-// #623: and it is answered a WINDOW at a time. The fallback branch above is the one that needs it most
+// #623: and it is answered a WINDOW at a time. The fallback branch above is the one that needs it most —
 // it exists precisely because the tenant has more public pages than the ceiling, and it used to load every
 // published page in the tenant and return every confirmed one in a single response. The window is a keyset
 // on `(created_at, id)`: DESC with a tiebreaker, because two pages created in the same millisecond (an
-// import, a template expansion) have no order between them otherwise and would straddle the boundary
+// import, a template expansion) have no order between them otherwise and would straddle the boundary —
 // one repeated, one lost. Never OFFSET: a page published while a reader walks would shift every later row.
 //
 // The confirm makes the window under-fill (a candidate the anonymous check rejects leaves a gap), so the
@@ -336,7 +337,7 @@ const CONFIRM_OVER_FETCH = 2
 /** …and how many such windows ONE request may spend looking. Past this the response is short, not longer. */
 const CONFIRM_MAX_WINDOWS = 3
 
-// #623: an epoch NUMERIC, never an ISO string. `created_at` is a timestamptz(6) and `toISOString`
+// #623: an epoch NUMERIC, never an ISO string. `created_at` is a timestamptz(6) and `toISOString()`
 // stops at milliseconds, so a cursor built from one names an earlier instant than the row it came from.
 // On this DESC walk that does not duplicate — it SKIPS: every page whose `created_at` falls between the
 // truncated instant and the true one is on the wrong side of `<` and appears on no page at all. A
@@ -581,12 +582,12 @@ export async function publicPlugin(app: FastifyInstance) {
     if (page.noindex) reply.header('X-Robots-Tag', 'noindex')
     //
     // Public child tree: each child is individually checked (loadPublicChildTree) — a
-    // public parent does NOT make its children public, and non-public children (and their
-    // subtrees) are excluded with no observable gap.
+    //   public parent does NOT make its children public, and non-public children (and their
+    //   subtrees) are excluded with no observable gap.
     //
     // Explicitly NOT included: viewerUsers/viewerGroups (internal ACL),
-    // created_by (would leak user IDs), revision history,
-    // attachment presigned URLs, non-public children.
+    //   created_by (would leak user IDs), revision history,
+    //   attachment presigned URLs, non-public children.
     // #464 / ADR-175: count this ANONYMOUS public read for page analytics — entitled tenants only
     // (collection is itself EE-gated), deduped per-IP/page/day (a floor: NAT collapses distinct readers),
     // the IP hashed and never stored. AFTER the public view gate above, so existence-hiding is intact and
@@ -631,7 +632,7 @@ export async function publicPlugin(app: FastifyInstance) {
 
   // The attachment routes: resolve the attachment's OWNING page under tenant RLS (a cross-tenant id is
   // a DB no-row → uniform 404, matching the public space route), run the ordered public gate on that
-  // page, then call the SHARED service with subject = user:anonymous (which re-runs its own view gate
+  // page, then call the SHARED service with subject = user:anonymous (which re-runs its own view gate —
   // defense-in-depth; the member/guest routes are untouched).
   const publicAttachmentPage = async (tenantId: string, attId: string): Promise<string | null> => {
     const rows = await withTenantTx(tenantId, async (tx) =>

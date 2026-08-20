@@ -7,7 +7,7 @@ import { findMathSpans } from "./math.js"; // #505: one math-delimiter rule, bot
 import { HEADINGS, footnoteRefLabel } from "./md-nodes.js";
 
 // #384 / ADR-160: ONE markdown tree-walk, two sinks. This visitor owns every structural decision the
-// two hand-mirrored walkers (apps/web md-render.ts DOM walk; render.ts SafeHtml walk) used to duplicate
+// two hand-mirrored walkers (apps/web md-render.ts DOM walk; render.ts SafeHtml walk) used to duplicate:
 // the node switch, MARKS skipping, inline recursion + leading-space trim, table structure, footnote
 // collection/numbering/section, the resolver-corrected directive ranges, and the wks-attachment: / URL
 // scheme judgment for links. It can ONLY emit through the sink's open/close/text/leaf hooks — it never
@@ -22,7 +22,7 @@ import { HEADINGS, footnoteRefLabel } from "./md-nodes.js";
 export const mdParser = parser.configure([directiveExtension, Strikethrough, Table, TaskList, highlightExtension, footnoteExtension]);
 export type MdNode = ReturnType<typeof mdParser.parse>["topNode"];
 
-// Container roles emitted via open/close; leaf roles via leaf.
+// Container roles emitted via open/close; leaf roles via leaf().
 export type MdOpenRole =
   | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
   | "p" | "blockquote" | "ul" | "ol" | "li"
@@ -167,8 +167,8 @@ function emitProse(st: WalkState, s: string): void {
 //
 // CommonMark folds a soft break into a space, and this walker passed the newline through as text, so a
 // two-line quote arrived as one run of prose — while the editing surface, which draws the source, shows
-// two lines. Same document, two answers, and the export is where a reader notices: "
-// ". The editor cannot be the one to change (it renders the text you typed), so the static surfaces
+// two lines. Same document, two answers, and the export is where a reader notices: line breaks in a
+// quote block vanish. The editor cannot be the one to change (it renders what you typed), so the static surfaces
 // follow it, which is also the wiki-familiar GFM `breaks: true` behaviour.
 //
 // The leading whitespace of the continuation is dropped with the break: inside a quote the source is
@@ -182,7 +182,7 @@ function emitTextLines(st: WalkState, s: string): void {
   });
 }
 
-// A break is emitted lazily, when something follows it. A trailing newline before the end of a block
+// A break is emitted lazily, when something follows it. A trailing newline before the end of a block —
 // which every block has — would otherwise hang an empty `<br>` inside every heading and paragraph.
 function flushBr(st: WalkState): void {
   if (!st.pendingBr) return;
@@ -206,7 +206,7 @@ function walkInlineChildren(st: WalkState, parent: MdNode): void {
     first = /\r?\n[ \t]*$/.test(s);
     if (!first) first = false;
   };
-  // #505 / ADR-191: math spans are resolved over this node's WHOLE source, once, before the child walk
+  // #505 / ADR-191: math spans are resolved over this node's WHOLE source, once, before the child walk —
   // the same thing the editor does over the whole document. Scanning the per-child text runs instead was
   // measurably wrong: markdown emits an `Escape` node for every backslash, so `$$\int_0^1 x\,dx$$` reached
   // the sink as four fragments and never matched, and the formula printed as raw TeX. A span found here
@@ -253,7 +253,7 @@ function walkInlineNode(st: WalkState, node: MdNode): void {
       const urlNode = node.getChild("URL");
       const rawHref = urlNode ? txt(st.src, urlNode) : "";
       // #273 / ADR-120 → ADR-160 §2: `wks-attachment:` is OUR opaque scheme; it must NEVER be emitted as
-      // a raw anchor on a static surface. Under one visitor this is the SINGLE structural intercept
+      // a raw anchor on a static surface. Under one visitor this is the SINGLE structural intercept —
       // it fires before ANY anchor role can be emitted (supersedes the "two sites" wording; both sinks'
       // anti-tests remain as the per-surface pins).
       if (/^\s*wks-attachment:/i.test(rawHref)) {

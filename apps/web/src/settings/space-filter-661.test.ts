@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { filterSpaceOptions, type SpaceOption } from "./space-filter";
 
-// #661 (user, on the device): " UI ".
+// #661 (user, on the device): asked for a UI to narrow down the target spaces.
 //
 // The list was every space the admin can see, as checkboxes, with no filter and no bound. This form was
 // built in #637 slice 7, AFTER #623 had swept the other fourteen lists, so it inherited none of that

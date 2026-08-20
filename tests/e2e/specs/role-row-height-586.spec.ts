@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
-// #586 (review rejection): . Built-in rows
+// #586 (review rejection): built-in and custom role rows differ in size, which looks wrong. Built-in rows
 // measured 17px and custom rows 32px — only the custom ones carry IconButtons, and the row had no box
 // of its own, so nearly-double-height rows alternated down one list.
 //

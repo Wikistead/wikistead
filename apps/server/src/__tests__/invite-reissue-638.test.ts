@@ -110,7 +110,8 @@ describe('#638: a pending invite can be handed over again', () => {
   }, 120_000)
 
   it('the list says which invitations have been mailed', async () => {
-    // : sending has always been best-effort, and its outcome was
+    // The acceptance: the list must show who has not been handed an invite yet. Sending has always been
+    // best-effort, and its outcome was
     // reported once — on the response to the create call — and then forgotten.
     const addr = email('mailed')
     const { id } = await invite(addr)

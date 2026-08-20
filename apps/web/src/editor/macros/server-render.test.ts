@@ -41,7 +41,7 @@ describe("renderMarkdownToHtml — XSS boundary (#88)", () => {
   });
 });
 
-// #89 / ADR-097 (the sanitize ): `:::table` cells that carry BLOCK content render through this
+// #89 / ADR-097 (the sanitize "lifeline"): `:::table` cells that carry BLOCK content render through this
 // SAME shared renderer, so its tag allowlist IS the cell sanitize boundary. The reviewer (comment 710)
 // required the allowlist be pinned as an executable contract — a positive list AND a negative assert
 // so an external-resource / executable tag can never slip in via a table cell and bypass the embed
@@ -58,7 +58,7 @@ describe("renderMarkdownToHtml — #89/ADR-097 cell block-content sanitize allow
     expect(h).toContain('<a href="https://ok.example" rel="noopener noreferrer nofollow">');
   });
 
-  // NEGATIVE : NO external-resource / executable / form tag is ever emitted live — each degrades
+  // NEGATIVE (the lifeline): NO external-resource / executable / form tag is ever emitted live — each degrades
   // to escaped text. A raw <iframe src> in a cell must NOT become a live frame (else it bypasses #108).
   const FORBIDDEN = ["iframe", "object", "embed", "script", "form", "input", "button", "style", "link", "base", "meta", "svg", "math", "template", "img"];
   for (const tag of FORBIDDEN) {

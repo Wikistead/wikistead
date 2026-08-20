@@ -2,13 +2,13 @@
 // (kinds this browser can do) — and both surfaces read the same two predicates.
 //
 // Offering "add a passkey" where passkeys are not accepted invites somebody to enrol a factor that will
-// not let them in ; offering it in a browser without WebAuthn is an entrance
+// not let them in ("of course you'd hide it"); offering it in a browser without WebAuthn is an entrance
 // that cannot be walked through at all. Each half of the defect had the same shape: the sign-in
 // interstitial asked the question and the account panel did not, and two surfaces reading different
 // copies of one fact is how they drifted. The first fix (stance) landed while was being written,
 // so the capability half shipped un-asked on the panel — measured by the reviewer and bounced.
 //
-// ⚠️ NOT a defence. The endpoints still accept those enrolments and still mark them as not counting
+// ⚠️ NOT a defence. The endpoints still accept those enrolments and still mark them as not counting —
 // this hides an entrance, it does not close one (#613). If they are to refuse outright, that is its own
 // change with its own pin, and this file would then be measuring the weaker half.
 //

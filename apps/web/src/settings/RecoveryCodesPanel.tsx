@@ -23,11 +23,14 @@ import { browserCanUseFactorKind, proofBeginsOnChoice } from "./factor-kind"; //
 // NO MEMBER COUNT, NO ROLE, anywhere in this file. The ruling on ADR-226 rev1 removed the predicate that
 // made codes depend on the shape of the workspace, and a screen that hid the button for an ordinary
 // member would put it back on the only surface that matters to the person locked out.
-// #650/ (user, at the screen): 123456
+// #650/ (user, at the screen): could not tell what to type into the fields — only a code
+// example and a password placeholder showed — and then, still, could not tell what goes where or what
+// to press.
 // The fields carried a `placeholder` and an `aria-label` and no visible label, so any one of three proofs
 // read as two boxes to fill — and a placeholder is gone the moment a finger touches the key.
 //
-// The round before that answered the labels but left the SHAPE: two fields stacked
+// #650 (user, at the same screen): offer the usable auth methods as buttons — press one to
+// verify, then create. The round before that answered the labels but left the SHAPE: two fields stacked
 // above two buttons, with a sentence underneath explaining that any one of them is enough. A sentence
 // that exists to explain a layout is a layout that failed, and the previous version's own comment said so.
 //
@@ -172,8 +175,8 @@ export function RecoveryReauthForm({
                 placeholder={t("account.factorCodePlaceholder")} data-testid="recovery-reauth-code" />
             ) : (
               // no placeholder: it would repeat the label a centimetre lower and then vanish on the
-              // first keystroke. "123456" above earns its place as an EXAMPLE of a shape;
-              // does not.
+              // first keystroke. "123456" above earns its place as an EXAMPLE of a shape; a plain
+              // "password" placeholder does not.
               <Input type="password" value={proving.password} autoComplete="current-password" autoFocus
                 onChange={(e) => onChange({ ...proving, password: e.target.value })}
                 data-testid="recovery-reauth-password" />
@@ -220,7 +223,7 @@ export function RecoveryCodesPanel() {
   // Which proofs this member can actually offer, so the form asks for what they have rather than
   // listing every mechanism the server accepts (#606: a control whose only outcome is a refusal).
   //
-  // `passkey` also asks the BROWSER, through the shared predicate the rest of the product uses (#686)
+  // `passkey` also asks the BROWSER, through the shared predicate the rest of the product uses (#686):
   // a key this member owns is no help in a window that has no WebAuthn, and offering it there is the
   // same refusal-only control by another route.
   const methods = proofsHeld({

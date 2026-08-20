@@ -135,7 +135,7 @@ export function resolveRoleChoice(value: string, addable: readonly TenantRoleDef
   return { kind: "none" };
 }
 
-// #579 (2026-08-03 ruling): . The control shows what
+// #579 (2026-08-03 ruling): "add a role" is the wrong idiom — roles cannot be held twice. The control shows what
 // the member IS and changing it replaces — the server converges at tenant scope now, so the UI cannot
 // keep pretending otherwise. That makes the option list the WHOLE vocabulary (every tier, every tenant
 // role), not "the ones they lack": a picker that hides the current value has nothing to display as its
@@ -244,6 +244,8 @@ export function groupConferredRoles(
 // list-builder there is, so a second control cannot quietly grow its own list again.
 
 /**
+ * #579 (ruling ①, 2026-08-03): no separate "group roles" section — fold groups into the Members list,
+ * so user names and group names sit side by side as peers.
  *
  * One list. A person and a group are both principals holding a tenant role, and the screen said so with
  * two sections, two shapes and two vocabularies — which is what made the group half look like a

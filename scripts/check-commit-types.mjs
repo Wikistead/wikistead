@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs'
-// #138 prep / the project design notes (" / / "): commit subjects are Conventional Commits,
+// #138 prep / the project design notes (the branching / commit / merge section): commit subjects are Conventional Commits,
 // and the TYPE comes from the list the project design notes fixes.
 //
 // WHY THIS EXISTS BEFORE semantic-release DOES. Introducing semantic-release is deliberately held until
@@ -10,12 +10,12 @@ import { existsSync, readFileSync } from 'node:fs'
 // not happen at all, over a history nobody can retype.
 //
 // Measured when written: 200 commits, and exactly one used a type outside the list — `ci(deploy):`,
-// written by the session that added this file, two commits earlier. It was already merged, so it stays
+// written by the session that added this file, two commits earlier. It was already merged, so it stays:
 // rewriting a shared branch to fix a subject line would cost every parallel worktree a divergence, which
 // is a real problem traded for a cosmetic one. It is recorded here instead, and the guard is why there is
 // not a second.
 //
-// Run: pnpm lint:commit-types [<base>] (defaults to comparing HEAD against origin/master or master)
+// Run: pnpm lint:commit-types [<base>]   (defaults to comparing HEAD against origin/master or master)
 import { execFileSync } from 'node:child_process'
 
 // the project design notes: `type(scope): subject`, type ∈ feat | fix | chore | docs | refactor | test | build | perf.

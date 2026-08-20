@@ -31,11 +31,11 @@ function tokenSet(s: string): Set<string> {
 }
 
 // #531: banned words were matched ONLY as whole tokens, and Japanese/Chinese/Korean are not written with
-// spaces — so is ONE token and banning never fired. The filter was effectively dead for
+// spaces — so a phrase like "hogehogedesu" is ONE token and banning "hoge" never fired. The filter was effectively dead for
 // non-word-segmented languages, which is the moderation surface's whole point. Ruled fix: pick the matching
 // mode from the WORD's own script, so nobody has to configure it.
-// - a word containing CJK → SUBSTRING match ( catches )
-// - a Latin-only word → token match, unchanged (banning "ass" must not flag "classic" — Scunthorpe)
+//   - a word containing CJK  → SUBSTRING match (banning "hoge" catches a "hogehogedesu" phrase containing it)
+//   - a Latin-only word      → token match, unchanged (banning "ass" must not flag "classic" — Scunthorpe)
 const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
 const isSubstringWord = (w: string): boolean => CJK_RE.test(w)
 

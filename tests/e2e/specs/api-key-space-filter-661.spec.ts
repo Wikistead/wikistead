@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
-// #661 (user, on the device): " UI ".
+// #661 (user, on the device): asked for a UI to narrow down the target spaces.
 //
-// Measured against a STUBBED `/spaces` of 40, and that is the whole reason this spec can say anything
+// Measured against a STUBBED `/spaces` of 40, and that is the whole reason this spec can say anything:
 // the dev fixture has one space, so a pin that opened the form as-is would watch a single checkbox and
 // call the list bounded. The same trap emptied a #623 pin, which was written against a real tree, could
 // not be turned red, and was discarded.
@@ -26,11 +26,11 @@ async function openNarrow(page: import("@playwright/test").Page) {
     if (route.request().method() !== "GET") return route.fallback();
     // #623 slice 12b: the route pages — `{ spaces, nextCursor }`. #705/#710: typing asks the SERVER
     // (`?q=`), so this stub must answer BOTH shapes or the filtered branch talks to the real tenant.
-    // browse (no q) → one page, no cursor: this test is about the FORM in front of forty spaces.
-    // search (q) → the matches, AND a cursor — i.e. the server still has more beyond this page,
-    // which is exactly the state the "more matches" line exists to announce (#710 D
-    // the old numeric hidden-count died with the roster; the signal is now the
-    // server's hasMore, and a cursor is how the server says it).
+    //   browse  (no q) → one page, no cursor: this test is about the FORM in front of forty spaces.
+    //   search  (q)    → the matches, AND a cursor — i.e. the server still has more beyond this page,
+    //                    which is exactly the state the "more matches" line exists to announce (#710 D:
+    //                    the old numeric hidden-count died with the roster; the signal is now the
+    //                    server's hasMore, and a cursor is how the server says it).
     const q = new URL(route.request().url()).searchParams.get("q")?.trim() ?? "";
     const body = q
       ? { spaces: SPACES.filter((s) => s.name.toLowerCase().includes(q.toLowerCase())), nextCursor: "more-beyond-this-page" }

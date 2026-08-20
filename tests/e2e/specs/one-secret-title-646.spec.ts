@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
-// #646 (user ruling: ): one secret, one name — whichever door it came through.
+// #646 (user ruling: unify them): one secret, one name — whichever door it came through.
 //
 // The invite link is produced from two places: the form at the top of the screen, and a pending row's
 // menu. #638 gave the row's dialog a proper heading and left the form's using the old key, which was a

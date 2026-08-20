@@ -77,7 +77,7 @@ describe('#554 S0: the reserved sub space', () => {
     expect(claimed, 'every seam that turns an outside claim into a member row refused these').toEqual([])
   })
 
-  // Non-vacuous by construction (S0 review 2): the reserved sub IS made a tenant member
+  // Non-vacuous by construction (S0 review must-fix 2): the reserved sub IS made a tenant member
   // first, so with the gate deleted the login SUCCEEDS (upserts a row, opens a session) — the
   // membership refusal can no longer masquerade as the gate.
   it('seam 1 — login upsert: a reserved sub is a 403 shaped exactly like a non-member, even AS a member', async () => {

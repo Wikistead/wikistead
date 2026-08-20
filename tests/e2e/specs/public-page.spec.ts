@@ -151,7 +151,7 @@ test("#227 the public TOC works on a narrow screen (toggle + scroll overlay, mem
   await expect(anon.getByTestId("toc")).toHaveCount(0);
 });
 
-// #267 : the callout BOX (tint + left bar) and default-CENTER diagrams must also render on the
+// #267 fallout: the callout BOX (tint + left bar) and default-CENTER diagrams must also render on the
 // PUBLIC reader — it uses the same renderMarkdownToDom outside .cm-editor. Two-surface regression for #267.
 test("#267 波及: the public reader shows the callout box + centers a mermaid diagram", async ({ browser }) => {
   const authed = await (await browser.newContext()).newPage();

@@ -142,7 +142,7 @@ export function SpaceMembersTab() {
   // #536 / ADR-188 §6: one control, two mechanisms underneath. A custom role goes through the assignment
   // path (its bundle expands server-side); a built-in goes through the grant path. Either way the server
   // re-gates on space `manage` — the merge is a UI convenience and moves no authority.
-  // The DECISION lives in resolveGrantDispatch (a pure function, behaviourally pinned — review 7
+  // The DECISION lives in resolveGrantDispatch (a pure function, behaviourally pinned — review point 7:
   // the group bug lived in an untestable inline handler); this only executes what it resolved.
   const addUnified = () => {
     const action = resolveGrantDispatch({ pick, mode, picked, groupName });
@@ -183,7 +183,7 @@ export function SpaceMembersTab() {
       setPendingAdd({ run: retry, who, current: capNoun("manage"), next, manager: true });
       return;
     }
-    // #607 the ceiling's refusal has a reason, and a generic "something went wrong" hides it
+    // #607 the ceiling's refusal has a reason, and a generic "something went wrong" hides it —
     // the reader is left thinking the product is broken when it is doing exactly what it should. The
     // control that produced this is gone now (the roster no longer offers it), so this is the second
     // layer: a caller who reaches the refusal another way is told WHICH rule stopped them.
@@ -226,7 +226,7 @@ export function SpaceMembersTab() {
   // #586 (review rejection): each choice is the NAME, and hovering it says what that name confers. Space
   // scope, so the composite NOUN table answers (a page grant is a single arm and reads from the other).
   // #578 bounce ③: ONE list, on every row. A custom role used to be drawn as a chip with only an ×,
-  // which meant the one kind of role a tenant writes for itself was the one kind nobody could change
+  // which meant the one kind of role a tenant writes for itself was the one kind nobody could change —
   // against both the standing ruling ("built-in and custom are the same picker, row and look") and #591
   // ("an exclusive role is changed in a dropdown"). The value carries which mechanism answers, exactly
   // as the add form's does, so the row and the form speak one vocabulary.

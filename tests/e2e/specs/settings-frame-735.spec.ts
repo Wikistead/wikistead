@@ -4,7 +4,7 @@ import { test, expect, type Page } from "@playwright/test";
 //
 // WHY THIS IS AN E2E AND NOT A UNIT TEST: the defect was a computed distance — SCIM and custom domains
 // rendered flush against the rail at 0px on every side — and a grep for `p-6` cannot see that. Nor can
-// happy-dom, which has no layout engine, so `getBoundingClientRect` there returns zeroes for
+// happy-dom, which has no layout engine, so `getBoundingClientRect()` there returns zeroes for
 // everything and would agree with any answer. The ruling on this ticket says to measure the real DOM,
 // and this is the only place that exists.
 //
@@ -120,10 +120,10 @@ test("#735: every settings tab has the same frame, one of three widths, and the 
   ];
 
   // 0. The walk actually walked. A discovery test that discovers nothing agrees with every possible
-  // state of the code, and this repository has shipped that shape before. The three consoles
-  // together carry more than twenty-five tabs; a number this far below any real total means a rail
-  // did not render, not that the product shrank. Raised with the third console rather than left at
-  // the old floor: a bound that a shrunken walk still clears is a bound that stopped working.
+  //    state of the code, and this repository has shipped that shape before. The three consoles
+  //    together carry more than twenty-five tabs; a number this far below any real total means a rail
+  //    did not render, not that the product shrank. Raised with the third console rather than left at
+  //    the old floor: a bound that a shrunken walk still clears is a bound that stopped working.
   expect(frames.length, `tabs measured: ${frames.map((f) => f.tab).join(", ")}`).toBeGreaterThan(20);
 
   // 1. Every tab HAS a frame. This is the reported bug in one line: a tab with no pane measures -1.
@@ -140,31 +140,32 @@ test("#735: every settings tab has the same frame, one of three widths, and the 
   expect(tops[0], "…and the same above").toBeGreaterThan(8);
 
   // 3. The width is one of the decided steps. An arbitrary number here means somebody wrote a
-  // max-width by hand again, which is how six of them accumulated.
+  //    max-width by hand again, which is how six of them accumulated.
   const strays = frames.filter((f) => !TIERS.includes(f.width));
   expect(strays.map((f) => [f.tab, f.width]), `widths outside ${TIERS.join(" / ")}`).toEqual([]);
 
   // 4. The step a tab NAMES is the step it WEARS. The attribute and the class are written side by side
-  // on ~30 roots, so the pair can drift with one careless copy — and a drifted pair passes every
-  // check above (the width is still a legal step, the gap is still right). Only comparing the two
-  // catches it, and without this the attribute would be decoration rather than the thing the walk
-  // trusts.
+  //    on ~30 roots, so the pair can drift with one careless copy — and a drifted pair passes every
+  //    check above (the width is still a legal step, the gap is still right). Only comparing the two
+  //    catches it, and without this the attribute would be decoration rather than the thing the walk
+  //    trusts.
   const named: Record<string, number> = { form: 560, list: 720, wide: 920 };
   const mismatched = frames.filter((f) => f.tier !== null && named[f.tier] !== f.width);
   expect(mismatched.map((f) => [f.tab, f.tier, f.width]), "these name one step and wear another").toEqual([]);
 
   // 5. Every tab HAS a heading, and every heading LOOKS THE SAME. (#735, second round.)
   //
-  // The frame was fixed and the same defect came straight back one layer up: fourteen admin tabs
-  // spelled their `<h2>` three different ways, and the two written most recently were the only two
-  // that looked like headings — which is what the owner saw and what
-  // is about. It came back because the first round fixed the fourteen places rather than the reason
-  // there were fourteen places.
+  //    The frame was fixed and the same defect came straight back one layer up: fourteen admin tabs
+  //    spelled their `<h2>` three different ways, and the two written most recently were the only two
+  //    that looked like headings — which is what the owner saw, and what the complaint about being
+  //    tired of pointing this out every round is about. It came back because the first round fixed
+  //    the fourteen places rather than the reason
+  //    there were fourteen places.
   //
-  // Measured from COMPUTED STYLE, not from the class list. The twelve broken headings all carried a
-  // perfectly reasonable-looking `className="mt-0"`; what made them wrong was invisible in the
-  // source — the preflight strips h1-h6, these panes render outside `.wks-prose`, and no global
-  // heading rule exists — so a source-level check would have called them correct.
+  //    Measured from COMPUTED STYLE, not from the class list. The twelve broken headings all carried a
+  //    perfectly reasonable-looking `className="mt-0"`; what made them wrong was invisible in the
+  //    source — the preflight strips h1-h6, these panes render outside `.wks-prose`, and no global
+  //    heading rule exists — so a source-level check would have called them correct.
   const headless = frames.filter((f) => f.heading === null);
   expect(headless.map((f) => f.tab), "these tabs render no heading the shell drew").toEqual([]);
   const looks = [...new Set(frames.map((f) => f.heading))];

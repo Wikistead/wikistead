@@ -1,6 +1,6 @@
 // #628 / ADR-215 §2: whether a NARROWED api key may reach the route it is calling.
 //
-// Narrowing is EE (the ruling: "CE " — running a roster of
+// Narrowing is EE (the ruling: CE carries only what an individual user needs — running a roster of
 // capabilities across several people and spaces is governance). It has to survive #178 lifting
 // `packages/ee-server` out of this tree, so CE gets a hole rather than a branch: nothing registered
 // means there is no narrowing, which is exactly CE's behaviour — CE cannot mint a narrowed key at all.

@@ -4,16 +4,16 @@ import * as Y from "yjs";
 // more peers editing the SAME macro body at once). It reuses the `:x:` ephemeral-room stack (collab.ts
 // connectEphemeral) — non-persistent, edit-gated — exactly like Excalidraw's live co-edit, but for TEXT.
 // The canonical single Y.Text is untouched: this shared body is a TEMPORARY second surface flushed back on
-// close (the sanctioned " CRDT → flush" pattern, ADR-184 §1; NOT a permanent CRDT).
+// close (the sanctioned temporary-in-modal-CRDT-flushed-on-close pattern, ADR-184 §1; NOT a permanent CRDT).
 //
 // THE SHARP EDGE (why this is NOT a copy of excalidraw-collab.ts): a Y.Text is an APPEND type, not an
 // idempotent Y.Map + version-LWW (excalidraw-collab.ts:shouldReplace). Two peers each seeding the body from
-// the fence text would produce "hellohello" — the text DOUBLES. So seeding is single-writer + guarded
-// 1. ELECTION — only the lowest clientID currently co-occupying is eligible to seed (shouldSeed). The
-// non-elected peers bind to the shared body and wait for the seeded text to sync in.
-// 2. GUARD — the ephemeral doc's own `meta` map carries a `seeded` flag; a late joiner (arriving AFTER
-// the seed has synced) binds to the already-seeded body and never re-seeds, and the flag is set in the
-// SAME transaction as the insert so a peer syncing mid-seed never observes a body-without-guard.
+// the fence text would produce "hellohello" — the text DOUBLES. So seeding is single-writer + guarded:
+//   1. ELECTION — only the lowest clientID currently co-occupying is eligible to seed (shouldSeed). The
+//      non-elected peers bind to the shared body and wait for the seeded text to sync in.
+//   2. GUARD — the ephemeral doc's own `meta` map carries a `seeded` flag; a late joiner (arriving AFTER
+//      the seed has synced) binds to the already-seeded body and never re-seeds, and the flag is set in the
+//      SAME transaction as the insert so a peer syncing mid-seed never observes a body-without-guard.
 // Together: exactly one insert ever runs. PRECONDITION (enforced by the slice-2b transport, not here): seed
 // only AFTER the ephemeral provider's initial sync has completed, so the guard/body a late joiner reads is
 // the seeder's — the election alone cannot beat a still-syncing join race, the post-sync guard closes it.

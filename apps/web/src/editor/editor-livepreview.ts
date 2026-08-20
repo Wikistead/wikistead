@@ -28,7 +28,7 @@ import { blockDrag } from "./live-preview/block-drag";
 import { everforestHighlight } from "./everforest-highlight";
 import { mathField } from "./live-preview/math";
 import { macroEdit, nestedSelectionField, setNestedSelection } from "./live-preview/macro-edit";
-import { headingAnchors } from "./live-preview/heading-anchor"; // #313: hover 🔗 per heading line
+import { headingAnchors } from "./live-preview/heading-anchor"; // #313: hover link icon per heading line
 import { search, searchKeymap } from "@codemirror/search"; // #402: in-page find & replace (non-vim + Reading)
 
 // vim Compartment content: the keymap AND a vimEnabled flag (so the decoration builder
@@ -246,7 +246,7 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     // drop indicator; editable surface only. NOT in a nested island — block reorder is a page-structure
     // affordance, and a drag crossing the island boundary has no defined target.
     ...(readOnly || env.nested ? [] : [blockDrag]),
-    // #313: hover 🔗 on heading lines — copies the heading's anchor URL (display-only widget).
+    // #313: hover link icon on heading lines — copies the heading's anchor URL (display-only widget).
     headingAnchors,
     // Inline-comment anchor highlights (display-only; fed via setCommentRanges — inert without data).
     commentHighlightTheme,
@@ -501,7 +501,7 @@ export function mountPublishedView(
       livePreview,
       mathField, // #158-C3: KaTeX math ($…$ / $$…$$), reveal-on-cursor atoms
       linkClicks,
-      headingAnchors, // #313: same hover 🔗 anchors on the read-only published view
+      headingAnchors, // #313: same hover link-icon anchors on the read-only published view
       // #224: auto internal links on the read-only view surface too (same inert-without-source rule).
       titleLinkDecorations(),
       titleLinkHover(),

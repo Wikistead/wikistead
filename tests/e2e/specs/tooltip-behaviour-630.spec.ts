@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
-// #630 (user ruling, 2026-08-05): " tooltip ".
+// #630 (user ruling, 2026-08-05): unify every tooltip-like surface completely, delays included.
 //
 // Four implementations had drifted into three open delays (180 / 180 / 0), two close graces (0 / 160)
 // and animation on exactly one of them. Placement was unified in #603 and the box in #582; this is the
@@ -9,7 +9,7 @@ import { openDemo, sleep } from "../helpers";
 // and after a beat on the next reads as two different products.
 //
 // The comparison is between the RADIX tooltip and the HAND-PLACED panels, because those are the two
-// mechanisms; naming surfaces would miss the fifth one somebody adds. And the premise is asserted first
+// mechanisms; naming surfaces would miss the fifth one somebody adds. And the premise is asserted first:
 // #582 records three pins in a row that were green while broken, because the sweep only ever
 // reached the Radix side. A comparison of one thing with itself is always equal.
 const MEMBERS = {
@@ -156,6 +156,7 @@ test("#630: the nested walk still works with the delay in front of it (#603 non-
 });
 
 
+// #630 (user ruling /): the pop-in entrance animation appears not to be implemented.
 //
 // The first attempt at "one behaviour" replaced the design system's own entrance with a bespoke 120ms
 // cross-fade, and a cross-fade at that speed, on a panel the eye is already resting on, is invisible.

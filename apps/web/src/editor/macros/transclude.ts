@@ -35,7 +35,7 @@ export const transcludeMacro: DirectiveMacro = {
   // SSR/export placeholder: the server render pipeline resolves the embed; this is the wrapper
   // carrying the target id. XSS-safe (id escaped; no innerHTML of untrusted text).
   htmlRender: transcludeHtmlRender,
-  // #205: user-facing name is "embed a page"; keywords lead with embed + JP so the slash
+  // #205: user-facing name is "embed a page"; keywords lead with embed plus its JP equivalents so the slash
   // palette finds it (transclude kept as a keyword for discoverability, not the syntax).
   slash: { labelKey: "palette.transclude", keywords: "embed page 埋め込み 埋込 transclude include reference link", insert: ":::embed-page\n\n:::", caret: 14 },
 };

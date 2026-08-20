@@ -36,8 +36,9 @@ export const plantumlMacro: FenceMacro = {
   },
   // #174 / ADR-087 addendum (comment 716): plantuml gets the single edit button → an inline editUI. In
   // WYSIWYG the raw source is hidden and Ctrl+Enter is the vim×Live path, so a non-vim user otherwise has
-  // NO way to edit a plantuml block — the edit button closes that gap (the reviewer's "WYSIWYG
-  // "). No bundled renderer, so the panel is a source textarea + a degraded
+  // NO way to edit a plantuml block — the edit button closes that gap (the reviewer's ask: an edit
+  // button even for macros with no WYSIWYG editing means). No bundled renderer, so the panel is a
+  // source textarea + a degraded
   // code preview (the same degrade-to-source shape liveRender shows); it upgrades for free once an
   // external render service is wired (ADR-074). Host-API is { theme } + save only (ADR-024); save lands
   // on `change` (blur), NOT per keystroke — a per-keystroke Y.Text write re-mounts the widget mid-typing.

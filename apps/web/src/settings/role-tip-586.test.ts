@@ -60,6 +60,7 @@ describe("#586: role-derived and individually granted are told apart, without be
   });
 
   it("the two badges differ by colour, taken from DS tokens rather than a literal", () => {
+    // the ruling: colours come from DS tokens, hardcoding is forbidden
     const badges = [...dialog.matchAll(/data-testid="grant-role-badge"/g)];
     expect(badges.length, "one badge per row kind").toBe(2);
     expect(dialog, "the role badge wears the accent token").toContain("border-[var(--accent)]");

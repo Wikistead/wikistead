@@ -1,7 +1,10 @@
 // #578 (review rejection, 2026-08-05): a principal the product cannot name must not be shown as its id.
 //
-// The reject is explicit about the SHAPE of this pin, and about why the previous one was not enough
+// The reject is explicit about the SHAPE of this pin, and about why the previous one was not enough:
 //
+//   > Write the scan not as "look for `|| sub`" but as "does every site that builds a label from a
+//   > principal / sub have an answer for the case it cannot resolve". A fix that plugs a single
+//   > surface ends the way #432 / #444 / #453 did.
 //
 // It was right: of the four surfaces, the page permissions dialog used `?? a.principal.replace(...)`
 // and a grep for `|| sub` never saw it. So the scan asks the question the defect is about — **which
@@ -36,7 +39,7 @@ describe("#578: a person who cannot be named is named as unnamed, not as a hash"
   });
 
   it("every EXPRESSION that unwraps a principal has an answer for an unresolvable one", () => {
-    // Per EXPRESSION, not per file. The file-level version of this check was vacuous, and measured so
+    // Per EXPRESSION, not per file. The file-level version of this check was vacuous, and measured so:
     // `PermissionsDialog.tsx` calls `memberLabel` at one of its three unwrapping sites, and that single
     // call excused the other two — which went on printing 70 characters of hex in the real dialog while
     // this pin stayed green (review rejection, 2026-08-05).
@@ -50,7 +53,7 @@ describe("#578: a person who cannot be named is named as unnamed, not as a hash"
       const lines = src.split("\n");
       lines.forEach((line, i) => {
         if (!/replace\(\/\^user:\//.test(line)) return;
-        // Deliberate, and it says so where it happens: on the line, or on the one directly above it
+        // Deliberate, and it says so where it happens: on the line, or on the one directly above it —
         // JSX puts a comment above the expression it is about. ONE line, never a window: a window is how
         // `PermissionsDialog`'s single good call came to excuse two bad ones 36 lines away.
         if (/raw-principal-ok:/.test(line) || /raw-principal-ok:/.test(lines[i - 1] ?? "")) return;

@@ -39,7 +39,7 @@ export class ImportInvalidError extends Error {
 }
 
 // STREAMING unzip with mid-inflation abort (ADR-132 §3). fflate's UnzipInflate is synchronous, so the ondata
-// callbacks fire during push; we accumulate per-entry and running-total inflated bytes and trip a cap the
+// callbacks fire during push(); we accumulate per-entry and running-total inflated bytes and trip a cap the
 // instant either is exceeded (terminating the offending stream), then throw after the synchronous push returns.
 // Only STORED/DEFLATE entries are decoded (what our export writes); an unknown compression method throws.
 export interface UnzipCaps { maxTotalBytes: number; maxEntryBytes: number; maxEntries: number }
@@ -74,7 +74,7 @@ export function streamingUnzip(archive: Uint8Array, caps: UnzipCaps = DEFAULT_CA
         files[file.name] = out
       }
     }
-    // Only inflate the entries we can handle; file.start throws for an unregistered compression method.
+    // Only inflate the entries we can handle; file.start() throws for an unregistered compression method.
     try { file.start() } catch (e) { capErr = e as Error }
   })
   uz.register(UnzipInflate)
@@ -148,14 +148,14 @@ export function buildIR(files: Record<string, Uint8Array>): ImportIR {
   const byDir = new Map<string, { oldId: string; title: string; published: boolean }>()
   for (const p of manifest?.pages ?? []) if (typeof p.dir === 'string') byDir.set(p.dir, p)
 
-  // Every `<dir>/index.md` is a page, and a bare `<name>.md` is its own single-page dir `<name>` (#501
+  // Every `<dir>/index.md` is a page, and a bare `<name>.md` is its own single-page dir `<name>` (#501 —
   // the comment always promised this; a ZIP of loose notes is the most common "bring my markdown" shape).
-  // Precedence and exclusions
-  // - `<dir>/index.md` OUTRANKS a sibling bare `<dir>.md` (the export's convention is authoritative);
-  // - a `.md` sitting in an attachment folder (`…/images/`, `_home_images/`) stays an attachment, never
-  // becomes a page (it would otherwise be imported twice);
-  // - the archive-root `_home.md` is the space home (handled below), not a bare page;
-  // - bare pages get no `images/` co-location of their own (v1: attachments key on the dir convention).
+  // Precedence and exclusions:
+  //  - `<dir>/index.md` OUTRANKS a sibling bare `<dir>.md` (the export's convention is authoritative);
+  //  - a `.md` sitting in an attachment folder (`…/images/`, `_home_images/`) stays an attachment, never
+  //    becomes a page (it would otherwise be imported twice);
+  //  - the archive-root `_home.md` is the space home (handled below), not a bare page;
+  //  - bare pages get no `images/` co-location of their own (v1: attachments key on the dir convention).
   const pageDirs: string[] = []
   const bodyByDir = new Map<string, string>()
   const bareBodies = new Map<string, string>()
@@ -310,7 +310,7 @@ export interface ImportReport {
 }
 
 const ATTACHMENT_REF = /!\[([^\]]*)\]\(([^)\s]+)\)/g
-/** The same shape WITHOUT the leading `!` — a file link rather than an embed (#712 ①). */
+/** The same shape WITHOUT the leading `!` — a file link rather than an embed (#712 leftover ①). */
 const FILE_LINK = /\[([^\]]*)\]\(([^)\s]+)\)/g
 /** Exports percent-encode spaces in asset paths; the name has to be compared decoded. */
 function decodeAttUrl(u: string): string { try { return decodeURIComponent(u) } catch { return u } }
@@ -379,7 +379,7 @@ function rewriteBody(
     const newId = attByRel.get(url) ?? attByName?.get(decodeAttUrl(url).split('/').pop()?.toLowerCase() ?? '')
     return newId ? `![${alt}](wks-attachment:${newId})` : m
   })
-  // #712 ① / c5496-B: a LINK to an attached file — `[paper](attachments/paper.pdf)` — is
+  // #712 leftover ① / c5496-B: a LINK to an attached file — `[paper](attachments/paper.pdf)` — is
   // the same file the image pass resolves, and the product already has notation for it
   // (`[name](wks-attachment:<id>)`, #273 / ADR-120). It could not be re-pointed at parse time because
   // the attachment id does not exist until materialisation; here it does. The parser therefore no
@@ -564,7 +564,7 @@ export async function materializeImport(
       if (base && !hrefByName.has(base)) hrefByName.set(base, `/p/${c.newId}`)
       if (full && !hrefByName.has(full)) hrefByName.set(full, `/p/${c.newId}`)
     }
-    // Same measurement, second defect: a vault keeps its attachments in ONE folder — `attachments/`
+    // Same measurement, second defect: a vault keeps its attachments in ONE folder — `attachments/` —
     // not co-located per page the way the Wikistead export does. So the embed map is built from
     // EVERY node's attachments, not just the embedding node's: `![[diagram.png]]` in one note refers
     // to a file the vault stores once, and a per-node map could never see it.

@@ -434,8 +434,9 @@ test("#85 the downloaded file, opened with the app closed, IS the document", asy
   expect(Math.min(...rhythm.gaps), "no two blocks are flush (the -35% cramping)").toBeGreaterThan(0)
   expect(rhythm.gaps.some((g) => g === rhythm.bodyLineBox), "the block gap IS the editor's blank line").toBe(true)
 
-  // 3. #636 (user ruling): the file ENDS with room. "
-  // " — about the saved file, not the app, which is where the first attempt
+  // 3. #636 (user ruling): the file ENDS with room. With no margin at the very bottom, the page
+  // feels clipped even when scrolled all the way down — about the saved file, not the app, which is
+  // where the first attempt
   // at this went. A document that stops flush against the bottom of the window reads as one that was cut
   // off rather than one that finished.
   //

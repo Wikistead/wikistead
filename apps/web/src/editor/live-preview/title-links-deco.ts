@@ -36,7 +36,7 @@ const titleLinkMark = (pageId: string) =>
   Decoration.mark({ class: "cm-lp-title-link", attributes: { "data-title-link": pageId } });
 
 // #350: the explicit-markdown link/image ranges (`[text](url)` / `![alt](url)`) — an auto title-link must NOT
-// overlay them. `matchTitleLinks` only sees plain text and would linkify a `[]/p/x)` whose LABEL
+// overlay them. `matchTitleLinks` only sees plain text and would linkify a `[label](/p/x)` whose LABEL
 // happens to equal a page title, stacking a second (possibly different-target) link + hover card on a hand-
 // written one (and contradicting a #276 struck-through dead link). Collect the Link/Image node ranges from the
 // shared Lezer tree (like dead-links.ts) and drop any auto-match that overlaps one. This only SHRINKS the
@@ -140,7 +140,7 @@ const titleLinkCardTheme = EditorView.baseTheme({
     overflow: "hidden",
     overflowWrap: "anywhere",
   },
-  // #381 / ADR-163: the card body is a `.wks-prose` container now (appendMarkdownInto), so its PROSE
+  // #381 / ADR-163: the card body is a `.wks-prose` container now (appendMarkdownInto), so its PROSE —
   // incl. the code-fence box #351 was missing — comes from the ONE raw-tag sheet (styles/prose.css). The
   // two rules below are the card's own EXCERPT COMPACTION (surface-local layout, not prose): tight block
   // margins and flattened headings so a heading-lead excerpt stays a few readable lines inside the clamp.
@@ -155,7 +155,7 @@ export function titleLinkHover(): Extension {
   type Excerpt = { title: string; excerpt: string | null } | null;
   const cache = new Map<string, Promise<Excerpt>>();
   return [
-    // ASYNC source: resolve the excerpt BEFORE returning the tooltip, so `create` builds a card that is already
+    // ASYNC source: resolve the excerpt BEFORE returning the tooltip, so `create()` builds a card that is already
     // at its FINAL size. The old code mounted an empty card, then filled it asynchronously — the height grew and
     // the `above` tooltip re-anchored UP, and that resize collided with the enter animation ("flicker").
     // One resolve → one measure → one position → one animation.
@@ -198,7 +198,7 @@ export function titleLinkHover(): Extension {
           title.textContent = titleText;
           const body = document.createElement("div");
           body.className = "cm-lp-title-link-card-body";
-          // #351: render the excerpt markdown RICHLY (headings/bold/code/lists) via the shared DOM-safe renderer
+          // #351: render the excerpt markdown RICHLY (headings/bold/code/lists) via the shared DOM-safe renderer —
           // the SAME `renderMarkdownToDom` the #285 search preview / transclude use (textContent / createTextNode
           // construction, `safeHref`, NO innerHTML), so raw `<script>` / dangerous schemes stay inert.
           // (user ruling): STATIC macros — the card stays light. A macro in the excerpt renders as a

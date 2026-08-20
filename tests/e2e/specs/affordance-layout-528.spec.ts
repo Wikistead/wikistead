@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit, sleep } from "../helpers";
 
-// #528 / ADR-192: one layout owner for every block affordance. The pin is the PROPERTY the ticket asks for
-// no two visible affordances of a block overlap — measured the way the collision was found (#528)
+// #528 / ADR-192: one layout owner for every block affordance. The pin is the PROPERTY the ticket asks for —
+// no two visible affordances of a block overlap — measured the way the collision was found (#528):
 // a nested macro with the caret inside it shows the raw rich-edit pill AND the ✎ chrome row, and before the
 // owner existed their rectangles intersected by 8px because both claimed `top:-1.5em; left:0` from different
 // offset parents.
@@ -217,7 +217,7 @@ test("#528 the affordances stay apart WHILE the pointer moves", async ({ page })
   expect(collisions, "no overlap at any point during the movement").toEqual([]);
 });
 
-// #528 measured by the user and it overturned the earlier "innermost-only already holds" report
+// #528 measured by the user and it overturned the earlier "innermost-only already holds" report —
 // that check counted VISIBLE affordances without asking which block each belonged to. With the caret in the
 // inner :::note, the affordance on screen belonged to the parent columns, and an unrelated tabs block showed
 // a permanent ✎ as well. The rule: exactly one block offers an entry affordance — the focused one.
@@ -290,7 +290,7 @@ test("#528 the two entry affordances are told apart", async ({ page }) => {
   await sleep(800);
 
   // 1. the rendered block's own ✎, where it lives: the RENDERED nested note (hover-gated — existence
-  // and wording are the contract here; visibility gating has its own pins above)
+  //    and wording are the contract here; visibility gating has its own pins above)
   const rows = await page.evaluate(() => {
     const list = [...document.querySelectorAll<HTMLElement>(".cm-lp-macro-edit, .cm-lp-callout-panel-edit")]
       .filter((e) => !e.classList.contains("cm-lp-macro-richui-raw"));
@@ -320,8 +320,8 @@ test("#528 the two entry affordances are told apart", async ({ page }) => {
 // real browser: the pointer was over a NESTED macro, focus (correctly) went to the slot, the container's
 // chrome was (correctly) suppressed — and in Live mode the slot had nothing of its own to show, because
 // the nested ✎ existed only in WYSIWYG and was hover-CSS-gated besides. The block the user was pointing
-// at offered nothing, and every twitch across the container margin made the container chrome pop back
-// . Two fixes pinned here: the focused slot's own pencil exists in Live
+// at offered nothing, and every twitch across the container margin made the container chrome pop back:
+// overlapping, flickering, oddly placed. Two fixes pinned here: the focused slot's own pencil exists in Live
 // and is owner-gated, and the set is STABLE while the pointer rests (the async nested-diagram swap used to
 // wipe the pencil ~1.4s in — md-render replaced the slot's children wholesale).
 test("#528 a nested macro under the pointer offers ITS OWN affordance, steadily", async ({ page }) => {

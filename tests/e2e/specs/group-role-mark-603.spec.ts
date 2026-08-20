@@ -5,8 +5,9 @@ import { openDemo, sleep } from "../helpers";
 // per role stacked above it.
 //
 // The badge-per-role shape this replaces was itself a reject: it put the row at 57px against 41px for
-// every other row, and got worse with each additional group — "…
-// ". So the row height is the assertion, measured
+// every other row, and got worse with each additional group — rows keep growing taller, and a user
+// can belong to several groups, whose roles must be readable together. So the row height is the
+// assertion, measured
 // against the OTHER rows rather than a constant: a table that is uniformly wrong would satisfy a number.
 //
 // GET /members is stubbed (the #537 pattern: stub the read, keep writes real) because the fixture has no
@@ -111,11 +112,12 @@ test("#603: a group-conferred role is one mark, and the row keeps its height", a
   await expect(page.locator("tr", { hasText: "Three Groups" }).getByTestId("member-role-select")).toBeVisible();
 });
 
-// #603 (user ruling, 2026-08-05): "2
+// #603 (user ruling, 2026-08-05): the nesting is easy to miss, and tier 2 walks off the screen —
+// no tier, tier 1 included, may ever leave the viewport.
 //
 // Both panels, both axes. The reject measured L2 escaping to the right at a 1000px viewport and L1
 // escaping downward at a 420px one — the same root in both: neither asked whether the side it opens on
-// has room. So the assertion is not about a panel, it is about EVERY panel that ends up on screen
+// has room. So the assertion is not about a panel, it is about EVERY panel that ends up on screen:
 // collect the live `[role=tooltip]` nodes and require each to be inside the viewport. A third tier added
 // later is covered the day it lands, without this file naming it.
 async function panelsOnScreen(page: import("@playwright/test").Page) {

@@ -141,6 +141,8 @@ export function ConfirmDialog({
   );
 }
 
+// #638 (user ruling): the password-setup link appears somewhere very hard to find — show it in a
+// modal instead.
 //
 // The password-setup link was produced by a row's ⋯ menu and rendered under the invite FORM, most of a
 // screen away — because it shared `lastLink` with the invite flow, where "operate the form, read the

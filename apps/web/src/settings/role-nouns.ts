@@ -1,10 +1,10 @@
-// #582 bounce (user, on the device): " 1 ".
+// #582 bounce (user, on the device): built-ins and custom roles are both one framework — a "role".
 //
 // A built-in grant and a custom role are one thing to the person reading a permissions surface: somebody
 // wearing a role. The space Members tab has said so since #445 — it renders the capability as the NOUN
 // the role is called (view→viewer, manage→manager) beside custom role names, in one picker and one row
 // shape. The page dialog moved half of that over in #582 §1 (custom roles in the picker) and left the
-// other half behind, so its picker said (a translated verb) while its rows said "manage" (a raw
+// other half behind, so its picker showed a translated verb while its rows said "manage" (a raw
 // wire value) and its role badges shouted "KAKUNIN-582".
 //
 // The nouns live here so both screens IMPORT the same table. Two hand-written copies is how the last
@@ -57,7 +57,7 @@ export const capNoun = (c: string): string => CAP_NOUN[c as RoleNounKey] ?? c;
 // store's answer, and the test is what keeps it honest.
 //
 // The verbs are page-scoped because that is what these surfaces are about: what this person can do to
-// the things in this space. (A moderator's page `edit` is the moderation bypass, not the edit grant
+// the things in this space. (A moderator's page `edit` is the moderation bypass, not the edit grant —
 // they have it on a page while not being a space editor, which is precisely the kind of fact a static
 // bundle cannot express.)
 export const BUILTIN_EFFECTIVE_CAPS: Record<RoleNounKey, readonly string[]> = {
@@ -69,7 +69,7 @@ export const BUILTIN_EFFECTIVE_CAPS: Record<RoleNounKey, readonly string[]> = {
   // (`page#settings: manage or …`) — a column the measurement did not cover was a lie waiting to be drawn.
   manage: ["view", "comment", "edit", "moderate", "publish", "delete", "share", "settings", "manage"],
   // ADR-209 (#607, bounce): view is the page-axis answer (the space viewer arm); manageAccess is
-  // the verb ITSELF, measured on the space axis where the grant lives. Every row here is reflexive
+  // the verb ITSELF, measured on the space axis where the grant lives. Every row here is reflexive —
   // `manage` lists manage — and this one drew as view-only because the page loop cannot see a
   // space-only verb: the role that exists to hand out membership looked identical to `viewer` in the
   // very picker that hands it out.

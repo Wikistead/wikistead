@@ -43,7 +43,8 @@ function useAccountTabs(): SettingsTab[] {
     // #309: the Data section hosts the tenant-wide export. It lives HERE (personal settings), not in
     // the tenant /admin console, because the export is view-filtered per member — every member may
     // take their visible knowledge out (Open formats), so an admin-looking home would misstate it.
-    // #362 notification preferences live in SETTINGS ; the watch LIST lives
+    // #362 notification preferences live in SETTINGS (the ruling: a setting belongs on the
+    // settings page); the watch LIST lives
     // off the bell. Both are emission-narrowing member prefs — display authz is server-side regardless.
     { key: "notifications", label: t("accountNav.notifications"), to: "/settings/account/notifications", icon: Bell },
     // #462: a member's own API keys. They were only issuable from the admin console, so a member who
@@ -58,7 +59,7 @@ function useAccountTabs(): SettingsTab[] {
   ];
 }
 
-// #194 (A / ADR-052) → #466: a settings page shell — the readable column with a page heading +
+// #194 (option A / ADR-052) → #466: a settings page shell — the readable column with a page heading +
 // description. The per-group CARD (surface-2 + hairline border + radius) is GONE: every other
 // settings screen (tenant branding / spaces / members / roles) groups with a heading + spacing on a
 // plain surface, and the cards made this one screen read as a different product. Token-driven;
@@ -130,7 +131,7 @@ function ProfileTab() {
     <SettingsPage title={t("accountNav.profile")} description={t("account.profileHint")}>
       <SettingsCard>
         <label className="mb-1 block text-sm font-medium">{t("account.displayName")}</label>
-        {/* #523 / ADR-190 (slice C): an OIDC-sourced user's name is managed by their identity provider
+        {/* #523 / ADR-190 (slice C): an OIDC-sourced user's name is managed by their identity provider —
             authoritative, anti-impersonation — so it is READ-ONLY here (the server also refuses the write).
             Only a 'local' user may edit it. The override UI is retained, gated to local users. */}
         {settings.data && settings.data.identitySource !== "local" ? (
@@ -316,7 +317,7 @@ function EditorTab() {
       </SettingsCard>
 
       <SettingsCard testid="account-atom-policy">
-        {/* #395 A: the ADR-156 atom/typed-body policy line, on a surface EVERY user can reach
+        {/* #395 A: the ADR-156 atom/typed-body policy line, on a surface EVERY user can reach —
             the onboarding done-screen shows it only on first run, so existing members never saw it.
             Reuses the onboarding string: one source of truth for the policy wording. */}
         <label className="mb-1 block text-sm font-medium">{t("account.selectionModel")}</label>
@@ -365,7 +366,7 @@ function EditorTab() {
               checked={modesVisible[m]}
               onChange={() => toggleMode(m)}
               testId={`account-chrome-mode-${m}`}
-              // #493 same per-mode glyphs as the displayMode RadioGroup above / MODE_META
+              // #493 same per-mode glyphs as the displayMode RadioGroup above / MODE_META —
               // every surface that enumerates the modes shows the same icons.
               icon={{ live: <Zap />, source: <Code />, reading: <BookOpen />, wysiwyg: <Eye /> }[m]}
               label={t(`page.mode${m === "live" ? "Live" : m === "source" ? "Source" : m === "reading" ? "Reading" : "Wysiwyg"}`)}
@@ -563,7 +564,7 @@ function ThemeTab() {
 // a credential and the profile is a name and a picture.
 function SecurityTab() {
   const { t } = useTranslation();
-  // #686 A ②: the description names the kinds this workspace ACCEPTS. It used to promise "a passkey
+  // #686 family A ②: the description names the kinds this workspace ACCEPTS. It used to promise "a passkey
   // or a six-digit code" to every tenant, including ones that had narrowed to one of them — the same
   // fact each row already carries as its "does not count" mark, contradicted one line above the list.
   // The stance rides along on the factors query, so this costs no extra request.

@@ -4,8 +4,8 @@
 // It was already written once — inside `Select`, for the capability panel #582 settled on. #603 then grew
 // two more panels (the group list, and that same capability panel raised from inside it) with their own
 // `top`/`left` arithmetic and no viewport question at all, so they escaped: the second tier off the right
-// at a 1000px window, the first tier off the bottom at a 420px one. Both rulings say the same thing
-// "2 " — so the rule lives here and the panels
+// at a 1000px window, the first tier off the bottom at a 420px one. Both rulings say the same thing —
+// placement rides one shared rule (never build a second placement logic) — so the rule lives here and the panels
 // call it.
 //
 // Two placements, because there are two relationships a panel can have to its anchor, not because there

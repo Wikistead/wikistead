@@ -5,6 +5,7 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 
 // #455, re-pinned by #600's bounce: an EMPTY macro shows a placeholder, and a placeholder is FULL WIDTH.
 //
+// Center-aligning a table caused it, and always-full-width had already been demanded once — an empty
 // `:::table{align=center}` shrank its dashed box to the width of its own sentence while every other empty
 // macro stayed full width. The rule was written twice, four lines apart, and the copy added later (#393,
 // table alignment) left the empty check out. #455's pin only ever looked at diagrams, so the second copy

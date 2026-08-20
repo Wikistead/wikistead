@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 import { memberStatusKeys, memberMenuValues, passwordAction } from "./member-status";
 
 // #614: the two pure decisions — which marks a row wears, and whether the ⋯ menu still offers a
-// password entrance. Both sides of the menu split are pinned (→→), because the defect this
+// password entrance. Both sides of the menu split are pinned (password present→absent AND
+// absent→present), because the defect this
 // descends from (#606) was an offered action that could only fail.
 
 const src = readFileSync(resolve(import.meta.dirname, "MembersPage.tsx"), "utf8");

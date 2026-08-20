@@ -3,15 +3,16 @@ import { openDemo } from "../helpers";
 
 // #721 the DNS challenge has to LOOK like three fields.
 //
-// The names landed and the reader still could not read it: "
-// " Measured on that version, the labels lined up and the values
-// lined up — the columns were fine. What was wrong was between the rows and inside them
+// The names landed and the reader still could not read it: the rows look misaligned somehow, and it
+// is hard to tell whether this is a table or plain text. Measured on that version, the labels lined
+// up and the values
+// lined up — the columns were fine. What was wrong was between the rows and inside them:
 //
-// * only two of the three fields carried a copy button, so their lines were 32px tall and the first
-// was 15px, and the three rows sat 27px and 36px apart. The eye follows the text, so unequal
-// spacing reads as misalignment even when every left edge agrees.
-// * label and value were both 11px in the same dim colour, separated by position alone — which is
-// precisely "is this a table or is it a paragraph".
+//   * only two of the three fields carried a copy button, so their lines were 32px tall and the first
+//     was 15px, and the three rows sat 27px and 36px apart. The eye follows the text, so unequal
+//     spacing reads as misalignment even when every left edge agrees.
+//   * label and value were both 11px in the same dim colour, separated by position alone — which is
+//     precisely "is this a table or is it a paragraph".
 //
 // WHY AN E2E: both facts are computed style and layout. A class-name assertion passes on a build where
 // the token behind the class is undefined and nothing is painted (#535), and happy-dom has no layout
@@ -72,23 +73,23 @@ test("#721 the DNS record reads as three fields, evenly spaced and telling name 
   }
 
   // 1. THE RULING'S (a): the three fields are evenly spaced. Measured on the LABELS, because those are
-  // the lines the eye tracks down the block, and rounded to a pixel so subpixel layout is not the
-  // thing being asserted. Unequal spacing was the reported "rows look misaligned".
+  //    the lines the eye tracks down the block, and rounded to a pixel so subpixel layout is not the
+  //    thing being asserted. Unequal spacing was the reported "rows look misaligned".
   const gaps = FIELDS.slice(1).map((_, i) => Math.round(measured[i + 1]!.label!.top - measured[i]!.label!.top));
   expect(new Set(gaps).size, `the three fields are unevenly spaced: ${JSON.stringify(gaps)}`).toBe(1);
   expect(gaps[0], "…and they are spaced apart at all, rather than collapsed into one line").toBeGreaterThan(20);
 
   // 2. THE RULING'S (b): a name does not look like a value. Compared as one string of the properties a
-  // reader actually distinguishes by — if the two ever paint the same, position is again the only
-  // difference and the block goes back to reading as a paragraph.
+  //    reader actually distinguishes by — if the two ever paint the same, position is again the only
+  //    difference and the block goes back to reading as a paragraph.
   for (const m of measured) {
     expect(m.value!.look, `${m.field}: the name and the value are painted identically (${m.look ?? m.value!.look})`)
       .not.toBe(m.label!.look);
   }
 
   // 3. The copy control belongs to the value it copies. It used to sit at the end of a column that
-  // stretched to fill the pane, 150px of empty space away from the string it copies, so which row
-  // it belonged to was a guess.
+  //    stretched to fill the pane, 150px of empty space away from the string it copies, so which row
+  //    it belonged to was a guess.
   for (const m of measured) {
     if (!m.copy) continue; // the record TYPE is chosen from a dropdown, never pasted
     const valueEl = await page.getByTestId(`domain-challenge-${m.field}`).boundingBox();

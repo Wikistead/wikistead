@@ -7,13 +7,14 @@ import { guestSearchRateAllowed } from '../abuse-rate.js'
 export async function searchPlugin(app: FastifyInstance) {
   // GET /search?q=...&spaceId=...&cursor=...
   //
-  // Two-stage guard
-  // Stage 1 — Meilisearch filter (fast, denormalized viewerUsers/viewerGroups/isPublic).
-  // May be slightly stale between FGA change and Meili reindex.
-  // Stage 2 — filterAuthorized FGA final check on the candidate set.
-  // Authoritative: catches anything Stage 1 missed due to stale state.
+  // Two-stage guard:
+  //   Stage 1 — Meilisearch filter (fast, denormalized viewerUsers/viewerGroups/isPublic).
+  //             May be slightly stale between FGA change and Meili reindex.
+  //   Stage 2 — filterAuthorized() FGA final check on the candidate set.
+  //             Authoritative: catches anything Stage 1 missed due to stale state.
   //
-  // MeiliFGA Deep pagination (#103/ADR-068)
+  // Meili freshness is a performance matter; FGA is a safety matter — a hit is shown only when both
+  // pass. Deep pagination (#103/ADR-068):
   // we scan ranked candidate WINDOWS under a bounded budget, filtering each by FGA, so an
   // authorized hit past the first window stays REACHABLE via `cursor` (not just signalled).
   //

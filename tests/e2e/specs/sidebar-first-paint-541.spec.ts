@@ -5,16 +5,16 @@ import { API } from "../helpers";
 // 7 — and three earlier tickets (#489/#500/#492) each went Done without a pin on the TIME itself, which
 // is how the symptom outlived all of them. So this spec creates a big space and holds the clock.
 //
-// (review reject) reshaped this spec twice over
-// - the FIXTURE was 197 bare pages, while dev carries private pages, share links and grants — the very
-// tuples that make the badge reads and confirms cost something. The fixture now publishes most
-// pages, makes a band of them private, hangs share links on some and adds a space grant, so the
-// authz paths the 7 seconds actually lived in are exercised. (Frozen pages are NOT seeded: freezing
-// goes through the moderation queue and has no direct API; noted rather than silently skipped.)
-// - one cold run hid the BIMODAL failure: the slow mode was the PREVIOUS page-open's abandoned
-// title-dictionary fan-out still flooding the checker (measured timelines on dev: the same tree
-// request takes 1.0s uncontended, 4.8s under a neighbour's dictionary). So the clock now runs
-// BACK-TO-BACK cold contexts — the contamination shape — and judges the WORST run, not the best.
+// (review reject) reshaped this spec twice over:
+//   - the FIXTURE was 197 bare pages, while dev carries private pages, share links and grants — the very
+//     tuples that make the badge reads and confirms cost something. The fixture now publishes most
+//     pages, makes a band of them private, hangs share links on some and adds a space grant, so the
+//     authz paths the 7 seconds actually lived in are exercised. (Frozen pages are NOT seeded: freezing
+//     goes through the moderation queue and has no direct API; noted rather than silently skipped.)
+//   - one cold run hid the BIMODAL failure: the slow mode was the PREVIOUS page-open's abandoned
+//     title-dictionary fan-out still flooding the checker (measured timelines on dev: the same tree
+//     request takes 1.0s uncontended, 4.8s under a neighbour's dictionary). So the clock now runs
+//     BACK-TO-BACK cold contexts — the contamination shape — and judges the WORST run, not the best.
 //
 // Thresholds: on an idle machine a run measures ~1.2s wall. The absolute bound carries margin because
 // three sibling sessions run builds on this box (load spikes turn any wall-clock into noise); the
@@ -81,7 +81,7 @@ test("#541: a realistic 197-page space's sidebar arrives with the body — on ev
     results.push({ run, ...r });
   }
 
-  // Judged on the WORST run ( — the best run proved nothing last time).
+  // Judged on the WORST run (argue from the distribution — the best run proved nothing last time).
   const detail = results.map((r) => `run${r.run}: body=${r.cmAt}ms sidebar=${r.sidebarAt}ms lag=${r.sidebarAt - r.cmAt}ms`).join(" | ");
   for (const r of results) {
     expect(r.sidebarAt, `worst-run wall clock — ${detail}`).toBeLessThan(SIDEBAR_WALL_MS);

@@ -2,7 +2,7 @@
 // #653 (ruling, re-ruled): a factor is named AFTER it exists, never before.
 //
 // The panel asked for a name first: an empty box, carrying an example nobody's device is called
-// / "Work phone"), standing above the only two buttons on the screen. Naming is
+// (the "Work phone" example, in either locale), standing above the only two buttons on the screen. Naming is
 // something you do to a thing you have — and most people have exactly one, so the answer is the kind,
 // which the row already says by itself (#653 the fallback).
 //

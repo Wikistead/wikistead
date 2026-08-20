@@ -66,7 +66,7 @@ test("#313 member surface: hovering a heading reveals 🔗; click copies /p/:id#
   expect(copied).not.toContain("?");
 });
 
-// (review bounce): the 🔗 follows the HEADING's font size — an h1's icon is visibly larger
+// (review bounce): the anchor-copy icon follows the HEADING's font size — an h1's icon is visibly larger
 // than an h3's (was a fixed 14px at every level). Pinned via the icon svg's rendered height per level.
 test("#313 the anchor icon scales with the heading level (h1 icon > h3 icon)", async ({ browser }) => {
   const ctx = await browser.newContext();
@@ -172,7 +172,7 @@ test("#313 public reader: heading 🔗 copies /pub/:id#slug and the anchor URL l
   const anon = await anonCtx.newPage();
 
   // (a) copy from the public reader's heading — #319: the CM `headingAnchors` extension (member parity) puts
-  // the 🔗 button on the heading LINE (.cm-lp-h2), and headingAnchorUrl uses origin+pathname → /pub/:id#slug.
+  // the anchor-copy button on the heading LINE (.cm-lp-h2), and headingAnchorUrl uses origin+pathname → /pub/:id#slug.
   await anon.goto(`/pub/${id}`);
   await anon.waitForSelector("[data-testid=public-body] .cm-content");
   // #319: the CM read surface VIRTUALIZES — this heading is deep in the doc (30 filler paragraphs above), so

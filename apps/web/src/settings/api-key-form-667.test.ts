@@ -42,8 +42,9 @@ describe("#667 §5: the scope is derived from the matrix", () => {
   });
 });
 
-// #667 (ruling, 2026-08-09): the per-type default was REVERSED. 30
-// — and the inconsistency was not only untidy: an ordinary key defaulted to never
+// #667 (ruling, 2026-08-09): the per-type default was REVERSED. The ruling: the inconsistency is
+// off-putting, just default everything to 30 days — and it was not only untidy: an ordinary key
+// defaulted to never
 // expiring, so the most dangerous option was pre-selected on the majority of keys.
 //
 // The cases below are the ones that SURVIVE the reversal (thirty is picked; a tighter ceiling is

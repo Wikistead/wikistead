@@ -87,9 +87,9 @@ export function buildEmbedElement(url: string, allowlist: readonly string[]): HT
     iframe.className = "cm-lp-embed-frame";
     iframe.src = trimmed;
     iframe.setAttribute("data-testid", "macro-embed-frame");
-    // Minimal-but-functional sandbox for a TRUSTED allowlisted host (comment 551: "allow-scripts
-    // "). No allow-top-navigation / allow-modals / allow-downloads. Privacy: no-referrer so the
-    // embedding page URL isn't leaked to the external host (comment 551 privacy concern).
+    // Minimal-but-functional sandbox for a TRUSTED allowlisted host (comment 551: keep grants such as
+    // allow-scripts to a minimum). No allow-top-navigation / allow-modals / allow-downloads. Privacy
+    // no-referrer so the embedding page URL isn't leaked to the external host (comment 551 privacy concern).
     // #108 (comment 643) defence-in-depth: allow-same-origin ONLY for a cross-origin frame — same-origin
     // is already rejected above, but never combine allow-scripts + allow-same-origin on our own origin
     // (that pair disables the sandbox), so drop it if the src ever resolves same-origin.

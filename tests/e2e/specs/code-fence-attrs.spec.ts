@@ -80,7 +80,7 @@ test("#198 comment 770: a plain lang fence still gets the tab + copy button", as
   expect(await page.locator(".cm-lp-code-copy").count()).toBe(1); // copy button present even without a title
 });
 
-// #198 (comment 724): B tab-style header + a copy button on the code area's top-right in view modes.
+// #198 (comment 724): option B tab-style header + a copy button on the code area's top-right in view modes.
 test("#198: filename tab + copy button (view mode) copies the code body; hidden in Source", async ({ browser }) => {
   const ctx = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
   const page = await ctx.newPage();
@@ -174,7 +174,7 @@ test("#174: a fence with no language still gets a copy button", async ({ browser
   await page.getByText("bot").click(); // caret off the fence → header renders (not raw-revealed)
   await sleep(200);
   expect(await page.locator(".cm-lp-code-copy").count()).toBe(1); // copy button present with no language
-  // #174 comment 948: a lang-less fence must NOT emit an empty tab stub (the "garbage" in the top-left)
+  // #174 comment 948: a lang-less fence must NOT emit an empty tab stub (the "garbage" in the top-left) —
   // the header is just the copy button (kept top-right by margin-left:auto).
   expect(await page.locator(".cm-lp-code-tab").count()).toBe(0);
   // The affordances sit at the RIGHT of the header. This used to be checked through the copy button's own

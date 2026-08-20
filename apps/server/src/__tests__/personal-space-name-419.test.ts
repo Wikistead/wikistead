@@ -1,5 +1,5 @@
 // #419: the personal-space initial name is localized by the TENANT default language (tenant_settings.
-// default_lang — v1's ONLY consumer of that column). ja → "X", en/unset → "X's Space"; an
+// default_lang — v1's ONLY consumer of that column). ja → the Japanese "X's Space" wording, en/unset → "X's Space"; an
 // empty display name falls back per-language. Existing spaces are never renamed (ensurePersonalSpace
 // short-circuits on the existing row — pinned here). Real Postgres (the dev tenant's settings row is
 // flipped and restored around the ja assertions).

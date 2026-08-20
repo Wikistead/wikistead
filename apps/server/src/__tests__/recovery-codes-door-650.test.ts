@@ -239,6 +239,8 @@ describe('#650 §4: minting proves the account again', () => {
   }, 180_000)
 
   it('says whether a password entrance exists, so the screen stops offering one that does not', async () => {
+    // #650 (user, at the screen) asked whether removing the password entrance makes the
+    // password field disappear — and
     // it did not. The screen can read its own factors, so the code box and the passkey button already
     // came and went, but a password entrance is NOT a factor and appears in no list it can fetch. This
     // is the only place that can answer, so the answer lives here.

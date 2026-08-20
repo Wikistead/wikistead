@@ -51,7 +51,7 @@ describe('evaluatePublishAbuse (#328 / ADR-140)', () => {
 })
 
 // #531: the filter matched banned words as WHOLE TOKENS only. Japanese/Chinese/Korean are not written with
-// spaces, so is a single token and banning never fired — the moderation surface was
+// spaces, so a phrase like "hogehogedesu" is a single token and banning "hoge" never fired — the moderation surface was
 // effectively off for those languages. Ruled fix: the matching mode follows the banned WORD's script.
 describe('#531 banned words in non-word-segmented scripts (CJK → substring, Latin → token)', () => {
   const ban = (...words: string[]) => ({ shrinkRatio: null, bannedWords: words })
