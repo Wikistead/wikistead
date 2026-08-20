@@ -44,6 +44,8 @@
     "teardown:server-test": "node scripts/server-test-down.mjs",
     "release:pr": "node scripts/release-pr.mjs",
     "gate:acceptance": "node scripts/gate-acceptance-730.mjs",
+    "site:acceptance": "node scripts/site-acceptance-180.mjs",
+    "publish-site": "node scripts/publish-site.mjs",
     "publish-gate": "node scripts/publish-gate.mjs"
   },
   "devDependencies": {
