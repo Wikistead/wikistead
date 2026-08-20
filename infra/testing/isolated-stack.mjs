@@ -55,3 +55,37 @@ export function isolatedStackFacts(root) {
     ],
   }
 }
+
+/**
+ * The RULE, once — not the facts but the verdict on them. `isolatedStackFacts` says what to look at;
+ * this says what counts as wrong, and every pin calls it instead of restating it.
+ *
+ * #819: the three pins that existed each carried their own copy of the same dozen lines — an empty
+ * definition is red, a machine with no dev environment is a declared skip, a missing value is a
+ * finding rather than a skip, an equal value is the bug. A copy is a rule that can be edited on one
+ * side only, which is how all three of this family's bugs were built, so the fourth package does not
+ * get a fourth copy of it.
+ *
+ * Each problem names BOTH sides with their real values. A reader of a red run has to see which url
+ * this process reached and which one it was confused with; without them the finding is just an
+ * assertion failing, and the reader goes looking in the wrong place.
+ */
+export function isolatedStackVerdict(root) {
+  const { marker, facts } = isolatedStackFacts(root)
+  // Reported as its own flag rather than as a quiet pass: an empty definition would make every loop
+  // below run zero times, and a walk that compared nothing is the shape of every vacuous green this
+  // repository has had to fix.
+  const definitionEmpty = facts.length < 2
+  const comparable = facts.filter((f) => f.dev)
+  const problems = []
+  for (const f of comparable) {
+    if (!f.actual) {
+      // Not a skip: the isolated stack is supposed to have handed this process the variable, so a
+      // suite running without it is missing the very thing being asserted about.
+      problems.push(`${f.what} — this process has no value for it at all (the dev environment has: ${f.dev})`)
+    } else if (f.actual === f.dev) {
+      problems.push(`${f.what} — this process reached: ${f.actual} / the developer's own: ${f.dev}`)
+    }
+  }
+  return { marker, definitionEmpty, compared: comparable.length, problems }
+}
