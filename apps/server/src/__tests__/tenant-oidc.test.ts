@@ -18,6 +18,18 @@ const REDIRECT = 'http://dev.localhost/auth/callback'
 const BAD_ISSUER = 'http://127.0.0.1:1/' // connection refused → discovery fails fast
 let db: TenantDb
 let issuer: TestIssuer
+
+/**
+ * #820: the password door, made deterministic the way the SAML row and the platform IdP already were.
+ * Returns what it found so the caller can put the shared fixture tenant back — the whole point is not
+ * to leave the next file guessing, which is what made this pin order-dependent in the first place.
+ */
+async function setLocalLogin(enabled: boolean): Promise<boolean> {
+  const [row] = await admin<{ local_login_enabled: boolean }[]>`
+    SELECT local_login_enabled FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`
+  await admin`UPDATE tenant_login_prefs SET local_login_enabled = ${enabled} WHERE tenant_id = ${TENANT}`
+  return !!row?.local_login_enabled // no row at all means no password door, which is `false`
+}
 // The hardened default (safeFetchJson) is https-only + SSRF-guarded, so it rejects the local
 // http/loopback TEST issuer by design (ADR-083 / #181 — asserted directly below). To exercise the
 // persist / secret / groups flow against the test issuer, inject a fake discovery fetch that returns
@@ -116,6 +128,17 @@ describe('#537 tenant-oidc lockout guard', () => {
   const base = { tenantId: TENANT, userId: 'dev-user', plan: 'free', clientId: 'wikistead-tenant', redirectUri: REDIRECT }
   it('refuses the disable that would empty the effective set; allows it once another method remains', async () => {
     await admin`DELETE FROM tenant_saml WHERE tenant_id = ${TENANT}`.catch(() => {}) // deterministic: saml off
+    // #820: the effective set this guard counts has THREE doors and this pin was making only two of
+    // them deterministic. The password door is a row on the SHARED fixture tenant, so whether the
+    // guard had anything left to count depended on what the last file to touch it happened to leave
+    // behind — a run that turned it on and was killed before its cleanup made this assertion fail,
+    // and running the file that turns it off again made it pass. Measured both ways: with the row
+    // left on, the disable below is correctly ALLOWED and the rejection never comes.
+    //
+    // The SAML sibling of this pin does NOT need the same line, which is worth knowing rather than
+    // copying: its guard asks the kind-level question, which never looks at the password door at all
+    // (measured — leaving the row on changes nothing there). That split is filed on its own.
+    const localBefore = await setLocalLogin(false)
     await updateTenantOidc(db, fgaClient, { ...base, issuer: issuer.url, enabled: true }, fakeDiscovery)
     const saved = process.env.PLATFORM_OIDC_ISSUER
     delete process.env.PLATFORM_OIDC_ISSUER // no platform → the tenant IdP is the ONLY door
@@ -136,6 +159,7 @@ describe('#537 tenant-oidc lockout guard', () => {
       expect((await getTenantOidc(db))?.groupsClaim).toBe('roles')
     } finally {
       process.env.PLATFORM_OIDC_ISSUER = saved
+      await setLocalLogin(localBefore) // put the shared tenant back the way it was found
     }
   })
 })
