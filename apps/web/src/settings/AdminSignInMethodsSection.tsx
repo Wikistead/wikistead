@@ -23,13 +23,13 @@ import { AdminSamlSection, samlSectionState } from "./AdminSamlSection";
 import { methodBadge } from "./login-method-badge";
 
 // #589 / ADR-195 addendum: ONE list of sign-in methods. A row is one way in — each OIDC connection,
-// SAML, and platform login — and every row is edited IN PLACE. What this replaces
+// SAML, and platform login — and every row is edited IN PLACE. What this replaces:
 //
-// - a "Login methods" status card that repeated the state each row already carries,
-// - a legacy single-OIDC form that always wrote `ORDER BY sort, id LIMIT 1`, so the SECOND
-// connection could not be edited at all and the FIRST was edited without saying so,
-// - flags (groups claim, group trust — and bootstrap eligibility, until #616 retired the
-// mechanism it gated) that only creation could set.
+//   - a "Login methods" status card that repeated the state each row already carries,
+//   - a legacy single-OIDC form that always wrote `ORDER BY sort, id LIMIT 1`, so the SECOND
+//     connection could not be edited at all and the FIRST was edited without saying so,
+//   - flags (groups claim, group trust — and bootstrap eligibility, until #616 retired the
+//     mechanism it gated) that only creation could set.
 //
 // In-row expansion rather than a side panel, deliberately: this list exists because editing lived in
 // two places, and a panel would be the third. `enabled` (what the tenant chose) and `effective` (what
@@ -61,7 +61,7 @@ export function connectionName(c: Pick<AdminConnectionDTO, "preset" | "label" | 
 }
 
 // #589 bounce: every method is a row, so every row is built from ONE class. The reject was that they
-// were not — password was an ON/OFF toggle, SAML only a save button, OIDC a card with different spacing
+// were not — password was an ON/OFF toggle, SAML only a save button, OIDC a card with different spacing —
 // and three hand-written class strings is how that happens. `data-method-row` marks them so a pin can
 // walk the list instead of naming the methods it knows about: a fifth method is measured by existing.
 // #679 / ADR-222 §1: the kind-stances, in the order they are offered. `off` is not among them — it is
@@ -220,7 +220,7 @@ export function AdminSignInMethodsSection() {
   // #672 (review rejection/): ONE mapping, read both by the toast below and by the reason
   // printed under the picker, because they are the same sentence said at two moments. The screen used
   // to answer `admin_factor_required` with the ON/OFF switch's wording whatever had been asked for, so
-  // an admin who already held a factor was told to enrol one and never learnt the real requirement
+  // an admin who already held a factor was told to enrol one and never learnt the real requirement —
   // two passkeys. The server names each floor now; anything unmapped stays the generic failure rather
   // than borrowing a neighbour's sentence.
   //
@@ -313,7 +313,7 @@ export function AdminSignInMethodsSection() {
         // A preset connection owns its issuer and refuses a label (the brand is not an admin string
         // that reaches the anonymous login screen) — the editor does not offer either field, so it
         // must not send them. For a preset-less row the label is sent even when EMPTY: the server
-        // reads as "clear it", and omitting it would make a cleared label silently keep the old
+        // reads "" as "clear it", and omitting it would make a cleared label silently keep the old
         // one (a field the admin can set but never unset).
         ...(c.preset ? {} : { issuer: draft.issuer, label: draft.label }),
         clientId: draft.clientId,
@@ -360,7 +360,7 @@ export function AdminSignInMethodsSection() {
   };
 
   // Two badges, because they are two facts — and the first one must not borrow the second's word.
-  // The SELECTION badge says what the tenant chose (`Selected` / `Not selected`), never "Active"
+  // The SELECTION badge says what the tenant chose (`Selected` / `Not selected`), never "Active":
   // a connection whose secret cannot be decrypted is selected and NOT active, and calling that
   // "Active" in green is the lie the two badges exist to prevent. The second badge appears only when
   // something CONTRADICTS the selection — deployment policy, the plan, or a configuration that
@@ -371,7 +371,7 @@ export function AdminSignInMethodsSection() {
   // #605 (review rejection, 2026-08-05): ONE reason, not three. The stance badge was rendered by the row
   // itself, so this function could not know a reason was already on screen and added its own: a
   // blocked local row showed "disabled because SSO is required", "selected" and "not currently
-  // working" side by side
+  // working" side by side —
   // the same fact three times, in the width the description needed. ADR-195 §1 asks for two facts (the
   // selection is preserved; here is why it does not bite), so the reason comes in here and the row
   // renders nothing beside it. #589 removed this exact doubling once; the stance brought it back.
@@ -390,7 +390,8 @@ export function AdminSignInMethodsSection() {
     const notWorking = enabled && !reason && working === false;
     return (
       <span className="flex flex-none items-center gap-2">
-        {/* #605 (review rejection, 2026-08-05): "SSO". Both facts were
+        {/* #605 (review rejection, 2026-08-05): "disabled because SSO is required" and "selected" were far
+            too easy to miss. Both facts were
             the same 11px grey, so the row read as ON with a footnote. The REASON is the headline — it gets
             a bordered warning badge — and the selection state steps back to a plain label when a reason is
             present. The row itself is NOT dimmed (the ruling is explicit): the setting is still there, it
@@ -579,7 +580,7 @@ export function AdminSignInMethodsSection() {
               <IconButton aria-label={t("signInMethods.edit")} data-testid="sign-in-method-saml-edit" onClick={() => setExpanded(expanded === "saml" ? null : "saml")}>
                 {expanded === "saml" ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </IconButton>
-              {/* #589 bounce ③: the closed row carries the same information every other row does
+              {/* #589 bounce ③: the closed row carries the same information every other row does —
                   what it is, and where it stands. It used to be a name and a badge, so a reader could
                   not tell a configured SAML from an untouched one without opening it. */}
               <div className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -588,7 +589,7 @@ export function AdminSignInMethodsSection() {
                   {samlState.kind === "form" && samlState.data?.ssoUrl ? samlState.data.ssoUrl : t("adminAuth.samlNotConfigured")}
                 </span>
               </div>
-              {/* review F4: an unentitled tenant's row must READ as unentitled without being opened
+              {/* review F4: an unentitled tenant's row must READ as unentitled without being opened —
                   the upgrade notice lives in the expansion, and a row that says only "Not selected"
                   hides the reason (ADR-072: an entitlement loss on an admin surface is named). */}
               {samlState.kind === "locked"
@@ -625,7 +626,7 @@ export function AdminSignInMethodsSection() {
             <div className="min-w-0 flex-1">
               <div className="font-medium">{t("adminAuth.methodLocal")}</div>
               {/* #605 (review rejection): NOT truncated. This is the only row carrying a description, and
-                  a single line for it inside a 512px row meant the sentence was cut at "…"
+                  a single line for it inside a 512px row meant the sentence was cut a few words in
                   even with nothing else on the row — before the stance badges took a third of the
                   width away. A row may be two lines tall; a sentence that stops mid-word is not a
                   sentence. */}
@@ -962,7 +963,7 @@ export function AdminSignInMethodsSection() {
           setConfirming(null);
         }}
       />
-      {/* #679: narrowing signs people out immediately (ruling ④), so the question carries the NUMBER
+      {/* #679: narrowing signs people out immediately (ruling ④), so the question carries the NUMBER —
           the one thing a tenant cannot work out for itself — and, for passkeys, the sentence ruling
           ②-3 asked for. `StanceConfirm` fetches while open; the dialog does not appear until it has an
           answer, because "N members" with N unknown is worse than a moment's wait. */}

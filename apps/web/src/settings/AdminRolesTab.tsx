@@ -31,7 +31,7 @@ const TENANT_CAPABILITIES = ["createSpaces", "issueApiKeys", "manageConnections"
 
 // #536 gave every row a scope badge because the sections it sat in were not readable as sections.
 // #581 fixes the sections instead and drops the badge here: where POSITION carries the information,
-// repeating it on every row is noise the user asked us to remove. The badge is still available
+// repeating it on every row is noise the user asked us to remove. The badge is still available —
 // `scope` is optional now — for a surface that mixes scopes in one list (a search result, a member
 // row's chips), where position says nothing. "BUILT-IN" always stays: no position implies it.
 function RoleBadges({ scope, builtIn = false }: { scope?: "resource" | "tenant"; builtIn?: boolean }) {
@@ -109,7 +109,7 @@ function CapabilityPicker({ value, onChange, idPrefix, list, disabled = false, l
 
 // #580: the scope is CHOSEN, and it is the first thing on the form.
 //
-// #536 removed a scope <Select> nobody could find and derived the scope from the boxes instead
+// #536 removed a scope <Select> nobody could find and derived the scope from the boxes instead —
 // which fixed the hidden control and created a new problem the user then hit: you cannot tell which
 // kind of role you are making until you have already ticked something, and both vocabularies sit in
 // one undifferentiated grid until then. The answer is not to bring back the hidden Select: the choice
@@ -174,7 +174,7 @@ function RoleEditor({ onSave, onCancel, pending }: {
 }
 
 // #586 (review rejection): built-in and custom role rows came out different heights, which the
-// user called unsettling to look at. Measured
+// user called unsettling to look at. Measured:
 // built-in rows were 17px and custom rows 32px, because only the custom ones carry IconButtons and the
 // row had no box of its own — so nearly-double-height rows alternated down one list. The standing
 // ruling is that built-in and custom are ONE kind of thing wearing the same row (#536 / #582); a
@@ -269,8 +269,8 @@ export function AdminRolesTab() {
             onClick={() => setDeletingRole({ id: r.id, name: r.name })}><X size={14} /></IconButton>
         </div>
         {/* #586 ②: the grid is an EDITING surface, so it shows when editing — at rest the list is
-            names, and the name's hover window says what each confers ("
-            Per-op semantics inside are unchanged. */}
+            names, and the name's hover window says what each confers (the ruling: show only the role
+            name, raise the capabilities on hover). Per-op semantics inside are unchanged. */}
         {capsOpenId === r.id && (
           <CapabilityPicker
             value={r.capabilities}
@@ -294,7 +294,7 @@ export function AdminRolesTab() {
   return (
     <SettingsPane width="wide" testId="admin-roles" title={t("adminRoles.title")}>
 
-      {/* #536 (user re-ruling) + ④: ONE set of roles, presented in TWO scope sections
+      {/* #536 (user re-ruling) + ④: ONE set of roles, presented in TWO scope sections —
           "Tenant" above, "Space / Page" below (the ruling: tenant roles and resource roles mixed in one
           flat list read as a jumble; the dividing axis is SCOPE, not built-in/custom). Within each
           section the order is built-in → custom (DOM-pinned). What each row keeps:
@@ -308,7 +308,8 @@ export function AdminRolesTab() {
         {/* #581: the two groups are SURFACES, not a pair of small grey labels above a continuous run of
             rows. A card each — border and its own heading bar — so the boundary is visible before you
             read anything, which is what lets the per-row scope badge go away.
-            . The FILL is gone; the boundary is not. `bg-panel` is the
+            #752 (user, at the screen): the tab looked dowdy with every surface filled in the sidebar's
+            colour — keep the border, drop the background fill. The FILL is gone; the boundary is not. `bg-panel` is the
             sidebar's own token, and this was the only screen in the console painting a large area with
             it — every other list (API keys, webhooks, SCIM, domains, orphaned drafts) draws through the
             shared `ListBox`, which paints nothing. The card was carrying the boundary twice, in a
@@ -321,8 +322,8 @@ export function AdminRolesTab() {
           <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto p-3" data-testid="roles-list-tenant">
           <div className="flex flex-col gap-1" data-testid="builtin-role-member">
             <div className={ROLE_ROW_HEAD}>
-              {/* #586 (review rejection, 2026-08-04): " member UI ".
-                  This row kept an editable grid because its boxes were really the TENANT DEFAULTS wearing
+              {/* #586 (review rejection, 2026-08-04): why does only the built-in member role show a
+                  capability-editing UI? This row kept an editable grid because its boxes were really the TENANT DEFAULTS wearing
                   a role row's clothes — and that made the one thing a tenant cannot redefine look like
                   the one thing it can. A built-in role carries no editing surface anywhere; the defaults
                   moved to their own section below, where they are what they are. */}
@@ -356,7 +357,7 @@ export function AdminRolesTab() {
                 {/* #586 ②: at rest a role is its NAME, and hovering it raises the measured "what
                     it can do" window — the same component every other surface uses. The read-only grid
                     that stood here drew the measured closure correctly since the last bounce, but a
-                    9-column lattice per row is the shape the ruling rejected. */}
+                    9-column lattice per row is the being-made-to-read shape the ruling rejected. */}
                 <RoleTip origin="role" scope="space" builtinCapability={nounCapability(r.name)} testId={`role-tip-${r.name}`}>
                   <span className="text-sm font-medium">{r.name}</span>
                 </RoleTip>

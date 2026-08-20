@@ -240,16 +240,17 @@ export function MembersPage() {
     <SettingsPane width="list" title={t("members.title")}>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
-      {/* #579 (review rejection ②, 2026-08-04): .
-          They were two rows with nothing between them, so the screen read as one four-control mess.
+      {/* #579 (review rejection ②, 2026-08-04): filtering and the add form are different operations, so
+          separate them visually. They were two rows with nothing between them, so the screen read as one four-control mess.
           Each operation gets a heading — the idiom this page already uses for its invite section, not a
           new one — and the filter now sits with the table it filters rather than above the form. */}
       <h3 className="mb-2 mt-6 text-sm font-medium">{t("members.grantTitle")}</h3>
 
-      {/* #578 bounce ④ (user ruling: " UI "), then the
+      {/* #578 bounce ④ (user ruling: line this UI up with the space screen wherever possible), then the
           2026-08-04 ruling: the SAME form the space screen uses, with the SAME type toggle — user or
           group, find them, choose the role, add. The groups-only round pinned "a person's tenant role is
           given on their row" (#579); that pin is overridden for the add form by the user's direct
+          instruction (why not let this toggle between users and groups like it used to?). The two doors
           converge on the same state — the server keeps 1 principal = 1 role — so this is a second way to
           say the same thing, not a second thing. */}
       <GranteeRoleForm
@@ -342,7 +343,7 @@ export function MembersPage() {
                   ariaLabel={t("members.roleFor", { sub: row.label })}
                   testId="member-role-select"
                   options={[
-                    // #643: the placeholder is a label, not an action. It USED to be the revocation
+                    // #643: the placeholder is a label, not an action. It USED to be the revocation —
                     // "choose a role" quietly took one away — which nobody reads it as, and which put a
                     // destructive act in the list of ordinary choices. Revoking moved to the row's ⋯,
                     // where this screen keeps every other destructive action (#591's shape: the dropdown
@@ -412,7 +413,7 @@ export function MembersPage() {
                   <MemberStatusIcons member={m} />
                 </span>
               </td>
-              {/* #579 (user ruling, 2026-08-03): .
+              {/* #579 (user ruling, 2026-08-03): there is no "add a role" — roles cannot stack.
                   One control, and its VALUE is the role this member has. Chips are gone with the concept
                   they drew: a chip row exists to show a SET, and there is no set — the server converges a
                   tenant principal to one role (a71d8100), so a screen showing two was describing a state
@@ -426,6 +427,7 @@ export function MembersPage() {
                 {/* #603 (review rejection 2026-08-05, ruling): the badge-per-role shape that used to
                     sit here is RETRACTED. It stacked above the control and stretched the row to 57px
                     against 41px for every other one, and a member in three groups stretched it further —
+                    the rows kept growing taller — could a tooltip gather these up instead? One mark
                     now, beside the control, carrying the count; the group × role pairs are behind its
                     hover. See GroupRolesMark. */}
                 <span className="inline-flex items-center">
@@ -469,7 +471,7 @@ export function MembersPage() {
                     },
                     // #626: only offered when the server would accept it — see memberMenuValues.
                     { value: "passwordRemove", label: t("members.removePassword"), icon: <KeyRound size={14} />, testId: "member-remove-password", danger: true },
-                    // #644 only for a member who holds one — see memberMenuValues. Not `danger`
+                    // #644 only for a member who holds one — see memberMenuValues. Not `danger`:
                     // the other red items take something away, and this one gives a locked-out person
                     // their account back. Colouring it as destruction would describe the wrong act.
                     { value: "factorReset", label: t("members.resetFactors"), icon: <ShieldOff size={14} />, testId: "member-reset-factors" },
@@ -656,13 +658,13 @@ export function MembersPage() {
           <ListBox data-testid="invite-list">
             {invites.map((i) => (
               <ListRow key={i.id} data-testid="invite-row" data-invite={i.id}>
-                {/* #638 ④: columns, not one sentence. " · " as a single string moved the
+                {/* #638 ④: columns, not one sentence. Email-dot-role as a single string moved the
                     buttons left and right with the length of the address, so the control a reader was
                     reaching for was never in the same place twice. The address takes the free space and
                     truncates; everything after it is fixed-width and lines up down the list. */}
                 <span className="min-w-0 flex-1 truncate" data-testid="invite-email">{i.email || t("members.noEmail")}</span>
                 <span className="flex-none text-xs text-fg-dim" data-testid="invite-role-label">{i.role}</span>
-                {/* #638 one button, and it is a NOUN. Two lived here — "new link" and "resend"
+                {/* #638 one button, and it is a NOUN. Two lived here — "new link" and "resend" —
                     calling the same endpoint, so "resend" re-issued and quietly killed the link the
                     recipient was holding. Issuing is now a second, deliberate press inside the dialog.
                     (The row also carried "emailed / not emailed", which said the same thing on every row

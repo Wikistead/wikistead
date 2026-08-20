@@ -190,7 +190,7 @@ export function DateRangePicker({ from, to, onChange, testId = "date-range" }: D
       <div className="flex items-center gap-2">
         {/* #641/ ONE entrance on the row.
             The two fields were `type="date"`, so the row carried three ways into a calendar and two of
-            them opened Chrome's own — square corners, white frame, the thing the reject called .
+            them opened Chrome's own — square corners, white frame, the thing the reject called shabby.
             Hiding `::-webkit-calendar-picker-indicator` would not have done it: F4 and Alt+Down still
             open it, and the browser keeps formatting the value. The `type` itself had to change.
             The typed path is not lost, only moved: the fields live inside the panel now (below), so
