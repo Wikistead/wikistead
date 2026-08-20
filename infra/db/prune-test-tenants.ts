@@ -58,7 +58,37 @@ async function main(): Promise<void> {
     const gone = await sql`DELETE FROM tenants WHERE id = ANY(${debris})`
     console.log(`[prune] ${gone.count} leftover tenant(s) and ${rows} row(s) removed; ${children.length} table(s) still referenced`)
   }
+
+  await pruneRoles(sql)
   await sql.end()
+}
+
+/**
+ * #821: the tenants the seed owns are KEPT, so anything a test made INSIDE one of them survives every
+ * prune. Role definitions are the shape that grew until it broke something: 906 of them on a stack
+ * that had been running for a while, against the nought the seed makes.
+ *
+ * It broke by PAGING, which is why nobody noticed it growing. `/spaces/:id/assignable-roles` answers
+ * with one page ordered by name, and the pin that asserts its own role is offered stops finding it
+ * once 200 older ones sort ahead — reporting `expected [ 'aa667-…', …(199) ] to include 'ar-res-…'`,
+ * which reads as a broken endpoint rather than as a full table. The run before it was green.
+ *
+ * Deleted WHOLESALE rather than by a list of test-shaped names: the seed writes no role rows at all
+ * (the built-ins are constants in code, not rows), so on this stack every one of them was made by a
+ * test, and a list of prefixes would go stale the first time a suite invents a new one — which is how
+ * the residue sweep in seed.ts came to miss these.
+ *
+ * What references roles is asked of the database, for the same reason the tenant pass above asks.
+ */
+async function pruneRoles(sql: postgres.Sql): Promise<void> {
+  const referrers = (await sql<{ child: string }[]>`
+    SELECT DISTINCT conrelid::regclass::text AS child
+      FROM pg_constraint WHERE confrelid = 'roles'::regclass AND contype = 'f'`).map((r) => r.child)
+  let rows = 0
+  for (const table of referrers) rows += (await sql.unsafe(`DELETE FROM ${table}`)).count ?? 0
+  const gone = await sql`DELETE FROM roles`
+  console.log(`[prune] ${gone.count} leftover role(s) and ${rows} row(s) referencing them removed ` +
+    `(${referrers.length} referencing table(s) asked of the database)`)
 }
 
 void main()
