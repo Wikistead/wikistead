@@ -50,16 +50,20 @@ export function renderEntitlementsMarkdown(): string {
   // Same family as #671 (one feature, one name) and #732 (internal vocabulary stays out of the UI) —
   // this is the documentation half of it.
   lines.push(HEADER, '', '# What each plan includes', '')
+  // #814 (owner ruling, follows #748): the intro speaks the reader's language too — no code
+  // identifiers in the prose. The generated-ness stays on the page as a trust statement.
   lines.push(
-    'Every paid lever is an `Entitlements` field resolved in one place',
-    '(`resolveEntitlements(plan)`). Self-hosted Community/Enterprise builds are',
-    '`UNLIMITED` by construction; the per-tier Cloud values are published',
-    'separately. This page is generated from the code (`LEVER_CATALOG`).',
+    'Each row is one feature or limit a plan can include. Self-hosted',
+    'Community/Enterprise builds have every one of them enabled or unlimited;',
+    'the per-tier Cloud values are published separately. This page is generated',
+    'from the product source, so it cannot drift from what the product does.',
     '',
   )
   // #693: the EDITION column mirrors catalog `edition` — 'EE' rows are levers whose enforcement
   // bytes live in the private overlay, and the placement lint derives its deny-set from them.
-  lines.push('| Lever | Edition | What it gates | Self-host (Community) | Enforced at | Downgrade |')
+  // The docs-site EE-badge check parses `(`key`) | EE |`, so the key cell and the Edition column
+  // must keep this shape.
+  lines.push('| Feature | Edition | What it controls | Self-host (Community) | Enforced at | Downgrade |')
   lines.push('|---|---|---|---|---|---|')
   for (const key of Object.keys(LEVER_CATALOG)) {
     const lever = LEVER_CATALOG[key as keyof typeof LEVER_CATALOG]
