@@ -201,17 +201,21 @@ describe('#623 §4: what a placeholder must NOT do', () => {
 
     let rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
     let flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
-    if (!flag.has(a)) {
-      // ADR-183 §3 by design: a saturated store's ITEM error denies that id — fewer visible rows,
-      // never a 500. On the 2-core public runner the first heavy batch over these fresh pages hits
-      // exactly that (measured via the diagnostic below: the same pinned batch answers true moments
-      // later), so one re-ask separates the DESIGNED degradation from a real deny — a predicate put
-      // back stays missing on the second read too, and every break-check in this file keeps its bite.
+    // A definitively HAS a visible child, so `hasChildren` is true unless the store starved — and the
+    // starvation has TWO shapes, not one: A missing from the branch (its own view check denied), OR A
+    // present with hasChildren wrongly false (the CHILD's view check denied). `flag.get(a) !== true`
+    // covers both (undefined or false). ADR-183 §3 by design: a saturated store's ITEM error denies
+    // that id — fewer visible rows, never a 500. On the 2-core public runner the first heavy batch
+    // over these fresh pages hits exactly that (measured: the same pinned batch answers true moments
+    // later), so one re-ask separates the DESIGNED degradation from a real deny. It is safe against the
+    // OTHER rows: B's and C's false are CORRECT (invisible-only child / leaf), and a re-ask leaves a
+    // genuine false false — every break-check in this file keeps its bite.
+    if (flag.get(a) !== true) {
       await new Promise((r) => setTimeout(r, 300))
       rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
       flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
     }
-    if (!flag.has(a)) {
+    if (flag.get(a) !== true) {
       // FIRST, before anything else asks the store a question: re-ask the one that failed, at the width
       // it failed at. Every earlier probe here asked about a SINGLE id, and a single id is the shape a
       // starved store still answers — so they were always going to say "allowed", and in every run they
