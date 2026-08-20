@@ -111,6 +111,11 @@ export const ENV_DOCS = {
     default: 'falls back to DATABASE_URL',
     what: 'Superuser connection string, used by the migration runner and by the cross-tenant storage sweep. Keep it out of processes that do not need it — row-level security is what confines the runtime role to one workspace.',
   },
+  MIGRATIONS_DIR: {
+    group: 'Database',
+    default: 'the SQL shipped beside the app (`/app/migrations` in the image), else the checkout',
+    what: 'Where the migration runner reads its SQL. Set it only when the schema lives somewhere the runner would not look — a chart mounting the files, or a run against a copy. The published image carries the migrations, so a normal deployment leaves this unset.',
+  },
 
   // ── Cache and queues ──────────────────────────────────────────────────────────────────────────
   VALKEY_URL: {

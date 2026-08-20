@@ -39,8 +39,8 @@ Two invariants shape every deployment:
 
 - Docker + Docker Compose (evaluation) or a Kubernetes cluster with an nginx
   ingress controller + cert-manager (production).
-- Node.js 20+ and pnpm only if you build images yourself or run migrations from a
-  checkout.
+- Node.js 20+ and pnpm only if you build images yourself. Running migrations does
+  not need them — the server image carries the schema and can apply it.
 - An OIDC identity provider for member login (anything spec-compliant: Authentik,
   Keycloak, Entra ID, Google, …). Guests via share links need no IdP.
 - DNS: one host per deployment, plus per-tenant subdomains if you use them
@@ -140,9 +140,22 @@ express it work. What production needs beyond the compose defaults:
   same-origin invariant), with WebSocket upgrade, sticky sessions and ≥1h
   read timeouts on `/collab`. Per-tenant subdomains ride the same services via
   the Host header; a wildcard cert needs DNS-01 — until then use explicit hosts.
-- **Migrations**: run `pnpm --filter @wikistead/server migrate` against the prod
-  database (with `DATABASE_ADMIN_URL`) as a release step — migrations are
-  idempotent and ordered (`infra/db/migrations`). Re-run on every upgrade.
+- **Migrations**: apply them as a release step, before the new code serves
+  traffic. Migrations are idempotent and ordered, and re-running is safe, so run
+  them on every upgrade. **From the image** — no checkout needed:
+
+  ```bash
+  docker run --rm -e DATABASE_ADMIN_URL=postgres://... <server-image> node dist/migrate.js
+  ```
+
+  On Kubernetes the same command is a Job (or `kubectl exec` into a server pod)
+  against the image the release is rolling out, so the schema and the code that
+  expects it come from one artifact. From a checkout the equivalent is
+  `pnpm --filter @wikistead/server migrate`. The SQL lives in
+  `infra/db/migrations` and is copied into the image at `/app/migrations`; set
+  `MIGRATIONS_DIR` if you keep it somewhere else. The runner needs the admin
+  role (`DATABASE_ADMIN_URL`) — the runtime role deliberately cannot create
+  tables.
 
 ## First tenant and sign-in
 
