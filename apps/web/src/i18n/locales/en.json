@@ -794,7 +794,8 @@
     "recoveryCodeWarning": "Using a code removes every second factor from your account and signs out all your sessions. You will set up a new authenticator afterwards.",
     "recoveryCodeFailed": "That code cannot be used. Each code works once, and creating a new set retires the old one.",
     "factorChooseOther": "Use something else",
-    "factorChoose": "Use {{kind}}"
+    "factorChoose": "Use {{kind}}",
+    "factorPresentPasskeyAgain": "Try your passkey again"
   },
   "share": {
     "invalid": "This share link is invalid, expired, or revoked.",

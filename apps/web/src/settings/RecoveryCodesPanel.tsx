@@ -10,7 +10,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import {
   useMyRecoveryCodes, useMintRecoveryCodes, useRecoveryReauthChallenge, useMyFactors,
 } from "../data/queries";
-import { browserCanUseFactorKind } from "./factor-kind"; // #686: one predicate for "can this window do it"
+import { browserCanUseFactorKind, proofBeginsOnChoice } from "./factor-kind"; // #686: one predicate for "can this window do it"
 
 // #650 / ADR-226: the member's own recovery codes. SELF-SCOPE like the factor panel beside it — every
 // call is keyed to the session's subject by the server, and there is no administrator route to mint
@@ -46,6 +46,24 @@ import { browserCanUseFactorKind } from "./factor-kind"; // #686: one predicate 
 
 /** The ways a member can prove it is them here. Order is the order they are offered. */
 export const REAUTH_METHODS = ["totp", "passkey", "password"] as const;
+
+/**
+ * What happens when the member picks a method (#745).
+ *
+ * Exported, and taking its effects as arguments, because the decision inside it is the one the owner
+ * caught at the screen: choosing a passkey IS presenting it, and the second button that used to sit
+ * behind that choice asked for a decision nobody had left to make. The rule itself belongs to the KIND
+ * (`proofBeginsOnChoice`) — the door asks the same question, and these two screens have now grown the
+ * same shape twice.
+ */
+export function pickReauthMethod(
+  method: ReauthMethod | null,
+  actions: { setMethod: (m: ReauthMethod | null) => void; resetProof: () => void; present: () => void },
+): void {
+  actions.setMethod(method);
+  actions.resetProof();
+  if (method && proofBeginsOnChoice(method)) actions.present();
+}
 export type ReauthMethod = (typeof REAUTH_METHODS)[number];
 
 /**
@@ -299,7 +317,9 @@ export function RecoveryCodesPanel() {
             <p className="text-xs text-fg-dim" data-testid="recovery-no-proof">{t("account.recoveryNoProof")}</p>
           ) : proving ? (
             <RecoveryReauthForm method={method} methods={methods} proving={proving} onChange={setProving}
-              onPick={(m) => { setMethod(m); setProving({ code: "", password: "" }); }}
+              onPick={(m) => pickReauthMethod(m, {
+                setMethod, resetProof: () => setProving({ code: "", password: "" }), present: () => void proveWithPasskey(),
+              })}
               busy={mint.isPending} passkeyBusy={challenge.isPending}
               onSubmit={() => void submitProof()} onPasskey={() => void proveWithPasskey()}
               onCancel={() => { setProving(null); setMethod(null); }} />
