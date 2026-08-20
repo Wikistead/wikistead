@@ -39,7 +39,7 @@ import { resolve, dirname } from 'node:path'
 // So an imported helper is never concatenated. It is evaluated on its own, and it may only answer for a
 // route that has NO query of its own — see `routeBounded`.
 const ROUTES = resolve(import.meta.dirname, '../routes')
-// #688: the audit viewer's home since the ledger moved behind the seam (absent from the public tree).
+// #688: the audit viewer's home since the ledger moved behind the seam (absent from the CE build).
 const EE_AUDIT_MOUNT_DIR = resolve(import.meta.dirname, '../../../../packages/ee-server/src/audit')
 const HAS_EE_AUDIT = existsSync(resolve(EE_AUDIT_MOUNT_DIR, 'mount.ts'))
 // #688 slice 2: who-viewed followed the ledger across the seam.
@@ -364,7 +364,7 @@ function listShapedRoutes(): { key: string; body: string; helpers: { name: strin
     .flatMap((f) => routesIn(f))
   // #688: the audit viewer moved into @wikistead-ee/server, and this discipline must not stop at the
   // package boundary — the suite runs the EE composition, so its routes are this suite's routes. The
-  // mirror carries neither the EE package nor (via the derived exclusion) most EE-coupled suites;
+  // CE build carries neither the EE package nor (via the derived exclusion) most EE-coupled suites;
   // THIS file stays CE, so the extra scan is conditional and the audit entries in the ledger are too.
   const eeRoutes = [
     ...(HAS_EE_AUDIT ? routesIn('mount.ts', EE_AUDIT_MOUNT_DIR) : []),

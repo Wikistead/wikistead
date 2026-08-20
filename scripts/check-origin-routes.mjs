@@ -63,10 +63,10 @@ for (const block of caddyBlocks) {
 
 // ── Kubernetes ingress ───────────────────────────────────────────────────────────────────────
 // The whole half sleeps when deploy/k8s is not in this checkout: the manifests are private-overlay
-// material the CE build deliberately does not carry (#178), so on the public
-// repository this check has no subject — measured on the public CI's first day, where the ENOENT
+// material the CE build deliberately does not carry (#178), so in the CE build
+// this check has no subject — measured on the public CI's first day, where the ENOENT
 // here killed the build job before the sibling-host checks below ever ran. A dev checkout keeps
-// the full check; the mirror says so and moves on.
+// the full check; the check says so and moves on.
 const ingressPath = join(root, 'deploy/k8s/base/ingress.yaml')
 if (!existsSync(ingressPath)) {
   console.log('origin-routes: deploy/k8s absent in this checkout (CE build) — the ingress half sleeps; Caddyfile still checked.')

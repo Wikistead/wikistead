@@ -7,9 +7,9 @@
 // to false, the whole path is unreachable in a CE composition.
 //
 // NO @wikistead-ee/server import, deliberately: this file states CE behaviour and SHIPS WITH THE
-// MIRROR — which is why it is named ce-saml-entitlement and not saml-*: the filter erases
+// CE BUILD — which is why it is named ce-saml-entitlement and not saml-*: the filter erases
 // `__tests__/saml*.test.ts` by glob, and the first version of this file silently vanished from the
-// one repository whose behaviour it pins (#693 ③, measured on a real mirror run).
+// one repository whose behaviour it pins (#693 ③, measured on a real CE build).
 //
 // On the dev suite the setup registers the EE predicate; module state is per-vitest-file, so
 // resetting here simulates the CE composition for this file alone. In the CE build nothing was

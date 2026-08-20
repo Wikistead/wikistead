@@ -1,14 +1,14 @@
 // #692 D: one positive assertion for "this operation reaches the compliance ledger" that is TRUE in
 // both compositions. The ledger is EE (#688): on the dev suite the setup registers the sink and an
-// audited operation leaves rows; on the CE build nothing registers and `auditIfEntitled` is a
+// audited operation leaves rows; in the CE build nothing registers and `auditIfEntitled` is a
 // documented no-op. A test that hard-codes the composed count is red exactly where the product is
-// right — and excluding the whole file would throw away the nine-tenths of it that IS the mirror's
+// right — and excluding the whole file would throw away the nine-tenths of it that IS the CE build's
 // coverage. So the expectation asks the same predicate production asks (`auditLedgerRegistered()`)
 // and pins BOTH answers: n rows when a ledger is composed in, zero when it is not — the CE no-op is
 // a promise too, and this is where it gets measured.
 //
 // NO EE import here, deliberately: this helper must load in the CE build (the drain helper next door
-// imports @wikistead-ee/server and is derived OUT of the mirror along with every file that uses it).
+// imports @wikistead-ee/server and is derived OUT of the CE build along with every file that uses it).
 import { expect } from 'vitest'
 import type { Sql } from 'postgres'
 import { auditLedgerRegistered } from '../../audit/sink.js'
@@ -16,7 +16,7 @@ import { auditLedgerRegistered } from '../../audit/sink.js'
 /**
  * Drain the audit outbox for `tenantId` — when a ledger is composed in at all. The real drain lives
  * beside the EE package (audit-drain.ts imports it), so it is reached by DYNAMIC import here: the
- * mirror derivation matches `from '…'` import syntax only, this call never executes in the CE build
+ * CE derivation matches `from '…'` import syntax only, this call never executes in the CE build
  * (nothing registered → nothing enqueued → nothing to drain), and the file it names does not ship
  * there either.
  */

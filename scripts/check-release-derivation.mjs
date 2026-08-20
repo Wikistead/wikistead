@@ -21,14 +21,14 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 // The subject is the release machinery, which the CE build deliberately does not carry
-// (#717 ②) — on the public repository this check sleeps, saying so. Measured on the public
+// (#717 ②) — in the CE build this check sleeps, saying so. Measured on the public
 // CI's first day: the unconditional read killed the build job at its very last step. A dev
 // checkout missing the file is still the hard error below (the derivation source moved).
 import { existsSync as __existsSync } from 'node:fs'
 import { join as __join, dirname as __dirname } from 'node:path'
 import { fileURLToPath as __fileURLToPath } from 'node:url'
 if (!__existsSync(__join(__dirname(__fileURLToPath(import.meta.url)), '../release.config.mjs'))) {
-  console.log('check-release-derivation: release.config.mjs not in this checkout (CE build carries no release machinery) — sleeping.')
+  console.log('check-release-derivation: release.config.mjs not in this checkout (the CE build carries no release machinery) — sleeping.')
   process.exit(0)
 }
 

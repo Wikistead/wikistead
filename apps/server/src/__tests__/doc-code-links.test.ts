@@ -23,7 +23,7 @@ function repoFiles(): string[] {
       else out.push(relative(repoRoot, full).split('\\').join('/'))
     }
   }
-  // 'scripts' too — measured on the CE build the day #734 landed: its map row names
+  // 'scripts' too — measured in the CE build the day #734 landed: its map row names
   // scripts/env-catalog.mjs plus an EE generator, dev stayed green because the EE glob matched
   // under packages/, and the mirror (no EE) went red because the ONLY live glob pointed at a root
   // this walk never visited. The walk must cover every root the map may reference.
