@@ -2017,25 +2017,60 @@ function HomeLanding() {
   );
 }
 
+// #808: a member address met by somebody who is NOT signed in shows the door, not an empty desk.
+//
+// Measured on a cookie-less browser (2026-08-21): `/`, `/templates`, `/changes` and `/watches` each
+// answered 401 to every call they made and then rendered the member's own empty state — "no spaces
+// yet, ask an administrator", "no templates yet, save one from a page's menu". The visitor is told
+// their workspace is empty when the truth is that the workspace has not been shown to them. Two
+// sibling routes (a page, a space) had the branch all along; the landing never grew one.
+//
+// It is invisible in development: `apps/web/.env.development` sets `VITE_DEV_TOKEN`, so the session
+// starts "authed" and this path never renders. `VITE_DEV_TOKEN_DISABLE=1` is how it is seen.
+function RequireMember({ children }: { children: React.ReactNode }) {
+  const { status } = useSession();
+  const { t } = useTranslation();
+  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "anon") return <LoginScreen />;
+  return <>{children}</>;
+}
+
+// The addresses a signed-out visitor may reach, and why. Every other Route is member UI and must be
+// wrapped in RequireMember — `anon-routes-808.test.ts` walks the table and requires each entry to be
+// one or the other, so a route added later has to say which it is instead of inheriting the empty
+// desk. Measured for each of these: a cookie-less visit renders copy written for a signed-out reader.
+export const ANONYMOUS_ROUTES: Readonly<Record<string, string>> = {
+  "/pub/space/:spaceId": "the public space surface (ADR-030), whose audience is anonymous",
+  "/pub/:pageId": "the public page surface, same audience",
+  "/share/:linkId": "a share link mints a guest session; the guest never has an account (ADR-107)",
+  "/invite": "the invitation carries its own token and is read before signing in",
+  "/reset-password": "a reset link works without a session, which is the point (#568)",
+  "/login": "the door",
+  "/login/recovery": "the break-glass door (#605)",
+  "/join": "sign-up starts here, before there is anybody to be",
+  "/join/workspace": "naming the new workspace, still before the session exists",
+  "*": "the catch-all redirects to /, which is guarded",
+};
+
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/p/:pageId" element={<PageRoute />} />
-      <Route path="/spaces/:spaceId" element={<SpaceHomeRoute />} /> {/* #364 / ADR-157 §6: the space root */}
+      <Route path="/p/:pageId" element={<RequireMember><PageRoute /></RequireMember>} />
+      <Route path="/spaces/:spaceId" element={<RequireMember><SpaceHomeRoute /></RequireMember>} /> {/* #364 / ADR-157 §6: the space root */}
       <Route path="/pub/space/:spaceId" element={<PublicSpaceRoute />} />
       <Route path="/pub/:pageId" element={<PublicPageRoute />} />
       <Route path="/share/:linkId" element={<ShareRoute />} />
       <Route path="/invite" element={<InviteRoute />} />
       {/* #568: a reset link lands here — no session required, that is the point */}
       <Route path="/reset-password" element={<ResetPasswordRoute />} />
-      <Route path="/templates" element={<Suspense fallback={<LazyFallback />}><TemplatesRoute /></Suspense>} />
-      <Route path="/changes" element={<Suspense fallback={<LazyFallback />}><RecentChangesRoute /></Suspense>} />
-      <Route path="/watches" element={<Suspense fallback={<LazyFallback />}><WatchListRoute /></Suspense>} /> {/* #362 the bell's watch list */}
-      <Route path="/admin/*" element={<Suspense fallback={<LazyFallback />}><AdminRoot /></Suspense>} />
-      <Route path="/settings/account/*" element={<Suspense fallback={<LazyFallback />}><AccountRoot /></Suspense>} />
-      <Route path="/spaces/:spaceId/settings/*" element={<Suspense fallback={<LazyFallback />}><SpaceSettingsRoot /></Suspense>} />
+      <Route path="/templates" element={<RequireMember><Suspense fallback={<LazyFallback />}><TemplatesRoute /></Suspense></RequireMember>} />
+      <Route path="/changes" element={<RequireMember><Suspense fallback={<LazyFallback />}><RecentChangesRoute /></Suspense></RequireMember>} />
+      <Route path="/watches" element={<RequireMember><Suspense fallback={<LazyFallback />}><WatchListRoute /></Suspense></RequireMember>} /> {/* #362 the bell's watch list */}
+      <Route path="/admin/*" element={<RequireMember><Suspense fallback={<LazyFallback />}><AdminRoot /></Suspense></RequireMember>} />
+      <Route path="/settings/account/*" element={<RequireMember><Suspense fallback={<LazyFallback />}><AccountRoot /></Suspense></RequireMember>} />
+      <Route path="/spaces/:spaceId/settings/*" element={<RequireMember><Suspense fallback={<LazyFallback />}><SpaceSettingsRoot /></Suspense></RequireMember>} />
       {/* Back-compat: the old members URL now lives under the admin console. */}
-      <Route path="/settings/members" element={<Navigate to="/admin/members" replace />} />
+      <Route path="/settings/members" element={<RequireMember><Navigate to="/admin/members" replace /></RequireMember>} />
       <Route path="/join" element={<JoinRoute />} />
       <Route path="/join/workspace" element={<WorkspaceRoute />} />
       {/* #261: the auth callback redirects failures to /login?error=<kind>. A dedicated route renders the
@@ -2049,7 +2084,7 @@ export function AppRoutes() {
           though it were the product's home — so the first thing an administrator of a real workspace
           saw, immediately after setting their password, was "this page does not exist". The catch-all
           sends unknown addresses to `/`, and `/` asks what this member actually has. */}
-      <Route path="/" element={<HomeLanding />} />
+      <Route path="/" element={<RequireMember><HomeLanding /></RequireMember>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
