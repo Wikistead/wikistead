@@ -36,7 +36,7 @@ test("#223: pasting an http(s) URL inserts [url](url) that renders as a clickabl
   await caretToTop(page);
   const link = await linkOf(page);
   expect(link?.href).toBe("https://example.com/x"); // rendered as a clickable link…
-  expect(link?.text).toBe("https://example.com/x"); // …showing the URL (NOT blank — the #223 fix)
+  expect(link?.text).toBe("https://example.com/x"); // showing the URL (NOT blank — the #223 blank-render fix)
 });
 
 test("#223: pasting a javascript: URL does NOT linkify (stays plain text)", async ({ browser }) => {
