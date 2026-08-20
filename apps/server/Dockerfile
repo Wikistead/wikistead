@@ -46,5 +46,12 @@ RUN pnpm --filter @wikistead/server deploy --prod /out
 FROM base AS runtime
 ENV NODE_ENV=production
 COPY --from=build /out /app
+# #804: the schema travels with the code that expects it. `pnpm deploy` produces the PACKAGE and its
+# production dependencies, and the SQL lives outside the package — so an operator holding only this
+# image had no way to create a database, and the first real Kubernetes deployment had to carry 130
+# files in a ConfigMap to get one (#802). Beside the package, where migrate.js looks second
+# (src/migrations-dir.ts); the repository layout it looks at last is three levels above /app and
+# therefore outside the image entirely.
+COPY infra/db/migrations /app/migrations
 WORKDIR /app
 CMD ["node", "dist/index.js"]

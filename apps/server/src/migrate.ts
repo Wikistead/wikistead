@@ -2,9 +2,11 @@
 // DDL. Never run as the restricted app role — CREATE TABLE requires privileges
 // the runtime role intentionally does not have.
 import { readdir, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
+import { migrationsDirCandidates, pickMigrationsDir } from './migrations-dir.js'
 
 const url = process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL
 if (!url) { console.error('DATABASE_ADMIN_URL or DATABASE_URL required'); process.exit(1) }
@@ -25,7 +27,15 @@ if (process.env.WKS_STACK_OFFSET) {
 
 const sql = postgres(url, { max: 1, onnotice: () => {} })
 
-const migrationsDir = join(fileURLToPath(new URL('.', import.meta.url)), '../../../infra/db/migrations')
+// #804: the image is a deploy tree, not a checkout — see migrations-dir.ts for the three layouts.
+const moduleDir = fileURLToPath(new URL('.', import.meta.url))
+const candidates = migrationsDirCandidates(moduleDir, process.env)
+const migrationsDir = pickMigrationsDir(candidates, existsSync)
+if (!migrationsDir) {
+  console.error('no migrations directory found. Looked in:\n  ' + candidates.join('\n  '))
+  console.error('Set MIGRATIONS_DIR if the SQL lives somewhere else.')
+  process.exit(1)
+}
 
 await sql`
   CREATE TABLE IF NOT EXISTS schema_migrations (
