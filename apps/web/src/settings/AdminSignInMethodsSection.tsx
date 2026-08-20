@@ -61,6 +61,7 @@ export function connectionName(c: Pick<AdminConnectionDTO, "preset" | "label" | 
 }
 
 // #589 bounce: every method is a row, so every row is built from ONE class. The reject was that they
+// were not — password was an ON/OFF toggle, SAML only a save button, OIDC a card with different spacing
 // and three hand-written class strings is how that happens. `data-method-row` marks them so a pin can
 // walk the list instead of naming the methods it knows about: a fifth method is measured by existing.
 // #679 / ADR-222 §1: the kind-stances, in the order they are offered. `off` is not among them — it is
@@ -136,7 +137,8 @@ export const HEADLESS_CONFIRMS = ["sso-exemption-revoke-confirm"] as const;
 // answer came from measuring rather than from reading: with fourteen of these stacked, `bg-panel` covered
 // 68% of this pane, against 85% on the roles tab before its fill came off and 0% on every list that draws
 // through the shared `ListBox` (API keys, webhooks, SCIM, domains). A row repeated fourteen times is a
-// surface — the user's words were , and this tab was the
+// surface — the user's complaint was that everything wearing the sidebar colour as its background
+// looked dowdy, and this tab was the
 // second-heaviest example of exactly that. The border stays and still separates the methods; only the
 // fill, which said the same thing a second time, is gone.
 const METHOD_ROW = "flex flex-col gap-1.5 rounded-md border border-border px-3 py-2 text-sm";
@@ -368,7 +370,8 @@ export function AdminSignInMethodsSection() {
   // method-wide facts (policy, entitlement). Whether THIS row is off is the row's own `enabled`.
   // #605 (review rejection, 2026-08-05): ONE reason, not three. The stance badge was rendered by the row
   // itself, so this function could not know a reason was already on screen and added its own: a
-  // blocked local row said "SSO " and and side by side
+  // blocked local row showed "disabled because SSO is required", "selected" and "not currently
+  // working" side by side
   // the same fact three times, in the width the description needed. ADR-195 §1 asks for two facts (the
   // selection is preserved; here is why it does not bite), so the reason comes in here and the row
   // renders nothing beside it. #589 removed this exact doubling once; the stance brought it back.
@@ -1006,7 +1009,8 @@ function StanceConfirm(
         // Plural-aware, and count-first: the number is the reason this question exists.
         //
         // #672 (review rejection②): at zero this read "0 members cannot satisfy this and will be
-        // signed out now" — a sentence about people who do not exist, and in Japanese
+        // signed out now" — a sentence about people who do not exist, with the Japanese copy's
+        // "those people" pronoun
         // pointing at nobody. One `{{count}}` string cannot say 0, 1 and N, and Japanese having no
         // plural is not a reason to skip the branch: `_zero` is a case, not a plural form. At zero the
         // sentence says so and stops, because there is no sign-out to describe.

@@ -5,10 +5,12 @@ import { sleep, API } from "../helpers";
 // configured on that same screen.
 //
 // RE-AIMED TWICE, both by reviews on #586, and the subject survived both. First: every built-in
-// stopped drawing a read-only capability grid — a nine-column lattice per row is the shape
+// stopped drawing a read-only capability grid — a nine-column lattice per row is the forced-reading shape
 // the ruling rejected, so a role at rest is its NAME and hovering it raises the measured window. Then
 // the `member` row kept an editable grid, because its boxes were really the TENANT DEFAULTS in a role
-// ". The defaults are their own section now. What this still pins: one screen, the
+// row's clothes — why does only the built-in member row show a permission-editing UI, when built-ins
+// are meant to stay fixed and steer customization toward the paid tier? The defaults are their own
+// section now. What this still pins: one screen, the
 // built-ins listed by scope, and the member preset driving the very same tenant#space_creator wildcard
 // through the unchanged endpoint.
 test("#469: the roles tab lists built-ins by scope; the member preset is configured on it", async ({ page }) => {

@@ -128,7 +128,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
 
   const addRestrict = () => {
   // #624: the principal is the CHOSEN candidate, never the raw text in the box. The fallback that used
-  // to sit here — `sub.trim ? \`user:${sub.trim}\` : null` — sent whatever was typed as a subject id,
+  // to sit here — `sub.trim() ? \`user:${sub.trim()}\` : null` — sent whatever was typed as a subject id,
   // and a sub is not something a person knows: it is minted by a connection or by this product. What it
   // produced was a grant that reported success, conferred nothing, and left a permanent tuple nobody
   // held; the roster then displayed the raw hex, which somebody could copy and paste straight back in.
@@ -202,7 +202,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
           560px on desktop, still clamped to 85vh on a short window) makes the flex-1 panel a stable box:
           short tabs leave breathing room at the bottom, the tall Access tab scrolls inside it, and the
           header / tab strip / footer never move between tabs. */}
-      {/* #460without this, Radix auto-focuses the first tabbable — the active TabsTrigger
+      {/* #460without this, Radix auto-focuses the first tabbable — the active TabsTrigger —
           and programmatic focus counts as :focus-visible, so a MOUSE open painted a focus ring on
           the Access tab. preventDefault alone strands focus outside the dialog (Radix then focuses
           NOTHING, measured: Tab goes dead), so focus the FocusScope container (e.target,
@@ -334,7 +334,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
             size="sm"
             // #582 bounce: every entry in this list is a ROLE NAME, so every entry reads like one. The
             // built-ins wear the nouns the space screen has used since #445 (view→viewer, manage→manager)
-            // instead of translated verbs, which is what made sit beside "kakunin-582" as if they
+            // instead of translated verbs, which is what made a translated verb sit beside "kakunin-582" as if they
             // were different kinds of thing. Capability words still exist — on the surface that EDITS a
             // role definition, where they describe what the role may do.
             // #586 (review rejection): the option is the NAME, and hovering it says what that name confers.
@@ -364,7 +364,7 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               {/* #582 bounce: the same badge a role-conferred row wears, with the same noun the picker
                   offered. It used to print the raw wire value as loose text beside a badge — one panel,
                   two designs for one idea. */}
-              {/* #586 §1 (user ruling): the axis that matters is ROLE-DERIVED vs GRANTED INDIVIDUALLY
+              {/* #586 §1 (user ruling): the axis that matters is ROLE-DERIVED vs GRANTED INDIVIDUALLY —
                   not built-in vs custom, which must never be split into separate lists. Two rows can now
                   read `commenter` legitimately (a role of that name, and a comment grant), so the colour
                   and the tooltip tell them apart instead of a rename. Colours are DS tokens. */}

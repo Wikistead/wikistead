@@ -50,7 +50,7 @@ export async function addEnrollDomain(db: TenantDb, args: { tenantId: string; do
 }
 
 // Prove ownership via the DNS-TXT challenge (SAME primitive as custom domains). ONLY this sets
-// verified_at — there is no other write path to it (the reviewer's " verified ").
+// verified_at — there is no other write path to it (the reviewer's rule: no other path may set verified).
 export async function verifyEnrollDomain(
   db: TenantDb,
   args: { tenantId: string; domain: string },

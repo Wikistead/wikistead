@@ -3,7 +3,9 @@ import { openDemo, sleep } from "../helpers";
 
 // #641 slice 1: the browser is told which theme it is drawing into.
 //
-// the theme perfectly — what does not is everything the BROWSER draws for it: the date picker's popup, the
+// In dark mode the calendar icon is hard to see, and the calendar is glaring white. The input itself
+// follows the theme perfectly — what does not is everything the BROWSER draws for it: the date
+// picker's popup, the
 // spinner on a number field, the file-chooser button, scrollbars, the autofill yellow, the caret. Those
 // obey `color-scheme`, and with it left at `normal` the browser draws them light no matter what the app
 // looks like.
@@ -32,7 +34,7 @@ test("#641: the theme reaches the chrome the browser draws", async ({ page }) =>
   await openDemo(page);
   // #641this used to wait for the analytics screen's `input[type="date"]`, which was the only
   // native-chrome control it could find. Those boxes are gone on purpose — they were the entrance to
-  // Chrome's own date popup, the one — and no screen in this fixture renders a VISIBLE
+  // Chrome's own date popup, the shabby-looking one — and no screen in this fixture renders a VISIBLE
   // native-typed control any more (the moderation ones are gated, the file inputs are hidden).
   //
   // Deleting the pin would have been wrong: the declaration still governs scrollbars, the caret, autofill
@@ -91,11 +93,11 @@ test("#641: the theme reaches the chrome the browser draws", async ({ page }) =>
 
 // #641/the product does not open the browser's own date picker any more.
 //
-// was Chrome's date popup, not this product's panel — and while a
+// The boxy corners and white frame were Chrome's date popup, not this product's panel — and while a
 // `type="date"` field is on screen, it is one keystroke away (F4, Alt+Down) whether or not its calendar
 // icon is hidden. So the assertion is about the TYPE, which is the only thing that closes that door.
 //
-// Written as a sweep over the analytics surfaces rather than over the two fields that used to be there
+// Written as a sweep over the analytics surfaces rather than over the two fields that used to be there:
 // a `type="date"` added to this screen next month is the same defect returning.
 test("#641: no analytics surface carries a native date control", async ({ page }) => {
   test.setTimeout(120_000);
@@ -104,7 +106,7 @@ test("#641: no analytics surface carries a native date control", async ({ page }
     await page.goto(url);
     await sleep(1200);
     // The fields live INSIDE the panel now, and a Radix popover does not render its content until it is
-    // opened — so a sweep of the closed page finds nothing and passes whatever the fields are. Measured
+    // opened — so a sweep of the closed page finds nothing and passes whatever the fields are. Measured:
     // putting `type="date"` back left this green. Open it first.
     const trigger = page.locator("[data-testid$=-trigger]").first();
     if (await trigger.count()) {

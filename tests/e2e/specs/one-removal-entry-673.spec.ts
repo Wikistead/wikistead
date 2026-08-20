@@ -3,8 +3,9 @@ import { openDemo, sleep } from "../helpers";
 
 // #673 ①: the way to remove a factor is the SAME in every row, whatever that row holds.
 //
-// The ticket asked for this in a specific form: "** pin **
-// ". The assertions that landed with the fix are per-kind — one file says a passkey row
+// The ticket asked for this in a specific form: do NOT write a pin that enumerates the kinds — it
+// cannot hold once factors beyond passkeys arrive. The assertions that landed with the fix are
+// per-kind — one file says a passkey row
 // carries `factor-remove`, another says a TOTP row opens a code box — and both stay green on the day a
 // third kind arrives wearing its own control. That is the artefact the ticket named.
 //

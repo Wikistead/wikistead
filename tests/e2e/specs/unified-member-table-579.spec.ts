@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { API } from "../helpers";
 
+// #579 ① / ③ (user ruling, 2026-08-03): no separate group-roles section — merge groups into the
+// members table, with user names and group names listed side by side, an icon telling the two kinds
+// apart, and the member search UI finding users and groups alike.
 //
 // A group holding a tenant role is a principal with a role, exactly like a person. The screen said
 // otherwise with two sections, two shapes and two vocabularies, and that is what made the group half

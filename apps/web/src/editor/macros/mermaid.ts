@@ -43,7 +43,7 @@ const mermaidConfig = (theme: MacroContext["theme"]) =>
   ({ startOnLoad: false, securityLevel: "strict" as const, suppressErrorRendering: true, theme: mermaidTheme(theme) });
 let mermaidP: Promise<typeof import("mermaid")["default"]> | null = null;
 let initedTheme: "dark" | "default" | null = null;
-// #360: mermaid is a singleton whose theme is set by initialize. It was initialized ONCE at first load, so a
+// #360: mermaid is a singleton whose theme is set by initialize(). It was initialized ONCE at first load, so a
 // mid-session light/dark switch left every diagram rendered in the ORIGINAL theme (the widget rebuilds with the
 // new ctx.theme — MacroWidget.eq keys on theme, #200 — and the #352 SVG cache key includes the theme, so it
 // re-renders; but mermaid.render still used the stale initialized theme). RE-initialize whenever the requested
@@ -66,14 +66,14 @@ function loadMermaid(theme: MacroContext["theme"]) {
   });
 }
 
-// #282 (3): `mermaid.render(id, code)` with NO 3rd arg makes mermaid 11 append its text-measuring
+// #282 (root cause 3): `mermaid.render(id, code)` with NO 3rd arg makes mermaid 11 append its text-measuring
 // node in-flow at document.body — a ~150px node with no hidden style. html/body/#root have no overflow
 // clamp, so for the render's duration the WINDOW overflows and its scrollbar flashes ("a scrollbar
 // further right, appearing and vanishing"). Fix: give each render its OWN off-flow sandbox as the 3rd
 // arg (svgContainingElement), so the temp node lands there, not in the body flow. position:fixed keeps
 // it out of the document flow (visibility:hidden + a REAL width so text still measures — display:none
 // would collapse the layout mermaid needs, the #174 hidden-tab class). Per-render (never a shared
-// singleton: mermaid does innerHTML= and would wipe a concurrent render's in-progress node — the page
+// singleton: mermaid does innerHTML="" and would wipe a concurrent render's in-progress node — the page
 // lays out many diagrams at once). Removing the sandbox in finally also disposes mermaid's temp node,
 // so the old getElementById("d"+id) cleanup is folded in here.
 async function renderMermaidOffscreen(
@@ -125,7 +125,7 @@ export const mermaidMacro: FenceMacro = {
     // async paint, no height re-settle on scroll re-entry (the measured jank). The id baked into the cached SVG
     // is reused (the anti-test's cache-hit signal).
     const cacheKey = `${ctx.theme ?? "light"}\x00${code}`;
-    // #174(1): mermaid sizes a diagram by MEASURING text via layout. Inside a display:none tab
+    // #174(root cause 1): mermaid sizes a diagram by MEASURING text via layout. Inside a display:none tab
     // panel that measures 0, so the SVG comes out degenerate (a tiny sliver). Paint once now; then re-paint
     // ONCE the element first gains a real width — a ResizeObserver fires when the tab activates (display:none
     // → block gives it a layout box). Only the `fig` child is replaced, so a nested WYSIWYG pencil appended to

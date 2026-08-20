@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, openScratch, enterEdit, sleep } from "../helpers";
 
-// #632 (user ruling, 2026-08-05): " AI ".
+// #632 (user ruling, 2026-08-05): the left bar's warped, curving look reads as AI-generated design.
 //
 // A coloured bar down the left of a box with rounded corners curves inward at both ends. Six places had
 // grown the same idiom. The assertion is about the SHAPE, not about those six: any element with a
@@ -60,12 +60,12 @@ for (const [name, path] of [["settings", "/admin/members"], ["login", "/"], ["sp
 // #632 (user ruling, after): every macro that draws a left bar, rendered and measured.
 //
 // The earlier version of this file rendered ONE callout, so `:::todo` shipped bent and the pin stayed
-// green — the exact failurenames (" pin ").
+// green — the exact failurenames (demanding a discovery pin while doing an enumerated sweep).
 // The sources come from the registry via a unit-side list, so a macro registered next month is drawn
 // here without this file being edited.
 //
 // What is measured is the BEND, not the corners. The ruling is explicit that the frame may stay round
-// , so a rounded box is fine — what must not happen
+// (there is no need to remove the frame's own rounding), so a rounded box is fine — what must not happen
 // is the bar following that curve. A `border-left` always does; an absolutely-positioned strip never
 // does. So the check is: anything that looks like a left bar must NOT be a border on a rounded box.
 const CONTAINER_SOURCES = [
@@ -124,7 +124,7 @@ test("#632: no container macro's bar bends around its frame", async ({ page }) =
 
 // #632 (user ruling): the strip replaced a border, and a border occupied space that a strip does
 // not. Whatever the bar is drawn with, the content behind it has to start in the same place — the ruling
-// is explicit that " 3px ".
+// is explicit that acceptance fails if the icon moves by 3px.
 //
 // This shipped wrong once BECAUSE nobody compared: the panel and the Tailwind boxes each got the 3px
 // added back to their padding, and the CM baseTheme rule did not, so `:::todo`'s icon and body slid 3px
@@ -258,7 +258,7 @@ test("#632: what the padding cannot move is placed from the bar's width too", as
 
 test("#632: the bar is still there, still 3px, still the type's colour", async ({ page }) => {
   // Removing the border would satisfy the test above by deleting the bar, which the ruling refused
-  // outright . So the strip is measured for real, on the widest-known types.
+  // outright (keep the strip, just make it straight). So the strip is measured for real, on the widest-known types.
   await openScratch(page, "container-bars-632-b");
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");

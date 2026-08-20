@@ -192,7 +192,7 @@ test("yy on a normal line still yanks just that line (passes through to vim)", a
 
 // ADR-024 1b: a TALL RENDERED widget (mermaid SVG ~380px) mounts its SVG asynchronously;
 // without re-measuring, every line BELOW it kept a stale visual-y and vim j/k drifted
-// across the whole region under the widget. A ResizeObserver → view.requestMeasure keeps
+// across the whole region under the widget. A ResizeObserver → view.requestMeasure() keeps
 // CM's line geometry in sync. This guards that motion below a tall rendered macro is
 // exactly one doc line per key (uses flowchart syntax, which renders here, not the
 // env-flaky `graph TD;`).
@@ -333,7 +333,7 @@ test("a large macro present at load renders as an atom, not a fold placeholder",
   );
   await sleep(2500); // SVG mounts + collab persists the doc
 
-  // Reload from scratch: the large macro now arrives over the provider at sync time
+  // Reload from scratch: the large macro now arrives over the provider at sync time —
   // exactly when the old auto-fold fired.
   await page.goto(`/p/${id}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
@@ -349,7 +349,7 @@ test("a large macro present at load renders as an atom, not a fold placeholder",
 // Display math ($$…$$) atoms live in mathField, SEPARATE from livePreview.blocks. Before the
 // motionAtomProvider fix, blockEntry never saw them, so its motion correction miscounted around the OTHER
 // atoms too — j skipped line 5 (1→2→3→4→6) and k warped asymmetrically (6→3→2→1). With math atoms fed to
-// the motion facet, j/k step ONE line at a time, symmetric down vs up (the reviewer's "1↔6 1").
+// the motion facet, j/k step ONE line at a time, symmetric down vs up (the reviewer's "1↔6, one line per step, symmetric").
 // This is the real-machine caret-transition measurement the reviewer required to confirm the fix.
 test("#183 symptom C: vim j/k move one line at a time, symmetric, over a math atom + code fence", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();

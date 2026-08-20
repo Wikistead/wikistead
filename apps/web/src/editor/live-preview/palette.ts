@@ -724,7 +724,8 @@ const vimVisualSync = EditorView.updateListener.of((u) => {
   if (u.view.state.field(vimVisualField) !== want) u.view.dispatch({ effects: setVimVisual.of(want) });
 });
 
-// #631 (user request, 2026-08-05): " …
+// #631 (user request, 2026-08-05): a selection made with the MOUSE should surface the palette
+// immediately; a selection made with `v` keeps the behaviour it has today.
 //
 // Dragging a selection with the mouse puts vim in visual mode too, so the flag above cannot tell the
 // two apart — and the hint that says "press \" was answering a reader who was already holding a mouse.

@@ -101,7 +101,7 @@ describe("#589: one list, one place to edit a sign-in method", () => {
 
   it("F2: the selection badge never borrows the word for 'working'", () => {
     const list = read("./AdminSignInMethodsSection.tsx");
-    // a selected-but-broken connection must not read as Active/
+    // a selected-but-broken connection must not read as Active, in any locale's word for it
     expect(list).toContain('t(enabled ? "signInMethods.selectionOn" : "signInMethods.selectionOff")');
     expect(list).not.toContain('t(enabled ? "adminAuth.method_effective"');
   });

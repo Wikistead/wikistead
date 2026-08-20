@@ -258,7 +258,7 @@ const COLLAB_URL = resolveCollabUrl();
 
 // Member route: /p/:pageId — tenant comes from the session, docName is formed
 // the same way the collab server expects ("t:<tenant>:p:<page>").
-// #364 / ADR-157: `pageIdOverride` lets the space-root route /spaces/:id) render the HOME page with
+// #364 / ADR-157: `pageIdOverride` lets the space-root route (/spaces/:id) render the HOME page with
 // the full page machinery (view/edit/publish/history/collab) without a second implementation; the
 // param path additionally canonicalises /p/<home-id> → /spaces/:id (one location for the home).
 // #457: what fills the body area before the real content can. Until now both states drew NOTHING, so a
@@ -270,7 +270,7 @@ const COLLAB_URL = resolveCollabUrl();
 // with an OPAQUE page background (var(--bg)) so the mounted-but-still-resolving Editor never shows
 // through. Before this it was inset-x-0/top-0 and transparent, so the instant the editor began painting
 // content (before showSkeleton flipped false) the skeleton and the real body were both visible = the
-// overlap. It sits below the title band (z-20) so the band stays crisp, and above the editor.
+// reported overlap. It sits below the title band (z-20) so the band stays crisp, and above the editor.
 function BodyPlaceholder({ loading, empty, canEdit }: { loading: boolean; empty: boolean; canEdit: boolean }) {
   const { t } = useTranslation();
   const showSkeleton = useDelayedFlag(loading);
@@ -316,7 +316,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const { t } = useTranslation();
   const params = useParams<{ pageId: string }>();
   const pageId = pageIdOverride ?? params.pageId;
-  // #710: "is this page some space's home?" is answered by the page's OWN space, resolved by id
+  // #710: "is this page some space's home?" is answered by the page's OWN space, resolved by id —
   // a home page always lives in the space that points at it, so the roster walk this used to scan
   // (and miss, past page one) is unnecessary. Resolution happens below, after pageQ names the space.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -347,13 +347,13 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const publish = usePublish(pageId ?? "");
   const renamePage = useRenamePage();
 
-  // Opening any page makes its space the active one, so the sidebar follows
+  // Opening any page makes its space the active one, so the sidebar follows —
   // including when arriving from cross-space search or a share link.
   const { setActiveSpaceId } = useActiveSpace();
   const openSpaceId = page?.spaceId;
   useEffect(() => { if (openSpaceId) setActiveSpaceId(openSpaceId); }, [openSpaceId, setActiveSpaceId]);
 
-  // #336 part B: the sidebar's unpublished-changes dot reads from the ["pages"] list, which has NO poll
+  // #336 part B: the sidebar's unpublished-changes dot reads from the ["pages"] list, which has NO poll —
   // so a fresh draft edit did not surface on the dot until a reload. usePublished already polls the OPEN
   // page's persisted draft-vs-published state (presence-safe: it's a SERVER poll, never an editor React
   // signal — driving unpublished/dirty UI from an editor signal regressed the presence e2e, memory
@@ -544,7 +544,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   useDisplayModeShortcut(cycleDisplayMode, editing, resolveKey("editor.cycleDisplayMode", keybindings));
   const isDesktop = useMediaQuery("(min-width: 768px)"); // 3 floating groups vs one ⋯
   const isWide = useMediaQuery("(min-width: 1200px)"); // #192: enough right whitespace for the TOC rail
-  // #406 S4 / ADR-159 (e): a coarse pointer (touch = soft keyboard) forces the EFFECTIVE vim off
+  // #406 S4 / ADR-159 (e): a coarse pointer (touch = soft keyboard) forces the EFFECTIVE vim off —
   // vim breaks soft-keyboard input. The stored preference is untouched (vim returns on a fine-pointer
   // device); the Compartment reconfigure in Editor swaps keymaps in place (collab/presence unbroken).
   // #512: WYSIWYG mode joins the same forced-off seam — vim × WYSIWYG is a bug nest (#240 atomic-skip),
@@ -672,7 +672,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   if (status === "anon") return <LoginScreen />;
   // A page that doesn't exist or isn't accessible must NOT present an editable phantom surface (it would
   // have no space → unpublishable). #262: the server now returns a uniform 404 for both "no such page" and
-  // "no view access" (existence-hiding), so the client shows ONE not-found state — a
+  // "no view access" (existence-hiding), so the client shows ONE not-found state — a "no permission"
   // message would leak that the page exists.
   if (pageId && pageQ.isError) {
     return (
@@ -698,7 +698,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     editing,
     onEdit: () => setEditing(true),
     onDone: () => setEditing(false),
-    pageId, // #320 / ADR-126: enables the watch (🔔) toggle (member surface only — the guest shell omits it)
+    pageId, // #320 / ADR-126: enables the watch (bell) toggle (member surface only — the guest shell omits it)
     spaceId, // #362: enables the space-scope watch item
     publishState,
     canPublish: !!published?.hasUnpublishedChanges,
@@ -742,7 +742,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     onRelated: pageId ? toggleRelated : undefined,
     onAnalytics: page?.canManage && pageId ? toggleAnalytics : undefined, // #464: manager-only analytics right panel
     onExport: () => { if (pageId) void downloadPageExport(token, pageId); },
-    // #85 / ADR-194 (Option B): the file is written by THIS browser, out of the document it already draws
+    // #85 / ADR-194 (Option B): the file is written by THIS browser, out of the document it already draws —
     // the app's own renderer and the app's own stylesheet, so the export cannot look like a different
     // product than the screen it came from. That is also how diagrams reach it as diagrams and code reaches
     // it highlighted: they are already that way here. The server route stays for the API path (no browser
@@ -799,7 +799,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               <div className="pointer-events-auto relative mx-auto flex w-full max-w-[740px] items-center gap-3 px-6 pt-6">
                 {/* #109 Fix B: private (allowlist-only) lock beside the title. Only viewers of the page see it. */}
                 {page?.private && <Lock size={16} className="mt-1 flex-none self-start text-fg-dim" data-testid="title-private-lock" aria-label={t("sidebar.private")} />}
-                {/* #329 / ADR-139: freeze badge (staged edit lock) beside the title. Shown to any viewer
+                {/* #329 / ADR-139: freeze badge (staged edit lock) beside the title. Shown to any viewer —
                     freeze only removes access, so the badge reveals nothing; the title attribute names the level. */}
                 {page?.frozen && (
                   <Snowflake size={16} className="mt-1 flex-none self-start text-fg-dim" data-testid="title-frozen-badge"
@@ -808,14 +808,14 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
                   </Snowflake>
                 )}
                 <div className="min-w-0 flex-1">
-                  {/* #364the space HOME's title is derived from the space name and locked
+                  {/* #364the space HOME's title is derived from the space name and locked —
                       no rename affordance (pageIdOverride is only ever set when rendering the home at
                       /spaces/:id, and /p/<home-id> canonicalises there). The server refuses the PATCH
                       too (two-layer defense).
                       #364the home label interpolates the SPACE NAME, never `page.title`. Under
                       ruling A the stored title IS the space name, but a home created before that
-                      ruling still carries the baked-in suffix ("<Space>"), and feeding THAT into
-                      the label produced the doubled "<Space>". The sidebar 🏠 always used
+                      ruling still carries the baked-in localized home suffix, and feeding THAT into
+                      the label produced a doubled home suffix. The sidebar home row always used
                       space.name (and read correctly) — this makes the band use the same single source, so
                       no stored title can ever double the suffix again. Migration 077 backfills the old
                       rows so search / pins / export agree with what is displayed. */}
@@ -1030,7 +1030,7 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
   const tenant = m?.[1] ?? "";
   const spaceId = m?.[2] ?? "";
   const [pages, setPages] = useState<Page[] | null>(null);
-  // #500: a failed tree fetch used to be swallowed into an EMPTY tree (`.catch( => setPages([]))`), so an
+  // #500: a failed tree fetch used to be swallowed into an EMPTY tree (`.catch(() => setPages([]))`), so an
   // FGA outage read as "this space has no pages" and derailed real-reviews. Track the error separately
   // so the sidebar can say "couldn't load, retry" instead of lying about emptiness.
   const [pagesError, setPagesError] = useState(false);
@@ -1144,7 +1144,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   // denied guest sees the empty view, not an eternal skeleton).
   const [publishedLoaded, setPublishedLoaded] = useState(false);
   const [pageTitle, setPageTitle] = useState(""); // #318: shown in the guest title band (read-only)
-  // #364a space's HOME page is labelled by its space everywhere else — the sidebar's 🏠 row, the
+  // #364a space's HOME page is labelled by its space everywhere else — the sidebar's home row, the
   // member band, the empty state. The guest band printed the raw title, which migration 077 normalised to
   // the bare space name, so the same page read "Acme" here and "Acme Home" one pane away. The label is
   // built from the title the guest already has; the server sends a boolean, never the space name (a
@@ -1214,7 +1214,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
       .catch(() => notify.error(t("toast.actionFailed")));
   }, [pageId, token, t, onTitleChange]);
 
-  // #318: publish the guest band's ACTUAL height as --wks-band-h on the editor's positioning parent
+  // #318: publish the guest band's ACTUAL height as --wks-band-h on the editor's positioning parent —
   // the same ResizeObserver contract as the member surface (#212 bounce 3), so the CM top padding, the
   // TOC overlay offsets and the anchor/TOC jump clearance (#304/#313 headerBandPx) all follow it.
   const bandRef = useCallback((el: HTMLDivElement | null) => {
@@ -1259,7 +1259,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
     [pageId, token, reloadPublished, t],
   );
 
-  // #448: STABLE (useCallback) so the Editor's mount-captured vim-ex wiring (:w/:wq) can hold it
+  // #448: STABLE (useCallback) so the Editor's mount-captured vim-ex wiring (:w/:wq) can hold it —
   // the server publish route is ALREADY guest:'edit' (#328/ADR-140: FGA edit gate + guest rate cap +
   // abuse filter + anonId attribution); only this client wiring was missing.
   const onPublish = useCallback(async () => {
@@ -1275,7 +1275,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
     reloadPublished();
   }, [pageId, token, t, reloadPublished]);
   // #448: vim :w/:wq/:q parity with the member surface — publish must be fire-and-forget for the
-  // Editor's => void contract; :q exits edit mode without publishing.
+  // Editor's () => void contract; :q exits edit mode without publishing.
   const publishForEditor = useCallback(() => { void onPublish(); }, [onPublish]);
   const exitEdit = useCallback(() => setEditing(false), []);
 
@@ -1340,7 +1340,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
                 #374guestSurface keeps the MEMBER-ONLY sources (title dictionary / backlinks / query)
                 suppressed — pageId used to double as their gate, so passing it above un-gated them on this
                 guest surface (the title-links-224 guest anti-test: no auto links for a guest, 2-layer rule). */}
-            {/* #457the guest body gets the SAME loading/empty distinction as the member surface
+            {/* #457the guest body gets the SAME loading/empty distinction as the member surface —
                 the identical opaque inset-0 overlay (thelesson: it must fully cover the mounted
                 Editor so the skeleton and real content never show together). The Editor stays mounted
                 underneath (collab/presence invariant), exactly like the member wiring above. */}
@@ -1528,7 +1528,7 @@ interface PublicChildNode { id: string; title: string; children: PublicChildNode
 // shows ONLY its page; space-level publish provides the tree via the sidebar shell.)
 
 // The rendered body of a single public page (no chrome). Reused by PublicPageRoute and PublicSpaceRoute
-// (#227).②: a standalone /pub/:id shows ONLY its page (the old bottom child-tree nav is gone
+// (#227).②: a standalone /pub/:id shows ONLY its page (the old bottom child-tree nav is gone —
 // page-level publish = just the page; SPACE-level publish is the sidebar shell with the tree).
 // #430the space a public page belongs to — name + (optional) icon, both served publicly.
 export interface PublicSpaceContext { name: string; iconImageUrl: string | null }
@@ -1599,7 +1599,7 @@ function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: 
         onScrollActivity: () => tocScrollListeners.current.forEach((fn) => fn()),
         tocJumpRef,
         // The CM view owns the scrolling (band is an absolute overlay, content clears it via
-        // `.lp-editor-host .cm-content { padding-top: var(--wks-band-h) }`), exactly like the member view
+        // `.lp-editor-host .cm-content { padding-top: var(--wks-band-h) }`), exactly like the member view —
         // so wireToc uses its defaults (the CM scroller + contentDOM padding-top as the band offset).
       });
       dispose = () => { unwire(); view.destroy(); };
@@ -1616,7 +1616,7 @@ function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: 
     return () => meta.remove();
   }, [state]);
 
-  // #319: hover 🔗 heading anchors are now provided by the CM `headingAnchors` extension inside
+  // #319: hover link-icon heading anchors are now provided by the CM `headingAnchors` extension inside
   // mountPublishedView (member parity) — the old DOM-based addHeadingAnchorButtons + usePublicToc are gone.
 
   // #227②: publish the frosted band's ACTUAL height as --wks-band-h on the outer wrapper (a 2-line
@@ -1734,7 +1734,7 @@ function PublicHeader({ space }: { space?: PublicSpaceContext | null }) {
       {b && !b.whitelabel && (
         <span className="text-[11px] text-fg-dim opacity-70" data-testid="powered-by">{t("publicReader.poweredBy", { product: productName })}</span>
       )}
-      {/* #429 ruling: theme AND language ride the minimal public header (JA is core to positioning
+      {/* #429 ruling: theme AND language ride the minimal public header (JA is core to positioning —
           one click away for anonymous readers too; the space reader gets both via the AppShell header) */}
       <LanguageToggle />
       <ThemeToggle />
@@ -1763,7 +1763,7 @@ function PublicPageRoute() {
 // #227 / ADR-030 (comment 966, option b): the anonymous read-only PUBLIC reader-chrome for a public space.
 // Reuses the app shell with a READ-ONLY sidebar (the space's published+public page tree) — the anonymous
 // visitor browses a public space exactly like a member, but every fetch is a PUBLIC endpoint
-// /public/spaces/:id/pages + /public/pages/:id), member routes are never touched (no session → no login
+// (/public/spaces/:id/pages + /public/pages/:id), member routes are never touched (no session → no login
 // bounce), and there is NO member chrome (search / user menu / edit / create). A non-public space → 404.
 // #227map the public tree (`/public/spaces/:id/pages` — every node is published + public) onto the
 // shared PageTreeNode shape. Published/non-private/ring-less, so the draft/unpublished/private/ring badges all
@@ -1954,7 +1954,7 @@ function SpaceHomeRoute() {
   }
   // #364hand the RESOLVED space name down. The band must never interpolate `page.title`
   // (a pre-ruling home carries the baked suffix → doubled label), and reading it from a second
-  // useSpaces inside PageRoute would render an empty name on the first frame; this route already
+  // useSpaces() inside PageRoute would render an empty name on the first frame; this route already
   // has the space in hand, so the label is correct on the FIRST paint.
   if (space?.homePageId) return <PageRoute pageIdOverride={space.homePageId} homeSpaceName={space.name} />;
   const canEdit = space?.capability === "edit" || space?.capability === "manage";

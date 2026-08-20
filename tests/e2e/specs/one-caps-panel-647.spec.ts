@@ -1,12 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
+// #647 (user report): hovering the group names in the first tier leaves several second-tier hover
+// panels stacked on top of each other.
 //
 // Hovering one role name after another left the previous panel up. Not a fading remnant — `data-state`
 // said `open` and opacity was 1, and they stacked 95px apart until the whole list unmounted.
 //
 // The cause was two features meeting: #630 keeps a closing panel mounted so it can animate out, and
-// #603's `place` ended with `setOpen(true)` while being called from a ref callback that runs on every
+// #603's `place()` ended with `setOpen(true)` while being called from a ref callback that runs on every
 // render. So hovering a sibling re-rendered the list, re-ran the dying panel's ref, and re-opened it.
 //
 // Counted by `data-state="open"`, never by how many panels EXIST: one on its way out is mounted and

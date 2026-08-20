@@ -2,11 +2,11 @@
 //
 // A role is a tenant-scoped NAMED bundle of atomic capabilities. FGA stays the single authz
 // truth — nothing here touches a check path; a role only becomes tuples when the assignment
-// write-path (increment 3) expands it. Gates on every WRITE, in the audit-viewer order
-// 1. the #383 shared tenant-admin gate,
-// 2. the customRoles ENTITLEMENT (EE / Cloud top tier) via the single resolver — defining is
-// issuance-gated (a downgrade blocks new definitions; expanded grants are plain FGA tuples
-// and keep working — the apiAccess/webhooks precedent).
+// write-path (increment 3) expands it. Gates on every WRITE, in the audit-viewer order:
+//   1. the #383 shared tenant-admin gate,
+//   2. the customRoles ENTITLEMENT (EE / Cloud top tier) via the single resolver — defining is
+//      issuance-gated (a downgrade blocks new definitions; expanded grants are plain FGA tuples
+//      and keep working — the apiAccess/webhooks precedent).
 // Listing is tenant-admin only (no entitlement): the UI shows the uniform role picker (built-ins
 // + any custom rows retained from an entitled period) on every plan.
 import type { FastifyInstance } from 'fastify'
@@ -26,7 +26,7 @@ import { resolveAuthorIdentities } from '../author-identity.js' // #523 / ADR-19
 import type { TenantDb } from '../db/index.js'
 import type { Sql } from 'postgres'
 
-// The ADR-164 §1 atomic vocabulary a custom RESOURCE role may bundle. `manage` is deliberately absent
+// The ADR-164 §1 atomic vocabulary a custom RESOURCE role may bundle. `manage` is deliberately absent —
 // it is the built-in SUPERSET (manager); a custom bundle wanting everything lists the atoms.
 //
 // `manageAccess` JOINS it with the ruling of 2026-08-05 (#607), and the order matters: that ruling
@@ -38,7 +38,7 @@ export const ROLE_CAPABILITIES = ['view', 'comment', 'edit', 'publish', 'delete'
 export type RoleCapability = (typeof ROLE_CAPABILITIES)[number]
 
 // #445 / ADR-171: the TENANT-scope vocabulary — tenant-action capabilities (the target resource does
-// not exist yet, so they cannot live on page/space). MUTUALLY EXCLUSIVE with the resource vocabulary
+// not exist yet, so they cannot live on page/space). MUTUALLY EXCLUSIVE with the resource vocabulary:
 // a resource role cannot bundle `createSpaces`, a tenant role cannot bundle `edit` (parseDefinition
 // enforces per scope). Grows later (invite members, manage templates, …).
 // #485 / ADR-171 Addendum 2: the ADMIN-CLASS resource capabilities — the ones the page GRANT CEILING
@@ -71,13 +71,15 @@ const BUILT_IN_ROLES: { name: string; capabilities: string[] }[] = [
   { name: 'moderator', capabilities: ['moderate'] },
   { name: 'manager', capabilities: ['view', 'comment', 'edit', 'publish', 'delete', 'share', 'settings'] },
   // The list ends at four ON PURPOSE — user ruling 2026-08-05 (#604/ #607), an EDITION
-  // boundary, not a taste
+  // boundary, not a taste:
   //
-  // custom roles EE-entitled (roles.ts gates on `customRoles`)
-  // built-in direct grant no gate at all
+  //   custom roles          EE-entitled (roles.ts gates on `customRoles`)
+  //   built-in direct grant no gate at all
   //
   // `access-manager` (ADR-209) and `deleter` / `sharer` / `settings-editor` (ADR-208 §C) were briefly
   // here. Naming them as built-ins moved "hand over exactly one verb" — which is what a custom role IS
+  // — to the free side of that line. The stated intent: the free tier covers basic permission
+  // management, and the patterns that need fine-grained control are the incentive to pay.
   //
   // Their FGA leaves and capability vocabulary stay (`space_grant_expansion` still maps every one), so a
   // custom role bundles them exactly as before. What went is only the ungated door. "In the model but
@@ -168,7 +170,7 @@ export function expansionTuples(resourceType: 'page' | 'space' | 'tenant', resou
   if (resourceType === 'page') {
     // `manage` at page scope exists only for the built-in grant path (allowSuperset): custom roles cannot
     // request it (absent from ROLE_CAPABILITIES / PAGE_CAP_RELATION), but a direct page grant of `manage`
-    // has always written the `manage_direct` leaf, and #536 review 3 routes those grants through here.
+    // has always written the `manage_direct` leaf, and #536 review point 3 routes those grants through here.
     if (cap === ('manage' as AnyRoleCapability)) {
       if (!allowSuperset) throw Object.assign(new Error(`capability "manage" is not assignable at page scope`), { statusCode: 400 })
       return [{ user: principal, relation: 'manage_direct', object: `page:${resourceId}` }]
@@ -193,17 +195,17 @@ const forbidden = () => Object.assign(new Error('forbidden'), { statusCode: 403 
 
 // #485 / ADR-171 Addendum 2: the per-scope AUTHORITY to WRITE a role ASSIGNMENT (assign / unassign).
 // Replaces the flat tenant-admin gate on the assignment paths so a SPACE MANAGER can assign roles inside
-// their own space, at BOTH space and page scope. The gate is the target resource's authority
-// - tenant scope → tenant admin — createSpaces & co. stay closed to a global admin.
-// - space scope → space `manage` (= the `manager` relation, the space SUPERSET). No per-capability
-// ceiling: a manager already holds every space capability, and the base-tier space
-// grant relations (sharer/deleter/…) do NOT union `manager` (model.fga:100-105), so
-// the page-style `share`+ceiling would wrongly 403 a legitimate manager.
-// - page scope → the page GRANT CEILING extended to the role BUNDLE: always the page `share` verb,
-// plus page `manage` iff ANY bundled capability is admin-class (ADMIN_CLASS_ROLE_CAPS).
-// This is `requireGrantAuthority` (pages.ts,) applied to every capability at
-// once — a partial grant would break theprovenance/ref-count, so ANY
-// over-ceiling capability rejects the WHOLE assignment.
+// their own space, at BOTH space and page scope. The gate is the target resource's authority:
+//   - tenant scope  → tenant admin — createSpaces & co. stay closed to a global admin.
+//   - space scope   → space `manage` (= the `manager` relation, the space SUPERSET). No per-capability
+//                     ceiling: a manager already holds every space capability, and the base-tier space
+//                     grant relations (sharer/deleter/…) do NOT union `manager` (model.fga:100-105), so
+//                     the page-style `share`+ceiling would wrongly 403 a legitimate manager.
+//   - page scope    → the page GRANT CEILING extended to the role BUNDLE: always the page `share` verb,
+//                     plus page `manage` iff ANY bundled capability is admin-class (ADMIN_CLASS_ROLE_CAPS).
+//                     This is `requireGrantAuthority` (pages.ts,) applied to every capability at
+//                     once — a partial grant would break theprovenance/ref-count, so ANY
+//                     over-ceiling capability rejects the WHOLE assignment.
 // A TENANT ADMIN short-circuits every resource scope: they could assign anywhere before this change
 // (incl. a private page, from which a space manager is correctly cut via `manage_from_space … but not
 // private`), so the short-circuit preserves that non-regression. `page share` unions `manage`
@@ -221,7 +223,7 @@ export async function assignRoleInTx(
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
     actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
     // #578 bounce ①: the NAME the grant was made with, when the principal is a group. A group's FGA id
-    // is a one-way hash, so a listing can only name it by reversing against names the product knows
+    // is a one-way hash, so a listing can only name it by reversing against names the product knows —
     // and after the mappings were retired, a group nobody carries yet had nowhere to keep its name.
     // Stored here, next to the grant it belongs to, so it dies with the grant.
     groupName?: string;
@@ -265,7 +267,7 @@ export async function assignRoleInTx(
   // not mine to delete" — which is right for a role bundling many capabilities, and wrong here: a rowless
   // tuple (a pre-086 grant, or the `manager` leaf createSpace writes for the creator) is the SAME grant,
   // untracked, not a different grantor. Deferring to it produced a row with owned = {}, and the revoke
-  // then deleted the row, deleted nothing in FGA, audited, emitted the webhook, and answered success
+  // then deleted the row, deleted nothing in FGA, audited, emitted the webhook, and answered success —
   // on a brand-new space, via the creator path, with no legacy data at all. Shared-leaf protection on
   // revoke is the reference count's job (other ROWS), not tuple presence's.
   if (args.builtinCapability !== undefined) {
@@ -301,7 +303,7 @@ export async function assignRoleWithinTx(
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
     actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
     // #578 bounce ①: the NAME the grant was made with, when the principal is a group. A group's FGA id
-    // is a one-way hash, so a listing can only name it by reversing against names the product knows
+    // is a one-way hash, so a listing can only name it by reversing against names the product knows —
     // and after the mappings were retired, a group nobody carries yet had nowhere to keep its name.
     // Stored here, next to the grant it belongs to, so it dies with the grant.
     groupName?: string;
@@ -331,7 +333,7 @@ async function assignRoleTxCore(
     resourceType: 'page' | 'space' | 'tenant'; resourceId: string; principal: string;
     actorSub: string; origin?: 'manual' | 'mapping' | 'default' | 'invite';
     // #578 bounce ①: the NAME the grant was made with, when the principal is a group. A group's FGA id
-    // is a one-way hash, so a listing can only name it by reversing against names the product knows
+    // is a one-way hash, so a listing can only name it by reversing against names the product knows —
     // and after the mappings were retired, a group nobody carries yet had nowhere to keep its name.
     // Stored here, next to the grant it belongs to, so it dies with the grant.
     groupName?: string;
@@ -357,7 +359,7 @@ async function assignRoleTxCore(
     }
     // Idempotent: the row is already there and already owns whatever it owns. Writing the tuples again
     // would be harmless but recomputing `owned` from a stale read would not — leave the row alone.
-    // The AUDIT still happens (#536 review 2): before 086 a duplicate grant audited like any other
+    // The AUDIT still happens (#536 review point 2): before 086 a duplicate grant audited like any other
     // successful write, and the caller's webhook still fires — an audit stream that goes quiet for a
     // subset of the events the webhook stream reports is one nobody can reconcile. The reindex is the
     // one thing legitimately skipped: nothing changed to index.
@@ -525,7 +527,7 @@ export async function unassignRoleTxCore(
              COALESCE(r.capabilities, ARRAY[a.builtin_capability]) AS capabilities
       FROM role_assignments a LEFT JOIN roles r ON r.id = a.role_id WHERE a.id = ${args.assignmentId} FOR UPDATE OF a`
     if (!asg) return null
-    // ADR-207 §R4-5 (#603): SECOND line under the last-admin FLOOR. In production this never fires
+    // ADR-207 §R4-5 (#603): SECOND line under the last-admin FLOOR. In production this never fires —
     // the members routes keep at least one row admin (the floor), so a group's `admin` grant is never
     // the last path and revoking it is never refused. It exists so a future change that breaks the
     // floor cannot ALSO silently delete the final admin power; it is deliberately not pinned by a test,
@@ -569,7 +571,7 @@ export async function unassignRoleTxCore(
     //
     // review F2: a capability survives this removal when a SURVIVING ROW confers it (named by that
     // row) OR when its leaves are simply still in FGA after the delete set is applied — the rowless
-    // pre-086 grant, which no row can speak for. A rowless holder is named by the capability itself
+    // pre-086 grant, which no row can speak for. A rowless holder is named by the capability itself:
     // that is exactly what a direct grant of it is called (the client renders it as the same noun the
     // pickers use).
     const goingAway = new Set(toDelete.map((t) => t.relation))
@@ -1105,7 +1107,7 @@ export async function rolesPlugin(app: FastifyInstance) {
       }
       // #579 (user ruling, twice): ROLES DO NOT STACK — and until now that was only true at space scope.
       //
-      // — the tenant screen had grown an additive
+      // No "add a role", no holding two at once — yet the tenant screen had grown an additive
       // model (chips, an "add role" control) on top of a mechanism that never promised it, and the same
       // ruling was already recorded once at #536 ("1 principal = 1 role; the SERVER converges too, not
       // just the UI"). Space scope implemented it; tenant scope did not, so a direct API call could give
@@ -1115,10 +1117,10 @@ export async function rolesPlugin(app: FastifyInstance) {
       // assignments are unassigned after, so there is no instant where they hold nothing. Same order as
       // the space sweep, for the same reason.
       //
-      // EXISTING multi-holdings are NOT bulk-migrated, and that is a decision rather than an omission
+      // EXISTING multi-holdings are NOT bulk-migrated, and that is a decision rather than an omission:
       // the space sweep set the precedent (#536 — "cleaned up on the next add for that principal; no
       // bulk backfill"), a migration would silently pick a winner for people who are not looking, and
-      // this path folds them the moment anyone touches that principal again. Nothing is removed quietly
+      // this path folds them the moment anyone touches that principal again. Nothing is removed quietly:
       // every unassign here goes through the audited, ref-counted core.
       if (resourceType === 'tenant') {
         const others = await req.db.sql<{ id: string }[]>`
@@ -1172,11 +1174,11 @@ export async function rolesPlugin(app: FastifyInstance) {
 
   // ADR-207 §R4-3 (#603): grant a TENANT TIER (admin | member) to a GROUP. This is the path that did
   // not exist — the assignment POST above takes a role id, and a tier has none. It is the BUILT-IN
-  // grant mechanism (#536: built-ins ARE assignments), so
-  // - the capability, not a role id, names what is granted (row: role_id NULL + builtin_capability);
-  // - NO entitlement gate — tiers are core product, not the customRoles plan feature;
-  // - groups only. A person's tier is their members row (PATCH /members/:sub); a second mechanism
-  // for the same fact would fork the truth the last-admin floor counts.
+  // grant mechanism (#536: built-ins ARE assignments), so:
+  //   - the capability, not a role id, names what is granted (row: role_id NULL + builtin_capability);
+  //   - NO entitlement gate — tiers are core product, not the customRoles plan feature;
+  //   - groups only. A person's tier is their members row (PATCH /members/:sub); a second mechanism
+  //     for the same fact would fork the truth the last-admin floor counts.
   // Authority is the tenant branch of requireAssignmentAuthority = TENANT ADMIN. Deliberately NOT the
   // #604 `manageRoles` gate: a manage_roles holder who could hand `admin` to their own group would be
   // the confused deputy §R4-2 exists to prevent, one door over.
@@ -1315,7 +1317,7 @@ export async function rolesPlugin(app: FastifyInstance) {
   // group nobody carries yet — the one thing this surface could do that the picker could not.
   //
   // Slice 3 closed the SPACE scope; this closes the TENANT scope, which #514 had made the only place a
-  // mapping could still be created. The replacement is the tenant settings' group assignment (#579)
+  // mapping could still be created. The replacement is the tenant settings' group assignment (#579):
   // one assignment row on `group:<id>#member`, the same principal, no declaration to keep honest.
   //
   // The routes stay declared and answer 410 rather than vanishing, so a stale client (or a script) is

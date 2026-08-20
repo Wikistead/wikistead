@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep } from "../helpers";
 
-// #607 (user ruling, 2026-08-05): "Dev User 2 ".
+// #607 (user ruling, 2026-08-05): "Dev User" appears twice, and a raw hash shows — something
+// looks wrong here.
 //
 // The roster answers one row per CAPABILITY, and this screen drew them straight through — so the space's
 // owner appeared twice, `manager` and `viewer`, on the very screen "1 principal = 1 role" (#536 / #579)
@@ -65,7 +66,7 @@ test("#607: the roster shows each principal once, whatever they hold", async ({ 
 // The frozen rows here are `revocable: true` ON PURPOSE. That is the shape the server actually produces
 // for the owner — their plain `view` row IS individually revocable while their ROLE is not — and
 // it is the only shape that makes this pin load-bearing: with `revocable: false` the row draws as a badge
-// through the `locked` arm, so deleting the `changeable` arm entirely leaves the test green. Measured
+// through the `locked` arm, so deleting the `changeable` arm entirely leaves the test green. Measured:
 // it did.
 const NARROWED = [
   { grantee: "user:owner-607", capability: "manage", displayName: "Owner", revocable: true, changeable: false },

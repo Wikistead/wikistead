@@ -82,8 +82,9 @@ describe("matchTitleLinks", () => {
   });
 
   // #224 anti-test 7 (ADR-104 Addendum 3): the v1-ACCEPTED CJK over-match, pinned as a RECORD test.
-  // Japanese has no word boundaries, so a CJK title matches as a SUBSTRING — lights up inside
-  // . This is the documented v1 trade-off (real JP segmentation is a future ticket); if a
+  // Japanese has no word boundaries, so a CJK title matches as a SUBSTRING — the two-character fixture
+  // title lights up inside the longer compound word below. This is the documented v1 trade-off (real JP
+  // segmentation is a future ticket); if a
   // tokenizer change alters it, this test makes that an INTENTIONAL decision, not a silent regression.
   it("RECORD (v1-accepted over-match): a CJK title matches as a substring inside a longer word", () => {
     const m = matchTitleLinks("この基本設計書を読む", [{ title: "設計", pageId: "p1" }]);

@@ -145,7 +145,7 @@ export const excalidrawMacro: FenceMacro = {
 
         // #92 canvas cursors: publish this user's live pointer (scene coords) onto the ephemeral
         // awareness so peers can render our cursor. Display-only (never touches the doc/scene).
-        // #92 comment 982 (①): Excalidraw 0.18 calls onPointerUpdate with { pointer, button, pointersMap }
+        // #92 comment 982 (root cause ①): Excalidraw 0.18 calls onPointerUpdate with { pointer, button, pointersMap }
         // DIRECTLY — `payload` in the type is the ARG NAME, not a wrapper field. Reading p.payload.pointer was
         // always undefined, so the local pointer was NEVER published and no peer cursor could appear. Read the
         // pointer off the argument itself.

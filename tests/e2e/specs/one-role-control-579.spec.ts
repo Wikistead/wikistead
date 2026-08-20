@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
-// #579 (third ruling): " UI " — one control per row,
-// and everything is chosen from it.
+// #579 (third ruling): every choice should be made from this one dropdown, here and in the other
+// UIs too — one control per row, and everything is chosen from it.
 //
 // Measured in the real DOM rather than from the source, because the thing that kept going wrong is what
 // a person SEES in one row: a Select beside a button, or two Selects side by side, each of which reads
@@ -71,7 +71,8 @@ test("#579: the invite form chooses its role from one dropdown too", async ({ pa
     .not.toMatch(/no custom role|カスタムロールなし/i);
 });
 
-// #579 (review rejection, 2026-08-04): " UI
+// #579 (review rejection, 2026-08-04): the add-password-login, clear-view-history, and delete controls
+// clutter the row — make them icon buttons with tooltips, or fold them into a ⋯ menu.
 //
 // Measured as a COUNT of what a row puts in front of the reader, not as a list of the three buttons that
 // happened to be there — the next action added to a member row has to land in the same place, and a pin

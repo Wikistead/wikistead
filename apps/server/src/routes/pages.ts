@@ -51,7 +51,7 @@ import { enqueueWebhookOutbox } from './webhooks.js'
 import { assertGranteeIsMember } from '../auth/member-principal.js' // #624: a grant names somebody who is here
 import { requireBody } from './require-body.js' // #667a bodyless write is 400, not 500
 
-// #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames
+// #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames —
 // the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
 // leading dots; require a dotted hostname; drop empties, non-hostnames and duplicates. (https is
 // implied — the client only ever iframes https hosts.) Pure + exported for unit tests.
@@ -82,7 +82,7 @@ export async function setEmbedProviders(
   args: { tenantId: string; userId: string; providers: unknown },
 ): Promise<string[]> {
   // Raw FGA check — `admin` on `tenant:` isn't a capability the `check` helper maps; the tenant-admin
-  // relation is checked directly. NOT folded into the shared `requireTenantAdmin` (#383) on purpose
+  // relation is checked directly. NOT folded into the shared `requireTenantAdmin` (#383) on purpose:
   // this gate returns 'forbidden', not 'admin only' — folding would change the error shape.
   const { allowed } = await fga.check({ user: `user:${args.userId}`, relation: 'admin', object: `tenant:${args.tenantId}` })
   if (!allowed) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
@@ -108,7 +108,7 @@ function toPage(r: PageRow): Page {
   // columns (listPages); together they drive the sidebar's 3-state badge
   // (Draft / Published / Unpublished changes). `published` is a cheap check
   // (published_at IS NOT NULL) — the heavy published_md is not read for the tree.
-  // #222: createdBy/updatedBy (author subs) are present only when the SELECT included them (getPage)
+  // #222: createdBy/updatedBy (author subs) are present only when the SELECT included them (getPage) —
   // they feed the title-bar metadata row; undefined for the tree list (not needed there).
   return { id: r.id, tenantId: r.tenant_id, spaceId: r.space_id, parentId: r.parent_id, title: r.title, position: r.position, createdAt: r.created_at, updatedAt: r.updated_at, hasUnpublishedChanges: r.has_unpublished_changes ?? false, published: r.published ?? false, createdBy: r.created_by ?? null, updatedBy: r.updated_by ?? null, taskDone: r.task_done ?? 0, taskTotal: r.task_total ?? 0 }
 }
@@ -132,7 +132,7 @@ function positionBetween(before: number | null, after: number | null): number {
   return (before + after) / 2
 }
 
-// A gap is COLLAPSED when the midpoint between two neighbours is not STRICTLY between them
+// A gap is COLLAPSED when the midpoint between two neighbours is not STRICTLY between them —
 // i.e. inserting there would produce a position equal to a neighbour (float exhaustion or
 // duplicate/equal positions). Only meaningful with two finite neighbours.
 export function gapCollapsed(before: number | null, after: number | null): boolean {
@@ -262,10 +262,10 @@ export async function createPage(
     if (!canManage) throw Object.assign(new Error('page creation is restricted to space managers'), { statusCode: 403, reason: 'page_creation_policy' })
   }
 
-  // Seed the new page's DRAFT content. Two sources, both view-gated and existence-hidden (404)
-  // #250 templateId — a `templates` snapshot (view = manage or space/tenant audience); title defaults
-  // to the template name. This is the real template system.
-  // #229 fromPageId — "duplicate a page": any page the creator can VIEW; its PUBLISHED md is the body.
+  // Seed the new page's DRAFT content. Two sources, both view-gated and existence-hidden (404):
+  //   #250 templateId — a `templates` snapshot (view = manage or space/tenant audience); title defaults
+  //                      to the template name. This is the real template system.
+  //   #229 fromPageId — "duplicate a page": any page the creator can VIEW; its PUBLISHED md is the body.
   // Either way the new page stays an unpublished, creator-only draft holding the seeded body.
   let seedMd: string | null = null
   let seedTitle = args.title
@@ -346,14 +346,14 @@ export async function createPage(
 // manage_direct grant, and share_link principals have no manage path and no per-guest identity to grant),
 // so the row + `page#space` + the `published` marker pair + an (empty) publish snapshot land in ONE
 // operation. The guest then co-edits over the normal collab path and publishes content like any editor.
-// - authz: FGA `edit` on the space (share_link → space#editor, with current_time for expiry) — the
-// exact gate createPage uses for members. No resource pre-binding (#397: FGA is the sole authority).
-// - attribution: pages/revisions record the #331 anon session id (`anon:<12hex>`), never a member sub,
-// so #327 per-actor revert and patrol group the guest's pages exactly like their edits.
-// - NO manage_direct grant: a guest owns nothing — edit flows from space#editor via edit_from_space
-// once page#space exists (which is written here, atomically). Deletion stays manage-gated (ADR §3).
-// - seeds: templateId/fromPageId are member-only (template#view has no share_link path; the route never
-// forwards them for a guest) — a guest page always starts empty.
+//   - authz: FGA `edit` on the space (share_link → space#editor, with current_time for expiry) — the
+//     exact gate createPage uses for members. No resource pre-binding (#397: FGA is the sole authority).
+//   - attribution: pages/revisions record the #331 anon session id (`anon:<12hex>`), never a member sub,
+//     so #327 per-actor revert and patrol group the guest's pages exactly like their edits.
+//   - NO manage_direct grant: a guest owns nothing — edit flows from space#editor via edit_from_space
+//     once page#space exists (which is written here, atomically). Deletion stays manage-gated (ADR §3).
+//   - seeds: templateId/fromPageId are member-only (template#view has no share_link path; the route never
+//     forwards them for a guest) — a guest page always starts empty.
 export async function guestCreatePublishPage(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -469,7 +469,7 @@ export async function listPages(
   // batch waves; sequentially that is most of a second on a busy checker, for a surface that IS the
   // boot path (the dictionary at least was only an enhancement).
   //
-  //follow-up: the confirm set is also CACHED per (tenant, viewer, space) for a few seconds
+  //follow-up: the confirm set is also CACHED per (tenant, viewer, space) for a few seconds —
   // the tree-confirm-cache header carries the safety argument (same discipline, same invalidation and
   // generation as the #534 dict cache). Pages the entry has never seen (created since) are confirmed
   // as a DELTA against FGA — never assumed; a cached deny stays hidden for at most the TTL, within the
@@ -604,7 +604,7 @@ export async function getPage(db: TenantDb, fga: OpenFgaClient, args: { pageId: 
   // still cannot write). null = no view access at all → 403.
   const access = await checkMemberAccess(fga, args.userId, { type: 'page', id: args.pageId })
   // #262: existence-hiding on the READ/DISPLAY path — "no view access" and "no such page" return the SAME
-  // 404 so a member can't tell a page they lack access to from one that doesn't exist ( leaks
+  // 404 so a member can't tell a page they lack access to from one that doesn't exist (a "no permission" reply leaks
   // existence). Uniform 404, like the public surface (#227) and share-links. Edit/manage ops keep their 403s
   // (an action failure is a different signal from a hidden resource).
   if (!access) throw Object.assign(new Error('not found'), { statusCode: 404 })
@@ -791,7 +791,7 @@ export async function publishPage(
     // excluded. publishedAt is non-null here (we just published), so the emission guard passes. Set-based, capped.
     await fanOutFeedEvent(tx, { tenantId: draft.tenant_id, eventType: 'page.published', pageId: args.pageId, spaceId: draft.space_id, actor: args.createdBy, publishedAt })
   })
-  // AFTER the DB commit (fail-closed: a tx failure above leaves the page gated)
+  // AFTER the DB commit (fail-closed: a tx failure above leaves the page gated):
   // release space inheritance, THEN reindex so buildSearchDoc sees the published
   // state. If this FGA write fails, the page stays gated and a retry publish (no-op
   // path) repairs it; the two-stage search guard keeps stage-2 FGA authoritative.
@@ -885,7 +885,7 @@ export async function toggleTask(
     // Lightweight audit (ADR-019 D2 / #97): who toggled which checkbox to what, when. NOT in
     // the revision/diff history (a toggle is interactive state). In the same tx as the flip,
     // so the log can never disagree with the published state. `actor` uses the human-readable
-    // principal (`user:`/`guest:` = createdBy), matching the attribution label revisions store
+    // principal (`user:`/`guest:` = createdBy), matching the attribution label revisions store —
     // NOT the FGA `subject` (`share_link:`), which is the authz check identity only.
     // #481: ONE ROW PER FOLDED FLIP, not one per request. The fold takes every pending flip,
     // so a fast clicker publishes N changes through a single call — and the ledger recorded only the
@@ -903,7 +903,7 @@ export async function toggleTask(
   return { publishedAt }
 }
 
-// Release space inheritance for a page: write `page#space` if absent (idempotent
+// Release space inheritance for a page: write `page#space` if absent (idempotent —
 // OpenFGA rejects duplicate writes, so we check first). Returns whether it wrote.
 // #218 / ADR-103 addendum: also write the `published` marker PAIR (draft gate — lets the page RECEIVE
 // folder-inherited grants). Both are keyed off "is this page published"; write them together so a page is
@@ -1109,7 +1109,7 @@ export async function grantPageAccess(
   validateGrant(args.grantee, args.relation)
   await requireGrantAuthority(fga, args.userId, args.pageId, args.relation as PageRelation) // #420 Addendum 3: the ceiling — admin-class grants need manage
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  // #536 review 3: the same mechanism as the space grant — a page grant IS a role assignment with the
+  // #536 review point 3: the same mechanism as the space grant — a page grant IS a role assignment with the
   // builtin_capability column set, so it participates in the reference count that decides whether a leaf
   // shared with a page-scope custom-role assignment may be deleted. Before this, revoking either one took
   // the other's access with it, exactly the defect item ① fixed for spaces.
@@ -1139,7 +1139,7 @@ export async function revokePageAccess(
   validateGrant(args.grantee, args.relation)
   await requireGrantAuthority(fga, args.userId, args.pageId, args.relation as PageRelation) // #420 Addendum 3: the ceiling — admin-class grants need manage
   await requireNotTrashed(db, args.pageId) // Rider 2: no share surgery on a trashed page (uniform 404)
-  // #536 review 3: revoke the ROW when there is one (refcount decides which leaves go); a rowless
+  // #536 review point 3: revoke the ROW when there is one (refcount decides which leaves go); a rowless
   // legacy grant falls back to the direct delete — guarded by the same coverage check as the space path,
   // so it cannot take a live assignment's leaf with it.
   const { unassignRoleInTx, redactCoverage } = await import('./roles.js')
@@ -1290,7 +1290,7 @@ export async function listPageRestrictions(
   for (const key of tuples) {
     if (key.relation === 'restricted' && key.user) out.push({ principal: key.user })
   }
-  // #578: a restriction names a person, so it carries a name for the same reason the grant list does
+  // #578: a restriction names a person, so it carries a name for the same reason the grant list does —
   // and from the same authorization-bounded set (the `share` verb above), resolved on the caller's RLS
   // handle. Without it the dialog's second list would still print a subject id beside a first list that
   // does not, which is the drift this ticket is about.
@@ -1403,7 +1403,7 @@ export async function setPagePrivate(
   // would then keep indexing public). Security-critical + fail-safe: runs AFTER the marker commit.
   //
   // The catch used to swallow EVERYTHING, which made this the quiet half of a leak: `view_base`'s `[user:*]`
-  // arm is NOT `but not private` (model.fga) — the invariant holds at the WRITE boundary and nowhere else
+  // arm is NOT `but not private` (model.fga) — the invariant holds at the WRITE boundary and nowhere else —
   // so a page whose strip failed stays anonymously world-readable while the caller is told it went private.
   // "Not public to begin with" is convergence and still passes; a real refusal is collected and raised below,
   // after the rest of the fail-safe work has been attempted (aborting mid-sweep would leave the pages behind
@@ -1622,7 +1622,7 @@ export async function unsetPagePublic(
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_non_public', target: `page:${args.pageId}` })
     }
     const o = await enqueueOutbox(tx, { tenantId: args.tenantId, pageId: args.pageId, operation: 'upsert' })
-    // #362 / ADR-126 addendum: page.made_non_public feed event, in-tx (published-only via the shared guard
+    // #362 / ADR-126 addendum: page.made_non_public feed event, in-tx (published-only via the shared guard —
     // un-publicing a draft is a no-op event-wise).
     const [pg] = await tx<[{ published_at: Date | null; space_id: string }?]>`SELECT published_at, space_id FROM pages WHERE id = ${args.pageId}`
     await fanOutFeedEvent(tx, { tenantId: args.tenantId, eventType: 'page.made_non_public', pageId: args.pageId, spaceId: pg?.space_id ?? null, actor: `user:${args.userId}`, publishedAt: pg?.published_at ?? null })
@@ -1787,7 +1787,7 @@ export async function listAllPageAccess(
 
 // Pages overview for a space (Phase 5 #5). space#manage gated — a manager sees the
 // pages ONLY of a space they manage (RLS scopes to the tenant; the space#manage
-// check is the authority), so nothing leaks beyond their authority. Per page
+// check is the authority), so nothing leaks beyond their authority. Per page:
 // published state, the cheap unpublished-changes flag, the count of DIRECT page
 // grants (user/group only — never share_link/wildcard/the space link), and the
 // count of active share links.
@@ -2189,8 +2189,8 @@ export async function paintTree(
 
   // The ancestors of the open page, nearest-first, INSIDE this space.
   //
-  // ⚠️ The space predicates here are the SECOND layer and cannot be broken to red on their own
-  // measured. Remove both and a cross-space ancestor still never reaches the answer, because `one`
+  // ⚠️ The space predicates here are the SECOND layer and cannot be broken to red on their own —
+  // measured. Remove both and a cross-space ancestor still never reaches the answer, because `one()`
   // goes through `listBranch`, whose §2 parent check refuses a page in another space with the same 404
   // every other refusal gets. They stay because the walk should not travel outside the space it was
   // asked about even for a row it will then discard; the guarantee itself is pinned one layer down, on
@@ -2418,7 +2418,7 @@ export async function descendantIds(sql: Sql, rootId: string): Promise<string[]>
 // separately so the atomic flip carries no separable scaffolding.
 export const MAX_PAGE_DEPTH = 10 // 0-indexed: a top-level page is depth 0, so up to 11 nesting levels.
 
-// #689: the walk cap the three parent-chain CTEs above/below refuse at. +2 is margin, not headroom
+// #689: the walk cap the three parent-chain CTEs above/below refuse at. +2 is margin, not headroom —
 // rows deeper than MAX_PAGE_DEPTH but under the cap (pre-guard data) still answer rather than 500, while
 // a cycle always reaches the cap. ONE derived constant so the write-boundary cap and the walk cap cannot
 // drift apart.
@@ -2752,7 +2752,7 @@ export async function trashPage(
     throw Object.assign(new Error('the trash pathway is disabled by policy'), { statusCode: 400, reason: 'delete_mode' })
   }
   const subtree = [args.pageId, ...(await descendantIds(db.sql, args.pageId))]
-  // Idempotent scope: only rows not already claimed by an existing trash entry get stamped/marked
+  // Idempotent scope: only rows not already claimed by an existing trash entry get stamped/marked —
   // a nested OLDER trash root keeps its own deleted_root_id (restore/purge are keyed by it, ADR §2).
   const fresh = (await db.sql<{ id: string }[]>`
     SELECT id FROM pages WHERE id = ANY(${subtree}) AND deleted_root_id IS NULL
@@ -2760,7 +2760,7 @@ export async function trashPage(
   if (fresh.length === 0) return
   for (const id of fresh) {
     await writeTuples(fga, TRASHED_MARKERS(id)).catch((e) => {
-      // ONLY a duplicate write (retry after a partial failure) is tolerated; anything else must abort
+      // ONLY a duplicate write (retry after a partial failure) is tolerated; anything else must abort —
       // the marker is the authorization change and MUST land before the page "disappears" anywhere else.
       // (Never key on the generic write_failed_due_to_invalid_input code — a model/relation mismatch
       // reports the same code, and swallowing that would trash the row with NO revocation = a leak.)
@@ -2909,7 +2909,7 @@ export async function deletePage(
   await physicalDeletePage(db, fga, driver, { pageId: args.pageId, actorId: args.userId })
 }
 
-// #437 / ADR-167: the DIRECT permanent path — offered only under 'both' / 'direct_only'. Order
+// #437 / ADR-167: the DIRECT permanent path — offered only under 'both' / 'direct_only'. Order:
 // FGA first (unauthorized callers get the uniform verb 403 for absent/live/trashed alike), then
 // the trashed/absent 404 (only a delete-capable caller — who already knows the page — reaches it;
 // a trashed root's permanent path stays the purge route), then the policy 400 (static reason).
@@ -2949,7 +2949,7 @@ export async function bulkDeletePages(
   driver: SearchDriver,
   args: { spaceId: string; pageIds: string[]; userId: string },
 ): Promise<BulkDeleteResult> {
-  // Existence-hiding: a caller who cannot even view the space gets a uniform 404 for the whole request
+  // Existence-hiding: a caller who cannot even view the space gets a uniform 404 for the whole request —
   // never a per-item partial-success map they could read as an oracle. (The per-page FGA gate is still the
   // real authority; this is defense-in-depth + parity with the trash listing.)
   if (!(await check(fga, `user:${args.userId}`, 'view', { type: 'space', id: args.spaceId }))) {
@@ -3019,7 +3019,7 @@ export async function bulkPublishPages(
   storage: StorageDriver,
   args: { spaceId: string; pageIds: string[]; userId: string; flush?: (pageId: string) => Promise<void> },
 ): Promise<BulkPublishResult> {
-  // Existence-hiding: a caller who cannot even view the space gets a uniform 404 for the whole request
+  // Existence-hiding: a caller who cannot even view the space gets a uniform 404 for the whole request —
   // never a per-item partial-success map they could read as an oracle (defense-in-depth + parity with delete).
   if (!(await check(fga, `user:${args.userId}`, 'view', { type: 'space', id: args.spaceId }))) {
     throw Object.assign(new Error('not found'), { statusCode: 404 })
@@ -3328,7 +3328,7 @@ async function physicalDeletePage(
     // gate drops orphans regardless — this is row hygiene, not correctness.
     await deletePinsForResources(tx, ids)
     await sweepWatchesForResources(tx, ids) // #320 / ADR-126: same row-hygiene sweep for watches (display gate is the backstop)
-    // #536 review 4: assignment rows (custom-role AND built-in grant rows) go with the pages. FGA is
+    // #536 review point 4: assignment rows (custom-role AND built-in grant rows) go with the pages. FGA is
     // the authz truth so orphans confer nothing — row hygiene, same as pins and watches above.
     await tx`DELETE FROM role_assignments WHERE resource_type = 'page' AND resource_id = ANY(${ids})`
     await auditIfEntitled(tx, { id: tenantId, plan: tenantRow?.plan ?? '' }, { actor: auditActor, action: 'page.purged', target: `page:${args.pageId}` })
@@ -3351,7 +3351,7 @@ async function physicalDeletePage(
 export async function sweepExpiredTrash(fga: OpenFgaClient, driver: SearchDriver): Promise<number> {
   // All trashed markers, read ONCE (the store spans tenants; RLS scopes the row work per tenant below).
   // #788: ask the store for the `trashed` markers rather than for every `user:*` tuple on every page.
-  // The set is the same — this is the filter that used to run here, moved to where the rows are
+  // The set is the same — this is the filter that used to run here, moved to where the rows are —
   // and the cost stops scaling with how much the workspace has PUBLISHED. Measured before: 41,257
   // tuples read in 43 seconds to find the one marker that mattered, on every sweep.
   const marked = (await readUserTuplesByType(fga, 'user:*', 'page:', 'trashed'))
@@ -3476,7 +3476,7 @@ export const MAX_LINK_STATUS_IDS = 256
 
 // #230: backlinks — the pages that reference `pageId` from their PUBLISHED content. Sources are the
 // PERSISTED internal references only: an `:::embed-page\n<id>\n:::` block (the body IS the target id)
-// and an explicit markdown link to `/p/<id>`. (The #224 title-match auto-links are display-only
+// and an explicit markdown link to `/p/<id>`. (The #224 title-match auto-links are display-only —
 // never in the source — so they are out of scope here and follow #224's finalisation.)
 // Security: the SQL LIKE only prefilters candidates that mention the id string; each candidate is then
 // (a) confirmed to hold a REAL reference (precise regex, not a coincidental substring) and (b) gated
@@ -3487,7 +3487,7 @@ export const MAX_LINK_STATUS_IDS = 256
 export interface Backlink { id: string; title: string; depth?: number }
 
 // #353 / ADR-027 (authorized-hit gap, Hole C): the reverse-lookup lists (backlinks / tag / children) must not
-// DROP viewable results at the raw-fetch boundary. The naive shape — `LIMIT N` raw → per-item view-filter
+// DROP viewable results at the raw-fetch boundary. The naive shape — `LIMIT N` raw → per-item view-filter —
 // silently loses authorized rows when the first N by rank include non-viewable ones (safe = no leak, but the
 // list is short of N genuine hits). Fix: OVER-FETCH by rank well past the display cap, view-filter in rank
 // order, and stop at the display cap — so the list is the "top DISPLAY_N VIEWABLE by rank", not "the viewable
@@ -3873,11 +3873,11 @@ export async function getLocalGraph(
   }
 }
 
-// #370 / ADR-145: the two read-only DYNAMIC LIST directives (they replace ADR-134's `:::query`)
-// - `:::tagged` — body's first non-empty line is a TAG NAME (a string, never a page id); lists the
-// published pages whose frontmatter `tags` include it (case-insensitive, user ruling).
-// - `:::children` — no body; lists the direct child pages of THIS page in the tree (kept tag-independent,
-// user ruling — the `:::query` teardown does not take it down).
+// #370 / ADR-145: the two read-only DYNAMIC LIST directives (they replace ADR-134's `:::query`):
+//   - `:::tagged` — body's first non-empty line is a TAG NAME (a string, never a page id); lists the
+//     published pages whose frontmatter `tags` include it (case-insensitive, user ruling).
+//   - `:::children` — no body; lists the direct child pages of THIS page in the tree (kept tag-independent,
+//     user ruling — the `:::query` teardown does not take it down).
 // The body is authoring free-text, so anything unresolvable yields 0 results (never a parse error).
 export type ListDirectiveName = 'tagged' | 'children'
 export const LIST_DIRECTIVE_NAMES: readonly ListDirectiveName[] = ['tagged', 'children']
@@ -4182,25 +4182,25 @@ export const LIST_OBJECTS_TRUNCATION_FLOOR = 1000
 
 // The viewer-scoped title dictionary (ADR-104 Addendum 3 Finding A, shape (ii) DB + ListObjects).
 // authz model (Addendum 2 point 1): this dictionary IS the primary defence — it must only ever
-// contain titles the caller may view. Two principals
-// - member → FGA ListObjects('view') for user:<sub> — the full authoritative view set — then the
-// tenant-scoped (RLS) title join, then the Addendum-3 belt-and-braces filterAuthorized confirm.
-// - share_link guest → **forced to the PUBLIC set via the anonymous user-typed principal** and
-// published-only rows. The share_link principal itself is NEVER given a reverse lookup — that is
-// thebinding closing the #244 re-entry (a space-shared non-public title must not leak).
+// contain titles the caller may view. Two principals:
+//   - member  → FGA ListObjects('view') for user:<sub> — the full authoritative view set — then the
+//     tenant-scoped (RLS) title join, then the Addendum-3 belt-and-braces filterAuthorized confirm.
+//   - share_link guest → **forced to the PUBLIC set via the anonymous user-typed principal** and
+//     published-only rows. The share_link principal itself is NEVER given a reverse lookup — that is
+//     thebinding closing the #244 re-entry (a space-shared non-public title must not leak).
 // Existence-hiding needs no 404 here: a non-viewable page is simply absent from the response.
 //
 // #540: ListObjects is not trusted past its own ceiling. It truncates silently at the server's max
 // (1000 by default), and the DB-derived `capped` flag knew nothing about it — so a viewer with more
 // than 1000 viewable pages got a dictionary that claimed to be complete (`capped: false`) while titles
-// were missing, which reads exactly like existence-hiding. Two shapes now
-// - result below the floor → it is the complete authoritative view set; keep the original flow. This
-// is the common case, and it is what keeps a low-privilege member of a huge tenant correct: their
-// few viewable pages are found by NAME, not by being among the tenant's newest.
-// - result AT the floor → possibly truncated. Ask the other way around: newest tenant pages from the
-// DB (RLS-scoped) as candidates, then the same fail-closed filterAuthorized confirm decides every
-// entry. No ListObjects ceiling applies, and `capped` means what it says (the candidate window
-// overflowed, so the dictionary MAY be missing older titles).
+// were missing, which reads exactly like existence-hiding. Two shapes now:
+//   - result below the floor → it is the complete authoritative view set; keep the original flow. This
+//     is the common case, and it is what keeps a low-privilege member of a huge tenant correct: their
+//     few viewable pages are found by NAME, not by being among the tenant's newest.
+//   - result AT the floor → possibly truncated. Ask the other way around: newest tenant pages from the
+//     DB (RLS-scoped) as candidates, then the same fail-closed filterAuthorized confirm decides every
+//     entry. No ListObjects ceiling applies, and `capped` means what it says (the candidate window
+//     overflowed, so the dictionary MAY be missing older titles).
 // #541confirm `ids` in slices, stopping when the time budget is spent. Every id in the result
 // was individually confirmed (same fail-closed filterAuthorized); ids the budget never reached are
 // simply ABSENT — never allowed by default. `exhausted` tells the caller the answer is partial.
@@ -4211,9 +4211,9 @@ async function confirmWithinBudget(
   budgetMs: number,
   signal?: AbortSignal,
 ): Promise<{ confirmed: Set<string>; exhausted: boolean }> {
-  // Lanes dropped 4 → 1 , measured): dev's FGA datastore and the app DB share one postgres, and
+  // Lanes dropped 4 → 1 (, measured): dev's FGA datastore and the app DB share one postgres, and
   // a 4-lane wave = 200 concurrent point checks saturated it — endpoints that never touch FGA at all
-  // /me/settings, /pins) measured 2.1s while a dictionary ran. At 1 lane the instantaneous pressure
+  // (/me/settings, /pins) measured 2.1s while a dictionary ran. At 1 lane the instantaneous pressure
   // quarters and interactive queries interleave between batches; an idle box still completes a full
   // 2000-id confirm in ~1-2s, and under load the budget above bounds the damage instead of the storm.
   const SLICE = 200 // 4 chunks of 50, sequential inside the slice; budget checked between slices
@@ -4251,7 +4251,7 @@ export async function getTitleDictionary(
 
   if (ids.length >= LIST_OBJECTS_TRUNCATION_FLOOR) {
     // Possibly-truncated ListObjects → candidates come from the DB instead. Guests still only link
-    // into the published public surface. The confirm below is the sole authz gate on this branch
+    // into the published public surface. The confirm below is the sole authz gate on this branch —
     // every candidate that the viewer cannot view is dropped by it (fail-closed, model id pinned).
     const rows = isGuest
       ? await db.sql<{ id: string; title: string }[]>`
@@ -4669,7 +4669,7 @@ export async function pagesPlugin(app: FastifyInstance) {
     // does not leave them behind as "unpublished changes". Best-effort: never blocks
     // longer than the timeout, and is a no-op when collab isn't running (e.g. tests).
     await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
-    // #326: the refusal below is patrol supply. The flag is recorded HERE, awaited, before the reply
+    // #326: the refusal below is patrol supply. The flag is recorded HERE, awaited, before the reply —
     // a fire-and-forget write would run after onResponse released the tenant connection, and the row
     // would be refused by RLS with nothing to show for it (the reviewer proved exactly that).
     let rejected: { reason: string; spaceId: string } | null = null
@@ -4773,13 +4773,13 @@ export async function pagesPlugin(app: FastifyInstance) {
     return getRelatedPages(req.db, app.fga, { pageId: req.params.pageId, subject, context })
   })
 
-  // #394 / ADR-147: the local link graph around a page (mini graph depth=1 / modal depth=2). MEMBER-ONLY
+  // #394 / ADR-147: the local link graph around a page (mini graph depth=1 / modal depth=2). MEMBER-ONLY —
   // the route deliberately omits `config.guest`, so a share_link token is rejected (a public graph over
   // public pages is a later increment, ADR-133 §6). getLocalGraph view-gates the center and returns an edge
   // only when the caller can view BOTH endpoints; an unviewable page is absent as a node entirely.
   // #399 / ADR-158 §1: the PAGE-level comment-audience override. The model has supported direct
   // `page#comment_open` wildcard tuples since #100/#244 (`[user:*, share_link:*] or comment_open from
-  // space`) — this ships the missing write path, mirroring the space switch (setSpaceCommentOpen)
+  // space`) — this ships the missing write path, mirroring the space switch (setSpaceCommentOpen):
   // manage-gated, each wildcard toggled INDEPENDENTLY and idempotently (members = user:*, guests =
   // share_link:* — deliberately NOT a #244 always-together pair; "members only" IS the lone-user:*
   // state). ADDITIVE semantics recorded honestly: a page can OPEN comments its space keeps closed,
@@ -4853,7 +4853,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/title-dictionary', { config: { guest: 'view' } }, async (req, reply) => {
     const { subject, context } = principalForPage(req, req.params.pageId)
     // #489 (remedy 1): the dictionary is an ENHANCEMENT (auto internal links) — it must never
-    // take the app down with it. Any FGA failure here (deadline under saturation, backend down)
+    // take the app down with it. Any FGA failure here (deadline under saturation, backend down) —
     // whether in the anchor check or the dict body — DEGRADES to an empty dictionary (200, links
     // render as plain text) instead of a 500 the client would retry into a multi-second freeze.
     // Uniform for every page id → never an oracle; an empty dictionary is strictly UNDER-disclosure,
@@ -4879,7 +4879,7 @@ export async function pagesPlugin(app: FastifyInstance) {
       // text and fill in moments later) instead of holding this request, and with it the whole
       // page-open, hostage to a multi-second confirm. Measured: the in-request compute was what made
       // a fresh page's own GETs take ~1s in the browser while the server answered curl in 11ms — the
-      // cold dictionary a NEIGHBOURING surface kicked off was starving them. Under-disclosure only
+      // cold dictionary a NEIGHBOURING surface kicked off was starving them. Under-disclosure only:
       // an empty dictionary never shows a title the viewer must not see, and navigation re-checks
       // view server-side, so nothing here is an authz gate.
       //
@@ -4933,7 +4933,7 @@ export async function pagesPlugin(app: FastifyInstance) {
     const ids = [...new Set(raw.filter((x): x is string => typeof x === 'string' && x.length > 0))]
     // #762: OVER THE CAP IS A REFUSAL, not a shorter answer.
     //
-    // The response is the set of ids the caller MAY VIEW, so an id that is absent from it was denied
+    // The response is the set of ids the caller MAY VIEW, so an id that is absent from it was denied —
     // and an id the route never looked at is absent in exactly the same way. Nothing in the body
     // separates them. The editor reads absence as "dead link", so a document with more than the cap
     // used to strike through live links past that point: the truncation was invisible to the only
@@ -5144,7 +5144,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   // public — but ONLY while the tenant parent switch is ON (guardrail 1: OFF ⇒ 403, a second layer over the
   // hidden UI so the API is the fortress). DELETE (make non-public) is always allowed — revoking is safe.
   app.get<{ Params: { pageId: string } }>('/pages/:pageId/public', async (req) => {
-    // `public` = this page's OWN grant (the toggle's state). #253 review: also report `effectivePublic`
+    // `public` = this page's OWN grant (the toggle's state). #253 review: also report `effectivePublic` —
     // whether an anonymous reader can actually reach the page (its own grant OR via a PUBLIC SPACE), so the
     // UI can warn "publicly reachable via space" when the own toggle reads OFF but the page is world-readable.
     const own = await isPagePublic(req.db, app.fga, { pageId: req.params.pageId, userId: req.user.sub })

@@ -103,7 +103,7 @@ export async function tenantDefaultLang(db: TenantDb): Promise<'en' | 'ja'> {
 }
 
 // #419: the localized personal-space initial name. An empty display name falls back to a
-// language-appropriate generic / "Personal Space").
+// language-appropriate generic ("Personal Space", or its Japanese counterpart).
 export function personalSpaceName(displayName: string, lang: 'en' | 'ja'): string {
   if (!displayName) return lang === 'ja' ? 'マイスペース' : 'Personal Space'
   return lang === 'ja' ? `${displayName}のスペース` : `${displayName}'s Space`
@@ -404,7 +404,7 @@ export async function establishMemberSession(
   // BEST-EFFORT — a failure here must never block login (the space is a convenience, not a credential),
   // so it runs after the session-critical work and swallows errors. The DB UNIQUE index makes concurrent
   // first-logins race-safe. #419: the initial name is localized by the TENANT's default language (OIDC
-  // claims carry no locale) — "X" / "X's Space" — v1 uses default_lang for THIS name only,
+  // claims carry no locale) — the "X's Space" wording in that language — v1 uses default_lang for THIS name only,
   // never as an app-wide locale default. Existing spaces are never renamed; the owner can rename freely.
   try {
     const displayName = claims.name?.trim() || claims.email?.split('@')[0] || ''

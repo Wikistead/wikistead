@@ -387,7 +387,7 @@ function inlineNode(node: Node, ctx: Ctx): string {
       // ⚠️ An `<a href="attachments/…">` is a FILE, not a page. It is left exactly as written here and
       // re-pointed during materialisation (`rewriteBody`), where the attachment id exists — the same
       // place the image pass resolves the same files. Reporting it as lost from here would be a
-      // prediction, and after #712① it would be a wrong one: what cannot be resolved is
+      // prediction, and after #712leftover ① it would be a wrong one: what cannot be resolved is
       // reported there, from the fact rather than from the guess.
       return `[${text}](${href})`
     }

@@ -194,7 +194,7 @@ test("#445: tenant defaults toggle + a tenant-scope role assigns tenant-wide (no
 // #420, RE-AIMED by #586②: whatbanned was the run-on "cap · cap · cap" line, and
 // what replaced it has changed shape once more — at rest a built-in is its NAME, and hovering the name
 // raises the measured "what it can do" window (the read-only grid rows left the list with the ruling
-// ). What this keeps: the vocabulary rules — no run-on line,
+// "show only the name, reveal on hover"). What this keeps: the vocabulary rules — no run-on line,
 // members picked by name, definitions tab defines only.
 test("#420a built-in explains itself from its name, and members are picked by name", async ({ page }) => {
   await page.goto("/admin/roles");

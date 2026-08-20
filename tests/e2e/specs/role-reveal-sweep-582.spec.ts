@@ -14,9 +14,9 @@ async function optionsOf(page: Page, trigger: string): Promise<{ name: string; r
   // and arrows pressed in that window fall through — the walk then collects only the selected option and
   // the sweep reads as "one role offered".
   //
-  // That wait used to end in `.catch( => {})`, which made the precondition ADVISORY: when focus never
+  // That wait used to end in `.catch(() => {})`, which made the precondition ADVISORY: when focus never
   // arrived the walk ran anyway and produced a one-item answer, so the test failed with "the picker
-  // offered 1 role" — a sentence about the product for what is really a harness timing miss. Measured
+  // offered 1 role" — a sentence about the product for what is really a harness timing miss. Measured:
   // green alone, red inside a batch, on identical code and data. The open is retried now, and if focus
   // never lands the failure SAYS SO instead of blaming the picker.
   let inList = false;
@@ -84,7 +84,7 @@ test("#582: a role picker offers names, and points at what they confer", async (
   expect(withPanel.revealed.length, `the panel carries a heading and the capabilities :: ${withPanel.revealed}`).toBeGreaterThan(4);
 });
 
-// #582 (review rejection,/): . The reveal
+// #582 (review rejection,/): the panel should show whether the list is open or not. The reveal
 // was bound to the open list, so the closed row — the thing a reader looks at when they want to know what
 // someone can do, before deciding whether to change it — stayed silent. Both states are the acceptance, so
 // both are measured here, and the panel raised by the closed control must be the SAME element as the one
@@ -144,7 +144,8 @@ async function visibleDisclosures(page: Page): Promise<string[]> {
       .map((el) => el.getAttribute("data-testid") ?? "?"))
 }
 
-// " — measured on the device as member and
+// #579 (review rejection, 2026-08-04): the capability popup on option hover only appeared for custom
+// roles, though the ruling had asked for it on built-ins and custom alike — measured on the device as member and
 // admin staying silent while the custom roles explained themselves.
 //
 // The tenant picker gets the same walk as the space one, and the assertion is over EVERY option it

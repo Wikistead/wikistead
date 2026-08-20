@@ -81,7 +81,7 @@ test("#638: a pending invitation can be handed over again from its own row", asy
 // #638 ①③④⑤⑫ (slice 2): the same screen, measured for shape rather than for reach.
 //
 // Supplied rather than taken from the fixture, and with addresses of deliberately different lengths
-// the defect is that the row was one sentence (" · "), so the controls after it slid left and
+// the defect is that the row was one run-on "email · role" sentence, so the controls after it slid left and
 // right with the address and the button a reader was reaching for was never twice in the same place.
 const INVITE = (i: number, email: string) => ({
   id: `i${i}`, email, role: "member", invited_by: "dev-user",

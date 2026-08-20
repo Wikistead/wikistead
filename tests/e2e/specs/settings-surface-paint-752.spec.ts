@@ -2,6 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 
 // #752: a settings pane may not paint a SURFACE with the rail's own colour.
 //
+// Everything wears the sidebar's colour as its background and it looks dowdy — colour the frame only
+// and leave the background alone
 // — the owner, at the roles tab, during #735's review. Measured, that tab filled 85% of its pane
 // with `bg-panel`, the token the navigation rail is painted in, and the sign-in tab was second at 68%
 // across fourteen stacked rows. Every list that draws through the shared `ListBox` painted nothing.

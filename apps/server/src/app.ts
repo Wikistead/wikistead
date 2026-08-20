@@ -102,7 +102,7 @@ import { mcpPlugin } from './routes/mcp.js'
 import { enrollmentPlugin } from './auth/enroll-domains.js'
 import { aiPlugin } from './routes/ai.js'
 // #178 / ADR-084: SCIM (scim-tokens + scim router) is EE and now lives in @wikistead-ee/server; it is
-// mounted via the getEeFeatures seam by the EE composition root, NOT imported here (CE stays EE-free).
+// mounted via the getEeFeatures() seam by the EE composition root, NOT imported here (CE stays EE-free).
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -129,7 +129,7 @@ declare module 'fastify' {
   }
   interface FastifyContextConfig {
     // Marks a route as guest-accessible and the capability a guest token must assert to use it (FGA
-    // re-checks the share_link's real authority regardless). Links carry view/edit ONLY (#100/ADR-029
+    // re-checks the share_link's real authority regardless). Links carry view/edit ONLY (#100/ADR-029:
     // commenting is a resource setting, not a link capability) — a comment route is `guest: 'view'`
     // (a view token is admitted; the FGA `comment` check then gates on space#comment_open).
     guest?: 'view' | 'edit'
@@ -142,9 +142,9 @@ declare module 'fastify' {
 
 // Build the Fastify app WITHOUT listening, so tests can drive it via app.inject
 // (the auth hook — cookie sessions, cross-tenant rejection — is HTTP-level and
-// must be exercised through real requests). The entry (index.ts) calls listen.
+// must be exercised through real requests). The entry (index.ts) calls listen().
 export async function buildApp(): Promise<FastifyInstance> {
-  // #537 B8: a ceiling that names no valid method would 404 every login and lock everyone out
+  // #537 B8: a ceiling that names no valid method would 404 every login and lock everyone out —
   // that is a configuration error, surfaced at boot, never as mysterious 404s.
   assertLoginCeilingValid()
 
@@ -197,7 +197,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // #758 / ADR-183 §3: give the authorization layer's observation port somewhere to report.
   //
   // `filterAuthorized` denies any id the store could not answer for, on purpose — a read surface with
-  // fewer rows beats a 500. The cost is that the thinned list is INDISTINGUISHABLE from an honest one
+  // fewer rows beats a 500. The cost is that the thinned list is INDISTINGUISHABLE from an honest one:
   // no error, no status, no gap, just a tree with fewer pages in it, exactly like a tree with fewer
   // pages in it. Without this line, "a page disappeared from my sidebar" is unanswerable — there is no
   // record anywhere that the store ever failed to speak.
@@ -307,7 +307,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   })
 
   // #637 / ADR-216 §1-2: the outermost hook opens an EMPTY authorization scope for the rest of the
-  // request. Callback style on purpose — `done` is called from inside the storage context, which is
+  // request. Callback style on purpose — `done()` is called from inside the storage context, which is
   // how every later hook and the handler inherit it; an async hook's context does not propagate out of
   // it (measured on a real server, which is why `enterWith` was rejected — it does not work here, as
   // opposed to working leakily). Authentication fills the container in once it knows what the
@@ -356,13 +356,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     let claimedTenant = ''
     const resolvePrincipal = async (): Promise<void> => {
       // ── Browser member path: host-only session cookie (BFF) ──────────────────
-      // Three cases, kept distinct
-      // (i) no cookie → fall through to Bearer (normal).
-      // (ii) cookie, tenant match → member session.
-      // (iii) cookie, tenant MISMATCH → EXPLICIT reject + clear cookie. A
-      // cross-tenant cookie is an anomaly (host-only should prevent it), so
-      // we do NOT silently fall through — we reject so it is distinguishable
-      // from a plain "no credentials" 401, and we clear the offending cookie.
+      // Three cases, kept distinct:
+      //   (i)   no cookie            → fall through to Bearer (normal).
+      //   (ii)  cookie, tenant match → member session.
+      //   (iii) cookie, tenant MISMATCH → EXPLICIT reject + clear cookie. A
+      //         cross-tenant cookie is an anomaly (host-only should prevent it), so
+      //         we do NOT silently fall through — we reject so it is distinguishable
+      //         from a plain "no credentials" 401, and we clear the offending cookie.
       const sid = req.cookies?.[SESSION_COOKIE]
       if (sid) {
         const sess = await readSession(valkey, sid)
@@ -528,7 +528,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           await reply.code(403).send({ error: 'read-only API key' })
           return
         }
-        // apiAccess entitlement gate on the REQUEST path (#126 / ADR-063 2 / ADR-064 / ADR-072).
+        // apiAccess entitlement gate on the REQUEST path (#126 / ADR-063 addendum 2 / ADR-064 / ADR-072).
         // createApiKey is gated at issue time, but a plan downgrade that strips apiAccess must ALSO
         // stop already-issued keys — otherwise a downgraded tenant's old key keeps working (monotonic-
         // deny violation). Resolved PER REQUEST so the downgrade takes effect immediately; the key row
@@ -642,7 +642,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(mcpPlugin) // #311 / ADR-131 slice 5: the /mcp JSON-RPC endpoint (Bearer-auth'd read tools)
   await app.register(enrollmentPlugin)
   // #178: SAML (tenant-saml + saml-auth) is an EE feature — physically moved to packages/ee-server and
-  // mounted via the getEeFeatures seam by the EE composition root. A CE build registers no SAML here.
+  // mounted via the getEeFeatures() seam by the EE composition root. A CE build registers no SAML here.
   await app.register(aiPlugin)
   await app.register(spacesPlugin)
   await app.register(pagesPlugin)
@@ -654,7 +654,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(publicPlugin)
   await app.register(publicShellPlugin) // #409 / ADR-154: /pub HTML shell (no-op unless PUBLIC_SHELL_INDEX is set)
   await app.register(publicRobotsPlugin) // #408 / ADR-154 §2: robots.txt + sitemap.xml (parent-switch gated)
-  // #688: the audit-log viewer mounts via getEeFeatures below — the ledger is EE now (ADR-155/#401 viewer included).
+  // #688: the audit-log viewer mounts via getEeFeatures() below — the ledger is EE now (ADR-155/#401 viewer included).
   await app.register(rolesPlugin) // #420 / ADR-164: custom-role definitions (tenant-admin + customRoles entitlement)
   await app.register(apiKeysPlugin)
   await app.register(shareLinksPlugin)
@@ -665,7 +665,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // composition root (packages/ee-server/src/main.ts — the entrypoint that may import @wikistead-ee/*)
   // calls registerEeFeatures before buildApp, and its mount receives the app as the host to register EE
   // plugins on. SCIM now mounts HERE (moved into @wikistead-ee/server this slice); SAML / EE-audit /
-  // operator-ledger migrate onto this seam in later #178 slices. getEeFeatures is null on a CE build.
+  // operator-ledger migrate onto this seam in later #178 slices. getEeFeatures() is null on a CE build.
   await getEeFeatures()?.(app)
 
   app.get('/', async (req) => ({ service: 'kb-server', tenant: req.tenant?.slug }))

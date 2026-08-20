@@ -2,7 +2,7 @@
 //
 // The count was the only shrinkable child in a row of six buttons, so once the buttons claimed the width
 // flex squeezed it. English breaks at spaces and merely looks cramped; Japanese has no word boundaries, so
-// "183 " became a vertical column of glyphs and the bar grew tall. That is why the bug reached the
+// the Japanese "183 selected" copy became a vertical column of glyphs and the bar grew tall. That is why the bug reached the
 // user through a screenshot rather than through a test — the default locale hides it.
 //
 // The fix is structural (every child shrink-0, the row wraps), so the pin is structural too: a lexical

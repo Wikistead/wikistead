@@ -64,7 +64,7 @@ let renderBase: number | null = null;
 
 // #450 slice 5b: an opaque, stable token for "this macro instance", derived from its anchor by the HOST.
 // Containers key display-only state (the open tab) by it; it is a Map key and nothing else, so a macro
-// keeps its state across re-renders without ever holding a document position (ruling R1). Both sides
+// keeps its state across re-renders without ever holding a document position (ruling R1). Both sides —
 // macro and host — go through this one function, so their keys cannot drift apart.
 const instanceKeys = new Map<number, string>();
 export function instanceKeyFor(base: number | null | undefined): string | undefined {
@@ -364,7 +364,7 @@ export function withListHost<T>(host: ListHostSeam | null, fn: () => T): T {
   try { return fn(); } finally { activeListHost = prev; }
 }
 
-// #450 slice 5c: THE host-list slot. Both surfaces used to resolve `:::tagged` / `:::children` by NAME
+// #450 slice 5c: THE host-list slot. Both surfaces used to resolve `:::tagged` / `:::children` by NAME —
 // the CM widget in decorations.ts and the nested sink here — each with its own copy of the lifecycle and
 // its own answer for "what does an empty result look like". Two resolution paths for one question is the
 // drift ADR-177 exists to remove, and it is why the nested copy once sat at its placeholder forever.
@@ -487,14 +487,14 @@ class DomSink implements MdSink {
       case "link": {
         const href = data?.href ?? null;
         const el = document.createElement(href ? "a" : "span");
-        // #223 comment 895 (B): tag the anchor cm-lp-link so it gets the body-link colour/underline
+        // #223 comment 895 (root cause B): tag the anchor cm-lp-link so it gets the body-link colour/underline
         // inside .cm-editor surfaces (Tailwind preflight had reset a bare <a> to color:inherit).
         if (href) { (el as HTMLAnchorElement).href = href; (el as HTMLAnchorElement).rel = "noopener noreferrer nofollow"; el.className = "cm-lp-link"; }
         this.push(el);
         return;
       }
       case "attachmentRef": {
-        // #273 / ADR-120 → ADR-160 §2: the visitor intercepted `wks-attachment:` BEFORE any anchor role
+        // #273 / ADR-120 → ADR-160 §2: the visitor intercepted `wks-attachment:` BEFORE any anchor role —
         // this chip is the static-surface affordance (the id resolves only inside the authenticated app).
         const chip = document.createElement("span");
         chip.className = "wks-attachment-ref";
@@ -528,14 +528,14 @@ class DomSink implements MdSink {
 
   // #598 (parity gate, identity slice): name the element that was just produced, so a surface can be
   // asked whether it has THIS element rather than whether it has something. One place, right after the
-  // dispatch, because every branch of `directive` below ends by appending its result to the same parent
+  // dispatch, because every branch of `directive` below ends by appending its result to the same parent —
   // stamping inside each of them is how two of them would come to disagree.
   //
   // #598(review, measured): the name used to come from the SOURCE — what the opening line
   // parsed as. That named the generic fallback box too, so a macro that is registered and NOT WIRED UP on
   // this surface came out wearing its own name and the gate's identity dimension passed. A dummy macro
   // registered with no working renderer was measured to stay green, which is the exact defect this ticket
-  // exists to catch ( — the usual shape is an element that draws while
+  // exists to catch (the reported pattern: every newly added element ships a bug — the usual shape is an element that draws while
   // editing and is not connected to the export).
   //
   // So the name now says WHO DREW IT. `drewMacro` is set by the two dispatch hooks below on the paths
@@ -805,10 +805,10 @@ class DomSink implements MdSink {
         return;
       }
     }
-    // #170 / ADR-049 (Y): a CONTAINER directive → the shared PANEL (single source of truth with the CM
+    // #170 / ADR-049 (option Y): a CONTAINER directive → the shared PANEL (single source of truth with the CM
     // widget), not a generic box.
     //
-    // #450 (measured): this used to require `macro.icon`, so the two containers that carry no icon
+    // #450 (measured): this used to require `macro.icon`, so the two containers that carry no icon —
     // `:::todo` and `:::details` — fell all the way through to the generic `cm-lp-md-directive` box on
     // every surface this sink draws (the read surface and the print portal). `:::todo` lost its accent
     // box and list-checks icon, and `:::details` lost its DISCLOSURE and its `[label]` outright — the
@@ -849,7 +849,7 @@ class DomSink implements MdSink {
 }
 
 // #381 / ADR-163: THE way to put rendered markdown into a container. Adds `.wks-prose` (the single
-// raw-tag prose stylesheet, styles/prose.css) to the container and appends the sanitized fragment
+// raw-tag prose stylesheet, styles/prose.css) to the container and appends the sanitized fragment —
 // appending through this helper is what makes a future surface unable to forget the prose class (the
 // #335/#351 parity-gap class). NEVER call this on `.cm-content` / non-markdown DOM (ADR-163 invariant).
 export function appendMarkdownInto(el: HTMLElement, src: string, baseOffset?: number, opts?: { staticMacros?: boolean }): void {
@@ -903,7 +903,7 @@ export function renderInlineMarkdownToDom(text: string): DocumentFragment {
   return frag;
 }
 
-// #170 / ADR-049 (Y): the shared callout PANEL renderer (single source of truth). A flex 2-column
+// #170 / ADR-049 (option Y): the shared callout PANEL renderer (single source of truth). A flex 2-column
 // panel — a large icon column (mask-image, currentColor-tinted, vertically centred against the whole
 // panel via CSS align-items) + a main column (variant-coloured title + nested Markdown body). Used by
 // the CM live widget (decorations.ts, top-level callouts) AND the nested dispatch above (callouts
@@ -926,7 +926,7 @@ export function renderDisclosure(label: string, body: string, baseOffset?: numbe
 
 export function renderCalloutPanel(containerClass: string, icon: string, label: string, body: string, baseOffset?: number): HTMLElement {
   const wrap = document.createElement("div");
-  // #453the callout takes the selection ring, so it wears the shared atom-box marker too
+  // #453the callout takes the selection ring, so it wears the shared atom-box marker too —
   // otherwise a peer's presence box measures the full content width around it (740px vs its real 692px).
   wrap.className = `${containerClass} cm-lp-callout-panel cm-lp-atom-box`;
   wrap.setAttribute("data-testid", "callout-panel");

@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit, sleep } from "../helpers";
 
-// #631 (user request, 2026-08-05): " wysiwyg vim
+// #631 (user request, 2026-08-05): when selecting with the mouse, show the palette immediately —
+// like a wysiwyg or non-vim selection does — while a selection made with v keeps today's behaviour.
 //
 // Dragging a selection with the mouse puts vim in visual mode, so the product could not tell the two
 // apart and answered a reader holding a mouse with "press \". The axis it was missing is not the mode,
@@ -56,7 +57,7 @@ test("#631: a mouse-made selection gets the toolbar; a v-made one keeps the hint
   // ── last input wins: touching a key after the drag hands it back to the keyboard ───────────────
   //
   // The bubble going away is the assertion, not the hint arriving. Whether the hint then shows depends
-  // on vim still holding a visual selection after that key, which is vim's business and varies by key
+  // on vim still holding a visual selection after that key, which is vim's business and varies by key —
   // measuring it here would be measuring the editor's motion rules, not this ticket's rule. What #631
   // decides is that a selection stops counting as pointer-made once a key is touched, and that is
   // exactly what the bubble's absence reports.

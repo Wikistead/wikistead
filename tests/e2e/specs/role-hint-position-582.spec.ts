@@ -4,15 +4,16 @@ import { openDemo, sleep } from "../helpers";
 // #582 (review rejection, 2026-08-04): the "what this role can do" panel does not keep one rule. Two
 // symptoms were reported and both are geometry, so both are measured here rather than described.
 //
-// - hovering an option low on the screen sent the panel UP, away from the option: the placement
-// clamped to a FIXED `innerHeight - 120`, so past that line the panel stopped tracking the row.
-// - at a short viewport the panel did not appear at all.
+//   - hovering an option low on the screen sent the panel UP, away from the option: the placement
+//     clamped to a FIXED `innerHeight - 120`, so past that line the panel stopped tracking the row.
+//   - at a short viewport the panel did not appear at all.
 //
 // Assertions relate the panel to the option it belongs to (not to constants): a placement that is
 // wrong at every size would satisfy a hard-coded number.
 // The space grant picker: the longest role list in the product (every built-in noun plus the tenant's
 // custom roles), which is what makes the bottom of the list reachable — the tenant row picker offers
-// two tiers and never gets near the clamp, which is exactly why the reject said .
+// two tiers and never gets near the clamp, which is exactly why the reject said only the tenant
+// picker behaved as expected.
 async function openRolePicker(page: Page): Promise<void> {
   await page.goto("/spaces/demo_space/settings/members");
   await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
@@ -70,7 +71,7 @@ test("#582 ①: the tenant tiers raise a panel of their own", async ({ page }) =
   await page.goto("/admin/members");
   await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 10_000 });
   await sleep(400);
-  // A PERSON's row. `.first` used to take whichever row came first, and since #579 folded groups into
+  // A PERSON's row. `.first()` used to take whichever row came first, and since #579 folded groups into
   // this table that can be a group — a different principal with a different vocabulary. The subject here
   // is the TENANT TIERS on a member.
   await page.locator("tr:not([data-testid='member-row-group'])")
@@ -110,7 +111,7 @@ test("#582 ①: the tenant tiers raise a panel of their own", async ({ page }) =
 // #582 (session B, closing the gap C flagged): the rewind above was honestly reported as "a future
 // defence we could not demonstrate" — with the row already on `admin`, reading BEFORE advancing finds the
 // target immediately and the rewind changes nothing. So aim at a tier that sits ABOVE the selected one.
-// `member` is the first option and the row's value is `admin`, so it is reachable ONLY by rewinding
+// `member` is the first option and the row's value is `admin`, so it is reachable ONLY by rewinding:
 // read-first cannot see it (the highlight starts on admin) and walking down never comes back to it.
 test("#582 ①: an option ABOVE the selected one is reachable too (the rewind is load-bearing)", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });

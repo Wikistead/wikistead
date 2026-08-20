@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 
-// #589 (review rejection): " ON/OFF SAML
+// #589 (review rejection): the screen has no consistency — password is an on/off toggle, SAML has only a
+// save button, and OIDC's "add a connection" button opens a card whose padding differs from the
+// SAML/password sections.
 //
 // One row per sign-in method was the whole point of the ticket, and three hand-written row shapes is
 // what it actually shipped: the password row switched from the row, the OIDC row switched from a stack
@@ -48,9 +50,10 @@ test("#589: every sign-in method is the same kind of row", async ({ page }) => {
   expect([...new Set(withForm.map((r) => r.pad))], `the add row disagrees on padding: ${JSON.stringify(withForm)}`).toHaveLength(1);
 });
 
-// #605 (review rejection, 2026-08-05): "
-// ..." — and, once the stance was on, three separate strings said the row was
-// off ("SSO " / / ) while the sentence they crowded out
+// #605 (review rejection, 2026-08-05): the password row's description was cut off from the very start,
+// truncated after its first word — and, once the stance was on, three separate strings said the row was
+// off (the "disabled because SSO is required" / "selected" / "not active right now" badges) while the
+// sentence they crowded out
 // was the one explaining what the method IS.
 //
 // Walked, not named (the rule this file already follows): every row is asked whether any text inside it
@@ -135,8 +138,9 @@ test("#605: a blocked row says why once, and still fits its sentence", async ({ 
     expect(shot.clipped, "the description survives the badges").toEqual([]);
     expect(shot.reasons, "one reason, not two — the selection badge carries the other fact").toBe(1);
 
-    // #605 (review rejection, 2026-08-05): "SSO /
-    // ON ". Both facts were the same 11px grey, and the
+    // #605 (review rejection, 2026-08-05): the "disabled because SSO is required" and "selected" badges were
+    // far too quiet — nothing said "unusable right now", and a reader would only register that the
+    // toggle is ON. Both facts were the same 11px grey, and the
     // switch wore the accent — so the row read as ON with a footnote. MEASURED, not eyeballed: the colour
     // of a thing is a computed style, and "it looks clearer now" is not a check.
     const look = await page.evaluate(() => {

@@ -53,7 +53,8 @@ describe("#600: every macro names itself when it cannot show its content", () =>
   });
 
   it("every macro's name is a localised one, not its raw id", () => {
-    // #600 bounce (measured on the device): a Japanese UI said "table". `table` has no slash entry
+    // #600 bounce (measured on the device): the Japanese empty-macro placeholder rendered the raw id
+    // `table` in its name slot. `table` has no slash entry —
     // a table is inserted from the toolbar — so `macroDisplayName` fell through to the directive id and
     // the sentence this ticket unified was English in one slot out of five. The palette already had the
     // word; nothing new had to be written. Pinned as "every macro resolves through a key that exists in
@@ -86,7 +87,7 @@ describe("#600: every macro names itself when it cannot show its content", () =>
     for (const file of readdirSync(here).filter((f) => f.endsWith(".ts") && !f.includes(".test."))) {
       if (file === "placeholder.ts") continue;
       const src = readFileSync(resolve(here, file), "utf8");
-      // a placeholder key read directly, rather than through macroPlaceholder
+      // a placeholder key read directly, rather than through macroPlaceholder()
       if (/i18n\.t\(\s*["'`]macro\.(placeholder|state|next)/.test(src)) offenders.push(`${file}: reads a placeholder key directly`);
       // an English sentence assigned straight to textContent (the hardcoded-copy shape)
       for (const m of src.matchAll(/textContent\s*=\s*"([^"]{12,})"/g)) {
@@ -123,7 +124,7 @@ describe("#600: every macro names itself when it cannot show its content", () =>
     add(en.macro as unknown as Record<string, unknown>, "macro.");
     const missing: string[] = [];
     for (const f of files) {
-      // Every quoted `macro.*` in CODE, not just the ones passed straight to t: the caller that got
+      // Every quoted `macro.*` in CODE, not just the ones passed straight to t(): the caller that got
       // left behind chose its key with a ternary, which a `t("…")` pattern walks right past. Comments
       // are stripped so a note ABOUT a retired key is not mistaken for a call.
       const code = readFileSync(f, "utf8")

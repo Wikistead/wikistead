@@ -36,8 +36,8 @@ export function MembersPage() {
   const { t } = useTranslation();
   const { token, sub: me, tenantId } = useSession();
   const [members, setMembers] = useState<Member[]>([]);
-  // #578 bounce ④, then the 2026-08-04 ruling ("
-  // "): the tenant screen runs the WHOLE shared add-flow — user or group, then who, then which
+  // #578 bounce ④, then the 2026-08-04 ruling (why not let the form switch between user and group
+  // like it used to?): the tenant screen runs the WHOLE shared add-flow — user or group, then who, then which
   // role — the same shape the space screen has. The groups-only round pinned "a person's tenant role is
   // given on their row" (#579); the ruling overrides that pin for the ADD FORM: the row keeps working,
   // and the form is a second door to the same converged state (1 principal = 1 role), not a second state.

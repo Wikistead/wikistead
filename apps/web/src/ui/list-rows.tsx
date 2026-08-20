@@ -1,10 +1,11 @@
 import type React from "react";
 
-// #639 (user ruling, 2026-08-06): " UI …
+// #639 (user ruling, 2026-08-06): list UIs are inconsistent — some are rows of boxes, some separate
+// rows with rules. Unify on the latter, and share the UI as common components wherever possible.
 //
-// Four of the five boxed lists carried the SAME class string, character for character
+// Four of the five boxed lists carried the SAME class string, character for character:
 //
-// flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2
+//   flex items-center gap-2.5 rounded-md border border-border px-2.5 py-2
 //
 // which is the ruling's own argument for a component — the shared idiom already existed, it was just
 // being spread by copy rather than by import. The fifth spelled it differently (`p-2 text-sm`) and
@@ -34,8 +35,8 @@ export function ListRow({ children, className = "", ...rest }: React.ComponentPr
 
 /** The box a list of `ListRow`s lives in: it grows with its content and scrolls only once it is tall.
  *
- * `max-h`, never a fixed `h-` — the ruling is explicit ("
- * "), and a fixed height gives a two-item list a mostly-empty frame. The height
+ *  `max-h`, never a fixed `h-` — the ruling is explicit (no box drawn by default; the list only becomes
+ *  scrollable once it grows), and a fixed height gives a two-item list a mostly-empty frame. The height
  *  is the one five other lists already use rather than a sixth measurement invented here. */
 export const LIST_SCROLL_MAX = "max-h-[26rem]";
 

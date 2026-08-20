@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit, sleep } from "../helpers";
 
-// #305 (B-): a TRULY inline image (text shares its line) renders as a line-height thumbnail so a large
+// #305 (option B): a TRULY inline image (text shares its line) renders as a line-height thumbnail so a large
 // natural size no longer occupies the whole line width and pushes the surrounding text onto new visual rows
 // ("a newline got inserted"). A STANDALONE image (its own line) stays a full-size atom (#255, unchanged). The
 // bytes don't load for a made-up attachment id, but the display CONVENTION (the max-height cap applied to the

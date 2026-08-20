@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { enterEdit, createScratchPage, sleep } from "../helpers";
 
-// #453: the LOCAL atom-selection ring and the REMOTE macro-presence box must share one geometry
+// #453: the LOCAL atom-selection ring and the REMOTE macro-presence box must share one geometry —
 // same rect (the macro wrap, not the full content width), same radius/outline — differing only in
 // colour + avatar. Two real clients on one `:::children` atom; the observer holds BOTH frames at
 // once (its own atom-sel + the peer's presence box) so the comparison is same-viewport.
@@ -130,7 +130,7 @@ for (const kind of KINDS) {
 // #453the DYNAMIC case — both peers enter the SAME macro. In Live mode reveal is per-client, so
 // once the OBSERVER (B) also enters the callout it opens the macro's editUI island LOCALLY and the
 // rendered atom-box leaves B's view. The peer's (A) frame must NOT then balloon to the full content
-// width (the reported — a 740px outline around a full-width island). With no
+// width (the report: the peer's frame flies outside — a 740px outline around a full-width island). With no
 // compact widget to ring, the peer shows as an avatar CHIP anchored at the macro's start (no outline),
 // staying visible without flying outside.
 test("#453a peer shows as a chip (no ballooning outline) when the observer also entered the macro", async ({ browser }) => {

@@ -92,7 +92,7 @@ test("#223: vim ON — Ctrl+V linkifies in INSERT mode; NORMAL leaves it to vim 
   expect(await rawText(page)).toContain("[https://example.com/v](https://example.com/v)");
 });
 
-// #223 comment 946 (1): the custom right-click context menu bypasses the browser paste event, so its
+// #223 comment 946 (root cause 1): the custom right-click context menu bypasses the browser paste event, so its
 // "paste" must route through the same linkify helper. Right-click → ctx-item-paste → URL linkifies.
 test("#223: the context-menu paste linkifies a URL", async ({ browser }) => {
   const page = await ctx(browser);

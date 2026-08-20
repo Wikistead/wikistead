@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
 // #650 (review rejection twice, 2026-08-18): the re-authentication form said nothing about itself.
 //
+// At the "verify it is you" step before creation, the user could not tell what to type into the fields
+// — only a code example and a password placeholder showed, so what they were was unclear — and, at the
+// same screen a second time, still could not tell what goes where or what to press.
 //
 // Three defects, one screen: the fields carried a `placeholder` and an `aria-label` and no visible label
-// (so the screen showed a box saying "123456" and a box saying , which reads as two boxes to
+// (so the screen showed a box saying "123456" and a box saying only "password", which reads as two boxes to
 // fill when any ONE of three proofs is enough); the prompt never said "any one"; and the two buttons used
 // two different verbs for the same act, so pressing the passkey one might have meant "unlock the form"
 // rather than "make the codes".
@@ -72,7 +75,8 @@ describe("#650 ①: the form says what it wants", () => {
   });
 
   it("both entrances say CREATE — three ways in, one destination", () => {
-    // The reported confusion: beside. Different verbs on the
+    // The reported confusion: a "create recovery codes" button beside a "confirm with your passkey"
+    // one. Different verbs on the
     // same act make the second button look like a step rather than the whole thing.
     for (const l of ["en", "ja"]) {
       const verb = l === "ja" ? "作成" : "Create";
@@ -85,7 +89,9 @@ describe("#650 ①: the form says what it wants", () => {
   });
 });
 
-// — two of the three did, and the password box did not.
+// #650(user, at the screen): asked whether deleting the authenticator app also removes its
+// code field, and whether removing the password entrance removes the password box — two of the three
+// did, and the password box did not.
 //
 // The ruling replaced the whole shape: pick a method, then prove. So the assertions are about WHICH
 // controls exist for a given member, which is the thing that was wrong, rather than about the sentence

@@ -174,7 +174,7 @@ describe('#364(plan A): the STORED home title is the space name — no language 
   })
 
   it('creation stores the SPACE NAME as the title — no suffix, regardless of the tenant default language', async () => {
-    //(plan A): the "Home / " wording is a viewer-side i18n label, never a stored value
+    //(plan A): the "Home" wording (and its Japanese counterpart) is a viewer-side i18n label, never a stored value
     // search / pins keep one language-stable title and the display follows the VIEWER language instead.
     await admin`INSERT INTO tenant_settings (tenant_id, default_lang) VALUES (${TENANT}, 'ja')
       ON CONFLICT (tenant_id) DO UPDATE SET default_lang = 'ja'`
@@ -265,7 +265,8 @@ describe('#364①: guest space info home pointer (view-gated, existence-hiding)'
 })
 
 // #364the ruling-A BACKFILL. Homes created beforestored the LABEL SUFFIX in
-// `pages.title` ("<Space>"); the title band then re-applied the label and rendered it twice.
+// `pages.title` (the space name plus the localized home suffix); the title band then re-applied the
+// label and rendered it twice.
 // Migration 077 restates the invariant on existing rows (home title IS the space name) and enqueues
 // the search reindex through the trusted outbox path. Pinned by REPLAYING the migration against a
 // deliberately drifted row — the exact fixture the previous pass never had (it only ever checked a

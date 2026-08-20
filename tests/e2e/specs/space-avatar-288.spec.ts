@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep, API } from "../helpers";
 import { assertConstantChipRatio } from "../avatar-ratio";
-// #288: a space avatar's initials chip must be a STABLE, single-glyph square — a digit-led CJK name like
-// "246 " used to render "2" (mixed half+full-width) which stretched the chip and, without
+// #288: a space avatar's initials chip must be a STABLE, single-glyph square — a digit-led CJK name
+// (the fixture below) used to render a mixed half+full-width digit+CJK pair which stretched the chip and, without
 // whitespace-nowrap, wrapped to two stacked rows that overflow-hidden then clipped. Real Chromium (a layout
 // concern happy-dom can't measure).
 test("#288: a digit+CJK space name renders a single-glyph, square, non-wrapping chip", async ({ page }) => {
@@ -25,7 +25,7 @@ test("#288: a digit+CJK space name renders a single-glyph, square, non-wrapping 
   await expect(option).toBeVisible();
   const chip = option.locator('[role=img]').first();
 
-  // the monogram is ONE glyph (the meaningful CJK), not the mixed-width "2".
+  // the monogram is ONE glyph (the first meaningful CJK character), not the mixed-width digit+CJK pair.
   expect((await chip.innerText()).trim()).toBe("被");
   // the chip is (near-)square — the initials never stretched it wide.
   const box = (await chip.boundingBox())!;

@@ -9,6 +9,7 @@ import { CopyButton } from "./CopyButton";
 // said "copy this now" and had a copy button; the invite link and the password-setup link were sentences
 // of `<code>` with neither — seventy characters to select by hand, no word about the one chance, and in
 // the password case rendered under the invite FORM while the button that produced it was a row menu two
+// screens up (the place it appears is very hard to find).
 //
 // So the box moves here and all three take it. The ruling is explicit that a third spelling must not
 // appear, and the two that were bare are the ones that strand people: an API key can be re-issued from

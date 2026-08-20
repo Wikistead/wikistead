@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
 
+// #591 (user, on the device): why does an "add role" label sit next to the badge, as if it ADDED a
+// role? A single ordinary dropdown would do — and the member roles in space settings should be
+// changeable from a dropdown too.
 //
 // The rule the four surfaces now share: an EXCLUSIVE role (a tenant tier, a built-in space role) is a
 // dropdown that is always visible and changes in place; ADDITIVE custom roles stay chips with their own

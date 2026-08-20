@@ -56,7 +56,7 @@ export function FactorStep(
   const { t } = useTranslation();
   const [code, setCode] = useState("");
   // #650 / ADR-226: the recovery code box is BEHIND a link rather than beside the factor box. Somebody
-  // who can reach their authenticator should use it — spending a code deletes every factor they hold
+  // who can reach their authenticator should use it — spending a code deletes every factor they hold —
   // so the way in that costs nothing stays the obvious one, and this is the door you go looking for.
   const [recovering, setRecovering] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState("");
@@ -101,7 +101,7 @@ export function FactorStep(
   };
 
   /**
-    * #686 B: a code the server REFUSED is not "that did not work".
+    * #686 family B: a code the server REFUSED is not "that did not work".
     *
     * The account panel has said "that code did not match" since #657; the two surfaces on the sign-in
     * side collapsed every non-5xx failure into one generic sentence. It is the same shape #673 and #681
@@ -370,7 +370,7 @@ export function FactorStep(
         <>
           {/* Nothing to present, so nothing to type yet. This is §6's circle: without this button the
               policy is unrecoverable for anybody who had not enrolled before it was turned on. */}
-          {/* #686 A ①: the sentence names the kinds this workspace ACCEPTS. It used to say "an
+          {/* #686 family A ①: the sentence names the kinds this workspace ACCEPTS. It used to say "an
               authenticator app" unconditionally — beside a button offering only a passkey when the
               stance was narrowed, so the one instruction a locked-out reader had was impossible to
               follow. `kinds` was already here, used by `accepts()` on the very next line. */}

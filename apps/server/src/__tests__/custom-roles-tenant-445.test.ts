@@ -1,18 +1,18 @@
-// #445 / ADR-171: tenant-scope roles + the space_creator gate. The ADR's mandatory anti-tests
-// (1) wildcard present → a plain member creates; absent → member 403 (static reason), admin still
-// creates (`or admin`), personal auto-create exempt — covered in policy-knobs-399.test.ts
-// (the superseded knob's rewritten pins). Here: the ROLE path on top of the absent wildcard.
-// (2) a custom TENANT role bundling createSpaces assigned to a member lets them create with the
-// wildcard absent; unassign revokes; a second covering role keeps the leaf (reference
-// count carries to tenant scope).
-// (3) scope vocabulary split: a resource role cannot bundle createSpaces; a tenant role cannot
-// bundle edit; a tenant role cannot be assigned at space scope (and vice versa).
-// (4) guest boundary: share_link / user:* principals are 400 at tenant scope too.
-// (5) entitlement: defining/assigning custom TENANT roles requires customRoles; the DEFAULT-role
-// preset toggle works WITHOUT the entitlement (CE), flips the wildcard, and reports admin
-// locked-on.
-// (6) CROSS-TENANT WRITE BIND: a tenant-role assignment naming ANOTHER tenant's id is a uniform
-// 404 and NO tuple lands on that tenant (FGA writes pierce RLS — the route bind is the guard).
+// #445 / ADR-171: tenant-scope roles + the space_creator gate. The ADR's mandatory anti-tests:
+//  (1) wildcard present → a plain member creates; absent → member 403 (static reason), admin still
+//      creates (`or admin`), personal auto-create exempt  — covered in policy-knobs-399.test.ts
+//      (the superseded knob's rewritten pins). Here: the ROLE path on top of the absent wildcard.
+//  (2) a custom TENANT role bundling createSpaces assigned to a member lets them create with the
+//      wildcard absent; unassign revokes; a second covering role keeps the leaf (reference
+//      count carries to tenant scope).
+//  (3) scope vocabulary split: a resource role cannot bundle createSpaces; a tenant role cannot
+//      bundle edit; a tenant role cannot be assigned at space scope (and vice versa).
+//  (4) guest boundary: share_link / user:* principals are 400 at tenant scope too.
+//  (5) entitlement: defining/assigning custom TENANT roles requires customRoles; the DEFAULT-role
+//      preset toggle works WITHOUT the entitlement (CE), flips the wildcard, and reports admin
+//      locked-on.
+//  (6) CROSS-TENANT WRITE BIND: a tenant-role assignment naming ANOTHER tenant's id is a uniform
+//      404 and NO tuple lands on that tenant (FGA writes pierce RLS — the route bind is the guard).
 // Real Postgres + OpenFGA + the app via inject. Runs on a DEDICATED throwaway tenant (slug crt445,
 // dev-user as its admin so the dev bearer works through host resolution): the wildcard-absent
 // windows these tests need would 403 PARALLEL test files' createSpace calls if they touched the
@@ -113,9 +113,9 @@ afterAll(async () => {
 describe('tenant-scope custom roles (#445 / ADR-171)', () => {
   // RE-AIMED by #579 (2026-08-03): the second half used to assign TWO tenant roles to one principal and
   // check that unassigning the first kept the leaf alive through the second — the reference count doing
-  // its job. That scenario is no longer reachable: the user's ruling , recorded
+  // its job. That scenario is no longer reachable: the user's ruling (roles cannot stack, recorded
   // twice) made the tenant assign path CONVERGE, so the second assignment sweeps the first. The property
-  // worth keeping is what a person actually experiences at the swap, and it is stronger than the old one
+  // worth keeping is what a person actually experiences at the swap, and it is stronger than the old one:
   // the capability must not blink off while the roles change hands. That is what the rewritten half
   // measures. The ref-count machinery itself is still exercised where stacking remains possible — the
   // space composite's two arms (edit + comment) in builtin-grant-equivalence-514.
@@ -136,7 +136,7 @@ describe('tenant-scope custom roles (#445 / ADR-171)', () => {
       await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: s.id, userId: MEMBER })
 
       // #579: a second role REPLACES the first (one principal, one tenant role). What matters to the
-      // person holding it is that the capability both roles carry never blinks off during the swap
+      // person holding it is that the capability both roles carry never blinks off during the swap —
       // the new role is written before the old one is swept, so there is no instant with nothing.
       const r2 = await makeRole('crt445-creator2', ['createSpaces'], 'tenant')
       const role2 = (r2.json() as { id: string }).id
@@ -203,8 +203,8 @@ describe('tenant-scope custom roles (#445 / ADR-171)', () => {
     const role = (await makeRole('crt445-bind', ['createSpaces'], 'tenant')).json() as { id: string }
     const evil = await assign(role.id, 'tenant', 'tenant_dev', `user:${MEMBER}`)
     expect(evil.statusCode, 'cross-tenant assignment refused (uniform 404)').toBe(404)
-    // Assert no DIRECT tuple landed on tenant B (the write-bind proof). A check can't pin this
-    // the target tenant grants its own members space creation, and MEMBER may well be one of them
+    // Assert no DIRECT tuple landed on tenant B (the write-bind proof). A check() can't pin this:
+    // the target tenant grants its own members space creation, and MEMBER may well be one of them —
     // the tuple READ (exact-match filter) is the authority on what this route wrote.
     const { tuples } = await fgaClient.read({ user: `user:${MEMBER}`, object: 'tenant:tenant_dev' })
     expect((tuples ?? []).length, 'no leaked tuple on the other tenant').toBe(0)

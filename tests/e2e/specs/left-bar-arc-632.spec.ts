@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit, sleep } from "../helpers";
 import { decodePng, type Bitmap } from "../paint";
 
-// #632 (review rejection)
+// #632 (review rejection): the right and left corners look rounded by different amounts.
 //
 // The strip was given `border-radius: inherit` so it would follow the box's corners. It cannot. A radius
 // is clamped to half the side it sits on, so a 3px-wide strip asking for 4px is drawn with 1.5px — while

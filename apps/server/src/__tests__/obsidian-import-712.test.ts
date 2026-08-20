@@ -1,8 +1,8 @@
 // #712 / ADR-227 §4 + §8 — the Obsidian dialect, measured on a vault rather than on the adapter's
 // own vocabulary.
 //
-// The fixture is a REAL vault layout (the ticket's acceptance: " round-trip
-// ——"): notes at the root and in folders, an attachment folder, a
+// The fixture is a REAL vault layout (the ticket's acceptance: round-trip a real export — do not go
+// green on synthetic fixtures alone): notes at the root and in folders, an attachment folder, a
 // `.canvas` file, a Dataview block, `%%comments%%`, and the four wikilink shapes a vault actually
 // contains. It is zipped in memory and pushed through the SHIPPED path — `importArchive`, the same
 // function the route calls — so what is measured is the import a user gets, not a unit's idea of it.

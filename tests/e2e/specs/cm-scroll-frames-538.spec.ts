@@ -8,7 +8,7 @@ import { openScratch, enterEdit, sleep } from "../helpers";
 // memoizes the prop-less Sidebar; this pin holds the frame clock on the reviewer's exact fixture shape
 // (heading sections + a 45×12 table) and measurement (wheel the cm-scroller, count long frames).
 //
-// Thresholds per the reject: >100ms frames must be ZERO; >50ms ones — bounded at 3 for the
+// Thresholds per the reject: >100ms frames must be ZERO; >50ms ones "negligible" — bounded at 3 for the
 // shared box's load spikes (measured post-fix: 0 and 0 on dev, three runs).
 const SECTIONS = 20;
 const table = () => {

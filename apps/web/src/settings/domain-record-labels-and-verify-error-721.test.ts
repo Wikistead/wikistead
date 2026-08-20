@@ -1,11 +1,11 @@
 // #721the two things the review found on the custom-domain surface, measured on the
 // rendered markup and on the mapping itself.
 //
-// ② " 2 " — the challenge was three fields and
+// ② the user could not tell what the two rows under a domain were — the challenge was three fields and
 // only the type named itself, so the person retyping it into a DNS panel (which takes host and
 // value in DIFFERENT boxes, which is whysplit the copy buttons) could not tell which was
 // which. Every field carries a persistent, visible name.
-// ③ — the server answers `not_verified`, the most
+// ③ pressing Verify only produced the generic "something went wrong" — the server answers `not_verified`, the most
 // ordinary outcome on this screen, and the client threw it into the generic failure. A person
 // then suspects the product instead of their DNS.
 //
@@ -82,7 +82,7 @@ describe("#721②: each DNS field says what it is", () => {
 
   it("keeps the names on screen rather than hiding them from sight", async () => {
     const html = await render();
-    //asked for a . The copy buttons already carry aria-labels and tooltips,
+    //asked for a visible label that never disappears. The copy buttons already carry aria-labels and tooltips,
     // and those are precisely what did not help while reading, so a screen-reader-only or
     // hover-only name would be the same defect wearing a different hat.
     for (const testId of ["domain-challenge-type-label", "domain-challenge-host-label", "domain-challenge-value-label"]) {

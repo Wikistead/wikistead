@@ -1,6 +1,6 @@
 // #226 / ADR-106: the default personal space. ensurePersonalSpace makes an OWNER-ONLY space on first
 // sign-in — invisible to ordinary members (existence-hidden, name not leaked), visible to the tenant admin
-// (decision 1(a): = hidden from ordinary members, NOT from an admin), idempotent, and its
+// (decision 1(a): "visible to the owner only" = hidden from ordinary members, NOT from an admin), idempotent, and its
 // pages are viewable only by owner + admin (so search never surfaces them to a non-admin member). Sharing
 // rides the existing manage-gated grant path, which rejects public / guest principals (public⊥ preserved).
 // Real Postgres + OpenFGA.

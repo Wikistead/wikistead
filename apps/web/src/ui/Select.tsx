@@ -15,7 +15,7 @@ export interface SelectOption {
    * onto — never printed under every label (nine two-line options made the reader read the whole
    * vocabulary before choosing one).
    *
-   * #582 (review rejection, 2026-08-04): "…". It was a reveal INSIDE the
+   * #582 (review rejection, 2026-08-04): the ask was a separate floating window. It was a reveal INSIDE the
    * row, which reserved width for text nobody had asked for and read as part of the option. It is a
    * FLOATING panel now, raised beside the list — the same panel the row badges already show, handed in
    * by the caller so this component stays about selects.
@@ -34,9 +34,9 @@ export interface SelectOption {
 // pattern; keeps the stable trigger testid plus per-option testids
 // (`${testId}-${value}`) so tests click the trigger then the option.
 //
-// #536Radix treats `value=` as "no value" — the item renders (and checks) in the OPEN list,
+// #536Radix treats `value=""` as "no value" — the item renders (and checks) in the OPEN list,
 // but the CLOSED trigger shows nothing, so an empty-valued option's label ("member", the built-in fallback)
-// vanished exactly where it matters. Callers keep the natural `` vocabulary; the wrapper maps it to a
+// vanished exactly where it matters. Callers keep the natural `""` vocabulary; the wrapper maps it to a
 // sentinel both ways so Radix always has a real value to resolve a label for.
 const EMPTY_SENTINEL = "__wks-select-empty__";
 
@@ -70,7 +70,7 @@ export function Select({
   // portalled out of it lands in the part of the document that layer has hidden — but a plain positioned
   // element above that layer does, which is what this is.
   // Only WHICH option is described lives in React state. Its POSITION is written straight onto the
-  // portalled element below, because re-rendering on every move re-renders the option list with it
+  // portalled element below, because re-rendering on every move re-renders the option list with it —
   // and Radix resets the keyboard highlight when its items re-render, so a held-down ArrowDown walked
   // one step and snapped back (measured: a 40-step walk never reached its target). Tracking the row was
   // the point of the #582 fix; doing it through state made the list unusable from the keyboard.
@@ -178,7 +178,7 @@ export function Select({
     // The list is found in the document rather than through a ref: it is portalled, it mounts after the
     // open, and only one select's list is open at a time. A ref would also have to survive the wrapper
     // chain between here and Radix's own content element, which is one more thing to be wrong.
-    // The panel's own render mutates the body, so the watcher must not react to that or it feeds itself
+    // The panel's own render mutates the body, so the watcher must not react to that or it feeds itself:
     // attributes only, and a key that says "nothing changed" so an identical read does not re-render.
     let key = "";
     const read = () => {

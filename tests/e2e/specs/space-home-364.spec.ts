@@ -7,7 +7,7 @@ import { E2E } from "../fixtures";
 // - /spaces/:id renders the EMPTY STATE (space-name heading + the write button for edit-capable)
 // until a home exists; the button creates-and-points atomically and lands in the editor.
 // - the home renders AT the space root with the full page machinery; the sidebar tree EXCLUDES it
-// (double-display rule) while the fixed 🏠 Home entry navigates back to it.
+// (double-display rule) while the fixed sidebar Home entry navigates back to it.
 // - /p/<home-id> canonicalises to /spaces/:id (one location).
 // - switching spaces lands on the space root (§6a).
 
@@ -93,8 +93,8 @@ test("#364 §6a: switching spaces lands on the space root", async ({ browser }) 
 });
 
 // #364the SUFFIX-DOUBLING regression. A home created before ruling A stored the
-// label suffix in `pages.title`; the title band re-applied the label and rendered "<Space>
-// ". The band now interpolates the SPACE NAME (the single source the sidebar 🏠 already
+// label suffix in `pages.title`; the title band re-applied the label and rendered the home suffix
+// twice ("<Space> Home Home"). The band now interpolates the SPACE NAME (the single source the sidebar Home entry already
 // used), so no stored title can double it — pinned here with the exact fixture the earlier pass
 // lacked: a home whose STORED title carries the suffix (only a freshly created home was ever
 // checked before, and that one is correct by construction).
@@ -130,12 +130,12 @@ test("#364a suffix-baked stored title never doubles in the H1 (band reads space.
   const txt = (await titleEl.innerText()).trim();
   expect(txt.match(/Home/g)?.length ?? 0, "one suffix occurrence").toBe(1);
 
-  // the sidebar 🏠 (which always read space.name) and the band now agree — one source, one string
+  // the sidebar Home entry (which always read space.name) and the band now agree — one source, one string
   const homeEntry = (await page.getByTestId("sidebar-home").innerText()).trim();
   expect(homeEntry, "sidebar 🏠 and the title band render the same label").toBe(txt);
 });
 
-//every surface names a space's home page after its space — the sidebar's 🏠 row, the member
+//every surface names a space's home page after its space — the sidebar's Home row, the member
 // band, the empty state — except the GUEST band, which printed the raw title. Migration 077 normalised
 // a home page's title to the bare space name, so once it landed the same page read "acme" through a
 // share link and "acme Home" one pane away. Driven through a real share link on both capabilities: the

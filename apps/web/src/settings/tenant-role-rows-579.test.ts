@@ -174,9 +174,9 @@ describe("#579: one control, showing the role the member has", () => {
   });
 });
 
-// #582 (user ruling): "member admin ". A built-in role name is a
+// #582 (user ruling): do not localise the member and admin names either. A built-in role name is a
 // proper noun — the same string on every screen and in every locale. Before this, the tenant screens
-// translated these two / ) while the space screen showed viewer/editor/moderator/manager
+// translated these two into Japanese while the space screen showed viewer/editor/moderator/manager
 // in English, so one role had two names depending on where you looked. The pin mirrors the real list
 // rather than copying it, because a hand-written copy is what rotted the last three copy pins.
 describe("#582: built-in role names are proper nouns", () => {

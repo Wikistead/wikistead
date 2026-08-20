@@ -173,7 +173,8 @@ function RoleEditor({ onSave, onCancel, pending }: {
   );
 }
 
-// #586(review rejection): . Measured
+// #586(review rejection): built-in and custom role rows came out different heights, which the
+// user called unsettling to look at. Measured
 // built-in rows were 17px and custom rows 32px, because only the custom ones carry IconButtons and the
 // row had no box of its own — so nearly-double-height rows alternated down one list. The standing
 // ruling is that built-in and custom are ONE kind of thing wearing the same row (#536 / #582); a

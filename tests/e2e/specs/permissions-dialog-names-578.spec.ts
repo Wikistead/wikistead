@@ -14,7 +14,7 @@ import { openScratch, sleep, API } from "../helpers";
 // A member whose name the product cannot resolve — the case the dialog was printing as a hash. Taken
 // from the tenant rather than invented: #624's guard refuses a grant to somebody who is not here, so an
 // orphan cannot be manufactured through the API, and a REAL member with no display name is the same
-// question (the reject says so: "70 sub ").
+// question (the reject says so: it reproduces even when granting to a current member with a 70-char sub).
 //
 // The assertion is that the SUBJECT ITSELF is not on screen, not that no hex is: a sub can be a UUID,
 // and "no run of hex" would pass on one of those while the id sat there in full.

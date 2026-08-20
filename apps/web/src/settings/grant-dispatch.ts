@@ -1,4 +1,4 @@
-// #536 review 7: what the merged picker DOES when Add is clicked, as a value.
+// #536 review point 7: what the merged picker DOES when Add is clicked, as a value.
 //
 // Thegroup bug lived inside the click handler: a principal string was assembled inline, it was
 // well-formed, and nothing could test it short of driving the whole component — which this repo has no
@@ -30,7 +30,7 @@ export type GrantAction =
 export const COMPOSITE_BUILTINS: Record<string, string[]> = { edit: ["edit", "comment"] };
 
 
-// #607 (user ruling): "Dev User 2 …". The roster answers one row per
+// #607 (user ruling): "Dev User" appeared twice, which reads as a bug. The roster answers one row per
 // CAPABILITY, and the screen drew them straight through — so the space's owner appeared twice, once as
 // manager and once as viewer. "1 principal = 1 role" (#536 / #579) is the settled shape of this product;
 // a screen that shows one person wearing two is showing the thing those rulings removed.

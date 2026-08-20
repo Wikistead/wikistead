@@ -4,12 +4,12 @@ import { WEB_REAL_PORT } from "../helpers";
 // #372: "another member's uploaded avatar shows for a NEW member". The server trace (ticket)
 // proved every path is sub-scoped (storage key / /auth/me row / per-sub image URL / JIT copies no
 // avatar key) — this pins that in a REAL browser with REAL OIDC logins on the real-auth web (5181),
-// covering BOTH reported shapes
-// 1. a FRESH browser context (the ticket's ) logging in as a brand-new member
-// right after another member uploaded an avatar → initials fallback, and the other member's
-// avatar-image URL is never even requested;
-// 2. a LOGIN SWITCH in the SAME browser context (upload as A → logout → accept an invite as B)
-// the shape that would catch any session/HTTP-cache carry-over across logins.
+// covering BOTH reported shapes:
+//   1. a FRESH browser context (the ticket's "separate browser session") logging in as a brand-new member
+//      right after another member uploaded an avatar → initials fallback, and the other member's
+//      avatar-image URL is never even requested;
+//   2. a LOGIN SWITCH in the SAME browser context (upload as A → logout → accept an invite as B) —
+//      the shape that would catch any session/HTTP-cache carry-over across logins.
 // dev-user's avatar is uploaded for the test and ALWAYS removed again (avatar.spec relies on dev-user
 // having no picture — initials "DE").
 const WEB = `http://dev.localhost:${WEB_REAL_PORT}`;

@@ -1,16 +1,16 @@
 // #603 / ADR-207: a group may hold the tenant tier, and the member table says what that means.
 //
-// Three claims, pinned pure (no DOM — the components execute what these functions decide, #536)
-// 1. the via-group marker walks the ROWS: any member carrying a role-holding group gets a badge, and
-// nobody gets one without. RE-AIMED (review rejection 2026-08-05): it used to say "admin-holding",
-// because only admin produced a marker — a group conferring a CUSTOM tenant role left its members
-// holding the capability with nothing on screen saying where it came from. The subject is now every
-// role a group confers, which is what "roles are one framework" has meant everywhere else;
-// 2. the mechanism, not the name, decides what a BUILT-IN is: a CUSTOM role named "admin" on a group
-// is reported as the custom role it is, never as the tier;
-// 3. the floor's 409 reaches the reader as a REASON — both locales carry the group-aware sentence,
-// and it differs from the ordinary last-admin sentence (the user's condition: a refusal that
-// reads as a bug is one the next person removes in good faith).
+// Three claims, pinned pure (no DOM — the components execute what these functions decide, #536):
+//   1. the via-group marker walks the ROWS: any member carrying a role-holding group gets a badge, and
+//      nobody gets one without. RE-AIMED (review rejection 2026-08-05): it used to say "admin-holding",
+//      because only admin produced a marker — a group conferring a CUSTOM tenant role left its members
+//      holding the capability with nothing on screen saying where it came from. The subject is now every
+//      role a group confers, which is what "roles are one framework" has meant everywhere else;
+//   2. the mechanism, not the name, decides what a BUILT-IN is: a CUSTOM role named "admin" on a group
+//      is reported as the custom role it is, never as the tier;
+//   3. the floor's 409 reaches the reader as a REASON — both locales carry the group-aware sentence,
+//      and it differs from the ordinary last-admin sentence (the user's condition: a refusal that
+//      reads as a bug is one the next person removes in good faith).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -98,7 +98,7 @@ describe("#603: the floor's 409 carries its reason to the reader", () => {
   });
 });
 
-// Discovery-shaped, per the reject's last condition ("`adminVia` admin "): the
+// Discovery-shaped, per the reject's last condition (no admin-only name such as `adminVia`): the
 // screen must not grow a second, tier-specific path back. A name that singles out one role is how the
 // gap was built in the first place — the badge only ever looked at admin because the data it read was
 // called `adminVia` and computed by `adminGroupNames`.

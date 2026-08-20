@@ -1,7 +1,7 @@
 // #579 (user ruling, recorded twice): a principal holds ONE tenant role, and the server is what makes
 // that true.
 //
-// — the tenant screen had grown chips and an "add
+// The ruling: roles cannot stack, there is no adding a second — yet the tenant screen had grown chips and an "add
 // role" control on top of a mechanism that never promised stacking. #536 had already ruled it: one
 // principal, one role, converged BY THE SERVER and not by a UI guard. Space scope implemented it
 // (sweepOtherSpaceRoles); tenant scope did not, so two direct API calls left one member holding two

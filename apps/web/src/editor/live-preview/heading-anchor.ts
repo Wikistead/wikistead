@@ -5,7 +5,7 @@ import i18n from "../../i18n";
 import { notify } from "../../ui/toast";
 import { extractHeadings } from "../headings";
 
-// #313: a hover 🔗 on every heading LINE of a CM surface (member view/edit, guest) that copies the
+// #313: a hover link icon on every heading LINE of a CM surface (member view/edit, guest) that copies the
 // heading's anchor URL (GitHub-style slug — the SAME slugify the TOC and the public reader use, so
 // one anchor resolves on every surface). Built as a Decoration.widget at the heading line's end —
 // NOT the tooltip layer: this is per-line persistent chrome (like the fence header's copy button),

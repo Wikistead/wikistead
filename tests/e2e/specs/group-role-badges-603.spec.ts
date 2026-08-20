@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openDemo, sleep, API } from "../helpers";
 
-// #603 (review rejection 2026-08-05): "admin " — a group conferring a CUSTOM
+// #603 (review rejection 2026-08-05): so only admin gets a badge? — a group conferring a CUSTOM
 // tenant role left its members holding the capability with nothing on screen saying where it came from.
 // Only `admin` was shown.
 //

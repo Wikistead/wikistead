@@ -21,7 +21,9 @@ const capsOf = (g: GroupConferredRole, tierCaps: TierCaps): readonly string[] | 
 // #603 (user ruling, 2026-08-05): what a member's GROUPS confer, folded into one mark.
 //
 // The shape this replaces was a badge per (role, group) stacked above the row's Select. It was itself a
-// tooltip " — and it got worse with each group: 57px against 41px for every other
+// reject — the row kept growing vertically, and since a user can belong to several groups the ask was
+// to fold them into something like a tooltip, readable together — and it got worse with each group:
+// 57px against 41px for every other
 // row with ONE badge, more with two.
 //
 // So: one mark beside the control, carrying the COUNT (how many there are is readable before you point
@@ -31,7 +33,8 @@ const capsOf = (g: GroupConferredRole, tierCaps: TierCaps): readonly string[] | 
 // the pointer: `pointer-events-none` on it would kill the walk from the mark into the list and onto a
 // name. It stays open while the pointer is anywhere in that chain.
 //
-// #603 (user ruling, 2026-08-05): "1 ". Both panels place themselves
+// #603 (user ruling, 2026-08-05): neither level — the first tier included — may ever run
+// off-screen. Both panels place themselves
 // through the shared rule in `panel-placement`, which flips to whichever side has room and clamps the
 // other axis. Measured before: the list ran off the bottom at a 420px-tall window and the capability
 // panel off the right at a 1000px-wide one, because each wrote `top`/`left` from its anchor and never

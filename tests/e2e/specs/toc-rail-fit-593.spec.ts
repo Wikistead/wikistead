@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openScratch, enterEdit, sleep } from "../helpers";
 
+// #593 (user, on a Mac): the table of contents overflows the window (in the non-floating state).
 //
 // The rail placed itself against its PARENT and sized itself against the VIEWPORT, and only one of those
 // knows the sidebar is 260px wide. The difference is exactly half a sidebar, which is what was measured

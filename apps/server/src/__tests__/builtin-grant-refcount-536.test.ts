@@ -3,12 +3,12 @@
 //
 // A built-in grant used to write FGA tuples with no row behind it, while a custom-role assignment wrote a
 // row and counted references on it. The two were therefore invisible to each other. Give Bob a `view`
-// grant AND a role that bundles `view`, take ONE of them away, and the shared `viewer` leaf goes with it
+// grant AND a role that bundles `view`, take ONE of them away, and the shared `viewer` leaf goes with it:
 //
-// - revoke the grant -> the unified table deleted `viewer` outright; the role assignment was still
-// there, still listed, still saying Bob may view. He could not.
-// - unassign the role -> the refcount consulted OTHER ASSIGNMENTS only, and the grant was not one, so
-// the leaf it "owned" was deleted even though a live grant also conferred it.
+//   - revoke the grant  -> the unified table deleted `viewer` outright; the role assignment was still
+//                          there, still listed, still saying Bob may view. He could not.
+//   - unassign the role -> the refcount consulted OTHER ASSIGNMENTS only, and the grant was not one, so
+//                          the leaf it "owned" was deleted even though a live grant also conferred it.
 //
 // Both directions are pinned. This is the invariant the whole reference count exists for, and it simply
 // did not apply to half the ways access is given.
@@ -227,7 +227,7 @@ describe('#536 review: a re-granted rowless tuple is still revocable', () => {
   }, 120_000)
 
   it('a duplicate grant still writes its audit line', async () => {
-    // 2: the idempotent early-return skipped auditIfEntitled while the webhook still fired. Before
+    // Review point 2: the idempotent early-return skipped auditIfEntitled while the webhook still fired. Before
     // #536 a duplicate grant audited like any other; an audit stream that goes quiet for a subset of
     // successful writes is one nobody can reconcile against the webhook stream.
     const p = sub('audit-dup')
@@ -245,7 +245,7 @@ describe('#536 review: a re-granted rowless tuple is still revocable', () => {
   }, 120_000)
 })
 
-// #536 review 3: the page scope had the identical defect and no pin. A page grant wrote a raw tuple
+// #536 review point 3: the page scope had the identical defect and no pin. A page grant wrote a raw tuple
 // with no row while a page-scope role assignment reference-counted rows — so revoking either deleted the
 // leaf the other still conferred. Routed through the same mechanism now; these are the page-side mirrors
 // of the space pins above.

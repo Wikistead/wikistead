@@ -38,7 +38,7 @@ export interface PageControlsProps {
   editing: boolean;
   onEdit: () => void;
   onDone: () => void;
-  // #320 / ADR-126: the current page id — enables the watch (🔔) toggle in the view-mode actions. Undefined
+  // #320 / ADR-126: the current page id — enables the watch (bell) toggle in the view-mode actions. Undefined
   // (a scratch/preview surface with no real page) hides it.
   pageId?: string;
   // #362: the page's space — enables the space-scope watch item (emission scope only; server-gated).

@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 // #745(review rejection): choosing a passkey IS presenting it.
 //
-// . The chooser landed in the shape of the recovery-code screen — pick a method,
+// The owner, at the screen, found it jarring that pressing "use a passkey" still required a second
+// confirm-with-passkey button before getting in. The chooser landed in the shape of the
+// recovery-code screen — pick a method,
 // then act on it — and for a passkey the second step had nothing in it: no field to fill, no decision
 // to make, just a button that repeated the one already pressed. The click that picks the kind is the
 // user activation the ceremony needs, so the browser prompt can open on that click.

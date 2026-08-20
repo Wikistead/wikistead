@@ -6,7 +6,7 @@ import { renderInlineMarkdownToDom } from "../macros/md-render"; // #223 comment
 import { mountCellFormatToolbar } from "./cell-inline-format";
 import { linkifyPaste } from "./paste-linkify";
 
-// #223 comment 910 (C): insert an inline DOM fragment (e.g. an <a> link) at the cell's caret, replacing
+// #223 comment 910 (root cause C): insert an inline DOM fragment (e.g. an <a> link) at the cell's caret, replacing
 // the selection. Keeps text+<br> only (the fragment is built by renderInlineMarkdownToDom via createElement,
 // never innerHTML — the ADR-037 XSS boundary). Falls back to nothing if there is no cell selection.
 function insertInlineDomAtCaret(frag: DocumentFragment): void {
@@ -40,7 +40,7 @@ export function uniformResizeSize(pointer: number, blockStart: number, n: number
 // rewrites the block by handing the host a LOSSLESS :::table source; the HOST's MacroTier
 // auto-demotes it to the lowest representable level — pipes (Tier 1) or :::table HTML
 // (Tier 2) (ADR-025 step 3). Committed via host.replaceSource (one offset-invariant Y.Text
-// edit, per-op). The grid is parsed from host.getSource at mount.
+// edit, per-op). The grid is parsed from host.getSource() at mount.
 // Controlled background palette: undefined = clear; var(--accent) stays on theme; the
 // tints are safe hex (pass the style allowlist). Not a free color picker (ADR-022 #2).
 const BG_PRESETS: { id: string; value: string | undefined; title: string }[] = [
@@ -86,7 +86,7 @@ const ICON: Record<string, string> = {
   alignCenter: I('<path d="M2 4h12M5 8h6M3 12h10"/>'),
   alignRight: I('<path d="M2 4h12M7 8h7M4 12h10"/>'),
   // #256: insert/delete/no-fill were Unicode glyphs (U+229E ⊞, ✕, ⌀) that fall back to system fonts and
-  // break (tofu / mixed weight) on some environments. Replace with trusted static SVG (Lucide-family look
+  // break (tofu / mixed weight) on some environments. Replace with trusted static SVG (Lucide-family look:
   // thin round strokes at 16px, matching the merge/align icons above) so no font fallback ever occurs.
   colInsBefore: I('<rect x="9" y="2.5" width="4.5" height="11" rx="1"/><path d="M3.5 8h3.5M5.25 6.25v3.5"/>'),
   colInsAfter: I('<rect x="2.5" y="2.5" width="4.5" height="11" rx="1"/><path d="M9 8h3.5M10.75 6.25v3.5"/>'),
@@ -231,8 +231,8 @@ export const tableInlineEditor: InlineEditor = {
     // A border drag handle: tracks the pointer, previews the size, commits on release.
     // #154 (revised): a UNIFORM multi-select resize whose DRAGGED EDGE follows the pointer, like a
     // spreadsheet. The `n` affected columns/rows (previewEls = every cell of each) all take the SAME
-    // size, chosen so the block's dragged (right/bottom) edge sits exactly at the pointer
-    // size = (pointer − blockStart) / n
+    // size, chosen so the block's dragged (right/bottom) edge sits exactly at the pointer:
+    //   size = (pointer − blockStart) / n
     // The block's start edge is frozen at drag-start (columns/rows before the block are unaffected, so
     // it never moves). For a single column/row (n=1) this reduces to "that one edge follows the
     // pointer" — the previous single-resize behaviour, unchanged. previewEls == the exact cells the
@@ -292,11 +292,11 @@ export const tableInlineEditor: InlineEditor = {
 
     // Cell text editing (#86 / #154): double-click a cell to type into it. The cell becomes
     // contenteditable IN PLACE. Focus is handed over via host.beginTextEdit — a plain focus in the
-    // MODAL path (no CM), but the CM focus-DELEGATION guard in the in-editor path (#153/ADR-054
+    // MODAL path (no CM), but the CM focus-DELEGATION guard in the in-editor path (#153/ADR-054:
     // root contenteditable=false + ignoreEvent means CM won't reclaim the nested island's focus), so
     // the same editor works BOTH in the modal and inline in CodeMirror. Enter commits; Shift+Enter
     // inserts an in-cell <br>; paste is forced to text/plain; blur commits. Every commit rewrites the
-    // block via apply (one Y.Text edit) and remounts from the canonical source.
+    // block via apply() (one Y.Text edit) and remounts from the canonical source.
     let editHandle: { end(): void } | null = null;
     // #216 / ADR-101 (comment 787): `overwrite` = the Excel "select a cell then just type" path — the
     // cell's content is REPLACED with the typed text and edit starts (vs double-click / F2 which edits the
@@ -348,7 +348,7 @@ export const tableInlineEditor: InlineEditor = {
         if (target) target.text = text;
         apply(next); // → host.replaceSource → tier demote → remount
       };
-      // #89 comment 886 (②): moving focus INTO the cell-link URL popover must NOT commit/exit the cell edit
+      // #89 comment 886 (②): moving focus INTO the cell-link URL popover must NOT commit/exit the cell edit —
       // the popover edits THIS cell's selection and returns focus on confirm/cancel. Any other blur commits.
       const onBlur = (e: FocusEvent) => {
         const to = e.relatedTarget as HTMLElement | null;
@@ -371,7 +371,7 @@ export const tableInlineEditor: InlineEditor = {
         // shows it clickable). Ctrl+Shift+V (plainNext) bypasses. safeHref is the only scheme judgment.
         const md = plainPaste ? null : linkifyPaste({ text: plain, html: ev.clipboardData?.getData("text/html") ?? "", selectedText: window.getSelection()?.toString() ?? "" });
         plainPaste = false;
-        // #223 comment 910 (C): a linkify result is a Markdown `[text](url)`. The cell is a WYSIWYG
+        // #223 comment 910 (root cause C): a linkify result is a Markdown `[text](url)`. The cell is a WYSIWYG
         // surface, so inserting it as LITERAL text showed the raw `[text](url)` until commit. Render it to a
         // real <a> (renderInlineMarkdownToDom builds an <a class=cm-lp-link> via createElement — never
         // innerHTML) and insert THAT, so the link shows immediately; cellElToText round-trips it back to

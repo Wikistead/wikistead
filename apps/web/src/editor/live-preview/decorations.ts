@@ -259,7 +259,7 @@ const hrLine = Decoration.line({ attributes: { class: "cm-lp-hr" } });
 // plus a muted language label. Display-only (contenteditable=false, ignoreEvent), block widget on the
 // side:-1 of the opening fence line. eq keys on lang+title so it's reused while they're stable.
 // #198 / ADR-094 (comment 724): the attributed code-fence chrome on the opening line — a FILENAME TAB
-// (B) at the top-left that reads like an editor tab connected to the code card, plus a COPY button at
+// (option B) at the top-left that reads like an editor tab connected to the code card, plus a COPY button at
 // the top-right shown only in a VIEW mode (Live/Reading), not Source. The row spans the opening line
 // (justify-between). copy reads the fence's code body (not the info line/header) → clipboard, with a
 // transient ✓ feedback. XSS-safe (textContent only).
@@ -946,7 +946,7 @@ export const listSource = Facet.define<ListSource | null, ListSource | null>({
   combine: (v) => (v.length ? v[v.length - 1]! : null),
 });
 
-// The optional `[label]` on a `:::tagged[]` / `:::children[]` open line (renders only alongside a
+// The optional `[label]` on a `:::tagged[recipes]` / `:::children[subpages]` open line (renders only alongside a
 // non-empty list). `name` selects which directive's label to read.
 function directiveLabel(openLine: string, name: string): string | null {
   const m = new RegExp(`^\\s*:::+\\s*${name}\\s*\\[([^\\]]*)\\]`).exec(openLine);
@@ -1263,7 +1263,7 @@ function openAttachmentLightbox(view: EditorView, id: string, name: string): voi
 }
 
 // #273 / ADR-120: INLINE file-attachment chip — [name](wks-attachment:id) with other text on
-// the line. Renders 📎 name (+ size once resolved) with a small download button. On the EDIT
+// the line. Renders a paperclip icon + name (+ size once resolved) with a small download button. On the EDIT
 // surface the chip body passes clicks through (caret lands → the line reveals raw, like the
 // inline image); only the ⤓ button is interactive, with the #265 mousedown guard. On a
 // READ-ONLY surface (c 07-16 return, item 2) the body click runs the type's PRIMARY action
@@ -2526,7 +2526,7 @@ function findNestedSlot(root: HTMLElement, anchor: number): HTMLElement | null {
 // #278 rev4 (②③): the island IS a live-preview surface — the same livePreview field + theme as the
 // host surface, mounted on the island's OWN state. The slot renders in place while only the caret's
 // surroundings reveal syntax (the main-editor experience), instead of the earlier source-pane + separate
-// preview stack (two renditions of the same content = the bounce). This changes DISPLAY
+// preview stack (two renditions of the same content = the reported preview-proliferation bounce). This changes DISPLAY
 // only: the island still holds its own plain document and still commits on blur exactly as above.
 // #524: `flush` synchronously commits this island's current body into its parent view. An OUTER island
 // invokes its OPEN nested islands' flush BEFORE reading its own getValue (innermost-first), so the
@@ -2826,7 +2826,7 @@ class MacroWidget extends WidgetType {
   // top-level columns/tabs render tags its nested macros via pendingBaseOffset). `nestedSel`/`nestedEdit`
   // are the display-only selection / edit-active state intersecting THIS widget (null otherwise), driving
   // the nested ring + edit button + editUI island. Stable string keys in eq so an unrelated selection
-  // move never churns this widget (the project design notes "widget eq ").
+  // move never churns this widget (the project design notes: a widget's eq compares stable keys).
   constructor(readonly macro: RenderableMacro, readonly body: string, readonly foldable: boolean, readonly name: string, readonly selected: boolean, readonly theme: MacroTheme, readonly from = 0, readonly to = 0, readonly bodyFrom = 0, readonly nestedSel: NestedSelection | null = null, readonly nestedEdit: NestedSelection | null = null, readonly align: FenceAlign = "center", readonly wysiwyg = false, readonly slotEdit: SlotEdit | null = null) {
     super();
   }
@@ -3531,7 +3531,7 @@ class DetailsSummaryWidget extends WidgetType {
   ignoreEvent() { return false; }
 }
 
-// #170 / ADR-049 (Y): a typed callout renders as a single-container PANEL widget (enter-to-edit,
+// #170 / ADR-049 (option Y): a typed callout renders as a single-container PANEL widget (enter-to-edit,
 // like columns/tabs/details) INSTEAD of the old always-inline per-line box. Caret-out → this panel
 // (icon large + vertically centred, variant title, nested Markdown body — the shared renderCalloutPanel
 // so the CM widget and nested renderer never drift); caret-in → the raw `:::` source (reveal-on-cursor,
@@ -4224,7 +4224,7 @@ const RENDERERS: BlockRenderer[] = [
           ctx.addAtomic(Decoration.replace({ widget: new EditableEditUIWidget(first.from, lastLine.to, blockSrc, macro.editUI, (b) => b, ctx.macroTheme, macro.tier), block: true }), first.from, lastLine.to);
           return false; // the inline editor owns the block
         }
-        // #170 / ADR-049 (Y): a typed callout (containerClass + icon) renders as a single-container
+        // #170 / ADR-049 (option Y): a typed callout (containerClass + icon) renders as a single-container
         // PANEL widget when the caret is OUTSIDE — icon large + vertically centred, variant title,
         // nested Markdown body (renderCalloutPanel, the shared renderer). Caret-in reveals the raw
         // `:::` source (per-line boxes below) for editing = enter-to-edit, consistent with
@@ -4434,14 +4434,14 @@ const RENDERERS: BlockRenderer[] = [
     // #223: a URL node is hidden ONLY when it is a link's DESTINATION (parent is Link → the `(url)` part,
     // which the [text] label replaces). A STANDALONE URL — a bare autolink, or the URL used AS a link's
     // visible text (e.g. `[https://x](https://x)`) — must NOT be hidden, or it renders BLANK (the reported
-    // on paste). A bare autolink additionally gets the clickable link style so a pasted / typed URL
+    // blank-on-paste). A bare autolink additionally gets the clickable link style so a pasted / typed URL
     // shows as a link. safeHref gates the click target (unsafe → plain, non-clickable text).
     match: (n) => n === "URL",
     enter: (node, ctx) => {
       // The link DESTINATION `(url)` — a URL inside a Link whose `(` immediately precedes it — is hidden (the
       // [text] label stands in for it). A URL used AS the link's visible text (`[https://x](…)`, preceded by
       // `[`) is inside the Link too but must SHOW — the Link's own cm-lp-link mark already makes it clickable;
-      // hiding it left the label BLANK (#223 ). A bare autolink (parent not a Link) shows + gets the
+      // hiding it left the label BLANK (#223's blank-label report). A bare autolink (parent not a Link) shows + gets the
       // clickable style.
       const inLink = node.node.parent?.name === "Link";
       const isDestination = inLink && ctx.state.doc.sliceString(Math.max(0, node.from - 1), node.from) === "(";
@@ -5250,7 +5250,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   // highlighted lines. All display-only; token colours (#158-C2) sit ABOVE the highlight background.
   // #198 bounce: inline-flex (not block flex) so the header sits ON the opening fence line it replaces
   // no residual blank line above the code body. Title + lang read as a compact header chip.
-  // #198 (comment 724, B): the opening-line row spans the code width — a filename TAB at the left, a
+  // #198 (comment 724, option B): the opening-line row spans the code width — a filename TAB at the left, a
   // copy button at the right. The tab reads like an editor tab: rounded top corners only, flush on top of
   // the code card below (no bottom edge between them). inline-flex + width so it sits on the (otherwise
   // hidden) opening fence line without a residual blank line.
@@ -5818,7 +5818,7 @@ const livePreviewBaseTheme = EditorView.baseTheme({
     // is semantic; accent-driven info/note lost their meaning). Every type overrides below.
     // #632 (user ruling): the bar is a STRIP, not a border. A border follows the box's corner
     // radius, and the todo container rounds its first and last lines (callout-icons.css) — so the bar
-    // curved inward at both ends, which is the the ruling names. The frame keeps its radius;
+    // curved inward at both ends, which is the "boomerang" the ruling names. The frame keeps its radius;
     // the strip is a rectangle that ignores it. `--cb-color` is what every type already overrides, so
     // the per-type rules below keep working by setting that variable rather than a border colour.
     "--cb-bar": "var(--callout-note, #6e7781)",

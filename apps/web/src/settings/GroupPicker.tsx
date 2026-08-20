@@ -1,12 +1,12 @@
 // #578 / ADR-201 slice 6, then the bounce: naming a group, once, in one control.
 //
-// Both surfaces that confer a role on an IdP group — the space Members tab and the tenant Roles tab
+// Both surfaces that confer a role on an IdP group — the space Members tab and the tenant Roles tab —
 // need the same control, and the ruling on OQ4 gave it two jobs: pick a group the directory has
 // already produced, or name one nobody carries yet (the one thing the retired mapping form could do
 // that a picker could not).
 //
-// The first cut stacked a Select on top of an Input, which the bounce rejected: " UI UI
-// UI ". So this is ONE input with completion — the same
+// The first cut stacked a Select on top of an Input, which the bounce rejected: do not stack a
+// selection UI above an input UI — give the input completion instead. So this is ONE input with completion — the same
 // shape `MemberSearchInput` gives the person picker right beside it, so both halves of "who gets this"
 // read the same way. Typing filters the known names; picking one fills the field; a name that matches
 // nothing is still a valid answer and says what will happen to it.

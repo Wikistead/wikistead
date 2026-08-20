@@ -30,23 +30,24 @@ async function makePublic(pageId: string): Promise<void> {
 // #598 / ADR-191: the parity gate. Every element, every surface, one run — and it goes red when a
 // surface loses something instead of a person finding it five reviews later.
 //
-// ". Five #85 rejects and three #207 rejects were all the same shape — an element that draws
+// The ruling behind it: every new element ships a new bug; no more one-off fixes — build the mechanism
+// that cannot break FIRST. Five #85 rejects and three #207 rejects were all the same shape — an element that draws
 // on one surface and not on another — and each was fixed one at a time because nothing compared them.
 //
 // DISCOVERY, not a list. The elements come from the macro REGISTRY source: every `kind: "fence"` with a
 // `lang`, every `kind: "directive"` with a `name`. Registering a macro therefore adds a checked element
 // with no edit here — which is the #544 lesson (an enumerated pin waves the N+1th case through).
 //
-// WHAT THIS SLICE MEASURES (and what it does not, said plainly)
-// 1. the element survives — its raw marker (``` / :::) never reaches the saved file, and no "…"
-// placeholder stands where content should be;
-// 2. nothing is invisible on paper — under `print` media the saved document hides no block;
-// 3. a diagram is a picture — mermaid / plantuml / excalidraw arrive as <svg> or <img>, not source;
-// 4. the file is self-contained — opening it raises no failed resource load (the ERR_FILE_NOT_FOUND
-// class, which is how the fonts were found to be absent).
-// NOT YET: computed-style equality (colour, line-height, margins, font family) across the surfaces.
-// That is the next slice and it is deliberately absent rather than half-done — this one has to be
-// green and honest first.
+// WHAT THIS SLICE MEASURES (and what it does not, said plainly):
+//   1. the element survives — its raw marker (``` / :::) never reaches the saved file, and no "…"
+//      placeholder stands where content should be;
+//   2. nothing is invisible on paper — under `print` media the saved document hides no block;
+//   3. a diagram is a picture — mermaid / plantuml / excalidraw arrive as <svg> or <img>, not source;
+//   4. the file is self-contained — opening it raises no failed resource load (the ERR_FILE_NOT_FOUND
+//      class, which is how the fonts were found to be absent).
+//   NOT YET: computed-style equality (colour, line-height, margins, font family) across the surfaces.
+//   That is the next slice and it is deliberately absent rather than half-done — this one has to be
+//   green and honest first.
 // KNOWN RED, with the ticket that owns each one. The gate lands with today's defects recorded rather
 // than hidden: the assertion is EQUALITY, so a new failure fails the gate AND a fixed one fails it too,
 // with a message telling you to delete the line. Nothing gets grandfathered by accident, and the list
@@ -56,7 +57,7 @@ const KNOWN_RED = {
   // gate demanded its removal from this list the moment the placeholder started naming itself. That is
   // the list working: it shrinks, and it says so.
   placeholders: [] as string[],
-  // #85 ③ / ADR-194 addendum (ruling pending): the copied CSS carries @font-face rules whose url is
+  // #85 ③ / ADR-194 addendum (ruling pending): the copied CSS carries @font-face rules whose url() is
   // root-absolute, so opening the file asks the filesystem root for fonts that are not there.
   failedRequests: [] as RegExp[],
   // #598registered macros that ended up in the GENERIC BOX — present, but nothing rendered them.
@@ -83,7 +84,7 @@ const KNOWN_RED = {
   // #598 public slice: elements the SERVER-rendered public page does not carry under their own name.
   missingPublicly: [] as string[],
   // #598 (review, 2026-08-04): elements whose STRUCTURE differs between surfaces — present,
-  // complete, correctly named, and a different KIND of thing. The reject that opened this dimension
+  // complete, correctly named, and a different KIND of thing. The reject that opened this dimension:
   // :::table drew a bordered grid on screen and borderless plain text everywhere else, because its
   // decoration lived in the CodeMirror theme (.cm-editor scope). No other dimension could see it: the
   // box has area (flatOnPaper), the text is right (typography), the name is right (identity).
@@ -309,20 +310,20 @@ test("#598: every registered element survives the export, the file, and the page
   // fourth block" with "the fourth block".
   //
   // THE RULE, written down before the properties were chosen, because a computed-style comparison with no
-  // rule is a noise generator
+  // rule is a noise generator:
   //
-  // COMPARED — what the DOCUMENT says: the typeface, the size, the line height, the weight and slant.
-  // These are the author's text. If they differ between the app and the saved file, the reader is
-  // holding a different document.
+  //   COMPARED — what the DOCUMENT says: the typeface, the size, the line height, the weight and slant.
+  //   These are the author's text. If they differ between the app and the saved file, the reader is
+  //   holding a different document.
   //
-  // NOT COMPARED — what the SURFACE says: margins, padding, widths, backgrounds. A screen with editor
-  // chrome and a printed page legitimately lay text out differently, and #207 (print margins) is a
-  // ticket about exactly that being a separate decision. Comparing them here would fail forever and
-  // teach everyone to ignore this gate.
+  //   NOT COMPARED — what the SURFACE says: margins, padding, widths, backgrounds. A screen with editor
+  //   chrome and a printed page legitimately lay text out differently, and #207 (print margins) is a
+  //   ticket about exactly that being a separate decision. Comparing them here would fail forever and
+  //   teach everyone to ignore this gate.
   //
-  // Colour is deliberately absent for now: the app follows the viewer's theme and the saved file bakes
-  // one, so equality is the wrong assertion and "legible against its own background" is the right one
-  // a different measurement, and its own slice.
+  //   Colour is deliberately absent for now: the app follows the viewer's theme and the saved file bakes
+  //   one, so equality is the wrong assertion and "legible against its own background" is the right one —
+  //   a different measurement, and its own slice.
   const TYPOGRAPHY = ["fontFamily", "fontSize", "lineHeight", "fontWeight", "fontStyle"] as const;
   const typographyOf = (p: Page) => p.evaluate((props: readonly string[]) =>
     Object.fromEntries([...document.querySelectorAll("[data-wks-el]")].map((el) => {
@@ -357,7 +358,7 @@ test("#598: every registered element survives the export, the file, and the page
   //
   // The rule stays NARROW on purpose, like the typography rule above it: no equality on widths or
   // margins — the assertion is only that a structural signal is not PRESENT on one surface and ABSENT
-  // on the other. One signal, computed the same way for every named element (no per-element table)
+  // on the other. One signal, computed the same way for every named element (no per-element table):
   // does anything inside the element draw an internal border?
   const structureOf = (p: Page, scope: string) => p.evaluate((sel: string) => {
     const out: Record<string, boolean> = {};
@@ -380,7 +381,7 @@ test("#598: every registered element survives the export, the file, and the page
   // the comparison was the file against a copy of itself and the table's missing grid stayed invisible.
   const exportStructure = await structureOf(opened, "main.wks-export-doc [data-wks-el]");
   const appStructure = await structureOf(page, ".cm-editor [data-wks-el]");
-  // #207the PORTAL is measured against the editor too — "1 " is exactly what a
+  // #207the PORTAL is measured against the editor too — "fix one surface, go green" is exactly what a
   // file-only comparison would allow (a CSS rule reaching the file but not the portal, or vice versa).
   const portalStructure = await structureOf(page, "[data-print-root] [data-wks-el]");
   const structureShared = Object.keys(exportStructure).filter((name) => name in appStructure);
@@ -536,7 +537,7 @@ test("#598: every registered element survives the export, the file, and the page
       if (ownText.length < 3) continue;
       // checkVisibility, not display/visibility/rect: a CLOSED <details>' body is hidden by
       // content-visibility on an internal slot, so it reports display:block AND a full-width rect while
-      // painting nothing (measured: 1280x24 and invisible). checkVisibility is the browser's own
+      // painting nothing (measured: 1280x24 and invisible). checkVisibility() is the browser's own
       // answer to "is this rendered", and it covers all three hiding mechanisms at once.
       const r = el.getBoundingClientRect();
       const hidden = !(el as Element & { checkVisibility(): boolean }).checkVisibility() || (r.width < 1 && r.height < 1);
@@ -634,7 +635,7 @@ test("#598: every registered element survives the export, the file, and the page
   // ---- 4. the file is self-contained ----
   const unexpectedFailures = failed.filter((f) => !KNOWN_RED.failedRequests.some((re) => re.test(f)));
   expect(unexpectedFailures, "the opened file asked for something it did not carry").toEqual([]);
-  // The "…and it must still be failing" counterpart that lived here is gone with the entry it guarded
+  // The "…and it must still be failing" counterpart that lived here is gone with the entry it guarded:
   // #85's A2 ruling landed, the code face travels inside the file and the other @font-face rules are
   // removed on the way out, so the opened document asks the filesystem for nothing. That mechanism did
   // its job — it refused to let the fix land quietly, and the line above now carries the whole rule.

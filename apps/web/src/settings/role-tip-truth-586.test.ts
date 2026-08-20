@@ -85,7 +85,7 @@ describe("#586a surface that offers a role says what the role does", () => {
   it("a role option is a NAME, and what it confers is revealed — found by walking, not by a list", () => {
     // REVERSED by the 2026-08-03 ruling. The previous shape demanded a `hint:` on every role option, and
     // the implementation obliged by printing the capabilities under all nine labels: the reader had to
-    // read the whole vocabulary to pick one name. — so the
+    // read the whole vocabulary to pick one name. Show only the role name, reveal on hover — so the
     // option carries the name, and `RoleTip` carries the meaning.
     //
     // WIDENED after a miss: the walk used to key on `capNoun(`, so a picker offering ONLY custom roles
@@ -105,8 +105,8 @@ describe("#586a surface that offers a role says what the role does", () => {
         const after = src.slice(m.index!, m.index! + 300);
         const where = `${f.slice(web.length + 1)}: ${after.replace(/\s+/g, " ").slice(0, 90)}`;
         // RE-AIMED by #582 (review rejection, 2026-08-04). For one round the reveal was drawn INSIDE the
-        // option, and the ruling rejected that too: "…" — a floating
-        // panel, the one the row badges already raise. So both idioms now hand the Select a PANEL
+        // option, and the ruling rejected that too: it asked for a separate window-like popup — a floating
+        // panel, the one the row badges already raise. So both idioms now hand the Select a PANEL:
         // through `withRoleTips`, or as an inline `hint: <RoleCaps …>`. What must not come back is a
         // wrapper that renders capability text into the row.
         if (/wrap:/.test(after)) { offenders.push(`${where} — draws the capabilities inside the option`); continue; }
@@ -121,7 +121,8 @@ describe("#586a surface that offers a role says what the role does", () => {
   it("#579 (2026-08-04): EVERY option the tenant vocabulary offers can be asked what it confers", () => {
     // The lexical walk above recognises a role option by its label shape (`capNoun(…)` or `x.name`), and
     // a TIER's label is neither — it is the bare tier string. So the tiers slipped through it and shipped
-    // silent: hovering `bbb` explained itself, hovering `admin` said nothing. "
+    // silent: hovering `bbb` explained itself, hovering `admin` said nothing. The ruling had asked for
+    // ALL of them — built-ins and custom roles alike.
     //
     // Run the real builder instead of reading the file: given what the SCREEN has (the tenant's live
     // tier defaults — #582 ① takes `member` from those rather than from a constant, because that
@@ -179,7 +180,7 @@ describe("#586a surface that offers a role says what the role does", () => {
 });
 
 describe("#586 review ①(bounce 3): the roles list ticks what the store confers", () => {
-  // The screen that EXISTS to say what a role can do was showing `manager` with Moderate unticked
+  // The screen that EXISTS to say what a role can do was showing `manager` with Moderate unticked —
   // the exact error ADR-203 §4 named when this ticket was opened, still on screen three rounds later.
   // Its source was the server's declared bundle (`BUILT_IN_ROLES`), which omits `manage`, so the UI's
   // closure had no starting point to reach `moderate` from.
@@ -204,9 +205,9 @@ describe("#586 review ①(bounce 3): the roles list ticks what the store confers
   });
 
   it("the list renders the MEASURED answer, not the server's declared bundle", () => {
-    // RE-AIMED by #586②: the read-only grid left the list ("
-    // "), so what carries the measured answer now is the name's hover window. The built-in rows hand
-    // RoleTip the measured sources — the noun for a space built-in, the measured tier table for admin
+    // RE-AIMED by #586②: the read-only grid left the list (show only the role name, reveal on
+    // hover), so what carries the measured answer now is the name's hover window. The built-in rows hand
+    // RoleTip the measured sources — the noun for a space built-in, the measured tier table for admin —
     // and never the server's declared bundle.
     const builtinRow = tab.slice(tab.indexOf("roles.data?.builtIn"), tab.indexOf("roles.data?.builtIn") + 900);
     expect(builtinRow, "a space built-in explains itself through the measured closure").toMatch(/RoleTip[\s\S]{0,120}builtinCapability=\{nounCapability\(r\.name\)\}/);

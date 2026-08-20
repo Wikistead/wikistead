@@ -213,7 +213,7 @@ export const MORE_PREFIX = "more:";
  * the unloaded sentinel when it is not — which is what makes every row expandable without asking the
  * server anything (①(c)). Placeholders render as unnamed rows whose children are their visible pages;
  * they are DATA ALREADY IN HAND (§4.2), so expanding one issues no request — and they are built from
- * the same node shape as everything else, which is ruling ②'s .
+ * the same node shape as everything else, which is ruling ②'s "exactly the same shape".
  */
 export function buildLazyNodes(args: {
   spaceId: string;
@@ -241,7 +241,7 @@ export function buildLazyNodes(args: {
   // #623①: the sentinel — and with it the chevron — exists ONLY for a row the server says has
   // a child the reader can see (`hasChildren`, folded into the branch's own batchCheck). The previous
   // ruling drew one on every row and the rejection called it what it was: a chevron on a childless
-  // page is a lie the reader pays for with a click. An invisible-only child reads as ABSENT here
+  // page is a lie the reader pays for with a click. An invisible-only child reads as ABSENT here —
   // nothing says "something you cannot see is here".
   const childrenOf = (p: Page): PageTreeNode[] => {
     const branch = byParent.get(p.id);

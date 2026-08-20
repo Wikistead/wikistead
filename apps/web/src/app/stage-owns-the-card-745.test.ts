@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // #745(review rejection): the card kept describing the stage the reader had left.
 //
-// sat directly above the second-factor buttons on
+// The "sign in with your email address and password" instruction sat directly above the second-factor buttons on
 // /login/recovery — an instruction already carried out, over controls asking for something else. The
 // card's title belonged to the SCREEN, and the screen has no idea the reader moved inside it.
 //

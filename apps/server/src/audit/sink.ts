@@ -6,7 +6,7 @@ import { currentAuthzScope } from '@wikistead/authz'
 // transparency projection) is organisational governance and lives in @wikistead-ee/server; the EE
 // composition root registers it here. A CE build registers nothing, so every audited write path
 // below stays a no-op — the same open-core line SCIM and SAML sit behind, applied to the ledger
-// (owner ruling 2026-08-12, #688: " = CE = EE").
+// (owner ruling 2026-08-12, #688: personal safety = CE, organisational governance = EE).
 //
 // ⚠️ The 21 call sites throughout CE keep calling `auditIfEntitled` unchanged. What moved is the
 // implementation, not the contract: the call still runs inside the operation's transaction, still
