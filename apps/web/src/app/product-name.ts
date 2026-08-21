@@ -8,6 +8,20 @@ import { useBranding } from "../data/queries";
 
 export const FALLBACK_PRODUCT_NAME = "Wikistead";
 
+/**
+ * Where THIS PRODUCT's documentation lives (#864).
+ *
+ * Here rather than beside the fetch helpers for the reason #575 exists: a literal naming the product
+ * belongs with the other literals that name it, and this file is the one place allowed to hold them.
+ * The address is not chosen here either — the documentation site declares it as its own canonical
+ * origin — and unlike the product NAME it does not vary by deployment: a self-hoster who renames the
+ * product still reads our guide.
+ */
+export const DOCS_ORIGIN = "https://docs.wikistead.com";
+
+/** The page an operator wants when they have just stood the server up and have no spaces yet. */
+export const SELF_HOSTING_GUIDE = `${DOCS_ORIGIN}/getting-started/self-hosting/`;
+
 /** The deployment's product name (NOT the tenant's display name — see `useBrandName` for that). */
 export function useProductName(): string {
   return useBranding().data?.productName || FALLBACK_PRODUCT_NAME;

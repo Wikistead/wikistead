@@ -203,6 +203,21 @@ export function resolveEntitlements(plan: string): Entitlements {
   return _resolver(plan)
 }
 
+/**
+ * Whether this deployment is the MANAGED one (#864).
+ *
+ * Not a lever, and deliberately not derived from one: on a self-hosted install every lever is
+ * UNLIMITED, and so is a Cloud tenant on the top plan — no entitlement value tells the two apart. What
+ * does is the registration above, which is the edition decided once at composition time (ADR-015):
+ * Cloud registers a resolver, self-host registers nothing.
+ *
+ * The screens that need this need it to offer OPERATOR help — a link to the setup guide belongs in
+ * front of somebody who runs the server, and nowhere near a tenant on somebody else's.
+ */
+export function isManagedDeployment(): boolean {
+  return _registered
+}
+
 // Test-only: restore the default (UNLIMITED) resolver so registry state cannot
 // leak between tests.
 export function resetEntitlementsResolver(): void {

@@ -1719,7 +1719,7 @@ export function useRemoveTenantLogo() {
 
 // Tenant entitlements (plan feature flags). Used for UI gating (e.g. show an
 // upgrade state for branding on Cloud free); the server stays the fortress.
-export interface EntitlementsDTO { branding: boolean }
+export interface EntitlementsDTO { branding: boolean; selfHosted?: boolean } // #864: selfHosted is a DEPLOYMENT fact, not a lever (every lever is UNLIMITED on both a self-host and a top Cloud plan)
 export function useEntitlements() {
   const { token } = useSession();
   return useQuery({

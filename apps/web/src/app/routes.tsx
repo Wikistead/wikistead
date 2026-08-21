@@ -32,6 +32,7 @@ function LazyFallback() {
   const { t } = useTranslation();
   return <div style={{ padding: 24, color: "var(--fg-dim)" }}>{t("common.loading")}</div>;
 }
+import { HomeEmpty } from "./HomeEmpty";
 import { AppShell } from "./AppShell";
 import { LoginScreen, RecoveryScreen } from "./LoginScreen";
 import { SetPasswordForm } from "./SetPasswordForm";
@@ -2025,10 +2026,7 @@ function HomeLanding() {
   if (first) return <Navigate to={`/spaces/${first.id}`} replace />;
   return (
     <AppShell>
-      <div className="max-w-[560px] p-6 text-fg-dim" data-testid="home-no-spaces">
-        <h2 className="mt-0 text-foreground">{t("home.emptyTitle")}</h2>
-        <p>{t("home.emptyBody")}</p>
-      </div>
+      <HomeEmpty />
     </AppShell>
   );
 }

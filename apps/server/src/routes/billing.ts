@@ -3,7 +3,7 @@ import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { OpenFgaClient } from '@openfga/sdk'
 import Stripe from 'stripe'
 import { pool } from '../db/pool.js'
-import { resolveEntitlements } from '@wikistead/entitlements'
+import { isManagedDeployment, resolveEntitlements } from '@wikistead/entitlements'
 import { currentPeriodStart, getUsage } from '../usage.js' // #231 slice 1: read the counters back
 import { emit } from '@wikistead/events'
 import { isDowngrade } from '../plan.js'
@@ -211,8 +211,12 @@ export async function billingPlugin(app: FastifyInstance) {
   // Returns the resolved entitlement flags for the current tenant's plan.
   // Useful for the frontend to show/hide upgrade prompts without hardcoding
   // plan logic in the client.
+  // #864: `selfHosted` rides along and is NOT a lever — on a self-hosted install every lever is
+  // UNLIMITED and so is a top-plan Cloud tenant, so no entitlement value distinguishes them. It comes
+  // from the registration the edition performs at composition time, and the screens that read it use
+  // it to offer OPERATOR help (a setup guide belongs in front of whoever runs the server).
   app.get('/entitlements', async (req) => {
-    return resolveEntitlements(req.tenant.plan)
+    return { ...resolveEntitlements(req.tenant.plan), selfHosted: !isManagedDeployment() }
   })
 
   // GET /billing/usage — #231 slice 1: SHOW what has been metered this period, next to the allowance the
