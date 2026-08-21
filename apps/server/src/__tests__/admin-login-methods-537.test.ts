@@ -18,10 +18,18 @@ import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import type { Tenant } from '@wikistead/types'
 import { registerSamlEntitlement, resetSamlEntitlement } from '../auth/saml-entitlement.js'
 import { resolveEntitlements } from '@wikistead/entitlements'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
-const HOST = 'dev.localhost'
+// #797: this file used to run on the SEEDED dev tenant, and pin 3 writes an enabled `tenant_saml`
+// row — one row per tenant, in a tenant that `prune-test-tenants` KEEPS. A run killed inside that
+// test therefore left a row nothing collects, and every later run failed the same INSERT; and the
+// afterEach below deletes the tenant's login-prefs row wholesale, which on a shared tenant is a
+// neighbour's premise being removed mid-flight. Both stop mattering in a tenant this file owns.
+const SLUG = 't537'
+const HOST = `${SLUG}.localhost`
 let app: FastifyInstance
+let pt: PrivateTenant
 let tenant: Tenant
 let memberSid: string
 
@@ -35,7 +43,13 @@ beforeAll(async () => {
   registerSamlEntitlement((t) => resolveEntitlements(t.plan).samlSso)
   app = await buildApp()
   await app.ready()
-  tenant = (await new TenantRegistry(pool).findBySlug('dev'))! as Tenant
+  pt = await privateTenant(admin, SLUG)
+  tenant = (await new TenantRegistry(pool).findBySlug(SLUG))! as Tenant
+  // `privateTenant` seeds a login-prefs row with password sign-in ON, and `local` is an own way in
+  // (#568 / ADR-198 §3) — an own IdP being effective by itself would defeat pin 2, whose whole
+  // premise is that there is NONE yet. The afterEach below clears prefs between tests; this states
+  // the same starting point for the FIRST one instead of letting test order decide it (#820).
+  await admin`DELETE FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`
   const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
   memberSid = await createSession(valkey, { tenantId: tenant.id, sub: 'lm537-member', role: 'member' })
   valkey.disconnect()
@@ -46,6 +60,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   await admin`DELETE FROM tenant_login_prefs WHERE tenant_id = ${tenant.id}`.catch(() => {})
+  await admin`DELETE FROM tenant_saml WHERE tenant_id = ${tenant.id}`.catch(() => {})
   await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${tenant.id}`.catch(() => {})
   delete process.env.PLATFORM_OIDC_ISSUER
   delete process.env.PLATFORM_OIDC_CLIENT_ID
@@ -56,6 +71,7 @@ afterAll(async () => {
   resetSamlEntitlement()
   await deleteTuples(fgaClient, [{ user: 'user:lm537-member', relation: 'member', object: `tenant:${tenant.id}` }]).catch(() => {})
   await app.close()
+  await pt.dispose()
   await admin.end()
   await pool.end()
 }, 30_000)
