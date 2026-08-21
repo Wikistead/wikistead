@@ -25,7 +25,8 @@
 // stack at once, and rotating the store out from under a suite that is already running would take its
 // model id with it.
 import { execSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /**
  * How many tuples a store may hold before a run rotates it. Chosen from the measurements above: one
@@ -100,13 +101,46 @@ export function localEnvBody({ ports, storeId, modelId }) {
 }
 
 /**
+ * #870: the environment every step AFTER the bootstrap must run with.
+ *
+ * A real environment variable beats `--env-file` — Node never lets an env file override one that is
+ * already set, which is the whole mechanism #484 relies on to move a session onto its own stack. The
+ * caller here loads `.env.server-test.local` into its own process (it has to: that is where the offset
+ * lives) and hands its `process.env` to every child, so the child carries the store id of the store
+ * this rotation just RETIRED — and the `--env-file` naming the freshly written local file cannot
+ * override it. The seed then reports success against a store nobody will ever read again, and the new
+ * one is left with a model and no tuples.
+ *
+ * That is not a cosmetic ordering problem. `user:dev-user member tenant:tenant_dev` is what the
+ * per-request membership seam asks about, so a store without it fails every authenticated request in
+ * three different voices — 401 `unauthorized` from the API, "space creation is restricted" from the
+ * create path (`space_creator` unions `tenant#member`), and `forbidden: not a member of this tenant`
+ * from collab's own gate. It reads as an authorization regression in whatever landed last, and it was
+ * read that way four times in one day across three sessions before it was measured.
+ */
+export function postBootstrapEnv(env, { storeId, modelId }) {
+  return { ...env, OPENFGA_STORE_ID: storeId, OPENFGA_MODEL_ID: modelId }
+}
+
+/**
  * Retire the fat store, bootstrap an empty one, re-pin it, and re-establish what the seeds own.
  * Every step is the one `setup:server-test` was already running; this is where they live now.
  */
-export function rotateStore({ repo, ports, env, localEnvPath }) {
+/**
+ * The real child-process runner. Taken as a parameter so the rotation's ORDER and the environment each
+ * step receives can be pinned without a stack: the defect #870 fixes was invisible to any test that
+ * could not see what the seed step was handed.
+ */
+export const shellRunner = (repo) => ({
+  run: (cmd, childEnv) => execSync(cmd, { cwd: repo, stdio: 'inherit', env: childEnv }),
+  capture: (cmd, childEnv) => execSync(cmd, { cwd: repo, encoding: 'utf8', env: childEnv }),
+  write: (path, body) => writeFileSync(path, body),
+})
+
+export function rotateStore({ repo, ports, env, localEnvPath, runner = shellRunner(repo) }) {
   const ENVS = '--env-file=.env.server-test --env-file=.env.server-test.local'
-  const run = (cmd) => execSync(cmd, { cwd: repo, stdio: 'inherit', env })
-  const capture = (cmd) => execSync(cmd, { cwd: repo, encoding: 'utf8', env })
+  const run = (cmd, childEnv = env) => runner.run(cmd, childEnv)
+  const capture = (cmd) => runner.capture(cmd, env)
 
   console.log('[server-test] retire the previous permission store…')
   run(`npx tsx ${ENVS} infra/openfga/reset-test-store.ts`)
@@ -119,22 +153,109 @@ export function rotateStore({ repo, ports, env, localEnvPath }) {
   // #484: `.env.server-test.local` loads BEFORE `.env.server-test` and wins (loadEnvFile never
   // overrides an already-set var), so the offset-derived URLs here move the suite onto this session's
   // stack. At offset 0 they equal the static values — a harmless restatement.
-  writeFileSync(localEnvPath, localEnvBody({ ports, storeId, modelId }))
+  runner.write(localEnvPath, localEnvBody({ ports, storeId, modelId }))
   console.log(`[server-test] wrote .env.server-test.local (store ${storeId}, pg ${ports.pg}, fga ${ports.fgaHttp})`)
 
+  // Every step from here on is about the NEW store, and says so in its environment rather than trusting
+  // the file it was just handed to win an argument it cannot win (see `postBootstrapEnv`).
+  const fresh = postBootstrapEnv(env, { storeId, modelId })
+
   console.log('[server-test] fga seed…')
-  run(`npx tsx ${ENVS} infra/openfga/seed.ts`)
+  run(`npx tsx ${ENVS} infra/openfga/seed.ts`, fresh)
 
   // #788: drop what earlier runs left behind. `sweepExpiredTrash` walks every tenant, so a stack that
   // has been up for hours pays for hundreds of fixtures nobody collected — measured at 33 seconds to
   // purge one page tree with 979 of them present. #821 does the same for role definitions.
   console.log('[server-test] prune leftover test tenants…')
-  run(`npx tsx ${ENVS} infra/db/prune-test-tenants.ts`)
+  run(`npx tsx ${ENVS} infra/db/prune-test-tenants.ts`, fresh)
 
   // Idempotent, and here rather than only in `setup:server-test` so a rotation leaves exactly the
   // state a fresh setup leaves: the two seeded tenants exist in BOTH the database and the new store.
   console.log('[server-test] db seed…')
-  run(`npx tsx --env-file=.env.server-test infra/db/seed.ts`)
+  run(`npx tsx --env-file=.env.server-test infra/db/seed.ts`, fresh)
 
   return { storeId, modelId }
+}
+
+// ── #870: is the store this run is about to use actually seeded? ──────────────────────────────────
+//
+// The rotation above is fixed, but it is not the only way a store ends up modelled and empty: a manual
+// reset, another session's mistake, a future change to these steps. The cost of finding out late is
+// what #870 measured — three sessions reading an unseeded stack as an authorization regression in
+// whatever had just landed, four times in one day, because the failure arrives as 401s and 403s in
+// suites that touched nothing.
+//
+// So the run asks one question first, and asks it of the TUPLES rather than of a symptom. There is no
+// symptom that covers all three voices (the API's 401, the create path's refusal, collab's own gate),
+// and each of them looks like a different bug.
+
+/**
+ * What the seed writes for the dev tenant, READ FROM THE SEED. A hand-written copy here would be a
+ * second declaration of the fixture, and the two would drift the first time somebody added a tuple —
+ * which is the shape #790 and #848 are both about. Only the first block is read: it is the hierarchy
+ * every authenticated request depends on, and the share-link blocks below it are about one feature.
+ */
+export function seedTuples(repo) {
+  try {
+    const src = readFileSync(join(repo, 'infra/openfga/seed.ts'), 'utf8')
+    const block = /writeIdempotent\(\[([\s\S]*?)\]\)/.exec(src)?.[1]
+    if (!block) return null
+    const out = []
+    for (const m of block.matchAll(/\{\s*user:\s*'([^']+)'\s*,\s*relation:\s*'([^']+)'\s*,\s*object:\s*'([^']+)'/g)) {
+      out.push({ user: m[1], relation: m[2], object: m[3] })
+    }
+    return out.length ? out : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Three answers, never two. `missing` means the store is up, answered, and does not hold the seed —
+ * the case worth stopping for. `unknown` covers every way the question could not be put: no stack, the
+ * store id points at something retired, the model does not have these types (a store whose LATEST model
+ * is a stub answers a plain check with `validation_error`, which is a different problem with a different
+ * fix). Folding `unknown` into `missing` would turn a convenience into a gate that fails a machine which
+ * simply has no isolated stack.
+ *
+ * ⚠️ The check PINS the model id. Without it OpenFGA answers against whatever model is newest in the
+ * store, and the suite writes models of its own — so an unpinned probe reports a broken stack on a
+ * perfectly good one. That is not hypothetical: it is how this check's first diagnostic recipe misled
+ * two sessions.
+ */
+export async function seedPresence({ env, tuples, fetchImpl = fetch }) {
+  const url = env.OPENFGA_API_URL
+  const store = env.OPENFGA_STORE_ID
+  const model = env.OPENFGA_MODEL_ID
+  if (!url || !store || !model || !tuples?.length) return { verdict: 'unknown', why: 'no store pinned in this environment' }
+  const missing = []
+  for (const t of tuples) {
+    let body
+    try {
+      const r = await fetchImpl(`${url}/stores/${store}/check`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ authorization_model_id: model, tuple_key: t }),
+      })
+      body = await r.json()
+    } catch (err) {
+      return { verdict: 'unknown', why: `the permission store could not be reached (${err?.message ?? err})` }
+    }
+    if (body?.code) return { verdict: 'unknown', why: `the store would not answer: ${body.code} ${body.message ?? ''}`.trim() }
+    if (body?.allowed !== true) missing.push(t)
+  }
+  return missing.length ? { verdict: 'missing', missing } : { verdict: 'present' }
+}
+
+/** The sentence a session should read when the store is empty. One command fixes it. */
+export function unseededMessage(missing, offset) {
+  const one = missing[0]
+  return (
+    `[store-refresh] the permission store is MODELLED BUT NOT SEEDED — ${missing.length} seed tuple(s) absent, ` +
+    `e.g. \`${one.user} ${one.relation} ${one.object}\`.\n` +
+    `  Every authenticated request will fail, and it will not say why: the API answers 401 unauthorized, ` +
+    `the create path answers "space creation is restricted", and collab answers "not a member of this tenant". ` +
+    `None of them is a bug in whatever you just changed.\n` +
+    `  Recover: WKS_STACK_OFFSET=${offset} pnpm setup:server-test`
+  )
 }

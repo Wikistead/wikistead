@@ -20,7 +20,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serverTestPorts, serverTestComposeEnv } from './stack-offset.mjs'
-import { countTuples, rotateStore, refreshVerdict, REFRESH_THRESHOLD } from './server-test-store.mjs'
+import { countTuples, rotateStore, refreshVerdict, REFRESH_THRESHOLD, seedTuples, seedPresence, unseededMessage } from './server-test-store.mjs'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..')
 const LOCAL = join(repo, '.env.server-test.local')
@@ -51,6 +51,21 @@ async function main() {
     SMTP_PORT: String(ports.smtp),
     MAILPIT_API_URL: `http://localhost:${ports.mailpit}/api/v1`,
   }
+  // #870: whatever the size verdict turns out to be, the store this run is about to use has to hold the
+  // seed. Asked AFTER a rotation (it writes the ids this reads) and on the keep path too, because a
+  // store can be emptied by something other than a rotation and the cost of finding out mid-suite is
+  // three sessions reading 401s as a regression in whatever landed last.
+  const confirmSeeded = async (currentEnv) => {
+    const presence = await seedPresence({ env: currentEnv, tuples: seedTuples(repo) })
+    if (presence.verdict === 'missing') {
+      console.error(unseededMessage(presence.missing, ports.offset))
+      process.exitCode = 1
+      return false
+    }
+    if (presence.verdict === 'unknown') console.log(`[store-refresh] could not confirm the seed — ${presence.why}`)
+    return true
+  }
+
   // Counting spawns a child, so it is only asked once the cheap refusals are out of the way.
   const tuples = hasLocalEnv && marker === 'server-test' ? countTuples({ repo, env }) : null
   switch (refreshVerdict({ hasLocalEnv, marker, tuples })) {
@@ -63,10 +78,15 @@ async function main() {
       // gate: the run that follows will fail on its own terms, with a better message than this one.
       return console.log('[store-refresh] could not read the permission store — leaving it alone')
     case 'keep':
-      return console.log(`[store-refresh] ${tuples} tuple(s), under the ${REFRESH_THRESHOLD} threshold — keeping this store`)
-    default:
+      console.log(`[store-refresh] ${tuples} tuple(s), under the ${REFRESH_THRESHOLD} threshold — keeping this store`)
+      return void (await confirmSeeded(env))
+    default: {
       console.log(`[store-refresh] ${tuples} tuple(s), over the ${REFRESH_THRESHOLD} threshold — rotating (offset ${ports.offset})`)
-      rotateStore({ repo, ports, env, localEnvPath: LOCAL })
+      const { storeId, modelId } = rotateStore({ repo, ports, env, localEnvPath: LOCAL })
+      // The ids the rotation just minted, not the ones this process loaded at startup — those name the
+      // store it retired, which is the defect #870 was filed for.
+      return void (await confirmSeeded({ ...env, OPENFGA_STORE_ID: storeId, OPENFGA_MODEL_ID: modelId }))
+    }
   }
 }
 
