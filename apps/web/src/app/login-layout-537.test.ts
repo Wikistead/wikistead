@@ -45,7 +45,10 @@ describe("#554 S3 connectionButtonText (ADR-197 §3 rev3 fixed branding)", () =>
     expect(connectionButtonText(conn("platform", "platform"), t)).toBe("auth.signInPlatform");
     expect(connectionButtonText(conn("saml"), t)).toBe("auth.signInSaml");
     expect(connectionButtonText(conn("oidc", "x", "Corp SSO"), t)).toBe("Corp SSO");
-    expect(connectionButtonText(conn("oidc", "x"), t)).toBe("auth.signIn");
+    // #798 / ADR-246 §2.1: the nameless fallback is no longer the verb the password form's submit
+    // button also uses. The property that fallback exists for is pinned on the rendered screen in
+    // every-way-in-names-itself-798.test.ts; this line only follows the key.
+    expect(connectionButtonText(conn("oidc", "x"), t)).toBe("auth.signInSso");
   });
   it("#554 S4: a PRESET connection wears its fixed brand, and a label never rides through it", () => {
     expect(connectionButtonText({ id: "x", kind: "oidc", label: null, brand: "google" }, t)).toBe("auth.continueWith");

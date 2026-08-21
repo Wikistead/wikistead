@@ -22,7 +22,8 @@ import { assertNotLastWayIn } from '../auth/login-methods.js'
 //     pass openid-client's strict issuer match — ADR review N1). A preset connection REFUSES a
 //     label (rev3: no admin-authored string reaches the unauthenticated screen through a branded
 //     connection).
-//   - a free-text label is allowed ONLY preset-less, with hygiene (S3 handoff): trimmed, ≤64
+//   - a free-text label is REQUIRED preset-less and refused with a preset (#798), with hygiene
+//     (S3 handoff): trimmed, ≤64
 //     chars, no control/newline/bidi-override characters — it renders on the anonymous screen.
 //   - verify-before-enable: enabling requires a passing discovery check, per connection (the same
 //     validateIssuer gate the legacy surface has).
@@ -148,6 +149,18 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     }
     const labelRes = sanitizeConnectionLabel(b.label)
     if (!labelRes.ok) throw Object.assign(new Error('invalid label'), { statusCode: 400 })
+    // #798 (ruling, 2026-08-21): a preset-less connection is NAMED, and the name is asked for here
+    // rather than left to a fallback on the login screen. A preset brings its own branding, so this
+    // is only about the connections that have nothing else to be called.
+    //
+    // The reason it belongs at the write and not in the copy: the fallback can only ever say what
+    // KIND of thing the button is ("single sign-on"), and a tenant running two of them gets two
+    // buttons that read the same again one level down. The admin is the only party who knows the
+    // difference, and they know it at the moment they add the connection.
+    if (preset === null && labelRes.label === null) {
+      throw Object.assign(new Error('a connection without a preset needs a label: it is what the sign-in screen calls it'),
+        { statusCode: 400, code: 'label_required' })
+    }
     const clientId = (b.clientId ?? '').trim()
     // #733: the redirect URI is NOT required, because it is not used. The login flow derives it from
     // the request (`${protocol}://${host}/auth/callback`, auth.ts) and passes that to buildLogin; the
@@ -206,6 +219,16 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     }
     const labelRes = b.label !== undefined ? sanitizeConnectionLabel(b.label) : { ok: true as const, label: row.label }
     if (!labelRes.ok) throw Object.assign(new Error('invalid label'), { statusCode: 400 })
+    // #798: the name cannot be cleared once the row has one, for the same reason it is required at
+    // creation. Scoped to a request that ACTUALLY CARRIES a label: a body without the field leaves
+    // `row.label` alone, which is what the row's on/off switch and the MCP switch send. Refusing
+    // those would make a connection created before this rule unmanageable until it was renamed —
+    // punishing the admin for the product's own history. Naming those rows is asked for on the
+    // screen instead, and the editor sends the field, so saving one does require a name.
+    if (row.preset === null && b.label !== undefined && labelRes.label === null) {
+      throw Object.assign(new Error('a connection without a preset needs a label: it is what the sign-in screen calls it'),
+        { statusCode: 400, code: 'label_required' })
+    }
     const issuer = (b.issuer ?? row.issuer).trim()
     if (b.issuer !== undefined && !validIssuerShape(issuer)) {
       throw Object.assign(new Error('issuer must be an http(s) URL'), { statusCode: 400 })

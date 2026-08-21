@@ -99,7 +99,11 @@ export function LocalLoginForm({ returnTo, disabled, onStage }: {
       <Button variant="primary" type="submit" className="w-full" data-testid="login-local-submit"
         disabled={disabled || busy || !identifier.trim() || !password}>
         {busy && <Loader2 size={16} className="animate-spin" data-testid="login-spinner" />}
-        {t("auth.signIn")}
+        {/* #798 / ADR-246 §2.2: this button names its own method too, and NOT conditionally on what
+            else is on screen. A button whose wording depends on its neighbours reads differently in
+            two tenants; #745's second-factor ruling ("the door holds no state") is the same instinct.
+            `auth.signIn` stays for the places that really are the verb (the reset card, the title). */}
+        {t("auth.signInLocal")}
       </Button>
       {/* review R3: without this, the reset endpoints were live and nobody could reach them — an
           unauthenticated surface with no user. The confirmation is the same whatever happened,

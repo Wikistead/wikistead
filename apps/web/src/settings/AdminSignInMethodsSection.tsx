@@ -213,6 +213,12 @@ export function AdminSignInMethodsSection() {
   const [confirming, setConfirming] = useState<{ stance: "factor" | "sso"; to: boolean } | null>(null);
 
   const rows = connections.data ?? [];
+  // #798 (ruling, 2026-08-21): a preset-less connection is named at creation now, so these rows are
+  // the ones that predate the rule. They are not broken and they still sign people in; what they lack
+  // is a name, and until they get one the login screen calls every one of them "single sign-on" (the
+  // insurance wording, ADR-246 §2.1). The migration is this screen asking, on the next visit: a notice
+  // above the list, a badge on the row, and an editor that will not save the row nameless.
+  const unnamed = rows.filter((c) => !c.preset && !c.label);
   // #652 the write-time refusals the server can still raise even when the row looked writable
   // (the last enrolled admin cleared their factor between the read and the click). Reported with the
   // sentence that names the fix, not a generic failure.
@@ -429,6 +435,19 @@ export function AdminSignInMethodsSection() {
       <h3 className="mt-0 text-sm font-medium">{t("signInMethods.title")}</h3>
       <p className="mt-0 mb-3 text-xs text-fg-dim">{t("signInMethods.body")}</p>
 
+      {/* #798: the migration for the rows that predate the naming rule. It is a notice rather than a
+          block: those connections work, and a screen that refused to load until they were renamed
+          would be punishing an admin for a rule the product added after they configured it. The row
+          badge and the editor carry the same fact, so the admin meets it wherever they look first. */}
+      {unnamed.length > 0 && (
+        <p
+          className="mt-0 mb-3 rounded-md border border-[color-mix(in_srgb,var(--callout-warning)_45%,transparent)] bg-[color-mix(in_srgb,var(--callout-warning)_10%,transparent)] px-3 py-2 text-xs"
+          data-testid="admin-connections-unnamed-notice"
+        >
+          {t("adminConnections.unnamedNotice")}
+        </p>
+      )}
+
       <div className="flex flex-col gap-1.5" data-testid="sign-in-methods-list">
         {rows.map((c, i) => (
           <div key={c.id} className={METHOD_ROW} data-method-row data-testid={`admin-connection-${c.id}`}>
@@ -451,7 +470,8 @@ export function AdminSignInMethodsSection() {
               {/* review F3: the aggregate's `selected` is the FIRST row's enabled flag, so it cannot
                   speak for this row. Pass only what is method-wide — the ceiling and the plan — and
                   let the row's own switch answer "is this one on". */}
-              {stateBadges(c.enabled, m && { ...m["tenant-oidc"], selected: c.enabled })}
+              {stateBadges(c.enabled, m && { ...m["tenant-oidc"], selected: c.enabled }, undefined,
+                !c.preset && !c.label ? { label: t("adminConnections.unnamedBadge"), testId: `admin-connection-unnamed-${c.id}` } : undefined)}
               {/* Order IS the login screen's order, so it only means something with more than one row. */}
               {rows.length > 1 && (
                 <>
@@ -496,6 +516,11 @@ export function AdminSignInMethodsSection() {
                       {t("adminConnections.labelPlaceholder")}
                       <Input inputSize="sm" value={draft.label} data-testid="oidc-label"
                         onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
+                      {/* The reason, not just the refusal: an admin who is told "required" without
+                          being told what it is for types anything. */}
+                      {!draft.label.trim() && (
+                        <span data-testid={`admin-connection-label-required-${c.id}`}>{t("adminConnections.labelRequired")}</span>
+                      )}
                     </label>
                   </>
                 )}
@@ -559,7 +584,11 @@ export function AdminSignInMethodsSection() {
                     onClick={() => onTest(c.preset ? c.issuer : draft.issuer)}>
                     {test.isPending ? t("adminAuth.testing") : t("adminAuth.test")}
                   </Button>
-                  <Button variant="primary" size="sm" data-testid="oidc-save" disabled={update.isPending} onClick={() => saveRow(c)}>
+                  {/* #798: the editor sends `label` for a preset-less row (empty means "clear it"),
+                      and the server now refuses an empty one — so the button says so before the round
+                      trip rather than after it. A preset row has no label field and is unaffected. */}
+                  <Button variant="primary" size="sm" data-testid="oidc-save"
+                    disabled={update.isPending || (!c.preset && !draft.label.trim())} onClick={() => saveRow(c)}>
                     {t("common.save")}
                   </Button>
                   <Button variant="default" size="sm" onClick={() => setExpanded(null)}>{t("common.cancel")}</Button>
@@ -851,6 +880,9 @@ export function AdminSignInMethodsSection() {
                   {t("adminConnections.buttonLabel")}
                   <Input inputSize="sm" placeholder={t("adminConnections.labelPlaceholder")} value={form.label}
                     onChange={(e) => setForm({ ...form, label: e.target.value })} data-testid="admin-connection-label" />
+                  {!form.label.trim() && (
+                    <span data-testid="admin-connection-label-required">{t("adminConnections.labelRequired")}</span>
+                  )}
                 </label>
               </>
             )}
@@ -898,7 +930,8 @@ export function AdminSignInMethodsSection() {
               </span>
             </label>
             <div className="flex gap-2">
-              <Button variant="primary" size="sm" data-testid="admin-connection-save" disabled={create.isPending} onClick={submitNew}>
+              <Button variant="primary" size="sm" data-testid="admin-connection-save"
+                disabled={create.isPending || (preset === "" && !form.label.trim())} onClick={submitNew}>
                 {t("common.save")}
               </Button>
               <Button variant="default" size="sm" onClick={() => setAdding(false)}>{t("common.cancel")}</Button>

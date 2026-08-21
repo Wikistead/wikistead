@@ -59,6 +59,7 @@ const createOne = () =>
     method: 'POST', url: '/admin/connections', headers: H,
     payload: JSON.stringify({
       issuer: 'https://one-more.example', clientId: 'overflow', redirectUri: 'https://app.example/auth/callback',
+      label: 'One More',
     }),
   })
 

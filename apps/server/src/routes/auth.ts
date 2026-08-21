@@ -150,8 +150,12 @@ export async function authPlugin(app: FastifyInstance) {
       //   - S1 drift (b), resolved: an oidc connection whose config cannot LOAD (undecryptable
       //     secret) is dropped from the list — the screen must never render a button the start
       //     route cannot honor. The failure is logged server-side, never surfaced (no oracle).
-      //   - rev3 labels: no admin-authored string reaches this unauthenticated surface until the
-      //     preset-less custom-OIDC label ships (S4 owns the column); label stays null.
+      //   - labels: the preset-less custom-OIDC label SHIPPED (S4, migration 094 + the sanitiser in
+      //     admin-connections.ts, which trims to 64 and strips the characters that lie precisely
+      //     BECAUSE this surface is unauthenticated). So an admin-authored string does reach here,
+      //     by design, and #798 made it required at creation. A preset never carries one: the brand
+      //     is fixed first-party wording, not an admin string. (The old note said the opposite and
+      //     was believed twice by people reading this file.)
       const connections: { id: string; kind: string; label: string | null; brand: string | null }[] = []
       for (const c of await resolveLoginConnections(db, tenant)) {
         if (c.kind === 'oidc') {

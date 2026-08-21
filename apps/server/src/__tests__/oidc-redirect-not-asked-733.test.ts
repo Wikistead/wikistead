@@ -63,7 +63,7 @@ describe('#733: the redirect URI is shown, not asked for', () => {
   it('creates a connection with no redirect URI at all, and stores no value', async () => {
     const res = await app.inject({
       method: 'POST', url: '/admin/connections', headers: H(),
-      payload: { issuer: issuer.url, clientId: CLIENT_ID },
+      payload: { issuer: issuer.url, clientId: CLIENT_ID, label: 'Corp SSO' },
     })
     expect(res.statusCode, res.body).toBe(201)
     const id = (res.json() as { id: string }).id
@@ -75,7 +75,7 @@ describe('#733: the redirect URI is shown, not asked for', () => {
     // …and issuer + client id are still required. Dropping one requirement must not drop the others:
     // an issuer-less connection is not a connection.
     const noIssuer = await app.inject({
-      method: 'POST', url: '/admin/connections', headers: H(), payload: { clientId: CLIENT_ID },
+      method: 'POST', url: '/admin/connections', headers: H(), payload: { clientId: CLIENT_ID, label: 'Corp SSO' },
     })
     expect(noIssuer.statusCode).toBe(400)
   })
