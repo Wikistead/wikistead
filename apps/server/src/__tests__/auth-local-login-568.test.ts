@@ -14,17 +14,28 @@ import { hashPassword } from '../auth/password-hash.js'
 import { enrolUnderSeatCap } from '../auth/invites.js'
 import { sameOriginOk } from '../routes/auth-local.js'
 import { buildApp } from '../app.js'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 import type { Tenant } from '@wikistead/types'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
-const TENANT = 'tenant_dev'
+// #832: this file's own tenant, not the seeded one. Its members carry `wlocal_` subs, and a run that
+// is killed between the INSERT and `afterAll` leaves them behind — inside `tenant_dev` that residue
+// is permanent, because the prune script KEEPS the seeded tenants, and it made an EE assertion that
+// counts reserved-prefix subs (`scim-provision.test.ts`) red on every run until somebody cleared the
+// table by hand. A tenant named after this file is outside the KEEP list, so the same debris is
+// collected by the next `setup:server-test`. The id is derived the way `privateTenant` derives it,
+// so the constants below can stay constants.
+const SLUG = 'l568'
+const TENANT = `tenant_${SLUG}`
+const HOST = `${SLUG}.localhost`
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
 const STAMP = Date.now().toString(36)
 const PASSWORD = 'a-perfectly-fine-passphrase'
-const H = { host: 'dev.localhost', 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
+const H = { host: HOST, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
 
 let app: FastifyInstance
 let db: TenantDb
+let pt: PrivateTenant
 const subs: string[] = []
 const ident = (n: string) => `local568-${n}-${STAMP}@e2e.test`
 
@@ -55,6 +66,7 @@ async function clearCounters(identifier: string): Promise<void> {
 beforeAll(async () => {
   app = await buildApp()
   await app.ready()
+  pt = await privateTenant(adminPool, SLUG, { plan: 'business' })
   db = await acquireTenantDb(asTenant(TENANT))
   await setLocalLogin(true)
 }, 120_000)
@@ -64,9 +76,19 @@ afterAll(async () => {
   for (const s of subs) {
     await adminPool`DELETE FROM local_credentials WHERE member_sub = ${s}`.catch(() => {})
     await adminPool`DELETE FROM members WHERE sub = ${s}`.catch(() => {})
+    // The membership tuple too: deleting one that is already gone REFUSES the whole batch, so each
+    // goes on its own and a missing one is not an error (the shape `members.ts` uses).
+    await deleteTuplesLazy([{ user: `user:${s}`, relation: 'member', object: `tenant:${TENANT}` }])
   }
+  await pt?.dispose()
   await db.release(); await app.close(); await adminPool.end(); await pool.end()
 }, 120_000)
+
+/** `deleteTuples` through a lazy import, because this file only needs it while cleaning up. */
+async function deleteTuplesLazy(tuples: { user: string; relation: string; object: string }[]): Promise<void> {
+  const { deleteTuples } = await import('@wikistead/authz')
+  await deleteTuples(fgaClient, tuples).catch(() => {})
+}
 
 describe('#568 §3: one refusal, whatever the reason', () => {
   it('a correct password signs in and sets the session cookie', async () => {
@@ -268,7 +290,7 @@ describe('#568 §3 M8: local is a connection, so the lockout guard can see it', 
 })
 
 describe('#568 §6: changing a password evicts everyone else, and cannot grow one on an SSO account', () => {
-  const DEV = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
+  const DEV = { host: HOST, authorization: 'Bearer dev-token', 'content-type': 'application/json' }
 
   it('an OIDC member cannot acquire a password here (the rev2 hole)', async () => {
     // dev-token authenticates `dev-user`, an OIDC-source member with no credential row. If this
@@ -293,7 +315,7 @@ describe('#568 §6: changing a password evicts everyone else, and cannot grow on
     const sid = signed.cookies.find((c) => c.name === 'wks_sess')!.value
     const res = await app.inject({
       method: 'POST', url: '/auth/local/password',
-      headers: { host: 'dev.localhost', 'content-type': 'application/json', cookie: `wks_sess=${sid}` },
+      headers: { host: HOST, 'content-type': 'application/json', cookie: `wks_sess=${sid}` },
       payload: { currentPassword: 'not-the-current-one', newPassword: 'a-brand-new-passphrase' },
     })
     expect(res.statusCode, 'the current password is checked, session or no session').toBe(403)
@@ -311,7 +333,7 @@ describe('#568 §6: changing a password evicts everyone else, and cannot grow on
     const NEXT = 'the-next-passphrase-please'
     const res = await app.inject({
       method: 'POST', url: '/auth/local/password',
-      headers: { host: 'dev.localhost', 'content-type': 'application/json', cookie: `wks_sess=${keep}` },
+      headers: { host: HOST, 'content-type': 'application/json', cookie: `wks_sess=${keep}` },
       payload: { currentPassword: PASSWORD, newPassword: NEXT },
     })
     expect(res.statusCode, res.body).toBe(204)
@@ -361,7 +383,7 @@ describe('#568 review: the remaining measured properties', () => {
 
   it('N5c: the ROUTE refuses to switch local off when it is the only way in', async () => {
     // Previously asserted by re-implementing the filter in the test; this calls the endpoint.
-    const H2 = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
+    const H2 = { host: HOST, authorization: 'Bearer dev-token', 'content-type': 'application/json' }
     await setLocalLogin(true)
     // Make local the only effective method by taking the tenant's OIDC connections out of service.
     const enabled = await adminPool<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE tenant_id = ${TENANT} AND enabled`
