@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { fgaClient, check, writeTuples, deleteTuples } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
+import { ensureMembers } from './helpers/membership.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
@@ -22,7 +23,7 @@ import {
   grantPageAccess, revokePageAccess, listAllPageAccess, restrictPageAccess, listAllPageRestrictions,
   unrestrictPageAccess, isPagePrivate,
 } from '../routes/pages.js'
-import { createShareLink } from '../routes/share-links.js'
+import { createShareLink, listShareLinks, revokeShareLink } from '../routes/share-links.js'
 import type { Tenant } from '@wikistead/types'
 
 const driver = new LogicalSearchDriver()
@@ -32,9 +33,14 @@ let tenant: Tenant
 let db: TenantDb
 let spaceId: string
 const P = (id: string) => ({ type: 'page' as const, id })
+const S = (id: string) => ({ type: 'space' as const, id })
 const DEL = 'crr420-deleter'
 const SHR = 'crr420-sharer'
 const PUB = 'crr420-publisher'
+// #868: a MEMBER of the tenant holding none of the split verbs. The share-class assertions below need
+// both directions, and the refused direction says nothing if its subject is a stranger — a stranger is
+// refused by membership, whatever the gate asks. Seated in beforeAll for that reason.
+const NOB = 'crr420-nobody'
 
 async function makePage(title: string): Promise<string> {
   const p = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title })
@@ -44,6 +50,7 @@ async function makePage(title: string): Promise<string> {
 beforeAll(async () => {
   tenant = (await new TenantRegistry(pool).findBySlug('dev'))!
   db = await acquireTenantDb(tenant)
+  await ensureMembers(tenant.id, [NOB]) // #868: the refused subject is inside the tenant, not outside it
   spaceId = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'crr420' })).id
 }, 60_000)
 
@@ -91,10 +98,42 @@ describe('split-verb route gates (#420 3b)', () => {
       await revokePageAccess(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: SHR, grantee: 'user:crr420-guest1', relation: 'view' })
       const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, resource: P(pageId), capability: 'view', userId: SHR, plan: tenant.plan, expiresInSeconds: null })
       expect(link.id).toBeTruthy()
+      // #868 / #833: the costliest of the three claims — that READING and REVOKING a resource's links
+      // is share-class, not manage-class. Until now it was held up by a text check on the comment that
+      // says so; issuing was the only verb any test actually walked. An unpassworded link id is its own
+      // credential, so both directions matter: dropped from the implementation this is a lockout, and
+      // widened it is a leak of credentials. Asked as SHR — never as dev-user, who owns the space and
+      // passes everything, which is why the existing list assertions in this file prove nothing about
+      // which verb the gate accepts.
+      expect((await listShareLinks(db, fgaClient, { resource: P(pageId), userId: SHR })).links.some((l) => l.id === link.id)).toBe(true)
+      await expect(listShareLinks(db, fgaClient, { resource: P(pageId), userId: NOB })).rejects.toMatchObject({ statusCode: 403 })
+      await expect(revokeShareLink(db, fgaClient, { id: link.id, userId: NOB, tenantId: tenant.id })).rejects.toMatchObject({ statusCode: 403 })
+      await revokeShareLink(db, fgaClient, { id: link.id, userId: SHR, tenantId: tenant.id })
+      expect((await listShareLinks(db, fgaClient, { resource: P(pageId), userId: SHR })).links.some((l) => l.id === link.id)).toBe(false)
       await expect(trashPage(db, fgaClient, driver, { pageId, userId: SHR })).rejects.toMatchObject({ statusCode: 403 })
     } finally {
       await deleteTuples(fgaClient, [grant]).catch(() => {})
       await trashPage(db, fgaClient, driver, { pageId, userId: 'dev-user' }).catch(() => {})
+    }
+  })
+
+  it("(2s) share-only on a SPACE: `sharer` alone lists and revokes the space's links (#868)", async () => {
+    // The space surface takes a different road to the same gate: `share` resolves to the space's
+    // `sharer` relation, which — unlike the page's `share` — unions no manager arm, so the gate
+    // accepts share OR manage there. That second arm is why the space side needs its own case: a
+    // change that left only the manage arm standing would keep every page assertion above green.
+    const grant = { user: `user:${SHR}`, relation: 'sharer', object: `space:${spaceId}` }
+    await writeTuples(fgaClient, [grant])
+    let link: { id: string } | null = null
+    try {
+      link = await createShareLink(db, fgaClient, { tenantId: tenant.id, resource: S(spaceId), capability: 'view', userId: SHR, plan: tenant.plan, expiresInSeconds: null })
+      expect((await listShareLinks(db, fgaClient, { resource: S(spaceId), userId: SHR })).links.some((l) => l.id === link!.id)).toBe(true)
+      await expect(listShareLinks(db, fgaClient, { resource: S(spaceId), userId: NOB })).rejects.toMatchObject({ statusCode: 403 })
+      await revokeShareLink(db, fgaClient, { id: link.id, userId: SHR, tenantId: tenant.id })
+      expect((await listShareLinks(db, fgaClient, { resource: S(spaceId), userId: SHR })).links.some((l) => l.id === link!.id)).toBe(false)
+    } finally {
+      if (link) await revokeShareLink(db, fgaClient, { id: link.id, userId: 'dev-user', tenantId: tenant.id }).catch(() => {})
+      await deleteTuples(fgaClient, [grant]).catch(() => {})
     }
   })
 
