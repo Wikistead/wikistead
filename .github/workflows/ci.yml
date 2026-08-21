@@ -10,7 +10,20 @@ env:
   # §Consequences — that is the point). Public repo, so no token; a set-but-uncloneable value
   # fails the checkout step itself — half-armed is loud, never a silent fall-back to warn
   # (the silent fall-back IS the hole #704 closes).
-  DOCS_REPO: Wikistead/wikistead-docs
+  # #865: DISARMED on purpose, and this is the note that says why.
+  #
+  # `check-doc-links` decides what a change touched from THIS repository's diff. An `authored`
+  # binding points at a page in the docs repository, which never appears in that diff — so once the
+  # checkout below armed the strict half, a bound change went red and STAYED red no matter what
+  # anybody wrote in the docs repo. An outside contributor sending a PR near the HTTP API had no way
+  # to make CI green. The mirror image is just as bad: a fast-forward push has an empty diff, so the
+  # same gate passed while nothing was checked.
+  #
+  # Re-arm when the authored bindings are satisfiable from a single diff — either because the pages
+  # they name live in this repository (what #865 did for the API reference), or because the check
+  # learns to read the docs checkout's own history rather than this repo's. Until then the authored
+  # half stays a loud warning, which is what it was before #704 armed it.
+  DOCS_REPO: CHANGE_ME
 
 jobs:
   build:

@@ -3,7 +3,9 @@
 // changed without its docs page → violation; with its docs page → none; an unrelated
 // change → none; glob matching (`**`, `*`) behaves. Also checks the real DOC_CODE_MAP is
 // well-formed.
-import { readdirSync, statSync } from 'node:fs'
+import { readdirSync, statSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
@@ -125,5 +127,92 @@ describe('surface-docs evaluator (#697 / ADR-225 §4.2)', () => {
 
   it('a matching walk answers no violations (and none: rows count as covered)', () => {
     expect(evaluateSurfaceDocs({ widget: ['a', 'b'] }, LEDGER)).toEqual([])
+  })
+})
+
+// ── #865: the git adapter, run as a process against a real repository ───────────────────────────
+//
+// Everything above measures the pure evaluator with synthetic file lists. The defect this section
+// exists for lived in the OTHER half: `check-doc-links.mjs` decides which files changed by asking
+// git, and decides what `--strict` may fail on. Neither had ever been executed by a test.
+//
+// What that cost: a binding pointed at a page in the docs repository, which this repo's diff can
+// never contain, so an armed run went red and stayed red — while a fast-forward push, whose diff is
+// empty, passed the same gate having checked nothing. Both are properties of the adapter.
+//
+// A real temporary repository is used rather than a mock of git: the thing under test IS the
+// conversation with git (`git diff --name-only <base>...HEAD`), and a mock of it would agree with
+// whatever the script already does.
+describe('#865 the git adapter of check-doc-links', () => {
+  const script = join(repoRoot, 'scripts/check-doc-links.mjs')
+
+  /** A throwaway repo with one commit per state, so `HEAD~1...HEAD` is a real diff. */
+  function repoWithChange(files: Record<string, string>, changed: Record<string, string>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'doclinks-'))
+    const run = (cmd: string) => execFileSync('bash', ['-c', cmd], { cwd: dir, stdio: 'pipe' })
+    run('git init -q && git config user.email t@t && git config user.name t')
+    for (const [p, body] of Object.entries(files)) {
+      mkdirSync(join(dir, dirname(p)), { recursive: true })
+      writeFileSync(join(dir, p), body)
+    }
+    run('git add -A && git commit -qm base')
+    for (const [p, body] of Object.entries(changed)) {
+      mkdirSync(join(dir, dirname(p)), { recursive: true })
+      writeFileSync(join(dir, p), body)
+    }
+    run('git add -A && git commit -qm change')
+    return dir
+  }
+
+  function runCheck(dir: string, args: string[] = []): { code: number; out: string } {
+    // BOTH streams: the script prints its refusals on stderr and its "OK" on stdout, so a helper
+    // that reads only what execFileSync returns sees an empty string on every warning — measured
+    // while writing this, and it looked exactly like "the check found nothing".
+    const r = spawnSync('node', [script, ...args], {
+      cwd: dir, encoding: 'utf8', env: { ...process.env, DOC_LINK_BASE: 'HEAD~1' },
+    })
+    return { code: r.status ?? -1, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
+  }
+
+  it('reads the diff from git and refuses a bound change whose page lives HERE', () => {
+    // `apps/server/src/routes/**` is bound to docs/api-reference.md — a page in this repository,
+    // so the violation is fixable in the same commit and --strict must fail on it.
+    const dir = repoWithChange(
+      { 'apps/server/src/routes/x.ts': 'a\n', 'docs/api-reference.md': 'doc\n' },
+      { 'apps/server/src/routes/x.ts': 'b\n' },
+    )
+    const { code, out } = runCheck(dir, ['--strict'])
+    expect(out, 'the adapter named the region it read from git').toContain('HTTP API routes')
+    expect(code, 'a page in this repo is fixable, so strict fails').toBe(1)
+  })
+
+  it('and passes when the same commit moves that page', () => {
+    const dir = repoWithChange(
+      { 'apps/server/src/routes/x.ts': 'a\n', 'docs/api-reference.md': 'doc\n' },
+      { 'apps/server/src/routes/x.ts': 'b\n', 'docs/api-reference.md': 'doc updated\n' },
+    )
+    expect(runCheck(dir, ['--strict']).code, 'the green path exists').toBe(0)
+  })
+
+  it('a page in the docs repo is a warning here, never a red with no way out', () => {
+    // The shape #865 was filed for: with no docs checkout beside us, an authored page there cannot
+    // be moved by this diff, so failing on it would leave a contributor with no green path.
+    const dir = repoWithChange(
+      { 'apps/web/src/settings/AdminBillingTab.tsx': 'a\n' },
+      { 'apps/web/src/settings/AdminBillingTab.tsx': 'b\n' },
+    )
+    const { code, out } = runCheck(dir, ['--strict'])
+    expect(out).toContain('admin console')
+    expect(out, 'it says why it is only a warning').toContain('warn')
+    expect(code).toBe(0)
+  })
+
+  it('an empty diff is not a pass — it is nothing measured, and the run says so', () => {
+    // A fast-forward push has no diff against its own parent. The check cannot see a violation, and
+    // this test exists so that stays a KNOWN property rather than a silent green somebody trusts.
+    const dir = repoWithChange({ 'README.md': 'a\n' }, { 'README.md': 'a\n', 'unrelated.txt': 'x\n' })
+    const { code, out } = runCheck(dir, ['--strict'])
+    expect(code).toBe(0)
+    expect(out).toContain('OK')
   })
 })

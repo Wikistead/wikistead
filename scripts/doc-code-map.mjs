@@ -65,16 +65,31 @@ export const DOC_CODE_MAP = [
     doc: 'wikistead-docs/src/content/docs/editor/macros.md',
   },
   {
+    // #865: this pointed at `api/reference.md` in the docs repo — a page that has never existed
+    // there (`git log --all` on that path is empty). So the most-edited region in the tree was bound
+    // to something nobody could update, and once #704 armed the authored half, every PR touching a
+    // route went red with no green path. ADR-225's canon for the HTTP API is the page in THIS
+    // repository, which a route change can actually move in the same commit.
     label: 'HTTP API routes',
     kind: 'authored',
     code: ['apps/server/src/routes/**'],
-    doc: 'wikistead-docs/src/content/docs/api/reference.md',
+    doc: 'docs/api-reference.md',
   },
   {
+    // #865: `settings/**` held both halves of a split screen. The admin console lives in the same
+    // directory (Admin*.tsx — the tabs behind Admin →), and binding it to the MEMBER's account page
+    // told an admin-console change to update a page about the reader's own profile. The two are
+    // listed apart so each names the page a reader would actually go to.
     label: 'account settings',
     kind: 'authored',
-    code: ['apps/web/src/settings/**'],
+    code: ['apps/web/src/settings/Account*', 'apps/web/src/settings/ApiKeysPanel.tsx'],
     doc: 'wikistead-docs/src/content/docs/settings/account.md',
+  },
+  {
+    label: 'admin console',
+    kind: 'authored',
+    code: ['apps/web/src/settings/Admin*'],
+    doc: 'wikistead-docs/src/content/docs/admin/index.md',
   },
   // ── #729 / ADR-235: capabilities with nothing enumerable behind them ────────────────────────────
   //

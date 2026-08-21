@@ -45,11 +45,19 @@ if (violations.length === 0) {
   process.exit(0)
 }
 
-const enforceable = violations.filter((v) => v.kind === 'generated' || docsCheckoutPresent)
+// #865: what `--strict` may enforce is decided by WHERE THE PAGE IS, not by the entry's kind. A
+// violation is only fixable when the doc side can move in the same diff this check reads: pages in
+// this repository always can (generated ones, and the authored canon like docs/api-reference.md);
+// pages in the docs repository can only when its checkout is here beside us. Keying on `kind` meant
+// an authored page that lives HERE was reported as a warning nobody had to act on.
+const inThisRepo = (doc) => !doc.startsWith('wikistead-docs/')
+const enforceable = violations.filter((v) => inThisRepo(v.doc) || docsCheckoutPresent)
 const warnOnly = violations.filter((v) => !enforceable.includes(v))
 
 for (const v of violations) {
-  const where = v.kind === 'generated' ? 'run `pnpm docs:gen` and commit the result' : `update ${v.doc} (wikistead-docs)`
+  const where = v.kind === 'generated'
+    ? 'run `pnpm docs:gen` and commit the result'
+    : inThisRepo(v.doc) ? `update ${v.doc} in this commit` : `update ${v.doc} (wikistead-docs)`
   const hard = enforceable.includes(v)
   console.error(`doc↔code${hard ? '' : ' (warn — no docs checkout here)'}: "${v.label}" code changed without its docs page → ${where}`)
   for (const f of v.changedCode) console.error(`    changed: ${f}`)
