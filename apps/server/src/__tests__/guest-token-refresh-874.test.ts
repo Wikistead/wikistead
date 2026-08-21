@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
-import { decodeJwt } from 'jose'
+import { decodeJwt, SignJWT } from 'jose'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient, deleteObjectTuples } from '@wikistead/authz'
@@ -107,16 +107,54 @@ afterAll(async () => {
 describe('#874 the session continues, and nothing else does', () => {
   it('the pseudonym and the session start survive a refresh; the expiry does not', async () => {
     const link = await mkLink('edit')
-    const first = await mkTok(link)
+    // ⚠️ The session start is set an hour BACK, deliberately. Minting with the default and comparing
+    // the two tokens cannot see the defect this pin exists for: a refresh that dropped `ses` and let
+    // the mint restart it would produce the same second, and `after.ses === before.ses` would hold —
+    // measured, with the carry removed the whole file stayed green. An hour is not a sleep either;
+    // nothing here waits on the clock (#851 was the same lesson in a git fixture).
+    const startedAt = now() - 3600
+    const first = await mkTok(link, { ses: startedAt })
     const before = claimsOf(first)
+    expect(before.ses, 'the fixture, not the mint, decides when this session began').toBe(startedAt)
 
     const r = await refresh(link, first)
     expect(r.statusCode, r.body).toBe(200)
     const after = claimsOf((r.json() as { token: string }).token)
 
     expect(after.anonId, 'the pseudonym is the attribution key — it must not move').toBe(before.anonId)
-    expect(after.ses, 'the ceiling counts from the first entry, not from the token in hand').toBe(before.ses)
+    expect(after.ses, 'the ceiling counts from the first entry, not from the token in hand').toBe(startedAt)
     expect(after.capability).toBe(before.capability)
+  })
+
+  // ADR-248 §6 names this as its own acceptance, and it is the reason the pseudonym is called the
+  // attribution key rather than a rate-limiting detail: the page a guest wrote before their token was
+  // renewed and the one they wrote after have to be BY THE SAME PERSON. Asserted from the row, because
+  // the create response does not carry `created_by` — the pin has to read where the attribution lands.
+  it('attribution survives a refresh — both pages are by the same guest', async () => {
+    const link = await mkLink('edit')
+    const tok = await mkTok(link, { anonId: anon(), ses: now() - 3600 })
+
+    const before = await createAsGuest(tok, 'written before the renewal')
+    expect(before.statusCode, before.body).toBe(201)
+    const beforeId = (before.json() as { id: string }).id
+    createdPages.push(beforeId)
+
+    const r = await refresh(link, tok)
+    expect(r.statusCode, r.body).toBe(200)
+    const renewed = (r.json() as { token: string }).token
+
+    const after = await createAsGuest(renewed, 'written after the renewal')
+    expect(after.statusCode, after.body).toBe(201)
+    const afterId = (after.json() as { id: string }).id
+    createdPages.push(afterId)
+
+    const rows = await admin<{ id: string; created_by: string | null }[]>`
+      SELECT id, created_by FROM pages WHERE id IN (${beforeId}, ${afterId})`
+    expect(rows, 'both pages exist').toHaveLength(2)
+    expect(rows[0]!.created_by, 'a guest is attributed by their pseudonym').toBe(rows[1]!.created_by)
+    // The pseudonym goes in bare — `anon:<hex>` is already namespaced, so nothing prefixes it here.
+    expect(rows[0]!.created_by, 'and it is the one the token carried, not a fresh one')
+      .toBe(claimsOf(tok).anonId)
   })
 
   // The budgets are the reason the refresh is not the public mint. `normalizeRateMax` reads an unset
@@ -211,23 +249,65 @@ describe('#874 the twelve-hour ceiling', () => {
     expect(r.json(), 'about the token the caller already holds — it reveals nothing about the link').toEqual({ error: 'session_ended' })
   })
 
-  it('a session one minute short of the ceiling still refreshes', async () => {
+  it('a session one minute short of the ceiling still refreshes — and the renewal is still that old', async () => {
     const link = await mkLink('edit')
-    const nearly = await mkTok(link, { ses: now() - GUEST_SESSION_CEILING_SECONDS + 60 })
-    expect((await refresh(link, nearly)).statusCode).toBe(200)
+    const startedAt = now() - GUEST_SESSION_CEILING_SECONDS + 60
+    const nearly = await mkTok(link, { ses: startedAt })
+    const r = await refresh(link, nearly)
+    expect(r.statusCode, r.body).toBe(200)
+
+    // The second hop, and the reason the first is not enough: a refresh could carry `ses` far enough
+    // to pass the check above and still hand back a token that starts the clock again. Then the next
+    // refresh would pass, and the next — a session that renews itself past twelve hours one token at
+    // a time, which is the thing §3.7 ruled out. The renewed token has to be as old as the original.
+    const renewed = claimsOf((r.json() as { token: string }).token)
+    expect(renewed.ses, 'the renewal inherits the age; it does not begin a second session').toBe(startedAt)
+    expect((await refresh(link, await mkTok(link, { ses: renewed.ses! - 120 }))).statusCode,
+      'and two minutes further on, the same session is over').toBe(401)
   })
 
   // A token minted before `ses` shipped carries none. Reading it as `iat` errs toward ending the
   // session sooner, which is the safe direction; the alternative is a token that never ages.
   it('a token with no session start is aged by its issue time, not treated as new', async () => {
     const link = await mkLink('edit')
-    const legacy = await mintGuestToken(
-      { secret: guestCfg.secret, ttlSeconds: 300 },
-      { tenantId: TENANT, shareLinkId: link, resource: { type: 'space', id: spaceId }, capability: 'edit' },
-    )
-    // Strip `ses` the way a pre-#874 token would have been minted, keeping everything else identical.
-    expect(claimsOf(legacy).ses, 'the mint sets it now — this case is about tokens that predate it').toBeTypeOf('number')
-    expect((await refresh(link, legacy)).statusCode).toBe(200)
+    // ⚠️ Signed here rather than minted: `mintGuestToken` fills `ses` in unconditionally, so asking it
+    // for a token without one is impossible and an earlier version of this case settled for asserting
+    // that the mint HAD set it — which walked the ordinary path and left `claims.ses ?? claims.iat`
+    // unexercised. This is the pre-#874 shape byte for byte: every claim the mint writes, minus that one.
+    const issuedAt = now() - GUEST_SESSION_CEILING_SECONDS + 120
+    const legacy = await new SignJWT({
+      tenantId: TENANT, shareLinkId: link, resource: { type: 'space', id: spaceId }, capability: 'edit',
+      anonId: claimsOf(await mkTok(link)).anonId,
+    })
+      .setProtectedHeader({ alg: 'HS256', typ: 'guest+jwt' })
+      .setIssuedAt(issuedAt)
+      .setExpirationTime(now() + 300)
+      .sign(new TextEncoder().encode(guestCfg.secret))
+    expect(claimsOf(legacy).ses, 'this token predates the claim — that is the whole case').toBeUndefined()
+
+    const r = await refresh(link, legacy)
+    expect(r.statusCode, r.body).toBe(200)
+    // Aged by `iat`, so the renewal carries THAT as the session start rather than starting fresh.
+    expect(claimsOf((r.json() as { token: string }).token).ses,
+      'the issue time becomes the session start, so the ceiling still arrives').toBe(issuedAt)
+  })
+
+  it('and a legacy token already past the ceiling by its issue time is refused', async () => {
+    // The other direction. Without it, reading `ses ?? iat` could fall back to `now` — the token would
+    // never age, which the comment above calls the alternative it rejected — and the case above would
+    // still pass, because a token that never ages refreshes happily.
+    const link = await mkLink('edit')
+    const old = await new SignJWT({
+      tenantId: TENANT, shareLinkId: link, resource: { type: 'space', id: spaceId }, capability: 'edit',
+      anonId: claimsOf(await mkTok(link)).anonId,
+    })
+      .setProtectedHeader({ alg: 'HS256', typ: 'guest+jwt' })
+      .setIssuedAt(now() - GUEST_SESSION_CEILING_SECONDS - 60)
+      .setExpirationTime(now() + 300)
+      .sign(new TextEncoder().encode(guestCfg.secret))
+    const r = await refresh(link, old)
+    expect(r.statusCode).toBe(401)
+    expect(r.json()).toEqual({ error: 'session_ended' })
   })
 
   it('a password link refreshes without a prompt inside the ceiling, and meets the door past it', async () => {
