@@ -22,7 +22,7 @@
 // true: the return value is ignored and a sink that throws is swallowed. An authorization answer must
 // never depend on whether logging worked.
 
-/** One batch in which the store answered for some ids and errored on others. */
+/** One batch in which the store did not answer for every id on the first, widest attempt. */
 export interface AuthzDegradation {
   /** The relation asked about — an FGA word (`view`, `access_manager`). Operator-facing only (#619). */
   relation: string
@@ -32,6 +32,13 @@ export interface AuthzDegradation {
   candidates: number
   /** How many of them the store could not answer, and which were therefore reported as denied. */
   unanswered: number
+  /**
+   * #799: how many ids the store went silent about on the first, wide round-trip and then answered
+   * when they were asked again in narrower ones. These cost nobody a row — they are here because a
+   * batch that only just made it and a batch that did not should not look the same in a log, and
+   * because a rising number is the store telling an operator it is running out of deadline.
+   */
+  recovered: number
   /**
    * The store's own words for the first failure — `deadline_exceeded` is the one seen in the wild.
    * #816: an id the store never spoke about brings no words of its own, so a batch thinned by SILENCE
