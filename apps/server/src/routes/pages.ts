@@ -819,7 +819,11 @@ export async function toggleTask(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { pageId: string; subject: string; createdBy: string; index: number; context?: { current_time: string } },
+  // #830: `to` is the state the caller believes the box is moving TO. Named for that and not `checked`,
+  // because the widget's own `checked` is the PRE-click state and one inverted reading is all this
+  // comparison would need to go quietly wrong. Optional, so a client that predates this behaves as it
+  // did — see the refusal below for what it buys.
+  args: { pageId: string; subject: string; createdBy: string; index: number; to?: boolean; context?: { current_time: string } },
 ): Promise<{ publishedAt: Date | null }> {
   const canEdit = await check(fga, args.subject, 'edit', { type: 'page', id: args.pageId }, args.context)
   if (!canEdit) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
@@ -868,6 +872,30 @@ export async function toggleTask(
     const pubStates = taskStates(publishedMd)
     const diff = draftStates.reduce<number[]>((acc, st, i) => (st !== pubStates[i] ? [...acc, i] : acc), [])
     if (diff.length === 0 || !diff.includes(args.index)) {
+      // #830: this state has TWO causes and they need different answers, because one of them is a
+      // reader looking at a tick that does not exist.
+      //
+      // `task_burst` was written for the fast clicker: a sibling request already folded this flip, so
+      // the draft and the published snapshot agree about it and the client is told to keep what the
+      // user is looking at. Correct — the flip IS published.
+      //
+      // The other cause is that the flip never reached the persisted draft at all. The client writes
+      // it into the live document and the collaboration server persists it; with that socket dead the
+      // write goes nowhere, the draft still holds the old state, and the two snapshots agree for the
+      // opposite reason. Measured in a real browser with the socket refused: the box stayed ticked on
+      // screen and `published_md` still read `- [ ] ship it`.
+      //
+      // The two are indistinguishable from the snapshots alone — both are "draft and published agree
+      // here" — so the caller says which state it is moving TO. If that is what published already holds,
+      // somebody folded it (burst). If it is the opposite, nothing was folded and nothing arrived, and
+      // the client has to put the checkbox back.
+      //
+      // A caller that sends no `to` gets the old answer, so a tab left open across a deploy keeps
+      // today's behaviour rather than a code it has never heard of.
+      const publishedHere = pubStates[args.index]
+      if (args.to !== undefined && publishedHere !== undefined && publishedHere !== args.to) {
+        throw Object.assign(new Error('the flip never reached the draft; nothing was published'), { statusCode: 409, code: 'task_not_stored' })
+      }
       throw Object.assign(new Error('the claimed checkbox is not flipped in the draft'), { statusCode: 409, code: 'task_burst' })
     }
 
@@ -4702,13 +4730,16 @@ export async function pagesPlugin(app: FastifyInstance) {
   // Toggle a single task checkbox on the published page WITHOUT creating a revision
   // (ADR-019). Edit-gated (FGA bastion) like publish; the client has already flipped
   // the live draft, so flush it first, then fold the one flip into published_md.
-  app.post<{ Params: { pageId: string }; Body: { index: number } }>(
+  app.post<{ Params: { pageId: string }; Body: { index: number; to?: boolean } }>(
     '/pages/:pageId/tasks/toggle', { config: { guest: 'edit' } }, async (req) => {
       const body = requireBody(req.body) // #667`index` is required, and undefined would toggle nothing
       const p = principalForPage(req, req.params.pageId)
       await flushDraft(app.valkey, docName(req.tenant.id, req.params.pageId))
       return toggleTask(req.db, app.fga, app.searchDriver, {
-        pageId: req.params.pageId, subject: p.subject, createdBy: p.createdBy, index: body.index, context: p.context,
+        pageId: req.params.pageId, subject: p.subject, createdBy: p.createdBy, index: body.index,
+        // #830: optional, and only ever used to tell a folded flip from one that never arrived.
+        to: typeof body.to === 'boolean' ? body.to : undefined,
+        context: p.context,
       })
     },
   )

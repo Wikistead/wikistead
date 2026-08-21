@@ -919,11 +919,16 @@ export function useToggleTask(pageId: string) {
     // invalidate once everything settled — intermediate toggles skip the refetch, so the widget keeps
     // the optimistic state until the final committed snapshot arrives.
     mutationKey: ["toggle", pageId],
-    mutationFn: ({ index, applyFlip }: { index: number; applyFlip?: () => void; checked?: boolean }) => {
+    mutationFn: ({ index, applyFlip, checked }: { index: number; applyFlip?: () => void; checked?: boolean }) => {
       applyFlip?.(); // the draft flip lands NOW (no chain) — see the note above
+      // #830: the state the box is moving TO travels with the index. The server cannot otherwise tell
+      // "a faster click already folded this" from "the flip never reached the draft", because both look
+      // like the draft and the published snapshot agreeing about this box — and the second one leaves a
+      // tick on screen that nothing stored. ⚠️ `checked` here is the PRE-click state (the widget's), so
+      // the state being moved to is its negation.
       return apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
         method: "POST",
-        body: JSON.stringify({ index }),
+        body: JSON.stringify(checked === undefined ? { index } : { index, to: !checked }),
       });
     },
     // #361the SIDEBAR ring is the one progress surface not derived from a document — it reads

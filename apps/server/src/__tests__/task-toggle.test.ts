@@ -86,6 +86,76 @@ describe('task-checkbox toggle (no-revision, ADR-019)', () => {
       .rejects.toMatchObject({ statusCode: 409 }) // …but index 0 claimed → reject
   })
 
+  // #830: the two causes of "the claimed box is not flipped in the draft" need different answers.
+  //
+  // `task_burst` was written for the fast clicker — a sibling request already folded this flip, so the
+  // client keeps what the user is looking at, correctly, because the flip IS published. The other
+  // cause is that the flip never reached the draft at all (the live document could not carry it), and
+  // there the client is keeping a tick that stands for nothing. Reproduced in a real browser with the
+  // collaboration socket refused: the box stayed ticked and `published_md` still read `- [ ] ship it`.
+  //
+  // The snapshots cannot tell them apart — both are "draft and published agree here" — so the caller
+  // says which state it flipped TO, and that is the whole difference.
+  describe('#830: a flip that never arrived is not a burst', () => {
+    it('the desired state matching published is a BURST (somebody folded it) — keep the tick', async () => {
+      // published holds `[ ] alpha`. A caller moving TO `false` is asking for what published already
+      // says, so somebody folded a tick and then a sibling untick: nothing to do, nothing lost.
+      await setDraft(pageId, BASE)
+      await expect(toggleTask(db, fgaClient, app.searchDriver, {
+        pageId, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 0, to: false,
+      })).rejects.toMatchObject({ statusCode: 409, code: 'task_burst' })
+    })
+
+    it('the desired state DIFFERING from published means it never arrived — say so', async () => {
+      // The caller is moving TO `true` (a tick), the draft never received it, and published still holds
+      // `[ ]`. This is the state that leaves a tick on screen with nothing behind it.
+      await setDraft(pageId, BASE)
+      await expect(toggleTask(db, fgaClient, app.searchDriver, {
+        pageId, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 0, to: true,
+      })).rejects.toMatchObject({ statusCode: 409, code: 'task_not_stored' })
+    })
+
+    it('a caller that says nothing gets the old answer', async () => {
+      // A tab open across a deploy sends no `to`. It must not meet a code it has never heard of.
+      await setDraft(pageId, BASE)
+      await expect(toggleTask(db, fgaClient, app.searchDriver, {
+        pageId, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 0,
+      })).rejects.toMatchObject({ statusCode: 409, code: 'task_burst' })
+    })
+
+    it('an index published has never heard of stays a burst, not a lost flip', async () => {
+      // A stale or fabricated index is not evidence that anything went missing, and answering
+      // `task_not_stored` there would make the client revert a box it cannot even see.
+      await setDraft(pageId, BASE)
+      await expect(toggleTask(db, fgaClient, app.searchDriver, {
+        pageId, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 99, to: true,
+      })).rejects.toMatchObject({ statusCode: 409, code: 'task_burst' })
+    })
+
+    it('a flip that DID arrive still succeeds with the state attached', async () => {
+      // The break-check for the whole thing: the new argument must not turn the ordinary success path
+      // into a refusal. ⚠️ On its OWN page — this one folds a flip into published, and the file's
+      // remaining 409 cases compare against the shared page's unchecked baseline (see the note above
+      // `describe`, which is the reason the original success case runs last).
+      const own = await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'Task Toggle 830' })
+      try {
+        await setDraft(own.id, BASE)
+        await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId: own.id, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+        await setDraft(own.id, `# Tasks\n\n- [x] alpha\n- [ ] beta\n`)
+        await expect(toggleTask(db, fgaClient, app.searchDriver, {
+          pageId: own.id, subject: 'user:dev-user', createdBy: 'user:dev-user', index: 0, to: true,
+        })).resolves.toBeTruthy()
+        expect((await getPublished(db, fgaClient, { pageId: own.id, subject: 'user:dev-user' })).publishedMd).toContain('- [x] alpha')
+      } finally {
+        await app.searchDriver.deleteDoc(own.id).catch(() => {})
+        await admin`DELETE FROM revisions WHERE page_id = ${own.id}`.catch(() => {})
+        await admin`DELETE FROM search_outbox WHERE page_id = ${own.id}`.catch(() => {})
+        await admin`DELETE FROM checkbox_events WHERE page_id = ${own.id}`.catch(() => {})
+        await admin`DELETE FROM pages WHERE id = ${own.id}`.catch(() => {})
+      }
+    })
+  })
+
   it('a single checkbox flip succeeds, updates published_md, and creates NO revision', async () => {
     const before = await revisionCount(pageId)
     expect(before).toBe(1) // just the baseline publish
