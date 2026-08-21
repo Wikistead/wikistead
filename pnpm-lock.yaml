@@ -184,9 +184,6 @@ importers:
       '@types/nodemailer':
         specifier: ^8.0.1
         version: 8.0.1
-      '@wikistead/entitlements-cloud':
-        specifier: workspace:^
-        version: link:../../packages/entitlements-cloud
       jose:
         specifier: ^5.9.0
         version: 5.10.0
@@ -449,72 +446,7 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
-  packages/ee-server:
-    dependencies:
-      '@fastify/cookie':
-        specifier: ^11
-        version: 11.0.2
-      '@node-saml/node-saml':
-        specifier: ^5.1.0
-        version: 5.1.0
-      '@openfga/sdk':
-        specifier: ^0.8.1
-        version: 0.8.1
-      '@wikistead/authz':
-        specifier: workspace:*
-        version: link:../authz
-      '@wikistead/entitlements':
-        specifier: workspace:^
-        version: link:../entitlements
-      '@wikistead/entitlements-cloud':
-        specifier: workspace:^
-        version: link:../entitlements-cloud
-      '@wikistead/events':
-        specifier: workspace:^
-        version: link:../events
-      '@wikistead/hooks':
-        specifier: workspace:^
-        version: link:../hooks
-      '@wikistead/server':
-        specifier: workspace:*
-        version: link:../../apps/server
-      '@wikistead/types':
-        specifier: workspace:*
-        version: link:../types
-      fastify:
-        specifier: ^5.0.0
-        version: 5.8.5
-      ioredis:
-        specifier: ^5.3.0
-        version: 5.11.1
-    devDependencies:
-      postgres:
-        specifier: ^3.4.0
-        version: 3.4.9
-      tsx:
-        specifier: ^4.19.0
-        version: 4.22.4
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.6
-        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.19.21)(happy-dom@20.10.6)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(sass@1.51.0)(tsx@4.22.4)(yaml@2.9.0)
-      xml-crypto:
-        specifier: ^6.1.2
-        version: 6.1.2
-
   packages/entitlements:
-    devDependencies:
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-
-  packages/entitlements-cloud:
-    dependencies:
-      '@wikistead/entitlements':
-        specifier: workspace:*
-        version: link:../entitlements
     devDependencies:
       typescript:
         specifier: ^5.6.0
