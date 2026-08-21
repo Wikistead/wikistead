@@ -4,15 +4,14 @@
 // enforces it before letting anyone into the Yjs room. Rooms are tenant-namespaced.
 import * as Y from "yjs";
 import { Hocuspocus } from "@hocuspocus/server";
-import type { onAuthenticatePayload } from "@hocuspocus/server";
 import { Redis } from "@hocuspocus/extension-redis";
 import { Database } from "@hocuspocus/extension-database";
 import IORedis from "ioredis";
 import { docName } from "@wikistead/types";
 import { fgaClient, check } from "@wikistead/authz";
 import { loadYdoc, storeYdoc, compactIfBloated } from "./ydoc.js";
-import { authenticate, parseDocName } from "./authenticate.js";
-import { readConnectCaps, guestConnectRateAllowed } from "./abuse-rate.js"; // #328 / ADR-140 increment 2
+import { parseDocName } from "./authenticate.js";
+import { makeOnAuthenticate } from "./on-authenticate.js";
 import { selectGuestConnectionsToClose, parseRevokeMessage } from "./revoke.js";
 import { planBodyEdit, EditApplyError, parseMcpEditRequest } from "./mcp-edit-apply.js";
 
@@ -89,23 +88,8 @@ const server = new Hocuspocus({
     }),
   ],
 
-  async onAuthenticate({ token, documentName }: onAuthenticatePayload) {
-    const result = await authenticate({ token, documentName });
-    // #328 / ADR-140 increment 2: guest connect/reconnect rate cap (per share link + per #331 session —
-    // never raw IP). AFTER authenticate so an unauthorized token never reaches a bucket (no pre-auth
-    // probe), and members are never capped. Defaults (NULL) short-circuit with zero Valkey I/O. This is
-    // the ADR-140 I4 seam: the share-link id and the session id are both in hand exactly here.
-    if (result.principal.kind === "guest") {
-      const caps = await readConnectCaps(result.principal.tenantId);
-      const allowed = await guestConnectRateAllowed(rateValkey, caps, {
-        tenantId: result.principal.tenantId,
-        shareLinkId: result.principal.shareLinkId,
-        anonId: result.principal.anonId,
-      });
-      if (!allowed) throw new Error("forbidden: connection rate limited"); // static reason — no content/limit echo
-    }
-    return result;
-  },
+  // #811: the join gate lives in on-authenticate.ts so the enforcement test drives the shipped hook.
+  onAuthenticate: makeOnAuthenticate(rateValkey),
 });
 
 server.listen();
