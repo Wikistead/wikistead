@@ -67,6 +67,13 @@ await waitFor(`http://localhost:${P.s3}`, "storage-s3", { ok: false });
 console.log("[server-test] migrate…");
 run(`npx tsx --env-file=.env.server-test apps/server/src/migrate.ts`);
 
+// #823: start from a store that holds only what the seed writes. The bootstrap below reuses the store
+// named `wikistead` forever, so every run's fixtures piled up in one — 337,127 tuples on a stack that
+// had been running a while, which is enough for a batched authorization check to miss its deadline and
+// for two suites to go red from a diff that touched neither. See the script for the measurement.
+console.log("[server-test] retire the previous permission store…");
+run(`npx tsx ${ENVS} infra/openfga/reset-test-store.ts`);
+
 console.log("[server-test] fga bootstrap…");
 const out = capture(`npx tsx --env-file=.env.server-test infra/openfga/bootstrap.ts`);
 const storeId = /OPENFGA_STORE_ID=(.+)/.exec(out)?.[1]?.trim();
