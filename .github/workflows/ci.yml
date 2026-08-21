@@ -10,7 +10,7 @@ env:
   # §Consequences — that is the point). Public repo, so no token; a set-but-uncloneable value
   # fails the checkout step itself — half-armed is loud, never a silent fall-back to warn
   # (the silent fall-back IS the hole #704 closes).
-  DOCS_REPO: CHANGE_ME
+  DOCS_REPO: Wikistead/wikistead-docs
 
 jobs:
   build:
