@@ -151,7 +151,7 @@ describe("collab authenticate — guest capability ⇒ readOnly (write fortress)
 
 // #104 / ADR-038: a SPACE share-link token admits the guest to ANY published page that
 // inherits view from the space — not just one page — and never to a page outside the space
-// or after revoke. View-only.
+// or after revoke. A VIEW link stays view-only; the EDIT link is #812's block below.
 describe("collab authenticate — space share-link token (#104)", () => {
   const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
   const SPACE = "sl-space-104";
@@ -170,7 +170,7 @@ describe("collab authenticate — space share-link token (#104)", () => {
       // a page in the space → admitted, view-only (no page-id match needed for a space token)
       const r = await authenticate({ token, documentName: DOC }); // DOC = t:tenant_dev:p:demo
       expect(r.principal).toMatchObject({ kind: "guest", shareLinkId: LINK });
-      expect(r.readOnly).toBe(true); // space links are view-only
+      expect(r.readOnly).toBe(true); // a space VIEW link is read-only (its capability, not its kind)
 
       // a page NOT in the space → rejected (inheritance doesn't reach it)
       await expect(authenticate({ token, documentName: "t:tenant_dev:p:not-in-space-xyz" }))
@@ -182,6 +182,67 @@ describe("collab authenticate — space share-link token (#104)", () => {
     } finally {
       // Individually — spaceGrant was already deleted by the revoke step above.
       for (const t of [spaceGrant, pageInSpace]) await deleteTuples(fgaClient, [t]).catch(() => {});
+    }
+  });
+});
+
+// #812 / #274 / ADR-135: the space EDIT link. collab used to overwrite a space token's capability with
+// "view" — a fossil of ADR-038, when `space#editor` had no share_link type at all. Once #811 made
+// read-only real, that line would have demoted every anonymous-wiki editor to a reader. The token's
+// capability is now honoured for a space link exactly as for a page link, and OpenFGA (editor from
+// space) remains the authority: forging `edit` on a view-only link is refused, not silently downgraded.
+describe("collab authenticate — space EDIT share-link token (#812)", () => {
+  const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 };
+  const SPACE = "sl-space-812";
+  const EDIT_LINK = "sl-editlink-812";
+  const VIEW_LINK = "sl-viewlink-812";
+  const editGrant = { user: `share_link:${EDIT_LINK}`, relation: "editor", object: `space:${SPACE}` };
+  const viewGrant = { user: `share_link:${VIEW_LINK}`, relation: "viewer", object: `space:${SPACE}` };
+  const pageInSpace = { user: `space:${SPACE}`, relation: "space", object: `page:${PAGE}` };
+  const all = [editGrant, viewGrant, pageInSpace];
+  const mint = (shareLinkId: string, capability: Capability) => mintGuestToken(guestCfg, {
+    tenantId: "tenant_dev", shareLinkId, resource: { type: "space", id: SPACE }, capability,
+  });
+
+  beforeAll(async () => {
+    for (const t of all) await deleteTuples(fgaClient, [t]).catch(() => {});
+    await writeTuples(fgaClient, all);
+  });
+  afterAll(async () => { for (const t of all) await deleteTuples(fgaClient, [t]).catch(() => {}); });
+
+  it("admits a space EDIT guest WRITABLE (edit inherited from space#editor)", async () => {
+    const r = await authenticate({ token: await mint(EDIT_LINK, "edit"), documentName: DOC });
+    expect(r.principal).toMatchObject({ kind: "guest", shareLinkId: EDIT_LINK, capability: "edit" });
+    expect(r.readOnly).toBe(false);
+  });
+
+  it("lets a space EDIT guest into the ephemeral Excalidraw room (#811 ruling 3)", async () => {
+    const r = await authenticate({ token: await mint(EDIT_LINK, "edit"), documentName: `${DOC}:x:anchor-812` });
+    expect(r.readOnly).toBe(false);
+  });
+
+  it("refuses a space token that CLAIMS edit on a VIEW-only link (intent is not authority)", async () => {
+    await expect(authenticate({ token: await mint(VIEW_LINK, "edit"), documentName: DOC }))
+      .rejects.toThrow(/denied|expired|forbidden/);
+  });
+
+  it("refuses a space VIEW guest the ephemeral room (co-editing a drawing requires edit)", async () => {
+    await expect(authenticate({ token: await mint(VIEW_LINK, "view"), documentName: `${DOC}:x:anchor-812` }))
+      .rejects.toThrow(/denied|expired|forbidden|edit/);
+  });
+
+  it("still refuses a space EDIT guest a page OUTSIDE the space (the space is the boundary)", async () => {
+    await expect(authenticate({ token: await mint(EDIT_LINK, "edit"), documentName: "t:tenant_dev:p:not-in-space-812" }))
+      .rejects.toThrow(/denied|expired|forbidden/);
+  });
+
+  it("refuses the same EDIT token after revoke (deleting the one space tuple)", async () => {
+    await deleteTuples(fgaClient, [editGrant]);
+    try {
+      await expect(authenticate({ token: await mint(EDIT_LINK, "edit"), documentName: DOC }))
+        .rejects.toThrow(/denied|expired|forbidden/);
+    } finally {
+      await writeTuples(fgaClient, [editGrant]).catch(() => {});
     }
   });
 });
