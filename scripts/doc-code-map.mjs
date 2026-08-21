@@ -368,6 +368,21 @@ export function evaluateSurfaceDocs(discovered, ledger = SURFACE_DOCS) {
 // Evaluate the linkage against a set of changed files. Returns one violation per map
 // entry whose code region changed but whose docs page did NOT — i.e. code and docs were
 // decoupled in this change.
+// #877: what the run actually JUDGED, so a green can say which kind of green it is.
+//
+// `evaluateDocLinks` returns violations, and an empty list has two very different causes: every
+// touched binding moved its page, or NO binding was touched at all. A fast-forward push has no diff
+// against its own parent, so the second case is the normal one there — and it printed the same
+// sentence as a run that checked something. #865 added a test meaning to make that a known property
+// and asserted only that the word OK appeared; the run did not, in fact, say so.
+//
+// Counting is NOT a gate. Zero judged is the honest answer on a fast-forward and failing on it would
+// stop every session's merge (#180 / #851: a check does not take merges hostage). It is reported.
+export function docLinkCoverage(changedFiles, map = DOC_CODE_MAP) {
+  const judged = map.filter((entry) => changedFiles.some((f) => matchesAny(f, entry.code)))
+  return { bindings: map.length, judged: judged.length, changedFiles: changedFiles.length }
+}
+
 export function evaluateDocLinks(changedFiles, map = DOC_CODE_MAP) {
   const changed = new Set(changedFiles)
   const violations = []

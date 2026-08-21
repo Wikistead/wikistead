@@ -208,11 +208,28 @@ describe('#865 the git adapter of check-doc-links', () => {
   })
 
   it('an empty diff is not a pass — it is nothing measured, and the run says so', () => {
-    // A fast-forward push has no diff against its own parent. The check cannot see a violation, and
-    // this test exists so that stays a KNOWN property rather than a silent green somebody trusts.
+    // A fast-forward push has no diff against its own parent. The check cannot see a violation, so it
+    // passes; #877 is that it used to pass with the SAME sentence as a run that judged something, and
+    // the fast-forward path always takes this branch — the reassuring line appeared most often exactly
+    // where nothing had been checked. Asserting the word OK, as this test first did, could not tell
+    // the two apart: it named a property the run did not have.
     const dir = repoWithChange({ 'README.md': 'a\n' }, { 'README.md': 'a\n', 'unrelated.txt': 'x\n' })
     const { code, out } = runCheck(dir, ['--strict'])
     expect(code).toBe(0)
-    expect(out).toContain('OK')
+    expect(out, 'the run says the diff judged no binding').toContain('NOTHING MEASURED')
+    expect(out, 'and how many there were to judge').toMatch(/touched none of the \d+ binding\(s\)/)
+  })
+
+  it('and a run that DID judge a binding says a different thing', () => {
+    // The other half, and the one that makes the assertion above worth having: without it, printing
+    // "NOTHING MEASURED" unconditionally would pass. Two greens, two sentences.
+    const dir = repoWithChange(
+      { 'apps/server/src/routes/x.ts': 'a\n', 'docs/api-reference.md': 'doc\n' },
+      { 'apps/server/src/routes/x.ts': 'b\n', 'docs/api-reference.md': 'doc updated\n' },
+    )
+    const { code, out } = runCheck(dir, ['--strict'])
+    expect(code).toBe(0)
+    expect(out, 'it counts what it judged').toMatch(/\d+ of \d+ binding\(s\) judged/)
+    expect(out, 'and does not claim the empty-diff shape').not.toContain('NOTHING MEASURED')
   })
 })

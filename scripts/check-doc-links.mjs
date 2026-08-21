@@ -19,7 +19,7 @@
 // DOC_LINK_BASE (env) or `origin/main`, falling back to HEAD~1 for a local run.
 import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { evaluateDocLinks } from './doc-code-map.mjs'
+import { evaluateDocLinks, docLinkCoverage } from './doc-code-map.mjs'
 
 const strict = process.argv.includes('--strict')
 const docsCheckoutPresent = existsSync('wikistead-docs')
@@ -39,9 +39,19 @@ function changedFiles() {
 
 const files = changedFiles()
 const violations = evaluateDocLinks(files)
+const { bindings, judged, changedFiles: changedCount } = docLinkCoverage(files)
 
+// #877: say which green this is. A run that judged nothing and a run that judged three bindings and
+// found them all satisfied printed the SAME sentence, and the fast-forward path always takes the
+// first one — so the reassuring line appeared most often exactly where nothing had been checked.
 if (violations.length === 0) {
-  console.log('OK: doc↔code linkage satisfied (no designated code region changed without its docs page).')
+  console.log(
+    judged === 0
+      ? `OK: doc↔code linkage — NOTHING MEASURED: ${changedCount} changed file(s) touched none of the ${bindings} binding(s). ` +
+        'A fast-forward push has no diff against its own parent, so this is a green that checked nothing.'
+      : `OK: doc↔code linkage satisfied — ${judged} of ${bindings} binding(s) judged, every one moved its page ` +
+        `(${changedCount} changed file(s)).`,
+  )
   process.exit(0)
 }
 
@@ -62,5 +72,5 @@ for (const v of violations) {
   console.error(`doc↔code${hard ? '' : ' (warn — no docs checkout here)'}: "${v.label}" code changed without its docs page → ${where}`)
   for (const f of v.changedCode) console.error(`    changed: ${f}`)
 }
-console.error(`\n${violations.length} doc↔code linkage issue(s) (${enforceable.length} enforceable, ${warnOnly.length} warn). See ADR-080 / ADR-225 §4.1.`)
+console.error(`\n${violations.length} doc↔code linkage issue(s) of ${judged} binding(s) judged (${enforceable.length} enforceable, ${warnOnly.length} warn). See ADR-080 / ADR-225 §4.1.`)
 process.exit(strict && enforceable.length > 0 ? 1 : 0)
