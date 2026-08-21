@@ -12,7 +12,7 @@ import { registerAuthzHooks } from '@wikistead/hooks'
 
 // A fake FGA whose verdict for a given object is deterministic via `allow(id)`. It records every
 // batchCheck call (chunk sizes) and every per-id check call, so a test can prove WHICH path ran.
-function fakeFga(allow: (id: string) => boolean, opts: { errorFor?: (id: string) => boolean; throwBatch?: boolean } = {}) {
+function fakeFga(allow: (id: string) => boolean, opts: { errorFor?: (id: string) => boolean; throwBatch?: boolean; dropFor?: (id: string) => boolean } = {}) {
   const batchChunks: number[] = []
   const checkCalls: string[] = []
   const client = {
@@ -24,11 +24,16 @@ function fakeFga(allow: (id: string) => boolean, opts: { errorFor?: (id: string)
       if (opts.throwBatch) throw new Error('rpc transport error')
       batchChunks.push(body.checks.length)
       return {
-        result: body.checks.map((c) => {
+        // #816: `dropFor` omits the entry ENTIRELY rather than marking it errored. The server answers
+        // with a map and the SDK folds it into a list, so an id the store never spoke about simply has
+        // no element here — which is a different shape from an element carrying an error, and the one
+        // nothing was measuring.
+        result: body.checks.flatMap((c) => {
           const id = c.object.replace(/^page:/, '')
-          return opts.errorFor?.(id)
+          if (opts.dropFor?.(id)) return []
+          return [opts.errorFor?.(id)
             ? { allowed: false, request: c, correlationId: c.correlationId!, error: { message: 'item deadline' } }
-            : { allowed: allow(id), request: c, correlationId: c.correlationId! }
+            : { allowed: allow(id), request: c, correlationId: c.correlationId! }]
         }),
       }
     },
@@ -103,6 +108,29 @@ describe('#500 / ADR-183: filterAuthorized over server-side BatchCheck', () => {
     const ids = Array.from({ length: 60 }, (_, i) => `r${i}`)
     const { client } = fakeFga(() => true, { errorFor: (id) => Number(id.slice(1)) < 50 })
     await expect(filterAuthorized(client, 'user:u', 'view', ids)).rejects.toThrow(/answered none of 50/)
+  })
+
+  // #816. 4c closed the door where every entry comes back ERRORED. The store has a third one: the call
+  // succeeds and the response carries NO ENTRY AT ALL for an id. The code counted the ways an answer can
+  // be bad instead of counting the ids that got one, so a response with no entries counted zero of them
+  // as unanswered — the degradation report stayed quiet, the refusal never fired, and the whole chunk
+  // was denied in silence. The amendment's own words ("a chunk that yields no error-free verdict
+  // throws") already covered this; the arithmetic did not reach it.
+  it('4f: a response with NO ENTRIES is a failure, not a set of denials (the third door)', async () => {
+    const { client } = fakeFga(() => true, { dropFor: () => true })
+    await expect(filterAuthorized(client, 'user:u', 'view', ['a', 'b', 'c']))
+      .rejects.toThrow(/answered none of 3/)
+  })
+
+  it('4g: a PARTLY missing response denies the missing ids and still answers for the rest', async () => {
+    // The break-check for 4f: the fix must not have turned "fewer rows" into "an error page" here
+    // either. Fail-closed for the ids the store did not speak about is the behaviour ADR-183 §3 chose,
+    // and it is unchanged — what changes is that those ids are now COUNTED, which is what lets both the
+    // report and the refusal see them.
+    const ids = Array.from({ length: 10 }, (_, i) => `t${i}`)
+    const { client } = fakeFga(() => true, { dropFor: (id) => Number(id.slice(1)) % 2 === 0 })
+    const out = await filterAuthorized(client, 'user:u', 'view', ids)
+    expect(out).toEqual(new Set(ids.filter((id) => Number(id.slice(1)) % 2 === 1)))
   })
 
   it('4e: the INTENDED degradation survives — a partly-errored chunk still answers, minus those ids', async () => {
