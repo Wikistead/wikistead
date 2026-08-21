@@ -152,20 +152,76 @@ test("the sidebar has no horizontal scrollbar (overflow regression)", async ({ p
   expect(ok).toBe(true);
 });
 
-test("the brand lockup links home (member chrome)", async ({ page }) => {
+// #364 / ADR-157 changed where "/" lands, and this spec kept the pre-#364 answer for two weeks: it
+// waited for /p/demo while the product went to the space root, and read as "the brand is broken".
+// HomeLanding (routes.tsx) has two branches and they are measured separately here — the space root
+// when the first space has no home, and the home page when it does. Pinning only the first would let
+// the second break in silence, which is how the stale expectation survived.
+test("the brand lockup links home — the space root, when the first space has no home", async ({ page }) => {
   await openDemo(page);
   // navigate off the home page first
   await page.getByTestId("new-page").click();
   await page.waitForURL(/\/p\/.+edit=1/);
-  // clicking the brand returns to home (catch-all "/" → /p/demo)
+  // clicking the brand returns to the landing, which resolves to the first space's root
   await page.getByTestId("brand-home").click();
-  await page.waitForURL(/\/p\/demo$/);
+  await page.waitForURL(/\/spaces\/demo_space$/);
 
   // the SETTINGS shell has no sidebar but is still member chrome → brand still links home
   await page.goto("/spaces/demo_space/settings/general");
   await page.waitForSelector("[data-testid=space-general]");
   await page.getByTestId("brand-home").click();
-  await page.waitForURL(/\/p\/demo$/);
+  await page.waitForURL(/\/spaces\/demo_space$/);
+});
+
+/**
+ * Put a space back the way the seed left it — no home, and no page behind it.
+ *
+ * `delete_mode` defaults to `trash_only` (resolveDeleteMode), so `/permanent` answers 400 and the page
+ * has to go through the trash. Measured the hard way: a first version deleted straight and never read
+ * the status, which left demo_space carrying a home and turned the sibling test above red — the exact
+ * pairing this spec exists to keep apart.
+ *
+ * Called BEFORE the test as well as after, so a run killed mid-test heals the next one instead of
+ * failing it.
+ */
+async function clearSpaceHome(page: Page, spaceId: string): Promise<string | null> {
+  return await page.evaluate(async ({ api, sid }) => {
+    const H = { Authorization: "Bearer dev-token" };
+    const homeOf = async (): Promise<string | null> => {
+      const body = (await (await fetch(`${api}/spaces`, { headers: H })).json()) as
+        | { spaces?: { id: string; homePageId?: string | null }[] }
+        | { id: string; homePageId?: string | null }[];
+      const spaces = Array.isArray(body) ? body : (body.spaces ?? []);
+      return spaces.find((s) => s.id === sid)?.homePageId ?? null;
+    };
+    const home = await homeOf();
+    if (!home) return null;
+    await fetch(`${api}/pages/${home}`, { method: "DELETE", headers: H }); // to the trash
+    await fetch(`${api}/pages/${home}/purge`, { method: "DELETE", headers: H }); // and out of it
+    return await homeOf(); // null once the FK's ON DELETE SET NULL has fired
+  }, { api: API, sid: spaceId });
+}
+
+test("the brand lockup links home — the home page, when the first space has one", async ({ page }) => {
+  await openDemo(page);
+  expect(await clearSpaceHome(page, "demo_space"), "starting from a space with no home").toBeNull();
+  // `/spaces` is ordered by created_at, so demo_space is the space the landing resolves. Give it a home
+  // through the API: the member control for this is broken (#845), and this test is about where the
+  // landing goes, not about how a home gets made.
+  const home = await page.evaluate(async (api) => {
+    const res = await fetch(`${api}/spaces/demo_space/home`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+    return { status: res.status, body: (await res.json()) as { id?: string } };
+  }, API);
+  expect(home.status, "a space with no home accepts one").toBe(201);
+  try {
+    await page.goto("/settings/account"); // a shell without a sidebar, so the brand is the only way back
+    await page.waitForSelector("header");
+    await page.getByTestId("brand-home").click();
+    await page.waitForURL(new RegExp(`/p/${home.body.id!}$`));
+  } finally {
+    // Leave demo_space exactly as it was — every other spec in the suite reads this same space.
+    expect(await clearSpaceHome(page, "demo_space"), "the space is back the way the seed left it").toBeNull();
+  }
 });
 
 // #219: a native tooltip on a sidebar page item ONLY when its title is truncated (VSCode/Finder tree
