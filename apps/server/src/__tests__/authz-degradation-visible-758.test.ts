@@ -20,17 +20,20 @@ import { buildApp } from '../app.js'
 
 // A store that answers cleanly for some ids and errors on others — the shape a saturated OpenFGA
 // returns, and the one whose verdicts get thinned.
-function store(errorFor: (id: string) => boolean, allow: (id: string) => boolean = () => true) {
+function store(errorFor: (id: string) => boolean, allow: (id: string) => boolean = () => true, dropFor: (id: string) => boolean = () => false) {
   return {
     batchCheck: async (body: { checks: { object: string; correlationId?: string }[] }) => ({
-      result: body.checks.map((c) => {
+      // #816: `dropFor` omits the entry entirely — the store never spoke about that id, which is a
+      // different shape from an entry carrying an error and produces no error text of its own.
+      result: body.checks.flatMap((c) => {
         const id = c.object.replace(/^[a-z_]+:/, '')
-        return errorFor(id)
+        if (dropFor(id)) return []
+        return [errorFor(id)
           ? {
               allowed: false, request: c, correlationId: c.correlationId!,
               error: { internal_error: 'deadline_exceeded', message: 'context deadline exceeded' },
             }
-          : { allowed: allow(id), request: c, correlationId: c.correlationId! }
+          : { allowed: allow(id), request: c, correlationId: c.correlationId! }]
       }),
     }),
   } as unknown as OpenFgaClient
@@ -54,6 +57,25 @@ describe('#758: a thinned batch is reported', () => {
     expect(seen[0].resourceType).toBe('page')
     expect(seen[0].firstError, 'the store gets to say why in its own words').toMatch(/deadline_exceeded/)
     // …and the answer is the one ADR-183 §3 ruled: the three that errored are denied, not the batch.
+    expect(out).toEqual(new Set(ids(10).filter((id) => Number(id.slice(1)) >= 3)))
+  })
+
+  // #816: the same loss, arriving as SILENCE rather than as an error. An id the store never spoke about
+  // was invisible to this report, because the count was a tally of bad answers rather than the ids that
+  // never got one — so the operator saw nothing at all where a reader had lost rows.
+  it('counts the ids the store never spoke about, not just the ones it errored on', async () => {
+    const seen: AuthzDegradation[] = []
+    registerAuthzDegradationSink((d) => seen.push(d))
+
+    const out = await filterAuthorized(
+      store(() => false, () => true, (id) => Number(id.slice(1)) < 3), 'user:u', 'view', ids(10))
+
+    expect(seen, 'a batch that lost three verdicts to silence reported nothing').toHaveLength(1)
+    expect(seen[0].unanswered, 'the count of lost verdicts').toBe(3)
+    expect(seen[0].candidates).toBe(10)
+    expect(seen[0].firstError, 'no entry means no words of the store\'s own — say so rather than nothing')
+      .toMatch(/no entry/)
+    // The verdicts do not move: fail-closed for the three, answered for the rest (ADR-183 §3).
     expect(out).toEqual(new Set(ids(10).filter((id) => Number(id.slice(1)) >= 3)))
   })
 

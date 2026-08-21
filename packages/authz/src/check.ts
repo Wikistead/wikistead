@@ -215,7 +215,17 @@ export async function filterAuthorized(
     }, { authorizationModelId: fgaModelId() })
     // Walk the response by correlation id. Fail closed: an id with NO response entry is simply never
     // added to `out` (a missing verdict is a deny, never a silent allow).
-    let unanswered = 0
+    //
+    // #816: what "unanswered" MEANS is the complement — the chunk's ids minus the ones that came back
+    // with a verdict — and not a tally of the ways an answer can be bad. It was the tally, incremented
+    // only where an entry carried an error, and an entry that never arrived was therefore not counted
+    // as anything. That left a third door into the room ADR-183's amendment closed: a response with NO
+    // entries at all made the count zero, so neither the degradation report below nor the refusal after
+    // it could see a chunk in which nothing was answered, and every id in it was denied in silence. The
+    // amendment's own words already cover this case — "a chunk that yields no error-free verdict throws"
+    // — so this is the code reaching the rule, not a new rule. The SDK folds the server's map into a
+    // list, so a missing entry is a shape the store can produce.
+    const answered = new Set<string>()
     let firstError = ''
     for (const r of result) {
       const id = byCorr.get(r.correlationId)
@@ -226,17 +236,23 @@ export async function filterAuthorized(
         // entitled to see, and until now it left no trace of any kind — the thinner list is
         // indistinguishable from an honest one. The count is also what #756 below reads to tell a
         // thinned answer from no answer at all.
-        unanswered += 1
         if (!firstError) firstError = JSON.stringify(r.error)
         continue
       }
+      answered.add(id)
       const fgaAllowed = Boolean(r.allowed)
       const final = hooks.afterCheck
         ? (await hooks.afterCheck({ user, relation, resource: { type: resourceType, id }, tenantId: '' }, fgaAllowed) ?? fgaAllowed)
         : fgaAllowed
       if (final) out.add(id)
     }
-    // Any chunk id with no response entry is denied (fail closed) — never silently treated as allowed.
+    // Any chunk id with no response entry is denied (fail closed) — never silently treated as allowed,
+    // and counted here rather than nowhere (#816).
+    const unanswered = chunk.length - answered.size
+    // The operator's log gets a reason even when no entry carried one: an id whose entry never arrived
+    // has no error text of its own, and an empty `firstError` next to a non-zero count reads as a bug
+    // in the report rather than as what happened (#816).
+    if (unanswered > 0 && !firstError) firstError = '{"message":"the response carried no entry for these ids"}'
 
     // #758 / ADR-183 §3 ("accept for v1 … log a warn per degraded batch" — the half never built).
     // Reported AFTER the verdicts are settled and with its result ignored, so the port cannot reach

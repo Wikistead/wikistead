@@ -32,7 +32,12 @@ export interface AuthzDegradation {
   candidates: number
   /** How many of them the store could not answer, and which were therefore reported as denied. */
   unanswered: number
-  /** The store's own words for the first failure — `deadline_exceeded` is the one seen in the wild. */
+  /**
+   * The store's own words for the first failure — `deadline_exceeded` is the one seen in the wild.
+   * #816: an id the store never spoke about brings no words of its own, so a batch thinned by SILENCE
+   * carries a fixed sentence saying that instead. An empty string next to a non-zero count would read
+   * as a broken report rather than as what happened.
+   */
   firstError: string
 }
 
