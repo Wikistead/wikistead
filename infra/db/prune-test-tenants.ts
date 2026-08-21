@@ -17,6 +17,7 @@
 // but the isolated stack (#269's valve, the same one apps/server and the EE package carry), and keeps
 // the two tenants the seed owns. Everything else in that database was made by a test.
 import postgres from 'postgres'
+import { RESERVED_SUB_RE } from '@wikistead/hooks'
 
 const KEEP = ['tenant_dev', 'tenant_acme']
 
@@ -60,6 +61,7 @@ async function main(): Promise<void> {
   }
 
   await pruneRoles(sql)
+  await pruneReservedSubMembers(sql)
   await sql.end()
 }
 
@@ -89,6 +91,55 @@ async function pruneRoles(sql: postgres.Sql): Promise<void> {
   const gone = await sql`DELETE FROM roles`
   console.log(`[prune] ${gone.count} leftover role(s) and ${rows} row(s) referencing them removed ` +
     `(${referrers.length} referencing table(s) asked of the database)`)
+}
+
+/**
+ * #852: member rows a killed run left inside a KEPT tenant. The suites that exercise the password
+ * door create members in `tenant_dev` with subs in the reserved space (`wlocal_<uuid>` from
+ * `acceptLocalInvite`, and the `wc<conn8>_` shape) and delete them in `afterAll` — so a run that is
+ * cancelled leaves them, and the tenant pass above cannot help because `tenant_dev` is KEPT.
+ *
+ * What that costs is not tidiness. #832 measured it: the EE assertion that SCIM refuses a
+ * reserved-prefix externalId proves it by counting reserved-prefix member rows in the tenant, so two
+ * rows from one cancelled run turned it red on EVERY run afterwards, until somebody cleared the table
+ * by hand. The message names SCIM and says nothing about debris, so it reads as a broken guard.
+ *
+ * SAFE TO SWEEP WHOLESALE, and this is the whole argument: the seed writes no member row with a
+ * reserved sub — the subs it creates are `dev-user` and `acme-admin` — so on this stack every row
+ * matching the reserved pattern was made by a test. Measured before writing this: zero such rows in a
+ * freshly seeded database.
+ *
+ * ⚠️ It is the SECOND thing that reaches inside a kept tenant (roles, above, is the first), so the
+ * promise "the prune keeps what the seed owns" now means "keeps what the seed WROTE", not "does not
+ * look inside". Both exceptions have the same shape — a table the seed does not write to at all — and
+ * a third one should have to argue the same way rather than inherit the licence.
+ *
+ * The PATTERN comes from the product (`RESERVED_SUB_RE`), not from a copy here: a prefix invented
+ * next month would otherwise be swept by nothing, which is exactly how #832 happened.
+ */
+async function pruneReservedSubMembers(sql: postgres.Sql): Promise<void> {
+  // Postgres reads the same expression the product's regex holds; `.source` keeps the two from
+  // drifting apart, which a second literal would not.
+  const pattern = RESERVED_SUB_RE.source
+  const doomed = (await sql<{ tenant_id: string; sub: string }[]>`
+    SELECT tenant_id, sub FROM members WHERE tenant_id = ANY(${KEEP}) AND sub ~ ${pattern}`)
+  if (doomed.length === 0) {
+    console.log('[prune] no reserved-sub member rows in the seeded tenants')
+    return
+  }
+  // Children first, asked of the database rather than listed: `local_credentials`, `member_factors`
+  // and `password_resets` point at members today, and a table added next month joins on its own.
+  const referrers = (await sql<{ child: string }[]>`
+    SELECT DISTINCT conrelid::regclass::text AS child
+      FROM pg_constraint WHERE confrelid = 'members'::regclass AND contype = 'f'`).map((r) => r.child)
+  const subs = doomed.map((r) => r.sub)
+  let rows = 0
+  for (const table of referrers) {
+    rows += (await sql.unsafe(`DELETE FROM ${table} WHERE tenant_id = ANY($1) AND member_sub = ANY($2)`, [KEEP, subs])).count ?? 0
+  }
+  const gone = await sql`DELETE FROM members WHERE tenant_id = ANY(${KEEP}) AND sub ~ ${pattern}`
+  console.log(`[prune] ${gone.count} reserved-sub member row(s) and ${rows} row(s) referencing them removed ` +
+    `from the seeded tenants (${referrers.length} referencing table(s) asked of the database)`)
 }
 
 void main()
