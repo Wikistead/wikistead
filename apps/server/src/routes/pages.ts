@@ -675,7 +675,7 @@ export async function updatePage(
   })
   const page = toPage(row as PageRow)
   processOutboxAsync(driver, outboxId, { tenantId: page.tenantId, pageId: page.id, operation: 'upsert' })
-  emit({ type: 'page.updated', tenantId: page.tenantId, pageId: page.id, actorId: args.userId ?? args.guest!.anonId ?? `guest:${args.guest!.shareLinkId}` })
+  emit({ type: 'page.renamed', tenantId: page.tenantId, pageId: page.id, actorId: args.userId ?? args.guest!.anonId ?? `guest:${args.guest!.shareLinkId}` })
   return page
 }
 
@@ -2688,7 +2688,7 @@ export async function movePage(
     // #218 / ADR-103: after the parent tuple is set, apply the private write-boundary if the effective private
     // state changed (strip/sweep only on the transition INTO private; reindex either way for the denorm).
     if (effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: willBePrivate, reindex: true })
-    emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
+    emit({ type: 'page.moved', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
     return toPage(r)
   }
 
@@ -2718,7 +2718,7 @@ export async function movePage(
   // the stripped public grant). The subtree reindex is already enqueued above (space-denorm change), so reindex:false.
   if (willBePrivate && effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: true, reindex: false })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId: page.tenant_id, pageId: o.pageId, operation: 'upsert' })
-  emit({ type: 'page.updated', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
+  emit({ type: 'page.moved', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
   return toPage(row as PageRow)
 }
 

@@ -15,7 +15,8 @@ import type { DomainEvent } from './index.js'
 export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   // Pages
   'page.created': 'A page was created.',
-  'page.updated': 'A page was renamed or moved. A change to its body arrives as page.published.',
+  'page.renamed': 'A page was given a new title.',
+  'page.moved': 'A page was moved to a different parent or space.',
   'page.deleted': 'A page was permanently deleted (purged from the trash, or swept by retention).',
   'page.trashed': 'A page (and its subtree) was moved to the trash.',
   'page.trash_restored': 'A page (and its subtree) was restored from the trash.',

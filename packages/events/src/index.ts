@@ -19,7 +19,11 @@ export type DomainEvent = WithActorKey<RawDomainEvent>
 type RawDomainEvent =
   // ── Pages ────────────────────────────────────────────────────────────
   | { type: 'page.created';   tenantId: string; pageId: string; spaceId: string; actorId: string }
-  | { type: 'page.updated';   tenantId: string; pageId: string; actorId: string }
+  // #862 / #853: `page.updated` fired on a rename and on a move, and never on a body change —
+  // publishing one is `page.published`. Anybody wiring a webhook read the name first and waited
+  // for edits on it. Split before delivery began, so no subscriber can be broken by the change.
+  | { type: 'page.renamed';   tenantId: string; pageId: string; actorId: string }
+  | { type: 'page.moved';     tenantId: string; pageId: string; actorId: string }
   | { type: 'page.deleted';   tenantId: string; pageId: string; actorId: string }
   // #411 / ADR-153: trash lifecycle. `page.deleted` now fires at PURGE (explicit or retention) — the
   // point of no return keeps its historical event name; `page.restored` stays the REVISION restore.

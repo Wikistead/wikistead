@@ -51,6 +51,7 @@ import { bumpRateBucket, API_RATE_LIMIT_WINDOW_S } from './rate-limit.js'
 import { getAuthProviders, getSearchDriver, getEmailDriver, getEeFeatures, type EmailDriver } from '@wikistead/hooks'
 import { resolveEmailDriver } from './email/index.js'
 import { emit, onDomainEvent, registerActorKeyResolver } from '@wikistead/events'
+import { bridgeEventToOutbox } from './webhooks/bridge.js' // #862: the catalogue reaches the outbox
 import { publishRevoke } from './collab-revoke.js'
 import { LogicalSearchDriver } from './search/index.js'
 import type { SearchDriver } from './search/index.js'
@@ -241,6 +242,24 @@ export async function buildApp(): Promise<FastifyInstance> {
     if (e.type === 'share_link.revoked') {
       void publishRevoke(valkey, { tenantId: e.tenantId, pageId: e.pageId, shareLinkId: e.shareLinkId })
     }
+  })
+
+  // #862 / ADR-108 Q4: every catalogued event reaches the webhook outbox.
+  //
+  // Two types were delivered because two call sites remembered to enqueue by hand; the other 73 were
+  // emitted and heard by nobody, while the generated reference told readers webhooks were built on all
+  // 75. One subscriber closes that, and it derives what to send from the event rather than from a list
+  // somebody has to keep — 133 emit sites will not remember a list.
+  //
+  // The outbox is the reliability boundary (lease + backoff + delete-on-2xx), and the drain applies the
+  // existence-hiding rule, so enqueueing every type is safe: a row about a private page or an
+  // unpublished draft is written and then suppressed before it can leave. See webhooks/bridge.ts.
+  onDomainEvent((e) => {
+    void bridgeEventToOutbox(pool, e).catch((err) => {
+      // The bus cannot retry: this INSERT is the one place a catalogued event can still be lost, so
+      // losing it is said out loud rather than swallowed.
+      app.log.error({ err, eventType: e.type, tenantId: e.tenantId }, 'webhook bridge could not enqueue a catalogued event')
+    })
   })
 
   // Metered usage alerts (#128 / ADR-082): the CE baseline logs that a soft-cap threshold was crossed
