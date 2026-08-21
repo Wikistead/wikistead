@@ -67,9 +67,15 @@ export function SetPasswordForm({ token, mode, onDone }: { token: string; mode: 
         </div>
       )}
       {mode === "accept" && (
-        <Input value={displayName} disabled={busy} autoComplete="name"
-          placeholder={t("auth.displayName")} aria-label={t("auth.displayName")}
-          data-testid="set-password-display-name" onChange={(e) => setDisplayName(e.target.value)} />
+        <>
+          <Input value={displayName} disabled={busy} autoComplete="name"
+            placeholder={t("auth.displayName")} aria-label={t("auth.displayName")}
+            data-testid="set-password-display-name" onChange={(e) => setDisplayName(e.target.value)} />
+          {/* #807 (review): the hint sat with the other hint at the foot of the form, two inputs
+              below the field it describes — a reader met "this is the name others see" after they had
+              already typed a password twice. Each hint goes under its own field. */}
+          <p className="m-0 text-xs text-fg-dim">{t("auth.displayNameHint")}</p>
+        </>
       )}
       <Input type="password" autoComplete="new-password" value={password} disabled={busy}
         placeholder={t("auth.newPassword")} aria-label={t("auth.newPassword")}
@@ -77,7 +83,6 @@ export function SetPasswordForm({ token, mode, onDone }: { token: string; mode: 
       <Input type="password" autoComplete="new-password" value={confirm} disabled={busy}
         placeholder={t("auth.confirmPassword")} aria-label={t("auth.confirmPassword")}
         data-testid="set-password-confirm" onChange={(e) => setConfirm(e.target.value)} />
-      {mode === "accept" && <p className="m-0 text-xs text-fg-dim">{t("auth.displayNameHint")}</p>}
       <p className="m-0 text-xs text-fg-dim">{t("auth.passwordHint", { min: PASSWORD_MIN })}</p>
       <Button variant="primary" type="submit" className="w-full" data-testid="set-password-submit" disabled={busy || !password || !confirm || (mode === "accept" && !displayName.trim())}>
         {busy && <Loader2 size={16} className="animate-spin" />}
