@@ -41,27 +41,19 @@
 // partially-present store converging cleanly, the #445 lesson). Run AFTER fga:bootstrap (the model must
 // exist) against the target datastore, with DATABASE_URL / OPENFGA_* set. Dev/migration/recovery only.
 import postgres from 'postgres'
-import { createHash } from 'node:crypto'
 import { OpenFgaClient } from '@openfga/sdk'
 import type { TupleKey } from '@openfga/sdk'
-
-// The SAME deterministic, tenant-salted FGA group id the runtime sync uses (auth/group-sync.ts groupFgaId).
-// Inlined so this script stays self-contained (like the other infra/openfga migrate scripts). MUST match
-// group-sync.ts exactly, or a rebuilt group membership lands on the wrong id and group grants silently break.
-const groupFgaId = (tenantId: string, name: string): string =>
-  createHash('sha256').update(`${tenantId} ${name}`).digest('hex').slice(0, 24)
-
-// #627 / ADR-213: the same ALLOWLIST `auth/member-suspension.ts` exports, inlined for the same reason
-// `groupFgaId` is — this script stays self-contained. MUST match that file: a reason added there and not
-// here brings a suspended member's grants back on the next rebuild.
-//
-// An allowlist because this side REBUILDS. A `downgrade_freeze` keeps its tuples (plan-reconcile never
-// touches FGA), so a rebuild must restore them; a suspension stripped its own on purpose and an unknown
-// reason must therefore rebuild NOTHING. The mirror predicate (SCIM's "already done?") is a denylist,
-// because refusing work needs the opposite default — sharing one makes one of them fail open.
-const REASONS_THAT_KEEP_GRANTS = new Set(['downgrade_freeze'])
-const grantsShouldBeRebuilt = (deactivatedAt: unknown, reason: string | null): boolean =>
-  !deactivatedAt || REASONS_THAT_KEEP_GRANTS.has(reason ?? '')
+// #831: IMPORTED, not copied. This script had its own `groupFgaId` under a comment promising it
+// "MUST match group-sync.ts exactly, or a rebuilt group membership lands on the wrong id and group
+// grants silently break" — and it separated the tenant from the name with a SPACE where the original
+// uses a NUL byte. Same inputs, different hash. This is the script that rebuilds a wiped or migrated
+// store, so a recovery run wrote every group membership under an id nothing grants to, reported
+// success, and left the grants gone. The promise is now a shared function, which is the only kind of
+// promise a comment cannot break.
+import { groupFgaId } from '@wikistead/authz'
+// #831, same family: the suspension allowlist was inlined here with the same "MUST match" comment.
+// Nothing had drifted yet, and nothing was checking either.
+import { grantsShouldBeRebuilt } from '../../apps/server/src/auth/member-suspension.js'
 
 ;(async () => {
   const apiUrl = process.env.OPENFGA_API_URL ?? 'http://localhost:8080'

@@ -13,3 +13,7 @@ export type { AuthzRestrictionEvaluator } from './restriction.js'
 // #758 / ADR-183 §3: the observation port for a thinned batch. A sink cannot change a verdict.
 export { registerAuthzDegradationSink, resetAuthzDegradationSink, hasAuthzDegradationSink } from './degradation.js'
 export type { AuthzDegradation, AuthzDegradationSink } from './degradation.js'
+// #831: one formula for a group's store id. It was copied into the rebuild script with a different
+// separator, so a recovery run wrote every group membership under an id nobody grants to — silently,
+// and reporting success. A shared comment asking two files to agree is not a mechanism.
+export { groupFgaId, groupGrantee } from './group-id.js'

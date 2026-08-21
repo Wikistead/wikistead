@@ -1,5 +1,4 @@
 import type { OpenFgaClient } from '@openfga/sdk'
-import { createHash } from 'node:crypto'
 import type { Sql } from 'postgres'
 import { writeTuples, deleteTuples, isAlreadyConverged } from '@wikistead/authz'
 
@@ -7,24 +6,18 @@ import { writeTuples, deleteTuples, isAlreadyConverged } from '@wikistead/authz'
 // group-granted members become @mentionable.
 
 // A deterministic, FGA-id-safe object id for a group (group-id format C). An IdP group NAME may
-// contain spaces / Japanese / symbols that are invalid in an FGA object id, so we hash it
+// contain spaces / Japanese / symbols that are invalid in an FGA object id, so it is hashed
 // (hex, tenant-salted): the same (tenant, name) ALWAYS maps to the same id, and the same name in
 // two tenants maps to DIFFERENT ids (no cross-tenant collision). The human name stays in
 // members.groups for display; FGA only ever sees the hash. The grant side MUST derive the id via
-// THIS function too, so a grant to a group by name resolves to its synced members.
+// the SAME function, so a grant to a group by name resolves to its synced members.
 //
-// groupGrantee() (below) is the grant-side helper that builds `group:<id>#member` via this fn.
-export function groupFgaId(tenantId: string, name: string): string {
-  return createHash('sha256').update(`${tenantId}\x00${name}`).digest('hex').slice(0, 24)
-}
-
-// The FGA grantee string for a group BY NAME (#163 / ADR-053): resolve a human group name to
-// `group:<id>#member` THROUGH groupFgaId — the SAME function the membership sync uses — so a grant
-// to "Engineering" always lands on the exact id that members synced into. The client never hashes
-// (no duplicated crypto / drift); the server is the single id authority.
-export function groupGrantee(tenantId: string, name: string): string {
-  return `group:${groupFgaId(tenantId, name)}#member`
-}
+// #831: the formula MOVED to `@wikistead/authz` and is re-exported here so every caller keeps its
+// import. It moved because the rebuild script had copied it with a different separator and nothing
+// compared them — see the note on the shared function. Re-exported rather than re-implemented: a
+// second definition beside this comment is exactly what went wrong.
+import { groupFgaId, groupGrantee } from '@wikistead/authz'
+export { groupFgaId, groupGrantee }
 
 // Reverse map for DISPLAY (#163): groupFgaId is one-way (sha256), so a stored `group:<id>#member`
 // grantee can't be un-hashed. Build hash→name from the tenant's known group names instead, so the

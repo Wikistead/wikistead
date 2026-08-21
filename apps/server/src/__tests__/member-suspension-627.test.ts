@@ -148,11 +148,17 @@ describe('#627: the two predicates are opposites on purpose', () => {
     expect(isScimSuspension('something_new'), 'an unknown reason is not "already done"').toBe(false)
   })
 
-  it('the rebuild script carries the same allowlist (it is inlined, like groupFgaId)', async () => {
+  // #831 rewrote what this asks. It used to accept the allowlist being INLINED in the rebuild script,
+  // because that is how it was written — and the sibling copy in the same file, `groupFgaId`, had
+  // silently drifted by one byte for four months under an identical "MUST match" comment. A pin that
+  // blesses a copy is a pin that will one day pass over the copy going wrong, so what is asked now is
+  // that there is no copy.
+  it('the rebuild script IMPORTS the predicate rather than carrying its own', async () => {
     const { readFileSync } = await import('node:fs')
     const { resolve } = await import('node:path')
     const src = readFileSync(resolve(import.meta.dirname, '..', '..', '..', '..', 'infra', 'openfga', 'resync.ts'), 'utf8')
     expect(src, 'the resync consults the predicate').toMatch(/grantsShouldBeRebuilt/)
-    expect(src, 'and knows which reason keeps its grants').toMatch(/downgrade_freeze/)
+    expect(src, 'from the file that owns it').toMatch(/import \{ grantsShouldBeRebuilt \} from/)
+    expect(src, 'a local allowlist is the copy coming back').not.toMatch(/const REASONS_THAT_KEEP_GRANTS/)
   })
 })
