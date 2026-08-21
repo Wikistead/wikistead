@@ -233,7 +233,7 @@ import { SearchBox } from "../search/SearchBox";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
 import { FALLBACK_PRODUCT_NAME, useProductName } from "./product-name";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpacesPage, useResolvedSpace, useBranding, type Page } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpacesPage, useResolvedSpace, useBranding, invalidateSpaces, type Page } from "../data/queries";
 import { TenantBrand } from "./BrandLockup"; // #430 the public header uses the shared two-slot lockup
 import { Avatar } from "../ui/Avatar"; // #430 the public header's space chip (shared primitive)
 import { GuestSidebar } from "./GuestSidebar";
@@ -1973,7 +1973,13 @@ function SpaceHomeRoute() {
     setCreating(true);
     void apiFetch<{ id: string }>(`/spaces/${encodeURIComponent(spaceId)}/home`, token, { method: "POST" })
       .then(async (r) => {
-        await qc.invalidateQueries({ queryKey: ["spaces"] });
+        // #845: every cache that holds a Space, not the listing alone. This screen reads the home
+        // pointer through `useResolvedSpace` — key `["spaces-resolve", ids]` — and React Query matches
+        // key prefixes element by element, so invalidating `["spaces"]` never reached it. The home was
+        // created, the empty state stayed on screen, and pressing the button again did the same thing.
+        // #737 met this exact mismatch on a space icon and left one way to say it; this call site was
+        // written afterwards and said it the old way.
+        invalidateSpaces(qc);
         // land in the editor immediately — the new home is an unpublished draft only the creator sees
         if (r?.id) navigate(`/spaces/${spaceId}?edit=1`, { replace: true });
       })
