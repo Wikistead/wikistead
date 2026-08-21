@@ -112,6 +112,9 @@ describe('#554 S2: per-connection start/callback', () => {
     const unknown = await app.inject({ method: 'GET', url: `/auth/login?connection=${randomUUID()}`, headers: { host: HOST } })
     expect(unknown.statusCode).toBe(404)
     const samlId = randomUUID()
+    // Clear this tenant's row before claiming it (#797) — a no-op for this per-run tenant, and the
+    // thing that keeps the file green if it ever gets a stable one.
+    await admin`DELETE FROM tenant_saml WHERE tenant_id = ${tenantId}`
     await admin`INSERT INTO tenant_saml (id, tenant_id, idp_entity_id, sso_url, idp_cert_enc, sp_entity_id, acs_url, enabled)
       VALUES (${samlId}, ${tenantId}, 'https://idp.example/meta', 'https://idp.example/sso', 'enc', 'sp', 'https://wks/acs', true)`
     try {

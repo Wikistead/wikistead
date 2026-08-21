@@ -133,6 +133,20 @@ function bareInsertTables(source: string, tables: string[]): string[] {
   return hit
 }
 
+/**
+ * Does this file clear the row before claiming it? The sequence that survives a killed run is DELETE
+ * my tenant's row, then INSERT — and the DELETE has to be scoped to a tenant, because an unscoped one
+ * in a shared stack takes a neighbour's fixture with it.
+ *
+ * Asked of every bare-INSERTing file, not only the ones whose tenant is stable across runs. A file
+ * that mints a tenant per run cannot collide with its own residue today, so the DELETE is a no-op
+ * there — and it is what keeps the file green on the day somebody gives it a fixed slug, which is a
+ * one-word edit nothing else would flag.
+ */
+function clearsBeforeClaiming(source: string, table: string): boolean {
+  return new RegExp(String.raw`DELETE FROM\s+${table}\b[^\`]*tenant_id`).test(source)
+}
+
 /** Does this file resolve one of the seeded tenants at all — by id, or by the slug it is looked up with? */
 function namesASeededTenant(source: string, seeded: string[]): string[] {
   const slugs = seeded.map((id) => id.replace(/^tenant_/, ''))
@@ -181,5 +195,24 @@ describe('#797: single-row-per-tenant fixtures stay out of the seeded tenants', 
     // The sweep has to have SEEN the shape it forbids, or "no offenders" means the matcher broke.
     expect(writers.length, `no fixture bare-INSERTs any of: ${tables.join(', ')}`).toBeGreaterThan(0)
     expect(offenders, `${writers.length} fixture(s) claim a single-row-per-tenant row; these do it in a shared tenant`).toEqual([])
+  })
+
+  it('and each of them clears its own tenant first, so a killed run cannot poison the next', () => {
+    // The other half of #797, and the half `fixture-residue-797` cannot measure: that file proves the
+    // SEQUENCE survives residue, but it proves it against its own copy of the sequence — remove the
+    // DELETE from a shipped fixture and those cases stay green. Deleting-then-claiming is a property
+    // of every writer, so it is asserted over the same swept set as the rule above.
+    const writers: string[] = []
+    const unguarded: string[] = []
+    for (const f of files) {
+      const src = stripComments(readFileSync(f, 'utf8'))
+      const bare = bareInsertTables(src, tables)
+      if (bare.length === 0) continue
+      const rel = f.slice(root.length + 1)
+      writers.push(rel)
+      for (const t of bare) if (!clearsBeforeClaiming(src, t)) unguarded.push(`${rel} → ${t}`)
+    }
+    expect(writers.length, 'nothing bare-INSERTs a single-row-per-tenant table — the matcher broke').toBeGreaterThan(0)
+    expect(unguarded, 'these claim a one-per-tenant row without clearing their own first (#797)').toEqual([])
   })
 })

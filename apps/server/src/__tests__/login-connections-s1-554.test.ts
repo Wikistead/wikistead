@@ -109,6 +109,10 @@ describe('#554 S1: connection identities and the list resolver', () => {
 
   it('SAML: listed only when entitled, with its own minted id', async () => {
     const samlId = randomUUID()
+    // Clear this tenant's row before claiming it (#797). The tenant is minted per run, so today this
+    // deletes nothing — it is here because the table holds ONE row per tenant, and the day somebody
+    // gives this file a stable slug the residue of a killed run would otherwise make it red forever.
+    await admin`DELETE FROM tenant_saml WHERE tenant_id = ${tenantId}`
     await admin`INSERT INTO tenant_saml (id, tenant_id, idp_entity_id, sso_url, idp_cert_enc, sp_entity_id, acs_url, enabled)
       VALUES (${samlId}, ${tenantId}, 'https://idp.example/meta', 'https://idp.example/sso', 'enc', 'https://wks/sp', 'https://wks/acs', true)`
     try {
