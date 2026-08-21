@@ -61,7 +61,7 @@ export default defineConfig({
         PLATFORM_OIDC_ISSUER: `http://127.0.0.1:${P.issuer}`,
         PLATFORM_OIDC_CLIENT_ID: "e2e-client",
         PLATFORM_OIDC_REDIRECT_URI: `http://${HOST}:${P.webReal}/signup/callback`,
-        PUBLIC_TENANT_BASE_HOST: `localhost:${P.webReal}`,
+        WKS_TENANT_URL_TEMPLATE: `http://{slug}.localhost:${P.webReal}`,
       },
     },
     {

@@ -23,6 +23,7 @@ import { resolveSsoStance } from '../auth/sso-stance.js'
 import { createInvite } from '../auth/invites.js'
 import { acquireTenantDb } from '../db/index.js'
 import { isValidSlug } from '../auth/provisioning.js'
+import { readTenantUrlTemplate } from '../auth/tenant-url-template.js'
 import type { Tenant } from '@wikistead/types'
 
 export interface LocalAdminResult {
@@ -63,6 +64,21 @@ export async function createLocalAdmin(
     if (!args.create) {
       throw new Error(`no tenant "${args.slug}" — pass --create to make one, or check the slug`)
     }
+  }
+
+  // #806 / ADR-249 Decision 5: the LAST line before the first write, and there is nothing above it
+  // but reads and refusals. Everything after it changes something — the tenant row, password
+  // sign-in, an invite, two operator-ledger entries — so a deployment that can name no address must
+  // fail here, having changed none of it. It used to fall back to `<slug>.localhost`, which printed
+  // a link to the operator's own machine and looked like it had worked.
+  //
+  // ⚠️ It sits BELOW the slug and `--create` refusals deliberately, and #616's pin is what says so:
+  // resolving it at the top made a typo'd slug report a missing template instead of a missing tenant.
+  // Both refuse before any effect, so the order between them decides only which problem the operator
+  // is told about — and that should be the one they just made, not the one their deployment has.
+  const origin = args.origin ?? renderTenantOrigin(args.slug)
+
+  if (!tenant) {
     const [row] = await sql<{ id: string; slug: string; plan: string }[]>`
       INSERT INTO tenants (slug, plan) VALUES (${args.slug}, ${args.plan ?? 'free'})
       RETURNING id, slug, plan`
@@ -117,7 +133,6 @@ export async function createLocalAdmin(
       }
     })
 
-    const origin = args.origin ?? `https://${tenant.slug}.${process.env.PUBLIC_TENANT_BASE_HOST ?? 'localhost'}`
     return {
       tenantId: tenant.id, slug: tenant.slug, created,
       steppedOverStance: stance.biting, enabledLocalLogin,
@@ -127,6 +142,24 @@ export async function createLocalAdmin(
   } finally {
     await db.release()
   }
+}
+
+/**
+ * The workspace's own address, from the shape the deployment declared (ADR-249).
+ *
+ * Throws rather than returning a fallback: an invite link is the one artefact of this command that
+ * leaves the machine, and a guessed one is worse than a refusal — the operator hands it to somebody,
+ * who cannot use it, and neither of them learns why.
+ */
+function renderTenantOrigin(slug: string): string {
+  const address = readTenantUrlTemplate()
+  if (!address.ok) {
+    throw new Error(
+      `no address to put in the invite link — ${address.why}. ` +
+      `Pass --origin=https://your.host to address this deployment directly, or set the template.`,
+    )
+  }
+  return address.render(slug)
 }
 
 /** What the operator reads at 3am. Every line is a fact this act changed. */

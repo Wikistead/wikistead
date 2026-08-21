@@ -227,13 +227,39 @@ credentials. If your policy needs a full single sign-out, drive it from the IdP.
 ### Making the first admin of a new tenant
 
 ```
-pnpm --filter @wikistead/server tenant:local-admin <tenant-slug> <email> --create [--plan=free] [--by=<you>]
+pnpm --filter @wikistead/server tenant:local-admin <tenant-slug> <email> --create [--plan=free] [--by=<you>] --origin=https://wiki.example.com
 ```
 
 It creates the tenant, turns password sign-in on for it, and prints a **first-admin
 invite link**. Hand that link to the person: they set a password, and they are the
 tenant's administrator. From there they configure OIDC in the admin console and can
 turn password sign-in back off.
+
+**`--origin` is the address that goes into that link**, and on a single-host
+deployment you have to pass it: the host you serve on is the only one that resolves,
+and without it the command has nothing to compose an address from and refuses rather
+than printing a link nobody can open. (A deployment that serves workspaces under a
+wildcard can declare the shape once instead — `WKS_TENANT_URL_TEMPLATE`, in the
+configuration reference — and then `--origin` is optional.)
+
+**Name the workspace after the host's first label.** Serving one workspace at
+`wiki.example.com` means calling it `wiki`: workspaces are resolved from the first
+label of the hostname, so that address already works, with no wildcard DNS and no
+second certificate.
+
+⚠️ **Hosts whose first label is a reserved word are not supported today.** `docs`,
+`app`, `www`, `api`, `help`, `blog`, `admin`, `status` and `dev` cannot be used as
+workspace names, so `docs.example.com` — a likely address for a knowledge base —
+has no way to reach a workspace at present. Registering it as a custom domain is not
+a way around it either: that is done from the admin console, which is itself reached
+through a host that already resolves. Serve on a host whose first label is not
+reserved until this is addressed.
+
+**Self-serve signup is not part of this profile.** The compose deployment ships
+without a platform identity provider, so there is no "create your own workspace"
+front door: workspaces are made with the command above. A deployment that does add
+one must also declare `WKS_TENANT_URL_TEMPLATE`, or self-serve creation stays closed
+— a workspace nobody can be sent to is not worth creating.
 
 The command does not take a subject id, and cannot. A tenant's sign-in connections
 stamp a prefix onto the subjects that arrive through them, so the id a real login
@@ -250,10 +276,10 @@ The same command without `--create` works on an existing tenant that has no
 administrator — after a restore, or one that was provisioned and never used:
 
 ```
-pnpm --filter @wikistead/server tenant:local-admin <tenant-slug> <email>
+pnpm --filter @wikistead/server tenant:local-admin <tenant-slug> <email> --origin=https://wiki.example.com
 ```
 
-For the evaluation stack that is `… tenant:local-admin dev you@example.com` — the seeded `dev` tenant
+For the evaluation stack that is `… tenant:local-admin dev you@example.com --origin=http://dev.localhost:5173` — the seeded `dev` tenant
 on `dev.localhost`, with no `--create`. (`dev` is a reserved slug and cannot be *created* as a tenant
 name; recovering the one the seed already made is a different act and is allowed.)
 

@@ -82,10 +82,13 @@ export const ENV_DOCS = {
     default: 'unset (links are dropped)',
     what: 'Canonical public base URL (scheme + host, port allowed) for links built off the request path — background mail has no Host header to work from. Unset means a message that needs a link is dropped with a logged reason rather than improvising one.',
   },
-  PUBLIC_TENANT_BASE_HOST: {
+  WKS_TENANT_URL_TEMPLATE: {
     group: 'Runtime',
-    default: "the request's own Host header",
-    what: 'Base host that new workspace subdomains are composed against when signup runs behind a proxy that rewrites Host.',
+    default: 'unset (self-serve workspace creation is closed)',
+    // Read through a constant (`process.env[TENANT_URL_TEMPLATE_ENV]`) so the two callers and the
+    // boot line cannot drift on the spelling — invisible to the walk, visible as a string literal.
+    indirect: true,
+    what: 'The shape of a workspace address, with `{slug}` standing for the workspace name — for example `https://{slug}.example.com`. The placeholder must be the host\'s entire first label, because that label is what tenant resolution reads. Unset closes self-serve creation of new workspaces and nothing else: signing in, existing workspaces, and custom domains are unaffected. Serving one workspace on one host needs no template — name that workspace after the host\'s first label instead.',
   },
   PUBLIC_SHELL_INDEX: {
     group: 'Runtime',

@@ -25,7 +25,9 @@ beforeAll(async () => {
   process.env.PLATFORM_OIDC_CLIENT_ID = CLIENT_ID
   delete process.env.PLATFORM_OIDC_CLIENT_SECRET // public client
   process.env.PLATFORM_OIDC_REDIRECT_URI = `http://${PLATFORM_HOST}/signup/callback`
-  process.env.PUBLIC_TENANT_BASE_HOST = 'localhost:5180'
+  // #806 / ADR-249: the deployment declares the SHAPE of a workspace address. Without it, self-serve
+  // creation is closed — which is its own test below.
+  process.env.WKS_TENANT_URL_TEMPLATE = 'http://{slug}.localhost:5180'
   app = await buildApp()
   await app.ready()
 })
@@ -42,7 +44,7 @@ afterAll(async () => {
       await admin`DELETE FROM tenants WHERE id = ${t.id}`.catch(() => {})
     }
   }
-  for (const k of ['PLATFORM_OIDC_ISSUER', 'PLATFORM_OIDC_CLIENT_ID', 'PLATFORM_OIDC_REDIRECT_URI', 'PUBLIC_TENANT_BASE_HOST']) delete process.env[k]
+  for (const k of ['PLATFORM_OIDC_ISSUER', 'PLATFORM_OIDC_CLIENT_ID', 'PLATFORM_OIDC_REDIRECT_URI', 'WKS_TENANT_URL_TEMPLATE']) delete process.env[k]
   await app.close()
   await issuer.close()
   await admin.end()
@@ -97,6 +99,66 @@ describe('Cloud signup', () => {
       payload: { slug: `myws2-${Date.now().toString(36)}` },
     })
     expect(reuse.statusCode).toBe(401)
+  })
+
+  // #806 / ADR-249: a deployment that cannot say WHERE a new workspace would live does not create
+  // one. The owner's ruling (#806) put the refusal here rather than at boot — a single host
+  // with a platform IdP has no true template to write, and refusing to start would demand a fiction
+  // and stop a server that signs people in today.
+  describe('with no workspace-address template', () => {
+    const withoutTemplate = async <T>(body: () => Promise<T>): Promise<T> => {
+      const saved = process.env.WKS_TENANT_URL_TEMPLATE
+      delete process.env.WKS_TENANT_URL_TEMPLATE
+      try { return await body() } finally { process.env.WKS_TENANT_URL_TEMPLATE = saved! }
+    }
+
+    it('self-serve creation is closed — and leaves NO workspace behind', async () => {
+      const cb = await app.inject({ method: 'GET', url: await startSignup(), headers: { host: PLATFORM_HOST } })
+      const sid = /wks_signup=([^;]+)/.exec(String(cb.headers['set-cookie']))![1]
+      const slug = `closed-${Date.now().toString(36)}`
+      const res = await withoutTemplate(() => app.inject({
+        method: 'POST', url: '/signup/tenants',
+        headers: { host: PLATFORM_HOST, cookie: `${SIGNUP_COOKIE}=${sid}`, 'content-type': 'application/json' },
+        payload: { slug },
+      }))
+      expect(res.statusCode).toBe(404)
+      // ⚠️ THE assertion. The reported defect IS "the workspace exists and the address does not", so
+      // the status code alone would pass over a refusal that happens after `provisionTenant`.
+      const rows = await admin`SELECT id FROM tenants WHERE slug = ${slug}`
+      expect(rows.length, 'the refusal happened AFTER the provision — the reported symptom, with a 404 on top').toBe(0)
+    })
+
+    it('and the entry points do not walk anybody into a flow that cannot finish', async () => {
+      const res = await withoutTemplate(() => app.inject({ method: 'GET', url: '/signup/login', headers: { host: PLATFORM_HOST } }))
+      expect(res.statusCode).toBe(404)
+    })
+
+    it('but signing in still works, and an existing workspace still serves', async () => {
+      // Both halves of the ruling. A pin that only checked the 404 would pass over a change that
+      // took the rest of the product down with the door.
+      await withoutTemplate(async () => {
+        const login = await app.inject({ method: 'GET', url: '/auth/login', headers: { host: 'dev.localhost' } })
+        expect(login.statusCode, 'sign-in is not what this closes').not.toBe(404)
+        // NOT `/api/spaces`: the `/api` prefix is the dev proxy's, not the server's (measured — that
+        // path 404s here for a reason that has nothing to do with this ticket).
+        const me = await app.inject({
+          method: 'GET', url: '/spaces',
+          headers: { host: 'dev.localhost', authorization: 'Bearer dev-token' },
+        })
+        expect(me.statusCode, 'an existing workspace still serves').toBe(200)
+      })
+    })
+
+    it('and a server configured this way starts', async () => {
+      // The pin that holds the ruling: the previous revision of ADR-249 refused to BOOT here, which
+      // would have stopped every deployment that signs people in today, on upgrade.
+      const started = await withoutTemplate(() => buildApp())
+      try {
+        expect(started.hasRoute({ method: 'GET', url: '/auth/login' })).toBe(true)
+      } finally {
+        await started.close()
+      }
+    }, 60_000)
   })
 
   it('create-tenant requires a signup session', async () => {

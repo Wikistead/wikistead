@@ -61,7 +61,9 @@ import type { StorageDriver } from './storage/index.js'
 import IORedis from 'ioredis'
 import { invalidateTitleDictCache } from './title-dict-cache.js' // #534
 import { invalidateTreeConfirmCache } from './tree-confirm-cache.js' // #541
-import { assertLoginCeilingValid } from './auth/login-methods.js' // #537
+import { assertLoginCeilingValid, loginMethodCeiling } from './auth/login-methods.js' // #537
+import { readTenantUrlTemplate, TENANT_URL_TEMPLATE_ENV } from './auth/tenant-url-template.js' // #806
+import { loadPlatformOidc } from './auth/oidc.js' // #806: is signup live at all on this deployment?
 import { SESSION_COOKIE, readSession } from './auth/session.js'
 import { assertSecretKey, assertNoPublishedSecretsInProduction } from './auth/secret-crypto.js'
 import { spacesPlugin } from './routes/spaces.js'
@@ -148,6 +150,22 @@ export async function buildApp(): Promise<FastifyInstance> {
   // #537 B8: a ceiling that names no valid method would 404 every login and lock everyone out —
   // that is a configuration error, surfaced at boot, never as mysterious 404s.
   assertLoginCeilingValid()
+
+  // #806 / ADR-249 Decision 4: the OPPOSITE of the line above, deliberately. A missing workspace-address
+  // template does NOT stop the server — a single host with a platform IdP has no true value to write,
+  // and refusing to boot over it would demand a fiction and stop a deployment that signs people in
+  // today. It closes self-serve workspace creation only, so the operator learns the fact here instead
+  // of from a 404 nobody can explain.
+  if (loginMethodCeiling().has('platform-oidc') && loadPlatformOidc()) {
+    const address = readTenantUrlTemplate()
+    if (!address.ok) {
+      console.warn(
+        `[signup] self-serve workspace creation is CLOSED (${address.why}). ` +
+        `Set ${TENANT_URL_TEMPLATE_ENV}=https://{slug}.example.com to open it. ` +
+        `Signing in and existing workspaces are unaffected.`,
+      )
+    }
+  }
 
   // Fail-closed at boot: refuse to start without a valid OIDC secret key (would
   // otherwise risk plaintext secret storage). See auth/secret-crypto.ts.
