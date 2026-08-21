@@ -8,9 +8,13 @@
 // Two halves, and BOTH have to hold or the fix is half a fix: the runner has to look where the image
 // puts the SQL, and the image has to put it there. A pin on only the first passes over an image with
 // no SQL in it; a pin on only the second passes over a runner that never looks.
-import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
+import postgres from 'postgres'
 import { describe, it, expect } from 'vitest'
 import { migrationsDirCandidates, pickMigrationsDir, chooseMigrationsDir } from '../migrations-dir.js'
 
@@ -85,10 +89,38 @@ describe('#804 the schema ships with the image that needs it', () => {
       .toMatch(/from '\.\/migrations-dir\.js'/)
     expect(src, 'migrate.ts imports the resolver but does not ask it anything')
       .toMatch(/\b(chooseMigrationsDir|pickMigrationsDir)\(/)
-    // Importing the resolver and then building a path anyway is the version an import check misses.
-    const ownPath = src.match(/^(?!.*\/\/).*(join|resolve)\([^)]*(infra\/db\/migrations|['"`]migrations['"`])/m)
-    expect(ownPath?.[0] ?? null, 'migrate.ts composes a migrations path of its own beside the resolver').toBeNull()
+    // Whether the answer is then USED is not asked here: a source regex for "composes a path of its
+    // own" missed the real pre-#804 line (a nested join it could not cross a ')' to see) and stayed
+    // green while the image broke. The next test runs the executable instead.
   })
+
+  // #849 second pass: enumerating source shapes lost twice (the COPY filter, then the own-path
+  // regex — the actual old line kept every assertion green). So this stops reading and RUNS the
+  // shipped runner: a named directory holds one marker migration, and only a runner that carries
+  // the resolver's answer all the way to readdir lands the marker in schema_migrations. A runner
+  // that resolves and then reads a path of its own skips the marker, exits green, and goes red here.
+  it("the resolver's answer is what the runner reads — measured by running it", async () => {
+    const adminUrl = process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL
+    expect(adminUrl, 'the server test env carries a database — this pin needs it').toBeTruthy()
+    const dir = mkdtempSync(join(tmpdir(), 'wks-849-'))
+    const marker = `zzz_probe_849_${process.pid}_${Date.now()}.sql`
+    writeFileSync(join(dir, marker), 'SELECT 1;\n')
+    const sql = postgres(adminUrl!, { max: 1, onnotice: () => {} })
+    try {
+      execFileSync(process.execPath, [createRequire(import.meta.url).resolve('tsx/cli'), 'src/migrate.ts'], {
+        cwd: join(repoRoot, 'apps/server'),
+        env: { ...process.env, MIGRATIONS_DIR: dir, DATABASE_ADMIN_URL: adminUrl! },
+        stdio: 'pipe',
+        timeout: 60_000,
+      })
+      const rows = await sql`SELECT 1 FROM schema_migrations WHERE filename = ${marker}`
+      expect(rows.length, "the runner exited green without applying the named directory's migration — the resolver's answer is not what it read").toBe(1)
+    } finally {
+      await sql`DELETE FROM schema_migrations WHERE filename = ${marker}`.catch(() => {})
+      await sql.end()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 90_000)
 
   // #838: `MIGRATIONS_DIR` is how an operator overrules the search. A name that is not there used to
   // fall through to the next layout — on the image, the SQL baked in at build time — so the run
