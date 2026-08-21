@@ -25,15 +25,23 @@ const bundle = (locale: string) =>
 
 const spec = SCREEN_VOCABULARY as Record<string, { ns: string; keys: string[] }>
 
+/**
+ * The one kind of surface the vocabulary accepts. Macros, web routes and capabilities are in the
+ * documentation ledger too, but ADR-239's check is about ADMIN SCREENS — it resolves product words
+ * out of the locale files, and those three have no screen whose buttons could be named. Declared
+ * here because two things depend on it: what a declared id may be, and what the coverage is out of.
+ */
+const ARMABLE_KIND = 'admin-surface'
+
 describe('#741 / ADR-239: the screen vocabulary names things that exist', () => {
   it('every declared surface is one the documentation ledger knows', () => {
     // A surface id that no longer exists would make the docs-site check guard a screen nobody has —
     // and it would stay green there, because a page that claims nothing is simply not checked.
-    const known = new Set(Object.keys((SURFACE_DOCS as Record<string, Record<string, unknown>>)['admin-surface'] ?? {}))
+    const known = new Set(Object.keys((SURFACE_DOCS as Record<string, Record<string, unknown>>)[ARMABLE_KIND] ?? {}))
     expect(known.size, 'the ledger has admin surfaces to check against').toBeGreaterThan(5)
     for (const id of Object.keys(spec)) {
       const [kind, name] = id.split(':')
-      expect(kind, `${id} is not a <kind>:<name> id`).toBe('admin-surface')
+      expect(kind, `${id} is not a <kind>:<name> id`).toBe(ARMABLE_KIND)
       expect(known.has(name!), `${id} names a surface the ledger does not have`).toBe(true)
     }
   })
@@ -46,11 +54,25 @@ describe('#741 / ADR-239: the screen vocabulary names things that exist', () => 
     const armed = Object.keys(spec)
     const ledger = Object.entries(SURFACE_DOCS as Record<string, Record<string, string>>)
       .flatMap(([kind, entries]) => Object.keys(entries).map((name) => `${kind}:${name}`))
-    const unarmed = ledger.filter((id) => !armed.includes(id))
+    // #846: the denominator is the surfaces that CAN be armed, which the test above pins to a single
+    // kind — the vocabulary refuses anything else. Counting all four kinds reported "3 armed, 67 not
+    // yet", and a reader took that 4% at face value: it became "arm ten more" in an ADR, which is 62%
+    // of the ledger rather than the modest step it looked like. The out-of-scope kinds are still
+    // counted, and said out loud, because a surface that can never be armed is a different fact from
+    // one that simply has not been.
+    const armable = ledger.filter((id) => id.startsWith(`${ARMABLE_KIND}:`))
+    const unarmed = armable.filter((id) => !armed.includes(id))
+    const outOfScope = ledger.length - armable.length
     // Reported on every run, so the number is visible in the log rather than only when it breaks.
-    console.error(`screen vocabulary: ${armed.length} surface(s) armed, ${unarmed.length} not yet`)
+    console.error(
+      `screen vocabulary: ${armed.length} of ${armable.length} armable surface(s) armed, ${unarmed.length} not yet` +
+        `; ${outOfScope} surface(s) out of scope (the vocabulary only takes ${ARMABLE_KIND})`,
+    )
 
     expect(ledger.length, 'the surface ledger is empty — nothing could be armed or unarmed').toBeGreaterThan(10)
+    // The split has to be real on both sides, or the sentence above is arithmetic over nothing.
+    expect(armable.length, 'no armable surface in the ledger — the kind name has drifted').toBeGreaterThan(5)
+    expect(outOfScope, 'every surface is armable — then this denominator no longer needs explaining').toBeGreaterThan(0)
     // A floor, not a target. #790 cannot start until three surfaces exist to derive from, which is
     // why three is the number: it is somebody else's unlock condition, not a round figure.
     expect(armed.length, 'fewer surfaces armed than #790 needs to derive from').toBeGreaterThanOrEqual(3)
