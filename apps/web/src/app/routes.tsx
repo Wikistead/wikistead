@@ -1456,20 +1456,31 @@ function JoinRoute() {
  * form should stop retrying and ask for an invitation instead. Before this ticket a 404 was
  * unreachable for a deployment that had an identity provider, so the branch did not exist.
  *
- * ⚠️ The other statuses still show the server's own `error` string, in English, to a reader who may
- * not be reading English. That is a real defect and it is filed rather than fixed here — widening
- * this function into a status-to-copy table is a change to every message the signup flow can show,
- * and it belongs to whoever owns that copy.
+ * #871: and now the rest of them. `POST /signup/tenants` answers five ways, and four of them were
+ * reaching the screen as the server's own English — written for an API client, by a route that has no
+ * idea who is reading. The one a person meets most is 409, because names are taken by other people.
+ *
+ * ⚠️ The body's `error` string is no longer rendered at all, on any status. Keeping it as the
+ * fallback would have left the defect wherever a status was not listed, which is the same thing as
+ * leaving it: the fallback is the generic sentence, which is at least in the reader's language. The
+ * server keeps its strings for API clients and for the log; the screen keeps the copy.
+ *
+ * ⚠️ What this does NOT decide: whether "that name is taken" belongs under the input rather than in
+ * the red line above it. That is a question about the shape of the form, not the words, and it is
+ * left on the ticket for whoever owns it.
  *
  * Exported so the rule is measured by running it, not by reading the file it lives in.
  */
 export function createWorkspaceMessage(
   status: number,
-  body: { error?: string },
+  _body: { error?: string },
   t: (key: string) => string,
 ): string {
   if (status === 404) return t("auth.signupUnavailable");
-  return body.error ?? t("auth.createWorkspaceError");
+  if (status === 409) return t("auth.workspaceNameTaken");
+  if (status === 400) return t("auth.workspaceNameInvalid");
+  if (status === 401) return t("auth.signupSessionExpired");
+  return t("auth.createWorkspaceError");
 }
 
 // After platform-IdP signup: choose a workspace name → POST /signup/tenants (uses

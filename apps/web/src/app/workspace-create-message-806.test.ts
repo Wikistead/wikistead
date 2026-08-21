@@ -36,9 +36,39 @@ describe("#806 the workspace-name step", () => {
     expect(ja.auth.signupUnavailable).not.toBe(en.auth.signupUnavailable);
   });
 
-  it("leaves the other statuses alone, because this ticket did not create them", () => {
+  // #871: the other four statuses were still the server's English. `POST /signup/tenants` answers
+  // 404 / 409 / 400 / 401 / 500, and the one a person meets most is 409 — names are taken by other
+  // people, so the commonest outcome of the commonest mistake was the least readable.
+  it("answers every status this route can give, in the reader's language", () => {
     const t = translator(en);
-    expect(createWorkspaceMessage(409, { error: "workspace name taken" }, t)).toBe("workspace name taken");
-    expect(createWorkspaceMessage(500, {}, t)).toBe(en.auth.createWorkspaceError);
+    expect(createWorkspaceMessage(409, { error: "workspace name taken" }, t)).toBe(en.auth.workspaceNameTaken);
+    expect(createWorkspaceMessage(400, { error: "invalid workspace name" }, t)).toBe(en.auth.workspaceNameInvalid);
+    expect(createWorkspaceMessage(401, { error: "no signup session" }, t)).toBe(en.auth.signupSessionExpired);
+    expect(createWorkspaceMessage(500, { error: "could not create workspace" }, t)).toBe(en.auth.createWorkspaceError);
+  });
+
+  // ⚠️ The claim is not "each status has a sentence" — it is that the SERVER'S sentence never
+  // arrives. A mapping that forgot one status would still pass the test above by falling through to
+  // `body.error`; this one names the strings the route actually sends and refuses all of them,
+  // including on a status nobody listed.
+  it("never renders the server's own string, on any status", () => {
+    const t = translator(en);
+    const sent = ["signup not available", "no signup session", "invalid workspace name", "workspace name taken", "could not create workspace"];
+    for (const status of [400, 401, 404, 409, 418, 500, 503]) {
+      for (const error of sent) {
+        expect(createWorkspaceMessage(status, { error }, t), `${status} rendered the server's words`).not.toContain(error);
+      }
+    }
+  });
+
+  it("says all of it in Japanese too, and not by copying English", () => {
+    const t = translator(ja);
+    expect(createWorkspaceMessage(409, { error: "workspace name taken" }, t)).toBe(ja.auth.workspaceNameTaken);
+    expect(createWorkspaceMessage(400, {}, t)).toBe(ja.auth.workspaceNameInvalid);
+    expect(createWorkspaceMessage(401, {}, t)).toBe(ja.auth.signupSessionExpired);
+    // A locale file that carried the key with the English text would satisfy every assertion above.
+    expect(ja.auth.workspaceNameTaken).not.toBe(en.auth.workspaceNameTaken);
+    expect(ja.auth.workspaceNameInvalid).not.toBe(en.auth.workspaceNameInvalid);
+    expect(ja.auth.signupSessionExpired).not.toBe(en.auth.signupSessionExpired);
   });
 });
