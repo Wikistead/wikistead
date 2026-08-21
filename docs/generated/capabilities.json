@@ -8,6 +8,7 @@
     "import:native",
     "import:notion",
     "import:obsidian",
+    "import:outline",
     "mcp:create_comment",
     "mcp:create_page",
     "mcp:edit_body",

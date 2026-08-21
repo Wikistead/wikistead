@@ -95,7 +95,7 @@ describe('#728 ADR-242 §3: an unreadable page link is said out loud', () => {
     expect(report.deadCrossLinks).toBe(0)
   }, 300_000)
 
-  it('still says a Docmost-shaped link out loud when no dialect claims the archive', async () => {
+  it('resolves the same shape without a manifest, because the Outline dialect claims it by its links', async () => {
     // The guarantee this file was written for, on the archive it now applies to: the SAME link shape
     // in an archive with no manifest is read as a vault (nothing else claims it), nothing resolves the
     // path, and the silence would be back if this were only a Docmost-detection feature. Somebody who
@@ -105,12 +105,30 @@ describe('#728 ADR-242 §3: an unreadable page link is said out loud', () => {
       'Handbook.md': strToU8('# Handbook\n\nStart with [Onboarding](Handbook/Onboarding.md).\n'),
       'Handbook/Onboarding.md': strToU8('# Onboarding\n\nBack to [Handbook](../Handbook.md).\n'),
     })
+    // ⚠️ This case CHANGED with #728 ②, and the change is the improvement this file was written to
+    // want. Without a manifest nothing used to claim the archive, so the links stayed as written and
+    // were reported. The Outline dialect claims it by its LINKS — relative `.md` targets the archive
+    // contains — so they now resolve, and said this would happen: "when a later slice rewrites
+    // this link, the report stops on its own; the list does not have to be edited".
+    expect(report.degraded.filter((d) => d.code === 'sourcePageLinkKept'), 'nothing left to report').toEqual([])
+    expect(await bodyOf('Handbook')).toMatch(/\(\/p\/[0-9a-f-]{36}\)/)
+    expect(await bodyOf('Onboarding')).toMatch(/\(\/p\/[0-9a-f-]{36}\)/)
+    expect(report.deadCrossLinks).toBe(0)
+  }, 300_000)
+
+  it('still says a page link out loud when NO dialect can resolve it', async () => {
+    // The guarantee this file exists for, on an archive no dialect claims: a page-shaped link whose
+    // target the archive DOES carry, in a shape none of them resolves. Docmost needs its manifest,
+    // Outline needs a `.md` target or a `/doc/` URL — this is a bare directory path, so it is read as
+    // a vault, nothing addresses it, and the reader is told rather than left with a silent dead link.
+    await fresh()
+    const report = await run({
+      'Handbook.md': strToU8('# Handbook\n\nStart with [Onboarding](Handbook/Onboarding).\n'),
+      'Handbook/Onboarding.md': strToU8('# Onboarding\n\nThe first day.\n'),
+    })
     const kept = report.degraded.filter((d) => d.code === 'sourcePageLinkKept')
-    expect(kept.map((d) => `${d.node}: ${d.params?.target}`).sort()).toEqual([
-      'Handbook: Handbook/Onboarding.md',
-      'Onboarding: ../Handbook.md',
-    ])
-    expect(await bodyOf('Handbook')).toContain('(Handbook/Onboarding.md)')
+    expect(kept.map((d) => `${d.node}: ${d.params?.target}`)).toEqual(['Handbook: Handbook/Onboarding'])
+    expect(await bodyOf('Handbook')).toContain('(Handbook/Onboarding)')
     expect(report.deadCrossLinks).toBe(0)
   }, 300_000)
 
@@ -120,9 +138,23 @@ describe('#728 ADR-242 §3: an unreadable page link is said out loud', () => {
       'Engineering/Runbook.md': strToU8('# Runbook\n\nSee [Deploys](/doc/deploys-a1b2c3d4e5).\n'),
       'Engineering/Deploys.md': strToU8('# Deploys\n\nNothing here yet.\n'),
     })
+    // ⚠️ Also changed by #728 ②, and in the direction the reader wants: the dialect reads the slug out
+    // of the URL, finds the document the archive carries under that name, and addresses it. Before,
+    // the best this could do was name the link and leave it broken.
+    expect(report.degraded.filter((d) => d.code === 'sourcePageLinkKept')).toEqual([])
+    expect(await bodyOf('Runbook')).toMatch(/\(\/p\/[0-9a-f-]{36}\)/)
+  }, 300_000)
+
+  it('still names a /doc/ link whose document the archive never carried', async () => {
+    // The half that has to keep working: an Outline URL pointing OUT of the export. Nothing can
+    // address it, and it is not a dead cross-link either — it names a page that was never here.
+    await fresh()
+    const report = await run({
+      'Engineering/Runbook.md': strToU8('# Runbook\n\nSee [Deploys](/doc/elsewhere-z9y8x7w6v5).\n'),
+    })
     expect(report.degraded.filter((d) => d.code === 'sourcePageLinkKept').map((d) => d.params?.target))
-      .toEqual(['/doc/deploys-a1b2c3d4e5'])
-    expect(await bodyOf('Runbook')).toContain('/doc/deploys-a1b2c3d4e5')
+      .toEqual(['/doc/elsewhere-z9y8x7w6v5'])
+    expect(await bodyOf('Runbook')).toContain('/doc/elsewhere-z9y8x7w6v5')
   }, 300_000)
 
   it('percent-encoded paths answer the same as plain ones', async () => {
@@ -135,12 +167,26 @@ describe('#728 ADR-242 §3: an unreadable page link is said out loud', () => {
       'Index.md': strToU8('# Index\n\n[手順書](%E6%89%8B%E9%A0%86%E6%9B%B8.md)\n'),
       '手順書.md': strToU8('# 手順書\n\nBody.\n'),
     })
-    // ⚠️ The manifest is deliberately absent, for the reason in the test above it: with one, the
-    // dialect resolves this link and there is nothing to report. What is measured here is the READING
-    // of the encoded path — that the reporter decodes before it compares — and that has to keep
-    // working for the archive nobody claims, which is the one where a missed link stays missed.
+    // ⚠️ Changed by #728 ②, and this is the case that mattered most. The archive has no manifest, so
+    // before the Outline dialect existed nothing claimed it and the encoded link was reported. Now it
+    // is claimed by its links and RESOLVED — which is the outcome the ticket wanted for exactly this
+    // archive, the one a Japanese export produces. The decoding this case was written to measure is
+    // still what makes it work; it now shows up as an address rather than as a report.
+    expect(report.degraded.filter((d) => d.code === 'sourcePageLinkKept')).toEqual([])
+    expect(await bodyOf('Index')).toMatch(/\(\/p\/[0-9a-f-]{36}\)/)
+  }, 300_000)
+
+  it('still reads an encoded path correctly when the report is the only thing left', async () => {
+    // The reading, kept under test on an archive no dialect resolves: a bare directory path, encoded.
+    // If the reporter compared raw strings this would say nothing, and a Japanese export would go
+    // through the whole path silent — the defect this file was opened for.
+    await fresh()
+    const report = await run({
+      'Index.md': strToU8('# Index\n\n[手順書](%E6%89%8B%E9%A0%86%E6%9B%B8)\n'),
+      '手順書.md': strToU8('# 手順書\n\nBody.\n'),
+    })
     expect(report.degraded.filter((d) => d.code === 'sourcePageLinkKept').map((d) => d.params?.target))
-      .toEqual(['%E6%89%8B%E9%A0%86%E6%9B%B8.md'])
+      .toEqual(['%E6%89%8B%E9%A0%86%E6%9B%B8'])
   }, 300_000)
 
   it('says nothing about a link whose target the archive never carried', async () => {
