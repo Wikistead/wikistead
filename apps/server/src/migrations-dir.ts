@@ -33,8 +33,43 @@ export function migrationsDirCandidates(moduleDir: string, env: Record<string, s
 /**
  * The first candidate that exists. Returns null rather than guessing — a runner that silently
  * migrates from an empty directory reports success over a database it never touched.
+ *
+ * ⚠️ It does NOT know which candidate an operator named, so it cannot tell a missing name from a
+ * missing everything. `chooseMigrationsDir` does, and is what the runner calls; this stays exported
+ * because the choice between the two non-named layouts is worth measuring on its own.
  */
 export function pickMigrationsDir(candidates: readonly string[], exists: (path: string) => boolean): string | null {
   for (const candidate of candidates) if (exists(candidate)) return candidate
   return null
+}
+
+/**
+ * #838: a named directory that is not there REFUSES, rather than falling through to the next layout.
+ *
+ * `MIGRATIONS_DIR` exists so an operator can overrule the search — a chart mounting the SQL, a
+ * one-off run against a copy. If the name is a typo, or the mount that was supposed to supply it
+ * failed, falling back means a DIFFERENT set of SQL runs than the one the operator asked for: on the
+ * image, the copy baked in at build time, which is older than whatever they were mounting. Measured
+ * on the built image during #804's review — `MIGRATIONS_DIR=/nonexistent` migrated happily
+ * from `/app/migrations` and said nothing.
+ *
+ * It is the same defect #804 closed one door along: reporting success over a database that did not
+ * get what the operator meant. The refusal is only for the NAMED case; with no name, the search
+ * order is untouched.
+ */
+export type MigrationsDirChoice =
+  | { kind: 'found'; dir: string }
+  | { kind: 'named-missing'; named: string }
+  | { kind: 'none'; candidates: string[] }
+
+export function chooseMigrationsDir(
+  moduleDir: string,
+  env: Record<string, string | undefined>,
+  exists: (path: string) => boolean,
+): MigrationsDirChoice {
+  const candidates = migrationsDirCandidates(moduleDir, env)
+  const named = env.MIGRATIONS_DIR?.trim()
+  if (named && !exists(named)) return { kind: 'named-missing', named }
+  const dir = pickMigrationsDir(candidates, exists)
+  return dir ? { kind: 'found', dir } : { kind: 'none', candidates }
 }

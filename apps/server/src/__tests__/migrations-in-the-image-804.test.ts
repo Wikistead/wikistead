@@ -12,7 +12,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
-import { migrationsDirCandidates, pickMigrationsDir } from '../migrations-dir.js'
+import { migrationsDirCandidates, pickMigrationsDir, chooseMigrationsDir } from '../migrations-dir.js'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
 const dockerfile = join(repoRoot, 'apps/server/Dockerfile')
@@ -78,11 +78,50 @@ describe('#804 the schema ships with the image that needs it', () => {
   // Read rather than imported, because importing this module RUNS the migrations.
   it('the runner that ships is the one that was fixed', () => {
     const src = readFileSync(join(repoRoot, 'apps/server/src/migrate.ts'), 'utf8')
-    expect(src, 'migrate.ts does not use the resolver — the fix lives in a module nothing runs')
-      .toMatch(/pickMigrationsDir\(\s*migrationsDirCandidates\(|migrationsDirCandidates\([\s\S]{0,200}?pickMigrationsDir\(/)
+    // The rule is "the runner asks this module", not "the runner calls these two names" — #838
+    // changed the entry point to `chooseMigrationsDir` and this assertion went red for a change that
+    // kept the rule. It reads the import and one call into it.
+    expect(src, 'migrate.ts does not import the resolver — the fix lives in a module nothing runs')
+      .toMatch(/from '\.\/migrations-dir\.js'/)
+    expect(src, 'migrate.ts imports the resolver but does not ask it anything')
+      .toMatch(/\b(chooseMigrationsDir|pickMigrationsDir)\(/)
     // Importing the resolver and then building a path anyway is the version an import check misses.
     const ownPath = src.match(/^(?!.*\/\/).*(join|resolve)\([^)]*(infra\/db\/migrations|['"`]migrations['"`])/m)
     expect(ownPath?.[0] ?? null, 'migrate.ts composes a migrations path of its own beside the resolver').toBeNull()
+  })
+
+  // #838: `MIGRATIONS_DIR` is how an operator overrules the search. A name that is not there used to
+  // fall through to the next layout — on the image, the SQL baked in at build time — so the run
+  // migrated from something other than what was asked for, and said nothing. Measured on the built
+  // image during #804's review.
+  it('a named directory that is not there refuses instead of falling back', () => {
+    const present = new Set(['/app/migrations', '/repo/infra/db/migrations'])
+    const choice = chooseMigrationsDir('/app/dist/', { MIGRATIONS_DIR: '/nonexistent' }, (p) => present.has(p))
+    expect(choice).toEqual({ kind: 'named-missing', named: '/nonexistent' })
+  })
+
+  it('…and a named directory that IS there still wins, as it always did', () => {
+    // The other direction, and the one a refusal written too widely would break: naming a directory
+    // has to keep working, or the refusal has taken the feature away instead of fixing it.
+    const choice = chooseMigrationsDir('/app/dist/', { MIGRATIONS_DIR: '/mnt/sql' }, (p) => p === '/mnt/sql' || p === '/app/migrations')
+    expect(choice).toEqual({ kind: 'found', dir: '/mnt/sql' })
+    // And with no name at all the search order is untouched: deploy tree first, checkout second.
+    expect(chooseMigrationsDir('/app/dist/', {}, (p) => p === '/app/migrations')).toEqual({ kind: 'found', dir: '/app/migrations' })
+    expect(chooseMigrationsDir('/repo/apps/server/dist/', {}, (p) => p === '/repo/infra/db/migrations'))
+      .toEqual({ kind: 'found', dir: '/repo/infra/db/migrations' })
+    // Nothing anywhere is still its own answer, carrying what was looked at.
+    const none = chooseMigrationsDir('/app/dist/', {}, () => false)
+    expect(none.kind).toBe('none')
+    expect(none.kind === 'none' && none.candidates.length, 'the refusal has to say where it looked').toBeGreaterThan(1)
+  })
+
+  it('the runner refuses a named directory rather than reporting one it did not use', () => {
+    // Read, not imported: importing migrate.ts runs the migrations. What is asserted is that the
+    // named-missing branch reaches `process.exit` rather than being logged and walked past.
+    const src = readFileSync(join(repoRoot, 'apps/server/src/migrate.ts'), 'utf8')
+    const branch = src.match(/named-missing[\s\S]{0,600}?\n\}/)?.[0] ?? ''
+    expect(branch, 'migrate.ts does not handle the named-missing answer at all').not.toBe('')
+    expect(branch, 'the named-missing branch does not stop the run').toMatch(/process\.exit\(1\)/)
   })
 
   it('there is SQL to carry (the check is not measuring an empty directory)', () => {

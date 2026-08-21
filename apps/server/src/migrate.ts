@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
-import { migrationsDirCandidates, pickMigrationsDir } from './migrations-dir.js'
+import { chooseMigrationsDir } from './migrations-dir.js'
 
 const url = process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL
 if (!url) { console.error('DATABASE_ADMIN_URL or DATABASE_URL required'); process.exit(1) }
@@ -29,13 +29,20 @@ const sql = postgres(url, { max: 1, onnotice: () => {} })
 
 // #804: the image is a deploy tree, not a checkout — see migrations-dir.ts for the three layouts.
 const moduleDir = fileURLToPath(new URL('.', import.meta.url))
-const candidates = migrationsDirCandidates(moduleDir, process.env)
-const migrationsDir = pickMigrationsDir(candidates, existsSync)
-if (!migrationsDir) {
-  console.error('no migrations directory found. Looked in:\n  ' + candidates.join('\n  '))
+const choice = chooseMigrationsDir(moduleDir, process.env, existsSync)
+if (choice.kind === 'named-missing') {
+  // #838: told where to look and it is not there. Falling back would run the image's own SQL under
+  // the operator's instruction to run something else, and say nothing.
+  console.error(`MIGRATIONS_DIR is set to ${choice.named}, and there is no directory there.`)
+  console.error('Refusing to fall back: unset it to search the default layouts, or fix the path.')
+  process.exit(1)
+}
+if (choice.kind === 'none') {
+  console.error('no migrations directory found. Looked in:\n  ' + choice.candidates.join('\n  '))
   console.error('Set MIGRATIONS_DIR if the SQL lives somewhere else.')
   process.exit(1)
 }
+const migrationsDir = choice.dir
 
 await sql`
   CREATE TABLE IF NOT EXISTS schema_migrations (
