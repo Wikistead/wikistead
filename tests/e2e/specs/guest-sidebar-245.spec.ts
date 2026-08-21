@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { API } from "../helpers";
+import { API, pageList } from "../helpers";
 
 // #245 / ADR-112: a space share-link guest browses the linked space in the REAL sidebar (page tree),
 // read-only, with NO member chrome (no new-page/settings/space-switcher). The tree lists only FGA-viewable
@@ -14,7 +14,7 @@ test("#245: space-link guest gets the sidebar tree, no member chrome, opens a pa
   let spaceId = "";
   let spaceName = "";
   for (const s of spaces) {
-    const pages = (await (await fetch(`${API}/spaces/${s.id}/pages`, { headers: H })).json()) as { id: string }[];
+    const pages = pageList<{ id: string }>(await (await fetch(`${API}/spaces/${s.id}/pages`, { headers: H })).json());
     if (pages.length > 0) { spaceId = s.id; spaceName = s.name; break; }
   }
   expect(spaceId, "a space with pages exists").toBeTruthy();

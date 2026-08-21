@@ -208,3 +208,18 @@ export async function nameNewestFactor(page: Page, label: string): Promise<void>
   // step in every caller looks the row up BY that name.
   await page.locator('[data-testid="factor-row"]', { hasText: label }).first().waitFor({ timeout: 15_000 });
 }
+
+/**
+ * #623 / ADR-220 §6.2: `GET /spaces/:id/pages` answers `{ pages, truncated }` — the guest tree's cap
+ * is a visible state, not a silent cut, so the list had to grow a sibling field. Callers written
+ * before that read the body as a bare array; the shape change turned four of them into `undefined`
+ * lengths and `.filter is not a function`, and they stayed red for two weeks because nothing runs
+ * the e2e suite on the way to master.
+ *
+ * Reading through this instead of at each call site keeps the knowledge of the shape in ONE place —
+ * the next field the route grows is a change here, not a hunt through the specs.
+ */
+export function pageList<T>(body: unknown): T[] {
+  if (Array.isArray(body)) return body as T[];
+  return ((body as { pages?: T[] } | null)?.pages) ?? [];
+}

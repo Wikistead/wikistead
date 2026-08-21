@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep, API } from "../helpers";
+import { openDemo, pageList, sleep, API } from "../helpers";
 import { LOCKED_SPACE_NAME } from "../fixtures";
 
 // Phase 1 nav: the sidebar shows ONE active space's page tree (chosen in the
@@ -7,10 +7,12 @@ import { LOCKED_SPACE_NAME } from "../fixtures";
 // affordance that was missing); DnD reparent/reorder within the active space still
 // works. (Cross-space DnD has no single-space UI now — the backend /move across
 // spaces stays covered by the server spaces-pages tests.)
-const pagesOf = (page: Page, space: string) =>
-  page.evaluate(
-    async ({ api, space }) => (await (await fetch(`${api}/spaces/${space}/pages`, { headers: { Authorization: "Bearer dev-token" } })).json()) as { id: string; parentId: string | null }[],
-    { api: API, space },
+const pagesOf = async (page: Page, space: string) =>
+  pageList<{ id: string; parentId: string | null }>(
+    await page.evaluate(
+      async ({ api, space }) => (await (await fetch(`${api}/spaces/${space}/pages`, { headers: { Authorization: "Bearer dev-token" } })).json()) as unknown,
+      { api: API, space },
+    ),
   );
 
 test("sidebar: active space follows the open page; switcher is FGA-filtered; route selection", async ({ page }) => {

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { sleep } from "../helpers";
+import { pageList, sleep } from "../helpers";
 import postgres from "postgres";
 import { E2E } from "../fixtures";
 
@@ -48,10 +48,12 @@ test("#364: empty state → write button → home renders at the space root; tre
 
   // 3) the sidebar shows the fixed Home entry; the tree does NOT list the home page
   await expect(page.getByTestId("sidebar-home")).toBeVisible();
-  const treeIds = await page.evaluate(async (sid: string) => {
-    const r = await fetch(`/api/spaces/${sid}/pages`, { headers: { authorization: "Bearer dev-token" } });
-    return ((await r.json()) as { id: string }[]).map((p) => p.id);
-  }, spaceId);
+  const treeIds = pageList<{ id: string }>(
+    await page.evaluate(async (sid: string) => {
+      const r = await fetch(`/api/spaces/${sid}/pages`, { headers: { authorization: "Bearer dev-token" } });
+      return (await r.json()) as unknown;
+    }, spaceId),
+  ).map((p) => p.id);
   expect(treeIds, "the tree route excludes the home").not.toContain(homeId);
 
   // 3.5) the home's title is DERIVED (space name + locale suffix) and shows NO rename
