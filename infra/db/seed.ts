@@ -22,8 +22,12 @@ import { assertStackTarget } from '../../scripts/assert-stack-target.mjs'
     // so the next run starts clean instead of inheriting another run's half-state. Every shape here is
     // a KNOWN leftover with a KNOWN owning suite (documented on #482): the residue is deleted, never a
     // real fixture (dev-user / demo page are re-seeded below, and only test-shaped rows are removed).
-    //   - throwaway members that seat-cap tests mint (they change "who is the newest member")
-    await tx`DELETE FROM members WHERE tenant_id = 'tenant_dev' AND (sub LIKE 'gate-%' OR sub LIKE 'pf-out-%' OR sub LIKE 'inv-%' OR sub LIKE 'seat-%')`
+    //   - #852: throwaway members that suites mint (a member row is a SEAT, so they change the answer
+    //     of every seat-cap assertion). This used to name four prefixes — `gate-`, `pf-out-`, `inv-`,
+    //     `seat-` — and a fifth suite minting `dg-w1-<stamp>` was never added, so its rows survived
+    //     every run until a seat assertion in an unrelated file went red. `prune-test-tenants.ts`
+    //     collects them now BY DERIVATION (everything in a seeded tenant that the seed did not write),
+    //     which needs no list and cannot miss the sixth.
     // #738: the fixture tenant's PLAN, when the stack asks for one.
     //
     // Nine specs invite a second member, and every Cloud plan below the top tier is one seat (#691's
