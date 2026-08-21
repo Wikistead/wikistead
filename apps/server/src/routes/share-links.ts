@@ -83,8 +83,11 @@ function toShareLink(r: ShareLinkRow): ShareLink {
 //    grant goes to the cascading `*_direct` leaf). Links carry view/edit ONLY — commenting is a
 //    RESOURCE setting (space#comment_open), NOT a link capability, so a guest comments via a VIEW
 //    link + comments being open, never via a comment link.
-//  - space: view-only -> 'viewer' (ADR-038: a space link opens the whole space READ-only; space#editor
-//    has no share_link, so guests never edit via a space link). An edit space link is rejected.
+//  - space: view -> 'viewer', edit -> 'editor' (#274 / ADR-135). The header used to say a space link
+//    was read-only and an edit one was rejected, which was true under ADR-038 and stopped being true
+//    when the editor split landed — and the stale line is not harmless: it is what made collab's
+//    demotion of space tokens to `view` look correct for months (#812, found on a device, not in a
+//    review). The body below is the statement of record.
 function relationForResource(type: ResourceRef['type'], capability: Capability): 'view_direct' | 'edit_direct' | 'viewer' | 'editor' {
   if (type === 'space') {
     // #274 / ADR-135: a space EDIT link writes `space#editor` (share_link + the non_expired twin are its
