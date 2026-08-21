@@ -75,10 +75,33 @@ describe('#728 ADR-242 §3: an unreadable page link is said out loud', () => {
   // MEASURED before the fix, through this same route: the body kept `(Handbook/Onboarding.md)`,
   // `deadCrossLinks` was 0, and `degraded[]` never mentioned it. Nothing anywhere said that every
   // internal link in the archive had stopped pointing at anything.
-  it('names a Docmost-shaped page link instead of losing it in silence', async () => {
+  // ⚠️ REWRITTEN by the Docmost dialect (#728 slice ①, same ticket). The original assertion here was
+  // that these two links are REPORTED and left alone — which is what this slice promised while the
+  // dialect did not exist, and it said so in as many words: "if a later slice DOES rewrite them, the
+  // link is gone from the body and this report stops firing on its own — it reads the finished text."
+  // That is now measured rather than predicted. The report's own guarantee is kept below, on the
+  // archive that still has nobody to resolve it.
+  it('resolves a Docmost-shaped page link now that the dialect exists', async () => {
     await fresh()
     const report = await run({
       'docmost-metadata.json': strToU8('{"source":"docmost","version":"0.1"}'),
+      'Handbook.md': strToU8('# Handbook\n\nStart with [Onboarding](Handbook/Onboarding.md).\n'),
+      'Handbook/Onboarding.md': strToU8('# Onboarding\n\nBack to [Handbook](../Handbook.md).\n'),
+    })
+    expect(report.degraded.filter((d) => d.code === 'sourcePageLinkKept'), 'nothing left to report').toEqual([])
+    expect(await bodyOf('Handbook')).toMatch(/\(\/p\/[0-9a-f-]{36}\)/)
+    expect(await bodyOf('Onboarding')).toMatch(/\(\/p\/[0-9a-f-]{36}\)/)
+    // Still not counted as dead: both targets came in with the archive, and now they are addressed.
+    expect(report.deadCrossLinks).toBe(0)
+  }, 300_000)
+
+  it('still says a Docmost-shaped link out loud when no dialect claims the archive', async () => {
+    // The guarantee this file was written for, on the archive it now applies to: the SAME link shape
+    // in an archive with no manifest is read as a vault (nothing else claims it), nothing resolves the
+    // path, and the silence would be back if this were only a Docmost-detection feature. Somebody who
+    // re-zips their export without the manifest is exactly that case.
+    await fresh()
+    const report = await run({
       'Handbook.md': strToU8('# Handbook\n\nStart with [Onboarding](Handbook/Onboarding.md).\n'),
       'Handbook/Onboarding.md': strToU8('# Onboarding\n\nBack to [Handbook](../Handbook.md).\n'),
     })
@@ -87,12 +110,7 @@ describe('#728 ADR-242 §3: an unreadable page link is said out loud', () => {
       'Handbook: Handbook/Onboarding.md',
       'Onboarding: ../Handbook.md',
     ])
-    // Report-only: the body is untouched, because rewriting these is the Docmost dialect's job and
-    // this slice is the one that stops the silence. If a later slice DOES rewrite them, the link is
-    // gone from the body and this report stops firing on its own — it reads the finished text.
     expect(await bodyOf('Handbook')).toContain('(Handbook/Onboarding.md)')
-    // Not counted twice. `deadCrossLinks` means "the target was outside the import", and both of
-    // these targets came in with the archive.
     expect(report.deadCrossLinks).toBe(0)
   }, 300_000)
 
@@ -114,10 +132,13 @@ describe('#728 ADR-242 §3: an unreadable page link is said out loud', () => {
     // silence this ticket is about, surviving the fix in the one export most likely to hit it.
     await fresh()
     const report = await run({
-      'docmost-metadata.json': strToU8('{"source":"docmost","version":"0.1"}'),
       'Index.md': strToU8('# Index\n\n[手順書](%E6%89%8B%E9%A0%86%E6%9B%B8.md)\n'),
       '手順書.md': strToU8('# 手順書\n\nBody.\n'),
     })
+    // ⚠️ The manifest is deliberately absent, for the reason in the test above it: with one, the
+    // dialect resolves this link and there is nothing to report. What is measured here is the READING
+    // of the encoded path — that the reporter decodes before it compares — and that has to keep
+    // working for the archive nobody claims, which is the one where a missed link stays missed.
     expect(report.degraded.filter((d) => d.code === 'sourcePageLinkKept').map((d) => d.params?.target))
       .toEqual(['%E6%89%8B%E9%A0%86%E6%9B%B8.md'])
   }, 300_000)

@@ -1,6 +1,6 @@
 // #747: the ELEMENT-BY-ELEMENT record of what an import keeps, converts, and cannot carry.
 //
-// The documentation promised a table and had none, and the obvious way to write one is by hand —
+// The documentation promised a table and had none, and the obvious way to write one is by hand
 // which is the way that is true on the day it is written and quietly false from the next adapter
 // change onward. So the table is MEASURED: every row here is pushed through the shipped import path
 // (`importArchive`, the function the route calls) and the resulting page body and fidelity report
@@ -41,7 +41,7 @@ export interface FidelityCase {
 }
 
 export interface FidelitySource {
-  id: 'obsidian' | 'notion' | 'confluence'
+  id: 'obsidian' | 'notion' | 'confluence' | 'docmost'
   /** the product being migrated FROM, as its own vendor spells it */
   name: string
   /** files every case needs: link targets, an attachment, whatever makes the archive that dialect */
@@ -187,6 +187,50 @@ const CONFLUENCE: FidelitySource = {
   ],
 }
 
+// ── Docmost ──────────────────────────────────────────────────────────────────
+// #728 / ADR-242 §3. Every snippet here is the shape a real Docmost 0.95.0 export writes — measured,
+// not guessed, from the archives under `__tests__/fixtures/docmost-0.95.0` (see its PROVENANCE.md).
+// The three that look like typos are the point: the entry name is raw where its link is
+// percent-encoded, the same page is spelled two ways when its title was duplicated, and an
+// attachment reference is relative to the page's own folder.
+const DOCMOST: FidelitySource = {
+  id: 'docmost',
+  name: 'Docmost',
+  support: {
+    'docmost-metadata.json': JSON.stringify({
+      source: 'docmost',
+      version: '0.95.0',
+      pages: { 'icon.md': { pageId: 'p1', slugId: 'sIcon00001', icon: '🚀', parentPath: null } },
+    }),
+    'Runbook.md': '# Runbook\n\nStop the writer first.\n',
+    'Runbook (1).md': '# Runbook (1)\n\nThe second page of that name.\n',
+    '手順書.md': '# 手順書\n\nBody.\n',
+    'files/01a0/diagram.png': '\x89PNG\r\n\x1a\n\x01\x02\x03\x04',
+  },
+  pathFor: (c) => `${c.id}.md`,
+  cases: [
+    { id: 'internal-link', element: 'Link to another exported page', input: 'Read the [Runbook](Runbook.md).\n' },
+    // The archive holds the non-ASCII file name as raw bytes and links to it percent-encoded, so
+    // comparing either side as written finds nothing — which is why a workspace in a language that
+    // does not fit ASCII is the one where a broken adapter shows.
+    { id: 'internal-link-encoded', element: 'Link to a page whose title is not ASCII', input: 'Read the [the Japanese page](%E6%89%8B%E9%A0%86%E6%9B%B8.md).\n' },
+    // Two pages of the same title become `Title (1)`, and the link escapes the parentheses the
+    // manifest leaves raw.
+    { id: 'internal-link-duplicate-title', element: 'Link to the second page of a duplicated title', input: 'Read the [other Runbook](Runbook%20%281%29.md).\n' },
+    { id: 'page-url-outside', element: 'Link to a page the export left behind', input: 'Read the [Archive](http://docmost.example/s/general/p/aBc123XyZ0).\n' },
+    { id: 'attachment-image', element: 'Attached image', input: '![diagram](files/01a0/diagram.png)\n' },
+    {
+      // The construct is the TITLE: the file name cannot hold a `/`, so the exporter deletes it and
+      // the untouched title survives only as the heading.
+      id: 'title-heading',
+      element: 'Page title the file name could not hold',
+      input: '# Ops / Daily\n\nJust a page.\n',
+      node: 'Ops / Daily',
+    },
+    { id: 'icon', element: 'Page icon', input: '# icon\n\nA page that had an icon.\n' },
+  ],
+}
+
 function page(body: string): string {
   return `<html><body><div id="main-content">${body}</div></body></html>`
 }
@@ -198,4 +242,4 @@ function hexFor(id: string): string {
   return (h + '0'.repeat(32)).slice(0, 32)
 }
 
-export const FIDELITY_SOURCES: readonly FidelitySource[] = [OBSIDIAN, NOTION, CONFLUENCE]
+export const FIDELITY_SOURCES: readonly FidelitySource[] = [OBSIDIAN, NOTION, CONFLUENCE, DOCMOST]

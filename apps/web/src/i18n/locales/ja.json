@@ -1353,7 +1353,8 @@
       "emojiReplacedByName": "絵文字の画像を、その名前に置き換えました",
       "linkOutsideExport": "エクスポートに含まれていないページへのリンクです",
       "attachmentLinkMissing": "アーカイブに入っていない添付ファイルへのリンクです",
-      "sourcePageLinkKept": "移行元のページへのリンクを、書いてあるまま残しました"
+      "sourcePageLinkKept": "移行元のページへのリンクを、書いてあるまま残しました",
+      "docmostIconDropped": "ページのアイコンは取り込んでいません"
     },
     "degradedDetail": {
       "embedSizeDropped": "元は {{target}}|{{label}} でした。画像そのものは入っています",
@@ -1374,7 +1375,8 @@
       "emojiReplacedByName": "{{name}}。画像は移行元のサーバにありました",
       "linkOutsideExport": "{{target}}",
       "attachmentLinkMissing": "{{file}}",
-      "sourcePageLinkKept": "{{target}}。この書き方のリンクは、まだページに結び付けられません"
+      "sourcePageLinkKept": "{{target}}。この書き方のリンクは、まだページに結び付けられません",
+      "docmostIconDropped": "{{icon}}。ここのページはアイコンを持ちません"
     },
     "degradedTitle": "そのままの形では入らなかったもの",
     "degradedHint": "どのページのものかまで挙げます。手で直すかどうかはここを見て判断してください。",

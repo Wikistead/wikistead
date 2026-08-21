@@ -323,6 +323,7 @@ export const SURFACE_DOCS = {
     'import:obsidian': 'wikistead-docs/src/content/docs/guides/import.md',
     'import:notion': 'wikistead-docs/src/content/docs/guides/import.md',
     'import:confluence': 'wikistead-docs/src/content/docs/guides/import.md',
+    'import:docmost': 'wikistead-docs/src/content/docs/guides/import.md',
     // #734 / ADR-237 §2.1: the second factors. They were a TYPE and a database constraint, which no
     // walk can read, so a third kind could have shipped with nobody noticing the page said nothing
     // about it. The kinds and the recovery path are enumerated at run time now, and land on the

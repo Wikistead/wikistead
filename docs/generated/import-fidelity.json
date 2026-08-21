@@ -541,6 +541,81 @@
           "verdict": "reported"
         }
       ]
+    },
+    {
+      "id": "docmost",
+      "name": "Docmost",
+      "cases": [
+        {
+          "id": "internal-link",
+          "element": "Link to another exported page",
+          "input": "Read the [Runbook](Runbook.md).",
+          "title": "internal-link",
+          "output": "Read the [Runbook](/p/<page-id>).",
+          "reports": [],
+          "verdict": "converted"
+        },
+        {
+          "id": "internal-link-encoded",
+          "element": "Link to a page whose title is not ASCII",
+          "input": "Read the [the Japanese page](%E6%89%8B%E9%A0%86%E6%9B%B8.md).",
+          "title": "internal-link-encoded",
+          "output": "Read the [the Japanese page](/p/<page-id>).",
+          "reports": [],
+          "verdict": "converted"
+        },
+        {
+          "id": "internal-link-duplicate-title",
+          "element": "Link to the second page of a duplicated title",
+          "input": "Read the [other Runbook](Runbook%20%281%29.md).",
+          "title": "internal-link-duplicate-title",
+          "output": "Read the [other Runbook](/p/<page-id>).",
+          "reports": [],
+          "verdict": "converted"
+        },
+        {
+          "id": "page-url-outside",
+          "element": "Link to a page the export left behind",
+          "input": "Read the [Archive](http://docmost.example/s/general/p/aBc123XyZ0).",
+          "title": "page-url-outside",
+          "output": "Read the [Archive](http://docmost.example/s/general/p/aBc123XyZ0).",
+          "reports": [],
+          "verdict": "kept"
+        },
+        {
+          "id": "attachment-image",
+          "element": "Attached image",
+          "input": "![diagram](files/01a0/diagram.png)",
+          "title": "attachment-image",
+          "output": "![diagram](wks-attachment:<file-id>)",
+          "reports": [],
+          "verdict": "converted"
+        },
+        {
+          "id": "title-heading",
+          "element": "Page title the file name could not hold",
+          "input": "# Ops / Daily\n\nJust a page.",
+          "title": "Ops / Daily",
+          "output": "Just a page.",
+          "reports": [],
+          "verdict": "converted"
+        },
+        {
+          "id": "icon",
+          "element": "Page icon",
+          "input": "# icon\n\nA page that had an icon.",
+          "title": "icon",
+          "output": "A page that had an icon.",
+          "reports": [
+            {
+              "code": "docmostIconDropped",
+              "what": "page icon not imported",
+              "detail": "="
+            }
+          ],
+          "verdict": "reported"
+        }
+      ]
     }
   ]
 }

@@ -1360,7 +1360,8 @@
       "emojiReplacedByName": "emoji image replaced by its name",
       "linkOutsideExport": "link to a page the export does not contain",
       "attachmentLinkMissing": "link to an attached file the archive does not carry",
-      "sourcePageLinkKept": "link to a page in the export, left as written"
+      "sourcePageLinkKept": "link to a page in the export, left as written",
+      "docmostIconDropped": "page icon not imported"
     },
     "degradedDetail": {
       "embedSizeDropped": "the note wrote {{target}}|{{label}}; the picture came across, the sizing did not",
@@ -1381,7 +1382,8 @@
       "emojiReplacedByName": "{{name}}. The picture lived in the old installation.",
       "linkOutsideExport": "{{target}}",
       "attachmentLinkMissing": "{{file}}",
-      "sourcePageLinkKept": "{{target}}. This link shape is not resolved to a page yet."
+      "sourcePageLinkKept": "{{target}}. This link shape is not resolved to a page yet.",
+      "docmostIconDropped": "{{icon}}. Pages here do not carry an icon."
     },
     "degradedTitle": "What did not survive",
     "degradedHint": "Each of these is named with the page it was on, so you can decide what to redo by hand.",

@@ -24,6 +24,8 @@ import { createPage, publishPage, deletePage } from '../routes/pages.js'
 import { noteNameOf, rewriteWikilinks, detectVaultDegradations, canvasDegradations, walkNodes, vaultAttachments, convertVaultCallouts, isExcalidrawNote, convertExcalidrawNote } from './obsidian.js'
 import { looksLikeNotionExport, splitNotionName, parseCsv, csvToMarkdownTable, databaseDegradation, rewriteNotionLinks } from './notion.js'
 import { looksLikeConfluenceExport, confluenceHtmlToMarkdown } from './confluence.js'
+import { looksLikeDocmostExport, parseDocmostManifest, collapseEmptySegments, splitDocmostTitle, rewriteDocmostLinks, absolutizeAttachmentRefs, docmostKey, iconDegradation, DOCMOST_MANIFEST } from './docmost.js'
+import type { DocmostLinkMaps } from './docmost.js'
 
 // Zip-bomb caps (ADR-132 §3). The importer aborts the moment a running total is exceeded — it never buffers a
 // whole malicious archive. These are generous enough for a real workspace export yet bound worst-case memory.
@@ -103,6 +105,8 @@ export interface ImportNode {
   notionHex?: string | null
   /** #712 G: true when this node came from an Obsidian Excalidraw note (`*.excalidraw.md`). */
   excalidrawNote?: boolean
+  /** #728 §3: the `slugId` a Docmost manifest gives this page — what its full-URL links point at. */
+  docmostSlug?: string | null
   // `frontmatter`: structured metadata an adapter carries over. Serialised as YAML at the top of the
   // body, which is where tags already live (ADR-145), so no second tag path appears.
   frontmatter?: Record<string, unknown>
@@ -274,7 +278,7 @@ export const DEGRADATION_CODES = [
   'excalidrawUnreadable', 'canvasNotImported', 'notionDatabaseFlattened',
   'confluenceStorageFormat', 'confluenceMacroNoEquivalent', 'mergedCellsFlattened',
   'emojiReplacedByName', 'linkOutsideExport', 'attachmentLinkMissing',
-  'sourcePageLinkKept',
+  'sourcePageLinkKept', 'docmostIconDropped',
 ] as const
 export type DegradationCode = typeof DEGRADATION_CODES[number]
 
@@ -368,6 +372,10 @@ function rewriteBody(
   notionHrefByHex?: ReadonlyMap<string, string>,
   /** Every node's attachments keyed by lower-cased FILE NAME — the cross-page fallback above. */
   attByName?: ReadonlyMap<string, string>,
+  // #728 / ADR-242 §3: Docmost writes its page links as relative FILE PATHS, and as its own absolute
+  // URL when the target was left out of the export. Same idea, third key: a map, one rewrite, one
+  // dead-link rule.
+  docmost?: DocmostLinkMaps,
 ): string {
   let md = markdown.replace(ATTACHMENT_REF, (m, alt: string, url: string) => {
     // ⚠️ The per-node map first, then EVERY node's attachments by FILE NAME. A Confluence export
@@ -406,7 +414,16 @@ function rewriteBody(
     }
     return m
   })
-  md = md.replace(INTERNAL_LINK, (m, oldId: string) => {
+  md = md.replace(INTERNAL_LINK, (m, oldId: string, offset: number) => {
+    // ⚠️ `/p/<id>` inside an ABSOLUTE URL is somebody else's address, not ours. Docmost writes a link
+    // to a page it did not export as `http://its-host/s/<space>/p/<slugId>`, and every one of those was
+    // counted here as a dead cross-link of ours — measured on a real export (#728): a clean import of
+    // five pages reported one dead link that did not exist, and the number a reader uses to decide
+    // whether to go and fix something was wrong in the direction that wastes their time. Any host is
+    // skipped, not just Docmost's: a `https://example.com/p/x` in a vault note was miscounted too.
+    let start = offset
+    while (start > 0 && !/[\s()<>[\]]/.test(md[start - 1]!)) start--
+    if (md.slice(start, offset).includes('://')) return m
     const newId = pageIdMap.get(oldId)
     if (newId) return `/p/${newId}`
     report.deadCrossLinks++
@@ -414,6 +431,14 @@ function rewriteBody(
   })
   if (notionHrefByHex && notionHrefByHex.size) {
     const r = rewriteNotionLinks(md, notionHrefByHex)
+    md = r.markdown
+    report.deadCrossLinks += r.deadLinks
+  }
+  if (docmost) {
+    // Before the vault pass, so what `reportSourcePageLinks` reads at the end is the body the reader
+    // will hold: a link this dialect resolved is no longer "left as written", and #712 ② is the
+    // measured example of what reporting on an earlier draft of the text costs.
+    const r = rewriteDocmostLinks(md, wiki?.node.dir ?? '', docmost)
     md = r.markdown
     report.deadCrossLinks += r.deadLinks
   }
@@ -580,6 +605,22 @@ export async function materializeImport(
       }
     }
 
+    // #728: Docmost refers to a page by its path in the archive, and by `slugId` when the link was
+    // written as a URL. Built here for the same reason as the others — the ids do not exist earlier.
+    const docmostHrefByPath = new Map<string, string>()
+    const docmostHrefBySlug = new Map<string, string>()
+    let isDocmost = false
+    for (const c of created) {
+      if (c.node.docmostSlug === undefined) continue
+      isDocmost = true
+      const key = docmostKey(c.node.dir)
+      if (key && !docmostHrefByPath.has(key)) docmostHrefByPath.set(key, `/p/${c.newId}`)
+      if (c.node.docmostSlug && !docmostHrefBySlug.has(c.node.docmostSlug)) {
+        docmostHrefBySlug.set(c.node.docmostSlug, `/p/${c.newId}`)
+      }
+    }
+    const docmostMaps = isDocmost ? { hrefByPath: docmostHrefByPath, hrefBySlug: docmostHrefBySlug } : undefined
+
     // Notion's links point at the 32-hex id in a filename, so the map is keyed on that.
     const notionHrefByHex = new Map<string, string>()
     for (const c of created) {
@@ -604,7 +645,7 @@ export async function materializeImport(
       }
       const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report, {
         node: { title: c.node.title || c.node.dir, dir: c.node.dir }, hrefByName, embedByName,
-      }, notionHrefByHex, attByName)
+      }, notionHrefByHex, attByName, docmostMaps)
       await setDraftBody(db, c.newId, md)
       if (args.publish && c.node.published && md.trim() !== '') {
         await publishPage(db, fga, driver, storage, { pageId: c.newId, subject: `user:${args.userId}`, createdBy: `user:${args.userId}` })
@@ -645,6 +686,7 @@ export const IMPORT_ADAPTERS = [
   { id: 'obsidian', detect: null },
   { id: 'notion', detect: (names: string[]) => looksLikeNotionExport(names) },
   { id: 'confluence', detect: (names: string[]) => looksLikeConfluenceExport(names) },
+  { id: 'docmost', detect: (names: string[]) => looksLikeDocmostExport(names) },
 ] as const
 
 export type ImportSourceKind = (typeof IMPORT_ADAPTERS)[number]['id']
@@ -705,6 +747,18 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
     }
     files = converted
   }
+  // #728 / ADR-242 §3 — Docmost. Detected from the manifest it writes, and normalised BEFORE the tree
+  // is built: the attachment entries carry an empty path segment (`Handbook//files/…`), and the tree
+  // builder would read that as a directory whose name is the empty string.
+  const docmostDegradations: ImportDegradation[] = []
+  let docmostManifest = parseDocmostManifest('')
+  if (matchesAdapter('docmost', Object.keys(files))) {
+    sourceKind = 'docmost'
+    const manifestBytes = files[DOCMOST_MANIFEST]
+    if (manifestBytes) docmostManifest = parseDocmostManifest(strFromU8(manifestBytes))
+    files = collapseEmptySegments(files).files
+    delete files[DOCMOST_MANIFEST]
+  }
   const ir = buildIR(files)
   if (ir.roots.length === 0) throw new ImportInvalidError('archive has no importable pages')
   const csvDegradations: ImportDegradation[] = []
@@ -764,6 +818,24 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
       csvDegradations.push(databaseDegradation(title || base, Math.max(0, rows.length - 1)))
     }
   }
+  if (sourceKind === 'docmost') {
+    for (const node of nodes) {
+      // The heading carries the title the file name could not (a `/` is deleted from the name), so it
+      // is read as the title and taken out of the body rather than printed under it.
+      const { title, body } = splitDocmostTitle(node.markdown)
+      if (title) { node.title = title; node.markdown = body }
+      // Attachment references become archive paths here, BEFORE the shared-file collector runs: it
+      // decides which page owns a file by looking for its path in a body, and a reference written
+      // relative to the page's own folder is not that path.
+      node.markdown = absolutizeAttachmentRefs(node.markdown, node.dir)
+      const meta = docmostManifest.pages.get(docmostKey(node.dir))
+      node.docmostSlug = meta?.slugId ?? null
+      // `sourceRef` is what the shared link map keys on, and for this dialect a page is referred to by
+      // its path in the archive — not by a note name, which is what the vault default would set.
+      node.sourceRef = docmostKey(node.dir)
+      if (meta?.icon) docmostDegradations.push(iconDegradation(node.title || node.dir, meta.icon))
+    }
+  }
   // A vault's shared attachment folder (see vaultAttachments): whatever the tree did not already
   // claim becomes an attachment, so `![[file]]` has something to resolve to. Anything already picked
   // up by the `<dir>/images/` convention is skipped, so a Wikistead export imports exactly as before.
@@ -785,7 +857,7 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
     sourceKind,
     // Canvas files never became pages — reported rather than silently absent, which is the difference
     // between "we could not represent this" and "your vault came in fine".
-    extraDegradations: [...csvDegradations, ...confluenceDegradations, ...canvasDegradations(Object.keys(files))],
+    extraDegradations: [...csvDegradations, ...confluenceDegradations, ...docmostDegradations, ...canvasDegradations(Object.keys(files))],
     // Counted AFTER the Notion branch, which can add a database root of its own.
     nodeCount: walkNodes(ir.roots).length,
   }
