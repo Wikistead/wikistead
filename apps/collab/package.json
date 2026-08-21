@@ -23,6 +23,7 @@
     "@wikistead/hooks": "workspace:*"
   },
   "devDependencies": {
+    "@hocuspocus/provider": "^2.15.0",
     "@types/node": "^22.0.0",
     "jose": "^5.9.0",
     "tsx": "^4.19.0",
