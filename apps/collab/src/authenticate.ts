@@ -90,18 +90,26 @@ export async function authenticate(args: { token: string; documentName: string }
     // because the share_link's view/edit grant cascades down the parent chain in the model. So we do NOT assert
     // resource.id === pageId; the OpenFGA check below is the authority (a non-folder link's grant reaches only
     // its own page, so the common case stays exact; a folder link additionally reaches its subtree per the
-    // link's capability). A SPACE token (ADR-038 / #104) likewise resolves via the FGA check (viewer from
-    // space). Same "trust FGA, not the token's page claim" discipline for both.
+    // link's capability). A SPACE token (ADR-038 / #104 / #274) likewise resolves via the FGA
+    // check — viewer from space for a view link, editor from space for an edit link. Same "trust FGA,
+    // not the token's page claim" discipline for both.
     if (c.resource.type !== "page" && c.resource.type !== "space") {
       assert(false, "unsupported resource");
     }
-    const capability = c.resource.type === "space" ? "view" : c.capability;
+    // #812 / ADR-135: the token's capability is honoured for a SPACE link exactly as for a page link.
+    // Until #812 a space token was forced to "view" here — a fossil of ADR-038, when `space#editor` had
+    // no share_link type and a space link could only ever read. #274 / ADR-135 split the relation and
+    // made the space EDIT link (the anonymous-wiki face) a first-class product surface, so forcing view
+    // demoted every space edit-link guest to read-only the moment readOnly was actually enforced (#811).
+    const capability = c.capability;
     // #92: an EPHEMERAL Excalidraw room is co-editing → it requires EDIT (a view/comment guest cannot
     // join it). Otherwise: only EDIT is writable; a view OR comment guest joins read-only (a comment
     // guest comments via the HTTP API, not by editing the doc) — so the FGA check is 'edit' for an edit
     // token (or any ephemeral join), else 'view'. JWT asserts intent; OpenFGA asserts authority
-    // (revoked/expired links fail here). A space token resolves via viewer-from-space (published pages
-    // in S only, never another space / a draft / after revoke) and is view-only (so never ephemeral).
+    // (revoked/expired links fail here). A space token resolves through the space: a VIEW link via
+    // viewer-from-space, an EDIT link via editor-from-space — published, non-private pages in S only,
+    // never another space / a draft / after revoke. A space EDIT link reaches the ephemeral Excalidraw
+    // room too (#811 ruling 3: the same co-editing power as a page edit link).
     const needEdit = ephemeral || capability === "edit";
     const allowed = await check(
       fgaClient,
