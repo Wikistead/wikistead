@@ -55,12 +55,17 @@ describe('#825: the decision, in every branch', () => {
     expect(shouldRotate(fat)).toBe(true)
   })
 
-  it('the threshold is under what was measured to hurt', () => {
+  it('the threshold sits between one run and the size that hurt', () => {
     // 48,364 tuples cost 4.4x per check and a full run leaves roughly half of that, so the check has
     // to bite before a second run lands on the first. A threshold at or above the measured figure
     // would be a knob that never turns.
     expect(REFRESH_THRESHOLD as number).toBeLessThan(48_364)
-    expect(REFRESH_THRESHOLD as number).toBeGreaterThan(0)
+    // And it must clear ONE run's worth (5,426 measured), or every run rotates: a fresh store on
+    // every entry point costs a bootstrap plus a reseed for nothing, and the cost is paid by whoever
+    // is waiting for the suite. `toBeGreaterThan(0)` was the first cut of this line and it held for
+    // a threshold of 1 — measured, the whole file stayed green — which is the shape of a bound that
+    // is not a bound.
+    expect(REFRESH_THRESHOLD as number).toBeGreaterThan(5_426)
   })
 })
 
