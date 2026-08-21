@@ -200,12 +200,19 @@ export async function filterAuthorized(
   const chunks: string[][] = []
   for (let i = 0; i < toBatch.length; i += BATCH_CHECK_MAX) chunks.push(toBatch.slice(i, i + BATCH_CHECK_MAX))
   const lanes = Math.max(1, Math.min(Math.trunc(concurrency), 8)) // clamped: never an unbounded fan-out
-  const runChunk = async (chunk: string[]) => {
+  // #799: one round-trip, and the ids it left unspoken.
+  //
+  // Split out of `runChunk` because the chunk is now asked more than once: the store's deadline is a
+  // budget for the WHOLE round-trip, so how many checks travel together decides whether the answer
+  // arrives at all, and re-asking the silent remainder in narrower trips is what turns a batch that
+  // could not be answered at fifty into one that can. Verdicts land in `out` here, so an id is settled
+  // by the first trip that speaks about it and never asked twice.
+  const askStore = async (batch: string[]): Promise<{ unanswered: string[]; firstError: string }> => {
     // Index-based correlation ids (not the page id) so any id shape is safe against the id charset/length
     // constraint on correlation_id; map the response back by correlation id.
-    const byCorr = new Map(chunk.map((id, j) => [String(j), id]))
+    const byCorr = new Map(batch.map((id, j) => [String(j), id]))
     const { result } = await fga.batchCheck({
-      checks: chunk.map((id, j) => ({
+      checks: batch.map((id, j) => ({
         user,
         relation,
         object: `${resourceType}:${id}`,
@@ -216,7 +223,7 @@ export async function filterAuthorized(
     // Walk the response by correlation id. Fail closed: an id with NO response entry is simply never
     // added to `out` (a missing verdict is a deny, never a silent allow).
     //
-    // #816: what "unanswered" MEANS is the complement — the chunk's ids minus the ones that came back
+    // #816: what "unanswered" MEANS is the complement — the batch's ids minus the ones that came back
     // with a verdict — and not a tally of the ways an answer can be bad. It was the tally, incremented
     // only where an entry carried an error, and an entry that never arrived was therefore not counted
     // as anything. That left a third door into the room ADR-183's amendment closed: a response with NO
@@ -246,19 +253,68 @@ export async function filterAuthorized(
         : fgaAllowed
       if (final) out.add(id)
     }
-    // Any chunk id with no response entry is denied (fail closed) — never silently treated as allowed,
-    // and counted here rather than nowhere (#816).
-    const unanswered = chunk.length - answered.size
+    return { unanswered: batch.filter((id) => !answered.has(id)), firstError }
+  }
+
+  const runChunk = async (chunk: string[]) => {
+    const first = await askStore(chunk)
+    let { unanswered, firstError } = first
+    let recovered = 0
+
+    // #799: ASK AGAIN, NARROWER — the width is what the store could not afford, not the question.
+    //
+    // A `page#view` costs the store around four milliseconds a check when it is idle and a hundred when
+    // it is not (measured on the isolated stack at 0.25 of a core, the CPU-starved shape that also
+    // reproduces the public runner). The store's request deadline is three seconds for the whole trip,
+    // so fifty of them together is inside the budget on a quiet machine and outside it on a busy one:
+    // measured, a fifty-wide batch came back with eight verdicts and forty-two `deadline_exceeded`
+    // errors on every attempt, while the same ids asked ten at a time answered completely, three times
+    // out of three. Nothing about the ids or the model changed between those two runs. The width did.
+    //
+    // Both of this batch's failure modes fall out of that one fact. The loud one is #799's: a chunk in
+    // which NOTHING was answered is refused below, so a legitimate request at the documented cap turned
+    // into a 500 whenever the machine was loaded — the reader lost every link mark on the page. The
+    // quiet one is worse and had no ticket: a chunk in which only SOME ids went silent denies the rest,
+    // so a live page the store never spoke about is struck through as dead, in exactly the shape #756
+    // and #762 were about. Re-asking narrows both, because it is the same cause.
+    //
+    // Only the silent remainder is re-asked — an id already carrying a verdict is settled, and asking
+    // twice would run `afterCheck` twice for it. ONE extra pass, at a fixed narrower width: the point is
+    // to fit the deadline, not to grind a failing store down to single checks, and a store that cannot
+    // answer ten in three seconds is having a problem no amount of re-asking is going to solve. What
+    // survives after this pass keeps exactly the rules it had before — denied one by one, refused if the
+    // chunk as a whole stayed silent.
+    if (unanswered.length > 0) {
+      // #541: the same courtesy the wave loop shows — an abandoned request does not get to start
+      // another round of trips. Aborting throws; it never fabricates a verdict.
+      if (signal?.aborted) throw Object.assign(new Error('filterAuthorized aborted: requester gone'), { name: 'AbortError' })
+      const stillSilent: string[] = []
+      for (let i = 0; i < unanswered.length; i += BATCH_RETRY_WIDTH) {
+        // Sequential, like the chunk waves above (#489's pacing): the store is already struggling, so
+        // the retry must not answer that by putting more in flight at once.
+        const again = await askStore(unanswered.slice(i, i + BATCH_RETRY_WIDTH))
+        stillSilent.push(...again.unanswered)
+        if (again.firstError) firstError = again.firstError
+      }
+      recovered = unanswered.length - stillSilent.length
+      unanswered = stillSilent
+    }
+
     // The operator's log gets a reason even when no entry carried one: an id whose entry never arrived
     // has no error text of its own, and an empty `firstError` next to a non-zero count reads as a bug
     // in the report rather than as what happened (#816).
-    if (unanswered > 0 && !firstError) firstError = '{"message":"the response carried no entry for these ids"}'
+    if (unanswered.length > 0 && !firstError) firstError = '{"message":"the response carried no entry for these ids"}'
 
     // #758 / ADR-183 §3 ("accept for v1 … log a warn per degraded batch" — the half never built).
     // Reported AFTER the verdicts are settled and with its result ignored, so the port cannot reach
     // into the answer. `out` is already what it is going to be.
-    if (unanswered > 0) {
-      reportAuthzDegradation({ relation, resourceType, candidates: chunk.length, unanswered, firstError })
+    //
+    // #799: a chunk the narrower pass rescued in full is reported too, with `unanswered: 0`. Nobody
+    // lost a row, so it is not the degradation this port was built for — but the store missed its
+    // deadline on a batch that a person then waited longer for, and a report only of the failures
+    // would make the days it nearly failed look identical to the days it did not.
+    if (unanswered.length > 0 || recovered > 0) {
+      reportAuthzDegradation({ relation, resourceType, candidates: chunk.length, unanswered: unanswered.length, recovered, firstError })
     }
 
     // #756: a chunk that answered NOTHING is a failure, not a set of denials.
@@ -288,7 +344,7 @@ export async function filterAuthorized(
     // that. `relation` is a name out of model.fga (`access_manager`, `settings_editor`), which #619
     // ruled stays inside. Neither may reach a response body, and the anti-test asks the shipped handler,
     // not a copy of its pattern.
-    if (chunk.length > 0 && unanswered === chunk.length) {
+    if (chunk.length > 0 && unanswered.length === chunk.length) {
       throw new Error(
         `openfga answered none of ${chunk.length} checks in a batch ` +
         `(${relation} on ${resourceType}) — refusing to report that as "denied"`)
@@ -305,6 +361,11 @@ export async function filterAuthorized(
 }
 // The server's default maxChecksPerBatchCheck (#500 / ADR-183). One `/batch-check` round-trip per chunk.
 const BATCH_CHECK_MAX = 50
+// #799: the width the silent remainder of a chunk is re-asked at. Chosen from the measurement, not from
+// taste: at 0.25 of a core a `page#view` costs the store ~100 ms, so ten of them is a second against a
+// three-second deadline — three times the room it needs on the slowest machine this project has seen
+// fail. Fifty is five seconds on that same machine, which is why the first pass is the one that breaks.
+const BATCH_RETRY_WIDTH = 10
 
 export interface MemberAccess {
   readOnly: boolean
