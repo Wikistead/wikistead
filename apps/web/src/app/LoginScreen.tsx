@@ -75,7 +75,21 @@ export function connectionButtonText(conn: LoginConnection, t: (k: string, o?: R
   // rev3: the label field never carries through a branded connection (the server enforces it;
   // this is display truth, not a gate).
   if (conn.brand && conn.brand in PRESET_LABELS) return t("auth.continueWith", { provider: PRESET_LABELS[conn.brand]! });
-  return conn.label ?? t("auth.signIn");
+  // #798 / ADR-246 §2.1: a way in is named by WHAT IT IS, never by the verb every button shares.
+  // `auth.signIn` used to be the fallback, and it is also the password form's submit — so a tenant with
+  // a nameless connection and password sign-in got two buttons reading "Sign in" and learned which was
+  // which by pressing one. Saying "single sign-on" is the shape of the thing, and the next connection
+  // kind that arrives without wording of its own cannot land back on the verb.
+  //
+  // NOT the issuer's host. The admin list falls back to it and is right to — that surface is
+  // authenticated. Here it would publish `login.acme-corp.com` to anyone who loads the page, which is
+  // the organisation's identity rather than the product's, and the label sanitiser's own comment
+  // treats this screen as public. What the admin opted into by typing must not arrive by default.
+  //
+  // #798 ruling (2026-08-21): a preset-less connection now REQUIRES a label at creation, so this line
+  // is reachable only for rows created before that rule. It stays as the insurance, and the admin
+  // screen asks for a name on the rows that predate it.
+  return conn.label ?? t("auth.signInSso");
 }
 
 // #602 / ADR-206 §3 (user ruling): the social start URL is GONE with the route it called. Signing in

@@ -21,8 +21,11 @@ test("signup → tenant → SSO seating with a host-only member session on the n
   await page.waitForURL(new RegExp(`^https?://${slug}\\.localhost:${WEB_REAL_PORT}`), { timeout: 20_000 });
 
   // 3) the new subdomain has no session yet (real mode) → login screen → SSO seats us
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("button", { name: "Sign in" })).toHaveCount(0, { timeout: 20_000 });
+  // #798: by test id, not by the button's words. The words are the thing that ticket changed, and
+  // "Sign in" is now a SUBSTRING of two of them ("with single sign-on", "with email") — a name-based
+  // locator would match both and fail strict mode on a tenant with a password door.
+  await page.getByTestId("login-signin").click();
+  await expect(page.getByTestId("login-signin")).toHaveCount(0, { timeout: 20_000 });
 
   // 4) seated: a host-only member session exists ON THE TENANT SUBDOMAIN
   const me = await page.request.get(`http://${slug}.localhost:${WEB_REAL_PORT}/api/auth/me`);

@@ -99,8 +99,50 @@ describe('#554 S4a: connection management', () => {
     expect((await post({ issuer: 'https://idp.example', clientId: 'c', redirectUri: 'https://x/cb', label: 'bad‮label' })).statusCode).toBe(400)
   }, 60_000)
 
+  // #798 (ruling, 2026-08-21). The sign-in screen calls a nameless connection "single sign-on",
+  // which is honest and useless the moment a tenant has two of them — and the admin is the only
+  // party who knows the difference, at the moment they add it. So the name is asked for at the
+  // write. A preset is the exception in both directions: it wears fixed first-party branding, and a
+  // label on one is still refused.
+  it('#798: a preset-less connection needs a name, and it cannot be taken away again', async () => {
+    const bare = await post({ issuer: 'https://named.example', clientId: 'c', redirectUri: 'https://x/cb' })
+    expect(bare.statusCode, bare.body).toBe(400)
+    expect(bare.json().code, 'the refusal says which field is missing').toBe('label_required')
+    expect((await post({ issuer: 'https://named.example', clientId: 'c', redirectUri: 'https://x/cb', label: '   ' })).statusCode,
+      'whitespace is not a name').toBe(400)
+
+    // The control: the same body with a name is created. Without it, a rule that refused every POST
+    // would pass the assertions above.
+    const ok = await post({ issuer: 'https://named.example', clientId: 'c', redirectUri: 'https://x/cb', label: 'Named SSO' })
+    expect(ok.statusCode, ok.body).toBe(201)
+    const id = (ok.json() as { id: string }).id
+
+    // …and it cannot be cleared afterwards, which is the same rule at the other end. The editor
+    // sends the field on every save of a preset-less row, so a blank one would otherwise be the way
+    // back to the state the create refuses.
+    const cleared = await app.inject({ method: 'PATCH', url: `/admin/connections/${id}`, headers: H(), payload: { label: '' } })
+    expect(cleared.statusCode).toBe(400)
+    expect(cleared.json().code).toBe('label_required')
+    const [still] = await admin<{ label: string }[]>`SELECT label FROM tenant_oidc WHERE id = ${id}`
+    expect(still!.label, 'a refused write left the name alone').toBe('Named SSO')
+
+    // A body that does not CARRY a label leaves it alone — this is the row's on/off switch and the
+    // MCP switch, and refusing those would make a connection created before the rule unmanageable
+    // until it was renamed. That population is asked on the screen instead (#798 settings pin).
+    const legacyId = randomUUID()
+    await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, trust_groups, label)
+      VALUES (${legacyId}, ${tenantId}, 'https://legacy.example', 'c', NULL, 'openid email profile', '', false, 90, false, NULL)`
+    const toggled = await app.inject({ method: 'PATCH', url: `/admin/connections/${legacyId}`, headers: H(), payload: { mcpEnabled: true } })
+    expect(toggled.statusCode, toggled.body).toBe(204)
+    await admin`DELETE FROM tenant_oidc WHERE id = ${legacyId}`
+
+    // A preset still refuses one, and still needs none.
+    const g = await post({ preset: 'google', clientId: 'g2', redirectUri: 'https://x/cb' })
+    expect(g.statusCode, 'a preset carries its own name').toBe(201)
+  }, 60_000)
+
   it('verify-before-enable: enabling against an unreachable/refused issuer is 400', async () => {
-    const res = await post({ issuer: 'http://127.0.0.1:1/', clientId: 'c', redirectUri: 'https://x/cb', enabled: true })
+    const res = await post({ issuer: 'http://127.0.0.1:1/', clientId: 'c', redirectUri: 'https://x/cb', label: 'Unreachable', enabled: true })
     expect(res.statusCode).toBe(400)
   }, 60_000)
 
@@ -245,7 +287,7 @@ describe('#554 S4 re-review pins', () => {
   }, 60_000)
 
   it('F1: a non-URL issuer refuses at WRITE time, enabled or not', async () => {
-    expect((await post({ issuer: 'not a url', clientId: 'c', redirectUri: 'https://x/cb' })).statusCode).toBe(400)
-    expect((await post({ issuer: 'idp.example.com', clientId: 'c', redirectUri: 'https://x/cb' })).statusCode, 'scheme-less refuses too').toBe(400)
+    expect((await post({ issuer: 'not a url', clientId: 'c', redirectUri: 'https://x/cb', label: 'Shapeless' })).statusCode).toBe(400)
+    expect((await post({ issuer: 'idp.example.com', clientId: 'c', redirectUri: 'https://x/cb', label: 'Schemeless' })).statusCode, 'scheme-less refuses too').toBe(400)
   }, 60_000)
 })
