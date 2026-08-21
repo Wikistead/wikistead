@@ -204,15 +204,17 @@ export async function createShareLink(
   return toShareLink(row as ShareLinkRow)
 }
 
-// List a resource's active share links (page or space). The SHARE class is required — `share` on a page,
-// `share` or `manage` on a space (#420 3b, `requireShareOnResource`). #833: this line said `manage` too,
-// and it is the costliest of the three: a reader deciding who may see a resource's links — and an
-// unpassworded link id IS its credential (app.ts) — would have believed the answer was administrators.
 /** #623: how many share links one response may carry. */
 export const SHARE_LINKS_PAGE_LIMIT = 100
 
 export interface ShareLinksPage { links: ShareLink[]; nextCursor: string | null }
 
+// List a resource's active share links (page or space). The SHARE class is required — `share` on a page,
+// `share` or `manage` on a space (#420 3b, `requireShareOnResource`). #833: this line said `manage` too,
+// and it is the costliest of the three: a reader deciding who may see a resource's links — and an
+// unpassworded link id IS its credential (app.ts) — would have believed the answer was administrators.
+// #856: this block sat above SHARE_LINKS_PAGE_LIMIT, nine lines and two declarations away from
+// what it describes — far enough that a reader scanning to the signature never met it.
 export async function listShareLinks(
   db: TenantDb,
   fga: OpenFgaClient,
