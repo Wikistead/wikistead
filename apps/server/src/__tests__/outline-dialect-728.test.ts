@@ -176,7 +176,7 @@ describe('#728: the Outline path rules, in isolation', () => {
     }
     expect(looksLikeOutlineExport(vault, (p) => bodies[p] ?? '')).toBe(false)
     // …and without the wikilink it is genuinely ambiguous, so the relative link decides.
-    const noWikilink = { ...bodies, 'Notes/Index.md': 'See [the same](./Daily.md).\n' }
+    const noWikilink: Record<string, string> = { ...bodies, 'Notes/Index.md': 'See [the same](./Daily.md).\n' }
     expect(looksLikeOutlineExport(vault, (p) => noWikilink[p] ?? '')).toBe(true)
   })
 
