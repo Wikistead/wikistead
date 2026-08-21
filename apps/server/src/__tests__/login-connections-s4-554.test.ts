@@ -47,9 +47,13 @@ beforeAll(async () => {
   issuer = await startTestIssuer({ clientId: CLIENT_ID })
   const t = await provisionTenant(fgaClient, { slug: SLUG, admin: { sub: ADMIN_SUB } })
   tenantId = t.tenantId
-  // the legacy (raw-sub) connection, enabled — the tenant's first way in
-  await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, trust_groups)
-    VALUES (${randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 0, true)`
+  // the legacy (raw-sub) connection, enabled — the tenant's first way in.
+  // #834: it carries a NAME. What makes it "legacy" here is its raw-sub namespacing (§5), not its
+  // namelessness, and a nameless row can no longer be edited at all — so leaving it unnamed would
+  // make the lockout-guard case below fail on the naming rule instead of reaching the guard. The
+  // nameless case is measured on its own row, in the #798/#834 block.
+  await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, trust_groups, label)
+    VALUES (${randomUUID()}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 0, true, 'Legacy raw-sub')`
   app = await buildApp()
   await app.ready()
   valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
@@ -126,14 +130,23 @@ describe('#554 S4a: connection management', () => {
     const [still] = await admin<{ label: string }[]>`SELECT label FROM tenant_oidc WHERE id = ${id}`
     expect(still!.label, 'a refused write left the name alone').toBe('Named SSO')
 
-    // A body that does not CARRY a label leaves it alone — this is the row's on/off switch and the
-    // MCP switch, and refusing those would make a connection created before the rule unmanageable
-    // until it was renamed. That population is asked on the screen instead (#798 settings pin).
+    // #834 (ruling) removed the exemption that used to live here. A body that merely OMITS the label
+    // used to pass, so a row made before the rule stayed manageable — its on/off and MCP switches send
+    // no label — until somebody named it. Nobody had such a row (the rule shipped the day it was
+    // written), and the exemption cost a second reading of "a connection has a name": true at
+    // creation, negotiable afterwards.
+    //
+    // So the rule is one rule, and this asserts its honest consequence: a nameless preset-less row
+    // cannot be edited at all, not even to switch it off, until it is named.
     const legacyId = randomUUID()
     await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort, trust_groups, label)
       VALUES (${legacyId}, ${tenantId}, 'https://legacy.example', 'c', NULL, 'openid email profile', '', false, 90, false, NULL)`
     const toggled = await app.inject({ method: 'PATCH', url: `/admin/connections/${legacyId}`, headers: H(), payload: { mcpEnabled: true } })
-    expect(toggled.statusCode, toggled.body).toBe(204)
+    expect(toggled.statusCode, toggled.body).toBe(400)
+    expect(toggled.json().code).toBe('label_required')
+    // …and naming it in the same breath is what unblocks it.
+    const named = await app.inject({ method: 'PATCH', url: `/admin/connections/${legacyId}`, headers: H(), payload: { mcpEnabled: true, label: 'Legacy SSO' } })
+    expect(named.statusCode, named.body).toBe(204)
     await admin`DELETE FROM tenant_oidc WHERE id = ${legacyId}`
 
     // A preset still refuses one, and still needs none.

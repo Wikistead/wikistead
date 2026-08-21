@@ -219,13 +219,21 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     }
     const labelRes = b.label !== undefined ? sanitizeConnectionLabel(b.label) : { ok: true as const, label: row.label }
     if (!labelRes.ok) throw Object.assign(new Error('invalid label'), { statusCode: 400 })
-    // #798: the name cannot be cleared once the row has one, for the same reason it is required at
-    // creation. Scoped to a request that ACTUALLY CARRIES a label: a body without the field leaves
-    // `row.label` alone, which is what the row's on/off switch and the MCP switch send. Refusing
-    // those would make a connection created before this rule unmanageable until it was renamed —
-    // punishing the admin for the product's own history. Naming those rows is asked for on the
-    // screen instead, and the editor sends the field, so saving one does require a name.
-    if (row.preset === null && b.label !== undefined && labelRes.label === null) {
+    // #798: a preset-less connection has a name, and it cannot be taken away — the same rule the
+    // create path applies, at the other end.
+    //
+    // #834 (ruling) removed the exemption that used to sit here. It let a request WITHOUT the field
+    // through, so a row created before the rule stayed manageable (its on/off and MCP switches send
+    // no label) until somebody named it. Nobody had such a row: the rule shipped the same day, and
+    // the population it was written for turned out to be empty. What it cost was a second reading of
+    // "a connection has a name" — true at creation, negotiable afterwards — and a screen full of
+    // machinery asking for something nothing needed.
+    //
+    // So the rule is one rule: a preset-less row that reaches this route without a name is refused,
+    // whether the field was omitted or emptied. A row that predates it (if one exists anywhere) must
+    // be named before it can be edited at all, which is the honest consequence and is stated on the
+    // ticket rather than smoothed over here.
+    if (row.preset === null && labelRes.label === null) {
       throw Object.assign(new Error('a connection without a preset needs a label: it is what the sign-in screen calls it'),
         { statusCode: 400, code: 'label_required' })
     }

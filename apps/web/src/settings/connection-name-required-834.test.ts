@@ -1,16 +1,20 @@
 // @vitest-environment happy-dom
-// #798 (ruling, 2026-08-21): a connection without a preset is NAMED, and the name is asked for where
-// the admin is — not left to a fallback on the sign-in screen.
+// #798 (ruling): a connection without a preset is NAMED, and the name is asked for where the admin
+// is — not left to a fallback on the sign-in screen. #834 (ruling, the same day) took the other half
+// back out, and this file follows it down.
 //
-// Two things have to be true for that to be a rule rather than a wish
+// #798 had also built a migration for rows that predate the rule: a notice above the list, a badge on
+// the row, and a server-side exemption letting a request carrying no label through so those rows
+// stayed manageable. The rule shipped the same day it was written, so that population was empty
+// machinery asking for something nothing needed, and a second reading of "a connection has a name"
+// (true at creation, negotiable afterwards). The replacement is one line: the name field's
+// placeholder shows the words the sign-in screen would use, so the field explains itself by example.
 //
-// the WRITE refuses a nameless preset-less connection (pinned server-side), and
-// the rows that predate the rule are ASKED, on the next visit, rather than left as they are.
-//
-// The second is what this file is about, and it is the half a fix usually skips: a rule added after
-// the data exists leaves a population that satisfies neither the old shape nor the new one. Those
-// connections still sign people in, so the screen does not block on them — it says what is missing,
-// on the row and above the list, and refuses only the save that would leave the row nameless.
+// ⚠️ AND THE OLD PINS PASSED OVER THE REMOVAL. They read
+// `expect(host.querySelector(...)?.textContent).toBe(copy("adminConnections.unnamedNotice"))`, so
+// when the element AND the copy key both went, the assertion compared `undefined` with `undefined`
+// and stayed green. A pin that reads both sides from things that can disappear together is not
+// measuring anything. The ones below assert absence and presence directly, against literals.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createElement, act } from "react";
 import { createRoot } from "react-dom/client";
@@ -92,34 +96,31 @@ function render(): { host: HTMLElement; unmount: () => void } {
 
 const { AdminSignInMethodsSection: Section } = await import("./AdminSignInMethodsSection");
 
-describe("#798: the rows that predate the naming rule are asked, not ignored", () => {
-  for (const l of ["en", "ja"]) {
-    it(`the list says a name is missing, above it and on the row (${l})`, () => {
-      lang = l;
-      rows = [row({ id: "old", label: null })];
-      const { host, unmount } = render();
-      expect(host.querySelector('[data-testid="admin-connections-unnamed-notice"]')?.textContent)
-        .toBe(copy("adminConnections.unnamedNotice"));
-      expect(host.querySelector('[data-testid="admin-connection-unnamed-old"]')?.textContent)
-        .toBe(copy("adminConnections.unnamedBadge"));
-      unmount();
-    });
-  }
-
-  it("a named connection and a preset are not asked for anything", () => {
-    // The break-check for the notice: if it appeared for every row it would be noise, and an admin
-    // who has named everything would be told to go and name something.
-    rows = [row({ id: "named", label: "Acme SSO" }), row({ id: "g", label: null, preset: "google" })];
+describe("#834: the migration is gone, and the field explains itself", () => {
+  it("a nameless row gets no notice and no badge", () => {
+    // Absence asserted as absence — not as "equals the copy that also went away".
+    rows = [row({ id: "old", label: null })];
     const { host, unmount } = render();
     expect(host.querySelector('[data-testid="admin-connections-unnamed-notice"]')).toBeNull();
-    expect(host.querySelector('[data-testid="admin-connection-unnamed-named"]')).toBeNull();
-    expect(host.querySelector('[data-testid="admin-connection-unnamed-g"]')).toBeNull();
+    expect(host.querySelector('[data-testid="admin-connection-unnamed-old"]')).toBeNull();
+    expect(host.querySelector('[data-testid="admin-connection-label-required-old"]')).toBeNull();
     unmount();
   });
 
-  it("the notice does not block the screen — the connection is still listed and still switchable", () => {
-    // A rule added after the data exists must not make the data unmanageable. These rows work; what
-    // they lack is a name.
+  it("the name field shows the words the sign-in screen would use", () => {
+    // The ruling's replacement for the sentence underneath. Compared against the LIVE `auth.signInSso`
+    // string, which the sign-in screen also renders, so the two cannot drift apart quietly.
+    rows = [row({ id: "c1", label: "Acme SSO" })];
+    const { host, unmount } = render();
+    act(() => { (host.querySelector('[data-testid="admin-connection-edit-c1"]') as HTMLElement).click(); });
+    const input = host.querySelector('[data-testid="oidc-label"]') as HTMLInputElement;
+    const words = copy("auth.signInSso");
+    expect(words, "the wording key vanished, so this test proves nothing").toBeTruthy();
+    expect(input.placeholder).toBe(words);
+    unmount();
+  });
+
+  it("the row is still listed and still switchable", () => {
     rows = [row({ id: "old", label: null })];
     const { host, unmount } = render();
     expect(host.querySelector('[data-testid="admin-connection-old"]')).not.toBeNull();
@@ -127,15 +128,13 @@ describe("#798: the rows that predate the naming rule are asked, not ignored", (
     unmount();
   });
 
-  it("opening a nameless row asks for the name and will not save without one", () => {
+  it("the editor will not save a preset-less row without a name", () => {
+    // The half the ruling KEPT. The route refuses it too, so this is the screen saying so before the
+    // round trip rather than the only thing saying so.
     rows = [row({ id: "old", label: null })];
     const { host, unmount } = render();
-    const edit = host.querySelector('[data-testid="admin-connection-edit-old"]') as HTMLElement;
-    act(() => { edit.click(); });
-    expect(host.querySelector('[data-testid="admin-connection-label-required-old"]')?.textContent)
-      .toBe(copy("adminConnections.labelRequired"));
-    const save = host.querySelector('[data-testid="oidc-save"]') as HTMLButtonElement;
-    expect(save.disabled, "a save that clears the name is what the server refuses").toBe(true);
+    act(() => { (host.querySelector('[data-testid="admin-connection-edit-old"]') as HTMLElement).click(); });
+    expect((host.querySelector('[data-testid="oidc-save"]') as HTMLButtonElement).disabled).toBe(true);
 
     const input = host.querySelector('[data-testid="oidc-label"]') as HTMLInputElement;
     act(() => {
@@ -144,12 +143,11 @@ describe("#798: the rows that predate the naming rule are asked, not ignored", (
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect((host.querySelector('[data-testid="oidc-save"]') as HTMLButtonElement).disabled).toBe(false);
-    expect(host.querySelector('[data-testid="admin-connection-label-required-old"]')).toBeNull();
     unmount();
   });
 
-  it("a preset row's editor offers no label field and saves without one", () => {
-    // The mirror image: a preset wears fixed first-party branding, the server refuses a label on it,
+  it("a preset row offers no name field and saves without one", () => {
+    // The mirror image: a preset wears fixed first-party branding, the route refuses a label on it,
     // and requiring one here would be a field nobody can satisfy.
     rows = [row({ id: "g", label: null, preset: "google" })];
     const { host, unmount } = render();
@@ -159,12 +157,16 @@ describe("#798: the rows that predate the naming rule are asked, not ignored", (
     unmount();
   });
 
-  it("the copy no longer calls the label optional", () => {
-    // It said "(optional, shown on the login screen)" in both locales, which is now false — and a
-    // form that calls a required field optional is worse than one that says nothing.
+  it("the copy the migration needed is gone, and the field still says it is required", () => {
+    const bundle = bundles as Record<string, { adminConnections: Record<string, string> }>;
     for (const l of ["en", "ja"]) {
-      lang = l;
-      expect(copy("adminConnections.labelPlaceholder")).not.toMatch(/optional|任意/);
+      const conn = bundle[l]!.adminConnections;
+      // Read off the BUNDLE, not through `copy` — a lookup helper answers `undefined` for a missing
+      // key and for a typo alike, which is the shape that made the old pins vacuous.
+      for (const k of ["unnamedNotice", "unnamedBadge", "labelRequired"]) {
+        expect(Object.keys(conn), `adminConnections.${k} survived the migration it belonged to (${l})`).not.toContain(k);
+      }
+      expect(conn.labelPlaceholder, `the ${l} field still calls the name optional`).not.toMatch(/optional|任意/);
     }
   });
 });
