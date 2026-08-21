@@ -133,9 +133,10 @@ async function requirePageNotTrashed(db: TenantDb, resource: ResourceRef): Promi
   if (!row || row.deleted_root_id) throw Object.assign(new Error('not found'), { statusCode: 404 })
 }
 
-// Create a share link for a page. Requires `manage` on the page — issuing an
-// anonymous edit link is an administrative act, so we gate on the strongest
-// page capability rather than `edit`.
+// Create a share link for a page or a space (#274). Requires the SHARE class on the resource
+// (`requireShareOnResource`) — issuing an anonymous link is an administrative act, but since #420 3b
+// that authority is `share`, not `manage`; a manager still passes through page#share's superset arm.
+// #833: this line said `manage`, which is stricter than what the code has enforced since the split.
 export async function createShareLink(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -166,7 +167,8 @@ export async function createShareLink(
 
   // #274 / ADR-135: a space EDIT link (the anonymous-wiki face) is its own lever — Cloud paid tiers
   // only, self-host unlimited. Same 402 convention; existing links are untouched by a downgrade.
-  // AFTER the manage gate: a non-manager gets a uniform 403 and learns nothing about the plan.
+  // AFTER the share gate: someone without share-class authority gets a uniform 403 and learns
+  // nothing about the plan.
   if (args.resource.type === 'space' && args.capability === 'edit' && !resolveEntitlements(args.plan).spaceEditLink) {
     throw Object.assign(new Error('space edit links not available on this plan'), { statusCode: 402 })
   }
@@ -202,8 +204,10 @@ export async function createShareLink(
   return toShareLink(row as ShareLinkRow)
 }
 
-// List a resource's active share links (page or space). `manage` on the resource is required
-// (only someone who can administer it may see/curate its links).
+// List a resource's active share links (page or space). The SHARE class is required — `share` on a page,
+// `share` or `manage` on a space (#420 3b, `requireShareOnResource`). #833: this line said `manage` too,
+// and it is the costliest of the three: a reader deciding who may see a resource's links — and an
+// unpassworded link id IS its credential (app.ts) — would have believed the answer was administrators.
 /** #623: how many share links one response may carry. */
 export const SHARE_LINKS_PAGE_LIMIT = 100
 
@@ -453,7 +457,7 @@ export interface MintedGuestToken {
 
 // Public landing: mint a short-lived guest token for a link id. No auth — the
 // link id is the capability. Tenant comes from the request Host (RLS stays on;
-// no bypass). Returns null for EVERY failure mode so the caller can answer 404
+// no bypass). Every DEAD failure mode returns the same null so the caller can answer 404
 // uniformly and leak nothing about a link's existence/state to an enumerator.
 // #233 / ADR-107: mint is now 3-way. `null` = a DEAD link (unknown / revoked / expired / FGA-denied) —
 // a UNIFORM 404 that never reveals whether the link exists OR whether it has a password. `'password_required'`

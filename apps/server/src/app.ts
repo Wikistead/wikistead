@@ -39,7 +39,7 @@ const CREDENTIAL_MINTING_ROUTES = new Set([
   // twin was missing for no reason anybody wrote down.
   'DELETE /admin/scim-tokens/:id',
   // These two RETURN share-link ids, and an id is exchangeable for a guest token at
-  // `POST /public/share-links/:id/token` with no authentication at all (`share-links.ts:514`). For a
+  // `POST /public/share-links/:id/token` with no authentication at all (`shareLinksPlugin`). For a
   // link with no password the id IS the credential, so listing them is a credential read, not a page
   // read — and a key narrowed to `view` would otherwise be a collection point for them.
   'GET /pages/:pageId/share-links',
