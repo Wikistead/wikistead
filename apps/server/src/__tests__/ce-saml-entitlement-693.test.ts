@@ -25,52 +25,64 @@ import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { resolveAvailableLogin } from '../auth/login-methods.js'
 import { samlEntitled, resetSamlEntitlement, registerSamlEntitlement } from '../auth/saml-entitlement.js'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
-const TENANT = 'tenant_acme' // its own tenant so no login-methods suite shares the saml row
-const tenant = { id: TENANT, slug: 'acme', plan: 'business', isolation: 'logical' } as Tenant
+// #797: a tenant this FILE owns. It used to be `tenant_acme` — a SEEDED tenant, on the claim that
+// "its own tenant" meant nobody else wrote its saml row. Two things were wrong with that. The EE
+// twin (saml-cli-composition-693) picked the same seeded tenant, and `tenant_saml` holds ONE row per
+// tenant, so the two files could not both exist: turbo runs their packages in parallel and one run in
+// four died on the unique constraint. And a seeded tenant is KEPT by `prune-test-tenants`, so a run
+// killed between the INSERT and afterAll left a row nothing would ever collect — after which EVERY
+// later run failed on the same constraint until somebody cleared the table by hand.
+// A private tenant closes both: no other file can name it, and prune reclaims it (and anything a
+// killed run left inside it) because it is not on the KEEP list.
+const SLUG = 't797ce'
+let pt: PrivateTenant
+let tenant: Tenant
 let db: TenantDb
 let samlRowId: string
-let priorPrefs: { platform_login_disabled: boolean } | undefined
 const PRIOR_ENV = process.env.PLATFORM_OIDC_ISSUER
 
 beforeAll(async () => {
+  pt = await privateTenant(admin, SLUG)
+  tenant = { id: pt.id, slug: SLUG, plan: 'business', isolation: 'logical' } as Tenant
   db = await acquireTenantDb(tenant)
-  // #797: same self-healing as the EE twin. A run that dies before afterAll leaves this row, and one
-  // row per tenant means the next run cannot insert its own. Scoped to THIS fixture's idp_entity_id
-  // so the twin's live row is never the casualty.
-  await admin`
-    DELETE FROM tenant_saml WHERE tenant_id = ${TENANT} AND idp_entity_id = 'https://idp.example'`
+  // A run killed between the INSERT below and afterAll leaves the row behind, and one row per tenant
+  // means the next run cannot insert its own. Tenant-wide now that the tenant is this file's alone:
+  // there is no neighbour's live row to be the casualty (the old, narrower delete existed only
+  // because the EE twin's row shared the seeded tenant).
+  await admin`DELETE FROM tenant_saml WHERE tenant_id = ${pt.id}`
   // The scenario the ruling names: an enabled tenant_saml row EXISTS in the data…
   const [row] = await admin<{ id: string }[]>`
     INSERT INTO tenant_saml (id, tenant_id, idp_entity_id, sso_url, idp_cert_enc, sp_entity_id, acs_url, enabled)
-    VALUES (gen_random_uuid()::text, ${TENANT}, 'https://idp.example', 'https://idp.example/sso', 'enc', 'https://sp.example', 'https://sp.example/acs', true)
+    VALUES (gen_random_uuid()::text, ${pt.id}, 'https://idp.example', 'https://idp.example/sso', 'enc', 'https://sp.example', 'https://sp.example/acs', true)
     RETURNING id`
   samlRowId = row!.id
   // …a platform IdP is configured, so its suppression would be observable…
   process.env.PLATFORM_OIDC_ISSUER = 'https://platform.example'
   process.env.PLATFORM_OIDC_CLIENT_ID = 'wikistead'
   process.env.PLATFORM_OIDC_REDIRECT_URI = 'https://dev.localhost/auth/callback'
-  // …and the tenant has SWITCHED PLATFORM LOGIN OFF, which is the suppression's own precondition.
-  // Without this row the platform door stays open in BOTH worlds and the "not suppressed" claim is
-  // satisfied by broken code too (#693 ② — the round-2 vacuity).
-  ;[priorPrefs] = await admin<{ platform_login_disabled: boolean }[]>`
-    SELECT platform_login_disabled FROM tenant_login_prefs WHERE tenant_id = ${TENANT}`
+  // …the tenant has SWITCHED PLATFORM LOGIN OFF, which is the suppression's own precondition
+  // (without it the platform door stays open in BOTH worlds and the "not suppressed" claim is
+  // satisfied by broken code too — #693 ②, the round-2 vacuity)…
+  // …and PASSWORD SIGN-IN IS OFF. `local` is an own way in too (#568 / ADR-198 §3), so leaving it on
+  // would make an own IdP effective by itself and the platform preference would bite in both worlds
+  // — the lapse this file measures would never happen. It is stated here rather than inherited from
+  // whatever the tenant happened to carry: #820 is the same lesson, one fixture earlier.
   await admin`
-    INSERT INTO tenant_login_prefs (tenant_id, platform_login_disabled) VALUES (${TENANT}, TRUE)
-    ON CONFLICT (tenant_id) DO UPDATE SET platform_login_disabled = TRUE`
+    INSERT INTO tenant_login_prefs (tenant_id, platform_login_disabled, local_login_enabled)
+    VALUES (${pt.id}, TRUE, FALSE)
+    ON CONFLICT (tenant_id) DO UPDATE SET platform_login_disabled = TRUE, local_login_enabled = FALSE`
 }, 60_000)
 
 afterAll(async () => {
   await admin`DELETE FROM tenant_saml WHERE id = ${samlRowId}`.catch(() => {})
-  if (priorPrefs === undefined) {
-    await admin`UPDATE tenant_login_prefs SET platform_login_disabled = FALSE WHERE tenant_id = ${TENANT}`.catch(() => {})
-  } else {
-    await admin`UPDATE tenant_login_prefs SET platform_login_disabled = ${priorPrefs.platform_login_disabled} WHERE tenant_id = ${TENANT}`.catch(() => {})
-  }
   if (PRIOR_ENV === undefined) delete process.env.PLATFORM_OIDC_ISSUER
   else process.env.PLATFORM_OIDC_ISSUER = PRIOR_ENV
-  await db.release(); await admin.end(); await pool.end()
+  await db.release()
+  await pt.dispose() // takes tenant_saml, tenant_login_prefs, members and the tenant row with it
+  await admin.end(); await pool.end()
 }, 60_000)
 
 describe('#693 a CE composition never counts the SAML door', () => {
@@ -108,8 +120,8 @@ describe('#693 a CE composition never counts the SAML door', () => {
   it('the SHIPPED CE CLI answers the same — measured as a child process, not through vitest setup', () => {
     // #693 ①: the dev suite's setupFiles register the EE predicate for every test file, so an
     // in-process pin measures a composition the shipped CE CLI never has. This spawns the real
-    // thing: `tsx src/scripts/login-methods.ts acme` with no vitest in sight.
-    const out = execFileSync('npx', ['tsx', 'src/scripts/login-methods.ts', 'acme'], {
+    // thing: `tsx src/scripts/login-methods.ts <this file's tenant>` with no vitest in sight.
+    const out = execFileSync('npx', ['tsx', 'src/scripts/login-methods.ts', SLUG], {
       cwd: resolve(import.meta.dirname, '../..'),
       encoding: 'utf8',
       env: { ...process.env },
