@@ -17,6 +17,26 @@
         "en": "Verify",
         "ja": "検証する"
       }
+    },
+    "admin-surface:embeds": {
+      "add": {
+        "en": "Add",
+        "ja": "追加"
+      },
+      "host": {
+        "en": "Host",
+        "ja": "ホスト"
+      },
+      "remove": {
+        "en": "Remove",
+        "ja": "削除"
+      }
+    },
+    "admin-surface:spaces": {
+      "manage": {
+        "en": "Manage",
+        "ja": "管理"
+      }
     }
   }
 }

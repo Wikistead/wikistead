@@ -38,6 +38,26 @@ describe('#741 / ADR-239: the screen vocabulary names things that exist', () => 
     }
   })
 
+  it('says how much of the product is armed, and how much is not', () => {
+    // #837: staged arming is a ruling, not a shortcut — a first run that reddened every admin page
+    // would have been paid off by deleting the check. But "armed one surface" and "armed most of
+    // them" must not read the same, and today only the count can tell them apart: the docs-site
+    // check looks at pages that CLAIM a surface, so a surface nobody claims is invisible there.
+    const armed = Object.keys(spec)
+    const ledger = Object.entries(SURFACE_DOCS as Record<string, Record<string, string>>)
+      .flatMap(([kind, entries]) => Object.keys(entries).map((name) => `${kind}:${name}`))
+    const unarmed = ledger.filter((id) => !armed.includes(id))
+    // Reported on every run, so the number is visible in the log rather than only when it breaks.
+    console.error(`screen vocabulary: ${armed.length} surface(s) armed, ${unarmed.length} not yet`)
+
+    expect(ledger.length, 'the surface ledger is empty — nothing could be armed or unarmed').toBeGreaterThan(10)
+    // A floor, not a target. #790 cannot start until three surfaces exist to derive from, which is
+    // why three is the number: it is somebody else's unlock condition, not a round figure.
+    expect(armed.length, 'fewer surfaces armed than #790 needs to derive from').toBeGreaterThanOrEqual(3)
+    // And the other half of staged arming: an unarmed surface is COUNTED, never red.
+    expect(unarmed.length, 'every surface is armed — then this floor has outlived its purpose and should be raised').toBeGreaterThan(0)
+  })
+
   it('every declared key resolves in every locale', () => {
     // The generator throws on a missing string, so this is the same fact said where a reader of the
     // declaration will look. A key that has lost its string is a word the docs are asked to contain

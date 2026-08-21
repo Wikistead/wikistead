@@ -22,4 +22,24 @@ export const SCREEN_VOCABULARY = {
     /** the ACTIONS and STATES of the screen; every one of these is demanded of a page that claims it */
     keys: ['verify', 'verified', 'pending', 'release'],
   },
+  // #837, arming two more. Both were chosen by MEASURING which surfaces their pages could already
+  // answer for — arming one whose page needs rewriting would make this check the thing that demands
+  // the rewrite, and a check that reddens a page nobody has had a chance to fix is the check that
+  // gets deleted (ADR-239's staged-arming ruling).
+  'admin-surface:embeds': {
+    ns: 'adminEmbeds',
+    // `remove` is an action of this screen and is listed on purpose even though neither page
+    // describes removing a host: the page then has to say so in its own frontmatter
+    // (`remove:none:<why>`), which puts the gap where a reader of the page can see it. Leaving the
+    // key out of this table would hide the same gap in a file nobody opens.
+    keys: ['add', 'host', 'remove'],
+  },
+  'admin-surface:spaces': {
+    ns: 'adminSpaces',
+    // One action, and the measurement that made it worth arming: the English page said "see who
+    // manages what" while the button says "Manage". The check compares WORDS, not substrings, so
+    // `manages` is not `Manage` — a reader hunting the button on the screen finds prose about
+    // managing and no button. That is the drift this surface is armed for.
+    keys: ['manage'],
+  },
 }
