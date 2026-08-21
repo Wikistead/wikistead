@@ -17,6 +17,18 @@ import { migrationsDirCandidates, pickMigrationsDir } from '../migrations-dir.js
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
 const dockerfile = join(repoRoot, 'apps/server/Dockerfile')
 
+// #849: the lines a `docker build` actually ships. Everything before the LAST `FROM … AS <name>`
+// belongs to a stage whose filesystem is thrown away, so a COPY there puts nothing in the image. The
+// last stage is found by position and not by the name `runtime` — a rename would otherwise turn this
+// check green while meaning nothing.
+function runtimeStageLines(text: string): string[] {
+  const lines = text.split('\n')
+  let last = -1
+  lines.forEach((l, i) => { if (/^\s*FROM\s/i.test(l)) last = i })
+  expect(last, 'no FROM line — this is not a Dockerfile').toBeGreaterThanOrEqual(0)
+  return lines.slice(last + 1)
+}
+
 describe('#804 the schema ships with the image that needs it', () => {
   it('the runner finds the SQL in a deploy tree, where the image puts it', () => {
     // The image: runner at /app/dist/migrate.js, SQL at /app/migrations. The repository entry is
@@ -47,13 +59,30 @@ describe('#804 the schema ships with the image that needs it', () => {
     // Read from the file rather than restated here: the runner's own second candidate is the
     // subject, so the two cannot drift into agreeing about different paths.
     const target = migrationsDirCandidates('/app/dist/', {})[0]! // /app/migrations
-    const copies = text
-      .split('\n')
+    // #849: only the LAST stage counts. The first version of this filtered every COPY in the file, so
+    // moving this line into the build stage — where the SQL is discarded with that stage's filesystem
+    // — left all five assertions green. Measured before the fix: it did.
+    const copies = runtimeStageLines(text)
       .filter((l) => /^\s*COPY\s/.test(l) && !/--from=/.test(l))
       .map((l) => l.trim())
-    expect(copies.length, 'no plain COPY lines — did the Dockerfile change shape?').toBeGreaterThan(0)
+    expect(copies.length, 'the last stage has no plain COPY lines — did the Dockerfile change shape?').toBeGreaterThan(0)
     const carriesSql = copies.some((l) => l.includes('infra/db/migrations') && l.includes(target))
-    expect(carriesSql, `no COPY puts infra/db/migrations at ${target}:\n${copies.join('\n')}`).toBe(true)
+    expect(carriesSql, `no COPY in the shipped stage puts infra/db/migrations at ${target}:\n${copies.join('\n')}`).toBe(true)
+  })
+
+  // #849: the two halves this file names are "the runner looks" and "the image carries" — and the
+  // first was measured on the extracted RESOLVER, never on the executable that ships. Reverting
+  // `migrate.ts` alone to its old hard-coded path left all five green while the image broke again.
+  // The same class as #637: a pin has to reach the shipped code.
+  //
+  // Read rather than imported, because importing this module RUNS the migrations.
+  it('the runner that ships is the one that was fixed', () => {
+    const src = readFileSync(join(repoRoot, 'apps/server/src/migrate.ts'), 'utf8')
+    expect(src, 'migrate.ts does not use the resolver — the fix lives in a module nothing runs')
+      .toMatch(/pickMigrationsDir\(\s*migrationsDirCandidates\(|migrationsDirCandidates\([\s\S]{0,200}?pickMigrationsDir\(/)
+    // Importing the resolver and then building a path anyway is the version an import check misses.
+    const ownPath = src.match(/^(?!.*\/\/).*(join|resolve)\([^)]*(infra\/db\/migrations|['"`]migrations['"`])/m)
+    expect(ownPath?.[0] ?? null, 'migrate.ts composes a migrations path of its own beside the resolver').toBeNull()
   })
 
   it('there is SQL to carry (the check is not measuring an empty directory)', () => {
