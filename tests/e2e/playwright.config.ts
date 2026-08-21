@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
+import { readFileSync } from "node:fs";
 // @ts-expect-error — repo-root JS helper, no types
-import { e2ePorts } from "../../scripts/stack-offset.mjs";
+import { e2ePorts, staleStackEnvPorts } from "../../scripts/stack-offset.mjs";
 // @ts-expect-error — repo-root JS helper, no types
 import { eeServerMain } from "../../scripts/ee-source-root.mjs";
 
@@ -15,6 +16,21 @@ import { eeServerMain } from "../../scripts/ee-source-root.mjs";
 // LISTEN ports + proxy targets + baseURL come from the same port map below.
 const P = e2ePorts();
 const REPO = new URL("../../", import.meta.url).pathname;
+
+// #869: refuse a `.env.e2e.local` left over from before the port band moved. It is loaded first and
+// wins, so its SERVER_PORT/WEB_PORT would start the stack on the old numbers while the polling below
+// watches the derived ones — sixty seconds of waiting, then a timeout that names neither cause.
+{
+  const local = (() => { try { return readFileSync(`${REPO}.env.e2e.local`, "utf8") } catch { return "" } })()
+  const stale = staleStackEnvPorts(local, P) as { key: string; found: number; expected: number }[]
+  if (stale.length) {
+    throw new Error(
+      `[e2e] .env.e2e.local was written for a different port map: ` +
+        stale.map((s) => `${s.key}=${s.found} (this offset uses ${s.expected})`).join(", ") +
+        `. Re-run \`WKS_STACK_OFFSET=${P.offset} pnpm setup:e2e\` — it rewrites the file.`,
+    )
+  }
+}
 const ENV_FILES = "--env-file=.env.e2e --env-file=.env.e2e.local";
 const HOST = "dev.localhost";
 

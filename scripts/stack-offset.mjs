@@ -65,16 +65,25 @@ export function serverTestComposeEnv(p = serverTestPorts()) {
 // APP band: offset 0 keeps the shipped literals (4010/4110/5180/5181/4444). An ISOLATED session
 // (offset >= 1) can't derive from those with a small stride without a neighbour collision — server 4010
 // and collab 4110 are only 100 apart — and must also dodge the dev app ports (4000/4100/5173). So an
-// isolated session's app ports live in a dedicated high band (42xxx) that nothing else uses; each
-// offset gets a 20-wide window, each service a fixed slot inside it. The `stack-offset` pin proves the
-// whole map is collision-free across offsets 0..9 and against the server-test and dev stacks.
+// isolated session's app ports live in a dedicated band that nothing else uses; each offset gets a
+// 20-wide window, each service a fixed slot inside it. The `stack-offset` pin proves the whole map is
+// collision-free across offsets 0..9 and against the server-test and dev stacks.
+//
+// #869: the band must also stay BELOW the kernel's ephemeral range (`ip_local_port_range`, 32768-60999
+// on a default Linux). It first sat at 42xxx — inside it — and the suite would die at startup with
+// "Port 42044 is already in use" while `ss -ltn` showed nobody listening: the number had been handed to
+// one of THIS stack's own outgoing connections as a source port, and sat in TIME-WAIT for 60s. Nothing
+// was listening, and the port was still unusable. A band below the range cannot be taken that way.
+// Below the ephemeral range (#869) and clear of every other band in this file.
+export const APP_BAND_BASE = 20000;
+
 export function e2ePorts(offset = stackOffset()) {
   const s = offset * 100;
   const app =
     offset === 0
       ? { server: 4010, collab: 4110, web: 5180, webReal: 5181, issuer: 4444 }
       : (() => {
-          const start = 42000 + (offset - 1) * 20; // 20-wide window per isolated offset
+          const start = APP_BAND_BASE + (offset - 1) * 20; // 20-wide window per isolated offset
           return { server: start, collab: start + 2, web: start + 4, webReal: start + 6, issuer: start + 8 };
         })();
   return {
@@ -137,3 +146,22 @@ export const DEV_PORTS = Object.freeze({
   pg: 5432, valkey: 6379, fgaHttp: 8080, fgaGrpc: 8081, kroki: 3000, meili: 7700, s3: 9000, smtp: 1025,
   mailpit: 8025, server: 4000, collab: 4100, web: 5173,
 });
+
+// #869: `.env.e2e.local` is written by `setup:e2e` and loaded FIRST, so it WINS over `.env.e2e` — that
+// is how an offset session's connection URLs reach the app processes. It also carries the app LISTEN
+// ports, which means a local file written before the band moved keeps starting the stack on the old
+// numbers while everything else derives the new ones. The run then waits sixty seconds for a healthz
+// on a port nothing will ever listen on, and the message says nothing about why.
+//
+// So the disagreement is named where it happens. Pure, so the rule is pinned without a stack: give it
+// the file's text and this offset's map, get back the keys that disagree.
+export function staleStackEnvPorts(localText, ports) {
+  const want = { SERVER_PORT: ports.server, COLLAB_PORT: ports.collab, WEB_PORT: ports.web };
+  const stale = [];
+  for (const [key, expected] of Object.entries(want)) {
+    const found = new RegExp(`^${key}=(.*)$`, "m").exec(localText)?.[1]?.trim();
+    if (found === undefined || found === "") continue; // a file that does not name it cannot disagree
+    if (Number(found) !== expected) stale.push({ key, found: Number(found), expected });
+  }
+  return stale;
+}
