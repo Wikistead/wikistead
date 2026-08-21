@@ -462,8 +462,30 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
               flipGen.set(index, myGen);
             };
             onToggleTask(index, applyFlip, checked).catch(() => {
+              // #830: put the VISIBLE box back FIRST, because it is the only thing the reader can see.
+              //
+              // The click flips this view's OWN document (#361) so the progress rings move on the
+              // click frame. When the toggle fails, that flip IS the tick on screen, and nothing else
+              // undoes it: the refetch that follows replaces the document only when the published text
+              // actually changed, and a flip the server never stored changed nothing. Measured in a real
+              // browser with the collaboration socket refused — the box stayed ticked while
+              // `published_md` still read `- [ ] ship it`.
+              //
+              // The state to restore comes from `publishedMd`, the last thing the SERVER said, not from
+              // this view's document — that document is the optimistic flip. Restoring it here also
+              // repairs the block below, which reads the same document expecting the server's answer.
+              const pv = previewViewRef.current;
+              const serverMd = publishedMd ?? "";
+              const serverPos = taskStatePosAt(serverMd, index);
+              const serverState = serverPos >= 0 ? serverMd[serverPos] : undefined;
+              if (pv && (serverState === "x" || serverState === " ")) {
+                const at = taskStatePosAt(pv.state.doc.toString(), index);
+                if (at >= 0 && pv.state.doc.sliceString(at, at + 1) !== serverState) {
+                  pv.dispatch({ changes: { from: at, to: at + 1, insert: serverState } });
+                }
+              }
               const c = collabRef.current;
-              if (!c || myGen === 0) return; // never wrote → nothing to restore
+              if (!c || myGen === 0) return; // never wrote → nothing to restore in the draft
               if (flipGen.get(index) !== myGen) return; // a newer flip superseded ours — it settles the state
               const pubDoc = previewViewRef.current?.state.doc.toString();
               if (pubDoc == null) return;

@@ -593,8 +593,13 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
         // keeps the "publish first" message and the revert.
         const err = e as { status?: number; code?: string } | null;
         if (err?.status === 409 && err.code === "task_burst") return undefined;
-        const dirty = err?.status === 409;
-        notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
+        // #830: the opposite of a burst. `task_not_stored` means the flip never reached the draft —
+        // the live document could not carry it — so the tick on screen stands for nothing and the
+        // rethrow below is what puts it back. It gets its own sentence: "publish first" is wrong
+        // advice here, because there is nothing to publish.
+        const notStored = err?.status === 409 && err.code === "task_not_stored";
+        const dirty = err?.status === 409 && !notStored;
+        notify.error(t(notStored ? "toast.taskToggleNotStored" : dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
         throw e; // let the editor revert the optimistic flip
       }),
     [toggleTaskAsync, t],
@@ -1237,22 +1242,27 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   // intermediate committed states against the user's final optimistic flip — the mechanism).
   const pendingTogglesRef = useRef(0);
   const onToggleTask = useCallback(
-    (index: number, applyFlip: () => void) => {
+    (index: number, applyFlip: () => void, checked: boolean) => {
       pendingTogglesRef.current += 1;
       const settle = () => {
         pendingTogglesRef.current -= 1;
         if (pendingTogglesRef.current === 0) reloadPublished();
       };
       applyFlip(); // #361 no serial chain — the draft flip and the POST fire on the click frame
+      // #830: the state the box is moving TO travels with the index, so the server can tell a folded
+      // flip from one that never arrived. The guest surface needs this more than the member one does: a
+      // guest's token expires on a timer, so its live document is the one that goes quiet (#813).
+      // ⚠️ `checked` is the PRE-click state, so the state being moved to is its negation.
       return apiFetch<{ publishedAt: string | null }>(`/pages/${encodeURIComponent(pageId)}/tasks/toggle`, token, {
         method: "POST",
-        body: JSON.stringify({ index }),
+        body: JSON.stringify({ index, to: !checked }),
       }).then(() => { settle(); }).catch((e) => {
         settle();
         const err = e as { status?: number; code?: string } | null;
         if (err?.status === 409 && err.code === "task_burst") return undefined; // transient — never undo the user's flip
-        const dirty = err?.status === 409;
-        notify.error(t(dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
+        const notStored = err?.status === 409 && err.code === "task_not_stored";
+        const dirty = err?.status === 409 && !notStored;
+        notify.error(t(notStored ? "toast.taskToggleNotStored" : dirty ? "toast.taskToggleDirty" : "toast.actionFailed"));
         throw e; // let the editor revert the optimistic flip
       });
     },

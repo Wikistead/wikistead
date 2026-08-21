@@ -130,6 +130,7 @@
     "copied": "Link copied to clipboard",
     "actionFailed": "Something went wrong",
     "taskToggleDirty": "Publish your draft changes first to tick this box",
+    "taskToggleNotStored": "That tick did not reach the server, so it has been put back. Check your connection and try again.",
     "saved": "Saved",
     "spaceDeleted": "Space deleted",
     "pageDeleted": "Page deleted",
