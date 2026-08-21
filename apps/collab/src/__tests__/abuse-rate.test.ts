@@ -82,6 +82,28 @@ describe("guestConnectRateAllowed (#328 connect caps)", () => {
     expect(await guestConnectRateAllowed(client, caps, id("anon:cccccccccccc"))).toBe(false);
   });
 
+  // #874 / ADR-248 §3.4: the refresh's whole reason for existing, from this side. The connect budget is
+  // keyed on the PSEUDONYM, so a session that keeps its pseudonym keeps its exhausted budget however many
+  // times its token is re-minted — and one that gets a fresh pseudonym starts over. That is why the
+  // refresh may not be "re-run the public mint", which mints a new pseudonym every time.
+  //
+  // ⚠️ This pins the CONSEQUENCE. That the refresh actually preserves the pseudonym is pinned where the
+  // route lives (`guest-token-refresh-874.test.ts`, "the pseudonym and the session start survive a
+  // refresh"), because minting through the route needs the server. Neither half is enough alone: this one
+  // would stay green against a refresh that rolled the pseudonym, and that one would stay green if the
+  // budget stopped being keyed on it.
+  it("a re-minted token keeps the session's exhausted connect budget — a NEW pseudonym does not", async () => {
+    const { client } = fakeValkey();
+    const caps = { linkMax: Infinity, sessionMax: 1 };
+    const carried = "anon:aaaaaaaaaaaa";
+    expect(await guestConnectRateAllowed(client, caps, id(carried))).toBe(true);
+    expect(await guestConnectRateAllowed(client, caps, id(carried))).toBe(false);
+    // the same session, on its next token
+    expect(await guestConnectRateAllowed(client, caps, id(carried))).toBe(false);
+    // what a re-run of the public mint would have produced instead
+    expect(await guestConnectRateAllowed(client, caps, id("anon:bbbbbbbbbbbb"))).toBe(true);
+  });
+
   it("a pre-#331 token (no anonId) is still bounded by the link bucket", async () => {
     const { client } = fakeValkey();
     const caps = { linkMax: 1, sessionMax: 1 };

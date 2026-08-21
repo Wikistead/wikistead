@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check, writeTuples, deleteTuples, isAlreadyConverged, runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
-import { mintGuestToken } from '@wikistead/auth'
+import { mintGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import type { Capability, ResourceRef } from '@wikistead/types'
@@ -22,6 +22,23 @@ const EXCHANGE_RL_WINDOW_S = 60
 const EXCHANGE_RL_IP_MAX = Number(process.env.EXCHANGE_RL_IP_MAX ?? 30)
 const EXCHANGE_RL_LINK_MAX = Number(process.env.EXCHANGE_RL_LINK_MAX ?? 10)
 
+// #813 / ADR-248 §3.7: how long a guest session may keep renewing itself, counted from the visitor's
+// FIRST entry (the `ses` claim), not from the token in hand. Twelve hours: a working session never
+// reaches it, a tab left open overnight meets the door in the morning, and a token lifted at lunchtime is
+// dead by bedtime. It is a CONSTANT, not an environment variable — §3.8 spends its length removing a
+// second answer to "how long does a guest's credential live", and a knob nobody asked for adds a third.
+export const GUEST_SESSION_CEILING_SECONDS = 12 * 60 * 60
+
+// #813 / ADR-248 §3.6: the refresh gets its OWN budget rather than sharing the exchange's. Reusing the
+// exchange buckets would cap one link at roughly 25 simultaneous guests at a 150-second half-life — a
+// limit on anonymous collaborative editing invented by a rate limiter. It can afford a per-SESSION bucket
+// precisely because the pseudonym is stable across refreshes (§3.4), which is what makes the session
+// countable at all. The per-IP bucket is checked before the token is even parsed, so an unauthenticated
+// flood is bounded too.
+const REFRESH_RL_IP_MAX = Number(process.env.REFRESH_RL_IP_MAX ?? 120)
+const REFRESH_RL_LINK_MAX = Number(process.env.REFRESH_RL_LINK_MAX ?? 600)
+const REFRESH_RL_SESSION_MAX = Number(process.env.REFRESH_RL_SESSION_MAX ?? 20)
+
 // #233 / ADR-107 (comment 967): the DEDICATED wrong-password throttle. per (link, IP) 5/min AND per link
 // 30/hour, fixed-window, bumped ONLY on a wrong/missing password. Confirmed values (coded like EXCHANGE_RL_*).
 const PW_RL_WINDOW_S = 60
@@ -37,10 +54,14 @@ async function bumpRateBucket(valkey: IORedis, key: string, max: number): Promis
   return n <= max
 }
 // #233: bump with an explicit window (the wrong-password buckets use 60s vs 3600s), else identical.
-async function bumpDurationBucket(valkey: IORedis, key: string, windowS: number): Promise<boolean> {
+// #813: `max` is now a parameter. It used to be DERIVED from the window — 3600s meant the per-link
+// password max, anything else meant the per-IP one — which reads as a coincidence and is one: the
+// refresh buckets below share the 60-second window and have nothing to do with passwords. The two
+// password callers pass the same numbers the derivation gave them, so their behaviour is unchanged.
+async function bumpDurationBucket(valkey: IORedis, key: string, windowS: number, max: number): Promise<boolean> {
   const n = await valkey.incr(key)
   if (n === 1) await valkey.expire(key, windowS)
-  return n <= (windowS === PW_RL_HOUR_S ? PW_RL_LINK_MAX : PW_RL_IP_MAX)
+  return n <= max
 }
 // #233: READ-ONLY check (no INCR) — is this wrong-password bucket already AT its max? Used in the
 // preHandler to reject a brute-forcer before processing; the count is only ever raised by a wrong password.
@@ -468,11 +489,32 @@ export interface MintedGuestToken {
 // `password_required` (existence-hiding).
 export type MintResult = MintedGuestToken | null | 'password_required'
 
+// #813 / ADR-248 §3.4 + §3.7: what a REFRESH carries forward from the token it presented. Both fields
+// come from a VERIFIED token and from nowhere else — never from a request body. `anonId` is not merely a
+// display handle: a guest's page is created with `createdBy = anonId` and every guest edit emits
+// `actorId = anonId`, which is what rollback-by-actor selects on, so an input path would let one guest
+// write under another's name and have that name's work reverted.
+export interface CarriedSession {
+  anonId?: string
+  ses?: number
+}
+
+export interface MintOptions {
+  password?: string | null
+  carry?: CarriedSession
+  // #813 / ADR-248 §3.7: the presented token IS the evidence for a password link, for a bounded time from
+  // the visitor's first entry. Only the refresh route sets this, and only after verifying the token's
+  // signature, its link id, its tenant AND that the session ceiling has not been reached — a token that
+  // could not be produced without passing the door once. Without it a refresh would prompt for the
+  // password every five minutes, which is the whole reason §3.7 exists.
+  passwordProvenByToken?: boolean
+}
+
 export async function mintTokenForShareLink(
   fga: OpenFgaClient,
   tenantId: string,
   id: string,
-  password?: string | null,
+  opts: MintOptions = {},
 ): Promise<MintResult> {
   // Fast first-pass under RLS (NOT the security gate): cheaply reject obviously
   // dead links before touching FGA.
@@ -506,7 +548,8 @@ export async function mintTokenForShareLink(
   // #233 / ADR-107: password gate — LAST, after every dead-state + the authoritative FGA check, so a dead
   // link never reaches here (existence-hiding: dead → 404, live+password → 401). Wrong ≡ missing (both
   // fail the verify → the same 'password_required'), so there is no wrong-vs-missing oracle.
-  if (row.password_hash) {
+  if (row.password_hash && !opts.passwordProvenByToken) {
+    const password = opts.password
     if (!password || !(await verifySharePassword(password, row.password_hash))) return 'password_required'
   }
 
@@ -521,7 +564,7 @@ export async function mintTokenForShareLink(
 
   const token = await mintGuestToken(
     { secret: guestCfg.secret, ttlSeconds: ttl },
-    { tenantId, shareLinkId: row.id, resource, capability },
+    { tenantId, shareLinkId: row.id, resource, capability, ...opts.carry },
   )
   // A page link points at one collab doc; a space link has no single doc — the client uses
   // the space marker to show the space's pages and connects per-page (t:<tenant>:p:<pageId>).
@@ -611,7 +654,28 @@ export async function shareLinksPlugin(app: FastifyInstance) {
       // Uniform 404 for unknown tenant too — never reveal anything to an enumerator.
       if (!tenant) return reply.code(404).send({ error: 'not found' })
 
-      const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id, req.body?.password)
+      // #813 / ADR-248 §3.7 (rev 8): at the twelve-hour ceiling the refresh refuses and the client comes
+      // back HERE — presenting the token it still holds. The pseudonym continues across that door, and its
+      // only source is that verified token: a session that can still prove it is the same session keeps the
+      // name its pages were created under. An EXPIRED token buys nothing (nothing proves the continuation,
+      // and allowing it would let anyone claim to be the continuation of someone else's session), and the
+      // request body is never read for it — `anonId` is the attribution key, not a preference.
+      //
+      // `ses` is deliberately NOT carried: this IS a new session — the password was checked again, and the
+      // ceiling starts over. On a password-less link that means the ceiling resets, which buys nothing and
+      // never did: `shareLinkId` is a plaintext claim, so anyone holding the token already holds the link
+      // id, and the link id is exchangeable by anyone today.
+      const presented = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+      const continuing = presented ? await verifyGuestToken(guestCfg, presented).catch(() => null) : null
+      const carriedAnonId =
+        continuing && continuing.shareLinkId === req.params.id && continuing.tenantId === tenant.id
+          ? continuing.anonId
+          : undefined
+
+      const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id, {
+        password: req.body?.password,
+        ...(carriedAnonId ? { carry: { anonId: carriedAnonId } } : {}),
+      })
       // #715 / ADR-229: the funnel's DENOMINATOR — a visitor got in through a link. Only a minted
       // token counts: a dead, revoked or password-refused link never reached the product, so it is
       // not a visit. The call carries no argument, so nothing about this visitor can be recorded.
@@ -629,12 +693,97 @@ export async function shareLinksPlugin(app: FastifyInstance) {
         const submittedPassword = typeof req.body?.password === 'string' && req.body.password.length > 0
         if (submittedPassword) {
           const ip = req.ip
-          await bumpDurationBucket(app.valkey, `rl:slxpw:ip:${req.params.id}:${ip}`, PW_RL_WINDOW_S)
-          await bumpDurationBucket(app.valkey, `rl:slxpw:link:${req.params.id}`, PW_RL_HOUR_S)
+          await bumpDurationBucket(app.valkey, `rl:slxpw:ip:${req.params.id}:${ip}`, PW_RL_WINDOW_S, PW_RL_IP_MAX)
+          await bumpDurationBucket(app.valkey, `rl:slxpw:link:${req.params.id}`, PW_RL_HOUR_S, PW_RL_LINK_MAX)
         }
         return reply.code(401).send({ error: 'password_required' })
       }
       if (!minted) return reply.code(404).send({ error: 'not found' })
+      return reply.send(minted)
+    },
+  )
+
+  // #813 / ADR-248 §3.4: the REFRESH. A guest token lives 300 seconds; collab authenticates once, at
+  // connect, and every guest HTTP call carries the same token as its bearer. So a session that outlives
+  // one token has to be able to produce the next one — and it cannot do that through the public mint,
+  // which has no way to say which pseudonym is being continued and would roll a new one every time,
+  // resetting every abuse budget keyed on it. An abuse ceiling a client can clear by asking for a new
+  // token is not a ceiling.
+  //
+  // ⚠️ This is a `/public/` route that verifies the bearer ITSELF, not a `config: { guest }` one. The
+  // global auth hook returns early for `/public/` before any of it runs, so there is no `req.tenant` and
+  // no `req.db` here and the Host is resolved below by hand. That is deliberate: on a guest-capability
+  // route the hook prefers a session cookie over the header (an admin tab in the same browser would
+  // answer as the admin) and refuses a `view` token on an `edit` route (a view-link guest could never
+  // refresh at all). Both are failures for reasons that have nothing to do with the link.
+  //
+  // What makes that safe is that this route re-runs EXACTLY the checks a first exchange runs — the link
+  // row's revoked/expired state and the authoritative OpenFGA check at `current_time` — so a revoked link
+  // stops refreshing at once and #100's "one tuple deleted, access gone" is untouched. The refresh
+  // extends nothing the link itself has run out of: the TTL stays clamped to the link's remaining life.
+  app.post<{ Params: { id: string }; Body: { anonId?: string } }>(
+    '/public/share-links/:id/token/refresh',
+    {
+      preHandler: async (req, reply) => {
+        const ok = await bumpDurationBucket(app.valkey, `rl:slrf:ip:${req.ip}`, EXCHANGE_RL_WINDOW_S, REFRESH_RL_IP_MAX)
+        if (!ok) {
+          const ttl = await app.valkey.ttl(`rl:slrf:ip:${req.ip}`)
+          reply.header('Retry-After', String(Math.max(1, ttl)))
+          return reply.code(429).send({ error: 'too many requests' })
+        }
+      },
+    },
+    async (req, reply) => {
+      // The presented token is the credential. Anything wrong with it — a bad signature, the wrong typ,
+      // or an expiry already past — is a 401: a genuinely ended session, which §3.6 tells apart from a
+      // dead link so the client can fall back to a fresh exchange rather than giving up.
+      const presented = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+      const claims = presented ? await verifyGuestToken(guestCfg, presented).catch(() => null) : null
+      if (!claims) return reply.code(401).send({ error: 'unauthorized' })
+
+      // Uniform 404 for every link-shaped failure, exactly as the exchange answers, so this route never
+      // becomes the existence oracle the exchange is careful not to be.
+      const { slug, domain } = resolveTenantFromHost(req.headers.host ?? '')
+      const tenant = await loadTenant(slug, domain)
+      if (!tenant) return reply.code(404).send({ error: 'not found' })
+      // The link row is read under RLS for the Host's tenant, so a token from elsewhere would be answered
+      // 404 anyway; comparing here makes that a stated rule rather than an accident of the query.
+      if (claims.shareLinkId !== req.params.id || claims.tenantId !== tenant.id) {
+        return reply.code(404).send({ error: 'not found' })
+      }
+
+      // §3.7: the ceiling. `ses` is when THIS session first passed the door; a token minted before it
+      // shipped carries none and is read as `iat`, which errs toward ending the session sooner. Past the
+      // ceiling the session is over and the visitor meets the link again — which, for a password link,
+      // means the password. Distinguishable from a dead link on purpose: it says something about the
+      // token the caller already holds, so it reveals nothing about the link.
+      const startedAt = claims.ses ?? claims.iat
+      if (Math.floor(Date.now() / 1000) - startedAt >= GUEST_SESSION_CEILING_SECONDS) {
+        return reply.code(401).send({ error: 'session_ended' })
+      }
+
+      const okLink = await bumpDurationBucket(app.valkey, `rl:slrf:link:${req.params.id}`, EXCHANGE_RL_WINDOW_S, REFRESH_RL_LINK_MAX)
+      const okSession = claims.anonId
+        ? await bumpDurationBucket(app.valkey, `rl:slrf:anon:${tenant.id}:${claims.anonId}`, EXCHANGE_RL_WINDOW_S, REFRESH_RL_SESSION_MAX)
+        : true
+      if (!okLink || !okSession) {
+        const ttl = await app.valkey.ttl(okLink ? `rl:slrf:anon:${tenant.id}:${claims.anonId}` : `rl:slrf:link:${req.params.id}`)
+        reply.header('Retry-After', String(Math.max(1, ttl)))
+        return reply.code(429).send({ error: 'too many requests' })
+      }
+
+      const minted = await mintTokenForShareLink(app.fga, tenant.id, req.params.id, {
+        // Both come from the VERIFIED token. The body is never read — `anonId` is the attribution key,
+        // so an input path would let one guest write under another's name.
+        carry: { anonId: claims.anonId, ses: startedAt },
+        // The token could not exist without passing the door once, and the ceiling above bounds how long
+        // that stays true.
+        passwordProvenByToken: true,
+      })
+      // #715 / ADR-229: NOT a visit. `reportLinkVisit` is the share-link funnel's DENOMINATOR — a visitor
+      // got in through a link — and a session continuing is not a visitor arriving. Implementing this
+      // route as a copy of the exchange would inflate that number by one every refresh interval.
+      if (!minted || minted === 'password_required') return reply.code(404).send({ error: 'not found' })
       return reply.send(minted)
     },
   )

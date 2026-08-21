@@ -58,22 +58,22 @@ describe('#233 mint password gate (3-way)', () => {
   })
   it('a password link: correct → token; wrong ≡ missing → password_required (no oracle)', async () => {
     const link = await mkLink({ password: 's3cret' })
-    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, 's3cret')).not.toBe('password_required')
-    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, 'nope')).toBe('password_required')
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 's3cret' })).not.toBe('password_required')
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 'nope' })).toBe('password_required')
     expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id)).toBe('password_required') // missing
-    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, '')).toBe('password_required')
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: '' })).toBe('password_required')
   })
   it('a REVOKED password link is a uniform null (404) — never password_required (existence-hidden)', async () => {
     const link = await mkLink({ password: 's3cret' })
     await admin`UPDATE share_links SET revoked_at = now() WHERE id = ${link.id}`
     // even WITH the correct password, a revoked link is dead → null, not password_required.
-    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, 's3cret')).toBeNull()
-    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, 'nope')).toBeNull()
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 's3cret' })).toBeNull()
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 'nope' })).toBeNull()
   })
   it('an EXPIRED password link is a uniform null (404), never password_required', async () => {
     const link = await mkLink({ password: 's3cret' })
     await admin`UPDATE share_links SET expires_at = now() - interval '1 hour' WHERE id = ${link.id}`
-    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, 's3cret')).toBeNull()
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 's3cret' })).toBeNull()
   })
 })
 
@@ -91,7 +91,7 @@ describe('#233 space-link password ⊥ private page (ADR-107 required integratio
     // A SPACE share link WITH a password.
     const link = await createShareLink(db, fgaClient, { tenantId: tenant.id, plan: tenant.plan, userId: 'dev-user', resource: { type: 'space', id: spaceId }, capability: 'view', expiresInSeconds: null, password: 'openplease' })
     // The correct password mints a token (the password gate passes)...
-    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, 'openplease')).not.toBe('password_required')
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 'openplease' })).not.toBe('password_required')
     // ...but the space-link guest STILL cannot view the private page — password protects the space, it does
     // not grant private pages. #244's share_link:* private marker cuts the space-viewer inheritance.
     expect(await check(fgaClient, `share_link:${link.id}`, 'view', { type: 'page', id: priv })).toBe(false)

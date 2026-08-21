@@ -272,6 +272,9 @@ export const ENV_DOCS = {
   },
   EXCHANGE_RL_IP_MAX: { group: 'Guests and sharing', default: '30', what: 'Share-link token exchanges accepted per source address per minute.' },
   EXCHANGE_RL_LINK_MAX: { group: 'Guests and sharing', default: '10', what: 'Token exchanges accepted per share link per minute, which bounds one leaked link rather than one visitor.' },
+  REFRESH_RL_IP_MAX: { group: 'Guests and sharing', default: '120', what: 'Token renewals accepted per source address per minute. A renewal is cheaper than an exchange and a guest makes many over one visit, so this sits well above the exchange limit.' },
+  REFRESH_RL_LINK_MAX: { group: 'Guests and sharing', default: '600', what: 'Token renewals accepted per share link per minute. Sized for the number of guests a link is meant to hold at once, not for how often one of them renews.' },
+  REFRESH_RL_SESSION_MAX: { group: 'Guests and sharing', default: '20', what: 'Token renewals accepted per guest session per minute. This is the narrow one: a session renews when its token is near expiry, so a well-behaved guest never approaches it.' },
   SHARE_LINK_SWEEP_POLL_MS: { group: 'Guests and sharing', default: '60000', what: 'How often expired share links are swept out of the authorization store.' },
 
   // ── Billing ───────────────────────────────────────────────────────────────────────────────────

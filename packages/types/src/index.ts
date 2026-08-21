@@ -70,6 +70,13 @@ export interface GuestTokenClaims {
   // `share_link:<id>` — no capability change). Not derived from any PII / raw IP (GDPR). One session = one
   // pseudonym. Optional so an older token without it still verifies.
   anonId?: string;
+  // #813 / ADR-248 §3.7: the epoch second at which THIS session first passed the door — set by the
+  // public exchange (the step that actually checks a link's password) and copied verbatim by every
+  // refresh, exactly as `anonId` is. It is what makes the twelve-hour ceiling a property of the
+  // SESSION rather than of the token in hand, which a refresh would otherwise reset forever.
+  // Optional: a token minted before this shipped carries none, and is read as `iat` — within one TTL
+  // of the truth, and erring toward ending the session sooner.
+  ses?: number;
   iat: number;
   exp: number;
 }

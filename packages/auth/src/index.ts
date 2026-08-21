@@ -47,7 +47,10 @@ export async function mintGuestToken(
   // #331 / ADR-138: `anonId` is minted here (at share-link token exchange) and embedded in the claim. A caller
   // that silently REFRESHES a still-live session passes the EXISTING anonId so the pseudonym is stable across
   // the refresh (one session = one pseudonym); a fresh exchange omits it → a new pseudonym.
-  args: { tenantId: string; shareLinkId: string; resource: ResourceRef; capability: Capability; anonId?: string },
+  // #813 / ADR-248 §3.7: `ses` travels the same way — a refresh passes the EXISTING session start so the
+  // twelve-hour ceiling counts from the visitor's first entry rather than from the token in hand; a fresh
+  // exchange omits it → the session starts now.
+  args: { tenantId: string; shareLinkId: string; resource: ResourceRef; capability: Capability; anonId?: string; ses?: number },
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({
@@ -56,6 +59,7 @@ export async function mintGuestToken(
     resource: args.resource,
     capability: args.capability,
     anonId: args.anonId ?? deriveAnonId(cfg.secret),
+    ses: args.ses ?? now,
   })
     .setProtectedHeader({ alg: "HS256", typ: "guest+jwt" })
     .setIssuedAt(now)
