@@ -67,12 +67,20 @@ async function singleRowPerTenantTables(): Promise<string[]> {
   return [...new Set(rows.filter((r) => r.cols === 'tenant_id').map((r) => r.tbl))].sort()
 }
 
-/** The tenants `prune-test-tenants` refuses to collect, read from the script that decides it. */
+/**
+ * The tenants `prune-test-tenants` refuses to collect. Since #852 the script does not name them: the
+ * seed and the prune read the same declaration, so this reads that declaration — and then checks the
+ * prune still derives KEEP from it, which is what makes the name in this file the one the sweep uses.
+ */
 function seededTenantIds(): string[] {
-  const src = readFileSync(resolve(root, 'infra/db/prune-test-tenants.ts'), 'utf8')
-  const m = /const KEEP = \[([^\]]*)\]/.exec(src)
-  if (!m) throw new Error('could not read the KEEP list out of infra/db/prune-test-tenants.ts')
-  return [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!)
+  const decl = readFileSync(resolve(root, 'infra/db/seed-identities.ts'), 'utf8')
+  const ids = [...new Set([...decl.matchAll(/tenantId: '([^']+)'/g)].map((x) => x[1]!))]
+  if (ids.length === 0) throw new Error('could not read the seeded tenants out of infra/db/seed-identities.ts')
+  const prune = readFileSync(resolve(root, 'infra/db/prune-test-tenants.ts'), 'utf8')
+  if (!/const KEEP = SEEDED_TENANTS\b/.test(prune)) {
+    throw new Error('prune-test-tenants.ts no longer keeps the tenants seed-identities declares')
+  }
+  return ids
 }
 
 /**

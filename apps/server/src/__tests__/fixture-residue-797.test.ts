@@ -60,9 +60,13 @@ describe('#797: a killed run leaves nothing that kills the next one', () => {
   it('and the tenant it lives in is one the prune script collects', () => {
     // If this tenant were on the KEEP list, the debris above would outlive every run — which is what
     // made an interruption permanent rather than merely annoying. Read from the script that decides.
-    const src = readFileSync(resolve(root, 'infra/db/prune-test-tenants.ts'), 'utf8')
-    const keep = [...(/const KEEP = \[([^\]]*)\]/.exec(src)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]!)
-    expect(keep.length, 'the prune script named no tenant it keeps — has the list moved?').toBeGreaterThan(0)
+    // Since #852 the script no longer names them — it keeps the tenants the seed writes into, so the
+    // list is read where the seed and the prune agree, and the prune is checked to still derive it.
+    const prune = readFileSync(resolve(root, 'infra/db/prune-test-tenants.ts'), 'utf8')
+    expect(prune, 'the prune no longer keeps the tenants seed-identities declares').toMatch(/const KEEP = SEEDED_TENANTS\b/)
+    const decl = readFileSync(resolve(root, 'infra/db/seed-identities.ts'), 'utf8')
+    const keep = [...new Set([...decl.matchAll(/tenantId: '([^']+)'/g)].map((m) => m[1]!))]
+    expect(keep.length, 'no seeded tenant is declared — has the declaration moved?').toBeGreaterThan(0)
     expect(keep, 'a fixture tenant on the KEEP list is debris nothing ever collects').not.toContain(pt.id)
   })
 })
