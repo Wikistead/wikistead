@@ -31,7 +31,8 @@ test("#615: the create form carries the groups claim and the trust switch", asyn
     await page.getByTestId("admin-connection-issuer").fill(`http://127.0.0.1:9/${stamp}`);
     await page.getByTestId("admin-connection-label").fill(label);
     await page.getByTestId("admin-connection-clientid").fill("cid-615");
-    await page.getByTestId("admin-connection-redirect").fill("http://dev.localhost/auth/callback");
+    // #733: the redirect URI is SHOWN, not asked for — the element with this id is a <code>, and the
+    // server derives the value per request. Filling it has not been possible since that change.
     // the two this ticket is about — both on the form, before the connection exists
     await page.getByTestId("admin-connection-groups-claim").fill("roles");
     await page.getByTestId("admin-connection-trust-groups").click();
@@ -62,7 +63,6 @@ test("#615: leaving them alone still creates the connection the way it always di
     await page.getByTestId("admin-connection-issuer").fill(`http://127.0.0.1:9/${stamp}`);
     await page.getByTestId("admin-connection-label").fill(label);
     await page.getByTestId("admin-connection-clientid").fill("cid-615d");
-    await page.getByTestId("admin-connection-redirect").fill("http://dev.localhost/auth/callback");
     await page.getByTestId("admin-connection-save").click();
 
     // the defaults are the ADR-197 judgement and this ticket does not move them: an untouched claim
