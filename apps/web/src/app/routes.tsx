@@ -1416,6 +1416,30 @@ function JoinRoute() {
   );
 }
 
+/**
+ * #806: which sentence the workspace-name step shows when the create step does not succeed.
+ *
+ * A 404 is not a failed attempt. It says this deployment does not offer self-serve creation at all —
+ * no workspace-address template, or no platform identity provider — and the person in front of the
+ * form should stop retrying and ask for an invitation instead. Before this ticket a 404 was
+ * unreachable for a deployment that had an identity provider, so the branch did not exist.
+ *
+ * ⚠️ The other statuses still show the server's own `error` string, in English, to a reader who may
+ * not be reading English. That is a real defect and it is filed rather than fixed here — widening
+ * this function into a status-to-copy table is a change to every message the signup flow can show,
+ * and it belongs to whoever owns that copy.
+ *
+ * Exported so the rule is measured by running it, not by reading the file it lives in.
+ */
+export function createWorkspaceMessage(
+  status: number,
+  body: { error?: string },
+  t: (key: string) => string,
+): string {
+  if (status === 404) return t("auth.signupUnavailable");
+  return body.error ?? t("auth.createWorkspaceError");
+}
+
 // After platform-IdP signup: choose a workspace name → POST /signup/tenants (uses
 // the signup session cookie) → redirect to the new tenant subdomain, where the
 // member logs in via platform-IdP SSO (a fresh host-only member session there).
@@ -1439,7 +1463,7 @@ function WorkspaceRoute() {
       return;
     }
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    setErr(body.error ?? t("auth.createWorkspaceError"));
+    setErr(createWorkspaceMessage(res.status, body, t));
     setBusy(false);
   };
   return (

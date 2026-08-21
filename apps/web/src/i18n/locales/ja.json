@@ -748,6 +748,7 @@
     "workspaceName": "ワークスペース名",
     "createWorkspace": "ワークスペースを作成",
     "createWorkspaceError": "ワークスペースを作成できませんでした",
+    "signupUnavailable": "このサイトはワークスペースの作成に対応していません。運用している方に招待を頼んでください。",
     "inviteLocalBody": "パスワードを決めると参加が完了します。",
     "displayName": "表示名",
     "displayNameHint": "ほかのメンバーにはこの名前で表示されます。あとからアカウント設定で変更できます。",

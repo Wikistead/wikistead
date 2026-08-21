@@ -750,6 +750,7 @@
     "workspaceName": "Workspace name",
     "createWorkspace": "Create workspace",
     "createWorkspaceError": "Could not create workspace",
+    "signupUnavailable": "This site is not set up to create workspaces. Ask whoever runs it for an invitation.",
     "inviteLocalBody": "Choose a password to finish joining.",
     "displayName": "Your display name",
     "displayNameHint": "Other members see this name. You can change it later in your account settings.",
