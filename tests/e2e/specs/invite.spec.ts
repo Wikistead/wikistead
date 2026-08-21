@@ -26,6 +26,13 @@ async function mailpitReceived(api: APIRequestContext, to: string): Promise<bool
   return false;
 }
 
+/**
+ * What the invite field is CALLED to a reader (#740 gave these fields visible labels, and an accessible
+ * name follows the label a person can see). Spelled once: two tests fill this box, and a rename that
+ * broke both of them used to read as two separate failures.
+ */
+const INVITE_EMAIL_LABEL = "Email address";
+
 test("admin invites a member; a fresh identity accepts in the browser and is seated", async ({ browser, request }) => {
   // ── admin (dev-user): real OIDC login, then the Admin Console ──────────────
   const adminCtx = await browser.newContext();
@@ -36,11 +43,15 @@ test("admin invites a member; a fresh identity accepts in the browser and is sea
   await admin.goto(`${WEB}/settings/members`);
   // #579 gave this page a second heading ("Members and groups"), so the un-anchored name matched
   // two elements and the spec failed in strict mode — the page was fine, the locator was not.
-  await expect(admin.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
+  // #867: the first assertion after a navigation is the one that meets a cold dev server, and the
+  // default 5s ran out while Vite was still compiling the settings bundle (measured: this line failing
+  // at 5.8s on a fresh stack, while the page itself was fine). Every other first-render assertion in
+  // this suite carries a timeout for the same reason.
+  await expect(admin.getByRole("heading", { name: "Members", exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(admin.getByText("dev-user")).toBeVisible(); // the admin is listed
 
   const inviteEmail = `invitee${Date.now()}@e2e.test`;
-  await admin.getByLabel("invite email").fill(inviteEmail);
+  await admin.getByLabel(INVITE_EMAIL_LABEL).fill(inviteEmail);
   await admin.getByRole("button", { name: "Send invite" }).click();
 
   // #638: the link is shown once, in a modal — read the value inside the box, then dismiss it so the
@@ -78,7 +89,7 @@ test("the same invite link cannot be accepted twice (consume-once)", async ({ br
   await admin.goto(`${WEB}/auth/login`);
   await admin.waitForURL((u) => !u.pathname.startsWith("/auth/"), { timeout: 15_000 });
   await admin.goto(`${WEB}/settings/members`);
-  await admin.getByLabel("invite email").fill(`once${Date.now()}@e2e.test`);
+  await admin.getByLabel(INVITE_EMAIL_LABEL).fill(`once${Date.now()}@e2e.test`);
   await admin.getByRole("button", { name: "Send invite" }).click();
   // #638: the link is shown once, in a modal — read the value inside the box, then dismiss it so the
   // console behind is usable again.
