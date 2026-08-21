@@ -15,7 +15,7 @@ import type { DomainEvent } from './index.js'
 export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   // Pages
   'page.created': 'A page was created.',
-  'page.updated': 'A page was edited and the change published.',
+  'page.updated': 'A page was renamed or moved. A change to its body arrives as page.published.',
   'page.deleted': 'A page was permanently deleted (purged from the trash, or swept by retention).',
   'page.trashed': 'A page (and its subtree) was moved to the trash.',
   'page.trash_restored': 'A page (and its subtree) was restored from the trash.',
@@ -23,13 +23,13 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'page.published': 'A page revision was published.',
   'page.access_granted': 'Someone was given access to a page.',
   'page.access_revoked': 'Someone\'s access to a page was taken away.',
-  'page.access_restricted': 'Someone was blocked from a page, overriding any access they would otherwise inherit.',
+  'page.access_restricted': 'Someone was blocked from a page. The block beats every other way in, including access given on the page itself; only a manager or moderator can still edit through it.',
   'page.access_unrestricted': 'A block on someone\'s access to a page was lifted.',
   'page.made_private': 'A page was made private: only the people named on it can open it, it stops inheriting access from its space, and any public link stops working.',
   'page.made_non_private': 'A page stopped being private and inherits access from its space again.',
   'page.made_public': 'A published page was opened to anyone with the link, no sign-in needed. Search engines are asked not to index it.',
   'page.made_non_public': 'A page stopped being open to anyone; the link no longer works without signing in.',
-  'page.frozen': 'A page was frozen against edits — either for everyone who cannot manage it, or for share-link guests only.',
+  'page.frozen': 'A page was frozen against edits. Level full stops everyone who can neither manage nor moderate it; level guests stops share-link guests only.',
   'page.unfrozen': 'A page was unfrozen and can be edited again.',
   // Spaces
   'space.created': 'A space was created.',
@@ -87,7 +87,7 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'member.suspended': 'An admin suspended a member: sign-in blocked, access taken away, API keys revoked, sessions ended. The membership and its seat stay.',
   'member.reactivated': 'An admin brought a suspended member back. Roles that came from a group are not restored — the identity directory adds those again.',
   'member.password_enabled': 'An admin gave an existing member a password to sign in with (the account had none before).',
-  'member.factor_enrolled': 'A member added a second factor — an authenticator app — to their own account.',
+  'member.factor_enrolled': 'A member added a second factor to their own account. Which kind it was — an authenticator app or a passkey — is not carried here.',
   'member.factor_removed': 'A member removed a second factor from their own account, proving possession of it first.',
   'member.factors_reset': "A member's second factors were cleared so they could enrol again after losing the device; their sessions were ended with it. `reason` says who did it: an admin, or the member themselves with a recovery code.",
   'member.recovery_codes_minted': 'A member generated a set of recovery codes for their own account. How many is recorded; the codes themselves are shown once and are never sent anywhere else.',
