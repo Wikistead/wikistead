@@ -4,6 +4,7 @@
     "factor:recovery-code",
     "factor:totp",
     "import:confluence",
+    "import:docmost",
     "import:native",
     "import:notion",
     "import:obsidian",
