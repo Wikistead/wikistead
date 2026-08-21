@@ -36,6 +36,7 @@ RUN rm -rf apps/server/src/__tests__
 # runs it — so the script has to BE here or the build dies on a missing module. It self-disables
 # outside a dev checkout (it looks for the project design notes, which no image copies), so shipping it costs a
 # 2 KB file and nothing else. Measured: without this line every image build fails (#726).
+COPY scripts/wire-git-hooks.mjs ./scripts/wire-git-hooks.mjs
 RUN pnpm install --frozen-lockfile=false
 RUN pnpm --filter @wikistead/server... build
 # Self-contained production tree: the app + its workspace deps (dist) + prod node_modules only —
