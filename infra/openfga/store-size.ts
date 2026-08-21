@@ -1,4 +1,10 @@
-// #825: how many tuples this stack's permission store holds, printed for a caller to read.
+// #825: how many tuples this stack's OpenFGA database holds, printed for a caller to read.
+//
+// The count is per DATABASE, not per store: retired stores leave their rows behind until
+// `reset-test-store.ts` reclaims them, so the number can exceed the live store's own size (measured:
+// 16,247 against 16,143 live). That errs toward rotating early, which is the safe direction for a
+// threshold that exists to stop the store getting slow — but it is not the live store's size and
+// nothing here should be read as claiming it is.
 //
 // OpenFGA has no endpoint that answers "how big are you", so the only place to ask is its own
 // database — the same tables `reset-test-store.ts` reclaims from, and with the same caveat: they

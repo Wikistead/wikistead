@@ -46,7 +46,11 @@ export function shouldRotate(tupleCount, threshold = REFRESH_THRESHOLD) {
  *
  *   no-stack   this tree has never bootstrapped the isolated stack (a fresh clone, CI before setup)
  *   not-mine   the stack marker is not `server-test` — #269's valve: never touch a store we cannot
- *              prove is the throwaway one
+ *              prove is the throwaway one. ⚠️ It separates this stack from the DEV one and nothing
+ *              else: the marker is a constant in a tracked env file, so it reads the same in every
+ *              worktree. What keeps one session off another's store is the offset — a per-session
+ *              `.env.server-test.local`, offset-derived URLs, and the port check in
+ *              `reset-test-store.ts` that refuses an OpenFGA which is not this offset's.
  *   unknown    the store would not tell us its size (stack down, OpenFGA's schema moved)
  *   keep       under the threshold; the run gets the store it already has
  *   rotate     over it
