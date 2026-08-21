@@ -32,6 +32,7 @@ import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
 import type { DirtySignal } from "./dirtySignal";
 import type { Liveness } from "./collab";
+import type { Bearer } from "../data/apiClient";
 
 // Inline-comment integration surface for the host (CommentsPanel via PageRoute).
 export interface InlineAnchorInput { anchorStart: string; anchorEnd: string; quotedText: string }
@@ -76,7 +77,15 @@ export interface EditorProps {
   // 2-layer rule says a guest surface must not even INJECT those sources (the server stays the bastion
   // either way). This flag restores the client layer without giving up the guest resolvers.
   guestSurface?: boolean;
-  token: string; // collab WebSocket token
+  /**
+   * The collaboration socket's credential.
+   *
+   * #813 / ADR-248 §3.5: a guest passes a REF-STABLE getter, which the provider calls on every
+   * connection. It must not be re-created per render — the collab effect compares this by identity,
+   * and its teardown destroys the provider, the socket AND the Y.Doc, so a fresh function each render
+   * turns a five-minute problem into a per-render one.
+   */
+  token: string | (() => Promise<string>);
   collabUrl: string;
   user: EditorUser;
   // Edit gate (UI only — the collab server is the fortress; see below). Defaults
@@ -84,7 +93,12 @@ export interface EditorProps {
   capability?: EditorCapability;
   // API auth for image resolution (dev-token bearer, or "" for the cookie session)
   // — distinct from the collab token above. Omit for guests (images won't resolve).
-  apiToken?: string;
+  /**
+   * #813: a string for members, a ref-stable getter for a guest whose token is renewed while they
+   * read. The surface effect depends on the memoised resolvers below, and those depend on this — so a
+   * value that changes rebuilds every CodeMirror view and takes the caret and the undo history with it.
+   */
+  apiToken?: Bearer;
   // The PUBLISHED markdown rendered in view mode (draft/publish model). The live
   // draft (collab) is only ever shown in EDIT mode; view shows this snapshot.
   publishedMd?: string | null;
@@ -172,7 +186,7 @@ function tint(color: string): string {
 // visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
 // the mount functions don't need to know about the TOC.
 
-export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, onPublish, onExitEdit, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "" as Bearer, publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, onPublish, onExitEdit, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);

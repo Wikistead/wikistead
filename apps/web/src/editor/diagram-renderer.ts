@@ -1,4 +1,5 @@
 import type { DiagramRenderer } from "./live-preview/decorations";
+import { type Bearer, bearerValue } from "../data/apiClient";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL ?? "/api";
 
@@ -14,7 +15,7 @@ type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 // Core: POST the plantuml source to a gated render endpoint and map the response to blob | null (degrade).
 // The endpoint URL (page- vs template-scoped) is the only thing that varies; the request/response contract
 // and the degrade rules are identical, so page and template previews cannot drift.
-function makeRenderer(url: string, token: string, fetcher: Fetcher): DiagramRenderer {
+function makeRenderer(url: string, token: Bearer, fetcher: Fetcher): DiagramRenderer {
   return async (lang, source, theme) => {
     if (lang !== "plantuml") return null; // only plantuml is host-rendered today
     if (!source.trim()) return null; // empty fence → nothing to render (the empty placeholder shows)
@@ -22,7 +23,7 @@ function makeRenderer(url: string, token: string, fetcher: Fetcher): DiagramRend
       const res = await fetcher(url, {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: (() => { const t = bearerValue(token); return { "content-type": "application/json", ...(t ? { Authorization: `Bearer ${t}` } : {}) }; })(),
         // #342: forward the theme so a dark render gets a built-in `!theme` injected server-side. The
         // widget rebuilds on a theme switch (#200 — theme is in its eq() key), so this re-fetches for free.
         body: JSON.stringify({ source, theme }),
@@ -44,7 +45,7 @@ function makeRenderer(url: string, token: string, fetcher: Fetcher): DiagramRend
   };
 }
 
-export function makeDiagramRenderer(token: string, pageId: string, fetcher: Fetcher = fetch): DiagramRenderer {
+export function makeDiagramRenderer(token: Bearer, pageId: string, fetcher: Fetcher = fetch): DiagramRenderer {
   return makeRenderer(`${API_URL}/pages/${encodeURIComponent(pageId)}/plantuml/render`, token, fetcher);
 }
 

@@ -14,7 +14,15 @@ export interface Liveness {
 export function connect(opts: {
   url: string;
   docName: string;
-  token: string;
+  /**
+   * #813 / ADR-248 §3.5: a value, or a getter the provider calls on EVERY connection.
+   *
+   * A guest's token is renewed while they read. Handing the provider a getter is what lets the next
+   * connection use the current token without the socket, the awareness or the Y.Doc being rebuilt —
+   * and rebuilding the Y.Doc would throw away the characters typed while disconnected, which is the
+   * thing the renewal exists to save.
+   */
+  token: string | (() => Promise<string>);
   /**
    * #813 / ADR-248 §3.1: called whenever the answer to "are this client's edits arriving" changes.
    *
@@ -169,7 +177,9 @@ export interface EphemeralSession {
   onSynced: (cb: () => void) => void;
   destroy: () => void;
 }
-export function connectEphemeral(opts: { url: string; docName: string; anchor: string; token: string }): EphemeralSession {
+// #813 / ADR-248 §3.9: the macro's temporary room is in scope too — it authenticates the same way, so
+// a token that died while the modal was open would refuse it for the same reason.
+export function connectEphemeral(opts: { url: string; docName: string; anchor: string; token: string | (() => Promise<string>) }): EphemeralSession {
   const doc = new Y.Doc();
   const socket = new HocuspocusProviderWebsocket({ url: opts.url });
   const latch = makeSyncedLatch();

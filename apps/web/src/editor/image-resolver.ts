@@ -1,4 +1,4 @@
-import { apiFetch, assetUrl } from "../data/apiClient";
+import { apiFetch, assetUrl, type Bearer, bearerValue} from "../data/apiClient";
 import type { ImageResolver } from "./live-preview/decorations";
 
 // Resolves a wks-attachment id → a fresh presigned download URL, with a small
@@ -7,7 +7,7 @@ import type { ImageResolver } from "./live-preview/decorations";
 // security is not weakened by caching — a revoked user simply gets a fresh 403 on
 // the next (cache-miss/refresh) resolve. `refresh` bypasses the cache (used when
 // an <img> errors because its presigned URL expired). Never persists the URL.
-export function makeImageResolver(token: string): ImageResolver {
+export function makeImageResolver(token: Bearer): ImageResolver {
   const cache = new Map<string, { url: string; exp: number }>();
   return async (id, opts) => {
     const now = Date.now();

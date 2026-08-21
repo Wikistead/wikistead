@@ -43,6 +43,7 @@ import { SetPasswordForm } from "./SetPasswordForm";
 import { Editor, type AnchorGetter } from "../editor/Editor";
 import { UnsavedBanner } from "../editor/UnsavedBanner";
 import type { Liveness } from "../editor/collab";
+import { makeGuestSession, type GuestSession } from "../session/guest-session";
 import { setVimClipboardMode } from "../editor/live-preview/vim-clipboard";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
@@ -1039,7 +1040,39 @@ function ShareRoute() {
   }
   // A space link's token carries a space marker docName (t:<tenant>:s:<spaceId>); show the
   // space's pages (#104). A page link goes straight to the page.
-  return state.minted.docName.includes(":s:") ? <GuestSpace minted={state.minted} /> : <GuestPage minted={state.minted} />;
+  //
+  // #813 / ADR-248 §3.5: the mint becomes a SESSION here, and the session is what everything below
+  // holds. The token itself is deliberately not passed down any more — see `GuestSessionHost`.
+  return <GuestSessionHost linkId={linkId!} minted={state.minted} />;
+}
+
+/**
+ * #813 / ADR-248 §3.5: owns one guest session for as long as this share link is open.
+ *
+ * ⚠️ The session is built ONCE, in a ref, and the two faces it offers are the same objects for the
+ * life of the visit. That is the requirement, not a style: the editor keys its collaboration effect
+ * and its CodeMirror surface effect on the credential it is handed, and a new identity on either tears
+ * down the Y.Doc or every view. A guest who paused mid-sentence would come back to a document that had
+ * been thrown away — the thing the renewal exists to prevent.
+ *
+ * What DOES re-render is the mint's other fields: a link narrowed to `view` while somebody was reading
+ * changes what the surface may offer. The token is not part of that news.
+ */
+function GuestSessionHost({ linkId, minted }: { linkId: string; minted: GuestToken }) {
+  const [current, setCurrent] = useState(minted);
+  const sessionRef = useRef<GuestSession | null>(null);
+  sessionRef.current ??= makeGuestSession(linkId, minted, setCurrent);
+  const session = sessionRef.current;
+  // Ref-stable by construction — never re-created, so neither effect below ever sees a new identity.
+  const getTokenRef = useRef<(() => Promise<string>) | null>(null);
+  getTokenRef.current ??= () => session.getToken();
+  const apiBearerRef = useRef<(() => string) | null>(null);
+  apiBearerRef.current ??= () => session.current();
+
+  const live = { ...current, token: "" }; // the token travels through the session, never as a prop
+  return live.docName.includes(":s:")
+    ? <GuestSpace minted={live} getToken={getTokenRef.current!} apiBearer={apiBearerRef.current!} />
+    : <GuestPage minted={live} getToken={getTokenRef.current!} apiBearer={apiBearerRef.current!} />;
 }
 
 // Space-link guest reader-chrome (#245 / ADR-112): show the linked space's page tree in the REAL sidebar
@@ -1048,9 +1081,13 @@ function ShareRoute() {
 // from the token's single space; the member-only GET /spaces is never called (Decision 0). No member
 // chrome (switcher/settings/create/rename/delete/unpublished dots) — GuestSidebar renders a read-only tree.
 // (Ships only after #244, which stops private pages from appearing in a space-guest's tree.)
-function GuestSpace({ minted }: { minted: GuestToken }) {
+function GuestSpace({ minted, getToken, apiBearer }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string }) {
   const { t } = useTranslation();
-  const { token, docName, capability } = minted;
+  // #813: the token is NOT in `minted` any more — it lives in the session. `apiBearer` is read per
+  // request (ref-stable, so no effect sees a new identity) and `getToken` is what the socket calls on
+  // every connection.
+  const token = apiBearer;
+  const { docName, capability } = minted;
   const m = /^t:(.+?):s:(.+)$/.exec(docName);
   const tenant = m?.[1] ?? "";
   const spaceId = m?.[2] ?? "";
@@ -1118,7 +1155,9 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
   // links carry their capability into the page (Decision 2/C — the tree is read-only chrome, but a page
   // opened from an edit link is editable); view links open read-only.
   const pageMinted: GuestToken | null = openId
-    ? { token, docName: `t:${tenant}:p:${openId}`, capability, readOnly: capability !== "edit" }
+    // #813: the token field carries nothing now — the session is what holds the credential, and it is
+    // handed down beside this rather than inside it.
+    ? { token: "", docName: `t:${tenant}:p:${openId}`, capability, readOnly: capability !== "edit" }
     : null;
 
   return (
@@ -1127,13 +1166,13 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
       // #449 / ADR-173: the guest gets the SAME search box (Ctrl-K + the header field), wired to their
       // own token and opening hits inside this shell via the tree's open handler. The server forces the
       // link's space scope and gates every hit on the share_link principal — no member chrome leaks here.
-      search={<SearchBox guestToken={token} onNavigate={setOpenId} />}
+      search={<SearchBox guestToken={token()} onNavigate={setOpenId} />}
     >
       {pageMinted ? (
         // key on the page id so switching pages in the tree remounts the editor cleanly. A page this
         // guest JUST created opens straight in edit mode (member new-page parity); onTitleChange
         // refreshes the tree so the rename shows up without a reload.
-        <GuestPageContent key={openId} minted={pageMinted} startEditing={openId === createdId} onTitleChange={refreshPages} />
+        <GuestPageContent key={openId} minted={pageMinted} getToken={getToken} apiBearer={apiBearer} startEditing={openId === createdId} onTitleChange={refreshPages} />
       ) : pages == null ? (
         // #364 ②: still resolving (tree + home pointer) — skeleton, not a centred text line.
         <ShellLoading />
@@ -1155,9 +1194,13 @@ function GuestSpace({ minted }: { minted: GuestToken }) {
 // chrome-less AppShell) and by the space-link reader-chrome (GuestSpace, rendered inside an AppShell whose
 // sidebar is the guest page tree). Keeping the AppShell out of here lets the space layout own a single
 // shell with the sidebar slot (#245 / ADR-112).
-function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange }: { minted: GuestToken; onBack?: () => void; startEditing?: boolean; onTitleChange?: () => void }) {
+function GuestPageContent({ minted, getToken, apiBearer, onBack, startEditing = false, onTitleChange }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string; onBack?: () => void; startEditing?: boolean; onTitleChange?: () => void }) {
   const { t } = useTranslation();
-  const { token, docName, capability } = minted;
+  // #813: the token is NOT in `minted` any more — it lives in the session. `apiBearer` is read per
+  // request (ref-stable, so no effect sees a new identity) and `getToken` is what the socket calls on
+  // every connection.
+  const token = apiBearer;
+  const { docName, capability } = minted;
   const pageId = docName.replace(/^t:.+?:p:/, "");
   // Anonymous guest identity (never an OIDC account / seat — the project design notes). Guests have
   // no real name → labelled "Guest"; each session gets a distinct auto colour (no
@@ -1392,7 +1435,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
               canEdit={canEdit}
             />
             <UnsavedBanner reason={liveness.reason} />
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (guest CM body is virtualised too).
                 #207: a guest holds a share token, which the diagram route accepts, so the picture prints
                 here as well. (The public route below has no token and passes none — its plantuml degrades
@@ -1420,7 +1463,7 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
               railTop="calc(var(--wks-band-h, 0px) + 0.5rem)"
             />
           </div>
-          {commentsOpen && <Suspense fallback={null}><CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} token={token} /></Suspense>}
+          {commentsOpen && <Suspense fallback={null}><CommentsPanel pageId={pageId} canComment={canComment} anchorGetterRef={anchorGetterRef} onClose={() => setCommentsOpen(false)} token={token()} /></Suspense>}
         </div>
       </div>
   );
@@ -1428,8 +1471,8 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
 
 // Page-link guest route: a single page, NO space tree (a page-scoped link grants no authority to traverse
 // the space — #245 / ADR-112 Decision 3). Chrome-less AppShell wrapping the page content.
-function GuestPage({ minted }: { minted: GuestToken }) {
-  return <AppShell><GuestPageContent minted={minted} /></AppShell>;
+function GuestPage({ minted, getToken, apiBearer }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string }) {
+  return <AppShell><GuestPageContent minted={minted} getToken={getToken} apiBearer={apiBearer} /></AppShell>;
 }
 
 // Cloud signup landing (platform origin). Public — no session yet. Starts the

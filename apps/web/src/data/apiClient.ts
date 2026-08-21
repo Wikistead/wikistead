@@ -42,11 +42,26 @@ export function apiErrorFrom(status: number, path: string, body: unknown): ApiEr
   return err;
 }
 
+/**
+ * The bearer for one request: a string, or something that produces the current one.
+ *
+ * #813 / ADR-248 §3.5: a guest's token is renewed while they read, and the editor keys two effects on
+ * the credential it is handed — a value that changes destroys the Y.Doc or rebuilds the CodeMirror
+ * surface, every few minutes, mid-sentence. A REF-STABLE getter lets the caller hold one identity for
+ * the life of the session while every request still carries the token that is current at the moment
+ * it leaves. Members pass a string, as before.
+ */
+export type Bearer = string | (() => string);
+
+/** The bearer's value right now — for the few places that build a `fetch` by hand. */
+export const bearerValue = (b: Bearer): string => (typeof b === "function" ? b() : b);
+
 export async function apiFetch<T = unknown>(
   path: string,
-  token: string,
+  bearer: Bearer,
   init: RequestInit = {},
 ): Promise<T | null> {
+  const token = bearerValue(bearer);
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: "include", // send the BFF session cookie (same-origin)
@@ -91,6 +106,43 @@ export interface GuestToken {
 // message instead of dropping to the dead-link view, #233); null for a dead link (404) or any
 // other failure (uniform — no existence/password oracle). `password` re-POSTs the mint with the entry.
 export type GuestTokenResult = GuestToken | "password_required" | "rate_limited" | null;
+
+// #813 / ADR-248 §3.4: renew a live guest session, WITHOUT it becoming a new visit.
+//
+// It sits beside the exchange because it speaks to the same link and returns the same shape — and
+// apart from it because it is a different act: the exchange is somebody arriving (the server counts it
+// in the share-link funnel), the refresh is somebody who never left. The credential is the token
+// already held; the server re-reads the link row and re-asks the authorization store every time, so a
+// revoked link stops renewing at once.
+export type RefreshOutcome =
+  | { kind: "renewed"; minted: GuestToken }
+  | { kind: "retry" }                      // 429, or a request that never arrived — not an ending
+  | { kind: "reenter" }                    // 401 session_ended — the ceiling; entering again continues it
+  | { kind: "ended"; why: "unauthorized" | "gone" };
+
+export async function refreshGuestToken(linkId: string, token: string): Promise<RefreshOutcome> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/public/share-links/${encodeURIComponent(linkId)}/token/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: { authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return { kind: "retry" }; // the network, not the session — a request that never arrived decides nothing
+  }
+  if (res.ok) return { kind: "renewed", minted: (await res.json()) as GuestToken };
+  if (res.status === 429) return { kind: "retry" };
+  if (res.status === 401) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    // ⚠️ Two different 401s, and telling them apart is the point of this branch. `session_ended` is the
+    // twelve-hour ceiling: the visitor may carry on by entering again (a password link asks for its
+    // password there). Anything else means the credential itself is dead and nothing continues.
+    return body.error === "session_ended" ? { kind: "reenter" } : { kind: "ended", why: "unauthorized" };
+  }
+  return { kind: "ended", why: "gone" }; // 404: revoked, expired, or never this deployment's link
+}
+
 export async function fetchGuestToken(linkId: string, password?: string): Promise<GuestTokenResult> {
   const res = await fetch(`${API_URL}/public/share-links/${encodeURIComponent(linkId)}/token`, {
     method: "POST",

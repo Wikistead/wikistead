@@ -11,6 +11,7 @@
 // page-INTERACTION opts (onToggleTask, titleLinks, list, linkStatus, embedProviders) stay caller-supplied
 // — they are not resource resolution.
 import { makeImageResolver, makePublicImageResolver } from "./image-resolver";
+import type { Bearer } from "../data/apiClient";
 import { makeAttachmentResolver } from "./attachment-resolver";
 import { makeDiagramRenderer, makePublicDiagramRenderer, makeTemplateDiagramRenderer } from "./diagram-renderer";
 import { makeTranscludeResolver, makePublicTranscludeResolver } from "./transclude-resolver";
@@ -19,7 +20,7 @@ import type { ImageResolver, AttachmentResolver, DiagramRenderer, TranscludeReso
 export type ResolverContext =
   // A member OR share-link guest page (the guest case is the member set with the guest token — the
   // server re-gates). pageId null = a surface with no page scope yet (diagram/transclude degrade).
-  | { kind: "page"; token: string; pageId: string | null }
+  | { kind: "page"; token: Bearer; pageId: string | null }
   | { kind: "template"; token: string; templateId: string }
   // Search-hit / embed-picker previews: image + diagram only.
   | { kind: "preview"; token: string; pageId: string }

@@ -1,4 +1,5 @@
 import type { LinkStatusResolver } from "./live-preview/decorations";
+import type { Bearer } from "../data/apiClient";
 
 const API_URL = (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ?? "/api";
 
@@ -11,14 +12,20 @@ type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 // hiding: non-existent / deleted / private / cross-tenant are indistinguishable). Returns null to DEGRADE
 // (any non-200 / network error / malformed body) → the overlay leaves every link ALIVE (never a false dead).
 // The fetcher is injectable so the request/response mapping is unit-tested without a real network.
-export function makeLinkStatusResolver(token: string, fetcher: Fetcher = fetch): LinkStatusResolver {
+export function makeLinkStatusResolver(bearer: Bearer, fetcher: Fetcher = fetch): LinkStatusResolver {
   return async (ids: string[]) => {
     if (!ids.length) return new Set<string>();
     try {
       const res = await fetcher(`${API_URL}/pages/link-status`, {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        // #813: resolved per request. A ref-stable `bearer` lets this resolver's identity stay put
+        // across a guest's token renewal — its identity is a dependency of the surface effect, and a
+        // new one rebuilds every CodeMirror view.
+        headers: (() => {
+          const token = typeof bearer === "function" ? bearer() : bearer;
+          return { "content-type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+        })(),
         body: JSON.stringify({ ids }),
       });
       if (res.status !== 200) return null; // any non-200 → degrade (leave links alive)

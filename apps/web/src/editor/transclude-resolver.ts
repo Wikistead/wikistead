@@ -1,4 +1,5 @@
 import type { TranscludeResolver } from "./live-preview/decorations";
+import { type Bearer, bearerValue } from "../data/apiClient";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL ?? "/api";
 
@@ -10,7 +11,7 @@ type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 // returns the referenced page's published markdown, or null to render an existence-hiding
 // placeholder (denied / cycle / depth / absent / network error — all indistinguishable to the UI,
 // so a viewer can't probe for pages they can't see). hostPageId scopes the request's page-view gate.
-export function makeTranscludeResolver(token: string, hostPageId: string, fetcher: Fetcher = fetch): TranscludeResolver {
+export function makeTranscludeResolver(token: Bearer, hostPageId: string, fetcher: Fetcher = fetch): TranscludeResolver {
   return makeResolver(`${API_URL}/pages/${encodeURIComponent(hostPageId)}/transclude`, token, fetcher);
 }
 
@@ -21,14 +22,14 @@ export function makePublicTranscludeResolver(hostPageId: string, fetcher: Fetche
   return makeResolver(`${API_URL}/public/pages/${encodeURIComponent(hostPageId)}/transclude`, "", fetcher);
 }
 
-function makeResolver(baseUrl: string, token: string, fetcher: Fetcher): TranscludeResolver {
+function makeResolver(baseUrl: string, token: Bearer, fetcher: Fetcher): TranscludeResolver {
   return async (refId) => {
     const ref = refId.trim();
     if (!ref) return null;
     try {
       const res = await fetcher(
         `${baseUrl}/${encodeURIComponent(ref)}`,
-        { credentials: "include", headers: token ? { Authorization: `Bearer ${token}` } : {} },
+        { credentials: "include", headers: (() => { const t = bearerValue(token); return (t ? { Authorization: `Bearer ${t}` } : {}) as Record<string, string>; })() },
       );
       if (res.status !== 200) return null; // 404 denied (#280 existence-hiding) / 422 cycle|depth → placeholder
       const body = (await res.json()) as { content?: string };

@@ -1,4 +1,4 @@
-import { assetUrl } from "../data/apiClient";
+import { assetUrl, type Bearer, bearerValue} from "../data/apiClient";
 import { apiFetch } from "../data/apiClient";
 import type { AttachmentResolver, AttachmentMeta } from "./live-preview/decorations";
 
@@ -9,7 +9,7 @@ import type { AttachmentResolver, AttachmentMeta } from "./live-preview/decorati
 // bytes (the nosniff/CSP route) WITH the caller's credentials and hands back a blob: URL —
 // an <iframe src> can't carry an Authorization header itself, so the blob is how the
 // sandboxed PDF viewer works for members (cookie or bearer) and guests (bearer) alike.
-export function makeAttachmentResolver(token: string): AttachmentResolver {
+export function makeAttachmentResolver(token: Bearer): AttachmentResolver {
   const metaCache = new Map<string, { meta: AttachmentMeta; exp: number }>();
   const blobCache = new Map<string, string>(); // blob: URLs live until page unload (bytes are immutable)
   return {
@@ -37,7 +37,7 @@ export function makeAttachmentResolver(token: string): AttachmentResolver {
       try {
         const res = await fetch(assetUrl(`/attachments/${encodeURIComponent(id)}/inline`), {
           credentials: "include",
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          headers: (() => { const t = bearerValue(token); return t ? { Authorization: `Bearer ${t}` } : undefined; })(),
         });
         if (!res.ok) return null; // 415 non-inline / 413 too large / 404 → the card renders without a viewer
         const url = URL.createObjectURL(await res.blob());
