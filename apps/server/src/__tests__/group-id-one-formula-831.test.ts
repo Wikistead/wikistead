@@ -16,14 +16,28 @@
 // because the literal made the source file BINARY to git. The rebuild script was written before that,
 // from a file nobody could read, and the invisible byte was copied as a space.
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { groupFgaId, groupGrantee } from '@wikistead/authz'
 import { groupFgaId as fromServer } from '../auth/group-sync.js'
 
 const root = resolve(import.meta.dirname, '../../../..')
 const read = (p: string) => readFileSync(resolve(root, p), 'utf8')
+
+// #848: the discovery below walks the tree instead of reading a list of two files. What is skipped is
+// the machinery, never a source directory — a list of source paths is the thing this file is fixing.
+const SKIP = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'docs-site', 'lp'])
+function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    if (SKIP.has(name)) continue
+    const p = join(dir, name)
+    if (statSync(p).isDirectory()) sourceFiles(p, out)
+    else if (/\.(ts|tsx|mjs|js)$/.test(name)) out.push(p)
+  }
+  return out
+}
+const rel = (p: string) => p.slice(root.length + 1)
 
 describe('#831: one formula for a group id', () => {
   it('the separator is the NUL byte the production store was written with', () => {
@@ -50,17 +64,47 @@ describe('#831: one formula for a group id', () => {
 
   // Discovery, and the shape that matters: not "do the two copies agree" (which permits a third), but
   // "is there more than one place that hashes a group id at all".
+  //
+  // #848: it used to read TWO NAMED FILES — the two that had already diverged — while its own name
+  // said "anywhere". A third copy in `infra/openfga/migrate-*.ts` would have passed, and a script
+  // exactly like that is where the first copy came from. It walks the tree now.
   it('nothing anywhere hashes a group id a second time', () => {
-    // ⚠️ CE paths only. Naming the proprietary package's file here would make this test unrunnable in
-    // the public tree, where that path does not exist (#178 / #785 — and the discovery pins for both
-    // caught exactly that on the first run of this file).
-    const files = ['infra/openfga/resync.ts', 'apps/server/src/auth/group-sync.ts']
-    for (const f of files) {
-      expect(read(f), `${f} builds a group id from crypto instead of importing the one formula`)
-        .not.toMatch(/createHash\([\s\S]{0,400}?slice\(0,\s*24\)/)
+    const files = sourceFiles(root)
+    // The shape, not the word: a sha256 truncated to 24 hex characters IS the group-id derivation.
+    // Hashing alone is far too common to mean anything — 33 files reach for `createHash` (tokens,
+    // PKCE, the audit chain), and even hash-then-truncate is a family of five legitimate derivations
+    // (the analytics IP pseudonym at 16, the transparency pseudonym at 12, the guest anon id at 12).
+    // Only the group id truncates at 24, so that is what this asks about, and the assertion below
+    // fails loudly if a second one ever picks the same width for something else.
+    const derivations = files.filter((f) => /createHash\([\s\S]{0,400}?slice\(0,\s*24\)/.test(readFileSync(f, 'utf8')))
+    const outside = derivations.map(rel).filter((f) => f !== 'packages/authz/src/group-id.ts' && !f.endsWith('group-id-one-formula-831.test.ts'))
+    console.error(`group id: ${files.length} source file(s) walked, ${derivations.length} derive an id by truncating a hash to 24`)
+    expect(files.length, 'the walk found no source files — it is broken, not clean').toBeGreaterThan(500)
+    expect(derivations.map(rel), 'the one definition is not among what was walked — the walk missed it')
+      .toContain('packages/authz/src/group-id.ts')
+    expect(outside, 'a second place derives a group id — the formula has been copied again').toEqual([])
+  })
+
+  // #848, the other direction: a copy of the FORMULA is one way to get a wrong id, and building the
+  // PRINCIPAL without the formula is the other. #854 was the second kind — the search filter composed
+  // `group:<name>` while the index holds `group:<hash>`, so group-granted pages matched nothing — and
+  // no pin here could see it, because nothing was hashed twice.
+  it('shipped code composes a group principal only through the one formula', () => {
+    const shipped = sourceFiles(root).filter((f) => !/__tests__|\.test\.[tj]sx?$/.test(f))
+    const sites: { file: string; expr: string }[] = []
+    for (const f of shipped) {
+      // ⚠️ NOT anchored to a backtick. The first draft of this pin matched only `` `group:${…} `` at
+      // the START of a template, and #854's own line — `viewerGroups = "group:${g}"`, the defect this
+      // half exists for — sits in the middle of one. The break-check caught it: reverting the fix left
+      // the pin green. Anywhere in the file is the rule.
+      for (const m of readFileSync(f, 'utf8').matchAll(/group:\$\{([^}]*)\}/g)) sites.push({ file: rel(f), expr: m[1]! })
     }
-    // The one definition, where it belongs.
-    expect(read('packages/authz/src/group-id.ts')).toMatch(/createHash\('sha256'\)/)
+    console.error(`group id: ${sites.length} place(s) in shipped code compose a \`group:\` principal`)
+    expect(sites.length, 'no shipped code composes a group principal — the walk is broken').toBeGreaterThan(0)
+    expect(
+      sites.filter((s) => !s.expr.includes('groupFgaId(')).map((s) => `${s.file}: ${s.expr}`),
+      'a group principal is built from something other than the one formula (#854 was this shape)',
+    ).toEqual([])
   })
 
   it('the rebuild script imports both promises it used to copy', () => {
