@@ -1,5 +1,6 @@
 // #485 / #514: GET /spaces/:spaceId/assignable-roles — the manager-readable role-definition list that
-// backs the in-space assignment picker. Its AUTHORITY (requireListAuthority on the space's `manage`) is
+// backs the in-space assignment picker. Its AUTHORITY (requireListAuthority, which at space scope
+// admits the roster verb `manageAccess` — ADR-209 / #607, not only a manager) is
 // pinned directly in role-assign-space-manager-485.test.ts (MGR passes, a non-manager is forbidden). This
 // pins the ENDPOINT's remaining contract: it returns only RESOURCE-scope roles (built-ins + custom
 // resource roles) and never the tenant-scope roles (createSpaces etc.), which are not assignable at a

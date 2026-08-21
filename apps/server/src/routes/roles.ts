@@ -637,10 +637,14 @@ export async function requireAssignmentAuthority(
   }
 }
 
-// The authority to READ (list) a resource's assignments: the target's `manage` (space manager / page
-// manage), tenant → admin, tenant-admin short-circuit. Listing is a management view, so it gates on
-// `manage` (not the write-side share ceiling); the endpoint answers for one resourceId, so there is no
-// cross-space enumeration surface.
+// The authority to READ (list) a resource's assignments. Listing is a management view, so it gates on
+// the target's MANAGEMENT side rather than the write-side share ceiling — but which verb that is
+// differs by scope, and the difference is the point: see the ternary below.
+//
+// ⚠️ #861: this header used to say the gate is `manage` at every scope. At SPACE scope it is
+// `manageAccess`, which ADR-209 (#607) lets a custom role carry WITHOUT making its holder a manager —
+// so the old sentence named a sufficient condition as if it were a necessary one, and a reader
+// checking who may see a space's roster got a narrower answer than the code gives.
 export async function requireListAuthority(
   fga: OpenFgaClient,
   args: { sub: string; tenantId: string; resourceType: 'page' | 'space' | 'tenant'; resourceId: string },
@@ -993,8 +997,10 @@ export async function rolesPlugin(app: FastifyInstance) {
 
   // #485 / #514: a space MANAGER (not just a tenant admin) needs the role DEFINITION list to populate the
   // in-space assignment picker — the tenant-admin-gated GET /admin/roles is unreachable for them.
-  // This is the read that lets "assign in space settings" (the #514 IA) work: gated on `manage` of the
-  // space (the SAME authority the assignment write + the assignment list already use — requireListAuthority),
+  // This is the read that lets "assign in space settings" (the #514 IA) work: gated by
+  // `requireListAuthority`, which at space scope admits `manageAccess` — a space manager holds it, and
+  // so does a custom-role holder who is not one (ADR-209 / #607). Same authority as the assignment
+  // list, and the same one the assignment WRITE asks for unless the call moves the admin class,
   // scoped to ONE space (no cross-space enumeration), READ-ONLY (no edit/create), and it returns only the
   // roles ASSIGNABLE at space/page scope — built-ins plus custom RESOURCE-scope roles. Tenant-scope roles
   // (createSpaces etc.) are deliberately excluded: they are not assignable at a resource and stay
@@ -1008,12 +1014,14 @@ export async function rolesPlugin(app: FastifyInstance) {
   // #582 / ADR-202 §1: the PAGE equivalent of `/spaces/:spaceId/assignable-roles`. The page dialog
   // offers custom roles beside the built-in capabilities, and a PAGE-only manager (someone holding
   // `manage_direct` on the page, which that very dialog can grant) could not fetch the list: the space
-  // endpoint is gated on SPACE manage and `/admin/roles` on tenant admin. #485 added the space one for
-  // exactly this reason ("the tenant-admin-gated GET /admin/roles is unreachable for them").
+  // endpoint gates on the SPACE roster verb (`manageAccess`) and `/admin/roles` on tenant admin. #485
+  // added the space one for exactly this reason ("the tenant-admin-gated GET /admin/roles is
+  // unreachable for them").
   //
   // Gated on the page's `manage` — deliberately NARROWER than the `share` that suffices to assign
-  // (share unions manage in the model). At space scope list and assign are both `manage` so the
-  // question never arose; here it is a choice, and the narrower one is taken because a role's
+  // (share unions manage in the model). At space scope both list and assign go through the roster verb
+  // (`manageAccess`) so the question never arose; here it is a choice, and the narrower one is taken
+  // because a role's
   // capability list is tenant-wide information and `share` is a wider audience.
   //
   // NO EXISTENCE ORACLE: a non-admin without `manage` is refused whether or not the page exists, and
