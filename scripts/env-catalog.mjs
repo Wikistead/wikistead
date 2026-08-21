@@ -267,8 +267,8 @@ export const ENV_DOCS = {
   },
   GUEST_TOKEN_TTL_SECONDS: {
     group: 'Guests and sharing',
-    default: '3600',
-    what: 'How long a guest token lives. Keep it short: after a link is revoked an already-connected guest keeps access until their token expires, and this is the length of that window.',
+    default: '300',
+    what: 'How long a guest token lives. Keep it short: revoking a link disconnects the guests it can still reach at once, and this is how long access lasts for one it could not. The value is also clamped to the link\'s own remaining life, so a link expiring in a minute never mints an hour-long token.',
   },
   EXCHANGE_RL_IP_MAX: { group: 'Guests and sharing', default: '30', what: 'Share-link token exchanges accepted per source address per minute.' },
   EXCHANGE_RL_LINK_MAX: { group: 'Guests and sharing', default: '10', what: 'Token exchanges accepted per share link per minute, which bounds one leaked link rather than one visitor.' },

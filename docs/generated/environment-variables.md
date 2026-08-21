@@ -121,7 +121,7 @@ A blank value is not the same as a missing one: unless a row says otherwise, uns
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `GUEST_TOKEN_SECRET` | unset (required) | Signs the short-lived tokens anonymous share-link visitors carry. Production refuses to start on the value published in the public repository's fixtures. |
-| `GUEST_TOKEN_TTL_SECONDS` | 3600 | How long a guest token lives. Keep it short: after a link is revoked an already-connected guest keeps access until their token expires, and this is the length of that window. |
+| `GUEST_TOKEN_TTL_SECONDS` | 300 | How long a guest token lives. Keep it short: revoking a link disconnects the guests it can still reach at once, and this is how long access lasts for one it could not. The value is also clamped to the link's own remaining life, so a link expiring in a minute never mints an hour-long token. |
 | `EXCHANGE_RL_IP_MAX` | 30 | Share-link token exchanges accepted per source address per minute. |
 | `EXCHANGE_RL_LINK_MAX` | 10 | Token exchanges accepted per share link per minute, which bounds one leaked link rather than one visitor. |
 | `SHARE_LINK_SWEEP_POLL_MS` | 60000 | How often expired share links are swept out of the authorization store. |

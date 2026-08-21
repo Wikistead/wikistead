@@ -307,10 +307,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   })
   // Guest (anonymous share) tokens reuse the collab signing secret + verifier, so
   // the HTTP guest path and the collab join point validate identically.
-  const guestCfg = {
-    secret: process.env.GUEST_TOKEN_SECRET!,
-    ttlSeconds: Number(process.env.GUEST_TOKEN_TTL_SECONDS ?? 3600),
-  }
+  // #813 / ADR-248 §3.8: the secret only. The lifetime lives where tokens are MINTED
+  // (`share-links.ts`); a second default here was dead code that published a different answer.
+  const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET! }
 
   // #400: liveness stays STATIC (a dependency outage must not make k8s kill/restart the pod — that
   // fixes nothing and loses the in-flight work); readiness pings every hard dependency so a pod with

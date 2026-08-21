@@ -13,10 +13,9 @@ import { fgaClient, check, checkMemberAccess, isTenantMember } from "@wikistead/
 import { externalSubViolation } from "@wikistead/hooks";
 import { pool } from "./db.js";
 
-const guestCfg = {
-  secret: process.env.GUEST_TOKEN_SECRET!,
-  ttlSeconds: Number(process.env.GUEST_TOKEN_TTL_SECONDS ?? 3600),
-};
+// #813 / ADR-248 §3.8: verifying reads the expiry out of the token, so this side has no business
+// naming a lifetime. It used to carry a default of its own — one that disagreed with the minter's.
+const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET! };
 const verifyMember = makeMemberVerifier({
   issuer: process.env.OIDC_ISSUER!,
   jwksUri: process.env.OIDC_JWKS_URI!,

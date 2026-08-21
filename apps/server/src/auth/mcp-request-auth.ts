@@ -18,8 +18,7 @@ export async function authenticateMcpRequest(req: FastifyRequest, hostTenantId: 
   if (!m) throw Object.assign(new Error('missing bearer token'), { statusCode: 401 })
   let claims
   try {
-    // ttlSeconds is unused on verify (exp is read from the token itself); only the secret matters.
-    claims = await verifyMcpAccessToken({ secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 0 }, m[1]!)
+    claims = await verifyMcpAccessToken({ secret: process.env.GUEST_TOKEN_SECRET! }, m[1]!)
   } catch {
     throw Object.assign(new Error('invalid or expired token'), { statusCode: 401 })
   }

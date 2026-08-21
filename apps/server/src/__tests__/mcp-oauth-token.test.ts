@@ -55,7 +55,7 @@ describe('POST /mcp/oauth/token — code → tenant-bound access token (#311 / A
     const body = res.json()
     expect(body.token_type).toBe('Bearer')
     expect(body.scope).toBe('read write')
-    const claims = await verifyMcpAccessToken({ secret: SECRET, ttlSeconds: 3600 }, body.access_token)
+    const claims = await verifyMcpAccessToken({ secret: SECRET }, body.access_token)
     expect(claims).toMatchObject({ sub: 'user-1', tenantId: 'tenant_dev', scopes: ['read', 'write'] })
   })
 

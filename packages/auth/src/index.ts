@@ -22,8 +22,22 @@ export function deriveAnonId(secret: string): string {
   return `anon:${digest.slice(0, 12)}`;
 }
 
-export interface GuestTokenConfig {
+/**
+ * What VERIFYING a token needs: the signing secret, and nothing else.
+ *
+ * #813 / ADR-248 §3.8: a lifetime is a minting decision — the expiry a verifier enforces is inside
+ * the token it is reading. Two call sites nevertheless built a full config to verify with, each
+ * carrying its own default, and those defaults disagreed with the one the minter actually uses. The
+ * values were dead, but "how long does a guest's credential live" had three published answers and the
+ * environment reference shipped the wrong one. Splitting the type is what keeps a fourth from
+ * appearing: a verifier that cannot be handed a lifetime cannot invent one.
+ */
+export interface TokenSecret {
   secret: string;
+}
+
+/** What MINTING a token needs: the secret, and how long the token lives. */
+export interface GuestTokenConfig extends TokenSecret {
   ttlSeconds: number;
 }
 
@@ -49,7 +63,7 @@ export async function mintGuestToken(
     .sign(enc.encode(cfg.secret));
 }
 
-export async function verifyGuestToken(cfg: GuestTokenConfig, token: string): Promise<GuestTokenClaims> {
+export async function verifyGuestToken(cfg: TokenSecret, token: string): Promise<GuestTokenClaims> {
   const { payload } = await jwtVerify(token, enc.encode(cfg.secret), { typ: "guest+jwt" });
   // NOTE: structural validation only; capability is re-checked against OpenFGA
   // at the authorization boundary. The token asserts intent, not authority.
@@ -81,7 +95,7 @@ export async function mintMemberCollabToken(
     .sign(enc.encode(cfg.secret));
 }
 
-export async function verifyMemberCollabToken(cfg: GuestTokenConfig, token: string): Promise<MemberCollabClaims> {
+export async function verifyMemberCollabToken(cfg: TokenSecret, token: string): Promise<MemberCollabClaims> {
   const { payload } = await jwtVerify(token, enc.encode(cfg.secret), { typ: "member+jwt" });
   return payload as unknown as MemberCollabClaims;
 }
@@ -124,7 +138,7 @@ export async function mintMcpAccessToken(
     .sign(enc.encode(cfg.secret));
 }
 
-export async function verifyMcpAccessToken(cfg: GuestTokenConfig, token: string): Promise<McpAccessClaims> {
+export async function verifyMcpAccessToken(cfg: TokenSecret, token: string): Promise<McpAccessClaims> {
   const { payload } = await jwtVerify(token, enc.encode(cfg.secret), { typ: "mcp+jwt" });
   return payload as unknown as McpAccessClaims;
 }
@@ -154,7 +168,7 @@ export async function mintUnsubToken(
     .sign(enc.encode(cfg.secret));
 }
 
-export async function verifyUnsubToken(cfg: GuestTokenConfig, token: string): Promise<UnsubTokenClaims> {
+export async function verifyUnsubToken(cfg: TokenSecret, token: string): Promise<UnsubTokenClaims> {
   const { payload } = await jwtVerify(token, enc.encode(cfg.secret), { typ: "unsub+jwt" });
   return payload as unknown as UnsubTokenClaims;
 }
