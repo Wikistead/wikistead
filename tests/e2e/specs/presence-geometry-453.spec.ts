@@ -54,13 +54,18 @@ test("#453: remote presence box hugs the same rect/shape as the local atom-sel r
     // 2. SHAPE parity: identical ring properties (radius / outline), colour is the only difference.
     const selStyle = await wrapB.evaluate((el) => {
       const c = getComputedStyle(el);
-      return { radius: c.borderRadius, outlineW: c.outlineWidth, outlineOffset: c.outlineOffset };
+      return { radius: c.borderRadius, outlineW: c.outlineWidth, outlineStyle: c.outlineStyle, outlineOffset: c.outlineOffset };
     });
     const boxStyle = await box.evaluate((el) => {
       const c = getComputedStyle(el);
-      return { radius: c.borderRadius, outlineW: c.outlineWidth, outlineOffset: c.outlineOffset, border: c.borderTopWidth };
+      return { radius: c.borderRadius, outlineW: c.outlineWidth, outlineStyle: c.outlineStyle, outlineOffset: c.outlineOffset, border: c.borderTopWidth };
     });
     expect(boxStyle.radius, "border-radius parity").toBe(selStyle.radius);
+    // #841: parity between two widths is satisfied by two ABSENT rings — `outline: none` leaves the
+    // width at 3px on both sides, so a change that removed the ring from both would agree here and pass.
+    // The styles are compared too, and both are required to be drawing something.
+    expect(selStyle.outlineStyle, "the local ring is drawn at all").not.toBe("none");
+    expect(boxStyle.outlineStyle, "outline style parity").toBe(selStyle.outlineStyle);
     expect(boxStyle.outlineW, "outline width parity").toBe(selStyle.outlineW);
     expect(boxStyle.outlineOffset, "outline offset parity").toBe(selStyle.outlineOffset);
     expect(boxStyle.border, "no on-edge border (ring only)").toBe("0px");
@@ -175,7 +180,13 @@ test("#453 a peer shows as a chip (no ballooning outline) when the observer also
     await expect(box, "the peer stays visible (not vanished) when the observer opens the island").toHaveCount(1, { timeout: 6000 });
     // it is CHIP-ONLY: no outline ring (which is what ballooned to full width before), avatar still shown.
     await expect(box, "chip-only, not a ballooning outline").toHaveAttribute("data-chip-only", "1");
-    expect(await box.evaluate((el) => getComputedStyle(el).outlineWidth), "no ring in chip mode").toBe("0px");
+    // The ring is removed with `outline: none`, and `none` is a LINE-STYLE — it leaves outline-width at
+    // its initial `medium`, which resolves to 3px. Measured in real Chromium 149: `outline: none` reports
+    // outlineWidth "3px" while painting nothing, `outline: 0` reports "0px". Asking for the width here
+    // failed against a product that was drawing no ring at all, which is the opposite of what the check
+    // is for. The style is also what the product states, so this reads the intent rather than a side
+    // effect of it (#841).
+    expect(await box.evaluate((el) => getComputedStyle(el).outlineStyle), "no ring in chip mode").toBe("none");
     const geom = await B.evaluate(() => {
       const b = document.querySelector("[data-pane=preview] [data-testid=macro-presence]")!.getBoundingClientRect();
       const c = document.querySelector("[data-pane=preview] .cm-content")!.getBoundingClientRect();
