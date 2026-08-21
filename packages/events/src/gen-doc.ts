@@ -15,11 +15,13 @@ export function renderEventsMarkdown(): string {
   const lines: string[] = []
   // #748: "domain event" is a design term. The reader is here because they are wiring a webhook.
   lines.push(HEADER, '', '# Webhook events', '')
+  // #817 (follows #814): the intro speaks the reader's language too — no code identifiers in the
+  // prose. No generated-ness sentence here either: the docs-site pull stamps a provenance note on
+  // every generated page already, and saying it twice reads as a tic (#814).
   lines.push(
-    'The CE event bus emits a `DomainEvent` after each successful operation. EE features',
-    '(webhooks, audit log, compliance export) subscribe to these. Events carry only ids,',
-    'actors, and timestamps — never page content or secrets. Generated from the code',
-    '(`EVENT_CATALOG`).',
+    'Every successful operation emits one of the events below. Webhooks, the audit',
+    'log and compliance export are all built on them. An event carries ids, who did',
+    'it and when — never page content, and never a secret.',
     '',
   )
   lines.push('| Event | Description |')
