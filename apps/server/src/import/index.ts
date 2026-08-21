@@ -26,6 +26,8 @@ import { looksLikeNotionExport, splitNotionName, parseCsv, csvToMarkdownTable, d
 import { looksLikeConfluenceExport, confluenceHtmlToMarkdown } from './confluence.js'
 import { looksLikeDocmostExport, parseDocmostManifest, collapseEmptySegments, splitDocmostTitle, rewriteDocmostLinks, absolutizeAttachmentRefs, docmostKey, iconDegradation, DOCMOST_MANIFEST } from './docmost.js'
 import type { DocmostLinkMaps } from './docmost.js'
+import { looksLikeOutlineExport, rewriteOutlineLinks, outlineKey, outlineDocIdOf, outlineLinkTargets, safeDecodeOnce } from './outline.js'
+import type { OutlineLinkMaps } from './outline.js'
 
 // Zip-bomb caps (ADR-132 §3). The importer aborts the moment a running total is exceeded — it never buffers a
 // whole malicious archive. These are generous enough for a real workspace export yet bound worst-case memory.
@@ -107,6 +109,8 @@ export interface ImportNode {
   excalidrawNote?: boolean
   /** #728 §3: the `slugId` a Docmost manifest gives this page — what its full-URL links point at. */
   docmostSlug?: string | null
+  /** #728: the Outline document id this node came from, for links written as `/doc/<slug>-<id>`. */
+  outlineDocId?: string | null
   // `frontmatter`: structured metadata an adapter carries over. Serialised as YAML at the top of the
   // body, which is where tags already live (ADR-145), so no second tag path appears.
   frontmatter?: Record<string, unknown>
@@ -376,6 +380,7 @@ function rewriteBody(
   // URL when the target was left out of the export. Same idea, third key: a map, one rewrite, one
   // dead-link rule.
   docmost?: DocmostLinkMaps,
+  outline?: OutlineLinkMaps,
 ): string {
   let md = markdown.replace(ATTACHMENT_REF, (m, alt: string, url: string) => {
     // ⚠️ The per-node map first, then EVERY node's attachments by FILE NAME. A Confluence export
@@ -439,6 +444,13 @@ function rewriteBody(
     // will hold: a link this dialect resolved is no longer "left as written", and #712 ② is the
     // measured example of what reporting on an earlier draft of the text costs.
     const r = rewriteDocmostLinks(md, wiki?.node.dir ?? '', docmost)
+    md = r.markdown
+    report.deadCrossLinks += r.deadLinks
+  }
+  if (outline) {
+    // Same placement and the same reason as the Docmost pass above: what the end-of-run report reads
+    // has to be the body the reader will hold, not the draft before this dialect resolved anything.
+    const r = rewriteOutlineLinks(md, wiki?.node.dir ?? '', outline)
     md = r.markdown
     report.deadCrossLinks += r.deadLinks
   }
@@ -621,6 +633,21 @@ export async function materializeImport(
     }
     const docmostMaps = isDocmost ? { hrefByPath: docmostHrefByPath, hrefBySlug: docmostHrefBySlug } : undefined
 
+    // #728: Outline names a page by its path in the archive, and by document id where the exporter
+    // left a `/doc/` URL unrewritten. Same construction point as the others — the ids do not exist
+    // before pass 1.
+    const outlineHrefByPath = new Map<string, string>()
+    const outlineHrefByDocId = new Map<string, string>()
+    for (const c of created) {
+      const key = outlineKey(c.node.dir)
+      if (key && !outlineHrefByPath.has(key)) outlineHrefByPath.set(key, `/p/${c.newId}`)
+      const id = c.node.outlineDocId
+      if (id && !outlineHrefByDocId.has(id)) outlineHrefByDocId.set(id, `/p/${c.newId}`)
+    }
+    const outlineMaps = created.some((c) => c.node.outlineDocId !== undefined)
+      ? { hrefByPath: outlineHrefByPath, hrefByDocId: outlineHrefByDocId }
+      : undefined
+
     // Notion's links point at the 32-hex id in a filename, so the map is keyed on that.
     const notionHrefByHex = new Map<string, string>()
     for (const c of created) {
@@ -645,7 +672,7 @@ export async function materializeImport(
       }
       const md = rewriteBody(c.node.markdown, c.attByRel, pageIdMap, report, {
         node: { title: c.node.title || c.node.dir, dir: c.node.dir }, hrefByName, embedByName,
-      }, notionHrefByHex, attByName, docmostMaps)
+      }, notionHrefByHex, attByName, docmostMaps, outlineMaps)
       await setDraftBody(db, c.newId, md)
       if (args.publish && c.node.published && md.trim() !== '') {
         await publishPage(db, fga, driver, storage, { pageId: c.newId, subject: `user:${args.userId}`, createdBy: `user:${args.userId}` })
@@ -687,6 +714,11 @@ export const IMPORT_ADAPTERS = [
   { id: 'notion', detect: (names: string[]) => looksLikeNotionExport(names) },
   { id: 'confluence', detect: (names: string[]) => looksLikeConfluenceExport(names) },
   { id: 'docmost', detect: (names: string[]) => looksLikeDocmostExport(names) },
+  // ⚠️ Outline is the one dialect whose fingerprint needs the BODIES, not just the names: its tree
+  // shape is a vault's. `matchesAdapter` answers on names alone, so this row declines and the branch
+  // in prepareImport asks `looksLikeOutlineExport` directly. Kept in the table so the id exists and
+  // the discovery walk over the adapters still sees it.
+  { id: 'outline', detect: null },
 ] as const
 
 export type ImportSourceKind = (typeof IMPORT_ADAPTERS)[number]['id']
@@ -759,6 +791,16 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
     files = collapseEmptySegments(files).files
     delete files[DOCMOST_MANIFEST]
   }
+  // #728 / ADR-242 §3 — Outline. Asked here rather than through `matchesAdapter` because its
+  // fingerprint is a LINK, not a name: the directory shape it writes is a vault's, and claiming every
+  // vault would be worse than missing an export. Only archives Docmost did not already claim are
+  // offered, so the two dialects cannot both fire.
+  if (sourceKind === 'native' && looksLikeOutlineExport(Object.keys(files), (p) => {
+    const b = files[p]
+    return b ? strFromU8(b) : ''
+  })) {
+    sourceKind = 'outline'
+  }
   const ir = buildIR(files)
   if (ir.roots.length === 0) throw new ImportInvalidError('archive has no importable pages')
   const csvDegradations: ImportDegradation[] = []
@@ -771,6 +813,33 @@ export function prepareImport(archive: Uint8Array): PreparedImport {
     // The `.excalidraw` half of the name is stripped by the tree builder, so the flag is set here
     // where the ARCHIVE path is still visible.
     if (isExcalidrawNote(`${node.dir}.md`) || isExcalidrawNote(`${node.dir}/index.md`)) node.excalidrawNote = true
+  }
+
+  // #728: an Outline node learns the id OTHER documents use for it, because the archive holds that id
+  // nowhere else (see `outlineDocIdOf`). Every unrewritten `/doc/<slug>-<id>` in any body is matched
+  // against the tree by its slug, which is `serializeFilename(title)` — the same string the file is
+  // named after.
+  if (sourceKind === 'outline') {
+    // The marker, not just the value: `materializeImport` has no `sourceKind`, and it tells Docmost
+    // apart the same way — by a field only that dialect sets. `null` means "this is an Outline node
+    // and nothing links to it by id", which is the common case in a fully-rewritten export.
+    for (const n of nodes) n.outlineDocId = null
+    for (const path of Object.keys(files)) {
+      const bytes = files[path]
+      if (!bytes || !/\.(md|markdown)$/i.test(path)) continue
+      for (const target of outlineLinkTargets(strFromU8(bytes))) {
+        const docId = outlineDocIdOf(target)
+        if (!docId) continue
+        // `…/doc/<slug>-<id>` — the slug is the file's name, so the node is found by matching the
+        // decoded target's slug against the tree's own keys. A miss is a document outside the export.
+        const slug = safeDecodeOnce(target).replace(/^.*\/doc\//, '').replace(new RegExp(`-?${docId}.*$`), '')
+        for (const n of nodes) {
+          if (!slug) break
+          const name = outlineKey(n.dir).split('/').pop() ?? ''
+          if (name === slug.toLowerCase()) { n.outlineDocId = docId; break }
+        }
+      }
+    }
   }
 
   // #712 / ADR-227 §5 — Notion. Detected from the export's own fingerprint (the 32-hex filename
