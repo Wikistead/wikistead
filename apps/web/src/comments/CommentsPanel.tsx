@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { memberLabel } from "../ui/principal-label"; // #859
 import { classifyMentionKey, nextMentionIndex, classifyComposerKey } from "./mention-nav";
 import { relTime } from "../ui/relative-time";
 import { Button } from "../ui/Button";
@@ -58,6 +59,10 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
   };
 
   const pick = (mn: Mentionable) => {
+    // #859: the @token written into the body and mapped back to the sub below — not a label. A
+    // shortened id could collide between two unnamed members, and what a nameless mention SHOULD
+    // write is its own question, filed separately.
+    // raw-principal-ok: a mention token, mapped back to the sub on the next line
     const name = (mn.displayName ?? mn.sub).replace(/\s/g, "");
     setText((t) => t.replace(/@([\p{L}\p{N}._-]*)$/u, `@${name} `));
     picked.current.set(`@${name}`, mn.sub);
@@ -125,7 +130,7 @@ function Composer({ pageId, token, onSubmit, placeholder }: { pageId: string; to
                 onMouseMove={() => setActive(i)}
                 onMouseDown={(e) => { e.preventDefault(); pick(s); }}
               >
-                {s.displayName ?? s.sub}
+                {memberLabel(s.sub, s.displayName, t("spaceMembers.unknownMember"))}
               </button>
             </li>
           ))}

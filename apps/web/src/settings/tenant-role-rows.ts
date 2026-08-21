@@ -38,7 +38,10 @@ export interface TenantRoleRow {
   addable: TenantRoleDef[];
 }
 
-const nameOf = (m: RowMember): string => m.display_name || m.email || m.sub;
+import { memberLabel } from "../ui/principal-label"; // #859: one wording for a member the product cannot name
+
+const nameOf = (m: RowMember, unknownMember: string): string =>
+  memberLabel(m.sub, m.display_name || m.email, unknownMember);
 
 /** Filter the member table itself. #557 put a search INSIDE the old assign form; with the form gone
  *  the search belongs to the table, where it also helps every other column. */
@@ -105,7 +108,6 @@ export function buildGroupRoleRows(
   return [...byPrincipal.values()];
 }
 
-export { nameOf as memberLabel };
 
 // #579 review: the row had TWO controls — a Select for the built-in tier and a separate button
 // that opened a second Select for custom roles — and the user asked the same question they asked
@@ -277,6 +279,9 @@ export function buildUnifiedRows(
   groups: readonly GroupRoleRow[],
   unconfirmedPrincipals: ReadonlySet<string> = new Set(),
   conferred: readonly GroupConferredRole[] = [],
+  // #859: the translated noun for a member with no name. Passed in rather than looked up — this module
+  // is a pure row builder, and `filterMembers`/`roleOptions` already take their words the same way.
+  unknownMember = "",
 ): UnifiedRow[] {
   const rows: UnifiedRow[] = [
     ...members.map((m) => {
@@ -287,7 +292,7 @@ export function buildUnifiedRows(
       return {
         key: `user:${m.sub}`,
         kind: "user" as const,
-        label: m.display_name || m.email || m.sub,
+        label: nameOf(m, unknownMember),
         sub: m.sub,
         ...(groupRoles.length ? { groupRoles } : {}),
       };

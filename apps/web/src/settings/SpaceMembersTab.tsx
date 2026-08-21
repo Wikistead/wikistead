@@ -403,7 +403,7 @@ export function SpaceMembersTab() {
         query={query}
         onQueryChange={setQuery}
         picked={picked}
-        onPick={(c) => { setPicked(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null); if (c) setQuery(""); }}
+        onPick={(c) => { setPicked(c ? { grantee: `user:${c.sub}`, label: memberLabel(c.sub, c.displayName, t("spaceMembers.unknownMember")) } : null); if (c) setQuery(""); }}
         candidates={candidates.data ?? []}
         groupName={groupName}
         onGroupNameChange={setGroupName}

@@ -312,13 +312,14 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               query={sub}
               onQueryChange={setSub}
               picked={pickedGrant}
-              onPick={(c) => setPickedGrant(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null)}
+              onPick={(c) => setPickedGrant(c ? { grantee: `user:${c.sub}`, label: memberLabel(c.sub, c.displayName, t("spaceMembers.unknownMember")) } : null)}
               candidates={grantCandidates.data ?? []}
               placeholder={t("common.memberSearch")}
               ariaLabel={t("permissions.member")}
               inputTestId="grant-sub"
               listTestId="grant-candidates"
               itemTestId="grant-candidate"
+              unknownMemberLabel={t("spaceMembers.unknownMember")}
             />
           )}
           {/* #582 / ADR-202 §1: ONE picker. The five capabilities the dialog always offered, then the
@@ -426,13 +427,14 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               query={restrictSub}
               onQueryChange={setRestrictSub}
               picked={pickedRestrict}
-              onPick={(c) => setPickedRestrict(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null)}
+              onPick={(c) => setPickedRestrict(c ? { grantee: `user:${c.sub}`, label: memberLabel(c.sub, c.displayName, t("spaceMembers.unknownMember")) } : null)}
               candidates={restrictCandidates.data ?? []}
               placeholder={t("common.memberSearch")}
               ariaLabel={t("permissions.restrictTitle")}
               inputTestId="restrict-sub"
               listTestId="restrict-candidates"
               itemTestId="restrict-candidate"
+              unknownMemberLabel={t("spaceMembers.unknownMember")}
             />
             <Button variant="default" size="sm" data-testid="restrict-add" disabled={restrict.isPending} onClick={addRestrict}>{t("permissions.restrictAdd")}</Button>
           </div>

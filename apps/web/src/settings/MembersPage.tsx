@@ -6,6 +6,7 @@ import { Button } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { ConfirmDialog, SecretDialog } from "../ui/dialogs"; // #504: removal / DSAR erasure / invite revoke confirm first
 import { Input } from "../ui/Input";
+import { memberLabel } from "../ui/principal-label"; // #859: one wording for a member the product cannot name
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import {
@@ -34,6 +35,13 @@ import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the fram
 // (the server is the authority — this screen is just chrome).
 export function MembersPage() {
   const { t } = useTranslation();
+  // #859: the roster showed `display_name || email || sub`, so a member with neither name nor email
+  // arrived as a 70-character subject id — the shape #578 removed from four other screens and wrote
+  // `memberLabel` for. The email stays: this is the admin's roster and knowing who was invited is the
+  // point of the column. What goes is the last resort, which was never a name.
+  const unknownMember = t("spaceMembers.unknownMember");
+  const nameOf = (m: { sub: string; display_name?: string | null; email?: string | null }): string =>
+    memberLabel(m.sub, m.display_name || m.email, unknownMember);
   const { token, sub: me, tenantId } = useSession();
   const [members, setMembers] = useState<Member[]>([]);
   // #578 bounce ④, then the 2026-08-04 ruling (why not let the form switch between user and group
@@ -189,7 +197,7 @@ export function MembersPage() {
   const groupRows = buildGroupRoleRows(assignments.data ?? [], t("spaceMembers.unknownGroup"), t("spaceMembers.group"), t("spaceMembers.groupNotSeen"));
   const shownGroups = filter.trim() ? groupRows.filter((g) => g.label.toLowerCase().includes(filter.trim().toLowerCase())) : groupRows;
   const tenantCustomRoles = (roles.data?.custom ?? []).filter((r) => r.scope === "tenant");
-  const unified = buildUnifiedRows(shownMembers, shownGroups, new Set(), groupConferredRoles(assignments.data ?? [], tenantCustomRoles));
+  const unified = buildUnifiedRows(shownMembers, shownGroups, new Set(), groupConferredRoles(assignments.data ?? [], tenantCustomRoles), unknownMember);
   // #578 bounce ④: the filter field no longer doubles as a way to CREATE a grant. It was the only route
   // a group had, and it was invisible — a reader had to type a name that matched nothing and notice a
   // row appear. Two routes to the same result is what this ticket exists to remove, so the add-flow
@@ -261,7 +269,7 @@ export function MembersPage() {
         query={userQuery}
         onQueryChange={setUserQuery}
         picked={pickedUser}
-        onPick={(c) => { setPickedUser(c ? { grantee: `user:${c.sub}`, label: c.displayName || c.sub } : null); if (c) setUserQuery(""); }}
+        onPick={(c) => { setPickedUser(c ? { grantee: `user:${c.sub}`, label: memberLabel(c.sub, c.displayName, unknownMember) } : null); if (c) setUserQuery(""); }}
         candidates={userCandidates}
         groupName={groupName}
         onGroupNameChange={setGroupName}
@@ -404,9 +412,9 @@ export function MembersPage() {
               <td style={{ padding: "8px 4px" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                   {/* #625: the same one number the group row's box uses — they cannot drift apart */}
-                  <Avatar name={m.display_name || m.email || m.sub} src={m.picture_url} seed={m.sub} size={ROW_LEAD_PX} />
+                  <Avatar name={nameOf(m)} src={m.picture_url} seed={m.sub} size={ROW_LEAD_PX} />
                   <span data-testid="member-name" style={{ opacity: dimmed ? 0.7 : undefined }}>
-                    {m.display_name || m.email || m.sub}{m.sub === me && t("members.you")}
+                    {nameOf(m)}{m.sub === me && t("members.you")}
                   </span>
                   {/* #614: the status marks — origin (IdP / password-born), an added password entrance,
                       suspended. Hover explains each (the #586 school); nothing is spelled beside the name. */}
@@ -436,7 +444,7 @@ export function MembersPage() {
                   value={currentRoleValue(roleRows.get(m.sub) ?? { sub: m.sub, builtin: m.role, custom: [], addable: [] })}
                   // #617 ⑤: the label is READ ALOUD. A 70-character hex sub is not a name — the row already
                   // renders one, and this is the same string.
-                  ariaLabel={t("members.roleFor", { sub: m.display_name || m.email || m.sub })}
+                  ariaLabel={t("members.roleFor", { sub: nameOf(m) })}
                   testId="member-role-select"
                   options={withRoleTips(roleOptions(roles.data?.custom ?? [], tierCaps), "tenant")}
                   onChange={(value) => applyUserRole(m.sub, value)}
@@ -455,7 +463,7 @@ export function MembersPage() {
                     was trying to do by sending a password invite, which used to make a second person. */}
                 <OverflowMenu
                   testId="member-actions"
-                  label={t("members.rowActions", { name: m.display_name || m.email || m.sub })}
+                  label={t("members.rowActions", { name: nameOf(m) })}
                   // #614: somebody who already has a password entrance is not offered another — that item
                   // could only ever fail (#606's always-failing button). The server's uniform 400 stays
                   // as the fortress; memberMenuValues is the convenience layer's half, pinned pure.
@@ -505,7 +513,7 @@ export function MembersPage() {
                       // item here (#504), and the two refusals are named rather than folded into
                       // "Action failed" (#596/#606: a reason nobody can read is a failure twice).
                       setConfirming({
-                        message: t("members.removePasswordConfirm", { name: m.display_name || m.email || m.sub }),
+                        message: t("members.removePasswordConfirm", { name: nameOf(m) }),
                         run: () => void (async () => {
                           try {
                             await removePassword(token, m.sub);
@@ -526,7 +534,7 @@ export function MembersPage() {
                       // what the member will have to do afterwards — enrol again. Somebody reading it
                       // is usually on the phone with the person it affects.
                       setConfirming({
-                        message: t("members.resetFactorsConfirm", { name: m.display_name || m.email || m.sub }),
+                        message: t("members.resetFactorsConfirm", { name: nameOf(m) }),
                         run: () => void (async () => {
                           try {
                             await resetFactors(token, m.sub);
@@ -551,7 +559,7 @@ export function MembersPage() {
                       const isSuspend = v === "suspend";
                       setConfirming({
                         message: t(isSuspend ? "members.suspendConfirm" : "members.reactivateConfirm",
-                          { name: m.display_name || m.email || m.sub }),
+                          { name: nameOf(m) }),
                         run: () => void guarded(async () => {
                           await (isSuspend ? suspendMember(token, m.sub) : reactivateMember(token, m.sub));
                         })(),
@@ -559,10 +567,10 @@ export function MembersPage() {
                       return;
                     }
                     if (v === "erase") {
-                      setConfirming({ message: t("members.eraseAnalyticsConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => eraseMemberAnalytics(token, m.sub))() });
+                      setConfirming({ message: t("members.eraseAnalyticsConfirm", { name: nameOf(m) }), run: () => void guarded(() => eraseMemberAnalytics(token, m.sub))() });
                       return;
                     }
-                    setConfirming({ message: t("members.removeConfirm", { name: m.display_name || m.email || m.sub }), run: () => void guarded(() => removeMember(token, m.sub))() });
+                    setConfirming({ message: t("members.removeConfirm", { name: nameOf(m) }), run: () => void guarded(() => removeMember(token, m.sub))() });
                   }}
                 />
               </td>

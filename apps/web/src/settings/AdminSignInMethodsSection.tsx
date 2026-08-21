@@ -739,6 +739,7 @@ export function AdminSignInMethodsSection() {
                   inputTestId="sso-exemption-input"
                   listTestId="sso-exemption-list"
                   itemTestId="sso-exemption-add"
+                  unknownMemberLabel={t("spaceMembers.unknownMember")}
                   inputSize="sm"
                 />
               </div>

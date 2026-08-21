@@ -1,4 +1,5 @@
 import { Input } from "./Input";
+import { memberLabel } from "./principal-label"; // #859: one wording for a member the product cannot name
 
 // #416 / ADR-161: the shared member-typeahead input — one implementation for every "pick a member"
 // surface (space members tab, the page permissions dialog's grant + restrict inputs). Presentation
@@ -22,6 +23,9 @@ export function MemberSearchInput(props: {
   inputTestId: string;
   listTestId: string;
   itemTestId: string;
+  /** #859: the translated noun for a candidate with no name. This component holds no i18n — every
+   *  other word it shows arrives the same way — and without it the list fell back to the raw sub. */
+  unknownMemberLabel: string;
   inputSize?: "sm" | undefined;
 }) {
   const { query, onQueryChange, picked, onPick, candidates } = props;
@@ -50,7 +54,7 @@ export function MemberSearchInput(props: {
                     it was the only identifier a member could see — #523 canonicalised display names from
                     the IdP, so the opaque id is now just noise in a picker. It is still what gets SENT
                     (`user:<sub>`), and still the fallback text for a member who has no name yet. */}
-                <span className="text-sm">{c.displayName || c.sub}</span>
+                <span className="text-sm">{memberLabel(c.sub, c.displayName, props.unknownMemberLabel)}</span>
               </button>
             </li>
           ))}

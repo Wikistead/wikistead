@@ -73,6 +73,39 @@ describe("#578: a person who cannot be named is named as unnamed, not as a hash"
     ).toEqual([]);
   });
 
+  it("nor through a field — `m.sub` is the same raw id as `sub`", () => {
+    // #859: the check below reads a BARE identifier (`|| sub`), and the roster fell back through a
+    // FIELD (`m.display_name || m.email || m.sub`). Ten expressions on one screen, plus six more on
+    // five others, all invisible to this pin — a member with no name arrived as 70 characters of hex
+    // in the admin's own table. The scan asks the same question of `<anything>.sub`.
+    //
+    // The count is asserted because a walk that stops finding files reads exactly like a clean tree.
+    const files = walk(SRC).filter((p) => !/\.test\.tsx?$/.test(p));
+    expect(files.length, "the walk found no source files — it is measuring nothing").toBeGreaterThan(100);
+    const offenders: string[] = [];
+    for (const path of files) {
+      const lines = readFileSync(path, "utf8").split("\n");
+      lines.forEach((line, i) => {
+        // Deliberate, and it says so where it happens — on the line or the one directly above it, the
+        // same latitude the expression scan above allows, because a comment explaining a JSX or a
+        // multi-line expression sits on top of it. Never a window wider than that.
+        if (/raw-principal-ok:/.test(line) || /raw-principal-ok:/.test(lines[i - 1] ?? "")) return;
+        const code = line.replace(/\/\/[^\n]*/g, "");
+        // `x.sub` as the last arm of a fallback chain, which is where a label lands. NOT `x.sub.foo()`
+        // — that is the id being asked a question (a search filter reads `|| m.sub.includes(q)`), and
+        // reading it as a label was measured as a false positive while writing this.
+        if (!/(\|\||\?\?)\s*[A-Za-z_$][\w$]*\.sub\b(?!\s*[.(])/.test(code)) return;
+        if (/memberLabel\s*\(|shortPrincipalId\s*\(/.test(code)) return; // named on the spot
+        offenders.push(`${path.slice(SRC.length + 1)}:${i + 1}`);
+      });
+    }
+    expect(
+      offenders,
+      `these fall back to a raw subject id through a field (#859). Reach memberLabel, or annotate ` +
+      `THAT LINE with \`// raw-principal-ok: <why>\`: ${offenders.join(", ")}`,
+    ).toEqual([]);
+  });
+
   it("no surface falls back to the bare id with `||` or `??`", () => {
     // The narrower check the reject started from, kept because it is cheap and names the exact shape
     // that shipped four times. It is NOT the main assertion — the one above is — but a regression here

@@ -88,6 +88,7 @@ export function GranteeRoleForm(p: GranteeRoleFormProps) {
           inputTestId={`${p.testId}-input`}
           listTestId={`${p.testId}-candidates`}
           itemTestId={`${p.testId}-candidate`}
+          unknownMemberLabel={t("spaceMembers.unknownMember")}
         />
       )}
       {/* #536 / ADR-188 §6: built-in roles and custom roles are ONE list. They stay two mechanisms
