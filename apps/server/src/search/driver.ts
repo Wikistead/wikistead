@@ -4,6 +4,7 @@
 import { MeiliSearch } from 'meilisearch'
 import type { SearchDoc } from '@wikistead/types'
 import type { SearchDriver, SearchHit } from '@wikistead/hooks'
+import { groupFgaId } from '@wikistead/authz'
 import { SEARCH_CANDIDATE_LIMIT } from './paginate.js'
 
 export type { SearchDriver, SearchHit }
@@ -60,7 +61,12 @@ export class LogicalSearchDriver implements SearchDriver {
     if (!omitViewerFilter) {
       const visibilityFilter = [
         `viewerUsers = "user:${userId}"`,
-        ...groups.map(g => `viewerGroups = "group:${g}"`),
+        // #854: the index holds the FGA object id — `group:<hash>` — because doc-builder reads it off
+        // the tuples, while `groups` here is what the member row carries: the IdP's group NAMES. The
+        // two never matched, so a page reachable only through a group was missing from that group's
+        // search for as long as groups have existed. The hash is derived the one way it is derived
+        // anywhere (ADR-053, #831) rather than rebuilt here.
+        ...groups.map(g => `viewerGroups = "group:${groupFgaId(tenantId, g)}"`),
         'isPublic = true',
       ].join(' OR ')
       filters.push(`(${visibilityFilter})`)
