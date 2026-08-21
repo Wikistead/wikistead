@@ -1,10 +1,29 @@
 import * as Y from "yjs";
-import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
+import { HocuspocusProvider, HocuspocusProviderWebsocket, WebSocketStatus } from "@hocuspocus/provider";
+import { isLive, notLiveReason, type AuthorizedScope, type LivenessInputs, type NotLiveReason } from "./liveness";
+
+/** What a subscriber is told when the connection's state changes (#813 / ADR-248 §3.1). */
+export interface Liveness {
+  live: boolean;
+  reason: NotLiveReason | null;
+}
 
 // docName must match the server: "t:<tenantId>:p:<pageId>".
 // token is either a member OIDC token or an app-issued guest share token —
 // the SAME collab server endpoint accepts both (see apps/collab).
-export function connect(opts: { url: string; docName: string; token: string }) {
+export function connect(opts: {
+  url: string;
+  docName: string;
+  token: string;
+  /**
+   * #813 / ADR-248 §3.1: called whenever the answer to "are this client's edits arriving" changes.
+   *
+   * The provider reported all of this before and `connect()` discarded it — the information existed
+   * and died at this seam, which is why a guest could type for five minutes into a socket that had
+   * been refused. Optional so the ephemeral room and the tests that do not care are unaffected.
+   */
+  onLiveness?: (state: Liveness) => void;
+}) {
   const doc = new Y.Doc();
   // Create the WebSocket transport explicitly. When HocuspocusProvider is given
   // a `url` it auto-creates an internal websocket that `provider.destroy()` does
@@ -12,12 +31,80 @@ export function connect(opts: { url: string; docName: string; token: string }) {
   // that keeps reconnecting on every page switch. Owning the socket lets the
   // caller close it in disconnect() below.
   const socket = new HocuspocusProviderWebsocket({ url: opts.url });
-  const provider = new HocuspocusProvider({
+  // The four inputs of the liveness rule, kept here rather than read off the provider on demand:
+  // `authorizedScope` survives a disconnect on the provider, so asking it after the socket dropped
+  // would report the last connection's answer as if it were this one's.
+  const state: LivenessInputs = { connected: false, authenticated: false, authorizedScope: undefined, synced: false };
+  let lastLive: boolean | null = null;
+  let lastReason: NotLiveReason | null = null;
+  const report = () => {
+    const live = isLive(state);
+    const reason = notLiveReason(state);
+    // Only on CHANGE. The band must not be a per-event store under the editor, and `synced` in
+    // particular is re-announced on every reconnect.
+    if (live === lastLive && reason === lastReason) return;
+    lastLive = live;
+    lastReason = reason;
+    opts.onLiveness?.({ live, reason });
+  };
+
+  // eslint-disable-next-line prefer-const -- the callbacks below close over it; it is assigned once, here.
+  let provider: HocuspocusProvider;
+  provider = new HocuspocusProvider({
     websocketProvider: socket,
     name: opts.docName,
     document: doc,
     token: opts.token,
+    onStatus: ({ status }) => {
+      state.connected = status === WebSocketStatus.Connected;
+      // A dropped socket invalidates everything the LAST connection established. The one that carries
+      // the weight is `authenticated`: a socket coming back says nothing about whether the token was
+      // accepted this time, and a token refused on reconnect is the reported accident itself.
+      //
+      // ⚠️ Measured: clearing `authorizedScope` here changes no observable answer while `authenticated`
+      // is also cleared — `notLiveReason` reads the scope only after both of those. It is kept because
+      // leaving one connection's permission lying around for the next one to find is a trap, not
+      // because a test would catch its absence. The test holds `authenticated`; this comment is the
+      // rest of the truth.
+      if (!state.connected) {
+        state.authenticated = false;
+        state.authorizedScope = undefined;
+        state.synced = false;
+      }
+      report();
+    },
+    onAuthenticated: () => {
+      // ⚠️ The event carries NO payload — `authenticatedHandler` assigns the scope to the provider and
+      // then emits bare (measured in the shipped bundle; the callback's type says `() => void`). So
+      // the scope is read off the instance, here, at the only moment it is known to be current.
+      state.authenticated = true;
+      state.authorizedScope = provider.authorizedScope as AuthorizedScope;
+      report();
+    },
+    onAuthenticationFailed: () => {
+      // The provider fires this, then disconnects itself. Recording it here means the band can say
+      // "you are not signed in to this document" rather than "reconnecting…" for a token that a
+      // reconnect will present again, unchanged, and be refused for again.
+      state.authenticated = false;
+      state.authorizedScope = undefined;
+      state.synced = false;
+      report();
+    },
+    onSynced: () => {
+      state.synced = true;
+      report();
+    },
+    onDisconnect: () => {
+      state.connected = false;
+      state.authenticated = false;
+      state.authorizedScope = undefined;
+      state.synced = false;
+      report();
+    },
   });
+  // The starting answer, before any event: not live. A surface that renders before the first
+  // callback must not begin by claiming the edits are safe.
+  report();
   // SINGLE canonical CRDT type. Both surfaces bind to this same Y.Text — no
   // XmlFragment, no bridging. This is what makes cross-surface presence trivial.
   const ytext = doc.getText("content");
@@ -86,7 +173,9 @@ export function connectEphemeral(opts: { url: string; docName: string; anchor: s
   const doc = new Y.Doc();
   const socket = new HocuspocusProviderWebsocket({ url: opts.url });
   const latch = makeSyncedLatch();
-  const provider = new HocuspocusProvider({
+  // eslint-disable-next-line prefer-const -- the callbacks below close over it; it is assigned once, here.
+  let provider: HocuspocusProvider;
+  provider = new HocuspocusProvider({
     websocketProvider: socket,
     name: `${opts.docName}:x:${opts.anchor}`, // the ephemeral room (server: parseDocName ⇒ ephemeral)
     document: doc,

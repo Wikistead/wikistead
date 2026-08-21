@@ -31,6 +31,7 @@ import { apiFetch } from "../data/apiClient";
 import { createAnchor, resolveAnchor } from "./comment-anchors";
 import { setCommentRanges, type CommentRange } from "./live-preview/comment-highlights";
 import type { DirtySignal } from "./dirtySignal";
+import type { Liveness } from "./collab";
 
 // Inline-comment integration surface for the host (CommentsPanel via PageRoute).
 export interface InlineAnchorInput { anchorStart: string; anchorEnd: string; quotedText: string }
@@ -119,6 +120,13 @@ export interface EditorProps {
   // or its host (keeps it off the presence path). The canonical Y.Text IS the
   // markdown, so `ytext !== publishedMd` is exactly the server's check, but instant.
   dirtySignal?: DirtySignal;
+  /**
+   * #813 / ADR-248 §3.1: told whenever the answer to "are this client's edits arriving" changes.
+   *
+   * The host owns the band and the publish button, so it needs the answer; the editor owns the vim
+   * `:w` entry point and the checkbox, so it withholds those itself. Both read the same signal.
+   */
+  onLiveness?: (state: Liveness) => void;
   // vim ex-command entry points (Light-3): :q → onExitEdit, :w/:wq → onPublish. Pass
   // STABLE callbacks (useCallback) — captured at mount, not in the surface-effect deps.
   onExitEdit?: () => void;
@@ -164,10 +172,24 @@ function tint(color: string): string {
 // visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
 // the mount functions don't need to know about the TOC.
 
-export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onExitEdit, onPublish, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "", publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, onPublish, onExitEdit, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
+  // #813 / ADR-248 §3.1+§3.3: are this client's edits reaching the server?
+  //
+  // ⚠️ A ref, not state. Two reasons, and both are load-bearing. (a) Re-rendering the editor on a
+  // connection event would remount the surface — the thing every effect here is arranged to avoid.
+  // (b) `onPublish` is captured when the surface MOUNTS (it is not in that effect's dependency list,
+  // deliberately: #448 stabilised it so a scroll does not defeat the memo). A gate that read `live`
+  // from the closure would read whatever it was at mount time, so the choice would be between a
+  // publish with no gate at all and a gate that answers with a five-minute-old fact. The ref is read
+  // at the moment the action happens, which is the only moment the answer is about.
+  const liveRef = useRef(false);
+  // The host's callback is held in a ref for the same reason the token will be (§3.5): putting it in
+  // the collab effect's dependency list would let a host re-render destroy the Y.Doc.
+  const onLivenessRef = useRef(onLiveness);
+  onLivenessRef.current = onLiveness;
   const previewViewRef = useRef<EditorView | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
   // Owned here so the vim toggle reconfigures the SAME compartment in place.
@@ -389,7 +411,15 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   // and vim toggles (keyed on docName/token), so toggling never drops presence.
   useLayoutEffect(() => {
     if (!canEdit) return;
-    const c = connect({ url: collabUrl, docName, token });
+    const c = connect({
+      url: collabUrl,
+      docName,
+      token,
+      onLiveness: (state) => {
+        liveRef.current = state.live;
+        onLivenessRef.current?.(state);
+      },
+    });
     collabRef.current = c;
     awarenessRef.current = c.provider.awareness ?? null;
     c.provider.awareness?.setLocalStateField("user", userField(user));
@@ -431,6 +461,11 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       const onToggleTaskInView = canEdit && onToggleTask
         ? (index: number, _from: number, checked: boolean) => {
             if (!collabRef.current) return;
+            // #813 / ADR-248 §3.11: the same gate, on the rendered view's own feature. A tick written
+            // into a draft the server is not receiving is the checkbox half of this defect — and
+            // unlike a keystroke it has no way back: the flip is folded into the published text, and
+            // there is no retry that re-runs it when the connection returns.
+            if (!liveRef.current) return;
             // #303: the checkbox reports `_from` computed on the PUBLISHED snapshot — NEVER apply it to the
             // live draft (when the draft has diverged, `_from+1` lands on unrelated prose and the optimistic
             // flip + failure-revert overwrite real text; the corruption then syncs to every collaborator via
@@ -533,7 +568,11 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       searchPhrases: searchPhrasesRef.current,
       searchPhrasesCompartment,
       onExitEdit,
-      onPublish,
+      // #813 / ADR-248 §3.3: `:w` and `:wq` go through the same gate as the button. The ref is read
+      // HERE, at the keystroke, rather than captured — see `liveRef`'s note for why that distinction
+      // is the whole point. A publish that cannot be sent is simply not sent; the band above the
+      // surface is what says why, and it has been saying so since the connection dropped.
+      onPublish: onPublish && (() => { if (liveRef.current) onPublish(); }),
       // #92 / ADR-093: the host ephemeral-collab seam — opens a non-persisted room for a co-editing
       // macro modal (excalidraw). Keyed by docName + the macro's anchor; token/url from the same collab.
       // The local user (name/color) is published on the ephemeral awareness so the macro can render

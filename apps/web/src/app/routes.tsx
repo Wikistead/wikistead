@@ -41,6 +41,8 @@ import { SetPasswordForm } from "./SetPasswordForm";
 
 
 import { Editor, type AnchorGetter } from "../editor/Editor";
+import { UnsavedBanner } from "../editor/UnsavedBanner";
+import type { Liveness } from "../editor/collab";
 import { setVimClipboardMode } from "../editor/live-preview/vim-clipboard";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
@@ -564,8 +566,24 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // props changing identity, and they re-rendered the whole editor twice per scroll step. `mutate` /
   // `mutateAsync` are stable across renders, which is exactly what a dependency list wants.
   const publishMutate = publish.mutate;
+  // #813 / ADR-248 §3.1: the connection's own report, kept as state because the BAND has to render
+  // from it. Connection events are rare (a handful in a session), and `<Editor>`'s memo holds through
+  // a host re-render because every prop it is handed is stable — which is the property #448 already
+  // established for this route and the reason the callback below is `useCallback([])`.
+  const [liveness, setLiveness] = useState<Liveness>({ live: false, reason: "connecting" });
+  const onLiveness = useCallback((s: Liveness) => setLiveness(s), []);
+  // Read by `publishPage`, which is `useCallback`-stable on purpose (#538 / #448) and therefore
+  // cannot close over the state value without going stale.
+  const livenessRef = useRef(liveness);
+  livenessRef.current = liveness;
+
   const publishPage = useCallback(() => {
     if (!canEdit) return;
+    // #813 / ADR-248 §3.3: withheld while the edits are not arriving — for members too, which is the
+    // half the report did not cover. A member's socket dies the same way; the reason the demo found
+    // it as a guest is that only a guest's credential expires on a timer. Publishing here would
+    // snapshot a draft missing everything typed since, and say "published".
+    if (!livenessRef.current.live) return;
     publishMutate(undefined, {
       onSuccess: () => { dirtySig.set(false); setEditing(false); notify.success(t("toast.published")); },
       onError: () => notify.error(t("toast.publishFailed")),
@@ -857,7 +875,8 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               empty={!editing && !pageQ.isLoading && !publishedQ.isLoading && !(published?.publishedMd ?? "").trim()}
               canEdit={canEdit}
             />
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <UnsavedBanner reason={liveness.reason} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (the live CM body is virtualised → prints one screenful).
                 #207: the SAME diagram seam the export gets — without it the browser's own File → Print drew
                 a plantuml block as its source while every other road drew the picture. */}
@@ -1273,7 +1292,19 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
   // #448: STABLE (useCallback) so the Editor's mount-captured vim-ex wiring (:w/:wq) can hold it —
   // the server publish route is ALREADY guest:'edit' (#328/ADR-140: FGA edit gate + guest rate cap +
   // abuse filter + anonId attribution); only this client wiring was missing.
+  // #813 / ADR-248 §3.1: THE surface the accident was reported on. A guest wrote a page, waited past
+  // the token's five minutes, typed, pressed publish, and was told it was published over a draft the
+  // socket had stopped carrying.
+  const [liveness, setLiveness] = useState<Liveness>({ live: false, reason: "connecting" });
+  const onLiveness = useCallback((s: Liveness) => setLiveness(s), []);
+  const livenessRef = useRef(liveness);
+  livenessRef.current = liveness;
+
   const onPublish = useCallback(async () => {
+    // Read at the click, from a ref: this callback is `useCallback`-stable so the editor's
+    // mount-captured `:w` wiring can hold it (#448), which is exactly what makes a closed-over value
+    // stale here.
+    if (!livenessRef.current.live) return;
     setPublishing(true);
     try {
       await apiFetch(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" });
@@ -1360,7 +1391,8 @@ function GuestPageContent({ minted, onBack, startEditing = false, onTitleChange 
               empty={publishedLoaded && !editing && !(publishedMd ?? "").trim()}
               canEdit={canEdit}
             />
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <UnsavedBanner reason={liveness.reason} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={token} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (guest CM body is virtualised too).
                 #207: a guest holds a share token, which the diagram route accepts, so the picture prints
                 here as well. (The public route below has no token and passes none — its plantuml degrades

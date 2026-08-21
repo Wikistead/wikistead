@@ -1,0 +1,44 @@
+// #813 / ADR-248 §3.2: a band, not a lock (owner ruling).
+//
+// While the connection is not carrying this client's edits, the surface wears a permanent band that
+// says so. It is a BAND rather than a toast because this is a state that continues, not an event that
+// happened — a toast that appeared when the socket dropped would be gone by the time the person
+// looked up, and they would go on typing.
+//
+// And it is a band rather than a locked editor because the characters are not lost: they live in the
+// local Y.Doc, and the next successful connection merges them. Locking the surface would throw away
+// the one thing Yjs is for. What is withheld is publishing — the act that would tell somebody their
+// work is safe when it is not.
+//
+// ⚠️ It sits ABOVE the CodeMirror surface, in the page chrome, never inside the editor's DOM. A widget
+// inside the surface enters CodeMirror's height map, and a band that appears and disappears would move
+// every line below it — the block-widget motion drift this codebase has measured more than once.
+import { useTranslation } from "react-i18next";
+import type { NotLiveReason } from "./liveness";
+
+/** The four states, each said in the words that fit what the reader can do about it. */
+const KEY: Record<NotLiveReason, string> = {
+  connecting: "collab.notSaving.connecting",
+  unauthenticated: "collab.notSaving.unauthenticated",
+  "read-only": "collab.notSaving.readOnly",
+  syncing: "collab.notSaving.syncing",
+};
+
+export function UnsavedBanner({ reason }: { reason: NotLiveReason | null }) {
+  const { t } = useTranslation();
+  if (!reason) return null;
+  // The house's existing caution band (AdminAuthTab): a left rule tinted from `--danger`, on the
+  // panel background, in dim text. ⚠️ Invented tokens would have shipped an INVISIBLE banner —
+  // Tailwind drops a class it cannot resolve, without a word, and the band's whole job is to be seen.
+  return (
+    <div
+      role="status"
+      data-testid="not-saving-banner"
+      data-reason={reason}
+      className="wks-left-bar mx-3 mb-2 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] px-3 py-2.5 text-xs text-fg-dim"
+    >
+      <strong className="font-medium">{t("collab.notSaving.title")}</strong>{" "}
+      {t(KEY[reason])}
+    </div>
+  );
+}
