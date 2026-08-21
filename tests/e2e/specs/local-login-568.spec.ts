@@ -34,6 +34,9 @@ test("#568: an invited member sets a password and signs in with it", async ({ pa
     // burning the token on an OIDC seat and never writing the credential. Walk the real page.
     await page.goto(`${REAL}/invite?token=${encodeURIComponent(token)}`);
     await expect(page.getByTestId("set-password"), "a password invite offers a password form").toBeVisible({ timeout: 10_000 });
+    // #807: an accepted password invite asks what to call you, and the submit stays disabled until
+    // it is answered — the member would otherwise arrive nameless in the roster and in presence.
+    await page.getByTestId("set-password-display-name").fill("Invited Member");
     await page.getByTestId("set-password-input").fill(PASSWORD);
     await page.getByTestId("set-password-confirm").fill(PASSWORD);
     await page.getByTestId("set-password-submit").click();
