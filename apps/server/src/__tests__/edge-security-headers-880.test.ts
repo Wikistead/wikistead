@@ -14,7 +14,7 @@
 // in `pnpm lint:origin-routes`, which renders with TLS both on and off. This half asks the question
 // that needs no tool: does the file say it at all?
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
@@ -49,13 +49,16 @@ describe('edge security headers are stated, not inherited (#880)', () => {
   const files = edgeFiles()
 
   it('finds the edges at all (a scan of nothing would pass every assertion below)', () => {
-    // Measured, not guessed: deploy/caddy/Caddyfile, deploy/k8s/base/ingress.yaml and the chart's
-    // ingress template. A refactor that renames or moves them must not turn this file vacuously green.
-    expect(files.map((f) => f.path).sort()).toEqual([
-      'charts/wikistead/templates/ingress.yaml',
-      'deploy/caddy/Caddyfile',
-      'deploy/k8s/base/ingress.yaml',
-    ])
+    // ⚠️ `deploy/k8s/` does not exist in the public tree — the filter erases it, and #785 caught this
+    // file naming it on the day it was written. The other two DO ship, so this takes #704's shape: ask
+    // whether the Kubernetes base is there and judge it only when it is, rather than excluding the
+    // whole test and leaving the published tree's own edges unguarded.
+    const k8s = 'deploy/k8s/base/ingress.yaml'
+    const expected = ['charts/wikistead/templates/ingress.yaml', 'deploy/caddy/Caddyfile']
+    if (existsSync(join(ROOT, k8s))) expected.push(k8s)
+    // Measured, not guessed, and exact for whatever this checkout actually holds: a refactor that
+    // renames or moves an edge must not turn this file vacuously green.
+    expect(files.map((f) => f.path).sort()).toEqual(expected.sort())
   })
 
   it.each(files.map((f) => [f.path, f.text] as const))(
