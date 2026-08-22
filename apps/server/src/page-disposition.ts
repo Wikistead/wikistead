@@ -15,6 +15,11 @@ import { readObjectTuples } from '@wikistead/authz'
 
 export type EventDisposition = 'suppress' | 'deliver' | 'not-ready'
 
+// A subject that is nobody, for a relation that answers about the OBJECT. `private` is granted to the
+// typed wildcard `[user:*]`, so any user id answers "is this page private" — the same idiom as
+// `MOVE_PRIVATE_PROBE` in routes/pages.ts, which asks the same question at the move boundary.
+const PRIVATE_PROBE = 'user:__disposition_private_probe__'
+
 export async function pageEventDisposition(fga: OpenFgaClient, payload: Record<string, unknown>): Promise<EventDisposition> {
   const pageId = typeof payload.pageId === 'string' ? payload.pageId : (payload.resource as { type?: string; id?: string } | undefined)?.id
   if (!pageId) return 'deliver' // not a page event → no instance-level exclusion
@@ -30,6 +35,19 @@ export async function pageEventDisposition(fga: OpenFgaClient, payload: Record<s
     // (fail toward suppression).
     const priv = rel.some((k) => k.relation === 'private')
     if (priv) return 'suppress'
+    // ⚠️ #862 the read above sees STORED tuples, and `private` is
+    // `[user:*, share_link:*] or private from parent` (model.fga) — so a page whose privacy is
+    // INHERITED has no tuple of its own and this function answered `deliver` for it. Measured:
+    // privatise a folder, and its child is `private = true` at the store while this said `deliver`.
+    // ADR-103 decision 2b is explicit that privatising a folder makes its whole subtree private, and
+    // the marker is written on the ROOT only, so the whole subtree was the leak.
+    //
+    // Asked with the client rather than through `checkRelation`, and that is the load-bearing part: the
+    // primitive ANDs the ambient scope's restriction, and a restriction that cannot be resolved makes it
+    // answer `false` — which HERE would read as "not private" and deliver. The polarity of every other
+    // caller is the opposite of this one's. A throw lands in the catch below and suppresses.
+    const { allowed } = await fga.check({ user: PRIVATE_PROBE, relation: 'private', object: `page:${pageId}` })
+    if (allowed) return 'suppress'
     return linked ? 'deliver' : 'not-ready'
   } catch { return 'suppress' } // fail closed
 }

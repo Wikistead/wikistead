@@ -69,9 +69,17 @@ describe('#637: the calls the AND cannot reach are counted, not assumed', () => 
     // If this is red because a call was ADDED: decide whether the route that reaches it belongs in
     // `NARROWED_KEY_ROUTES`, because the primitives will not narrow it. If it is red because one was
     // REMOVED, lower the number — that is the direction this is meant to move.
+    //
+    // ⚠️ TWENTY since 2026-08-22 (#862). The twentieth is `page-disposition.ts` asking whether a page is
+    // effectively private before an event about it leaves the workspace, and it is raw ON PURPOSE: the
+    // primitive ANDs the ambient restriction and answers `false` when it cannot resolve one, which every
+    // other caller reads as "denied" and this one would read as "not private, send it". The polarity is
+    // inverted here, so the second layer is the wrong instrument. It reaches no route — the webhook drain
+    // and the email drain are workers — so `NARROWED_KEY_ROUTES` has nothing to add; a narrowed key
+    // cannot arrive at either. Its own failure mode is a throw, and the caller's catch suppresses.
     const found = rawCalls()
     const total = found.reduce((n, f) => n + f.count, 0)
-    expect(total, `raw FGA calls, by file ::\n${found.map((f) => `${f.count}  ${f.file}`).join('\n')}`).toBe(19)
+    expect(total, `raw FGA calls, by file ::\n${found.map((f) => `${f.count}  ${f.file}`).join('\n')}`).toBe(20)
   })
 
   it('the code says which layer is the guarantee, in that order', () => {
