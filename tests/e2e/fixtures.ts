@@ -23,7 +23,11 @@ const CORE_FGA_TUPLES = [
   { user: "tenant:tenant_dev", relation: "tenant", object: "space:demo_space" },
   { user: "user:dev-user", relation: "manager", object: "space:demo_space" },
   { user: "space:demo_space", relation: "space", object: "page:demo" },
-  { user: "share_link:demo_view_perm", relation: "view_base", object: "page:demo" },
+  // ⚠️ #890: this said `view_base` until 2026-08-22, and `view_base` takes only `[user:*]` in the model
+  // (#218 moved link grants to the `view_direct` leaf). The write was therefore REJECTED on every
+  // globalSetup and swallowed by the best-effort catch below, so the anchor was permanently absent —
+  // it showed up in the first widened integrity report as "deleted during this run", which it never was.
+  { user: "share_link:demo_view_perm", relation: "view_direct", object: "page:demo" },
   // #471 / ADR-176: a request principal must be a member of the tenant it is used against, so every
   // subject the specs speak as needs real membership — `admin` alone describes a tenant nobody can
   // authenticate into (admin and member are separate relations; provisioning writes both).
@@ -34,8 +38,6 @@ const CORE_FGA_TUPLES = [
   { user: "user:acme-admin", relation: "manager", object: "space:acme_space" },
   { user: "space:acme_space", relation: "space", object: "page:acme_page" },
 ] as const;
-// The one tuple whose loss caused #279 — the teardown integrity check asserts it survives the run.
-const DEMO_PAGE_TUPLE = { user: "space:demo_space", relation: "space", object: "page:demo" };
 
 function fgaEnv(): { apiUrl: string; storeId: string; modelId: string } {
   const parse = (rel: string): Record<string, string> => {
@@ -104,24 +106,50 @@ export async function seedFgaFixtures(): Promise<void> {
   for (const t of CORE_FGA_TUPLES) {
     const key = { user: t.user, relation: t.relation, object: t.object };
     try { await fga("/write", { deletes: { tuple_keys: [key] } }, apiUrl, storeId); } catch { /* absent */ }
-    try {
-      await fga("/write", { writes: { tuple_keys: [key] }, authorization_model_id: modelId }, apiUrl, storeId);
-    } catch { /* best effort */ }
+    // #890: the write used to be best-effort too, and that is how a stale anchor survived for months —
+    // a tuple the model refuses is refused on every run, silently, and the only symptom is an integrity
+    // report blaming a spec for a deletion that never happened. Self-healing that cannot heal has to say so.
+    const written = await fga("/write", { writes: { tuple_keys: [key] }, authorization_model_id: modelId }, apiUrl, storeId)
+      .catch((e: unknown) => ({ ok: false, status: 0, text: async () => String(e) } as unknown as Response));
+    if (!written.ok) {
+      throw new Error(
+        `#890 fixture seed: OpenFGA refused \`${key.user}#${key.relation}@${key.object}\` (${written.status}). ` +
+          `The anchor and the model disagree — fix CORE_FGA_TUPLES or the model, do not ignore this. ` +
+          (await written.text().catch(() => "")),
+      );
+    }
   }
 }
 
-// #279 integrity check (globalTeardown): fail the run if the demo page tuple didn't survive, so the spec
-// that deleted it is caught in that run rather than silently breaking the NEXT one.
-export async function assertDemoFixtureIntact(): Promise<void> {
+// #279 integrity check: fail the run if the shared fixture didn't survive, so the spec that broke it
+// is caught in that run rather than silently breaking the NEXT one.
+//
+// ⚠️ #890: this used to read ONE of the twelve tuples above. A run that lost only
+// `user:dev-user#manager@space:demo_space` therefore passed the check while every space-settings spec
+// failed with an empty screen — the tab strip is built from what that tuple grants, so the reds read
+// as a product regression and not as a broken fixture. Measured on 2026-08-22: `space:demo_space` and
+// `page:demo` were both down to ZERO tuples mid-run while `space:acme_space` still had its two.
+export async function missingCoreFixtureTuples(): Promise<string[]> {
   const { apiUrl, storeId } = fgaEnv();
-  if (!storeId) return;
-  const res = await fga("/read", { tuple_key: DEMO_PAGE_TUPLE }, apiUrl, storeId);
-  const json = (await res.json().catch(() => ({}))) as { tuples?: unknown[] };
-  if (!json.tuples || json.tuples.length === 0) {
+  if (!storeId) return [];
+  const missing: string[] = [];
+  for (const t of CORE_FGA_TUPLES) {
+    const res = await fga("/read", { tuple_key: t }, apiUrl, storeId);
+    const json = (await res.json().catch(() => ({}))) as { tuples?: unknown[] };
+    if (!json.tuples || json.tuples.length === 0) missing.push(`${t.user}#${t.relation}@${t.object}`);
+  }
+  return missing;
+}
+
+export async function assertDemoFixtureIntact(): Promise<void> {
+  const missing = await missingCoreFixtureTuples();
+  if (missing.length > 0) {
     throw new Error(
-      "#279 fixture integrity: the shared `space:demo_space#space@page:demo` tuple was DELETED during this run. " +
+      `#279/#890 fixture integrity: ${missing.length} of ${CORE_FGA_TUPLES.length} shared tuples were DELETED ` +
+        `during this run:\n  ${missing.join("\n  ")}\n` +
         "A spec must not mutate the shared demo fixture — use a scratch resource + afterAll cleanup. " +
-        "seedFgaFixtures() will self-heal the next run, but fix the offending spec.",
+        "seedFgaFixtures() will self-heal the next run, but fix the offending spec. " +
+        "The per-file reporter (fixture-guard-reporter.ts) names it if the run reached that far.",
     );
   }
 }

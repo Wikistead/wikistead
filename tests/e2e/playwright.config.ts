@@ -47,7 +47,9 @@ export default defineConfig({
   timeout: 60_000,
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts", // #279: fail a run that broke the shared demo FGA fixture
-  reporter: [["list"]],
+  // #890: the second reporter names the spec that broke the shared fixture; the teardown check only
+  // ever names the run, and every spec after the break fails for want of permission.
+  reporter: [["list"], ["./fixture-guard-reporter.ts"]],
   use: {
     // Same-origin (ADR-016): the browser hits the web origin only; Vite proxies
     // /api + /collab. dev.localhost (not localhost) so the API resolves slug "dev".
