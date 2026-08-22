@@ -38,7 +38,7 @@ type RawDomainEvent =
   // publishing one is `page.published`. Anybody wiring a webhook read the name first and waited
   // for edits on it. Split before delivery began, so no subscriber can be broken by the change.
   | { type: 'page.renamed';   tenantId: string; pageId: string; actorId: string }
-  | { type: 'page.moved';     tenantId: string; pageId: string; actorId: string }
+  | { type: 'page.moved';     tenantId: string; pageId: string; actorId: string; pageWasDeliverable?: PageWasDeliverable }
   | { type: 'page.deleted';   tenantId: string; pageId: string; actorId: string; pageWasDeliverable?: PageWasDeliverable }
   // #411 / ADR-153: trash lifecycle. `page.deleted` now fires at PURGE (explicit or retention) — the
   // point of no return keeps its historical event name; `page.restored` stays the REVISION restore.

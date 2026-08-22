@@ -2621,17 +2621,6 @@ export async function movePage(
   const ownMarker = await readPagePrivate(fga, args.pageId)
   const willBePrivate = ownMarker || (newParent ? await checkRelation(fga, MOVE_PRIVATE_PROBE, 'private', { type: 'page', id: newParent }) : false)
   const effChanged = wasPrivate !== willBePrivate
-  // ⚠️ #862 / ADR-108 §G: a move INTO a private ancestor revokes the subtree's share links, and the
-  // events that says so carry a pageId the new private state hides — so the drain suppresses every one
-  // of them. The answer has to be read here, before the parent tuple is re-pointed. Only on the
-  // transition into private, so an ordinary move pays nothing.
-  const movePrivatiseWasDeliverable = new Map<string, boolean>()
-  if (effChanged && willBePrivate) {
-    for (const id of [args.pageId, ...(await descendantIds(db.sql, args.pageId))]) {
-      movePrivatiseWasDeliverable.set(id, (await pageEventDisposition(fga, { pageId: id })) === 'deliver')
-    }
-  }
-
   // Authorization: cross-space is a structural ownership move; an effective-private change is manage-level.
   if (crossSpace) {
     const [canManage, canEditDest] = await Promise.all([
@@ -2644,6 +2633,26 @@ export async function movePage(
     const ok = await check(fga, `user:${args.userId}`, need, { type: 'page', id: args.pageId })
     if (!ok) throw Object.assign(new Error('forbidden'), { statusCode: 403 })
   }
+
+  // ⚠️ #862 / ADR-108 §G: a move INTO a private ancestor revokes the subtree's share links, and the
+  // events that say so carry a pageId the new private state hides — so the drain suppresses every one
+  // of them. The answer has to be read before the parent tuple is re-pointed, and BELOW the refusals
+  // above: it walks the subtree and asks the store once per page, and a caller who is about to get a
+  // 403 should not pay for that (finding 3). Only on the transition into private, so an ordinary
+  // move pays nothing at all.
+  const movePrivatiseWasDeliverable = new Map<string, boolean>()
+  if (effChanged && willBePrivate) {
+    for (const id of [args.pageId, ...(await descendantIds(db.sql, args.pageId))]) {
+      movePrivatiseWasDeliverable.set(id, (await pageEventDisposition(fga, { pageId: id })) === 'deliver')
+    }
+  }
+  // `page.moved` belongs to the same class when the move is what made the page private: the consumer
+  // knew this page and is about to stop hearing about it, and the answer to "may we say so" is gone by
+  // the time the drain asks. On any other move the field is absent and the drain asks as it always has
+  // — including a move OUT of private, where the later answer is the safer one.
+  const movedSettled = effChanged && willBePrivate
+    ? { pageWasDeliverable: movePrivatiseWasDeliverable.get(args.pageId) ?? false }
+    : {}
 
   // No cycles: a page cannot be nested under itself or its own descendant.
   if (newParent === args.pageId) throw Object.assign(new Error('cannot nest under itself'), { statusCode: 400 })
@@ -2710,7 +2719,7 @@ export async function movePage(
     // #218 / ADR-103: after the parent tuple is set, apply the private write-boundary if the effective private
     // state changed (strip/sweep only on the transition INTO private; reindex either way for the denorm).
     if (effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: willBePrivate, reindex: true, wasDeliverable: movePrivatiseWasDeliverable })
-    emit({ type: 'page.moved', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
+    emit({ type: 'page.moved', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId, ...movedSettled })
     return toPage(r)
   }
 
@@ -2740,7 +2749,7 @@ export async function movePage(
   // the stripped public grant). The subtree reindex is already enqueued above (space-denorm change), so reindex:false.
   if (willBePrivate && effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: true, reindex: false, wasDeliverable: movePrivatiseWasDeliverable })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId: page.tenant_id, pageId: o.pageId, operation: 'upsert' })
-  emit({ type: 'page.moved', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
+  emit({ type: 'page.moved', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId, ...movedSettled })
   return toPage(row as PageRow)
 }
 

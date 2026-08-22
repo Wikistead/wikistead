@@ -29,7 +29,8 @@ import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, deletePage, setPagePrivate } from '../routes/pages.js'
+import { createPage, deletePage, setPagePrivate, movePage } from '../routes/pages.js'
+import { createShareLink } from '../routes/share-links.js'
 import { drainWebhookOutbox, createWebhook } from '../routes/webhooks.js'
 import { buildApp } from '../app.js'
 import type { FastifyInstance } from 'fastify'
@@ -121,6 +122,44 @@ describe('#862 §G — a purge', () => {
   }, 120_000)
 })
 
+describe('#862 §G — a move INTO a private folder', () => {
+  it('settles the moved page and the links it revokes, from before the parent was re-pointed', async () => {
+    // The move is what makes the subtree private, and it has already landed by the time the privacy
+    // boundary runs — so unlike the privatise path, nothing inside that function could read the answer.
+    // It is taken in the caller. Nothing pinned this path at all until asked for it.
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    const folder = await visiblePage('g862 move folder')
+    const moving = await visiblePage('g862 moving page')
+    await createShareLink(db, fgaClient, {
+      tenantId: tenant.id, plan: 'business', userId: 'dev-user',
+      resource: { type: 'page', id: moving }, capability: 'view', expiresInSeconds: null,
+    })
+    await setPagePrivate(db, fgaClient, driver, { pageId: folder, tenantId: tenant.id, userId: 'dev-user' })
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}` // the privatise's own rows
+    await movePage(db, fgaClient, driver, { pageId: moving, userId: 'dev-user', parentId: folder, afterId: null })
+    await settle()
+    const moved = await rowsFor('page.moved')
+    expect(moved.length, 'the move enqueued a page.moved').toBeGreaterThan(0)
+    expect(moved[0]!.settled_disposition, 'read before the page inherited the folder\'s privacy').toBe('deliver')
+    const revoked = await rowsFor('share_link.revoked')
+    expect(revoked.length, 'and the link the move revoked').toBeGreaterThan(0)
+    for (const r of revoked) expect(r.settled_disposition, 'settled the same way').toBe('deliver')
+  }, 180_000)
+
+  it('⚠️ and a page moved between two ordinary parents is NOT settled — the drain still asks', async () => {
+    // The class is "the act destroyed the answer", not "a move happened". A move that changes nothing
+    // about privacy must keep the delivery-time question, where the later answer is the safer one.
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    const a = await visiblePage('g862 ordinary parent')
+    const moving = await visiblePage('g862 ordinary mover')
+    await movePage(db, fgaClient, driver, { pageId: moving, userId: 'dev-user', parentId: a, afterId: null })
+    await settle()
+    const moved = await rowsFor('page.moved')
+    expect(moved.length, 'the move enqueued a page.moved').toBeGreaterThan(0)
+    expect(moved[0]!.settled_disposition, 'nothing was settled — the drain asks').toBeNull()
+  }, 180_000)
+})
+
 describe('#862 §G — privatising a page', () => {
   it('delivers page.made_private and the share_link.revoked events beside it', async () => {
     await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
@@ -134,6 +173,24 @@ describe('#862 §G — privatising a page', () => {
     await admin`UPDATE webhooks SET active = TRUE WHERE id = ${hookId}`
     await drainWebhookOutbox(fgaClient)
     expect(await hookFailures(), 'and it was actually sent, not suppressed by the marker it announces').toBeGreaterThan(before)
+  }, 120_000)
+
+  it('⚠️ and the share_link.revoked events raised beside it are settled too', async () => {
+    // The half the title of the walk above used to claim and never measured: `page.made_private` is one
+    // row, and the links the privatise revokes are others. ADR-108 §G calls this member the worse one,
+    // because the code beside that emit says a consumer mirroring access has to hear about the links
+    // that went — and it was the marker written two lines earlier that stopped them.
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    const pageId = await visiblePage('g862 privatise with a link')
+    await createShareLink(db, fgaClient, {
+      tenantId: tenant.id, plan: 'business', userId: 'dev-user',
+      resource: { type: 'page', id: pageId }, capability: 'view', expiresInSeconds: null,
+    })
+    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: tenant.id, userId: 'dev-user' })
+    await settle()
+    const rows = await rowsFor('share_link.revoked')
+    expect(rows.length, 'the revoke of the live link was enqueued').toBeGreaterThan(0)
+    for (const r of rows) expect(r.settled_disposition, 'and settled from before the marker landed').toBe('deliver')
   }, 120_000)
 
   it('⚠️ and an already-hidden page still settles as suppress', async () => {
