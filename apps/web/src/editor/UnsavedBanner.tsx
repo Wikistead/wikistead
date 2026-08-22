@@ -35,7 +35,12 @@ export function UnsavedBanner({ reason }: { reason: NotLiveReason | null }) {
       role="status"
       data-testid="not-saving-banner"
       data-reason={reason}
-      className="wks-left-bar mx-3 mb-2 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] px-3 py-2.5 text-xs text-fg-dim"
+      // #873 (review rejection): the class alone got the strip's DEFAULT, `var(--accent)` — blue. The
+      // border beside it was already `--danger`, so the band read as ordinary information while its
+      // border said otherwise. ⚠️ A mistyped token would have been visible (Tailwind drops what it
+      // cannot resolve and the strip disappears); an unstated one is not, because the default paints
+      // something plausible. Every other wks-left-bar site names its colour for this reason.
+      className="wks-left-bar mx-3 mb-2 rounded-lg border border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] px-3 py-2.5 text-xs text-fg-dim [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
     >
       <strong className="font-medium">{t("collab.notSaving.title")}</strong>{" "}
       {t(KEY[reason])}
