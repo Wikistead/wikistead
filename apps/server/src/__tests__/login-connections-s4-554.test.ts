@@ -170,8 +170,15 @@ describe('#554 S4a: connection management', () => {
     await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, scopes, redirect_uri, enabled, sort, subject_prefix)
       VALUES (${sibling}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, 'openid', ${`http://${HOST}/auth/callback`}, true, 5, ${subjectPrefixFor(sibling)})`
     try {
-      const offNow = await app.inject({ method: 'PATCH', url: `/admin/connections/${first!.id}`, headers: H(), payload: { enabled: false } })
-      expect(offNow.statusCode, 'a live sibling unlocks the guard').toBe(204)
+      // ⚠️ ADR-251 / #822 changed what "unlocked" means here. A sibling connection is a door, but the
+      // product cannot promise anybody can walk through a federated door, so one remaining door with
+      // no key behind it is the ruling's confirm case, not a silent yes. The guard still refuses the
+      // write that leaves NOTHING (above); this one asks, and takes the answer.
+      const asks = await app.inject({ method: 'PATCH', url: `/admin/connections/${first!.id}`, headers: H(), payload: { enabled: false } })
+      expect(asks.statusCode, 'a lone unverifiable door went through unasked').toBe(409)
+      expect(asks.json().code).toBe('confirm_required')
+      const offNow = await app.inject({ method: 'PATCH', url: `/admin/connections/${first!.id}`, headers: H(), payload: { enabled: false, confirm: true } })
+      expect(offNow.statusCode, 'a live sibling unlocks the guard once confirmed').toBe(204)
       // re-enable via SQL: the PATCH path would run discovery against the LOCAL test issuer, which
       // the hardened fetch refuses by design (the verify gate is pinned separately above)
       await admin`UPDATE tenant_oidc SET enabled = true WHERE id = ${first!.id}`

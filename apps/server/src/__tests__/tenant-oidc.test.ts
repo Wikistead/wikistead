@@ -97,9 +97,12 @@ describe('tenant OIDC settings', () => {
   })
 
   it('the secret is write-only: a blank value keeps it, an explicit null clears it', async () => {
-    // No secret supplied → keep the stored one.
+    // No secret supplied → keep the stored one. ⚠️ `confirm`: the previous case left this connection
+    // enabled, so this write CLOSES a door, and ADR-251 / #822 asks about that when what remains is a
+    // federated door nobody can promise. The subject here is the secret, not the guard — the guard is
+    // measured in its own describe below — so the question is answered rather than avoided.
     await updateTenantOidc(db, fgaClient, {
-      tenantId: TENANT, userId: 'dev-user', plan: 'free', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false,
+      tenantId: TENANT, userId: 'dev-user', plan: 'free', issuer: issuer.url, clientId: 'wikistead-tenant', redirectUri: REDIRECT, enabled: false, confirm: true,
     })
     expect((await getTenantOidc(db))?.hasSecret).toBe(true)
     // Explicit null → clear (public client).
@@ -149,8 +152,14 @@ describe('#537 tenant-oidc lockout guard', () => {
     } finally {
       process.env.PLATFORM_OIDC_ISSUER = saved
     }
-    // With the platform IdP effective again the same disable goes through…
-    await updateTenantOidc(db, fgaClient, { ...base, issuer: issuer.url, enabled: false })
+    // With the platform IdP effective again the same disable goes through — but ADR-251 / #822 asks
+    // first: one door remains and it is federated, so the product cannot promise anybody can walk
+    // through it. Both halves are pinned, because "the guard let it through" and "the guard asked and
+    // then let it through" are different products and the older test could not tell them apart.
+    await expect(updateTenantOidc(db, fgaClient, { ...base, issuer: issuer.url, enabled: false }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'confirm_required' })
+    expect((await getTenantOidc(db))?.enabled, 'the unanswered question persisted the write anyway').toBe(true)
+    await updateTenantOidc(db, fgaClient, { ...base, issuer: issuer.url, enabled: false, confirm: true })
     expect((await getTenantOidc(db))?.enabled).toBe(false)
     // …and an already-disabled row may be edited even without the escape hatch (no transition).
     delete process.env.PLATFORM_OIDC_ISSUER

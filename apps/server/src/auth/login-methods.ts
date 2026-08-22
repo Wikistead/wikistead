@@ -294,13 +294,16 @@ export async function waysInAfter(
   // changes is whether `local` still has a key behind it. So the list is derived unchanged and only
   // the `local` classification is asked with that person removed.
   if (!('id' in closing)) {
+    // ⚠️ All three key-taking shapes reduce to the SAME exclusion: the person stops counting as an
+    // administrator who holds a key — by losing the key (`credentialOf`), by losing the account
+    // (`deactivating`), or by losing the adminship (`demoting`). They stay three shapes because the
+    // three REFUSALS are different sentences, not because the counterfactual differs.
     const excluded = 'credentialOf' in closing ? closing.credentialOf : 'deactivating' in closing ? closing.deactivating : closing.demoting
-    const dropAdminship = 'demoting' in closing
     const effective = await resolveLoginConnections(db, tenant, env)
     const out: WayIn[] = []
     for (const c of effective) {
       if (c.kind !== 'local') { out.push({ id: c.id, kind: c.kind, usable: 'unknown' }); continue }
-      if (await anAdminHoldsAKey(db, { without: excluded, alsoWithoutAdminship: dropAdminship })) {
+      if (await anAdminHoldsAKey(db, { without: excluded })) {
         out.push({ id: c.id, kind: c.kind, usable: 'yes' })
       }
     }
@@ -345,12 +348,12 @@ export async function waysInAfter(
  */
 export async function anAdminHoldsAKey(
   db: TenantDb,
-  opts: { without?: string; alsoWithoutAdminship?: boolean; exemptOnly?: boolean } = {},
+  opts: { without?: string; exemptOnly?: boolean } = {},
 ): Promise<boolean> {
   // `without` asks the counterfactual the key-taking writes need: would an administrator still hold a
-  // key once THIS person no longer does. `alsoWithoutAdminship` is the demotion: they keep the
-  // credential, they stop being an administrator — the same exclusion for a different reason, and the
-  // caller says which so the refusal can say it too.
+  // key once THIS person no longer does. It is the only counterfactual: a demotion, a suspension and a
+  // revoked password all remove the same person from the same set, and an earlier draft carried a
+  // second flag for the demotion that no query ever read.
   // ⚠️ `exemptOnly` narrows the SAME question to the SSO exemption list (#836): when the IdP is down,
   // is there an administrator who can both get in AND fix things. A narrowing of this predicate
   // rather than a second one, because a rule written twice is how this family keeps ending up with
@@ -358,7 +361,7 @@ export async function anAdminHoldsAKey(
   const excluded = opts.without ?? null
   const [row] = await db.sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM members m
-      JOIN local_credentials c ON c.sub = m.sub
+      JOIN local_credentials c ON c.member_sub = m.sub
       ${opts.exemptOnly ? db.sql`JOIN sso_exemptions se ON se.member_sub = m.sub` : db.sql``}
      WHERE m.role = 'admin' AND m.deactivated_at IS NULL
        AND (${excluded}::text IS NULL OR m.sub <> ${excluded})`
