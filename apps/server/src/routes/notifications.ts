@@ -87,11 +87,30 @@ export async function sweepWatchesForResources(sql: Sql, resourceIds: string[]):
 // SET-BASED: one INSERT…SELECT DISTINCT from watches (page-watch OR space-watch), excluding the actor's own sub
 // (self-actions appear in the FEED but never as a self-notification, ADR-126 §2). Capped at FANOUT_CAP with a
 // LOGGED truncation (never silent). `publishedAt` is the emission guard: a NULL (unpublished page) → no event.
+// #900: the six values the product actually writes here, as a union rather than a bare string.
+// `feed_events.event_type` is a plain text column, so nothing in the database narrows it — and the
+// digest renders whatever it finds straight into the body a person reads. A seventh kind added
+// tomorrow must not reach that body as an identifier, so it is a compile error until somebody gives
+// it words (`digest.ts`'s label table is keyed on this type).
+//
+// ⚠️ It does NOT cover every value in the column. `fanOutMention` writes `mention` and the abuse
+// patrol writes four `abuse.*` kinds, both by their own INSERTs; neither reaches the digest, which
+// excludes mentions in SQL and never gets notification rows for patrol events. Narrowing only the
+// writer that feeds the digest is the point: a union that also had to hold those would be a list of
+// everything and would guarantee nothing about what a reader sees.
+export type FeedEventType =
+  | 'page.published'
+  | 'page.restored'
+  | 'page.made_public'
+  | 'page.made_non_public'
+  | 'comment.created'
+  | 'attachment.confirmed'
+
 export async function fanOutFeedEvent(
   tx: Sql,
   args: {
     tenantId: string
-    eventType: string
+    eventType: FeedEventType
     pageId: string | null
     spaceId: string | null
     actor: string // user:<sub> | guest:<id> | anon:<hash>

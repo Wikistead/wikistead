@@ -13,7 +13,7 @@ import { memberTuples, ensureMembers } from './helpers/membership.js'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
-import { createWatch, fanOutFeedEvent, fanOutMention, listFeed, listNotifications, markAllNotificationsRead, unreadCount, sweepUnviewableWatches, listWatchesResolved } from '../routes/notifications.js'
+import { createWatch, fanOutFeedEvent, type FeedEventType, fanOutMention, listFeed, listNotifications, markAllNotificationsRead, unreadCount, sweepUnviewableWatches, listWatchesResolved } from '../routes/notifications.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -30,7 +30,9 @@ const ACTOR = 'n362-actor', A = 'n362-a', B = 'n362-b', C = 'n362-c'
 const cleanupTuples: { user: string; relation: string; object: string }[] = []
 const NOW = () => new Date()
 
-const emitOn = (pageId: string, eventType = 'page.published') =>
+// #900: annotated rather than inferred — `= 'page.published'` widens to `string`, which the writer
+// no longer takes. Every call site here already passes a value the product writes.
+const emitOn = (pageId: string, eventType: FeedEventType = 'page.published') =>
   db.tx((tx) => fanOutFeedEvent(tx, { tenantId: TENANT, eventType, pageId, spaceId, actor: `user:${ACTOR}`, publishedAt: NOW() }))
 
 const notifCount = async (sub: string) =>

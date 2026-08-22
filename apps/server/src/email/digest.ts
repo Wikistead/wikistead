@@ -21,6 +21,7 @@ import { fgaClient } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, registry } from '../db/index.js'
 import { pageEventDisposition } from '../page-disposition.js'
+import type { FeedEventType } from '../routes/notifications.js' // #900: the writer decides the words
 import { registerEmailBuilder, type EmailBuildResult, type EmailOutboxRow } from './outbox.js'
 import type { EmailBranding } from './outbox.js'
 import { startOutboxDrainWorker } from '../db/outbox-lease.js'
@@ -66,6 +67,36 @@ export async function produceDigestJobs(log: (m: string) => void = () => {}): Pr
 }
 
 const DIGEST_ITEM_CAP = 100
+
+// #900: what the reader is told happened. The body used to interpolate `event_type` straight out of
+// the row, so a person received `page.made_non_public: Q3 plan` -- an identifier that is not the
+// product's language even in English, in a message that cannot be taken back once sent.
+//
+// Keyed on `FeedEventType`, so the day a seventh kind is written this file stops compiling rather
+// than shipping its identifier to an inbox. The type comes from the WRITER (`fanOutFeedEvent`), not
+// from the webhook catalogue: that catalogue holds seventy-odd kinds, none of which are written
+// here, so borrowing it would have produced words for events nobody sends and missed the six that
+// are sent.
+//
+// ⚠️ These are English, and the whole mail surface is: measured, there is no locale plumbing in
+// `email/` and no server-side i18n anywhere -- the digest's own subject line is a hard-coded English
+// template. Translating mail is a separate piece of work and a separate ticket; this change stops the
+// body naming internals, which is wrong for an English reader too.
+const SAID: Record<FeedEventType, string> = {
+  'page.published': 'Published',
+  'page.restored': 'Restored a previous version',
+  'page.made_public': 'Made public',
+  'page.made_non_public': 'No longer public',
+  'comment.created': 'New comment',
+  'attachment.confirmed': 'Attachment added',
+}
+
+// Rows the digest query does not exclude but this table does not name -- a legacy value, or a kind
+// written by a path that bypasses `fanOutFeedEvent`. Says something true and general rather than
+// falling back to the identifier, which is the failure being fixed.
+function said(eventType: string): string {
+  return SAID[eventType as FeedEventType] ?? 'Updated'
+}
 
 export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding }): Promise<EmailBuildResult> {
   const memberSub = rows[0]!.member_sub
@@ -115,11 +146,11 @@ export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: 
     // at it once per message is how the old string came to name the wrong one.
     if (!ctx.baseUrl) return { kind: 'skip', reason: 'no address for this workspace — refusing to improvise links' }
 
-    // minimal body: event type + send-time-confirmed live title + deep link. Never content or diffs.
+    // minimal body: what happened + send-time-confirmed live title + deep link. Never content or diffs.
     const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
     const lines = gated.map((g) => {
       const link = g.pageId ? `${ctx.baseUrl}/p/${g.pageId}` : `${ctx.baseUrl}/`
-      return { label: `${g.eventType}: ${g.title ?? ''}`, link }
+      return { label: `${said(g.eventType)}: ${g.title ?? ''}`, link }
     })
     // #575 slice B: the digest wears the same shell as the mention mail — and gains the unsubscribe it
     // never had. The token's ACTION is `digest`: minting an `immediate` one here (the shape a copy of

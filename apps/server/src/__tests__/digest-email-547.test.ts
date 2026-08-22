@@ -99,6 +99,14 @@ describe('#547 S4: digest', () => {
     expect(sent[0]!.subject).toContain('2 update')
     expect(sent[0]!.text).toContain(`Digest A ${STAMP}`)
     expect(sent[0]!.text).toContain(`Digest B ${STAMP}`)
+    // #900: the body says what happened in words. ⚠️ Asserted as the ABSENCE of a dotted identifier
+    // rather than as the presence of a phrase — pinning the phrase would freeze prose that is meant
+    // to be rewritten (the mail surface has no i18n yet), and would go green again the moment
+    // somebody reintroduced `${'${'}eventType}` beside it.
+    for (const line of sent[0]!.text.split('\n')) {
+      const before = line.split(':')[0] ?? ''
+      expect(/^[a-z_]+\.[a-z_]+$/.test(before.trim()), `an internal identifier reached the reader: ${line}`).toBe(false)
+    }
     expect(sent[0]!.text).toContain(`/p/${pageA}`)
     // consumed: a re-produce (daily guard lifted) finds nothing new
     await resetDaily()
@@ -148,5 +156,26 @@ describe('#547 S4: digest', () => {
       const { unsetPagePrivate } = await import('../routes/pages.js')
       await unsetPagePrivate(db, fgaClient, app.searchDriver, { pageId: pageA, tenantId: TENANT, userId: OWNER, plan: 'business' }).catch(() => {})
     }
+  }, 120_000)
+
+  // #900: the rows the label table does not name. `feed_events.event_type` is plain text, so a value
+  // written before the union existed -- or by a path that bypasses `fanOutFeedEvent` -- still reaches
+  // the body. ⚠️ The other cases in this file only ever create the six kinds the table names, so they
+  // cannot see this branch at all: measured, restoring the identifier fallback left every one of them
+  // green. The row is therefore written straight to the table, the way a legacy row exists.
+  it('an event kind the table does not name still reaches the reader in words', async () => {
+    const legacy = 'page.frobnicated'
+    const [ev] = await adminPool<{ id: string }[]>`
+      INSERT INTO feed_events (tenant_id, event_type, page_id, space_id, actor)
+      VALUES (${TENANT}, ${legacy}, ${pageA}, ${spaceId}, ${'user:someone-else'}) RETURNING id`
+    await adminPool`
+      INSERT INTO notifications (tenant_id, member_sub, event_id) VALUES (${TENANT}, ${W1}, ${ev!.id})`
+    await resetDaily()
+    expect(await produceDigestJobs(), 'the unnamed kind still produces a digest').toBe(1)
+    await forceDue()
+    await drain()
+    expect(sent.length).toBe(1)
+    expect(sent[0]!.text, 'the identifier does not reach the inbox').not.toContain(legacy)
+    expect(sent[0]!.text, 'and the item is still there, described').toContain(`Digest A ${STAMP}`)
   }, 120_000)
 })
