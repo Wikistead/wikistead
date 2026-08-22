@@ -82,28 +82,62 @@ function effectiveLicense(name, versions, license) {
 const FONT_LICENSE_ALLOW = new Set(["OFL-1.1"]);
 const isFontPkg = (name) => name.startsWith("@fontsource/") || name.startsWith("@fontsource-variable/");
 
+// #893: a run that read NOTHING must not report that everything is permissive.
+//
+// This gate is the legal precondition of ADR-011's dual licensing, and until now it had six ways to
+// exit 0 having judged no package at all — the shape #719 names, wearing the most expensive hat in
+// the tree. `pnpm` missing from PATH, a corrupt store, an unreadable lockfile and an over-large
+// output all threw; the catch turned the throw into an empty string, the empty string was read as
+// "there are no dependencies", and the build went green. `stdio` sent stderr to `ignore`, so the
+// reason went with it. A valid but empty `{}`, or a tree of nothing but workspace packages, reached
+// the success line by a different road.
+//
+// What replaces it: the run says HOW MANY packages it judged, and zero is a failure. The distinction
+// that matters is not "empty or not" but "did the tool answer" — so the failure is reported with what
+// the tool actually said, rather than as an absence.
 let raw;
 try {
   raw = execSync("pnpm licenses list --prod --json", {
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
+    // ⚠️ stderr is CAPTURED, not discarded: when this fails, the reason is the only thing that tells
+    // an operator whether their tree is clean or their tooling is broken.
+    stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: 64 * 1024 * 1024,
   });
 } catch (err) {
-  // pnpm exits non-zero when there are no dependencies; treat empty as success.
-  raw = err.stdout?.toString() || "";
+  const reason = (err.stderr?.toString() || err.message || "").trim();
+  console.error("license:check FAILED — could not read the dependency licenses, so nothing was checked.");
+  console.error(`  ${reason.split("\n")[0] || "pnpm licenses list did not answer"}`);
+  console.error("\nADR-011's dual licensing rests on this scan. A run that cannot see the dependencies");
+  console.error("is not a run that found them permissive — fix the tooling, then re-run.");
+  process.exit(1);
 }
 
 if (!raw.trim()) {
-  console.log("license:check — no production dependencies to scan.");
-  process.exit(0);
+  // The old code called this "no production dependencies" and passed. It cannot mean that here: this
+  // repository HAS production dependencies, so an empty answer is a broken read wearing that costume.
+  console.error("license:check FAILED — `pnpm licenses list` answered with nothing.");
+  console.error("Nothing was scanned, so nothing was found permissive (ADR-011).");
+  process.exit(1);
 }
 
-const byLicense = JSON.parse(raw);
+let byLicense;
+try {
+  byLicense = JSON.parse(raw);
+} catch (err) {
+  console.error(`license:check FAILED — the dependency list was not JSON (${err.message}).`);
+  console.error("Nothing was scanned, so nothing was found permissive (ADR-011).");
+  process.exit(1);
+}
 const violations = [];
+// #893: judged, not listed. A package skipped as one of ours was never asked the question, so it
+// cannot be part of the evidence that the answer was yes.
+let judged = 0;
+let skippedOwn = 0;
 for (const [license, pkgs] of Object.entries(byLicense)) {
   for (const pkg of pkgs) {
-    if (isWorkspacePkg(pkg.name)) continue;
+    if (isWorkspacePkg(pkg.name)) { skippedOwn += 1; continue; }
+    judged += 1;
     const versions = pkg.versions || [];
     const effective = effectiveLicense(pkg.name, versions, license);
     if (exprAllowed(effective)) continue;
@@ -122,5 +156,23 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
+// ⚠️ The last two doors, and they are the ones a reader would not think to look for: `pnpm` can answer
+// with a well-formed `{}`, and a tree could in principle be nothing but our own packages. Both parse,
+// both iterate cleanly, and both used to reach the line below — which would then announce that every
+// production dependency is permissive on the strength of having examined none.
+//
+// The threshold is deliberately ZERO rather than a floor near today's count (594). A floor would have
+// to be maintained, and the failure it guards against is not "fewer than usual" — it is "none at all",
+// which is what every broken read produces.
+if (judged === 0) {
+  console.error("license:check FAILED — the scan judged 0 dependencies.");
+  console.error(`  ${Object.keys(byLicense).length} license group(s) read; ${skippedOwn} package(s) skipped as our own.`);
+  console.error("\nADR-011's premise is that every production dependency was seen and found permissive.");
+  console.error("A scan that saw none has not established that, whatever it printed.");
+  process.exit(1);
+}
+
 const licenses = Object.keys(byLicense).filter((l) => ALLOW.has(l));
-console.log(`license:check OK — all production dependencies are permissive (${licenses.join(", ")}).`);
+console.log(
+  `license:check OK — ${judged} production dependencies judged, all permissive (${licenses.join(", ")}).`,
+);
