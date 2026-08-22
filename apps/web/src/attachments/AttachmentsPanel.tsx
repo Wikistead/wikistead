@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Download, Paperclip, Trash2, Upload } from "lucide-react";
 import { useSession } from "../session/SessionProvider";
 import { RightPanel } from "../ui/RightPanel";
@@ -100,6 +101,9 @@ export function AttachmentsPanel({ pageId, readOnly, onClose }: { pageId: string
 
           {list.isLoading ? (
             showSkeleton ? <PanelRowsSkeleton testid="attachments-skeleton" /> : null
+          ) : list.isError ? (
+            // #895: a page whose attachments could not be listed is not a page without attachments.
+            <LoadFailed testId="attachments-failed" onRetry={() => { void list.refetch(); }} />
           ) : count === 0 && uploads.length === 0 ? (
             <div className={dim}>{t("attachments.empty")}</div>
           ) : (

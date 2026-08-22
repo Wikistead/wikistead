@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Activity, Check, Filter } from "lucide-react";
 import { useFeed, useTogglePatrol, type FeedItem } from "../notifications/useNotifications";
@@ -14,7 +15,7 @@ export function RecentChangesRoute() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [unpatrolled, setUnpatrolled] = useState(false);
-  const { data, isLoading } = useFeed({ unpatrolled });
+  const { data, isLoading, isError, refetch } = useFeed({ unpatrolled });
   const togglePatrol = useTogglePatrol();
   const items = data ?? [];
 
@@ -42,6 +43,9 @@ export function RecentChangesRoute() {
       </div>
       {isLoading ? (
         <p className="text-fg-dim">{t("common.loading")}</p>
+      ) : isError ? (
+        // #895: said BEFORE the empty branch. A feed that could not be fetched is not a quiet week.
+        <LoadFailed testId="recent-changes-failed" onRetry={() => { void refetch(); }} />
       ) : items.length === 0 ? (
         <p className="text-fg-dim" data-testid="recent-changes-empty">{t("recentChanges.empty")}</p>
       ) : (

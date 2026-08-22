@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { useOrphanDrafts, useClaimOrphanDraft, useReassignOrphanDraft } from "../data/queries";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -28,6 +29,9 @@ export function AdminOrphanDraftsTab() {
 
       {orphans.isLoading ? (
         <p className="text-sm text-fg-dim">{t("common.loading")}</p>
+      ) : orphans.isError ? (
+        // #895: an admin reading "no orphaned drafts" acts on it. A failed fetch established none.
+        <LoadFailed testId="admin-orphans-failed" onRetry={() => { void orphans.refetch(); }} />
       ) : list.length === 0 ? (
         <p className="text-sm text-fg-dim" data-testid="admin-orphans-empty">{t("adminOrphans.empty")}</p>
       ) : (

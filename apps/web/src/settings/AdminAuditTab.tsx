@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { useQuery } from "@tanstack/react-query";
 import { useAuditLog, useAuditVerify, type AuditRow, type AuditVerdict } from "../data/queries";
 import { apiFetch } from "../data/apiClient";
@@ -151,7 +152,12 @@ export function AdminAuditTab() {
             ))}
           </tbody>
         </table>
-        {rows.length === 0 && !firstPage.isLoading && <p className="px-2 py-2 text-sm text-fg-dim">{t("adminAudit.empty")}</p>}
+        {/* ⚠️ #895: `err` above is read for ONE thing — the entitlement code that draws the upgrade
+            notice. Every other failure fell through to here, so a 500 on the compliance ledger printed
+            "no entries". The ledger's whole value is that entries cannot vanish; a read that failed
+            must not look like one that found nothing. */}
+        {!locked && firstPage.isError && <LoadFailed testId="admin-audit-failed" onRetry={() => { void firstPage.refetch(); }} />}
+        {rows.length === 0 && !firstPage.isLoading && !firstPage.isError && <p className="px-2 py-2 text-sm text-fg-dim">{t("adminAudit.empty")}</p>}
         {canLoadMore && (
           <div className="px-2 py-2">
             <Button variant="default" size="sm" onClick={() => void loadMore()} data-testid="audit-load-more">{t("adminAudit.loadMore")}</Button>

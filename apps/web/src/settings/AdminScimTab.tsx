@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { useScimTokens, useCreateScimToken, useRevokeScimToken, type ScimTokenCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
 import { Trash2 } from "lucide-react";
@@ -112,7 +113,9 @@ export function AdminScimTab() {
             </IconButton>
           </ListRow>
         ))}
-        {rows.length === 0 && !tokens.isLoading && <p className="p-4 text-sm text-fg-dim">{t("adminScim.empty")}</p>}
+        {/* #895: a token list is an access answer — "no tokens" off a failed fetch is a finding. */}
+        {tokens.isError && <LoadFailed testId="admin-scim-failed" onRetry={() => { void tokens.refetch(); }} />}
+        {rows.length === 0 && !tokens.isLoading && !tokens.isError && <p className="p-4 text-sm text-fg-dim">{t("adminScim.empty")}</p>}
       </ListBox>
 
       {/* #504: revoking cuts a running sync, so it asks — and names the token it would cut. */}

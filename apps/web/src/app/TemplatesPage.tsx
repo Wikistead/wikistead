@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Eye, FileStack, Pencil, Trash2, X } from "lucide-react";
 import { TemplateBodyPreview } from "../editor/TemplateBodyPreview";
@@ -15,7 +16,7 @@ import { notify } from "../ui/toast";
 // (client-side only — embed/transclude are not server-resolved).
 export function TemplatesRoute() {
   const { t } = useTranslation();
-  const { data, isLoading } = useTemplates();
+  const { data, isLoading, isError, refetch } = useTemplates();
   const rename = useRenameTemplate();
   const del = useDeleteTemplate();
   const [renaming, setRenaming] = useState<TemplateSummary | null>(null);
@@ -33,6 +34,9 @@ export function TemplatesRoute() {
       </h1>
       {isLoading ? (
         <p className="text-fg-dim">{t("common.loading")}</p>
+      ) : isError ? (
+        // #895: "you have no templates" is a claim about the reader's own library.
+        <LoadFailed testId="templates-failed" onRetry={() => { void refetch(); }} />
       ) : templates.length === 0 ? (
         <p className="text-fg-dim" data-testid="templates-empty">{t("templates.empty")}</p>
       ) : (

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { useNavigate } from "react-router-dom";
 import { useSearch, useResolvedSpaces, usePage, usePublished, useGuestPublished } from "../data/queries";
 import { useDebouncedValue } from "./useDebouncedValue";
@@ -42,7 +43,7 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
   const isGuest = guestToken != null;
   const [input, setInput] = useState("");
   const debounced = useDebouncedValue(input, 250);
-  const { data: hits, isFetching } = useSearch(open ? debounced : "", guestToken);
+  const { data: hits, isFetching, isError: searchFailed, refetch: retrySearch } = useSearch(open ? debounced : "", guestToken);
   // #710: resolve exactly the spaces the HITS name (one batch over distinct ids) — the roster walk
   // that fetched every space to label a dozen results is gone. Member-only; a guest has no
   // cross-space resolution (and the guest surface renders no space chips).
@@ -129,7 +130,10 @@ export function SearchModal({ open, onOpenChange, guestToken, onNavigate }: {
                 // #457 row skeletons while results load (delay-gated: a fast query renders nothing)
                 <div className="p-2">{showListSkeleton ? <PanelRowsSkeleton testid="search-list-skeleton" rows={5} /> : null}</div>
               ) : items.length === 0 ? (
-                input.trim() ? <CommandEmpty>{t("search.noResults")}</CommandEmpty> : <div className="p-2 text-sm text-fg-dim">{t("search.placeholder")}</div>
+                // #895: "nothing matched" is a claim about the corpus. A search that failed made no
+                // such finding, and a reader who is looking for a page they know exists would stop.
+                searchFailed ? <div className="p-2"><LoadFailed testId="search-failed" onRetry={() => { void retrySearch(); }} /></div>
+                  : input.trim() ? <CommandEmpty>{t("search.noResults")}</CommandEmpty> : <div className="p-2 text-sm text-fg-dim">{t("search.placeholder")}</div>
               ) : (
                 items.map((item) => (
                   <CommandItem

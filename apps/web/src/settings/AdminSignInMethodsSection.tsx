@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, X } from "lucide-react";
 import {
   useAdminConnections, useCreateConnection, useUpdateConnection, useDeleteConnection, useReorderConnections,
@@ -917,7 +918,9 @@ export function AdminSignInMethodsSection() {
           </div>
         )}
 
-        {rows.length === 0 && !adding && !connections.isLoading && samlState.kind === "hidden" && !showPlatform && (
+        {/* #895: "no sign-in methods configured" is what an admin reads before adding one. */}
+        {connections.isError && !adding && <LoadFailed testId="admin-connections-failed" onRetry={() => { void connections.refetch(); }} />}
+        {rows.length === 0 && !adding && !connections.isLoading && !connections.isError && samlState.kind === "hidden" && !showPlatform && (
           <p className="text-sm text-fg-dim">{t("adminConnections.empty")}</p>
         )}
       </div>

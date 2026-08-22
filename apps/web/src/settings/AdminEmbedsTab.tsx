@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Trash2 } from "lucide-react";
 import { useEmbedProviders, useUpdateEmbedProviders } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
@@ -82,7 +83,9 @@ export function AdminEmbedsTab() {
             </IconButton>
           </ListRow>
         ))}
-        {hosts.length === 0 && <p className="text-xs text-fg-dim">{t("adminEmbeds.empty")}</p>}
+        {/* #895: an admin reading "no providers allowed" may add one that is already there. */}
+        {providers.isError && <LoadFailed testId="admin-embeds-failed" onRetry={() => { void providers.refetch(); }} />}
+        {!providers.isError && hosts.length === 0 && <p className="text-xs text-fg-dim">{t("adminEmbeds.empty")}</p>}
       </ListBox>
 
       <div className="mt-5 flex gap-2">

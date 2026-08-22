@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { FileStack } from "lucide-react";
 import { TemplateBodyPreview } from "../editor/TemplateBodyPreview";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -24,7 +25,7 @@ export function TemplatePickerDialog({
   onPick: (templateId: string) => void;
 }) {
   const { t } = useTranslation();
-  const { data, isLoading } = useTemplates(open);
+  const { data, isLoading, isError, refetch } = useTemplates(open);
   const [selected, setSelected] = useState<string | null>(null);
   const body = useTemplateBody(open ? selected : null);
   const selectedRef = useRef<HTMLButtonElement | null>(null);
@@ -76,7 +77,9 @@ export function TemplatePickerDialog({
         {isLoading ? (
           <p className="py-8 text-center text-fg-dim">{t("common.loading")}</p>
         ) : empty ? (
-          <p className="py-8 text-center text-fg-dim" data-testid="template-picker-empty">{t("templatePicker.empty")}</p>
+          isError
+            ? <LoadFailed testId="template-picker-failed" onRetry={() => { void refetch(); }} />
+            : <p className="py-8 text-center text-fg-dim" data-testid="template-picker-empty">{t("templatePicker.empty")}</p>
         ) : (
           // #267 this row is a GRID ITEM of DialogContent (shadcn grid). A grid item's default
           // min-width is AUTO = its content's min-content — so heavy preview content (wide mermaid/table,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Trash2, Upload, Lock, LockOpen, Download, FolderInput } from "lucide-react";
 import { useSpacePagesOverview, useBulkDeletePages, useBulkPublishPages, useBulkSetPageVisibility, useBulkMovePages, useSpacesPage, useSpaceNameSearch } from "../data/queries";
 import { Button } from "../ui/Button";
@@ -165,7 +166,9 @@ export function SpacePagesTab() {
     // status column until its badges wrapped one glyph per line.
     <SettingsPane width="wide" testId="space-pages" title={t("spacePages.title")}>
       {pages.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
-      {!pages.isLoading && rows.length === 0 && <p className="text-sm text-fg-dim">{t("spacePages.empty")}</p>}
+      {/* #895: an admin reading "this space has no pages" may go on to delete the space. */}
+      {pages.isError && <LoadFailed testId="space-pages-failed" onRetry={() => { void pages.refetch(); }} />}
+      {!pages.isLoading && !pages.isError && rows.length === 0 && <p className="text-sm text-fg-dim">{t("spacePages.empty")}</p>}
 
       {/* #511: the bulk action bar appears only with a selection. Delete is red-at-rest (#504 posture) and
           confirmed before it runs (the ConfirmDialog's onConfirm is the guard the #510 policy checks).

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { CopyButton } from "../ui/CopyButton";
 import { Trash2 } from "lucide-react";
 import {
@@ -162,7 +163,10 @@ export function AdminDomainsTab() {
             </IconButton>
           </ListRow>
         ))}
-        {rows.length === 0 && !domains.isLoading && <p className="p-4 text-sm text-fg-dim">{t("adminDomains.empty")}</p>}
+        {/* #895: same shape as the audit tab — `err` is read only for the entitlement code, so any
+            other failure printed "no domains" to an admin who may then add one that already exists. */}
+        {!locked && domains.isError && <LoadFailed testId="admin-domains-failed" onRetry={() => { void domains.refetch(); }} />}
+        {rows.length === 0 && !domains.isLoading && !domains.isError && <p className="p-4 text-sm text-fg-dim">{t("adminDomains.empty")}</p>}
       </ListBox>
 
       {/* #664: the passkey consequence, stated BEFORE it commits. Confirming here is what sends

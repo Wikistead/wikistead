@@ -12,7 +12,7 @@
 // This walks the tree rather than listing the six: the next surface written in this shape has to be
 // caught by a test nobody remembers to update. A walk that matches nothing is a red.
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const SRC_ROOT = resolve(import.meta.dirname, "..");
@@ -27,36 +27,104 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 // `(x.data?.length ?? 0) === 0`, `!x.data?.length`, `x.data?.length === 0` — the ways this tree spells
-// "the list is empty" off a react-query result. The capture is the query variable, so the same file
-// can hold one guarded list and one unguarded one and still be judged per list.
-const EMPTY_STATE = /\((\w+)\.data\?\.length \?\? 0\) === 0|!\s*(\w+)\.data\?\.length\b|(\w+)\.data\?\.length === 0/g;
+// #895: THE FIRST VERSION OF THIS WALK ONLY KNEW ONE SPELLING. It matched `x.data?.length`, so a
+// surface that destructured (`const { data: revisions } = useX()`) passed straight through, and so did
+// one whose rows arrive already flattened. Twenty surfaces were outside a pin that called itself a
+// discovery walk — including the compliance ledger, which answered "no entries" to a 500.
+//
+// Two more shapes made the old rule wrong in the other direction as well:
+//   ① a surface that reads `error` for ONE code (an entitlement 403) and lets every other failure fall
+//      through to the empty state — it "reads error", so a rule that looks for the word passes it;
+//   ② a surface fed by props, where the failure belongs to the caller and cannot be seen from here.
+//
+// So the question is no longer "does this file ask a query whether it failed". It is: DOES THIS FILE
+// DRAW SOMETHING WHEN THE FETCH FAILS. That is one shared component (`LoadFailed`) or an early return,
+// and neither can be satisfied by mentioning a word.
+const EMPTY_STATE = /t\("([\w.]*(?:\.empty|empty[A-Z]\w*|noResults))"\)/g;
 
-type Site = { file: string; query: string; guarded: boolean };
+// Drawn on failure: the shared view, or the surface removing itself. Both are decisions; a mention of
+// `error` inside a mutation's `onError` is not.
+const DRAWS_ON_FAILURE = /<LoadFailed\b/;
+const RETURNS_ON_FAILURE = /if\s*\([^)]*\b(?:isError|error)\b[^)]*\)\s*return\b/;
+
+// ⚠️ Judged per COMPONENT, not per file — and not by a character window either. Both were measured
+// here: with a file-wide rule, taking the failure view out of the audit ledger stayed green because
+// the transparency section further down has its own `if (q.error) return null`; with a 2500-character
+// window, the same borrowing happened from just far enough away. One component's handling excusing
+// another's is the hole #886 already found in a pin that read positions out of a whole file.
+const componentAround = (src: string, at: number): string => {
+  const before = src.slice(0, at);
+  const start = Math.max(before.lastIndexOf("\nfunction "), before.lastIndexOf("\nexport function "));
+  const rest = src.slice(at);
+  const endRel = Math.min(
+    ...[rest.indexOf("\nfunction "), rest.indexOf("\nexport function ")].filter((i) => i > -1).concat([rest.length]),
+  );
+  return src.slice(start > -1 ? start : 0, at + endRel);
+};
+
+// Prop-fed surfaces: the data (and therefore the failure) belongs to the caller. Each entry names the
+// caller so the claim can be checked, rather than being a hole with a shrug in it.
+const FAILURE_BELONGS_TO_THE_CALLER: Record<string, string> = {
+  "settings/ApiKeysPanel.tsx": "keys arrive as a prop — AccountPage and AdminApiTab own the fetch",
+  "app/HomeEmpty.tsx": "presentational: the caller decides there are no spaces and renders this",
+};
+
+// Empty states that are NOT about a fetch. Named one by one, because a category would swallow the
+// next real one: an empty frontmatter block and an empty page body are facts about the document in
+// hand, not answers a request came back with.
+const NOT_A_FETCH: Record<string, string> = {
+  "editor/live-preview/frontmatter.ts": "an empty frontmatter block in the open document",
+  "app/routes.tsx": "page.empty / page.emptyEditable describe a page with no body — #886 owns the fetch states here",
+};
+
+type Site = { file: string; keys: string[]; handled: boolean; delegated: boolean };
 
 const sites: Site[] = [];
 for (const file of walk(SRC_ROOT)) {
   const src = readFileSync(file, "utf8");
+  const keys = [...src.matchAll(EMPTY_STATE)].map((m) => m[1]!);
+  if (keys.length === 0) continue;
+  const rel = file.slice(SRC_ROOT.length + 1);
+  if (rel in NOT_A_FETCH) continue;
   for (const m of src.matchAll(EMPTY_STATE)) {
-    const query = (m[1] ?? m[2] ?? m[3])!;
-    // Guarded = this surface asks THIS query whether it failed. Anywhere in the file is enough: the
-    // check may sit in a sibling branch, and a false positive here would only weaken the test, not
-    // hide a defect — the defect is a query nobody asks at all.
-    const guarded = new RegExp(`\\b${query}\\.isError\\b`).test(src);
-    sites.push({ file: file.slice(SRC_ROOT.length + 1), query, guarded });
+    const around = componentAround(src, m.index!);
+    sites.push({
+      file: rel,
+      keys: [m[1]!],
+      handled: DRAWS_ON_FAILURE.test(around) || RETURNS_ON_FAILURE.test(around),
+      delegated: rel in FAILURE_BELONGS_TO_THE_CALLER,
+    });
   }
 }
 
 describe("#888 a failed fetch is not an empty list", () => {
   it("finds the empty-state surfaces at all", () => {
-    // The guard on the walk. If the spelling of an empty state changes, this reddens instead of
-    // letting every case below pass on an empty list of cases.
-    expect(sites.length, `no empty-state surfaces found under ${SRC_ROOT}`).toBeGreaterThanOrEqual(6);
+    // The guard on the walk. #895 is what happens when this number is met by a walk that is still
+    // missing most of the tree, so it is set from what the tree actually holds rather than from the
+    // handful this ticket started with.
+    expect(sites.length, `no empty-state surfaces found under ${SRC_ROOT}`).toBeGreaterThanOrEqual(20);
   });
 
-  it.each(sites.map((s) => [`${s.file} (${s.query})`, s] as const))(
-    "%s asks whether the fetch failed before saying it is empty",
+  it("keeps both exclusion lists live", () => {
+    // An allowlist that outlives the thing it excuses is a hole: the file is renamed, the entry stays,
+    // and the next surface to take that path is excused by a line about something else.
+    for (const rel of Object.keys(FAILURE_BELONGS_TO_THE_CALLER)) {
+      expect(sites.some((s) => s.file === rel), `${rel} no longer renders an empty state — drop the entry`).toBe(true);
+    }
+    for (const rel of Object.keys(NOT_A_FETCH)) {
+      expect(existsSync(resolve(SRC_ROOT, rel)), `${rel} is gone — drop the entry`).toBe(true);
+    }
+  });
+
+  it.each(sites.map((s) => [`${s.file} (${s.keys.join(", ")})`, s] as const))(
+    "%s draws something when the fetch fails",
     (_label, site) => {
-      expect(site.guarded, `${site.query} in ${site.file} renders its empty state for a failed fetch`).toBe(true);
+      if (site.delegated) return; // the caller owns it — asserted above that the entry is still live
+      expect(
+        site.handled,
+        `${site.file} renders ${site.keys.join(", ")} but nothing when the fetch fails, so a failure ` +
+          "reads as a finding. Either draw <LoadFailed> or return early on the error.",
+      ).toBe(true);
     },
   );
 

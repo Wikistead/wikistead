@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { useParams, useNavigate } from "react-router-dom";
 import { Check, Filter, ShieldAlert } from "lucide-react";
 import { usePatrolQueue, useTogglePatrol, type FeedItem } from "../notifications/useNotifications";
@@ -22,7 +23,7 @@ export function SpaceModerationTab() {
   const { spaceId } = useParams<{ spaceId: string }>();
   const navigate = useNavigate();
   const [unpatrolled, setUnpatrolled] = useState(true); // the queue's job is what still needs review
-  const { data, isLoading, error } = usePatrolQueue(spaceId, { unpatrolled });
+  const { data, isLoading, error, isError, refetch } = usePatrolQueue(spaceId, { unpatrolled });
   const togglePatrol = useTogglePatrol();
   const items = data ?? [];
   const denied = (error as { status?: number } | null)?.status === 403;
@@ -47,6 +48,11 @@ export function SpaceModerationTab() {
           </div>
           {isLoading ? (
             <p className="text-fg-dim">{t("common.loading")}</p>
+          ) : isError && !denied ? (
+            // ⚠️ #895: `error` above is read for ONE status (the 403 that draws the denied state), and
+            // every other failure fell through to "nothing to review" — which is what a moderator acts
+            // on. The third surface in this tree with that shape (audit ledger, custom domains).
+            <LoadFailed testId="moderation-failed" onRetry={() => { void refetch(); }} />
           ) : items.length === 0 ? (
             <p className="text-sm text-fg-dim" data-testid="moderation-empty">
               {unpatrolled ? t("moderation.emptyUnreviewed") : t("moderation.empty")}

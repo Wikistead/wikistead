@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { X } from "lucide-react";
 import {
   useSpaceAccess, useGrantSpaceAccess, useRevokeSpaceAccess, useMemberCandidates, useTenantGroups,
@@ -512,7 +513,10 @@ export function SpaceMembersTab() {
             )}
           </ListRow>
         ))}
-        {mergedRows.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
+        {/* #895: this is an access answer, like #888's share links and permissions — "nobody has
+            access to this space" read off a failed fetch is a finding an admin acts on. */}
+        {roleAssignments.isError && <LoadFailed testId="space-members-failed" onRetry={() => { void roleAssignments.refetch(); }} />}
+        {!roleAssignments.isError && mergedRows.length === 0 && <p className="text-sm text-fg-dim">{t("spaceMembers.empty")}</p>}
       </ListBox>
 
       {/* #536 ②: the replacement confirm — adding over a different existing role swaps it. */}

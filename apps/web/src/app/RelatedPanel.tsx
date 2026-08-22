@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { RadioGroup } from "../ui/RadioGroup";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Link as LinkIcon, Maximize2 } from "lucide-react";
@@ -76,7 +77,7 @@ function LocalGraphModal({ pageId, open, onClose }: { pageId: string; open: bool
 export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data } = useBacklinks(pageId);
+  const { data, isError: backlinksFailed, refetch: refetchBacklinks } = useBacklinks(pageId);
   const backlinks = data ?? [];
   // #322 / ADR-133 §2: 2-hop related pages (grouped by the shared link). The panel is only mounted when open,
   // so the query is effectively lazy (fetched when Related opens); the server view-filters both edge ends.
@@ -107,7 +108,10 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
       <div className="flex flex-col gap-4">
         {/* §Backlinks — 1-hop pages that link here (moved from the standalone panel). */}
         <RelatedSection title={t("related.backlinks")} count={backlinks.length}>
-          {backlinks.length === 0 ? (
+          {/* #895: "nothing links here" is an answer about the page. A failed fetch is not. */}
+          {backlinksFailed ? (
+            <LoadFailed testId="backlinks-failed" onRetry={() => { void refetchBacklinks(); }} />
+          ) : backlinks.length === 0 ? (
             <p className="text-[13px] text-fg-dim" data-testid="backlinks-empty">{t("backlinks.empty")}</p>
           ) : (
             // #623: the section scrolls, the panel does not grow. A page that everything links to
@@ -126,7 +130,9 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
         {/* §Related — 2-hop pages that share a link with this one, grouped by the shared link (Scrapbox-style).
             Both edge ends are view-filtered server-side (#322 / ADR-133 §3). */}
         <RelatedSection title={t("related.related")} count={relatedCount}>
-          {relatedGroups.length === 0 ? (
+          {related.isError ? (
+            <LoadFailed testId="related-failed" onRetry={() => { void related.refetch(); }} />
+          ) : relatedGroups.length === 0 ? (
             <p className="text-[13px] text-fg-dim" data-testid="related-empty">{t("related.empty")}</p>
           ) : (
             // #623: same box, same reason — 20 groups of up to 12 pages is 240 rows.

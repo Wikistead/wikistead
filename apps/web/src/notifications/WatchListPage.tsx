@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Eye, BellOff, Bell, X, SlidersHorizontal } from "lucide-react";
 import { useWatchList, useUpdateWatch, useUnwatch, WATCH_EVENT_TYPES, type WatchRow } from "./useNotifications";
@@ -50,7 +51,7 @@ function MaskEditor({ row }: { row: WatchRow }) {
 export function WatchListRoute() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data, isLoading } = useWatchList();
+  const { data, isLoading, isError, refetch } = useWatchList();
   const update = useUpdateWatch();
   const unwatch = useUnwatch();
   const [editing, setEditing] = useState<string | null>(null); // row id whose mask editor is open
@@ -65,7 +66,9 @@ export function WatchListRoute() {
         <Eye size={18} /> {t("watches.title")}
       </h1>
       {isLoading && <div className="py-8 text-center text-fg-dim">{t("notifications.loading")}</div>}
-      {!isLoading && rows.length === 0 && (
+      {/* #895: "you are watching nothing" is a claim about the reader's own settings. */}
+      {isError && <LoadFailed testId="watch-list-failed" onRetry={() => { void refetch(); }} />}
+      {!isLoading && !isError && rows.length === 0 && (
         <div className="py-10 text-center text-fg-dim" data-testid="watch-list-empty">{t("watches.empty")}</div>
       )}
       <ListBox>

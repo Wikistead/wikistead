@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty } from "../components/ui/command";
 import { useSearch, useResolvedSpaces } from "../data/queries";
@@ -18,7 +19,7 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const debounced = useDebouncedValue(input, 250);
-  const { data: hits } = useSearch(debounced);
+  const { data: hits, isError: searchFailed, refetch: retrySearch } = useSearch(debounced);
   // #710: resolve the spaces the HITS name, by id — no roster walk to label a result list.
   const hitSpaceIds = useMemo(() => [...new Set((hits ?? []).map((h) => h.spaceId).filter(Boolean))], [hits]);
   const resolved = useResolvedSpaces(hitSpaceIds);
@@ -90,7 +91,10 @@ export function PageEmbedPicker({ open, onPick }: { open: boolean; onPick: (page
               // motionless cursor fires no pointermove, so results appearing under it still auto-select hit 1.
               onPointerMove={() => { userNavRef.current = true; }}
             >
-              <CommandEmpty>{t("embedPicker.empty")}</CommandEmpty>
+              {/* #895: the same claim as the search modal — a failed search is not an absent page. */}
+              {searchFailed
+                ? <div className="p-2"><LoadFailed testId="embed-picker-failed" onRetry={() => { void retrySearch(); }} /></div>
+                : <CommandEmpty>{t("embedPicker.empty")}</CommandEmpty>}
               {(hits ?? []).map((h) => (
                 <CommandItem key={h.id} value={h.id} onSelect={() => close(h.id, h.title || null)} data-testid="embed-picker-item">
                   <div className="flex min-w-0 items-center gap-2">

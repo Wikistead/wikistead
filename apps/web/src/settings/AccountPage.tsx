@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { IdCard, SquarePen, Palette, HardDriveDownload, Loader2, Bell, KeyRound, ShieldCheck, Zap, Code, Eye, BookOpen, MonitorSmartphone } from "lucide-react"; // #493: display-mode glyphs
 import { AppShell } from "../app/AppShell";
 import { LoginScreen } from "../app/LoginScreen";
@@ -594,13 +595,18 @@ function ApiKeysTab() {
         {policy.data && !canIssue && (
           <p className="mt-0 text-sm text-fg-dim" data-testid="api-keys-restricted">{t("accountApiKeys.restricted")}</p>
         )}
-        <ApiKeysPanel
+        {/* #895: ApiKeysPanel takes its rows as a prop, so the failure is THIS component's to answer —
+            and it did not. A reader seeing "no API keys" acts on it: they issue another one, or they
+            conclude nothing is holding a credential. Measured while widening the walk for this ticket:
+            the panel was excused as caller-owned, and the caller had nothing. */}
+        {keys.isError && <LoadFailed testId="account-api-keys-failed" onRetry={() => { void keys.refetch(); }} />}
+        {!keys.isError && <ApiKeysPanel
           keys={keys.data ?? []}
           canIssue={canIssue}
           maxScope={policy.data?.maxScope ?? "write"}
           maxAgeDays={policy.data?.maxAgeDays ?? null}
           emptyText={t("accountApiKeys.empty")}
-        />
+        />}
       </div>
     </SettingsPage>
   );

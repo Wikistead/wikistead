@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { RotateCcw, GitCompare, Undo2 } from "lucide-react";
 import { usePageRevisions, useRestoreRevision, useRevertActorRun, type Revision } from "../data/queries";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -78,7 +79,7 @@ export function HistoryPanel({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const { data: revisions, isLoading } = usePageRevisions(pageId);
+  const { data: revisions, isLoading, isError, refetch } = usePageRevisions(pageId);
   const restore = useRestoreRevision(pageId);
   const revertRun = useRevertActorRun(pageId);
   const [confirming, setConfirming] = useState<Revision | null>(null);
@@ -103,7 +104,10 @@ export function HistoryPanel({
   return (
     <RightPanel testId="history-panel" title={t("history.title")} onClose={onClose}>
       {isLoading && showSkeleton && <PanelRowsSkeleton testid="history-skeleton" />}
-      {!isLoading && (revisions?.length ?? 0) === 0 && <p className="m-0 text-sm text-fg-dim">{t("history.empty")}</p>}
+      {/* #895: "this page has no earlier versions" is a claim about the page's past. A fetch that
+          failed made no such finding — and a reader who wanted an old version would stop looking. */}
+      {isError && <LoadFailed testId="history-failed" onRetry={() => { void refetch(); }} />}
+      {!isLoading && !isError && (revisions?.length ?? 0) === 0 && <p className="m-0 text-sm text-fg-dim">{t("history.empty")}</p>}
 
       {/* #327 increment 2: the one-click per-actor revert, offered ONLY when it is honest (the newest
           revisions are one actor's run AND a pre-run revision exists to restore to). */}
