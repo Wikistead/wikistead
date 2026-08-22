@@ -9,6 +9,9 @@
 // Measured before the fix, with a store that refuses writes: unsetPagePublic returned normally, wrote
 // `page.made_non_public` to the audit ledger, fired the webhook, and `check(user:anonymous, view, page)`
 // was still true. The tests below assert on that check — the access itself — rather than on a status code.
+//
+// #885: the ledger deltas two of these cases also checked live in `public-grant-removal-audit-885.test.ts`,
+// which re-runs the same two scenarios. The access assertions stay here, in full, and now ship.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { readFileSync, readdirSync } from 'node:fs'
@@ -21,7 +24,6 @@ import { onDomainEvent } from '@wikistead/events'
 import { buildApp } from '../app.js'
 import { createSpace, deleteSpace, setSpacePublic, unsetSpacePublic } from '../routes/spaces.js'
 import { createPage, deletePage, publishPage, setPagePublic, unsetPagePublic, setPagePrivate, movePage } from '../routes/pages.js'
-import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -78,13 +80,6 @@ afterAll(async () => {
   await db.release(); await app.close(); await admin.end(); await pool.end()
 }, 180_000)
 
-async function auditCount(pageId: string): Promise<number> {
-  await drainAuditFor(admin, TENANT)
-  const [{ n }] = await admin<[{ n: string }]>`
-    SELECT count(*)::text AS n FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`page:${pageId}`}
-      AND action IN ('page.made_non_public', 'page.made_private')`
-  return Number(n)
-}
 
 async function eventsDuring(fn: () => Promise<unknown>): Promise<string[]> {
   const seen: string[] = []
@@ -97,14 +92,15 @@ describe('a refused removal is not reported as a removal', () => {
   it('unsetPagePublic: the caller hears it, and the ledger is not written', async () => {
     const pageId = await freshPublicPage('unset')
     expect(await anyoneCanRead(pageId), 'public to begin with').toBe(true)
-    const before = await auditCount(pageId)
 
     const events = await eventsDuring(() =>
       unsetPagePublic(db, refusing(), app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, plan: 'business' }))
 
     expect(await anyoneCanRead(pageId), 'still public — that is the truth to report').toBe(true)
     expect(events, 'no event for a removal that did not happen').toEqual([])
-    expect(await auditCount(pageId) - before, 'no audit line either').toBe(0)
+    // (#885: the ledger delta this case also asserted is in `public-grant-removal-audit-885.test.ts`
+    // — the audit ledger is EE, and reaching its drain helper filtered this CE suite out of the
+    // published tree. The access assertion above is the one that matters and it stays here.)
     await expect(
       unsetPagePublic(db, refusing(), app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, plan: 'business' }),
       'and the call itself fails',
@@ -172,13 +168,14 @@ describe('a refused removal is not reported as a removal', () => {
 
   it('the working path still works, and still says so', async () => {
     const pageId = await freshPublicPage('happy')
-    const before = await auditCount(pageId)
     const events = await eventsDuring(() =>
       unsetPagePublic(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, plan: 'business' }))
 
     expect(await anyoneCanRead(pageId), 'the grant really went').toBe(false)
     expect(events, 'and the event fires — silence on success would be the opposite defect').toEqual(['page.made_non_public'])
-    expect(await auditCount(pageId) - before, 'with its ledger line').toBe(1)
+    // (#885: the ledger delta this case also asserted is in `public-grant-removal-audit-885.test.ts`
+    // — the audit ledger is EE, and reaching its drain helper filtered this CE suite out of the
+    // published tree. The access assertion above is the one that matters and it stays here.)
   }, 180_000)
 
   it('removing a grant that was never there still succeeds (convergence is not failure)', async () => {
