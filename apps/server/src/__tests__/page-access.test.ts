@@ -2,6 +2,10 @@
 // Phase 4b per-page grant/revoke/list. Only a `manage` holder may grant/revoke/list;
 // a grant makes the grantee a real FGA viewer (and a search viewer after reindex); a
 // revoke drops them; granting on a DRAFT is how you invite someone to it.
+//
+// #885: the two audit-row assertions live in `page-access-audit-885.test.ts`. The ledger is EE, and
+// a suite that reaches its drain helper is filtered out of the published tree, which took these
+// authorization tests with it. They belong to CE, so they stay and the ledger half moved out.
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import postgres from 'postgres'
 import * as Y from 'yjs'
@@ -12,7 +16,6 @@ import { LogicalSearchDriver, buildSearchDoc } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, grantPageAccess, revokePageAccess, listAllPageAccess, restrictPageAccess, unrestrictPageAccess, listAllPageRestrictions, setPagePrivate, unsetPagePrivate, isPagePrivate, listPages, getPage, getPublished } from '../routes/pages.js'
 import { createShareLink, listAllShareLinks, revokeShareLink, revokeResourceShareLinks } from '../routes/share-links.js'
-import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -106,20 +109,14 @@ describe('per-page access (grant/revoke/list)', () => {
       .rejects.toMatchObject({ statusCode: 400 })
   })
 
-  it('records a durable page.access_granted audit entry when entitled + plan passed (#177)', async () => {
-    await grantPageAccess(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', grantee: 'user:pa-audit', relation: 'view', plan: 'team' })
-    await drainAuditFor(admin, TENANT)
-    const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
-    expect(rows.some((r) => r.action === 'page.access_granted' && r.target === `page:${pageId}` && r.actor === 'user:dev-user')).toBe(true)
-    await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) // clean the extra grantee tuple
-  })
 })
 
 // #109 / ADR-072 monotonic deny — the restrict write path over the same manage-gated mechanism.
 describe('per-page restrict (monotonic deny)', () => {
   const R = 'user:pa-restrictee'
-  // A prior test (the audit one) wipes ALL page tuples incl. the creator's `manage`; re-establish it
-  // so dev-user can manage the page for these tests.
+  // Re-establish the creator's `manage`: the cases above delete the page's tuples when they finish,
+  // and dev-user has to manage the page for these. (#885 moved the audit case that used to be the
+  // last of them into `page-access-audit-885.test.ts`; the cleanup it compensates for is still here.)
   beforeAll(async () => { await writeTuples(fgaClient, [{ user: 'user:dev-user', relation: 'manage_direct', object: `page:${pageId}` }]).catch(() => {}) })
   afterAll(async () => { await deleteObjectTuples(fgaClient, `page:${pageId}`).catch(() => {}) })
 
@@ -307,12 +304,6 @@ describe('per-page private (ADR-098 allowlist)', () => {
     await expect(isPagePrivate(db, fgaClient, { pageId, userId: STRANGER })).rejects.toMatchObject({ statusCode: 403 })
   })
 
-  it('records a durable page.made_private audit entry when entitled + plan passed (#177)', async () => {
-    await setPagePrivate(db, fgaClient, driver, { pageId, tenantId: TENANT, userId: 'dev-user', plan: 'team' })
-    await drainAuditFor(admin, TENANT)
-    const rows = await db.sql<{ action: string; target: string; actor: string }[]>`SELECT action, target, actor FROM audit_log WHERE tenant_id = ${TENANT} ORDER BY seq`
-    expect(rows.some((r) => r.action === 'page.made_private' && r.target === `page:${pageId}` && r.actor === 'user:dev-user')).toBe(true)
-  })
 })
 
 // #262: existence-hiding on the READ/DISPLAY path. A member without view access to a page, a non-existent
