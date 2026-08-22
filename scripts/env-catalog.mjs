@@ -297,6 +297,7 @@ export const ENV_DOCS = {
   SEARCH_OUTBOX_POLL_MS: { group: 'Background workers', default: '2000', what: 'How often the search index drain runs. It is the delay between an edit and the edit being findable.' },
   WEBHOOK_OUTBOX_POLL_MS: { group: 'Background workers', default: '5000', what: 'How often queued webhook deliveries are drained.' },
   TRASH_SWEEP_POLL_MS: { group: 'Background workers', default: '3600000 (1 hour)', what: 'How often trashed pages past their retention are purged.' },
+  TUPLE_OUTBOX_POLL_MS: { group: 'Background workers', default: '30000', what: 'How often the permission store is asked again to drop the entries a removed member left behind. They are retried until they land; the drain reports how many are waiting and how long the oldest has waited.' },
   CUSTOM_DOMAIN_RECHECK_MS: {
     group: 'Background workers',
     default: '21600000 (6 hours)',

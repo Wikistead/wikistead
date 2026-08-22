@@ -11,6 +11,7 @@ import type { SearchDriver } from '../search/index.js'
 import { enqueueOutbox, processOutboxAsync } from '../search/outbox.js'
 import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
+import { enqueueTupleDeletes, flushTupleDeletes, type TupleIntent } from '../db/tuple-outbox.js' // #896
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
 import { assertClosingIsSafe } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
@@ -564,6 +565,9 @@ export async function membersPlugin(app: FastifyInstance) {
     }
 
     let revokedKeyIds: string[] = []
+    // #896: filled inside the tx, used after commit. Declared out here because Decision 5's ordering
+    // puts the enqueue and the store call on opposite sides of the transaction boundary.
+    let groupIntents: TupleIntent[] = []
     await req.db.tx(async (tx) => {
       await tx`DELETE FROM members WHERE sub = ${req.params.sub}`
       // #362 E1: the removed member's watches go with them (BLIND delete is correct here — the member is
@@ -614,11 +618,20 @@ export async function membersPlugin(app: FastifyInstance) {
       // members.groups (the same source syncMemberGroups writes from). Left behind they (a) keep granting
       // group-inherited access after removal (an authz leak) and (b) break a later RE-registration of the same
       // sub: syncMemberGroups(prev=[], next=[…]) re-writes tuples that still exist → FGA duplicate-write error →
-      // the login tx rolls back → permanent login failure. Delete each INDIVIDUALLY (ignore a missing one) so
-      // any drift between members.groups and FGA can never block removal or survive it.
-      for (const g of existing.groups ?? []) {
-        await deleteTuples(req.server.fga, [{ user: `user:${req.params.sub}`, relation: 'member', object: `group:${groupFgaId(req.tenant.id, g)}` }]).catch(() => {})
-      }
+      // the login tx rolls back → permanent login failure.
+      //
+      // #896 / ADR-255 Decision 5: the store call has LEFT this transaction, so #378's swallow has
+      // nothing left to swallow here. The intent is written down instead — enqueue in-tx, delete
+      // after commit, success drops the row. Recording only what a catch saw would lose the crash
+      // between commit and call, which is the one case a catch block cannot observe. #378's rule is
+      // unchanged and now holds for a reason rather than by forgetting: drift can neither block the
+      // removal nor survive it, because the queue outlives the request that could not finish.
+      groupIntents = (existing.groups ?? []).map((g) => ({
+        subject: `user:${req.params.sub}`,
+        relation: 'member',
+        object: `group:${groupFgaId(req.tenant.id, g)}`,
+      }))
+      await enqueueTupleDeletes(tx, req.tenant.id, groupIntents)
       // Durable compliance audit (#177), in-tx + EE-gated.
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'member.removed', target: `user:${req.params.sub}` })
       for (const k of revoked) {
@@ -626,6 +639,9 @@ export async function membersPlugin(app: FastifyInstance) {
       }
       revokedKeyIds = revoked.map((k) => k.id)
     })
+    // #896: after commit, per Decision 5's ordering. Never throws — a failure here leaves the queue
+    // row for the drain, which is the whole point of having written it.
+    await flushTupleDeletes(req.server.fga, req.tenant.id, groupIntents)
     await destroyMemberSessions(req.server.valkey, req.tenant.id, req.params.sub)
     // #396: post-commit residual sweep — the removed sub's direct space/page grants (this tenant only)
     // + the synchronous search reindex. Failures are logged per-tuple, never block the removal.

@@ -74,6 +74,13 @@ export async function startServer(): Promise<FastifyInstance> {
     Number(process.env.IMPORT_JOB_POLL_MS ?? 5000),
   )
 
+  // #896 / ADR-255 Decision 5: retries the permission-store tuple deletes a member removal could not
+  // land. Started here (not buildApp) so inject-driven tests don't spawn a timer — they call
+  // drainTupleOutbox directly; THIS is what clears the queue in production, and its log line carries
+  // the two numbers the 2026-08-21 ruling asks for (how many wait, how old the oldest is).
+  const { startTupleOutboxWorker } = await import('./db/tuple-outbox.js')
+  startTupleOutboxWorker(fgaClient, Number(process.env.TUPLE_OUTBOX_POLL_MS ?? 30000), (m) => app.log.info(m))
+
   // Background trash retention purge (#411 / ADR-153): permanently deletes trash entries older than
   // TRASH_RETENTION_DAYS (30). Hourly is plenty for a 30-day horizon; started here (not buildApp) so
   // inject-driven tests don't spawn a timer.

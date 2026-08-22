@@ -2,9 +2,10 @@ import { runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
 import type { PendingQuery, Row } from 'postgres'
 import { pool } from './pool.js'
 
-// #432 (the #385 follow-up): THE outbox lease primitive. The three reliable outboxes — search
-// (search_outbox), audit (audit_outbox) and webhooks (webhook_outbox) — share one reliability shape,
-// aligned by #385: a SHORT claim statement (`claimed_at = now()` over FOR UPDATE SKIP LOCKED
+// #432 (the #385 follow-up): THE outbox lease primitive. The reliable outboxes — search
+// (search_outbox), audit (audit_outbox), webhooks (webhook_outbox), email (email_outbox), imports
+// (import_jobs), analytics (analytics_outbox) and, since #896, permission-store tuple deletes
+// (fga_tuple_outbox) — share one reliability shape, aligned by #385: a SHORT claim statement (`claimed_at = now()` over FOR UPDATE SKIP LOCKED
 // candidates, stale claims re-claimed after the window), all external I/O OUTSIDE any transaction,
 // then success ⇒ delete / failure ⇒ leave (or site-specific backoff that RELEASES the claim). This
 // module is the single definition of the claim statement, the stale window and the worker loop; the
