@@ -23,15 +23,27 @@ import type { DomainEvent } from '@wikistead/events'
 /**
  * What a type is allowed to send outside the tenant.
  *
- * `send`   — the payload as it is.
- * `drop`   — never bridged. The event still happens; nothing leaves.
- * `redact` — bridged with the named fields removed.
+ * `send`   — the fields named, and nothing else.
+ * `drop`   — nothing leaves. The event still happens; no row is written.
+ * `redact` — the fields named leave; `withheld` records what a ruling held back, so the reason stays
+ *            visible at the row instead of only in the ADR.
+ *
+ * ⚠️ `fields` is an ALLOW-LIST, not a description. ADR-108 addendum §H: the payload used to be the
+ * whole event spread into a row, so a field added to any type tomorrow left the tenant the day it was
+ * added, and a row-per-TYPE table would not have noticed. Naming what may leave is the only shape in
+ * which adding a field is inert until somebody adds it here too.
  */
-export type EgressVerdict = { kind: 'send' } | { kind: 'drop'; why: string } | { kind: 'redact'; fields: readonly string[]; why: string }
+export type EgressVerdict =
+  | { kind: 'send'; fields: readonly string[] }
+  | { kind: 'drop'; why: string }
+  | { kind: 'redact'; fields: readonly string[]; withheld: readonly string[]; why: string }
 
-const send = { kind: 'send' } as const
+const send = (...fields: string[]) => ({ kind: 'send', fields }) as const
 const drop = (why: string) => ({ kind: 'drop', why }) as const
-const redact = (fields: readonly string[], why: string) => ({ kind: 'redact', fields, why }) as const
+// `withheld` comes first because it is the ruling; the rest is the payload it was taken out of, and
+// the filter is what keeps the two from disagreeing when somebody edits one of them.
+const redact = (withheld: readonly string[], why: string, ...fields: string[]) =>
+  ({ kind: 'redact', fields: fields.filter((f) => !withheld.includes(f)), withheld, why }) as const
 
 /**
  * ⚠️ Every type in the catalogue, with what it may carry. Keyed on the union so the compiler asks
@@ -60,82 +72,82 @@ export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
   //       whether the tenant has a hook at all — so an unauthenticated caller can make this product
   //       write a row per request. Anonymous share-link editing is the product's centre, so every
   //       keystroke flush is one of these.
-  'page.created': send,
-  'page.renamed': send,
-  'page.moved': send,
-  'page.deleted': send,
-  'page.trashed': send,
-  'page.trash_restored': send,
-  'page.restored': send,
-  'page.published': send,
-  'page.access_granted': send,
-  'page.access_revoked': send,
-  'page.access_restricted': send,
-  'page.access_unrestricted': send,
-  'page.made_private': send,
-  'page.made_non_private': send,
-  'page.made_public': send,
-  'page.made_non_public': send,
-  'page.frozen': send,
-  'page.unfrozen': send,
-  'space.created': send,
-  'space.updated': send,
-  'vendor.access': send, // already redacted at the source (ADR-169): action code and timestamp only
-  'space.deleted': send,
-  'space.access_granted': send,
-  'space.access_revoked': send,
-  'space.branding_updated': send,
-  'space.made_public': send,
-  'space.made_non_public': send,
-  'tenant.branding_updated': send,
-  'tenant.embed_providers_updated': send,
-  'tenant.oidc_updated': send,
-  'tenant.login_methods_updated': send,
+  'page.created': send('pageId', 'spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.renamed': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.moved': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.deleted': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.trashed': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.trash_restored': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.restored': send('pageId', 'fromRevisionId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.published': send('pageId', 'revisionId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.access_granted': send('pageId', 'grantee', 'relation', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.access_revoked': send('pageId', 'grantee', 'relation', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.access_restricted': send('pageId', 'grantee', 'relation', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.access_unrestricted': send('pageId', 'grantee', 'relation', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.made_private': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.made_non_private': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.made_public': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.made_non_public': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.frozen': send('pageId', 'level', 'actorId', 'actorKeyId', 'occurredAt'),
+  'page.unfrozen': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'space.created': send('spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'space.updated': send('spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'vendor.access': send('action', 'at', 'occurredAt'), // already redacted at the source (ADR-169): action code and timestamp only
+  'space.deleted': send('spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'space.access_granted': send('spaceId', 'grantee', 'relation', 'actorId', 'actorKeyId', 'occurredAt'),
+  'space.access_revoked': send('spaceId', 'grantee', 'relation', 'actorId', 'actorKeyId', 'occurredAt'),
+  'space.branding_updated': send('spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'space.made_public': send('spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'space.made_non_public': send('spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'tenant.branding_updated': send('actorId', 'actorKeyId', 'occurredAt'),
+  'tenant.embed_providers_updated': send('actorId', 'count', 'actorKeyId', 'occurredAt'),
+  'tenant.oidc_updated': send('actorId', 'enabled', 'actorKeyId', 'occurredAt'),
+  'tenant.login_methods_updated': send('actorId', 'platformLoginEnabled', 'actorKeyId', 'occurredAt'),
   'tenant.oidc_recovered': drop('#862 / ADR-108 §C (2026-08-22): never the operator id — ADR-169'),
   'tenant.login_methods_recovered': drop('#862 / ADR-108 §C (2026-08-22): never the operator id — ADR-169'),
   'tenant.saml_recovered': drop('#862 / ADR-108 §C (2026-08-22): never the operator id — ADR-169'),
-  'orphan_draft.enumerated': send,
-  'orphan_draft.claimed': send,
-  'orphan_draft.reassigned': send,
-  'orphan_draft.claim_expired': send,
-  'tenant.custom_domain_added': send,
-  'tenant.custom_domain_verified': send,
-  'tenant.custom_domain_removed': send,
-  'tenant.custom_domain_unverified': send,
-  'tenant.saml_updated': send,
-  'tenant.ai_toggled': send,
-  'usage.threshold_crossed': send,
-  'scim_token.created': send,
-  'scim_token.revoked': send,
-  'attachment.confirmed': send,
-  'attachment.deleted': send,
-  'share_link.revoked': send,
-  'api_key.created': send,
-  'api_key.revoked': send, // in-transaction at its call site; the resolved owner name is dropped there
-  'tenant.plan_changed': send,
+  'orphan_draft.enumerated': send('actorId', 'count', 'actorKeyId', 'occurredAt'),
+  'orphan_draft.claimed': send('actorId', 'pageId', 'expiresAt', 'actorKeyId', 'occurredAt'),
+  'orphan_draft.reassigned': send('actorId', 'pageId', 'newOwner', 'actorKeyId', 'occurredAt'),
+  'orphan_draft.claim_expired': send('pageId', 'adminSub', 'occurredAt'),
+  'tenant.custom_domain_added': send('domain', 'occurredAt'),
+  'tenant.custom_domain_verified': send('domain', 'occurredAt'),
+  'tenant.custom_domain_removed': send('domain', 'occurredAt'),
+  'tenant.custom_domain_unverified': send('domain', 'occurredAt'),
+  'tenant.saml_updated': send('actorId', 'enabled', 'actorKeyId', 'occurredAt'),
+  'tenant.ai_toggled': send('actorId', 'enabled', 'actorKeyId', 'occurredAt'),
+  'usage.threshold_crossed': send('resource', 'threshold', 'period', 'occurredAt'),
+  'scim_token.created': send('actorId', 'tokenId', 'actorKeyId', 'occurredAt'),
+  'scim_token.revoked': send('actorId', 'tokenId', 'actorKeyId', 'occurredAt'),
+  'attachment.confirmed': send('attachmentId', 'pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'attachment.deleted': send('attachmentId', 'pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'share_link.revoked': send('shareLinkId', 'pageId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'api_key.created': send('keyId', 'actorId', 'actorKeyId', 'occurredAt'),
+  'api_key.revoked': send('keyId', 'actorId', 'ownerId', 'actorKeyId', 'occurredAt'), // in-transaction at its call site; the resolved owner name is dropped there
+  'tenant.plan_changed': send('oldPlan', 'newPlan', 'occurredAt'),
   'auth.success': drop('#862 / ADR-108 §F (2026-08-22): one row per request, reachable unauthenticated'),
   'auth.failed': drop('#862 / ADR-108 §F (2026-08-22): one row per request, reachable unauthenticated'),
-  'member.added': send,
-  'member.role_changed': send,
-  'member.removed': send,
-  'member.locked': redact(['identifier'], '#862 / ADR-108 §D (2026-08-22): the value is supplied by whoever is attacking the door'),
-  'member.password_changed': send,
-  'member.password_enabled': send,
-  'member.suspended': send,
-  'member.reactivated': send,
-  'member.password_removed': send,
-  'member.factor_enrolled': send,
-  'member.factor_removed': send,
-  'member.factors_reset': send,
-  'member.recovery_codes_minted': send,
-  'member.recovery_codes_revoked': send,
-  'tenant.second_factor_policy_changed': send,
-  'member.password_reset_requested': redact(['targetSub'], '#862 / ADR-108 §E (2026-08-22): the window is reportable, the subject is not'),
-  'member.password_reset_completed': redact(['targetSub'], '#862 / ADR-108 §E (2026-08-22): the window is reportable, the subject is not'),
-  'invite.created': send,
-  'invite.revoked': send,
-  'invite.reissued': send,
-  'comment.created': send,
+  'member.added': send('targetSub', 'role', 'via', 'occurredAt'),
+  'member.role_changed': send('actorId', 'targetSub', 'role', 'actorKeyId', 'occurredAt'),
+  'member.removed': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
+  'member.locked': redact(['identifier'], '#862 / ADR-108 §D (2026-08-22): the value is supplied by whoever is attacking the door', 'identifier', 'occurredAt'),
+  'member.password_changed': send('targetSub', 'occurredAt'),
+  'member.password_enabled': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
+  'member.suspended': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
+  'member.reactivated': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
+  'member.password_removed': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
+  'member.factor_enrolled': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
+  'member.factor_removed': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
+  'member.factors_reset': send('actorId', 'targetSub', 'count', 'reason', 'actorKeyId', 'occurredAt'),
+  'member.recovery_codes_minted': send('actorId', 'targetSub', 'count', 'actorKeyId', 'occurredAt'),
+  'member.recovery_codes_revoked': send('actorId', 'targetSub', 'reason', 'actorKeyId', 'occurredAt'),
+  'tenant.second_factor_policy_changed': send('actorId', 'required', 'kinds', 'actorKeyId', 'occurredAt'),
+  'member.password_reset_requested': redact(['targetSub'], '#862 / ADR-108 §E (2026-08-22): the window is reportable, the subject is not', 'targetSub', 'actorId', 'actorKeyId', 'occurredAt'),
+  'member.password_reset_completed': redact(['targetSub'], '#862 / ADR-108 §E (2026-08-22): the window is reportable, the subject is not', 'targetSub', 'occurredAt'),
+  'invite.created': send('actorId', 'role', 'actorKeyId', 'occurredAt'),
+  'invite.revoked': send('actorId', 'actorKeyId', 'occurredAt'),
+  'invite.reissued': send('actorId', 'emailed', 'actorKeyId', 'occurredAt'),
+  'comment.created': send('actorId', 'pageId', 'threadId', 'actorKeyId', 'occurredAt'),
 }
 
 /** What this type may send, if anything. */

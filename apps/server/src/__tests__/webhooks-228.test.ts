@@ -134,10 +134,14 @@ describe('#228 drain — existence-hiding + SSRF', () => {
   })
 })
 
+// ⚠️ #862: these use `member.added` — a REAL catalogued type with no `pageId`, so the drain's
+// disposition has nothing to suppress and the lease is what is being measured. They used to enqueue
+// `member.joined`, which the catalogue does not contain; typing `eventType` as the union is what said
+// so. A fabricated type now also has no egress row, so it would be written and never delivered.
 describe('#385 drain — the lease (claim → deliver outside tx → bookkeep)', () => {
   it('a freshly CLAIMED row is not re-drained within the stale window; a stale claim IS re-claimed', async () => {
     await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
-    await db.tx(async (tx) => { await enqueueWebhookOutbox(tx, { tenantId: tenant.id, eventType: 'member.joined', payload: { actor: 'user:x' } }) })
+    await db.tx(async (tx) => { await enqueueWebhookOutbox(tx, { tenantId: tenant.id, eventType: 'member.added', payload: { targetSub: 'user:x', role: 'member', via: 'invite' } }) })
     // simulate another worker's FRESH claim → this drain must skip it (disjoint batches)
     await admin`UPDATE webhook_outbox SET claimed_at = now() WHERE tenant_id = ${tenant.id}`
     expect(await drainWebhookOutbox(fgaClient)).toBe(0)
@@ -153,7 +157,7 @@ describe('#385 drain — the lease (claim → deliver outside tx → bookkeep)',
     // an SSRF-blocked hook → delivery fails → the row must be rescheduled, not stuck under a live claim
     const hook = await createWebhook(db, { tenantId: tenant.id, plan: 'business', userId: 'dev-user', url: 'https://127.0.0.1/blocked-385', eventFilter: null })
     hookIds.push(hook.id)
-    await db.tx(async (tx) => { await enqueueWebhookOutbox(tx, { tenantId: tenant.id, eventType: 'member.joined', payload: { actor: 'user:x' } }) })
+    await db.tx(async (tx) => { await enqueueWebhookOutbox(tx, { tenantId: tenant.id, eventType: 'member.added', payload: { targetSub: 'user:x', role: 'member', via: 'invite' } }) })
     expect(await drainWebhookOutbox(fgaClient)).toBe(1)
     const [row] = await admin<{ claimed_at: string | null; attempts: number; due: boolean }[]>`
       SELECT claimed_at, attempts, next_attempt_at > now() AS due FROM webhook_outbox WHERE tenant_id = ${tenant.id}`

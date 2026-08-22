@@ -11,6 +11,8 @@ import { withTenantTx } from '../db/index.js' // #382
 import { encryptSecret, decryptSecret } from '../auth/secret-crypto.js'
 import { guardedFetch } from '../safe-fetch.js'
 import { pageEventDisposition } from '../page-disposition.js'
+import { egressVerdict } from '../webhooks/egress.js' // #862: what each type may carry out of the tenant
+import type { DomainEvent } from '@wikistead/events'
 
 // #228 / ADR-108: outbound webhooks. A subscription is admin-managed (RLS) and gated by the `webhooks`
 // entitlement at CREATION. Events are enqueued IN the operation's tx (enqueueWebhookOutbox — like the audit
@@ -98,10 +100,31 @@ export async function deleteWebhook(db: TenantDb, id: string): Promise<boolean> 
 
 // Enqueue a webhook event IN the operation's tx (mirrors enqueueAudit). Thin payload only. The private/
 // draft existence-hiding filter is applied at DRAIN (it needs the current FGA state, and the row is cheap).
-export async function enqueueWebhookOutbox(sql: Sql, args: { tenantId: string; eventType: string; payload: Record<string, unknown> }): Promise<string> {
+//
+// ⚠️ #862 / ADR-108 addendum §H: the egress verdict is applied HERE, at the write, and this is the only
+// place it is applied. There are three roads to a durable row — the bridge, and the two call sites that
+// enqueue inside their own transaction — and the two transactional ones are precisely the pair that
+// egressed for a year without anybody reviewing what they carried. A check on the bridge would have
+// missed them again. It also has to happen before the INSERT rather than at the drain: the outbox is
+// durable, so a row holding a field nobody may receive is the same disclosure one step later, waiting
+// for whoever reads the table next.
+//
+// Returns the row id, or `null` when the verdict is `drop` and no row was written.
+export async function enqueueWebhookOutbox(
+  sql: Sql,
+  args: { tenantId: string; eventType: DomainEvent['type']; payload: Record<string, unknown> },
+): Promise<string | null> {
+  // `eventType` is the union rather than `string` on purpose: an unruled type is then a compile error
+  // at the call site, not a row that quietly ships whatever it was handed.
+  const verdict = egressVerdict(args.eventType)
+  if (verdict.kind === 'drop') return null
+  // The row names what may leave; anything else the event grows is dropped rather than forwarded.
+  // `in` rather than a default: an optional field that is absent stays absent, it does not become null.
+  const payload: Record<string, unknown> = {}
+  for (const field of verdict.fields) if (field in args.payload) payload[field] = args.payload[field]
   const [row] = await sql<{ id: string }[]>`
     INSERT INTO webhook_outbox (tenant_id, event_type, payload)
-    VALUES (${args.tenantId}, ${args.eventType}, ${args.payload as unknown as string})
+    VALUES (${args.tenantId}, ${args.eventType}, ${payload as unknown as string})
     RETURNING id`
   return row!.id
 }

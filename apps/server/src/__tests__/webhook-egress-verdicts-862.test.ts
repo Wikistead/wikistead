@@ -10,15 +10,48 @@
 // suite here stayed green when a fictional type was added to the catalogue, and that blindness is how
 // the operator-name events were shipped in the first place. These cases cover what a type cannot: that
 // the verdicts are the ruled ones, and that the bridge obeys them.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import postgres from 'postgres'
 import { EVENT_CATALOG } from '@wikistead/events'
 import type { DomainEvent } from '@wikistead/events'
+import { pool } from '../db/pool.js'
+import { TenantRegistry } from '../db/registry.js'
+import { acquireTenantDb } from '../db/tenant-db.js'
+import type { TenantDb } from '../db/index.js'
+import type { Tenant } from '@wikistead/types'
 import { EGRESS, egressVerdict } from '../webhooks/egress.js'
-import { bridgeShouldEnqueue, webhookPayload } from '../webhooks/bridge.js'
+import { bridgeShouldEnqueue } from '../webhooks/bridge.js'
+import { enqueueWebhookOutbox } from '../routes/webhooks.js'
 
 const catalogued = Object.keys(EVENT_CATALOG) as DomainEvent['type'][]
 const event = (type: string, rest: Record<string, unknown> = {}) =>
   ({ type, tenantId: 'tenant_dev', ...rest }) as unknown as DomainEvent
+
+// ⚠️ The `strip` rulings are asserted on the ROW, not on what the bridge hands over. What the
+// receiving system can read is the whole question, and there are three roads to a durable row — only
+// one of them goes through the bridge. So these write through the real chokepoint and read back what
+// Postgres holds.
+const admin = postgres(process.env.DATABASE_ADMIN_URL!)
+let tenant: Tenant, db: TenantDb
+
+beforeAll(async () => {
+  tenant = (await new TenantRegistry(pool).findBySlug('dev'))!
+  db = await acquireTenantDb(tenant)
+}, 60_000)
+
+afterAll(async () => {
+  await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id} AND payload->>'egress862' IS NOT NULL`.catch(() => {})
+  await db.release(); await pool.end(); await admin.end()
+}, 60_000)
+
+/** Write one event through the durable chokepoint and return the payload the row actually holds. */
+async function storedPayload(type: DomainEvent['type'], payload: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const id = await db.tx((tx) => enqueueWebhookOutbox(tx, { tenantId: tenant.id, eventType: type, payload }))
+  if (id === null) return null
+  const [row] = await admin<{ payload: Record<string, unknown> }[]>`SELECT payload FROM webhook_outbox WHERE id = ${id}`
+  await admin`DELETE FROM webhook_outbox WHERE id = ${id}`
+  return row!.payload
+}
 
 describe('#862 every catalogued type has a verdict', () => {
   it('the catalogue is not empty (a walk that finds nothing would pass everything below)', () => {
@@ -66,21 +99,23 @@ describe('#862 §C — a break-glass event never names the operator who ran it',
 })
 
 describe('#862 §D — a lockout does not relay what the attacker typed', () => {
-  it('ships, without the identifier', () => {
+  it('ships, without the identifier', async () => {
     expect(egressVerdict('member.locked').kind).toBe('redact')
-    const payload = webhookPayload(event('member.locked', { identifier: 'victim@example.com' }))
+    const payload = await storedPayload('member.locked', { identifier: 'victim@example.com', occurredAt: '2026-01-01T00:00:00.000Z' })
     // ⚠️ The event still leaves: "an account was locked" is the operationally useful fact. What does
     // not leave is a string an unauthenticated caller chose — delivering it would make this product
     // POST attacker-supplied input to a URL the tenant configured.
+    expect(payload, 'the row is written; only the field is withheld').not.toBeNull()
     expect(payload).not.toHaveProperty('identifier')
-    expect(payload.occurredAt, 'the consumer still learns when').toBeTruthy()
+    expect(payload!.occurredAt, 'the consumer still learns when').toBeTruthy()
   })
 })
 
 describe('#862 §E — the security events ship; two lose their subject', () => {
-  it('the reset events carry the window, not whose window it is', () => {
+  it('the reset events carry the window, not whose window it is', async () => {
     for (const type of ['member.password_reset_requested', 'member.password_reset_completed'] as const) {
-      const payload = webhookPayload(event(type, { targetSub: 'user-42', actorId: 'admin-1' }))
+      const payload = await storedPayload(type, { targetSub: 'user-42', actorId: 'admin-1', occurredAt: '2026-01-01T00:00:00.000Z' })
+      expect(payload, `${type}: the row is written`).not.toBeNull()
       expect(payload, type).not.toHaveProperty('targetSub')
     }
   })
@@ -115,27 +150,47 @@ describe('#862 §F — neither auth event is bridged', () => {
   })
 })
 
-describe('#862 the redaction happens before the row is durable', () => {
-  it('a redacted field is absent from the payload the outbox would store', () => {
+describe('#862 the verdict is applied before the row is durable', () => {
+  it('a withheld field is absent from the row Postgres holds', async () => {
     // Not at the drain: a row holding a field nobody may receive is the same disclosure one step
     // later, and the outbox outlives the request that wrote it.
-    const payload = webhookPayload(event('member.locked', { identifier: 'x@example.com', at: '2026-01-01' }))
-    expect(Object.keys(payload).sort()).toEqual(['at', 'occurredAt'])
+    const payload = await storedPayload('member.locked', { identifier: 'x@example.com', occurredAt: '2026-01-01T00:00:00.000Z' })
+    expect(Object.keys(payload!).sort()).toEqual(['occurredAt'])
   })
 
-  it('and a `send` verdict is not an excuse to drop the routing rule', () => {
+  it('⚠️ §H — a field the row does not name is dropped, not forwarded', async () => {
+    // The payload used to be the event spread whole, so a field added to any type tomorrow left the
+    // tenant that day. `egress862` is such a field: nothing in the catalogue declares it, and the
+    // caller here asks for it to be sent.
+    const payload = await storedPayload('page.created', { pageId: 'p1', spaceId: 's1', actorId: 'u1', egress862: 'must not travel' })
+    expect(payload, 'the event still ships').not.toBeNull()
+    expect(payload!.pageId, 'the fields its row names do travel').toBe('p1')
+    expect(payload, 'a field no row names is dropped').not.toHaveProperty('egress862')
+  })
+
+  it('and a `send` verdict is not an excuse to drop the routing rule', async () => {
     // `type` and `tenantId` are columns of the row; repeating them in the payload invites two answers.
-    const payload = webhookPayload(event('page.created', { pageId: 'p1', spaceId: 's1', actorId: 'u1' }))
+    const payload = await storedPayload('page.created', { pageId: 'p1', spaceId: 's1', actorId: 'u1', type: 'page.created', tenantId: tenant.id })
     expect(payload).not.toHaveProperty('type')
     expect(payload).not.toHaveProperty('tenantId')
-    expect(payload.pageId).toBe('p1')
+    expect(payload!.pageId).toBe('p1')
   })
 
-  it('⚠️ and `actorKeyId` still travels — ADR-221 §9 was not reversed by this change', () => {
+  it('⚠️ and `actorKeyId` still travels — ADR-221 §9 was not reversed by this change', async () => {
     // The field is distributed onto every event with an `actorId` by a conditional type, so no union
-    // member declares it. A verdict table built from declared fields would have stripped it from
-    // sixty events silently. It is carried because ADR-221 §9 says the key travels with the actor.
-    const payload = webhookPayload(event('page.created', { pageId: 'p1', actorId: 'u1', actorKeyId: 'key-1' }))
-    expect(payload.actorKeyId, 'the key the actor arrived on').toBe('key-1')
+    // member declares it. A table of DECLARED fields would have stripped it from sixty events
+    // silently, and §H's rule is exactly the thing that would have done the stripping. It is carried
+    // because ADR-221 §9 says the key travels with the actor, for webhooks too.
+    const payload = await storedPayload('page.created', { pageId: 'p1', actorId: 'u1', actorKeyId: 'key-1' })
+    expect(payload!.actorKeyId, 'the key the actor arrived on').toBe('key-1')
+  })
+
+  it('⚠️ §F — a dropped type writes no row at all, by either road', async () => {
+    // The bridge refuses it, and so does the chokepoint — because the two types that egress today do
+    // not come through the bridge, and a refusal only the bridge performs would not cover them.
+    for (const type of ['auth.success', 'auth.failed'] as const) {
+      expect(bridgeShouldEnqueue(event(type, { method: 'oidc' })), `${type}: the bridge refuses`).toBe(false)
+      expect(await storedPayload(type, { method: 'oidc' }), `${type}: and no row is written`).toBeNull()
+    }
   })
 })

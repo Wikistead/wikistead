@@ -55,17 +55,16 @@ import { egressVerdict } from './egress.js'
 export const ENQUEUED_IN_TRANSACTION = new Set<DomainEvent['type']>(['page.published', 'api_key.revoked'])
 
 /**
- * The delivered payload: what the event carries, minus the routing fields the row already has, minus
- * anything its egress verdict says must not leave the tenant.
+ * What the bridge OFFERS the outbox: everything the event carries except the routing fields the row
+ * already has, plus the moment it happened.
  *
- * ⚠️ The redaction happens HERE, on the way into the outbox, rather than at the drain. A row that
- * holds a field nobody may receive is a disclosure waiting for the next person who reads the table —
- * and the outbox is durable, so it would outlive the request that produced it.
+ * ⚠️ This is not what gets stored. `enqueueWebhookOutbox` applies the egress verdict and keeps only
+ * the fields that type's row names — deliberately there and not here, because two of the three roads
+ * to a durable row do not come through this file, and they are the two that have been egressing all
+ * along (ADR-108 addendum §H). One enforcement point; this one just shapes.
  */
 export function webhookPayload(event: DomainEvent): Record<string, unknown> {
   const { type: _type, tenantId: _tenantId, ...rest } = event as DomainEvent & Record<string, unknown>
-  const verdict = egressVerdict(event.type)
-  if (verdict.kind === 'redact') for (const field of verdict.fields) delete (rest as Record<string, unknown>)[field]
   return { ...rest, occurredAt: new Date().toISOString() }
 }
 
