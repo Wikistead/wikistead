@@ -140,7 +140,12 @@ export async function refreshGuestToken(linkId: string, token: string): Promise<
     // password there). Anything else means the credential itself is dead and nothing continues.
     return body.error === "session_ended" ? { kind: "reenter" } : { kind: "ended", why: "unauthorized" };
   }
-  return { kind: "ended", why: "gone" }; // 404: revoked, expired, or never this deployment's link
+  // 404 is the link itself answering: revoked, expired, or never this deployment's. That ends it.
+  if (res.status === 404) return { kind: "ended", why: "gone" };
+  // #875 (review rejection): everything else used to land here too, so a 502 from a rolling restart or a
+  // gateway timeout ended a guest's session for good — a redeploy read to them as a revocation. The
+  // terminal statuses are 401 and 404 (ADR-248 §3.6); a deployment having a moment is a retry.
+  return { kind: "retry" };
 }
 
 export async function fetchGuestToken(linkId: string, password?: string): Promise<GuestTokenResult> {

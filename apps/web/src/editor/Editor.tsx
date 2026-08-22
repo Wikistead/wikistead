@@ -141,6 +141,8 @@ export interface EditorProps {
    * `:w` entry point and the checkbox, so it withholds those itself. Both read the same signal.
    */
   onLiveness?: (state: Liveness) => void;
+  /** #875 / ADR-248 §3.6: the guest session registers its reconnect knock through here. */
+  registerReconnect?: (fn: (() => void) | null) => void;
   // vim ex-command entry points (Light-3): :q → onExitEdit, :w/:wq → onPublish. Pass
   // STABLE callbacks (useCallback) — captured at mount, not in the surface-effect deps.
   onExitEdit?: () => void;
@@ -186,7 +188,7 @@ function tint(color: string): string {
 // visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
 // the mount functions don't need to know about the TOC.
 
-export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "" as Bearer, publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, onPublish, onExitEdit, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "" as Bearer, publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, registerReconnect, onPublish, onExitEdit, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -429,6 +431,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       url: collabUrl,
       docName,
       token,
+      registerReconnect,
       onLiveness: (state) => {
         liveRef.current = state.live;
         onLivenessRef.current?.(state);
@@ -447,6 +450,9 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
     };
     // user intentionally excluded — presence updates go through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    // registerReconnect intentionally excluded: it is a stable method on the session object, and
+    // depending on it would rebuild the socket and the Y.Doc — the thing this whole seam exists to
+    // avoid. eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docName, token, collabUrl, canEdit, onDictStateless]);
 
   // (2) Surface — remount when the surface changes (same connection) or after a

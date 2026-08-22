@@ -31,6 +31,14 @@ export function connect(opts: {
    * been refused. Optional so the ephemeral room and the tests that do not care are unaffected.
    */
   onLiveness?: (state: Liveness) => void;
+  /**
+   * #875 / ADR-248 §3.6: hand the session the knock that re-attaches this document.
+   *
+   * Called with a function while the connection exists and with `null` when it is torn down. The
+   * provider will not reconnect itself once `permissionDeniedHandler` has disconnected it, and the
+   * backoff has to outlive any one provider, so the session holds it and this is where it gets it.
+   */
+  registerReconnect?: (fn: (() => void) | null) => void;
 }) {
   const doc = new Y.Doc();
   // Create the WebSocket transport explicitly. When HocuspocusProvider is given
@@ -121,6 +129,9 @@ export function connect(opts: {
   // provider, AND close the underlying socket (no WS leak), then free the doc.
   // Robust to rapid page switches and React StrictMode double-mounts.
   const disconnect = () => {
+    // Unregister FIRST: a scheduled knock that fires after teardown would reconnect a provider the
+    // caller has just thrown away, and the socket below is about to be closed under it.
+    opts.registerReconnect?.(null);
     try {
       provider.awareness?.setLocalState(null);
     } catch {
@@ -131,6 +142,7 @@ export function connect(opts: {
     doc.destroy();
   };
 
+  opts.registerReconnect?.(() => provider.connect());
   return { doc, provider, socket, ytext, disconnect };
 }
 

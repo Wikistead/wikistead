@@ -1071,8 +1071,8 @@ function GuestSessionHost({ linkId, minted }: { linkId: string; minted: GuestTok
 
   const live = { ...current, token: "" }; // the token travels through the session, never as a prop
   return live.docName.includes(":s:")
-    ? <GuestSpace minted={live} getToken={getTokenRef.current!} apiBearer={apiBearerRef.current!} />
-    : <GuestPage minted={live} getToken={getTokenRef.current!} apiBearer={apiBearerRef.current!} />;
+    ? <GuestSpace minted={live} getToken={getTokenRef.current!} apiBearer={apiBearerRef.current!} registerReconnect={session.onReconnect} />
+    : <GuestPage minted={live} getToken={getTokenRef.current!} apiBearer={apiBearerRef.current!} registerReconnect={session.onReconnect} />;
 }
 
 // Space-link guest reader-chrome (#245 / ADR-112): show the linked space's page tree in the REAL sidebar
@@ -1081,7 +1081,7 @@ function GuestSessionHost({ linkId, minted }: { linkId: string; minted: GuestTok
 // from the token's single space; the member-only GET /spaces is never called (Decision 0). No member
 // chrome (switcher/settings/create/rename/delete/unpublished dots) — GuestSidebar renders a read-only tree.
 // (Ships only after #244, which stops private pages from appearing in a space-guest's tree.)
-function GuestSpace({ minted, getToken, apiBearer }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string }) {
+function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string; registerReconnect: (fn: (() => void) | null) => void }) {
   const { t } = useTranslation();
   // #813: the token is NOT in `minted` any more — it lives in the session. `apiBearer` is read per
   // request (ref-stable, so no effect sees a new identity) and `getToken` is what the socket calls on
@@ -1172,7 +1172,7 @@ function GuestSpace({ minted, getToken, apiBearer }: { minted: GuestToken; getTo
         // key on the page id so switching pages in the tree remounts the editor cleanly. A page this
         // guest JUST created opens straight in edit mode (member new-page parity); onTitleChange
         // refreshes the tree so the rename shows up without a reload.
-        <GuestPageContent key={openId} minted={pageMinted} getToken={getToken} apiBearer={apiBearer} startEditing={openId === createdId} onTitleChange={refreshPages} />
+        <GuestPageContent registerReconnect={registerReconnect} key={openId} minted={pageMinted} getToken={getToken} apiBearer={apiBearer} startEditing={openId === createdId} onTitleChange={refreshPages} />
       ) : pages == null ? (
         // #364 ②: still resolving (tree + home pointer) — skeleton, not a centred text line.
         <ShellLoading />
@@ -1194,7 +1194,7 @@ function GuestSpace({ minted, getToken, apiBearer }: { minted: GuestToken; getTo
 // chrome-less AppShell) and by the space-link reader-chrome (GuestSpace, rendered inside an AppShell whose
 // sidebar is the guest page tree). Keeping the AppShell out of here lets the space layout own a single
 // shell with the sidebar slot (#245 / ADR-112).
-function GuestPageContent({ minted, getToken, apiBearer, onBack, startEditing = false, onTitleChange }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string; onBack?: () => void; startEditing?: boolean; onTitleChange?: () => void }) {
+function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBack, startEditing = false, onTitleChange }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string; registerReconnect: (fn: (() => void) | null) => void; onBack?: () => void; startEditing?: boolean; onTitleChange?: () => void }) {
   const { t } = useTranslation();
   // #813: the token is NOT in `minted` any more — it lives in the session. `apiBearer` is read per
   // request (ref-stable, so no effect sees a new identity) and `getToken` is what the socket calls on
@@ -1435,7 +1435,7 @@ function GuestPageContent({ minted, getToken, apiBearer, onBack, startEditing = 
               canEdit={canEdit}
             />
             <UnsavedBanner reason={liveness.reason} />
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (guest CM body is virtualised too).
                 #207: a guest holds a share token, which the diagram route accepts, so the picture prints
                 here as well. (The public route below has no token and passes none — its plantuml degrades
@@ -1471,8 +1471,8 @@ function GuestPageContent({ minted, getToken, apiBearer, onBack, startEditing = 
 
 // Page-link guest route: a single page, NO space tree (a page-scoped link grants no authority to traverse
 // the space — #245 / ADR-112 Decision 3). Chrome-less AppShell wrapping the page content.
-function GuestPage({ minted, getToken, apiBearer }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string }) {
-  return <AppShell><GuestPageContent minted={minted} getToken={getToken} apiBearer={apiBearer} /></AppShell>;
+function GuestPage({ minted, getToken, apiBearer, registerReconnect }: { minted: GuestToken; getToken: () => Promise<string>; apiBearer: () => string; registerReconnect: (fn: (() => void) | null) => void }) {
+  return <AppShell><GuestPageContent registerReconnect={registerReconnect} minted={minted} getToken={getToken} apiBearer={apiBearer} /></AppShell>;
 }
 
 // Cloud signup landing (platform origin). Public — no session yet. Starts the
