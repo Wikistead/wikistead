@@ -266,6 +266,8 @@ const BRAND_ASSETS: { from: string; to: string }[] = [
 import { renderEntitlementsMarkdown } from '../packages/entitlements/src/index.js'
 import { renderEventsMarkdown } from '../packages/events/src/index.js'
 import { renderAccountSettingsMarkdown } from '../apps/server/src/settings-catalog.js'
+// #862: the reference says which events reach a webhook, and the server owns that decision.
+import { EGRESS } from '../apps/server/src/webhooks/egress.js'
 // @ts-expect-error — repo-root script module, no types (#621 convention)
 import { SURFACE_DOCS } from './doc-code-map.mjs'
 import { SCREEN_VOCABULARY } from './screen-vocabulary.mjs'
@@ -286,7 +288,7 @@ const SURFACES: { name: string; outPath: string; render: () => string }[] = [
   {
     name: 'domain events',
     outPath: join(root, 'docs/generated/webhook-events.md'),
-    render: renderEventsMarkdown,
+    render: () => renderEventsMarkdown(EGRESS),
   },
   {
     name: 'account settings',
