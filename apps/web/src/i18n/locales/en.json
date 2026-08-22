@@ -1219,7 +1219,9 @@
     "updated": "Updated"
   },
   "publicPage": {
-    "notFound": "Page not found"
+    "notFound": "Page not found",
+    "unavailable": "This site is not answering right now. The link is fine, so please try again in a moment.",
+    "unavailableRetry": "Try again"
   },
   "backlinks": {
     "untitled": "(untitled)",

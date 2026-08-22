@@ -1215,7 +1215,9 @@
     "updated": "更新"
   },
   "publicPage": {
-    "notFound": "ページが見つかりません"
+    "notFound": "ページが見つかりません",
+    "unavailable": "このサイトがいま応答していません。リンク自体は有効ですので、少し待ってからもう一度お試しください。",
+    "unavailableRetry": "もう一度試す"
   },
   "backlinks": {
     "untitled": "(無題)",

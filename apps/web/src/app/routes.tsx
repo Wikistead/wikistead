@@ -44,6 +44,7 @@ import { Editor, type AnchorGetter } from "../editor/Editor";
 import { UnsavedBanner } from "../editor/UnsavedBanner";
 import type { Liveness } from "../editor/collab";
 import { makeGuestSession, type GuestSession } from "../session/guest-session";
+import { isServerFault } from "./serverFault"; // #886 / #681: one place decides "the server failed"
 import { setVimClipboardMode } from "../editor/live-preview/vim-clipboard";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
@@ -1680,7 +1681,14 @@ export interface PublicSpaceContext { name: string; iconImageUrl: string | null 
 
 function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: PublicSpaceContext | null) => void }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ status: "loading" | "notfound" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[]; space?: PublicSpaceContext } }>({ status: "loading" });
+  // #886: FOUR states. "unavailable" is the deployment failing, and it is NOT "notfound" — a 502 from
+  // a rolling restart used to tell a reader that the address their author shared does not exist, which
+  // they have no way to tell apart from a broken link. ⚠️ The 404 is untouched: it is existence-hiding
+  // (#227), and a private page must stay indistinguishable from a missing one.
+  const [state, setState] = useState<{ status: "loading" | "notfound" | "unavailable" | "ok"; page?: { id: string; title: string; content: string; noindex: boolean; children: PublicChildNode[]; space?: PublicSpaceContext } }>({ status: "loading" });
+  // #886: bumping this re-runs the load, which is what the retry on the unavailable view needs. A
+  // separate key rather than clearing `pageId`: the page being asked for has not changed.
+  const [reloadKey, setReloadKey] = useState(0);
   const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null); // callback ref → reactive for the TOC hook
   const [outerEl, setOuterEl] = useState<HTMLDivElement | null>(null); // #227 non-scrolling positioning context
   const [bandEl, setBandEl] = useState<HTMLDivElement | null>(null); // #227 ②: publish the band's real height
@@ -1704,14 +1712,18 @@ function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: 
     fetch(assetUrl(`/public/pages/${encodeURIComponent(pageId)}`))
       .then(async (res) => {
         if (cancelled) return;
+        // #886 / #681: the server failing is not an answer about this page. `isServerFault` is the one
+        // place that decides, so the five surfaces asking it cannot drift apart.
+        if (isServerFault(res)) { setState({ status: "unavailable" }); return; }
         if (!res.ok) { setState({ status: "notfound" }); return; }
         const payload = await res.json();
         setState({ status: "ok", page: payload });
         onSpace?.(payload?.space ?? null); // hoist the space context into the header slot
       })
-      .catch(() => { if (!cancelled) setState({ status: "notfound" }); });
+      // A request that never arrived decides nothing either — same reading, same state.
+      .catch(() => { if (!cancelled) setState({ status: "unavailable" }); });
     return () => { cancelled = true; };
-  }, [pageId]);
+  }, [pageId, reloadKey]);
 
   // #319 / ADR-124: render the public body with mountPublishedView (the member read engine) instead of the
   // reduced renderMarkdownToDom, so math / code highlighting / task checkboxes / line wrapping / every macro
@@ -1779,6 +1791,19 @@ function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: 
 
   // #364 ②: the public reader's loading was a bare empty div = a white page while resolving.
   if (state.status === "loading") return <ShellLoading />;
+  // #886: said BEFORE the not-found branch, and separately from it. A reader who was handed a working
+  // address must not be told the page does not exist because the deployment is restarting.
+  if (state.status === "unavailable") {
+    return (
+      <div data-testid="public-unavailable" style={{ padding: 24, fontFamily: "var(--font-body, sans-serif)" }}>
+        <p style={{ margin: 0 }}>{t("publicPage.unavailable")}</p>
+        <button type="button" data-testid="public-unavailable-retry" style={{ marginTop: 12 }}
+          onClick={() => { setState({ status: "loading" }); setReloadKey((k) => k + 1); }}>
+          {t("publicPage.unavailableRetry")}
+        </button>
+      </div>
+    );
+  }
   if (state.status === "notfound") {
     return <div data-testid="public-not-found" style={{ padding: 24, fontFamily: "var(--font-body, sans-serif)" }}>{t("publicPage.notFound")}</div>;
   }
