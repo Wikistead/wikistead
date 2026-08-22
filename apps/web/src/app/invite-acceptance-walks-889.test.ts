@@ -14,9 +14,9 @@ import { join, resolve } from "node:path";
 const FORM = resolve(import.meta.dirname, "SetPasswordForm.tsx");
 const SPECS = resolve(import.meta.dirname, "../../../../tests/e2e/specs");
 
-// The specs directory is present in the CE build (measured against `isFilteredPath`), so the
-// existsSync is a guard against a move rather than against the filter — and `finds the walks at all`
-// is what stops a move from turning this file into a green that walked nothing.
+// The specs directory is part of the CE build, so the existsSync is a guard against a MOVE rather
+// than against a missing directory — and `finds the walks at all` is what stops a move from turning
+// this file into a green that walked nothing.
 const specs = existsSync(SPECS)
   ? readdirSync(SPECS).filter((f) => f.endsWith(".spec.ts"))
       .map((f) => ({ name: f, src: readFileSync(join(SPECS, f), "utf8") }))
