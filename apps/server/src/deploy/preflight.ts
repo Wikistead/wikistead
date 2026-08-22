@@ -151,7 +151,18 @@ export function notFoundIsJsonVerdict(status: number, contentType: string): Chec
 // is the day it would otherwise ship unguarded. Cookies this product did not set are deliberately out
 // of scope here — the load balancer's affinity cookie is a routing hint, not a credential, and failing
 // a deployment over it would teach the operator to ignore this row.
+//
+// ⚠️ the prefix was the whole rule, and the tree already had a counter-example — `mcp_flow`
+// (`routes/mcp-oauth-flow.ts`) binds an OAuth authorize to the browser that started it, which is
+// squarely a credential and was judged by nothing. The naming convention is not a guarantee, so the
+// names that do not follow it are listed, and `cookie-names-judged-884.test.ts` walks the tree to
+// keep the list honest instead of trusting the next author to remember this comment.
 const OWN_COOKIE_PREFIX = 'wks_'
+export const OWN_COOKIES_OUTSIDE_THE_PREFIX = ['mcp_flow'] as const
+
+export function isOwnCookie(name: string): boolean {
+  return name.startsWith(OWN_COOKIE_PREFIX) || (OWN_COOKIES_OUTSIDE_THE_PREFIX as readonly string[]).includes(name)
+}
 
 /** The name of a Set-Cookie line, e.g. `wks_sess=abc; Path=/` → `wks_sess`. */
 function cookieName(line: string): string {
@@ -167,7 +178,7 @@ function cookieName(line: string): string {
 // ⚠️ `Secure` is required only on an https run. Demanding it over http would redden every plaintext
 // evaluation stack, and a gate an operator learns to skip protects nothing.
 export function cookieAttributesVerdict(setCookieHeaders: string[], isHttps: boolean): CheckVerdict {
-  const ours = setCookieHeaders.filter((c) => cookieName(c).startsWith(OWN_COOKIE_PREFIX))
+  const ours = setCookieHeaders.filter((c) => isOwnCookie(cookieName(c)))
   if (ours.length === 0) {
     // NOT a pass. The run saw cookies but none of ours, so it has no evidence either way — and this
     // gate blocks a release, where "I did not look" must never print like "I looked and it was fine".

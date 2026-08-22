@@ -119,8 +119,11 @@ describe('cookieAttributesVerdict (#884: who may READ the session, and over what
   })
 
   it('judges every cookie this product issues, not just the session', () => {
-    // The rule is the `wks_` prefix, so a fourth one is judged the day it is written.
-    for (const name of ['wks_factor', 'wks_signup', 'wks_something_new']) {
+    // the third name here used to be `wks_something_new` — a name this test invented, which
+    // made a claim about the tree that only the test's own example could satisfy. `mcp_flow` is the
+    // real counter-example (an OAuth authorize bound to one browser, outside the naming convention),
+    // and `cookie-names-judged-884.test.ts` walks the tree so the list cannot fall behind again.
+    for (const name of ['wks_factor', 'wks_signup', 'mcp_flow']) {
       const v = cookieAttributesVerdict([`${name}=x; Path=/; Secure`], true)
       expect(v.pass, `${name} was not judged`).toBe(false)
       expect(v.detail).toContain(name)
