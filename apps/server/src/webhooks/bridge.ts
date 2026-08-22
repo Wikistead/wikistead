@@ -1,13 +1,13 @@
 // #862 / ADR-108 Q4: every event the catalogue names reaches the webhook outbox.
 //
-// The catalogue lists 75 event types and the documentation says webhooks are built on it. Two of them
+// The catalogue lists 76 event types and the documentation says webhooks are built on it. Two of them
 // were actually delivered: `page.published` and `api_key.revoked`, each because somebody remembered to
-// call `enqueueWebhookOutbox` by hand at that one call site. The other seventy-three were emitted onto
+// call `enqueueWebhookOutbox` by hand at that one call site. The other seventy-four were emitted onto
 // the in-process bus and went nowhere — a subscriber wired for `share_link.revoked` (Valkey) and one
 // for `usage.threshold_crossed` (a log line) were the only listeners in the tree.
 //
 // A per-call-site enqueue cannot close that: there are 133 `emit` sites and the next one will forget
-// too, exactly as the previous seventy-three did. So the bridge is ONE subscriber, and what it carries
+// too, exactly as the previous seventy-four did. So the bridge is ONE subscriber, and what it carries
 // is derived from the event rather than from a list of types anybody has to maintain.
 //
 // ── what makes this a reliable path ────────────────────────────────────────────────────────────────
@@ -27,14 +27,23 @@
 //
 // ── what is NOT decided here ───────────────────────────────────────────────────────────────────────
 //
-// Whether an event may leave the tenant at all is the drain's question, not this one. `page-disposition`
-// reads the CURRENT authorization state at delivery time and suppresses anything about a private page
-// or an unpublished draft (ADR-108 Q4's existence-hiding rule) — which is why enqueueing every type is
-// safe: a row for a draft page is written, and then dropped before it can reach anybody. Filtering here
-// instead would ask the authorization store a question whose answer can change before delivery.
+// Whether THIS PAGE may be spoken of is the drain's question, not this one. `page-disposition` reads the
+// CURRENT authorization state at delivery time and suppresses anything about a private page or an
+// unpublished draft (ADR-108 Q4's existence-hiding rule) — which is why a row for a draft page may be
+// written and then dropped before it reaches anybody. Asking that question here instead would put it to
+// the authorization store at a moment whose answer can change before delivery.
+//
+// ⚠️ Whether THIS KIND of event may leave the tenant at all is a different question, and it is settled
+// here, in `egress.ts` — one row per catalogued type, ruled 2026-08-22 (ADR-108 addendum §C–§F). It has
+// to be answered before the row is written rather than at the drain: the outbox is durable, so a row
+// holding a field nobody may receive is the same disclosure waiting one step later. The two questions
+// are not interchangeable — the disposition is per-instance and can change, the verdict is per-type and
+// cannot. This file used to say enqueueing every type was safe because the drain would sort it out;
+// that was true of pages and false of the fifty types the drain never examines (#862).
 import type { DomainEvent } from '@wikistead/events'
 import type { Sql } from 'postgres'
 import { enqueueWebhookOutbox } from '../routes/webhooks.js'
+import { egressVerdict } from './egress.js'
 
 /**
  * Event types that a call site already enqueues inside its own transaction.
@@ -45,9 +54,18 @@ import { enqueueWebhookOutbox } from '../routes/webhooks.js'
  */
 export const ENQUEUED_IN_TRANSACTION = new Set<DomainEvent['type']>(['page.published', 'api_key.revoked'])
 
-/** The delivered payload: everything the event carries except the routing fields the row already has. */
+/**
+ * The delivered payload: what the event carries, minus the routing fields the row already has, minus
+ * anything its egress verdict says must not leave the tenant.
+ *
+ * ⚠️ The redaction happens HERE, on the way into the outbox, rather than at the drain. A row that
+ * holds a field nobody may receive is a disclosure waiting for the next person who reads the table —
+ * and the outbox is durable, so it would outlive the request that produced it.
+ */
 export function webhookPayload(event: DomainEvent): Record<string, unknown> {
   const { type: _type, tenantId: _tenantId, ...rest } = event as DomainEvent & Record<string, unknown>
+  const verdict = egressVerdict(event.type)
+  if (verdict.kind === 'redact') for (const field of verdict.fields) delete (rest as Record<string, unknown>)[field]
   return { ...rest, occurredAt: new Date().toISOString() }
 }
 
@@ -56,9 +74,13 @@ export function webhookPayload(event: DomainEvent): Record<string, unknown> {
  *
  * Separated from the subscriber so the rule can be measured without a database — the defect this
  * ticket is about was a wiring gap, and a test that can only reach it through a live outbox would have
- * had nothing to say about the seventy-three types that were never wired.
+ * had nothing to say about the seventy-four types that were never wired.
  */
 export function bridgeShouldEnqueue(event: DomainEvent): boolean {
+  // #862 / ADR-108 addendum: the catalogue is not an allow-list. A type whose verdict is `drop` never
+  // reaches a tenant's endpoint, and it does not reach the outbox either — a durable row is the same
+  // disclosure one step later.
+  if (egressVerdict(event.type).kind === 'drop') return false
   return !ENQUEUED_IN_TRANSACTION.has(event.type)
 }
 

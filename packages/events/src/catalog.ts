@@ -73,9 +73,13 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'share_link.revoked': 'An anonymous share link was revoked.',
   // API keys
   'api_key.created': 'An API key was issued.',
-  // #495 Q3: the webhook payload names the affected key owner by default — `ownerId` (member sub) and
-  // `ownerName` (display name; never an email, null when unknown) — alongside `keyId` and `actorId`.
-  'api_key.revoked': 'An API key was revoked. The webhook payload includes the key owner: ownerId (member sub) and ownerName (display name, never an email; null if unknown).',
+  // #495 Q3: the webhook payload names the affected key owner by default — `ownerId` (member sub) —
+  // alongside `keyId` and `actorId`. ⚠️ #862 (ruled 2026-08-22): the RESOLVED DISPLAY NAME used to
+  // travel with it and no longer does. #495 Q3 put `ownerId` through Review; `ownerName` came along
+  // beside it unexamined, and this call site enqueues in its own transaction, so the bridge's egress
+  // table never saw it either. A consumer that wants the name asks the admin API, under its own
+  // authorization.
+  'api_key.revoked': 'An API key was revoked. The webhook payload includes the key owner id (ownerId, the member sub). The display name is not sent.',
   // Auth
   'auth.success': 'Someone signed in successfully.',
   'auth.failed': 'A sign-in attempt failed.',

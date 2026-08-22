@@ -1,14 +1,20 @@
 // #862 / ADR-108 Q4: the catalogue is a promise, and this measures that the wiring keeps it.
 //
-// The generated reference lists 75 event types and says webhooks are built on them. Two were actually
-// delivered — each because one call site remembered to enqueue by hand — and the other 73 were emitted
+// The generated reference lists 76 event types and says webhooks are built on them. Two were actually
+// delivered — each because one call site remembered to enqueue by hand — and the other 74 were emitted
 // onto the in-process bus with nobody listening. The existing suite could not see it: `webhooks-228`
 // calls `enqueueWebhookOutbox` itself and then asserts the row arrives, which measures the outbox and
 // says nothing about whether anything puts events into it.
 //
 // So these walk the OTHER direction: start from the catalogue, go through the bridge, and ask what
-// comes out. A type added to the catalogue tomorrow is covered the day it appears, because the walk
-// reads the catalogue rather than a list kept here.
+// comes out.
+//
+// ⚠️ These walks do NOT cover a type added tomorrow, and this header used to claim they did (#862
+// measured it: adding a fictional type to the catalogue left all six green). Only one type is
+// actually driven through a live outbox here; the rest are read from the catalogue and asked a
+// question the bridge answers without a database. What DOES cover a new type is `egress.ts`'s
+// `Record<DomainEvent['type'], EgressVerdict>` — an unruled type fails `pnpm typecheck`, which is a
+// stronger gate than a test but a different one, and saying so is the point of this note.
 import { describe, it, expect, afterAll } from 'vitest'
 import postgres from 'postgres'
 import { EVENT_CATALOG, emit } from '@wikistead/events'
@@ -57,11 +63,25 @@ describe('#862 every catalogued event reaches the webhook outbox', () => {
     }
   }, 60_000)
 
-  it('the bridge skips exactly the types a transaction-scoped call site already enqueues', () => {
-    // Not "skips some things": skipping one the publish path does NOT carry would silently drop it,
-    // and skipping nothing would deliver the published event twice.
+  it('the bridge skips exactly the types it is meant to, and no others', () => {
+    // Not "skips some things": skipping one nothing else carries would silently drop it, and skipping
+    // nothing would deliver the published event twice.
+    //
+    // Two reasons a type is skipped, and they are unrelated. A transaction-scoped call site already
+    // enqueues it — that set is `ENQUEUED_IN_TRANSACTION`, and the walk below checks the code really
+    // does. Or it was ruled out of egress entirely (ADR-108 addendum §C/§F, 2026-08-22), and those five
+    // are NAMED HERE rather than read back from `egress.ts`: deriving the expectation from the same
+    // table `bridgeShouldEnqueue` consults would make this assertion agree with itself, and a verdict
+    // flipped by accident would keep it green. Written out, flipping one shows up as a diff.
+    const RULED_OUT = [
+      'auth.success', // §F — emitted per request; reachable with any bearer, so it is write amplification
+      'auth.failed',
+      'tenant.oidc_recovered', // §C — carries the Wikistead operator's identifier (ADR-169: never that)
+      'tenant.login_methods_recovered',
+      'tenant.saml_recovered',
+    ] as const
     const skipped = catalogued.filter((type) => !bridgeShouldEnqueue(eventOf(type)))
-    expect(skipped.sort()).toEqual([...ENQUEUED_IN_TRANSACTION].sort())
+    expect(skipped.sort()).toEqual([...ENQUEUED_IN_TRANSACTION, ...RULED_OUT].sort())
   })
 
   it('every skipped type is one the code really does enqueue in a transaction', async () => {
