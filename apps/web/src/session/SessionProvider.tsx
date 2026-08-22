@@ -1,8 +1,9 @@
-import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { EditorUser } from "../editor/Editor";
 import { apiFetch, assetUrl } from "../data/apiClient";
 import { shortPrincipalId } from "../ui/principal-label"; // #578
 import { colorFromString } from "../ui/avatar";
+import { makeCollabTokenSource, type CollabTokenSource } from "./collab-token"; // #813 / ADR-248 §3.10
 
 // An uploaded avatar comes back as a relative API path (/members/:sub/avatar-image) that
 // must go through the API base to load as an <img>; an OIDC picture is an absolute URL —
@@ -20,7 +21,24 @@ export type AuthStatus = "loading" | "authed" | "anon";
 export interface Session {
   status: AuthStatus;
   token: string; // Bearer for apiFetch (dev-token) or "" (cookie member)
-  collabToken: string; // token handed to the collab WebSocket
+  // #813: the STRING is gone from the contract, not merely unused. A member's collab credential lives
+  // for five minutes, so any reader that took it as a value would hold a dead one — and the compiler
+  // is the only thing that can find a reader written after this line. Ask for the getter below.
+  /**
+   * #813 / ADR-248 §3.10: the collab credential as a REF-STABLE getter, renewed on demand.
+   *
+   * `COLLAB_TOKEN_TTL` is 300 seconds and the value above is fetched once, at bootstrap. A member who
+   * reconnects six minutes later therefore fails to authenticate exactly as a guest did, and by the
+   * detach in §3.6 stops receiving the document's messages in silence — with `live` false, so publish
+   * and the checkbox stay withheld until the tab is reloaded.
+   *
+   * A getter rather than a fresher string: the editor keys its collaboration effect on the credential,
+   * and that effect's teardown destroys the provider, the socket AND the Y.Doc. Renewing as a React
+   * value would throw away the characters typed while disconnected every five minutes — the thing the
+   * renewal exists to save. The route re-derives everything from the cookie session, so no authority
+   * moves; unlike the guest case there is no pseudonym to carry and no password to reason about.
+   */
+  getCollabToken: () => Promise<string>;
   tenantId: string;
   sub: string | null;
   // #427: TRUE while the dev-token god-mode identity (dev-user) is active. A REAL cookie
@@ -66,7 +84,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [picture, setPicture] = useState<string | null>(null);
   // dev-token is god-mode (tenant admin) to match the server's dev bypass.
   const [isAdmin, setIsAdmin] = useState<boolean>(!!devToken);
-  const [collabToken, setCollabToken] = useState<string>(devToken ?? "");
+  // #813 / ADR-248 §3.10: the collab credential lives here, outside React, and renews on demand.
+  // See `collab-token.ts` for why it is a plain object and not a piece of state.
+  const collabRef = useRef<CollabTokenSource | null>(null);
+  collabRef.current ??= makeCollabTokenSource(
+    async () => (await apiFetch<{ token: string }>("/auth/collab-token", "", { method: "POST" }))?.token ?? null,
+    devToken,
+  );
+  const collab = collabRef.current;
+
   // #427 (a): god-mode is PROVISIONAL — the probe below hands the identity to a real cookie
   // session when one exists. Until then the dev token renders instantly (no loading flash,
   // and the e2e dev-token contexts — which never carry a cookie — are untouched).
@@ -106,7 +132,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setPicture(normPicture(me.picture));
         const ct = await apiFetch<{ token: string }>("/auth/collab-token", "", { method: "POST" });
         if (cancelled) return;
-        setCollabToken(ct?.token ?? "");
+        collab.set(ct?.token ?? "");
         setDevMode(false); // the real session owns the identity from here on
         setStatus("authed");
       } catch {
@@ -137,7 +163,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setDisplayName(null);
     setPicture(null);
     setIsAdmin(false);
-    setCollabToken("");
+    // Drop the credential on the way out, so a socket opened after a sign-out cannot present the
+    // token of the person who just left.
+    collab.clear();
   };
 
   const refresh = useCallback(async () => {
@@ -156,7 +184,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // #427: the dev bearer authorizes API calls only WHILE god-mode is active; a real
     // session switches the app to cookie authority (same as REAL mode).
     token: devMode ? devToken ?? "" : "",
-    collabToken,
+    getCollabToken: collab.get,
     tenantId,
     sub,
     devMode,

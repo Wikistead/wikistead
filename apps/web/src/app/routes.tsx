@@ -331,7 +331,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const diffRevId = searchParams.get("diff");
   const openDiff = useCallback((revId: string) => setSearchParams((p) => { p.set("diff", revId); return p; }), [setSearchParams]);
   const closeDiff = useCallback(() => setSearchParams((p) => { p.delete("diff"); return p; }), [setSearchParams]);
-  const { status, collabToken, tenantId, user, logout, token } = useSession();
+  const { status, getCollabToken, tenantId, user, logout, token } = useSession();
   // Capability gates the Edit control (UI only — collab server is the fortress).
   // Defaults to view until resolved, so a page is never editable speculatively. A page
   // that does NOT exist (getPage 404) must never become editable — every page belongs
@@ -877,7 +877,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               canEdit={canEdit}
             />
             <UnsavedBanner reason={liveness.reason} />
-            <Editor key={docName} docName={docName} pageId={pageId} token={collabToken} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={getCollabToken} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (the live CM body is virtualised → prints one screenful).
                 #207: the SAME diagram seam the export gets — without it the browser's own File → Print drew
                 a plantuml block as its source while every other road drew the picture. */}
