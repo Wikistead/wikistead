@@ -14,6 +14,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { buildApp } from '../app.js'
 import { seatMembers, unseatMembers } from './helpers/seat-members.js'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
@@ -24,6 +25,12 @@ const H = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-t
 const H_NO_BODY = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
 
 let app: FastifyInstance
+// ⚠️ #894: the SSO-floor case below reads TWO tenant-wide facts, so it cannot live in `tenant_dev`.
+// Every other case in this file is per-member and stays there; only the one that needs the whole
+// tenant to itself gets one.
+let own: PrivateTenant
+const OWN_FED = 'pw894-fed'      // the exempt member whose credential is removed
+const OWN_OTHER = 'pw894-other'  // a second exempt member, added to flip the answer on purpose
 
 const giveCredential = async (sub: string) =>
   admin`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
@@ -38,6 +45,13 @@ beforeAll(async () => {
   await seatMembers(admin, TENANT, [FED, LOCAL])
   await admin`UPDATE members SET identity_source = 'oidc' WHERE tenant_id = ${TENANT} AND sub = ${FED}`
   await admin`UPDATE members SET identity_source = 'local' WHERE tenant_id = ${TENANT} AND sub = ${LOCAL}`
+
+  own = await privateTenant(admin, 'pw894')
+  for (const sub of [OWN_FED, OWN_OTHER]) {
+    await admin`INSERT INTO members (tenant_id, sub, email, role, identity_source)
+                VALUES (${own.id}, ${sub}, ${`${sub}@pw894.test`}, 'member', 'oidc')
+                ON CONFLICT (tenant_id, sub) DO UPDATE SET identity_source = 'oidc'`
+  }
 }, 120_000)
 
 afterAll(async () => {
@@ -48,6 +62,7 @@ afterAll(async () => {
   }
   await unseatMembers(admin, TENANT, [FED, LOCAL])
   await admin`UPDATE tenant_login_prefs SET sso_required = false WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await own?.dispose()
   await app.close(); await admin.end(); await pool.end()
 }, 120_000)
 
@@ -88,22 +103,73 @@ describe('#626: the password entrance can be taken back', () => {
     await admin`DELETE FROM local_credentials WHERE tenant_id = ${TENANT} AND member_sub = ${LOCAL}`
   })
 
+  // ⚠️ #894: this case lives in its OWN tenant, and the three assertions below say why.
+  //
+  // THE FLAKE. The guard reads two facts about the WHOLE tenant — the `sso_required` row, and whether
+  // any OTHER exempt member holds a credential — and both were being read out of `tenant_dev`, which
+  // more than twenty other files write. In a full run it failed once: 200 where 409 was expected, and
+  // green on its own and green beside the file we suspected. ⚠️ **We never identified which file**,
+  // and the ticket said not to fix it by asserting "shared tenant, therefore" — a fix whose effect
+  // cannot be measured is not a fix.
+  //
+  // So the mechanism is measured instead of the race. The three cases below flip the answer by moving
+  // exactly the two facts the guard reads. That is the reproduction condition stated in a form a test
+  // can hold: **any file that writes either fact in a shared tenant flips this answer**, whichever
+  // file it turns out to be. And they double as the proof that the isolation did not empty the
+  // assertion — the refusal still has both of its causes.
+  const ownRemove = (sub: string) =>
+    app.inject({ method: 'DELETE', url: `/members/${sub}/password-setup`, headers: own.AUTH })
+  const ownCredential = async (sub: string) =>
+    admin`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
+          VALUES (${own.id}, ${sub}, ${`${sub}@pw894.test`}, 'x')
+          ON CONFLICT (tenant_id, member_sub) DO UPDATE SET password_hash = 'x'`
+  const ownExempt = (sub: string) =>
+    admin`INSERT INTO sso_exemptions (tenant_id, member_sub, created_by) VALUES (${own.id}, ${sub}, 'dev-user')
+          ON CONFLICT DO NOTHING`
+  const ownStance = (on: boolean) =>
+    admin`UPDATE tenant_login_prefs SET sso_required = ${on} WHERE tenant_id = ${own.id}`
+
   it('refuses to empty the SSO-required floor from the credential side', async () => {
     // The two existing guards read the EXEMPTION rows; this route removes the CREDENTIAL, so the floor can
     // be emptied from a side it does not watch — leaving a tenant that requires SSO with an exemption that
     // opens nothing, which is the outage case the floor exists for.
-    await giveCredential(FED)
-    await admin`INSERT INTO sso_exemptions (tenant_id, member_sub, created_by) VALUES (${TENANT}, ${FED}, 'dev-user')
-                ON CONFLICT DO NOTHING`
-    await admin`UPDATE tenant_login_prefs SET sso_required = true WHERE tenant_id = ${TENANT}`
+    await ownCredential(OWN_FED)
+    await ownExempt(OWN_FED)
+    await ownStance(true)
+    const res = await ownRemove(OWN_FED)
+    expect(res.statusCode, res.body).toBe(409)
+    expect(res.json()).toMatchObject({ code: 'sso_exemption_required' })
+    const [{ n }] = await admin<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM local_credentials WHERE tenant_id = ${own.id} AND member_sub = ${OWN_FED}`
+    expect(Number(n), 'the refused removal took the credential anyway').toBe(1)
+  })
+
+  it('⚠️ …and the stance being off is one of the two facts that flips it', async () => {
+    // Fact one. A file that resets `tenant_login_prefs` in a shared tenant produces exactly this.
+    await ownCredential(OWN_FED)
+    await ownExempt(OWN_FED)
+    await ownStance(false)
     try {
-      const res = await remove(FED)
-      expect(res.statusCode, res.body).toBe(409)
-      expect(res.json()).toMatchObject({ code: 'sso_exemption_required' })
-      expect(await credentialCount(FED)).toBe(1)
+      expect((await ownRemove(OWN_FED)).statusCode, 'the floor is only guarded while the stance is on').toBe(200)
     } finally {
-      await admin`UPDATE tenant_login_prefs SET sso_required = false WHERE tenant_id = ${TENANT}`
-      await admin`DELETE FROM sso_exemptions WHERE tenant_id = ${TENANT} AND member_sub = ${FED}`
+      await ownStance(true)
+    }
+  })
+
+  it('⚠️ …and another exempt member holding a credential is the other', async () => {
+    // Fact two, and the harder one to see: the floor is not emptied, so the removal is correct. A file
+    // that leaves an exemption AND a credential behind in a shared tenant hands this case a second
+    // key-holder it never asked for.
+    await ownCredential(OWN_FED)
+    await ownExempt(OWN_FED)
+    await ownStance(true)
+    await ownCredential(OWN_OTHER)
+    await ownExempt(OWN_OTHER)
+    try {
+      expect((await ownRemove(OWN_FED)).statusCode, 'somebody else exempt still holds a key — the floor stands').toBe(200)
+    } finally {
+      await admin`DELETE FROM sso_exemptions WHERE tenant_id = ${own.id} AND member_sub = ${OWN_OTHER}`
+      await admin`DELETE FROM local_credentials WHERE tenant_id = ${own.id} AND member_sub = ${OWN_OTHER}`
     }
   })
 
