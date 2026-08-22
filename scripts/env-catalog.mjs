@@ -79,8 +79,13 @@ export const ENV_DOCS = {
   WKS_BRAND_NAME: { group: 'Runtime', default: 'Wikistead', what: 'Product name shown in the interface and in outgoing mail, for a rebranded deployment.' },
   WKS_PUBLIC_BASE_URL: {
     group: 'Runtime',
-    default: 'unset (links are dropped)',
-    what: 'Canonical public base URL (scheme + host, port allowed) for links built off the request path — background mail has no Host header to work from. Unset means a message that needs a link is dropped with a logged reason rather than improvising one.',
+    default: 'unset (mail that needs a link is dropped)',
+    // #828 / ADR-254 Decision 1: this row used to describe the APPLICATION's own origin, and the one
+    // thing that reads the variable prefixes a workspace slug onto it. An operator who set what this
+    // row described sent every mention and digest to `<slug>.app.example.com` — outside the wildcard,
+    // outside the certificate, resolving to nothing. The composition is spelled out now, because the
+    // ambiguity was never in the code (`.env.example` has always said the zone) but in this sentence.
+    what: 'The parent zone whose subdomains are workspaces — background mail has no Host header to compose from. The workspace slug is prefixed onto it: `https://wikistead.com` produces `https://<slug>.wikistead.com`, so set the zone, not the application\'s own host. A workspace with a verified custom domain uses that instead. Unset means a message that needs a link is dropped with a logged reason rather than improvising one; on a single host, set it to the zone ABOVE your site host so the composed address is the site host itself.',
   },
   WKS_TENANT_URL_TEMPLATE: {
     group: 'Runtime',

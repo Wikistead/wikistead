@@ -97,7 +97,31 @@ services:
       # the public host below (SigV4 covers the Host header, so the two have to be stated apart).
       S3_ENDPOINT: http://seaweedfs:8333
       S3_PUBLIC_ENDPOINT: https://s3.${SITE_HOST:-dev.localhost}
-      WKS_PUBLIC_BASE_URL: https://${SITE_HOST:-dev.localhost}
+      # #828 / ADR-254 Decision 2: BLANK, not absent, and not the site host.
+      #
+      # This used to be `https://${SITE_HOST}`, and the one thing that reads it prefixes a workspace
+      # slug — so the profile composed `https://<slug>.<SITE_HOST>`, an address the Caddyfile beside
+      # it does not serve (its site blocks are `{$SITE_HOST}` and `s3.{$SITE_HOST}`; the wildcard is
+      # commented out, waiting on #123). Every mention and digest carried a link that went nowhere,
+      # and the RFC 8058 unsubscribe went with it — a mail nobody can unsubscribe from becomes a spam
+      # report. Composing nothing drops those mails instead, which is what the k8s profile already
+      # does; security mail carries no link and is unaffected.
+      #
+      # ⚠️ Deleting the line would NOT remove the variable: this service carries `env_file: [.env]`
+      # and compose merges the file into the environment, so the operator's own `.env` would show
+      # through (in this repository, `http://localhost:5173`). Blanking is how collab below does it,
+      # and `composeTenantUrl` reads "" exactly as it reads unset.
+      #
+      # To get those mails back, put ONE line in `docker-compose.override.yml` — the zone ABOVE this
+      # site host, so the composed address is the site host itself and today's Caddyfile serves it:
+      #
+      #     WKS_PUBLIC_BASE_URL: https://example.com     # for SITE_HOST=wiki.example.com
+      #
+      # ⚠️ That recipe rests on two things nothing here can check: this deployment serves ONE
+      # workspace whose slug is the site host's first label, and the operator owns the whole parent
+      # zone. If a second workspace exists its mail points somewhere nobody serves; if the zone is
+      # shared, unsubscribe tokens are delivered to a stranger's host.
+      WKS_PUBLIC_BASE_URL: ""
       # #409 / ADR-154: without this the public HTML shell is OFF, and because the route table sends
       # /pub to the server, every published page in this stack answers 404 — the SPA never sees the
       # path. Same shape as the k8s initContainer (deploy/k8s/base/server.yaml).

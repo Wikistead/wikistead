@@ -310,8 +310,38 @@ The ones a deployment almost always sets:
 | `OIDC_SECRET_ENC_KEY` | **required**; AES-256 key for tenant OIDC secrets at rest |
 | `GUEST_TOKEN_SECRET` / `GUEST_TOKEN_TTL_SECONDS` | share-link token signing; short TTL bounds the revocation window |
 | `SMTP_*` / `EMAIL_FROM` | leave `SMTP_HOST` empty to disable email (invites become copy-links) |
+| `WKS_PUBLIC_BASE_URL` | the zone **above** your site host — see below. Unset (the shipped default) means mention and digest mail is not sent |
 | `STRIPE_*` | Cloud billing only; leave empty when self-hosting (CE is unlimited) |
 | `PLANTUML_RENDER_URL` | optional Kroki-compatible base URL; unset → PlantUML fences degrade to source |
+
+### Mention and digest email needs an address to link to
+
+Background email has no request to take a host from, so it composes one — and the composition
+prefixes the workspace's slug. **The shipped compose profile sets nothing**, which means those two
+kinds of mail are **not sent** rather than sent with a link that goes nowhere. (Invitations, password
+setup and recovery mail carry no such link and are unaffected.)
+
+To turn them on, put one line in `docker-compose.override.yml` naming **the zone above your site
+host**:
+
+```yaml
+services:
+  server:
+    environment:
+      WKS_PUBLIC_BASE_URL: https://example.com     # for SITE_HOST=wiki.example.com
+```
+
+The composed address is then `https://wiki.example.com` — your site host itself, which the shipped
+Caddyfile already serves. No wildcard DNS, no second certificate.
+
+⚠️ **Two things this rests on, and nothing checks either.** It works because your one workspace is
+named after the host's first label (`wiki`), and because the parent zone is yours. If you create a
+second workspace, its mail will point at a host nobody serves. If the parent zone is shared with
+other people — a free subdomain provider, a company zone you do not control — then one-click
+unsubscribe links, which carry a token, are delivered to somebody else's host.
+
+The override file is the mechanism because the compose file pins the value in the service's own
+`environment:`, which wins over `.env`.
 
 ## Operations
 
