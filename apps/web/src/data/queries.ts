@@ -2697,6 +2697,9 @@ export interface AdminConnectionInput {
   preset?: string; issuer?: string; clientId?: string; clientSecret?: string | null; redirectUri?: string
   scopes?: string; label?: string; entraTenantId?: string; enabled?: boolean
   trustGroups?: boolean; groupsClaim?: string | null; mcpEnabled?: boolean
+  // #822 / ADR-251: repeating a write the server answered `confirm_required`. The screen asks first —
+  // this is how the person's answer travels back.
+  confirm?: boolean
 }
 export function useAdminConnections() {
   const { token } = useSession();
@@ -2727,7 +2730,10 @@ export function useDeleteConnection() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiFetch<null>(`/admin/connections/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+    // #822: DELETE carries no body, so the confirmation rides the query string. Without it the console
+    // could no longer delete a connection at all once the server started asking.
+    mutationFn: ({ id, confirm }: { id: string; confirm?: boolean }) =>
+      apiFetch<null>(`/admin/connections/${encodeURIComponent(id)}${confirm ? "?confirm=1" : ""}`, token, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-connections"] }),
   });
 }

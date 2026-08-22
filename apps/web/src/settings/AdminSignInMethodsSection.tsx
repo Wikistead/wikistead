@@ -123,6 +123,11 @@ export const CONFIRM_COPY: Record<string, { title: string; message: string }> = 
   "sso/on": STANCE_COPY.sso.on,
   "sso/off": STANCE_COPY.sso.off,
   kinds: { title: "adminAuth.stanceKindsTitle", message: "adminAuth.stanceConfirmTail" },
+  // #822 / ADR-251 §3.6: the ONE confirmation that starts on the server. The others here ask before
+  // sending; this one is the answer to a 409 the write already got, so it names the door that would
+  // be left and asks whether to go on. Ruled 2026-08-21: the last living way in may only be closed
+  // with an explicit confirmation.
+  lastWayIn: { title: "adminConnections.confirmLastWayInTitle", message: "adminConnections.confirmLastWayInBody" },
 };
 
 /**
@@ -282,6 +287,24 @@ export function AdminSignInMethodsSection() {
     return { title: t(said.title), message: t(said.message) };
   };
   const m = methods.data?.methods;
+  // #822 / ADR-251 §3.6: the server answers `confirm_required` when a write would leave one door it
+  // cannot vouch for. ⚠️ Unlike every other confirmation on this screen, this one starts AFTER the
+  // request — the write already went and came back with a question — so the retry has to be held
+  // here and replayed with the answer attached.
+  const [lastWayIn, setLastWayIn] = useState<{ door: string; retry: () => void } | null>(null);
+  // The server names the door by its CONNECTION kind. Say it in the reader's words; an unknown kind
+  // falls back to the generic sentence rather than printing an internal token at somebody.
+  const doorName = (kind: string): string =>
+    kind === "saml" ? t("adminAuth.methodSaml")
+    : kind === "platform" ? t("adminConnections.platformName")
+    : kind === "local" ? t("adminAuth.methodLocal")
+    : t("adminConnections.doorGeneric");
+  const askedFirst = (e: unknown, retry: () => void): boolean => {
+    if (!(e instanceof ApiError) || e.code !== "confirm_required") return false;
+    setLastWayIn({ door: String((e as unknown as { remainingKind?: string }).remainingKind ?? ""), retry });
+    return true;
+  };
+
   const onError = (e: unknown) => {
     // the server names the refusal by CODE — never sniff English message text. review F7: an
     // unreachable issuer is the failure an admin hits most while editing a connection, and the
@@ -467,7 +490,9 @@ export function AdminSignInMethodsSection() {
                   every row. It used to hang under the row in a stack of two switches, which is why
                   turning a connection on looked like a different act from turning password sign-in on. */}
               <Switch checked={c.enabled} ariaLabel={t("adminConnections.enabled")} testId={`admin-connection-enabled-${c.id}`}
-                onChange={(on: boolean) => update.mutate({ id: c.id, enabled: on }, { onError })} />
+                onChange={(on: boolean) => update.mutate({ id: c.id, enabled: on }, {
+                  onError: (e) => { if (!askedFirst(e, () => update.mutate({ id: c.id, enabled: on, confirm: true }, { onError }))) onError(e); },
+                })} />
             </div>
             {/* #592 / ADR-204: MCP access, per connection — in the row, not on a screen of its own. The
                 server is the wall (a member of a switched-off connection is refused at the MCP entry
@@ -985,6 +1010,18 @@ export function AdminSignInMethodsSection() {
         <StanceConfirm stance={pickingStance} onClose={() => setPickingStance(null)}
           onConfirm={() => { saveStance(pickingStance); setPickingStance(null); }} />
       )}
+      {/* #822 / ADR-251 §3.6: the ruling asked for an explicit confirmation before the last living way
+          in is closed. It names the door that would be left, because "are you sure" carries nothing a
+          person can act on. */}
+      <ConfirmDialog
+        open={lastWayIn !== null}
+        title={t("adminConnections.confirmLastWayInTitle")}
+        message={lastWayIn ? t("adminConnections.confirmLastWayInBody", { door: doorName(lastWayIn.door) }) : ""}
+        confirmTestId="admin-last-way-in-confirm"
+        confirmLabel={t("common.confirm")}
+        onClose={() => setLastWayIn(null)}
+        onConfirm={() => { lastWayIn?.retry(); setLastWayIn(null); }}
+      />
       <ConfirmDialog
         open={deleting !== null}
         title={t("adminConnections.deleteTitle")}
@@ -992,7 +1029,13 @@ export function AdminSignInMethodsSection() {
         confirmTestId="admin-connection-delete-confirm"
         onClose={() => setDeleting(null)}
         onConfirm={() => {
-          if (deleting) remove.mutate(deleting.id, { onSuccess: () => notify.success(t("adminConnections.deleted")), onError });
+          if (deleting) {
+            const id = deleting.id;
+            remove.mutate({ id }, {
+              onSuccess: () => notify.success(t("adminConnections.deleted")),
+              onError: (e) => { if (!askedFirst(e, () => remove.mutate({ id, confirm: true }, { onSuccess: () => notify.success(t("adminConnections.deleted")), onError }))) onError(e); },
+            });
+          }
           setDeleting(null);
         }}
       />

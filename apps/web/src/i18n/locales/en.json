@@ -27,7 +27,11 @@
     "secretPlaceholder": "Client secret (leave empty for a public client)",
     "groupsClaimPlaceholder": "Groups claim (blank: groups)",
     "mcpEnabled": "AI tool access (MCP)",
-    "mcpUnavailable": "(not available for this connection)"
+    "mcpUnavailable": "(not available for this connection)",
+    "confirmLastWayInTitle": "Close the last way in?",
+    "confirmLastWayInBody": "After this, {{door}} would be the only way anyone signs in, and this deployment cannot check that it works. If it stops letting people through, getting back in means running a command on the server.",
+    "doorGeneric": "single sign-on",
+    "platformName": "the shared sign-in service"
   },
   "common": {
     "cancel": "Cancel",

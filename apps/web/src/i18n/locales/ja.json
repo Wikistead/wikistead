@@ -27,7 +27,11 @@
     "secretPlaceholder": "クライアントシークレット（public client は空欄）",
     "groupsClaimPlaceholder": "groups クレーム名（空欄なら groups）",
     "mcpEnabled": "AI ツール接続（MCP）",
-    "mcpUnavailable": "（この接続では設定できません）"
+    "mcpUnavailable": "（この接続では設定できません）",
+    "confirmLastWayInTitle": "この操作で、入口が 1 つだけになります",
+    "confirmLastWayInBody": "これを実行すると、サインインの手段は {{door}} だけになります。それが実際に通るかどうかは、ここからは確かめられません。通らなくなった場合、戻る手段はサーバ上でコマンドを実行することだけです。",
+    "doorGeneric": "シングルサインオン",
+    "platformName": "共有のサインイン"
   },
   "common": {
     "cancel": "キャンセル",

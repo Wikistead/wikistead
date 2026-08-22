@@ -58,10 +58,12 @@ describe("#683: every confirmation on this screen is accounted for", () => {
     // prop), so entries and elements are not one-to-one. Counted as: the dialogs are the headed ones
     // plus the headless ones, and the headed ones all draw their title from the table.
     const headed = rendered - HEADLESS_CONFIRMS.length;
-    expect(headed, "a confirmation appeared that nothing here explains").toBe(3);
+    // #822 added the fourth: the last-way-in confirmation, which starts on the SERVER (a 409 the write
+    // already got) rather than before the request like the other three.
+    expect(headed, "a confirmation appeared that nothing here explains").toBe(4);
     // …and every title rendered in this file comes from the table or is a dialog's own dedicated key
     // never a control's label. Measured below; this leg only fixes the population.
-    expect(Object.keys(CONFIRM_COPY).length, "the table lost an entry").toBe(5);
+    expect(Object.keys(CONFIRM_COPY).length, "the table lost an entry").toBe(6); // #822 added lastWayIn
   });
 
   it("no confirmation is headed with a control's label", () => {
