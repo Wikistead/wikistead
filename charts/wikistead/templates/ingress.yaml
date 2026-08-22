@@ -12,6 +12,16 @@ dev proxy and this chart alike; `lint:origin-routes` compares them.
 {{- $snippet := `more_set_headers "X-Content-Type-Options: nosniff";
 more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
 ` -}}
+{{- /*
+#880: state HSTS here rather than inheriting whatever the controller's ConfigMap happens to default
+to. The compose edge (deploy/caddy/Caddyfile) has always said it outright; leaving the Kubernetes edge
+to a default means an operator can switch the protection off in a file that is not in this chart, and
+nothing here would show it. ⚠️ Only when TLS is on: pinning a host that has no https locks every
+browser out of it, and that is not undoable from the server side.
+*/ -}}
+{{- if .Values.ingress.tls.enabled }}
+{{- $snippet = printf "%smore_set_headers \"Strict-Transport-Security: max-age=31536000; includeSubDomains\";\n" $snippet -}}
+{{- end }}
 {{- $hosts := list .Values.host -}}
 {{- if .Values.ingress.wildcardHost }}{{- $hosts = append $hosts (printf "*.%s" .Values.host) }}{{- end }}
 apiVersion: networking.k8s.io/v1

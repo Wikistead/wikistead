@@ -238,6 +238,27 @@ if (!existsSync(chartPath)) {
         'behaviour a request gets depends on which Ingress the controller matches — the route has one home.',
       )
     }
+    // #880: the edge states HSTS itself rather than inheriting the controller ConfigMap's default,
+    // so an operator who turns it off has to edit something in this chart. Measured in BOTH
+    // directions on purpose: an implementation that always emits the header passes the positive
+    // half, and pinning a host that has no https locks every browser out of it irreversibly.
+    const hstsCount = (text) => (text.match(/Strict-Transport-Security/g) ?? []).length
+    if (hstsCount(out) !== ingressDocs.length) {
+      problems.push(
+        `chart: ${hstsCount(out)} Strict-Transport-Security header(s) across ${ingressDocs.length} Ingress ` +
+        'object(s) — every object the browser can reach needs the pin, or which one it gets depends on the route.',
+      )
+    }
+    const plaintext = spawnSync('helm', ['template', 'routes-check', chartPath, '--set', 'ingress.tls.enabled=false'], { encoding: 'utf8' })
+    if (plaintext.status !== 0) {
+      problems.push(`chart: helm template with ingress.tls.enabled=false failed (exit ${plaintext.status}) — the negative half could not be measured.`)
+    } else if (hstsCount(plaintext.stdout) !== 0) {
+      problems.push(
+        'chart: rendering with TLS disabled still emits Strict-Transport-Security. A pin on a host that ' +
+        'serves no https locks browsers out of it, and the server cannot take it back.',
+      )
+    }
+
     const chartByHost = new Map()
     for (const doc of ingressDocs) {
       for (const m of doc.matchAll(/-\s*host:\s*(\S+)\n([\s\S]*?)(?=\n\s*-\s*host:|\n---|$)/g)) {
