@@ -71,8 +71,14 @@ beforeEach(() => {
   registerEmailDriver(null)
 })
 
-const emitUpdate = (pageId: string) =>
-  db.tx((tx) => fanOutFeedEvent(tx, { tenantId: TENANT, eventType: 'page.updated', pageId, spaceId, actor: 'user:someone-else', publishedAt: new Date(), log: { warn: () => {} } }))
+// #853: the digest body prints the stored `eventType` verbatim (`digest.ts`: `${eventType}: ${title}`),
+// so a fixture that stores a string the product never writes is measuring prose no reader will see.
+// Measured, shipped code writes six values into `feed_events` — page.published, page.restored,
+// page.made_public, page.made_non_public, comment.created, attachment.confirmed — and `page.updated`
+// is not among them. It was the DomainEvent name #862 split into page.renamed and page.moved; this
+// fixture kept it because `feed_events.event_type` is a bare string with no union to fail on.
+const emitPublished = (pageId: string) =>
+  db.tx((tx) => fanOutFeedEvent(tx, { tenantId: TENANT, eventType: 'page.published', pageId, spaceId, actor: 'user:someone-else', publishedAt: new Date(), log: { warn: () => {} } }))
 const outboxOf = (sub: string) => adminPool<{ id: string }[]>`SELECT id FROM email_outbox WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`
 const resetDaily = () => adminPool`UPDATE members SET email_digest_last_at = NULL WHERE tenant_id = ${TENANT} AND sub = ${W1}`
 const forceDue = () => adminPool`UPDATE email_outbox SET next_attempt_at = now() - interval '1 second' WHERE tenant_id = ${TENANT} AND member_sub LIKE ${'dg-w%-' + STAMP}`
@@ -80,8 +86,8 @@ const drain = () => drainEmailOutbox({ fallback: capture, log: () => {}, batch: 
 
 describe('#547 S4: digest', () => {
   it('one rollup per opted member; items are never re-sent; the producer is once-a-day idempotent', async () => {
-    await emitUpdate(pageA)
-    await emitUpdate(pageB)
+    await emitPublished(pageA)
+    await emitPublished(pageB)
     const produced = await produceDigestJobs()
     expect(produced, 'exactly one job (W1); the default-off watcher produces nothing').toBe(1)
     expect((await outboxOf(W2)).length, 'email_digest=false: nothing despite watching').toBe(0)
@@ -100,8 +106,8 @@ describe('#547 S4: digest', () => {
   }, 120_000)
 
   it('per-item: a not-ready item rides the next window while confirmed siblings send', async () => {
-    await emitUpdate(pageA)
-    await emitUpdate(pageB)
+    await emitPublished(pageA)
+    await emitPublished(pageB)
     // constructed not-ready state (the ADR names this a defensive state with no realistic e2e
     // trigger): pull pageB's space link so its disposition is not-ready at build time
     const linkTuple = [{ user: `space:${spaceId}`, relation: 'space', object: `page:${pageB}` }]
@@ -127,7 +133,7 @@ describe('#547 S4: digest', () => {
 
   it('suppressed items are consumed silently; an empty-after-confirmation digest is not sent', async () => {
     const { setPagePrivate } = await import('../routes/pages.js')
-    await emitUpdate(pageA)
+    await emitPublished(pageA)
     await setPagePrivate(db, fgaClient, app.searchDriver, { pageId: pageA, tenantId: TENANT, userId: OWNER, plan: 'business' })
     try {
       await resetDaily()
