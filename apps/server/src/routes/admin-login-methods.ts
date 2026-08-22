@@ -315,6 +315,23 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     if (typeof req.body?.localLoginEnabled === 'boolean') {
       const on = req.body.localLoginEnabled
       if (!on) {
+        // ⚠️ #822 / ADR-251: while SSO is REQUIRED, the password door may not be deselected. ADR-210
+        // only lets a tenant require SSO while an exempt member holds a password AND this door stays
+        // selected (:278-286); a write that removes the second half is the requirement being taken
+        // apart from behind, and nothing guarded it. ADR-210 §R5-3 wrote the resulting state down
+        // itself — "the admin route permits it while SSO is effective" — and ended with the operator
+        // CLI as the only recovery, which is the state the owner's ruling forbids.
+        //
+        // ⚠️ This closes the WRITE half only. The same configuration is still reachable through a
+        // billing downgrade that drops `samlSso`, which is not a tenant write and which no guard here
+        // sees. Named so the next reader does not believe the whole entrance is shut.
+        const [pref] = await req.db.sql<{ sso_required: boolean }[]>`SELECT sso_required FROM tenant_login_prefs LIMIT 1`
+        if (pref?.sso_required) {
+          throw Object.assign(
+            new Error('SSO is required for this workspace, and an exempt member holding a password is what makes that safe. Turn the SSO requirement off before deselecting passwords.'),
+            { statusCode: 409, code: 'sso_exemption_required' },
+          )
+        }
         const available = await resolveLogin(req.db, req.tenant)
         const others = [...available.methods].filter((m) => m !== 'local')
         if (others.length === 0) {

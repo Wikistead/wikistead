@@ -8,7 +8,7 @@ import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
 import { validateIssuer, type DiscoveryFetch } from './tenant-oidc.js'
-import { assertNotLastWayIn } from '../auth/login-methods.js'
+import { assertClosingIsSafe } from '../auth/login-methods.js' // #822 / ADR-251: one question for every door-closing write
 
 // #554 S4 / ADR-197 §1-3: the admin management surface for OIDC login connections. tenant#admin
 // gated, RLS-scoped. Scope note: SAML keeps its own surface (/admin/saml — one per tenant, EE) and
@@ -206,6 +206,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     issuer?: string; clientId?: string; clientSecret?: string | null; redirectUri?: string; scopes?: string
     label?: string | null; enabled?: boolean; trustGroups?: boolean; groupsClaim?: string | null
     mcpEnabled?: boolean
+    confirm?: boolean // #822 / ADR-251 §3.2: the receptacle for repeating a write after confirm_required
   } }>('/admin/connections/:id', async (req, reply) => {
     await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
     const [row] = await req.db.sql<ConnRow[]>`
@@ -246,7 +247,9 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
       const err = await validateIssuer(issuer, fetchJson)
       if (err) throw Object.assign(new Error(err), { statusCode: 400, code: 'oidc_unreachable' })
     }
-    if (b.enabled === false && row.enabled) await assertNotLastWayIn(req.db, req.tenant, row.id)
+    // #822 / ADR-251: the shared question — which doors somebody can still walk THROUGH, not which
+    // methods are configured. `live` is the transition this route already computes.
+    if (b.enabled === false && row.enabled) await assertClosingIsSafe(req.db, req.tenant, { id: row.id, live: true }, { confirm: b.confirm })
     let secretEnc = row.client_secret_enc
     if (b.clientSecret === null) secretEnc = null
     else if (b.clientSecret) secretEnc = encryptSecret(b.clientSecret)
@@ -263,11 +266,15 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     return reply.code(204).send()
   })
 
-  app.delete<{ Params: { id: string } }>('/admin/connections/:id', async (req, reply) => {
+  app.delete<{ Params: { id: string }; Querystring: { confirm?: string } }>('/admin/connections/:id', async (req, reply) => {
     await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
-    const [row] = await req.db.sql<{ id: string }[]>`SELECT id FROM tenant_oidc WHERE id = ${req.params.id}`
+    // #822: `enabled` is read because the guard needs the transition — deleting a row that is already
+    // disabled closes no door, and judging it as if it did would refuse a tidy-up.
+    const [row] = await req.db.sql<{ id: string; enabled: boolean }[]>`SELECT id, enabled FROM tenant_oidc WHERE id = ${req.params.id}`
     if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
-    await assertNotLastWayIn(req.db, req.tenant, row.id)
+    // ⚠️ DELETE takes no body, so the confirmation rides the query string. Without a receptacle here
+    // the console could no longer delete a connection at all once the answer became confirm_required.
+    await assertClosingIsSafe(req.db, req.tenant, { id: row.id, live: row.enabled }, { confirm: req.query?.confirm === '1' })
     // Members the connection minted keep their rows and grants (FGA is untouched); only this way
     // IN dies. Recovery for an accidental delete is re-creating the connection — but the minted
     // subject_prefix derives from the NEW id, so their sign-in identities do NOT reconnect: stated,

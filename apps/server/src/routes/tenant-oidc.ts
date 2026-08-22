@@ -5,7 +5,7 @@ import type { OpenFgaClient } from '@openfga/sdk'
 import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
-import { loginMethodCeiling, assertNotLastWayIn } from '../auth/login-methods.js' // #537 lockout ceiling; #554 S4 shared per-connection guard
+import { loginMethodCeiling, assertClosingIsSafe } from '../auth/login-methods.js' // #537 lockout ceiling; #554 S4 shared per-connection guard; #822 one question for every door
 import type { TenantDb } from '../db/index.js'
 
 // Tenant OIDC (members' SSO) settings (Phase 5e). tenant#admin gated. Available on
@@ -80,6 +80,9 @@ export async function updateTenantOidc(
     issuer: string; clientId: string; clientSecret?: string | null;
     scopes?: string; redirectUri?: string; enabled: boolean; groupsClaim?: string | null;
     plan: string; // #537: the lockout guard consults SAML entitlement
+    // #822 / ADR-251 §3.2: the receptacle for repeating the write after a `confirm_required`. Every
+    // door-closing route needs one, or the console loses a button it used to have.
+    confirm?: boolean;
   },
   fetchJson: DiscoveryFetch = safeFetchJson, // injectable for tests; prod uses the hardened default
 ): Promise<void> {
@@ -122,10 +125,12 @@ export async function updateTenantOidc(
   // #554 S4 review F3: the guard is the SHARED per-connection one — with N≥2 a live sibling
   // connection keeps this disable legal (the old kind-level check answered 409 against siblings
   // it could not see), and the ruling-4 platform lapse is honored by the same code path the
-  // connections surface uses. The kind-level otherLoginMethodsEffective stays for the OTHER
-  // surfaces (SAML/platform toggles).
+  // connections surface uses.
+  //
+  // #822 / ADR-251: it now asks about ways IN rather than configured methods, and the SAML surface
+  // asks the same one — the two-guards-two-questions split this comment used to describe is gone.
   if (!args.enabled && existing?.enabled && loginMethodCeiling().has('tenant-oidc')) {
-    await assertNotLastWayIn(db, { id: args.tenantId, plan: args.plan }, existing.id)
+    await assertClosingIsSafe(db, { id: args.tenantId, plan: args.plan }, { id: existing.id, live: true }, { confirm: args.confirm })
   }
   let secretEnc: string | null
   if (args.clientSecret === null) secretEnc = null

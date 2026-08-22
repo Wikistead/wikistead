@@ -233,6 +233,129 @@ export async function resolveLoginConnections(
 // own IdP is effective, so the write is allowed. Honest limit (F11, the #537 guard's own caveat):
 // read-then-write without a lock — two concurrent disables of different connections can still
 // empty the set; break-glass is the recovery.
+/**
+ * ADR-251 / #822: the doors somebody can actually walk through after a write — not the doors that
+ * are SELECTED.
+ *
+ * THE DEFECT the two older guards share. `otherLoginMethodsEffective` asks which METHODS are
+ * configured and never looks at `local` at all, so a workspace using SAML and passwords cannot turn
+ * SAML off: it is told to enable another method first, and another method is already enabled.
+ * `assertNotLastWayIn` does count the password door, but only as a preference — a tenant where every
+ * administrator signs in through the IdP and nobody holds a password satisfies it, and closing the
+ * last federated door there leaves a workspace nobody can administer. ⚠️ Ruled 2026-08-21: a door
+ * being SELECTED is not a way in; the last live way in may only be closed with a key-holding
+ * administrator confirmed to exist, and an explicit confirmation.
+ *
+ * So the classification is:
+ *
+ *   `local`      usable ONLY when an active tenant administrator holds a password. Selected but
+ *                key-less, it is not a way in and is dropped.
+ *   federated    `unknown`. The product cannot enumerate who an external IdP will admit; claiming to
+ *   platform     have verified them would be a lie, and refusing them would strand every SSO-only
+ *                tenant. They count, exactly as today.
+ *
+ * ⚠️ The ruling-4 lapse is IN the list, not beside it. Kept as a separate arm, "nothing is left" can
+ * be judged before or after key-less `local` rows are dropped, and the two orders disagree: judged
+ * after, a write is waved through by an arm reasoning from what is CONFIGURED while the list it
+ * describes is empty. What is configured and what is usable are never the same fact.
+ *
+ * ⚠️ Stated limit: an administrator who holds `admin` through a GROUP is not counted (ADR-207 puts
+ * that in `role_assignments`; this reads `members.role`). The direction is safe — it can only refuse
+ * a write it need not have — and the `last_direct_admin` floor keeps one directly granted
+ * administrator, so it cannot produce a lockout. Named here rather than found later.
+ */
+export type WayIn = { id: string; kind: string; usable: 'yes' | 'unknown' }
+
+export async function waysInAfter(
+  db: TenantDb,
+  tenant: { id: string; plan: string },
+  closing: { id: string; live: boolean },
+  env?: string | undefined,
+): Promise<WayIn[]> {
+  const effective = await resolveLoginConnections(db, tenant, env)
+  // The caller says whether the id it is closing is live NOW. `live: false` means the write closes a
+  // door that was already shut, which takes nothing away — the same step-aside the older guard makes.
+  if (!closing.live) return effective.map((c) => ({ id: c.id, kind: c.kind, usable: c.kind === 'local' ? 'yes' : 'unknown' }))
+
+  const { resolveSsoStance } = await import('./sso-stance.js')
+  const stanceAfter = await resolveSsoStance(db, tenant, env, { exceptConnectionId: closing.id })
+  let remaining = effective.filter((c) => c.id !== closing.id)
+  if (!stanceAfter.biting && loginMethodCeiling(env).has('local') && (await localLoginEnabled(db)) && !remaining.some((c) => c.kind === 'local')) {
+    remaining = [...remaining, { id: 'local', kind: 'local', label: null, brand: null, trustGroups: false, subjectPrefix: null }]
+  }
+  // The lapse, folded in: when it would open the platform door, that door IS a member of the list.
+  // ⚠️ The CONNECTION kind is `platform`; `platform-oidc` is the METHOD name the ceiling speaks. The
+  // typechecker caught the mix-up, which is the same two-vocabularies-for-one-thing this ADR is about.
+  if (!remaining.some((c) => c.kind === 'platform') && loginMethodCeiling(env).has('platform-oidc') && loadPlatformOidc()) {
+    remaining = [...remaining, { id: 'platform', kind: 'platform', label: null, brand: null, trustGroups: false, subjectPrefix: null }]
+  }
+
+  const out: WayIn[] = []
+  for (const c of remaining) {
+    if (c.kind !== 'local') { out.push({ id: c.id, kind: c.kind, usable: 'unknown' }); continue }
+    if (await anAdminHoldsAKey(db)) out.push({ id: c.id, kind: c.kind, usable: 'yes' })
+    // else: selected but key-less — not a way in, dropped.
+  }
+  return out
+}
+
+/**
+ * Does an active tenant administrator hold a password?
+ *
+ * ⚠️ This is the question the ruling turned the guard into, and it is NOT what `isLastAdmin` asks —
+ * that one counts `role` and `deactivated_at` and never joins the credential table. Migration 109
+ * dropped the `wlocal_` restriction, so an IdP-derived administrator can hold one too.
+ *
+ * ⚠️ A passkey-only administrator is NOT counted (ruled 2026-08-21, deliberately for now). The
+ * direction is over-refusal, which is the safe side.
+ */
+export async function anAdminHoldsAKey(db: TenantDb): Promise<boolean> {
+  const [row] = await db.sql<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM members m
+      JOIN local_credentials c ON c.sub = m.sub
+     WHERE m.role = 'admin' AND m.deactivated_at IS NULL`
+  return (row?.n ?? 0) > 0
+}
+
+/**
+ * ADR-251 §3.2: the three answers a door-closing write can get.
+ *
+ *   two or more ways in, or one that is `yes`   allow — today's behaviour
+ *   nothing at all                              409 `login_lockout`
+ *   exactly one, and it is `unknown`            409 `confirm_required`, until the caller repeats
+ *                                               itself with `confirm`
+ *
+ * ⚠️ The confirmation is scoped to the RULING'S case and no wider. An earlier draft asked for it
+ * whenever nothing remaining was provably usable — and because `yes` can only come from `local`, that
+ * would have asked an SSO-only tenant to confirm every ordinary connection tidy-up, three doors
+ * remaining or not. The ruling says "closing the last living way in", so the trigger is literally
+ * that: one door left, and the product cannot promise it works.
+ *
+ * ⚠️ Read on the TRANSITION, not the post-state — the callers carry that difference themselves
+ * (`b.enabled === false && row.enabled`, the SAML guard's enabled→disabled check, and this function's
+ * own step-aside through `closing.live`). Two rules would be a defect; there is one.
+ */
+export async function assertClosingIsSafe(
+  db: TenantDb,
+  tenant: { id: string; plan: string },
+  closing: { id: string; live: boolean },
+  opts: { confirm?: boolean; env?: string | undefined } = {},
+): Promise<void> {
+  const remaining = await waysInAfter(db, tenant, closing, opts.env)
+  if (remaining.length === 0) {
+    throw Object.assign(
+      new Error('this is the last effective way to sign in. Enable another connection first, or have an operator run `pnpm tenant:login-methods`.'),
+      { statusCode: 409, code: 'login_lockout' },
+    )
+  }
+  if (remaining.length > 1 || remaining[0]!.usable === 'yes') return
+  if (opts.confirm) return
+  throw Object.assign(
+    new Error('this would leave one way in, and it cannot be verified from here. Confirm to continue.'),
+    { statusCode: 409, code: 'confirm_required', remainingKind: remaining[0]!.kind },
+  )
+}
+
 export async function assertNotLastWayIn(
   db: TenantDb,
   tenant: { id: string; plan: string },
@@ -265,34 +388,12 @@ export async function assertNotLastWayIn(
   )
 }
 
-// #537 lockout guard: "would anything OTHER than `except` still let someone in?" — asked before a
-// write that disables one method. Refusing the transition to an empty effective set is the guard; an
-// ALREADY-empty set is not made worse by a write, so only the transition is refused (the admin's
-// live cookie session is the recovery path, per the module header of tenant-oidc.ts).
-//
-// Two honest limits (design-review, Slice 1):
-// - TOCTOU: this read and the caller's write are not one transaction, and the sibling method can be
-//   disabled through its own route concurrently — two simultaneous disables can still empty the set.
-//   The guard is a seatbelt against the common accident, not a serializable invariant; break-glass
-//   (Slice 4) is the recovery for the race.
-// - The predicates mirror the resolver's ENABLED checks, not the full login reality (a stored-but-
-//   undecryptable tenant IdP cfg, a corrupt SAML cert): a "remaining" method can still be broken.
-//   That gap is §4's documented one — the guard prevents intentional lockout, not misconfiguration.
-export async function otherLoginMethodsEffective(
-  db: TenantDb,
-  tenant: { plan: string },
-  except: LoginMethod,
-  env?: string | undefined,
-): Promise<boolean> {
-  const ceiling = loginMethodCeiling(env)
-  // The platform pref is deliberately NOT consulted here: it is a conditional that lapses the moment
-  // no own IdP is effective (see resolveAvailableLogin), so a configured, in-ceiling platform IdP is
-  // ALWAYS a way back in — either directly, or by lapse once the disable being guarded goes through.
-  if (except !== 'platform-oidc' && ceiling.has('platform-oidc') && loadPlatformOidc()) return true
-  if (except !== 'saml' && ceiling.has('saml') && samlEntitled(tenant) && (await tenantSamlEnabled(db))) return true
-  if (except !== 'tenant-oidc' && ceiling.has('tenant-oidc') && (await tenantOidcEnabled(db))) return true
-  return false
-}
+// #537's kind-level lockout guard is RETIRED (#822 / ADR-251 §3.4 — named here so the seam does not
+// linger half-alive). It asked which METHODS were configured and had no `local` branch at all, so a
+// workspace on SAML plus passwords was told to enable another method before disabling SAML while
+// another method was already enabled. Every door-closing write asks `assertClosingIsSafe` now, which
+// asks about ways somebody can walk THROUGH. Leaving a "does not count the password door" predicate
+// in the module is how the next feature picks it up.
 
 // #554 S3 / ADR-197 §3: socialProvidersFor is RETIRED (named in the ADR so the seam does not
 // linger half-alive). Social slugs now ride the platform CONNECTION's presence in the
