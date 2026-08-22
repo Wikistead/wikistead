@@ -82,6 +82,8 @@ const drop = async (ids: string[], log: (m: string) => void, reason: string) => 
 // through the ADR-196 §7 resolver so a managed-sender tenant uses its own transport here too.
 export async function drainEmailOutbox(deps: { fallback: EmailDriver; log?: (m: string) => void; batch?: number }): Promise<number> {
   const log = deps.log ?? (() => {})
+  // Workspaces already explained this drain (Decision 5 — once per drain, not once per message).
+  const unaddressed = new Set<string>()
   const rows = await claimOutboxBatch<EmailOutboxRow>({
     table: 'email_outbox',
     returning: ['id', 'tenant_id', 'member_sub', 'class', 'notification_id', 'fold_key', 'attempts'],
@@ -110,8 +112,18 @@ export async function drainEmailOutbox(deps: { fallback: EmailDriver; log?: (m: 
       if (members[0]!.deactivated_at != null) { await drop([row.id], log, 'member deactivated'); handled++; continue }
       const to = members[0]!.email
       if (!to) { await drop([row.id], log, 'member has no address'); handled++; continue }
-      const { tenantBaseUrl } = await import('./base-url.js')
-      const baseUrl = await withTenantTx(tenant, async (tx) => tenantBaseUrl(tx as never, { id: tenant.id, slug: tenant.slug }))
+      const { tenantBaseUrl, noAddressReason } = await import('./base-url.js')
+      const address = await withTenantTx(tenant, async (tx) => tenantBaseUrl(tx as never, { id: tenant.id, slug: tenant.slug }))
+      const baseUrl = address.url
+      // #828 / ADR-254 Decision 5: a deployment that cannot address its mail says so WHEN IT HAPPENS
+      // — not at boot, where the predicate would have to sweep `custom_domains` across every tenant
+      // and would go stale the moment one is verified. Once per drain per workspace, not once per
+      // message: in a drain of twenty the cause is the same twenty times, and a log that repeats it
+      // reads as twenty problems.
+      if (baseUrl === null && !unaddressed.has(tenant.id)) {
+        unaddressed.add(tenant.id)
+        log(`email outbox: ${tenant.slug} has no address for links — ${noAddressReason(address)}`)
+      }
       // #575 slice B: the same short tenant tx shape — inside it because tenant_settings is FORCE RLS.
       const { getTenantBranding } = await import('../routes/branding.js')
       const { productName } = await import('../product-name.js')

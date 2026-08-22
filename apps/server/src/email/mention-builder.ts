@@ -47,7 +47,10 @@ export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId:
     )
     if (gated.length === 0) return { kind: 'skip', reason: 'recipient view denied at send time (suppress, never retry)' }
 
-    if (!ctx.baseUrl) return { kind: 'skip', reason: 'no WKS_PUBLIC_BASE_URL / custom domain — refusing to improvise a link' }
+    // #828 / ADR-254 Decision 5: the reason stops naming a variable. WHICH addressing step ran out is
+    // said once per drain by the drain itself, which is the only place that knows; repeating a guess
+    // at it once per message is how the old string came to name the wrong one.
+    if (!ctx.baseUrl) return { kind: 'skip', reason: 'no address for this workspace — refusing to improvise a link' }
     const title = gated[0]!.title ?? 'a page'
     const link = `${ctx.baseUrl}/p/${pageId}`
     const more = gated.length > 1 ? ` (and ${gated.length - 1} more)` : ''

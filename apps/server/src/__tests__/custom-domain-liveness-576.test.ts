@@ -143,7 +143,7 @@ describe('#576: a custom domain that stopped being ours stops deciding link host
   it('a sustained failure demotes reversibly, and the canonical URL falls back to the platform', async () => {
     process.env.WKS_PUBLIC_BASE_URL = 'https://wikistead.example.com'
     try {
-      expect(await tenantBaseUrl(admin, { id: tenantId, slug: SLUG }), 'before: the custom domain wins').toBe(`https://${DOMAIN}`)
+      expect((await tenantBaseUrl(admin, { id: tenantId, slug: SLUG })).url, 'before: the custom domain wins').toBe(`https://${DOMAIN}`)
 
       const { demotedAtTick } = await runTicks(3, gone())
       expect(demotedAtTick).not.toBeNull()
@@ -153,14 +153,14 @@ describe('#576: a custom domain that stopped being ours stops deciding link host
       expect((await admin<{ verification_token: string }[]>`SELECT verification_token FROM custom_domains WHERE domain = ${DOMAIN}`)[0]!.verification_token,
         'the token survives, so Verify works without re-adding').toBe(token)
       expect(await mapped(), 'host→tenant resolution stops pointing at the dead name').toBeNull()
-      expect(await tenantBaseUrl(admin, { id: tenantId, slug: SLUG }), 'links fall back instead of pointing at a dead host').toBe(`https://${SLUG}.wikistead.example.com`)
+      expect((await tenantBaseUrl(admin, { id: tenantId, slug: SLUG })).url, 'links fall back instead of pointing at a dead host').toBe(`https://${SLUG}.wikistead.example.com`)
 
       // and the reverse direction works: proving ownership again restores everything
       await verifyCustomDomain(db, { tenantId, domain: DOMAIN }, { resolveTxt: present() })
       const restored = (await row())!
       expect(restored.status).toBe('verified')
       expect(restored.check_failures, 'a manual verify re-arms the guard too').toBe(0)
-      expect(await tenantBaseUrl(admin, { id: tenantId, slug: SLUG })).toBe(`https://${DOMAIN}`)
+      expect((await tenantBaseUrl(admin, { id: tenantId, slug: SLUG })).url).toBe(`https://${DOMAIN}`)
     } finally {
       delete process.env.WKS_PUBLIC_BASE_URL
     }
@@ -204,7 +204,7 @@ describe('#576: a custom domain that stopped being ours stops deciding link host
         }
         expect(hit, 'the dead one is demoted').toContain(SECOND)
         expect(await mapped(), 'the mapping follows to the surviving verified domain').toBe(DOMAIN)
-        expect(await tenantBaseUrl(admin, { id: tenantId, slug: SLUG }), 'and it is the SAME domain the URL builder picks')
+        expect((await tenantBaseUrl(admin, { id: tenantId, slug: SLUG })).url, 'and it is the SAME domain the URL builder picks')
           .toBe(`https://${DOMAIN}`)
       } finally {
         delete process.env.WKS_PUBLIC_BASE_URL
@@ -223,7 +223,7 @@ describe('#576: a custom domain that stopped being ours stops deciding link host
       try {
         await removeCustomDomain(db, { tenantId, domain: SECOND })
         expect(await mapped(), 'the mapping follows to the surviving verified domain').toBe(DOMAIN)
-        expect(await tenantBaseUrl(admin, { id: tenantId, slug: SLUG })).toBe(`https://${DOMAIN}`)
+        expect((await tenantBaseUrl(admin, { id: tenantId, slug: SLUG })).url).toBe(`https://${DOMAIN}`)
       } finally {
         delete process.env.WKS_PUBLIC_BASE_URL
         await admin`INSERT INTO custom_domains (tenant_id, domain, verification_token, status, verified_at, last_ok_at)

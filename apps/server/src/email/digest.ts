@@ -110,7 +110,10 @@ export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: 
     if (stamp.length) await db.sql`UPDATE notifications SET emailed_at = now() WHERE id = ANY(${stamp})`
 
     if (gated.length === 0) return { kind: 'skip', reason: 'empty after confirmation' }
-    if (!ctx.baseUrl) return { kind: 'skip', reason: 'no WKS_PUBLIC_BASE_URL / custom domain — refusing to improvise links' }
+    // #828 / ADR-254 Decision 5: the reason stops naming a variable. WHICH addressing step ran out is
+    // said once per drain by the drain itself, which is the only place that knows; repeating a guess
+    // at it once per message is how the old string came to name the wrong one.
+    if (!ctx.baseUrl) return { kind: 'skip', reason: 'no address for this workspace — refusing to improvise links' }
 
     // minimal body: event type + send-time-confirmed live title + deep link. Never content or diffs.
     const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
