@@ -2,6 +2,7 @@
 // Drives the member-management API via app.inject with cookie sessions. Focus:
 // the admin authz matrix (point 7), the last-admin lockout guard, and immediate
 // session revocation on removal (point 7 — the §7 session index).
+// #885: the two ledger assertions live in `members-audit-885.test.ts`; see that file for why.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -12,7 +13,6 @@ import { groupFgaId } from '../auth/group-sync.js'
 import { buildApp } from '../app.js'
 import { provisionTenant } from '../auth/provisioning.js'
 import { createSession, SESSION_COOKIE } from '../auth/session.js'
-import { drainAuditFor } from './helpers/audit-drain.js'
 import { acquireTenantDb } from '../db/tenant-db.js' // #474: fixture keys for the removal sweep
 import { createApiKey } from '../routes/api-keys.js'
 import { verifyApiKey } from '../api-key-auth.js'
@@ -272,20 +272,7 @@ describe('last-admin guard', () => {
 // ── #177: admin member ops write a durable, EE-gated audit entry ─────────────
 // LAST describe: it seeds + promotes mem-audit, so it must not precede the count /
 // last-admin assertions above.
-describe('member ops → audit log (#177)', () => {
-  it('a role change records a member.role_changed audit entry (entitled tenant)', async () => {
-    await seedMember('mem-audit', 'member') // provisionTenant has no cloud resolver → UNLIMITED.auditLog
-    const res = await app.inject({ method: 'PATCH', url: '/members/mem-audit', headers: { host, cookie: cookie(adminSid), 'content-type': 'application/json' }, payload: JSON.stringify({ role: 'admin' }) })
-    expect(res.statusCode).toBe(200)
-    await drainAuditFor(admin, tenantId)
-    const rows = await admin<{ actor: string; action: string; target: string }[]>`
-      SELECT actor, action, target FROM audit_log WHERE tenant_id = ${tenantId} ORDER BY seq`
-    expect(rows.some((r) => r.action === 'member.role_changed' && r.target === 'user:mem-audit' && r.actor === 'user:mem-admin')).toBe(true)
-  })
-
-  // #474: removal already strips sessions, membership/group tuples and direct grants — the member's API
-  // keys were the one credential left behind, and an API key outlives a session. Pinned end to end: the
-  // key authenticates while the member exists, and stops the moment they are removed.
+describe('member removal sweeps the credentials it must (#474)', () => {
   it('#474: removal revokes the member\'s API keys — and nobody else\'s', async () => {
     await seedMember('mem-keyed', 'member')
     await seedMember('mem-bystander', 'member')
@@ -314,11 +301,9 @@ describe('member ops → audit log (#177)', () => {
     const [row] = await admin<{ revoked_at: Date | null }[]>`SELECT revoked_at FROM api_keys WHERE id = ${victim.id}`
     expect(row?.revoked_at, 'the key row survives, marked revoked').not.toBeNull()
 
-    // the revocation is in the compliance ledger next to member.removed (same in-tx writer)
-    await drainAuditFor(admin, tenantId)
-    const audit = await admin<{ action: string; target: string }[]>`
-      SELECT action, target FROM audit_log WHERE tenant_id = ${tenantId} AND action = 'api_key.revoked'`
-    expect(audit.some((a) => a.target === `api_key:${victim.id}`), 'the revoke is audited').toBe(true)
+    // (#885: the ledger line this used to assert here is in `members-audit-885.test.ts` — the
+    // audit ledger is EE, and reaching its drain helper filtered this CE suite out of the
+    // published tree. What the keys DO is asserted above, which is the half that is CE.)
 
     // removing a member with no live keys is a no-op (no double-revoke, no error)
     const again = await app.inject({ method: 'DELETE', url: '/members/mem-bystander', headers: { host, cookie: cookie(adminSid) } })
