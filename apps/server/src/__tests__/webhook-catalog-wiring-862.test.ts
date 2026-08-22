@@ -140,7 +140,11 @@ describe('#862 every catalogued event reaches the webhook outbox', () => {
     } as DomainEvent)
     expect(payload.pageId).toBe('p1')
     expect(payload.actorId).toBe('user-1')
-    expect(payload.occurredAt, 'a subscriber needs to know when').toBeTruthy()
+    // ⚠️ `occurredAt` is NOT here, and that is deliberate. It used to be stamped in this function, so
+    // the two call sites that enqueue in their own transaction — and the CLI one — wrote rows with no
+    // timestamp at all (finding 4). It is stamped at the write now, where all three roads pass;
+    // `webhook-egress-verdicts-862` reads it back off the row for each of them.
+    expect(payload, 'stamped at the write, not here').not.toHaveProperty('occurredAt')
     // `type` and `tenantId` are columns of `webhook_outbox`; repeating them invites two answers.
     expect(payload).not.toHaveProperty('type')
     expect(payload).not.toHaveProperty('tenantId')

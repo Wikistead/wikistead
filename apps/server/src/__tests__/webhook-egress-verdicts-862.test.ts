@@ -185,6 +185,18 @@ describe('#862 the verdict is applied before the row is durable', () => {
     expect(payload!.actorKeyId, 'the key the actor arrived on').toBe('key-1')
   })
 
+  it('⚠️ every road stamps `occurredAt`, including the ones that skip the bridge', async () => {
+    // finding 4: this used to be stamped in the bridge, so the two transaction-scoped call sites
+    // and the CLI one wrote rows with no timestamp — while their rows named the field, which made the
+    // generated reference promise something the wire did not carry.
+    for (const type of ['api_key.revoked', 'orphan_draft.claim_expired'] as const) {
+      const payload = await storedPayload(type, type === 'api_key.revoked'
+        ? { keyId: 'k1', actorId: 'admin-1', ownerId: 'member-1' }
+        : { pageId: 'p1', adminSub: 'admin-1' })
+      expect(payload!.occurredAt, `${type} carries when it happened`).toBeTruthy()
+    }
+  })
+
   it('⚠️ §F — a dropped type writes no row at all, by either road', async () => {
     // The bridge refuses it, and so does the chokepoint — because the two types that egress today do
     // not come through the bridge, and a refusal only the bridge performs would not cover them.

@@ -248,6 +248,17 @@ let _actorKey: ActorKeyResolver | null = null
 export function registerActorKeyResolver(fn: ActorKeyResolver): void { _actorKey = fn }
 export function resetActorKeyResolver(): void { _actorKey = null }
 
+/**
+ * The key the current actor arrived on, if any.
+ *
+ * `emit` adds this to every event that names an actor, so a subscriber gets it for free. A call site
+ * that writes a durable row WITHOUT going through the bus does not — #862 measured three of them,
+ * and `page.published` is one, so an API-key publish reached a consumer with no key on it while the
+ * same event through the bus carried one. The resolver is exported so the write can ask the same
+ * question the bus asks, rather than each call site being told to remember.
+ */
+export function currentActorKeyId(): string | undefined { return _actorKey?.() }
+
 export function emit(event: DomainEvent): void {
   // One place, for the same reason the audit substitution has one: forty-one call sites build an
   // `actorId`, and a list of corrected sites grows a forty-second next week.

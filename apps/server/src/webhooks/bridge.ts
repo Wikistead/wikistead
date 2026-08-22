@@ -69,8 +69,10 @@ export const ENQUEUED_IN_TRANSACTION = new Set<DomainEvent['type']>(['page.publi
  * along (ADR-108 addendum §H). One enforcement point; this one just shapes.
  */
 export function webhookPayload(event: DomainEvent): Record<string, unknown> {
+  // `occurredAt` used to be stamped here, which meant the two call sites that do not come through this
+  // file had no timestamp at all. It is stamped at the write now, where every road passes.
   const { type: _type, tenantId: _tenantId, ...rest } = event as DomainEvent & Record<string, unknown>
-  return { ...rest, occurredAt: new Date().toISOString() }
+  return { ...rest }
 }
 
 /**

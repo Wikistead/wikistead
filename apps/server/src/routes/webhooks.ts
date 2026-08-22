@@ -12,6 +12,7 @@ import { encryptSecret, decryptSecret } from '../auth/secret-crypto.js'
 import { guardedFetch } from '../safe-fetch.js'
 import { pageEventDisposition } from '../page-disposition.js'
 import { egressVerdict } from '../webhooks/egress.js' // #862: what each type may carry out of the tenant
+import { currentActorKeyId } from '@wikistead/events'
 import type { DomainEvent } from '@wikistead/events'
 
 // #228 / ADR-108: outbound webhooks. A subscription is admin-managed (RLS) and gated by the `webhooks`
@@ -118,10 +119,21 @@ export async function enqueueWebhookOutbox(
   // at the call site, not a row that quietly ships whatever it was handed.
   const verdict = egressVerdict(args.eventType)
   if (verdict.kind === 'drop') return null
+  // ⚠️ Two fields no caller should have to remember, stamped here for the same reason the verdict is
+  // applied here: three roads reach this row and only one of them comes through the bus. `occurredAt`
+  // was missing from the two in-transaction payloads and the CLI one, and `actorKeyId` from
+  // `page.published` — so an API-key publish delivered no key while the same event through the bridge
+  // did (finding 4). Their rows named both, which made the reference say what the wire did not.
+  const stamped: Record<string, unknown> = { ...args.payload }
+  if (!('occurredAt' in stamped)) stamped.occurredAt = new Date().toISOString()
+  if ('actorId' in stamped && !('actorKeyId' in stamped)) {
+    const keyId = currentActorKeyId()
+    if (keyId) stamped.actorKeyId = keyId
+  }
   // The row names what may leave; anything else the event grows is dropped rather than forwarded.
   // `in` rather than a default: an optional field that is absent stays absent, it does not become null.
   const payload: Record<string, unknown> = {}
-  for (const field of verdict.fields) if (field in args.payload) payload[field] = args.payload[field]
+  for (const field of verdict.fields) if (field in stamped) payload[field] = stamped[field]
   // ADR-108 addendum §G: a `settled` disposition is one taken before the act destroyed what answers
   // it. `suppress` still writes a row rather than skipping the INSERT, so a suppressed event and a
   // never-enqueued one stay distinguishable while the row is alive — the drain deletes it on sight.
