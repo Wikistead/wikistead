@@ -816,6 +816,8 @@
   },
   "share": {
     "invalid": "This share link is invalid, expired, or revoked.",
+    "unavailable": "This workspace is not answering right now. Your link is fine, so please try again in a moment.",
+    "unavailableRetry": "Try again",
     "spaceTitle": "Shared space",
     "treeError": "Couldn't load the page list.",
     "treeRetry": "Retry",

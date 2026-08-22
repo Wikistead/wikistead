@@ -981,7 +981,12 @@ function ShareRoute() {
   // ok. The password prompt re-POSTs the mint with the entry; a wrong one lands back on password_required
   // with a generic error (wrong ≡ missing — no oracle). #233 a 429 (wrong-password throttle) keeps
   // the prompt with a cool-down notice ("throttled") instead of dropping to the dead-link view.
-  const [state, setState] = useState<{ status: "loading" | "denied" | "password" | "ok"; minted?: GuestToken; error?: "wrong" | "throttled" }>({
+  // #882: FIVE states now. "unavailable" is the deployment saying "not now" — a rolling restart, a
+  // gateway timeout, a request that never arrived. It used to collapse into "denied", so a redeploy
+  // told a visitor holding a perfectly good address that their link was dead, which reads as the
+  // sender having got it wrong. It is a separate state because the answer is different: wait and try
+  // again, rather than ask for a new link.
+  const [state, setState] = useState<{ status: "loading" | "denied" | "unavailable" | "password" | "ok"; minted?: GuestToken; error?: "wrong" | "throttled" }>({
     status: "loading",
   });
   const [password, setPassword] = useState("");
@@ -996,6 +1001,9 @@ function ShareRoute() {
       // keeps the prompt with the cool-down notice (never the dead-link view — the user just typed).
       if (minted === "password_required") setState({ status: "password", error: "wrong" });
       else if (minted === "rate_limited") setState({ status: "password", error: "throttled" });
+      // The visitor is standing at the prompt with a password typed. Dropping them to a full-page
+      // notice would throw that away, so a transient failure stays here and says so.
+      else if (minted === "unavailable") setState({ status: "unavailable" });
       else setState(minted ? { status: "ok", minted } : { status: "denied" });
     });
   }, [linkId]);
@@ -1010,6 +1018,7 @@ function ShareRoute() {
       if (cancelled) return;
       if (minted === "password_required") setState({ status: "password" });
       else if (minted === "rate_limited") setState({ status: "password", error: "throttled" });
+      else if (minted === "unavailable") setState({ status: "unavailable" });
       else setState(minted ? { status: "ok", minted } : { status: "denied" });
     });
     return () => { cancelled = true; };
@@ -1031,6 +1040,21 @@ function ShareRoute() {
             {state.error === "throttled" && <p className="text-[var(--danger)]" data-testid="share-password-throttled">{t("share.passwordThrottled")}</p>}
             <Button variant="primary" type="submit" disabled={!password || submitting} data-testid="share-password-submit">{t("share.passwordSubmit")}</Button>
           </form>
+        </div>
+      </AppShell>
+    );
+  }
+  // #882: said before the `denied` check, because "not now" must not fall through to "this link is
+  // dead". The retry re-runs the exchange with whatever password the visitor already typed.
+  if (state.status === "unavailable") {
+    return (
+      <AppShell>
+        <div className="mx-auto mt-16 flex max-w-sm flex-col items-start gap-3 p-4" data-testid="share-unavailable">
+          <p className="m-0">{t("share.unavailable")}</p>
+          <Button variant="primary" disabled={submitting} data-testid="share-unavailable-retry"
+            onClick={() => { setState({ status: "loading" }); attempt(password || undefined); }}>
+            {t("share.unavailableRetry")}
+          </Button>
         </div>
       </AppShell>
     );

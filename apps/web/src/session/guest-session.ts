@@ -171,7 +171,14 @@ export function makeGuestSession(
     // between two names in the page's own history.
     const again = await fetchGuestToken(linkId, undefined, token);
     if (again === "password_required") { end = "unauthorized"; return; } // the door asks again; this session is over
-    if (again === "rate_limited" || again === null) { scheduleRetry(); return; } // not an answer about the session
+    // #882: "unavailable" joins the rate limit here — a rolling restart at the twelve-hour boundary is
+    // not the link being revoked, and ending the session for it would throw away one that could have
+    // carried on.
+    if (again === "rate_limited" || again === "unavailable") { scheduleRetry(); return; }
+    // ...and `null` now means 404, which is the LINK answering: revoked, expired, or never this
+    // deployment's. It used to mean "anything that was not OK", which is why it was treated as a
+    // non-answer; with the two split, this one is an answer and it is the end.
+    if (again === null) { end = "gone"; return; }
     adopt(again);
   };
 

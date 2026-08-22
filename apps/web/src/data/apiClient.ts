@@ -105,7 +105,10 @@ export interface GuestToken {
 // wrong-password throttle has tripped (HTTP 429 — the caller keeps the prompt but shows a cool-down
 // message instead of dropping to the dead-link view, #233); null for a dead link (404) or any
 // other failure (uniform — no existence/password oracle). `password` re-POSTs the mint with the entry.
-export type GuestTokenResult = GuestToken | "password_required" | "rate_limited" | null;
+// #882: `null` is the LINK saying no — revoked, expired, or never this deployment's. "unavailable" is
+// the deployment saying "not now": a 502 from a rolling restart, a gateway timeout, a request that
+// never arrived. They used to be the same value, so a redeploy told a visitor their link was dead.
+export type GuestTokenResult = GuestToken | "password_required" | "rate_limited" | "unavailable" | null;
 
 // #813 / ADR-248 §3.4: renew a live guest session, WITHOUT it becoming a new visit.
 //
@@ -162,17 +165,34 @@ export async function refreshGuestToken(linkId: string, token: string): Promise<
  * and inventing a header there would send an empty credential for the server to reject.
  */
 export async function fetchGuestToken(linkId: string, password?: string, carrying?: string): Promise<GuestTokenResult> {
-  const res = await fetch(`${API_URL}/public/share-links/${encodeURIComponent(linkId)}/token`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      ...(password !== undefined ? { "content-type": "application/json" } : {}),
-      ...(carrying ? { authorization: `Bearer ${carrying}` } : {}),
-    },
-    body: password !== undefined ? JSON.stringify({ password }) : undefined,
-  });
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}/public/share-links/${encodeURIComponent(linkId)}/token`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        ...(password !== undefined ? { "content-type": "application/json" } : {}),
+        ...(carrying ? { authorization: `Bearer ${carrying}` } : {}),
+      },
+      body: password !== undefined ? JSON.stringify({ password }) : undefined,
+    })
+  } catch {
+    // #882: `fetch` REJECTS when the request never arrives, and this had no catch — so a visitor who
+    // opened a share link on a flaky connection got an unhandled rejection, neither branch of the
+    // caller ran, and the page sat on its loading skeleton with no way out but a reload. A request
+    // that never arrived decides nothing about the link. (`refreshGuestToken` has always said this;
+    // the first exchange never did.)
+    return "unavailable"
+  }
   if (res.status === 401) return "password_required"; // needs a password
   if (res.status === 429) return "rate_limited"; // throttled — keep the prompt, show a cool-down notice
-  if (!res.ok) return null;
+  // #882: 404 is the link answering for itself — revoked, expired, or never this deployment's — and
+  // that is the only "no" a visitor can act on. Everything else that is not OK is the DEPLOYMENT
+  // having a moment: a 502 from a rolling restart, a gateway timeout, the 404-shaped refusal of a pod
+  // that is draining. Reporting those as a dead link tells somebody who was handed a working address
+  // that the person who sent it got it wrong. ADR-248 §3.6 already draws this line for the refresh
+  // route (#875); the first exchange is the same question asked one step earlier.
+  if (res.status === 404) return null;
+  if (!res.ok) return "unavailable";
   return (await res.json()) as GuestToken;
 }
