@@ -19,7 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { isServerFault } from "./serverFault";
+import { isServerFault, isServerFaultError, HttpStatusError, loadVerdict } from "./serverFault";
 
 const SRC = readFileSync(resolve(import.meta.dirname, "routes.tsx"), "utf8");
 const at = (marker: string): number => {
@@ -28,10 +28,28 @@ const at = (marker: string): number => {
   return i;
 };
 
+// ⚠️ reading positions out of the WHOLE file let this pin borrow the boundary next door — the
+// order assertion below was measuring ShareRoute, ~750 lines from the component it names, and stayed
+// green while the public page's own branches were swapped. Every ordering is read inside one function
+// body from here on, and the slice itself is asserted so a rename cannot quietly empty it.
+const bodyOf = (name: string): string => {
+  const start = SRC.indexOf(`function ${name}(`);
+  expect(start, `${name} is not in routes.tsx`).toBeGreaterThan(-1);
+  const end = SRC.indexOf("\nfunction ", start + 1);
+  const body = SRC.slice(start, end === -1 ? undefined : end);
+  expect(body.length, `${name}'s body is empty`).toBeGreaterThan(200);
+  return body;
+};
+const atIn = (body: string, marker: string): number => {
+  const i = body.indexOf(marker);
+  expect(i, `${marker} is not in this component`).toBeGreaterThan(-1);
+  return i;
+};
+
 describe("#886 a restarting deployment is not a missing page", () => {
   it("asks the one predicate the sign-in screens ask, rather than inventing a second", () => {
     // #681 wrote isServerFault precisely so four surfaces could not drift apart. This is the fifth.
-    expect(SRC).toContain('import { isServerFault } from "./serverFault"');
+    expect(SRC).toMatch(/import \{[^}]*\bisServerFault\b[^}]*\} from "\.\/serverFault"/);
     expect(SRC).toContain('if (isServerFault(res)) { setState({ status: "unavailable" }); return; }');
   });
 
@@ -56,13 +74,44 @@ describe("#886 a restarting deployment is not a missing page", () => {
   });
 
   it("renders the new state before the not-found one, and offers a way back", () => {
-    expect(at('state.status === "unavailable"')).toBeLessThan(at('state.status === "notfound"'));
+    const body = bodyOf("PublicPageContent");
+    expect(atIn(body, 'state.status === "unavailable"')).toBeLessThan(atIn(body, 'state.status === "notfound"'));
+    expect(atIn(body, 'data-testid="public-unavailable"')).toBeLessThan(atIn(body, 'data-testid="public-not-found"'));
     // The whole difference from the not-found view: this one is recoverable, so it has to be able to
     // ask again — otherwise it is the same dead end in kinder words.
     expect(at('data-testid="public-unavailable-retry"')).toBeGreaterThan(at('data-testid="public-unavailable"'));
     expect(SRC).toMatch(/public-unavailable-retry[\s\S]{0,200}setReloadKey/);
     // …and the retry has to actually re-run the load.
     expect(SRC).toContain('}, [pageId, reloadKey]);');
+  });
+
+  // the fix landed inside PublicPageContent, but a /pub/space address never reaches it when the
+  // tree request fails — PublicSpaceRoute answers first, and it answered "not found" to everything.
+  it("gives the public SPACE route the same three answers", () => {
+    const body = bodyOf("PublicSpaceRoute");
+    // Run the decision, do not read it: `loadVerdict` is the shipped branch, so an inversion here is
+    // a failure rather than a differently-spelled string.
+    expect(loadVerdict(false, undefined)).toBe("ok");
+    expect(loadVerdict(true, new HttpStatusError(502))).toBe("unavailable");
+    expect(loadVerdict(true, new TypeError("Failed to fetch"))).toBe("unavailable");
+    expect(loadVerdict(true, new HttpStatusError(404)), "existence-hiding stays put").toBe("notfound");
+    expect(body).toContain("loadVerdict(lazy.root.isError, lazy.root.error)");
+    expect(body).toContain('treeVerdict === "unavailable"');
+    expect(body).toContain('treeVerdict === "notfound"');
+    expect(atIn(body, 'data-testid="public-space-unavailable"'))
+      .toBeLessThan(atIn(body, 'data-testid="public-space-not-found"'));
+    // Recoverable means it can ask again — the page route bumps a key, this one refetches the query.
+    expect(body).toMatch(/public-space-retry[\s\S]{0,200}lazy\.root\.refetch\(\)/);
+  });
+
+  it("keeps the status on the error, so the space route can still tell the two apart", () => {
+    // react-query hands the component an Error, not the Response. Throwing a bare Error made a 404 and
+    // a dropped connection identical by the time anything could judge them.
+    expect(SRC).toContain("throw new HttpStatusError(res.status)");
+    expect(isServerFaultError(new HttpStatusError(404)), "404 is an answer about the space").toBe(false);
+    expect(isServerFaultError(new HttpStatusError(403)), "so is a refusal").toBe(false);
+    expect(isServerFaultError(new HttpStatusError(502))).toBe(true);
+    expect(isServerFaultError(new TypeError("Failed to fetch")), "a request that never arrived").toBe(true);
   });
 
   it("says it in both locales, and the Japanese is not the English", () => {

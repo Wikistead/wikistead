@@ -44,7 +44,7 @@ import { Editor, type AnchorGetter } from "../editor/Editor";
 import { UnsavedBanner } from "../editor/UnsavedBanner";
 import type { Liveness } from "../editor/collab";
 import { makeGuestSession, type GuestSession } from "../session/guest-session";
-import { isServerFault } from "./serverFault"; // #886 / #681: one place decides "the server failed"
+import { isServerFault, isServerFaultError, HttpStatusError, loadVerdict } from "./serverFault"; // #886 / #681: one place decides "the server failed"
 import { setVimClipboardMode } from "../editor/live-preview/vim-clipboard";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { colorFromString } from "../ui/avatar";
@@ -1956,7 +1956,7 @@ function usePublicLazyTree(spaceId: string | undefined) {
     retry: 1,
     queryFn: async (): Promise<PublicBranch> => {
       const res = await fetch(assetUrl(`/public/spaces/${encodeURIComponent(spaceId!)}/pages/branch`));
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) throw new HttpStatusError(res.status); // #886 the status has to survive the rejection
       return (await res.json()) as PublicBranch;
     },
   });
@@ -2079,7 +2079,23 @@ function PublicSpaceRoute() {
     setOpenId(home?.id ?? lazy.root.data.pages[0]?.id ?? null); // the home is the space root — open it by default
   }, [openId, home, lazy.root.data]);
 
-  if (lazy.root.isError) return <AppShell><div data-testid="public-not-found" style={{ padding: 24 }}>{t("publicPage.notFound")}</div></AppShell>;
+  // #886 this branch used to answer "the page does not exist" to EVERY failure, so a restarting
+  // deployment made a shared /pub/space address look dead — and it sits OUTSIDE PublicPageContent, so
+  // the fix that landed there never got to draw. Said before the not-found branch, and separately.
+  const treeVerdict = loadVerdict(lazy.root.isError, lazy.root.error);
+  if (treeVerdict === "unavailable") {
+    return (
+      <AppShell>
+        <div data-testid="public-space-unavailable" style={{ padding: 24 }}>
+          <p style={{ margin: 0 }}>{t("publicPage.unavailable")}</p>
+          <button type="button" data-testid="public-space-retry" style={{ marginTop: 12 }} onClick={() => { void lazy.root.refetch(); }}>
+            {t("publicPage.unavailableRetry")}
+          </button>
+        </div>
+      </AppShell>
+    );
+  }
+  if (treeVerdict === "notfound") return <AppShell><div data-testid="public-space-not-found" style={{ padding: 24 }}>{t("publicPage.notFound")}</div></AppShell>;
   return (
     <AppShell sidebar={<PublicSpaceSidebar tree={lazy} home={home} openId={openId} onOpen={setOpenId} />} headerExtra={<PublicPoweredBy />}>
       {openId ? (
