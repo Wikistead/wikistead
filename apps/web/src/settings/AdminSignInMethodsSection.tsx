@@ -494,7 +494,7 @@ export function AdminSignInMethodsSection() {
                         onChange={(e) => setDraft({ ...draft, issuer: e.target.value })} />
                     </label>
                     <label className="flex flex-col gap-1 text-xs text-fg-dim">
-                      {t("adminConnections.labelPlaceholder")}
+                      {t("adminConnections.labelField")}
                       {/* #834 (ruling): the placeholder IS the explanation. It shows the words the
                           sign-in screen would use, so the field says what it is for by example —
                           which a sentence underneath had to say in the abstract. */}

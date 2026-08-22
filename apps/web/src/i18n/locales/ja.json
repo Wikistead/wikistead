@@ -19,7 +19,7 @@
     "trustGroupsHint": "ON にすると、この接続のグループ claim をサインイン時に同期します。",
     "presetNone": "カスタム（任意の OIDC プロバイダ）",
     "issuerPlaceholder": "Issuer URL（https://idp.example.com）",
-    "labelPlaceholder": "ボタンのラベル（必須・ログイン画面に表示）",
+    "labelField": "ボタンのラベル（必須・ログイン画面に表示）",
     "entraPlaceholder": "Entra テナント ID（GUID）",
     "buttonLabel": "ボタンのラベル",
     "entraTenantId": "Entra テナント ID",

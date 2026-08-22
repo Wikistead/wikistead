@@ -166,7 +166,13 @@ describe("#834: the migration is gone, and the field explains itself", () => {
       for (const k of ["unnamedNotice", "unnamedBadge", "labelRequired"]) {
         expect(Object.keys(conn), `adminConnections.${k} survived the migration it belonged to (${l})`).not.toContain(k);
       }
-      expect(conn.labelPlaceholder, `the ${l} field still calls the name optional`).not.toMatch(/optional|任意/);
+      // #860: the key is `labelField` since 2026-08-22 — it names the visible <label> above the name
+      // input, and `labelPlaceholder` said it was placeholder text (#834 moved the placeholder to
+      // `auth.signInSso`). Its EXISTENCE is asserted first: without this line, deleting the key made
+      // the case below fail with a TypeError from `undefined`, which is a red by accident rather than
+      // a red the pin decided on — and an accident stops working the day the matcher changes.
+      expect(Object.keys(conn), `adminConnections.labelField is gone from ${l}`).toContain("labelField");
+      expect(conn.labelField, `the ${l} field still calls the name optional`).not.toMatch(/optional|任意/);
     }
   });
 });

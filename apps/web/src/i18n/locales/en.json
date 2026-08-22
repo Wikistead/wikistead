@@ -19,7 +19,7 @@
     "trustGroupsHint": "When on, this connection's group claim is synced at sign-in.",
     "presetNone": "Custom (any OIDC provider)",
     "issuerPlaceholder": "Issuer URL (https://idp.example.com)",
-    "labelPlaceholder": "Button label (required, shown on the login screen)",
+    "labelField": "Button label (required, shown on the login screen)",
     "entraPlaceholder": "Entra tenant ID (GUID)",
     "buttonLabel": "Button label",
     "entraTenantId": "Entra tenant ID",
