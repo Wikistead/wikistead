@@ -9,6 +9,12 @@
 // So these walk the OTHER direction: start from the catalogue, go through the bridge, and ask what
 // comes out.
 //
+// ⚠️ WHICH ENTRYPOINTS THIS SPEAKS FOR. The live walk goes through `buildApp`, so it measures the
+// API server process and only that one. It cannot say anything about a type emitted from a CLI or a
+// cron — the bridge subscribes inside `buildApp`, so those emits reach nobody. Three such types were
+// ruled out of egress entirely (§C); the fourth, `orphan_draft.claim_expired`, enqueues at its own
+// call site now, and the walk below checks the source rather than driving the sweep.
+//
 // ⚠️ These walks do NOT cover a type added tomorrow, and this header used to claim they did (#862
 // measured it: adding a fictional type to the catalogue left all six green). Only one type is
 // actually driven through a live outbox here; the rest are read from the catalogue and asked a
@@ -34,6 +40,33 @@ const eventOf = (type: string): DomainEvent =>
   ({ type, tenantId: 'tenant_dev', pageId: 'p1', actorId: 'user-1' }) as unknown as DomainEvent
 
 const catalogued = Object.keys(EVENT_CATALOG)
+
+describe('#862 §F — the per-request auth events write nothing', () => {
+  it('a real request with a garbage bearer leaves no outbox row', async () => {
+    // ⚠️ This is §F's measurement turned into an assertion, and it is measured through a REQUEST, not
+    // through `emit`. `resolvePrincipal` raises `auth.failed` from a dozen places on the onRequest
+    // hook, and reaching one costs a malformed `Authorization` header — no share link, no key, no
+    // account. Before the ruling, that header was one INSERT into a durable table, and 17 of 21 rows
+    // after an ordinary run were `auth.success`. The bridge does not consult whether the tenant has a
+    // hook, so a tenant with none paid for the writes too.
+    const app = await buildApp()
+    try {
+      await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${TENANT}`
+      const before = await countRows()
+      for (let i = 0; i < 5; i++) {
+        await app.inject({ method: 'GET', url: '/spaces', headers: { host: 'dev.localhost', authorization: `Bearer not-a-real-token-${i}` } })
+      }
+      // the bus hands the bridge its handlers through a resolved promise — give them room to land
+      for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 25))
+      expect(await countRows(), 'five refused requests wrote nothing to the outbox').toBe(before)
+      const auth = await admin<{ n: number }[]>`
+        SELECT COUNT(*)::int AS n FROM webhook_outbox WHERE event_type LIKE 'auth.%'`
+      expect(auth[0]!.n, 'and no auth row exists for any tenant').toBe(0)
+    } finally {
+      await app.close()
+    }
+  }, 120_000)
+})
 
 describe('#862 every catalogued event reaches the webhook outbox', () => {
   it('the catalogue is not empty (a walk that finds nothing would pass everything below)', () => {
@@ -92,7 +125,7 @@ describe('#862 every catalogued event reaches the webhook outbox', () => {
     const { join, dirname } = await import('node:path')
     const { fileURLToPath } = await import('node:url')
     const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
-    const sources = ['src/routes/pages.ts', 'src/routes/api-keys.ts'].map((f) => readFileSync(join(root, f), 'utf8')).join('\n')
+    const sources = ['src/routes/pages.ts', 'src/routes/api-keys.ts', 'src/scripts/orphan-claim-sweep.ts'].map((f) => readFileSync(join(root, f), 'utf8')).join('\n')
     for (const type of ENQUEUED_IN_TRANSACTION) {
       expect(
         new RegExp(`enqueueWebhookOutbox\\([\\s\\S]{0,200}?${type.replace('.', '\\.')}`).test(sources),

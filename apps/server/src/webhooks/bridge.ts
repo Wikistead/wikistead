@@ -48,11 +48,16 @@ import { egressVerdict } from './egress.js'
 /**
  * Event types that a call site already enqueues inside its own transaction.
  *
- * These are the ones whose delivery is worth more than the bridge can offer: the publish path writes
- * the row in the same transaction that publishes, so a crash cannot separate the two. The bridge would
- * add a second, weaker copy of the same event.
+ * These are the ones whose delivery is worth more than the bridge can offer, or which the bridge
+ * cannot reach at all. The publish path writes the row in the same transaction that publishes, so a
+ * crash cannot separate the two; the bridge would add a second, weaker copy.
+ *
+ * ⚠️ `orphan_draft.claim_expired` is here for the other reason (#862 / ADR-108 §F). This subscriber is
+ * registered in `buildApp` and nowhere else, and that event is emitted only by `pnpm orphan:sweep` — a
+ * separate process with no app in it. "One subscriber closes the gap" is true within a process and
+ * false across one, so that call site enqueues for itself.
  */
-export const ENQUEUED_IN_TRANSACTION = new Set<DomainEvent['type']>(['page.published', 'api_key.revoked'])
+export const ENQUEUED_IN_TRANSACTION = new Set<DomainEvent['type']>(['page.published', 'api_key.revoked', 'orphan_draft.claim_expired'])
 
 /**
  * What the bridge OFFERS the outbox: everything the event carries except the routing fields the row

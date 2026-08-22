@@ -9,6 +9,7 @@
 import postgres from 'postgres'
 import { emit } from '@wikistead/events'
 import { fgaClient, deleteTuples } from '@wikistead/authz'
+import { enqueueWebhookOutbox } from '../routes/webhooks.js'
 import type { OpenFgaClient } from '@openfga/sdk'
 
 // Revoke + clear every expired claim. `sql` MUST be an admin-role connection (bypasses RLS) so
@@ -22,6 +23,16 @@ export async function sweepExpiredClaims(sql: postgres.Sql, fga: OpenFgaClient):
     await deleteTuples(fga, [{ user: `user:${c.admin_sub}`, relation: 'manage_direct', object: `page:${c.page_id}` }]).catch(() => {}) // #218: manage is computed; the grant lives on manage_direct
     await sql`DELETE FROM orphan_claims WHERE tenant_id = ${c.tenant_id} AND page_id = ${c.page_id}`
     emit({ type: 'orphan_draft.claim_expired', tenantId: c.tenant_id, pageId: c.page_id, adminSub: c.admin_sub })
+    // ⚠️ #862 / ADR-108 §F: the bridge that carries the bus to the webhook outbox subscribes inside
+    // `buildApp`, and this sweep is a CLI — `pnpm orphan:sweep`, its own process, no app. So the emit
+    // above reaches nobody, and this was the one catalogued type left with no road to a consumer once
+    // the three break-glass events were ruled out of egress. Enqueued at the call site instead, the
+    // way the publish path does: a road that does not depend on which process is running.
+    await enqueueWebhookOutbox(sql, {
+      tenantId: c.tenant_id,
+      eventType: 'orphan_draft.claim_expired',
+      payload: { pageId: c.page_id, adminSub: c.admin_sub },
+    })
   }
   return expired.length
 }
