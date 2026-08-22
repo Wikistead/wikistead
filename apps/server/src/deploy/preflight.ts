@@ -143,6 +143,48 @@ export function notFoundIsJsonVerdict(status: number, contentType: string): Chec
   return { pass: status === 404 && isJson && !isHtml, detail: `status=${status} content-type=${contentType || '(none)'}${isHtml ? ' — HTML! (SPA catch-all leaked into /api)' : ''}` }
 }
 
+// The cookies this product issues. Every one of them carries authority — the session itself
+// (`wks_sess`), the second-factor step (`wks_factor`) and the half-finished signup (`wks_signup`) —
+// so every one has to be unreadable to script and unavailable over plain http.
+//
+// A PREFIX rather than a list of three: a fourth `wks_` cookie is judged the day it is written, which
+// is the day it would otherwise ship unguarded. Cookies this product did not set are deliberately out
+// of scope here — the load balancer's affinity cookie is a routing hint, not a credential, and failing
+// a deployment over it would teach the operator to ignore this row.
+const OWN_COOKIE_PREFIX = 'wks_'
+
+/** The name of a Set-Cookie line, e.g. `wks_sess=abc; Path=/` → `wks_sess`. */
+function cookieName(line: string): string {
+  return (line.split('=')[0] ?? '').trim()
+}
+
+// Row: our own cookies are HttpOnly, and Secure wherever the run is https (ADR-039 / #884).
+//
+// #879 found the header rows judging presence rather than value; this is the same gap one row over.
+// The cookie row asked only whether a `Domain=` was present, so a session cookie readable by any
+// script, or one that travels over plain http, passed the gate that exists to stop exactly that.
+//
+// ⚠️ `Secure` is required only on an https run. Demanding it over http would redden every plaintext
+// evaluation stack, and a gate an operator learns to skip protects nothing.
+export function cookieAttributesVerdict(setCookieHeaders: string[], isHttps: boolean): CheckVerdict {
+  const ours = setCookieHeaders.filter((c) => cookieName(c).startsWith(OWN_COOKIE_PREFIX))
+  if (ours.length === 0) {
+    // NOT a pass. The run saw cookies but none of ours, so it has no evidence either way — and this
+    // gate blocks a release, where "I did not look" must never print like "I looked and it was fine".
+    return { pass: false, skipped: true, detail: `no ${OWN_COOKIE_PREFIX}* cookie observed — sign in and re-run with --set-cookie "<the Set-Cookie line>"` }
+  }
+  const problems: string[] = []
+  for (const line of ours) {
+    const name = cookieName(line)
+    if (!/;\s*httponly\b/i.test(line)) problems.push(`${name} is missing HttpOnly (any script on the page can read the session)`)
+    if (isHttps && !/;\s*secure\b/i.test(line)) problems.push(`${name} is missing Secure (it would travel over plain http)`)
+  }
+  return {
+    pass: problems.length === 0,
+    detail: problems.join('; ') || `${ours.length} ${OWN_COOKIE_PREFIX}* cookie(s) are HttpOnly${isHttps ? ' and Secure' : ' (Secure not required over http)'}`,
+  }
+}
+
 // Row: the API is REACHABLE through the edge (#724 / ADR-231). Every other /api row here answers
 // a question about a response's shape, and a fully broken edge answers all of them correctly: the
 // 404-JSON row in particular PASSES when nothing routes to the server at all, because a stack that
@@ -267,6 +309,14 @@ export async function runHttpPreflight(
     }
     const v = cookieHostOnlyVerdict(cookies)
     return { ...v, detail: `${v.detail} [${cookies.length} cookie(s); replay at a second tenant host is still manual]` }
+  })
+
+  // #884: the row above asks where a cookie may be SENT; this one asks who may read it and over what.
+  // Same evidence, separate verdicts, because a deployment can fail one and pass the other and the
+  // operator has to know which.
+  await run('session-cookie-attributes', async () => {
+    const cookies = [...(opts.setCookies ?? []), ...observedCookies]
+    return cookieAttributesVerdict(cookies, isHttps)
   })
 
   await run('public-page-noindex', async () => {

@@ -6,6 +6,7 @@ import {
   lowerHeaders,
   securityHeadersVerdict,
   cookieHostOnlyVerdict,
+  cookieAttributesVerdict,
   notFoundIsJsonVerdict,
   cacheControlVerdict,
   noindexVerdict,
@@ -94,6 +95,54 @@ describe('cookieHostOnlyVerdict (ADR-039 cross-subdomain leak)', () => {
   })
 })
 
+describe('cookieAttributesVerdict (#884: who may READ the session, and over what)', () => {
+  const sess = (attrs: string) => `wks_sess=abc; Path=/${attrs}`
+
+  it('PASSES the posture the product actually sets', () => {
+    expect(cookieAttributesVerdict([sess('; HttpOnly; Secure; SameSite=Lax')], true).pass).toBe(true)
+  })
+
+  it('FAILS a session cookie any script on the page can read', () => {
+    const v = cookieAttributesVerdict([sess('; Secure')], true)
+    expect(v.pass).toBe(false)
+    expect(v.detail).toContain('HttpOnly')
+  })
+
+  it('FAILS an https deployment whose session cookie is not Secure', () => {
+    const v = cookieAttributesVerdict([sess('; HttpOnly')], true)
+    expect(v.pass).toBe(false)
+    expect(v.detail).toContain('Secure')
+  })
+
+  it('does NOT demand Secure over http — a gate an operator skips protects nothing', () => {
+    expect(cookieAttributesVerdict([sess('; HttpOnly')], false).pass).toBe(true)
+  })
+
+  it('judges every cookie this product issues, not just the session', () => {
+    // The rule is the `wks_` prefix, so a fourth one is judged the day it is written.
+    for (const name of ['wks_factor', 'wks_signup', 'wks_something_new']) {
+      const v = cookieAttributesVerdict([`${name}=x; Path=/; Secure`], true)
+      expect(v.pass, `${name} was not judged`).toBe(false)
+      expect(v.detail).toContain(name)
+    }
+  })
+
+  it('leaves cookies the product did not set alone', () => {
+    // The load balancer's affinity cookie is a routing hint, not a credential. Failing a deployment
+    // over it would teach the operator to ignore this row — and then it guards nothing at all.
+    const v = cookieAttributesVerdict([`INGRESSCOOKIE=abc; Path=/`, sess('; HttpOnly; Secure')], true)
+    expect(v.pass).toBe(true)
+  })
+
+  it('SKIPS rather than passes when it saw no cookie of ours', () => {
+    // "I did not look" must not print like "I looked and it was fine" — this gate blocks a release.
+    const v = cookieAttributesVerdict([`INGRESSCOOKIE=abc; Path=/`], true)
+    expect(v.pass).toBe(false)
+    expect(v.skipped).toBe(true)
+    expect(cookieAttributesVerdict([], true).skipped).toBe(true)
+  })
+})
+
 describe('notFoundIsJsonVerdict (uniform 404, no SPA catch-all in /api)', () => {
   it('PASSES a JSON 404', () => {
     expect(notFoundIsJsonVerdict(404, 'application/json; charset=utf-8').pass).toBe(true)
@@ -142,10 +191,10 @@ describe('runHttpPreflight (orchestration, injected fetch — no network)', () =
     const items = await runHttpPreflight('https://t1.example', fetchImpl)
     const { allPass, skipped } = formatReport(items)
     expect(allPass).toBe(true)
-    expect(items.map((i) => i.name)).toEqual(['security-headers', 'document-security-headers', 'api-reachable', 'api-404-json', 'api-no-cache', 'assets-long-cache', 'cookie-host-only', 'public-page-noindex'])
+    expect(items.map((i) => i.name)).toEqual(['security-headers', 'document-security-headers', 'api-reachable', 'api-404-json', 'api-no-cache', 'assets-long-cache', 'cookie-host-only', 'session-cookie-attributes', 'public-page-noindex'])
     // ...but the three probe-dependent rows were NOT observed here, and say so rather than reading green.
-    expect(skipped).toBe(3)
-    expect(items.filter((i) => i.verdict.skipped).map((i) => i.name)).toEqual(['assets-long-cache', 'cookie-host-only', 'public-page-noindex'])
+    expect(skipped).toBe(4)
+    expect(items.filter((i) => i.verdict.skipped).map((i) => i.name)).toEqual(['assets-long-cache', 'cookie-host-only', 'session-cookie-attributes', 'public-page-noindex'])
   })
   // #724: the row that would have caught the /api prefix break. Every other /api row answers a
   // question about a response's SHAPE, and a stack where nothing routes to the server satisfies
