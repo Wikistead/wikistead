@@ -435,14 +435,19 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     // precondition set, or the switch's own requirement dies one delete later.
     const stance = await resolveSsoStance(req.db, req.tenant)
     if (stance.selected) {
-      const [other] = await req.db.sql<{ member_sub: string }[]>`
-        SELECT se.member_sub FROM sso_exemptions se JOIN local_credentials lc ON lc.member_sub = se.member_sub
-        WHERE se.member_sub <> ${req.params.sub} LIMIT 1`
+      // #898: the SAME predicate the ON precondition uses, asked counterfactually. This query used to
+      // be its own, and it did not read `role` — so the switch could be turned on because an exempt
+      // ADMINISTRATOR held a password, and then that administrator's exemption revoked because some
+      // exempt ordinary member held one. Two moves to the state the floor exists to prevent: people
+      // can get in when the IdP is down, and nobody among them can fix anything. #836 narrowed the
+      // entrance and left both exits wide, which is worse than the three agreeing loosely, because
+      // the record says the floor is held.
+      const otherAdmin = await anAdminHoldsAKey(req.db, { exemptOnly: true, without: req.params.sub })
       const [self] = await req.db.sql<{ member_sub: string }[]>`
         SELECT member_sub FROM sso_exemptions WHERE member_sub = ${req.params.sub}`
-      if (self && !other) {
+      if (self && !otherAdmin) {
         throw Object.assign(
-          new Error('this is the last exempt member holding a password — name another exemption first, or turn the SSO requirement off.'),
+          new Error('this is the last exempt ADMINISTRATOR holding a password — exempt another administrator who has one, or turn the SSO requirement off.'),
           { statusCode: 409, code: 'sso_exemption_required' },
         )
       }

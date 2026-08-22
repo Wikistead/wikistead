@@ -156,17 +156,44 @@ describe('#626: the password entrance can be taken back', () => {
     }
   })
 
-  it('⚠️ …and another exempt member holding a credential is the other', async () => {
+  it('⚠️ …and another exempt ADMINISTRATOR holding a credential is the other', async () => {
     // Fact two, and the harder one to see: the floor is not emptied, so the removal is correct. A file
     // that leaves an exemption AND a credential behind in a shared tenant hands this case a second
     // key-holder it never asked for.
+    //
+    // ⚠️ #898 changed WHO counts as that second key-holder, and this case asserted the old answer.
+    // It seated the sibling as a plain `member`, so it was measuring the hole rather than the floor:
+    // an exempt ordinary member with a password lets nobody administer anything when the IdP is down,
+    // which is the state the floor exists to prevent. The sibling is promoted for the duration.
+    await ownCredential(OWN_FED)
+    await ownExempt(OWN_FED)
+    await ownStance(true)
+    await ownCredential(OWN_OTHER)
+    await ownExempt(OWN_OTHER)
+    await admin`UPDATE members SET role = 'admin' WHERE tenant_id = ${own.id} AND sub = ${OWN_OTHER}`
+    try {
+      expect((await ownRemove(OWN_FED)).statusCode, 'another exempt ADMIN still holds a key — the floor stands').toBe(200)
+    } finally {
+      await admin`UPDATE members SET role = 'member' WHERE tenant_id = ${own.id} AND sub = ${OWN_OTHER}`
+      await admin`DELETE FROM sso_exemptions WHERE tenant_id = ${own.id} AND member_sub = ${OWN_OTHER}`
+      await admin`DELETE FROM local_credentials WHERE tenant_id = ${own.id} AND member_sub = ${OWN_OTHER}`
+    }
+  })
+
+  it('⚠️ …but an exempt ordinary member holding one is NOT (#898)', async () => {
+    // The half the case above used to assert. Same fixture, sibling left as a plain member: the
+    // removal is refused, because after it nobody who can sign in during an outage can administer
+    // anything. Both halves live here so the pair cannot drift the way the three copies of this rule
+    // drifted -- one of them is always red for a `role`-blind guard.
     await ownCredential(OWN_FED)
     await ownExempt(OWN_FED)
     await ownStance(true)
     await ownCredential(OWN_OTHER)
     await ownExempt(OWN_OTHER)
     try {
-      expect((await ownRemove(OWN_FED)).statusCode, 'somebody else exempt still holds a key — the floor stands').toBe(200)
+      const res = await ownRemove(OWN_FED)
+      expect(res.statusCode, 'an exempt plain member is not a way to administer anything').toBe(409)
+      expect(res.json().code).toBe('sso_exemption_required')
     } finally {
       await admin`DELETE FROM sso_exemptions WHERE tenant_id = ${own.id} AND member_sub = ${OWN_OTHER}`
       await admin`DELETE FROM local_credentials WHERE tenant_id = ${own.id} AND member_sub = ${OWN_OTHER}`

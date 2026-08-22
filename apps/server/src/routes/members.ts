@@ -13,7 +13,7 @@ import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { enqueueTupleDeletes, flushTupleDeletes, type TupleIntent } from '../db/tuple-outbox.js' // #896
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
-import { assertClosingIsSafe } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
+import { assertClosingIsSafe, anAdminHoldsAKey } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
@@ -413,18 +413,21 @@ export async function membersPlugin(app: FastifyInstance) {
       })
     }
 
-    // (2) the SSO-required floor, guarded from the side it is not written on. The two existing guards read
+    // (2) the SSO-required floor, guarded from the side it is not written on. The other guards read
     // the EXEMPTION rows (admin-login-methods.ts); this route removes the CREDENTIAL, so a tenant could be
     // left requiring SSO with an exemption that can no longer open anything — the outage case the floor
     // exists for. Same code, so a caller handles one refusal.
+    //
+    // #898: through `anAdminHoldsAKey`, which is what the ON precondition asks. This was its own
+    // query and it did not read `role`, so the last exempt ADMINISTRATOR's password could be deleted
+    // as long as any exempt ordinary member held one — leaving people who can sign in during an
+    // outage and nobody among them who can fix it. The rule is written once now: #836 narrowed one
+    // copy of three and left this one and the revoke loose, which is how a family ends up disagreeing.
     const [pref] = await req.db.sql<[{ sso_required: boolean }?]>`SELECT sso_required FROM tenant_login_prefs LIMIT 1`
     if (pref?.sso_required) {
-      const [other] = await req.db.sql<[{ member_sub: string }?]>`
-        SELECT se.member_sub FROM sso_exemptions se JOIN local_credentials lc ON lc.member_sub = se.member_sub
-        WHERE se.member_sub <> ${sub} LIMIT 1`
-      if (!other) {
+      if (!(await anAdminHoldsAKey(req.db, { exemptOnly: true, without: sub }))) {
         return reply.code(409).send({
-          error: 'name at least one exempt member who holds a password (and keep password sign-in selected) before requiring SSO — they are the way back in when the IdP is down.',
+          error: 'name at least one exempt ADMINISTRATOR who holds a password (and keep password sign-in selected) before requiring SSO — they are the way back in when the IdP is down.',
           code: 'sso_exemption_required',
         })
       }
