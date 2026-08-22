@@ -22,7 +22,11 @@ const HEADER = `<!--
  */
 export type EgressSummary = Record<string, { kind: 'send' | 'drop' | 'redact'; withheld?: readonly string[] }>
 
-export function renderEventsMarkdown(egress: EgressSummary = {}): string {
+// ⚠️ Required, with no default. A default of `{}` renders every event as delivered, which is the exact
+// falsehood this argument was added to remove — and it did: the stale-guard in `events-doc.test.ts`
+// called it bare and compared an all-delivered page against the committed one. A caller that has no
+// verdicts to give should not be able to produce this page at all.
+export function renderEventsMarkdown(egress: EgressSummary): string {
   const lines: string[] = []
   // #748: "domain event" is a design term. The reader is here because they are wiring a webhook.
   lines.push(HEADER, '', '# Webhook events', '')
