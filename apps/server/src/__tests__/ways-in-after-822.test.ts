@@ -12,7 +12,7 @@
 // rules are what is dangerous here; getting them wrong locks a workspace out, and the store is
 // fail-closed, so the failure is not a leak but everybody losing access at once.
 import { describe, it, expect, afterEach } from 'vitest'
-import { waysInAfter, assertClosingIsSafe } from '../auth/login-methods.js'
+import { waysInAfter, assertClosingIsSafe, anAdminHoldsAKey } from '../auth/login-methods.js'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { TenantDb } from '../db/index.js'
@@ -181,6 +181,54 @@ describe('#822 / #866 every door-closing write asks the question', () => {
     for (const [file] of CLOSING_WRITES) {
       expect(read(file), `${file} cannot accept a confirmation`).toMatch(/confirm/)
     }
+  })
+})
+
+describe('#836 requiring SSO needs an exempt ADMINISTRATOR, not any exempt member', () => {
+  // THE DEFECT. The precondition asked whether ANY exempt member holds a password and never looked at
+  // `members.role`. An exemption list of ordinary members satisfied it, so the IdP going down left a
+  // workspace people could sign in to and nobody could administer — the forbidden state again,
+  // reached from the other side of the same door.
+  const asked: string[] = []
+  const db = {
+    sql: Object.assign(
+      async (strings: TemplateStringsArray) => {
+        const q = strings.join('?')
+        if (q.includes('local_credentials')) { asked.push(q); return [{ n: 1 }] }
+        return []
+      },
+      { unsafe: async () => [] },
+    ),
+  } as unknown as TenantDb
+
+  it('narrows the shared predicate to the exemption list, rather than writing a second rule', () => {
+    // The point is not that a query exists; it is that ONE predicate answers both questions. Two
+    // copies is how this family arrived at two guards that disagreed.
+    const src = readFileSync(resolve(import.meta.dirname, '../routes/admin-login-methods.ts'), 'utf8')
+    expect(src, 'the precondition writes its own rule instead of asking the shared one').toContain('anAdminHoldsAKey(req.db, { exemptOnly: true })')
+    expect(src, 'a second copy of the role predicate is back').not.toMatch(/JOIN members m ON m\.sub = se\.member_sub/)
+  })
+
+  it('narrows the same predicate rather than writing a second one', () => {
+    // ⚠️ Measured honestly, and the limit is stated. postgres.js splices a fragment at SEND time, so
+    // the conditional join is not in the template a stub sees — a first version of this case matched
+    // the query string and failed while the join was working. That the splice REALLY changes the
+    // answer was measured separately against a live database (a join to nothing: 0 rows against 729).
+    // What is asserted here is that one predicate carries both questions, which is the property this
+    // ticket is about: the two older guards disagreed because the rule was written twice.
+    const src = readFileSync(resolve(import.meta.dirname, '../auth/login-methods.ts'), 'utf8')
+    const body = src.slice(src.indexOf('export async function anAdminHoldsAKey'))
+    expect(body, 'the exemption narrowing is not part of this predicate').toMatch(/exemptOnly[\s\S]{0,200}sso_exemptions/)
+    expect(body, 'the role restriction moved out of the shared predicate').toMatch(/role\s*=\s*'admin'/)
+    expect(body, 'a deactivated administrator would count').toMatch(/deactivated_at IS NULL/)
+  })
+
+  it('the door-closing writes do not ask the narrowed question', () => {
+    // Only the SSO precondition narrows to the exempt list; the doors ask about administrators
+    // generally. A narrowing that leaked into the doors would refuse writes for the wrong reason.
+    const src = readFileSync(resolve(import.meta.dirname, '../auth/login-methods.ts'), 'utf8')
+    const waysIn = src.slice(src.indexOf('export async function waysInAfter'), src.indexOf('export async function anAdminHoldsAKey'))
+    expect(waysIn, 'the door question narrowed itself to the exemption list').not.toMatch(/exemptOnly/)
   })
 })
 

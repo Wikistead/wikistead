@@ -345,16 +345,21 @@ export async function waysInAfter(
  */
 export async function anAdminHoldsAKey(
   db: TenantDb,
-  opts: { without?: string; alsoWithoutAdminship?: boolean } = {},
+  opts: { without?: string; alsoWithoutAdminship?: boolean; exemptOnly?: boolean } = {},
 ): Promise<boolean> {
   // `without` asks the counterfactual the key-taking writes need: would an administrator still hold a
   // key once THIS person no longer does. `alsoWithoutAdminship` is the demotion: they keep the
   // credential, they stop being an administrator — the same exclusion for a different reason, and the
   // caller says which so the refusal can say it too.
+  // ⚠️ `exemptOnly` narrows the SAME question to the SSO exemption list (#836): when the IdP is down,
+  // is there an administrator who can both get in AND fix things. A narrowing of this predicate
+  // rather than a second one, because a rule written twice is how this family keeps ending up with
+  // one copy edited — which is exactly why the two older guards disagreed.
   const excluded = opts.without ?? null
   const [row] = await db.sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM members m
       JOIN local_credentials c ON c.sub = m.sub
+      ${opts.exemptOnly ? db.sql`JOIN sso_exemptions se ON se.member_sub = m.sub` : db.sql``}
      WHERE m.role = 'admin' AND m.deactivated_at IS NULL
        AND (${excluded}::text IS NULL OR m.sub <> ${excluded})`
   return (row?.n ?? 0) > 0
@@ -385,6 +390,17 @@ export async function assertClosingIsSafe(
   opts: { confirm?: boolean; env?: string | undefined } = {},
 ): Promise<void> {
   const remaining = await waysInAfter(db, tenant, closing, opts.env)
+  // ⚠️ Read on the TRANSITION, not the post-state. Every guard in this area is written that way, and
+  // for the door-closing shapes the callers carry the difference themselves (`b.enabled === false &&
+  // row.enabled`, and this function's own step-aside through `closing.live`). The key-taking shapes
+  // have no such caller-side transition, so it is taken here: a write that leaves the set exactly as
+  // empty as it found it takes nothing away, and refusing it is a 409 with no remedy behind it —
+  // there is no door to enable that would make the demotion legal. Measured: without this, a tenant
+  // with nothing configured refused every role change.
+  if (remaining.length === 0 && !('id' in closing)) {
+    const before = await waysInAfter(db, tenant, { id: '', live: false }, opts.env)
+    if (before.length === 0) return
+  }
   if (remaining.length === 0) {
     throw Object.assign(
       new Error('this is the last effective way to sign in. Enable another connection first, or have an operator run `pnpm tenant:login-methods`.'),
