@@ -27,7 +27,7 @@ const AUTO_DISABLE_FAILURES = 10  // consecutive per-hook failures → active=fa
 const BACKOFF_BASE_S = 30         // exponential backoff base (30s, 60s, 120s, …)
 
 export interface WebhookRow { id: string; url: string; event_filter: string[] | null; active: boolean; failure_count: number; created_at: Date }
-export interface WebhookOutboxRow { id: string; tenant_id: string; event_type: string; payload: Record<string, unknown>; attempts: number }
+export interface WebhookOutboxRow { id: string; tenant_id: string; event_type: string; payload: Record<string, unknown>; attempts: number; settled_disposition: 'deliver' | 'suppress' | null }
 
 // ── model (admin CRUD) ──────────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@ export async function deleteWebhook(db: TenantDb, id: string): Promise<boolean> 
 // Returns the row id, or `null` when the verdict is `drop` and no row was written.
 export async function enqueueWebhookOutbox(
   sql: Sql,
-  args: { tenantId: string; eventType: DomainEvent['type']; payload: Record<string, unknown> },
+  args: { tenantId: string; eventType: DomainEvent['type']; payload: Record<string, unknown>; settled?: 'deliver' | 'suppress' },
 ): Promise<string | null> {
   // `eventType` is the union rather than `string` on purpose: an unruled type is then a compile error
   // at the call site, not a row that quietly ships whatever it was handed.
@@ -122,9 +122,12 @@ export async function enqueueWebhookOutbox(
   // `in` rather than a default: an optional field that is absent stays absent, it does not become null.
   const payload: Record<string, unknown> = {}
   for (const field of verdict.fields) if (field in args.payload) payload[field] = args.payload[field]
+  // ADR-108 addendum §G: a `settled` disposition is one taken before the act destroyed what answers
+  // it. `suppress` still writes a row rather than skipping the INSERT, so a suppressed event and a
+  // never-enqueued one stay distinguishable while the row is alive — the drain deletes it on sight.
   const [row] = await sql<{ id: string }[]>`
-    INSERT INTO webhook_outbox (tenant_id, event_type, payload)
-    VALUES (${args.tenantId}, ${args.eventType}, ${payload as unknown as string})
+    INSERT INTO webhook_outbox (tenant_id, event_type, payload, settled_disposition)
+    VALUES (${args.tenantId}, ${args.eventType}, ${payload as unknown as string}, ${args.settled ?? null})
     RETURNING id`
   return row!.id
 }
@@ -153,7 +156,7 @@ export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: num
   // lease primitive; this site only adds its backoff gate (next_attempt_at decides due-ness/order).
   const rows = await claimOutboxBatch<WebhookOutboxRow>({
     table: 'webhook_outbox',
-    returning: ['id', 'tenant_id', 'event_type', 'payload', 'attempts'],
+    returning: ['id', 'tenant_id', 'event_type', 'payload', 'attempts', 'settled_disposition'],
     batch: opts.batch ?? 20,
     orderBy: 'next_attempt_at',
     extraDue: pool`AND next_attempt_at <= now()`,
@@ -172,7 +175,12 @@ export async function drainWebhookOutbox(fga: OpenFgaClient, opts: { batch?: num
       // page#space link hasn't landed yet (publish writes it just after the tx) → RETRY, don't permanently
       // drop a legitimate page.published (#228 review point 2); dropped only once attempts are exhausted, and it
       // never delivers while unlinked so a genuine draft stays hidden.
-      const disp = await pageEventDisposition(fga, row.payload)
+      // ⚠️ #862 / ADR-108 addendum §G: three types are about an act that destroys what this question
+      // reads — the purge deletes the page's tuples, privatising writes the marker that hides it. For
+      // those the answer was taken at the act and settled on the row; re-asking here would find the
+      // aftermath and refuse, which is why none of the three had ever been delivered. Every other row
+      // is asked exactly as before, at delivery, because for those the later answer is the safer one.
+      const disp = row.settled_disposition ?? (await pageEventDisposition(fga, row.payload))
       if (disp === 'suppress') { await pool`DELETE FROM webhook_outbox WHERE id = ${row.id}`; handled++; continue }
       if (disp === 'not-ready') { await retryOrDrop(row); handled++; continue }
       // Tenant-scoped hook read — a SHORT tx (set_config is tx-local; RLS scopes the SELECT), closed

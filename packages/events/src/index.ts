@@ -14,6 +14,21 @@
  */
 type WithActorKey<E> = E extends { actorId: string } ? E & { actorKeyId?: string } : E
 
+/**
+ * ⚠️ #862 / ADR-108 addendum §G — a control field, and NOT part of any payload.
+ *
+ * Three acts destroy the state that decides whether the resulting event may be spoken of: a purge
+ * deletes the page's tuples, and privatising writes a marker that hides it. The webhook drain asks
+ * that question at delivery, which for these three is always after the answer is gone — so all three
+ * were enqueued and none was ever delivered. The emit sites take the answer BEFORE they destroy it and
+ * carry it here.
+ *
+ * It reaches no consumer: `webhooks/egress.ts` names the fields each type may send, and no row names
+ * this one, so the outbox strips it on the way in. If a row is ever regenerated from this union, this
+ * field must stay out of it.
+ */
+export type PageWasDeliverable = boolean
+
 export type DomainEvent = WithActorKey<RawDomainEvent>
 
 type RawDomainEvent =
@@ -24,7 +39,7 @@ type RawDomainEvent =
   // for edits on it. Split before delivery began, so no subscriber can be broken by the change.
   | { type: 'page.renamed';   tenantId: string; pageId: string; actorId: string }
   | { type: 'page.moved';     tenantId: string; pageId: string; actorId: string }
-  | { type: 'page.deleted';   tenantId: string; pageId: string; actorId: string }
+  | { type: 'page.deleted';   tenantId: string; pageId: string; actorId: string; pageWasDeliverable?: PageWasDeliverable }
   // #411 / ADR-153: trash lifecycle. `page.deleted` now fires at PURGE (explicit or retention) — the
   // point of no return keeps its historical event name; `page.restored` stays the REVISION restore.
   | { type: 'page.trashed';        tenantId: string; pageId: string; actorId: string }
@@ -36,7 +51,7 @@ type RawDomainEvent =
   | { type: 'page.access_restricted'; tenantId: string; pageId: string; grantee: string; relation: string; actorId: string }
   | { type: 'page.access_unrestricted'; tenantId: string; pageId: string; grantee: string; relation: string; actorId: string }
   // #109 / ADR-098: per-page private (allowlist) toggle. `made_private` also strips public (view@user:*).
-  | { type: 'page.made_private'; tenantId: string; pageId: string; actorId: string }
+  | { type: 'page.made_private'; tenantId: string; pageId: string; actorId: string; pageWasDeliverable?: PageWasDeliverable }
   | { type: 'page.made_non_private'; tenantId: string; pageId: string; actorId: string }
   // #253 / ADR-113: per-page anonymous public toggle (view_base@user:* grant/revoke; noindex forced on).
   | { type: 'page.made_public'; tenantId: string; pageId: string; actorId: string }
@@ -107,7 +122,7 @@ type RawDomainEvent =
   // Emitted by every revocation path: the explicit revoke API (routes/share-links.ts) and the implicit
   // sweeps when a page is made private or deleted (routes/pages.ts) — always AFTER the DB revoke commits,
   // never on a rolled-back tx. app.ts forwards it to the collab layer so live guests disconnect (ADR-028).
-  | { type: 'share_link.revoked'; tenantId: string; shareLinkId: string; pageId: string; actorId: string }
+  | { type: 'share_link.revoked'; tenantId: string; shareLinkId: string; pageId: string; actorId: string; pageWasDeliverable?: PageWasDeliverable }
   // ── API keys ─────────────────────────────────────────────────────────
   | { type: 'api_key.created'; tenantId: string; keyId: string; actorId: string }
   // #495 / ADR-182: `ownerId` (the affected member's sub) is OPTIONAL — set only by the admin-revoke

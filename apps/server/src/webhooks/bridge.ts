@@ -91,6 +91,14 @@ export function bridgeShouldEnqueue(event: DomainEvent): boolean {
  */
 export async function bridgeEventToOutbox(sql: Sql, event: DomainEvent): Promise<'enqueued' | 'skipped'> {
   if (!bridgeShouldEnqueue(event)) return 'skipped'
-  await enqueueWebhookOutbox(sql, { tenantId: event.tenantId, eventType: event.type, payload: webhookPayload(event) })
+  // #862 / ADR-108 §G: three types carry an answer their emit site had to take before the act
+  // destroyed it. It is a control field — no egress row names it, so the payload filter drops it and
+  // no consumer sees it — and it rides here rather than being re-derived, because by now the tuples
+  // it was read from are gone.
+  const settled =
+    'pageWasDeliverable' in event && typeof event.pageWasDeliverable === 'boolean'
+      ? event.pageWasDeliverable ? ('deliver' as const) : ('suppress' as const)
+      : undefined
+  await enqueueWebhookOutbox(sql, { tenantId: event.tenantId, eventType: event.type, payload: webhookPayload(event), settled })
   return 'enqueued'
 }

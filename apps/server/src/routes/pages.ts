@@ -50,6 +50,7 @@ import { fanOutFeedEvent, sweepWatchesForResources, sweepUnviewableWatches } fro
 import { enqueueWebhookOutbox } from './webhooks.js'
 import { assertGranteeIsMember } from '../auth/member-principal.js' // #624: a grant names somebody who is here
 import { requireBody } from './require-body.js' // #667 a bodyless write is 400, not 500
+import { pageEventDisposition } from '../page-disposition.js' // #862 / ADR-108 §G: read before the act destroys the answer
 
 // #108 bounce: normalise an admin-supplied external-embed allowlist into bare, lowercase hostnames —
 // the exact form isAllowlistedEmbed matches. Strip a scheme, path/query/fragment, port, whitespace and
@@ -1400,6 +1401,14 @@ export async function setPagePrivate(
   // subtract a descendant's DIRECT `view_base@user:*` (public) or its direct share-link grants, so those would
   // survive the inherited private as live holes.
   const subtree = [args.pageId, ...(await descendantIds(db.sql, args.pageId))]
+  // ⚠️ #862 / ADR-108 §G: the marker written below is exactly what the webhook drain reads when it
+  // asks whether these pages may be spoken of, so after this point the answer is `suppress` for every
+  // one of them — which is why `page.made_private` and the `share_link.revoked` events raised here
+  // have never been delivered, beside a comment saying a consumer mirroring access has to hear them.
+  // Read once per page now, while the pre-privatise state is still there. One extra store read per
+  // page on a path that already does several (#788): proportionate, not a new order of magnitude.
+  const wasDeliverable = new Map<string, boolean>()
+  for (const id of subtree) wasDeliverable.set(id, (await pageEventDisposition(fga, { pageId: id })) === 'deliver')
   const oids = await db.tx(async (tx) => {
     if (args.plan !== undefined) {
       await auditIfEntitled(tx, { id: args.tenantId, plan: args.plan }, { actor: `user:${args.userId}`, action: 'page.made_private', target: `page:${args.pageId}` })
@@ -1457,7 +1466,7 @@ export async function setPagePrivate(
   // mirroring access has to hear about the ones that went even when the strip did not — swallowing them
   // because a different half failed is the same "the ledger does not match the world" defect from the
   // other direction.
-  for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
+  for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId, pageWasDeliverable: wasDeliverable.get(link.pageId) ?? false })
   // Raised after every piece of fail-safe work, and before the success event: the marker landed, but a page
   // whose public grant survived is still readable by anyone, and saying "made private" would be the #596
   // lie about the one thing this call exists to guarantee. Retrying the same call re-attempts the strip
@@ -1471,7 +1480,7 @@ export async function setPagePrivate(
       statusCode: 500, code: 'public_grant_not_removed', pages: stillPublic,
     })
   }
-  emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId })
+  emit({ type: 'page.made_private', tenantId: args.tenantId, pageId: args.pageId, actorId: args.userId, pageWasDeliverable: wasDeliverable.get(args.pageId) ?? false })
   // comment 785 #3: a partial FGA-delete failure is not silent — the page IS private (fail-safe), but these
   // links are still live on FGA until a re-privatise/sweep retries them (they stay revoked_at IS NULL).
   if (failed.length) console.error('[setPagePrivate] subtree share-link revoke incomplete (private applied; links pending FGA delete)', { pageId: args.pageId, failed })
@@ -2364,7 +2373,7 @@ async function applyMovePrivacyBoundary(
   db: TenantDb,
   fga: OpenFgaClient,
   driver: SearchDriver,
-  args: { rootId: string; tenantId: string; userId: string; stripSweep: boolean; reindex: boolean },
+  args: { rootId: string; tenantId: string; userId: string; stripSweep: boolean; reindex: boolean; wasDeliverable?: Map<string, boolean> },
 ): Promise<void> {
   const subtree = [args.rootId, ...(await descendantIds(db.sql, args.rootId))]
   let unremoved: string[] = []
@@ -2378,7 +2387,10 @@ async function applyMovePrivacyBoundary(
     }
     for (const id of subtree) {
       const { revoked } = await revokeResourceShareLinks(db, fga, { type: 'page', id }, args.tenantId, args.userId)
-      for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId })
+      // ⚠️ #862 / ADR-108 §G: the same defect as setPagePrivate's, one step further back — the MOVE is
+      // what made this subtree private, and it has already landed by the time this runs, so nothing
+      // here could read the pre-move answer. The caller takes it before the move and hands it down.
+      for (const link of revoked) emit({ type: 'share_link.revoked', tenantId: args.tenantId, shareLinkId: link.id, pageId: link.pageId, actorId: args.userId, pageWasDeliverable: args.wasDeliverable?.get(link.pageId) ?? false })
     }
     // Remembered, not thrown yet: the reindex below is part of the fail-safe work, and #622's re-review
     // caught this raise jumping over it — the search denorm would have kept the pre-move state for a
@@ -2609,6 +2621,16 @@ export async function movePage(
   const ownMarker = await readPagePrivate(fga, args.pageId)
   const willBePrivate = ownMarker || (newParent ? await checkRelation(fga, MOVE_PRIVATE_PROBE, 'private', { type: 'page', id: newParent }) : false)
   const effChanged = wasPrivate !== willBePrivate
+  // ⚠️ #862 / ADR-108 §G: a move INTO a private ancestor revokes the subtree's share links, and the
+  // events that says so carry a pageId the new private state hides — so the drain suppresses every one
+  // of them. The answer has to be read here, before the parent tuple is re-pointed. Only on the
+  // transition into private, so an ordinary move pays nothing.
+  const movePrivatiseWasDeliverable = new Map<string, boolean>()
+  if (effChanged && willBePrivate) {
+    for (const id of [args.pageId, ...(await descendantIds(db.sql, args.pageId))]) {
+      movePrivatiseWasDeliverable.set(id, (await pageEventDisposition(fga, { pageId: id })) === 'deliver')
+    }
+  }
 
   // Authorization: cross-space is a structural ownership move; an effective-private change is manage-level.
   if (crossSpace) {
@@ -2687,7 +2709,7 @@ export async function movePage(
     await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218: re-point the parent tuple (private/grants cascade)
     // #218 / ADR-103: after the parent tuple is set, apply the private write-boundary if the effective private
     // state changed (strip/sweep only on the transition INTO private; reindex either way for the denorm).
-    if (effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: willBePrivate, reindex: true })
+    if (effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: willBePrivate, reindex: true, wasDeliverable: movePrivatiseWasDeliverable })
     emit({ type: 'page.moved', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
     return toPage(r)
   }
@@ -2716,7 +2738,7 @@ export async function movePage(
   await syncPageParentTuple(fga, args.pageId, page.parent_id, newParent) // #218: re-point the parent tuple (private/grants cascade)
   // #218 / ADR-103: strip/sweep on the transition INTO private BEFORE the reindex runs (so is_public reflects
   // the stripped public grant). The subtree reindex is already enqueued above (space-denorm change), so reindex:false.
-  if (willBePrivate && effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: true, reindex: false })
+  if (willBePrivate && effChanged) await applyMovePrivacyBoundary(db, fga, driver, { rootId: args.pageId, tenantId: page.tenant_id, userId: args.userId, stripSweep: true, reindex: false, wasDeliverable: movePrivatiseWasDeliverable })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId: page.tenant_id, pageId: o.pageId, operation: 'upsert' })
   emit({ type: 'page.moved', tenantId: page.tenant_id, pageId: page.id, actorId: args.userId })
   return toPage(row as PageRow)
@@ -3339,6 +3361,12 @@ async function physicalDeletePage(
   // the page AND all descendants. FGA-first (ADR-003): if a tuple sweep fails the
   // DB row is untouched and the op is retryable.
   const ids = [args.pageId, ...(await descendantIds(db.sql, args.pageId))]
+  // ⚠️ #862 / ADR-108 §G: read whether this page could be spoken of BEFORE the sweep below removes the
+  // tuples that answer it. The webhook drain asks the same question at delivery, finds nothing, and
+  // has answered `not-ready` for every `page.deleted` ever enqueued — six retries over 930 s and then
+  // dropped, per purge. `not-ready` here means a draft, and a purged draft can never become linked, so
+  // it settles as "do not deliver" rather than as something to retry.
+  const wasDeliverable = (await pageEventDisposition(fga, { pageId: args.pageId })) === 'deliver'
   for (const id of ids) await deleteObjectTuples(fga, `page:${id}`)
 
   // #437 / ADR-167 §3: permanent deletion is exactly where attribution matters most — EE tenants
@@ -3363,7 +3391,7 @@ async function physicalDeletePage(
     await tx`DELETE FROM pages WHERE id = ${args.pageId}` // cascade deletes descendants
   })
   for (const o of outboxIds) processOutboxAsync(driver, o.id, { tenantId, pageId: o.pageId, operation: 'delete' })
-  emit({ type: 'page.deleted', tenantId, pageId: args.pageId, actorId: args.actorId })
+  emit({ type: 'page.deleted', tenantId, pageId: args.pageId, actorId: args.actorId, pageWasDeliverable: wasDeliverable })
 }
 
 // #411 / ADR-153: purge trash entries older than TRASH_RETENTION_DAYS, across all tenants. Same

@@ -1,0 +1,24 @@
+-- #862 / ADR-108 addendum §G: three event types were structurally undeliverable.
+--
+-- The drain asks `pageEventDisposition` at DELIVERY time — may this page be spoken of — and for most
+-- events that is right, because the answer can change between the act and the delivery and the later
+-- answer is the safer one. For three types it is not right, because the act itself destroys what
+-- answers the question:
+--
+--   page.deleted        the purge deletes every tuple for the page and then emits, so the read finds
+--                       nothing, answers `not-ready` on all six attempts, and drops the row after
+--                       930 s of retries — per purge
+--   page.made_private   the marker is written first, so the answer is `suppress`, always
+--   share_link.revoked  on the privatise path, same: the marker lands, then the links are revoked and
+--                       emitted, and their payload carries the pageId the marker now hides
+--
+-- For that class the disposition is taken BEFORE the destructive write, while the state that answers
+-- it still exists, and settled here. A row that carries one is not re-asked at the drain; a row that
+-- does not is asked exactly as before. Nothing about WHICH pages may be spoken of changes — only when
+-- the question is put, which for these three is the last moment it has an answer.
+--
+-- Two values only. A captured `not-ready` is stored as `suppress`: for these types the page is about
+-- to be gone or private, so "not linked yet" can never become "linked" and retrying is a slower way
+-- of dropping it.
+ALTER TABLE webhook_outbox ADD COLUMN IF NOT EXISTS settled_disposition TEXT
+  CHECK (settled_disposition IN ('deliver', 'suppress'));
