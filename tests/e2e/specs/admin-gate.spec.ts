@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep, WEB_REAL_PORT } from "../helpers";
+import { openDemo, sleep, WEB_REAL_PORT, DEV_USER_SHOWN } from "../helpers";
 
 // Phase 5a: the two-layer admin console framework + authz gates.
 //  - Positive (dev-mode 5180, dev-user = tenant admin + space manager): the user
@@ -23,7 +23,9 @@ test("admin: user menu opens the tenant console; space settings rename + delete"
   // substring — so this resolved to two elements and the console's own landing pin went red. Anchored,
   // because the thing being asserted is "the console rendered", not "some heading starts with Members".
   await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
-  await expect(page.getByText("dev-user")).toBeVisible();
+  // #902: what the screen shows, not the subject — `memberLabel` prefers the display name (#859),
+  // so the raw sub stopped appearing and this line failed BEFORE the destructive steps below ran.
+  await expect(page.getByText(DEV_USER_SHOWN)).toBeVisible();
 
   // Back-compat: the old members URL redirects into the console.
   await page.goto("/settings/members");
@@ -76,7 +78,7 @@ test("space Members tab renders and the member typeahead finds a seeded member",
   await expect(page.getByTestId("space-members")).toBeVisible();
   // Typeahead is manage-gated server-side and returns the minimal {sub,displayName}.
   await page.getByTestId("space-grant-input").fill("dev");
-  await expect(page.getByTestId("space-grant-candidate").first()).toContainText("dev-user");
+  await expect(page.getByTestId("space-grant-candidate").first()).toContainText(DEV_USER_SHOWN); // #902
 });
 
 test("space Pages overview lists the space's pages", async ({ page }) => {

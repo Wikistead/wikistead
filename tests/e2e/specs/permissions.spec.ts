@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep, API } from "../helpers";
+import { openDemo, sleep, API, DEV_USER_SHOWN } from "../helpers";
 
 // Phase 4c: the per-page Permissions dialog (manager only). Grant a member access
 // (this is also how you invite someone to a draft) and revoke it.
@@ -22,7 +22,7 @@ test("manager grants and revokes page access via the Permissions dialog", async 
   await expect(page.locator("[data-testid=permissions-dialog]")).toBeVisible();
 
   // the creator's own grant is listed
-  await expect(page.locator("[data-testid=grant-list]")).toContainText("dev-user");
+  await expect(page.locator("[data-testid=grant-list]")).toContainText(DEV_USER_SHOWN); // #902
 
   // Grant a member view → a row appears.
   //

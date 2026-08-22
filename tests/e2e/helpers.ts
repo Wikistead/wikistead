@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 // @ts-expect-error — repo-root JS helper, no types
 import { e2ePorts } from "../../scripts/stack-offset.mjs";
+import { memberLabel } from "../../apps/web/src/ui/principal-label"; // #902: the screen's own rule
+import enLocale from "../../apps/web/src/i18n/locales/en.json" with { type: "json" };
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -223,3 +225,21 @@ export function pageList<T>(body: unknown): T[] {
   if (Array.isArray(body)) return body as T[];
   return ((body as { pages?: T[] } | null)?.pages) ?? [];
 }
+
+// #902: what the screen actually shows for a person. ⚠️ Imported from the shipped renderer rather
+// than restated here: five specs asserted the raw subject, which stopped appearing the day
+// `memberLabel` started preferring the display name (#859). A rule copied into the harness would have
+// drifted again the next time the screen's changed -- so the harness asks the screen's own function.
+//
+// ⚠️ And do NOT inline the seeded name instead. `Dev User` is a seed value; a spec spelling it out is
+// green until somebody edits `infra/db/seed.ts`, and then five specs fail for a reason that has
+// nothing to do with what they test.
+export function shownAs(sub: string, displayName: string | null): string {
+  // The noun comes from the shipped catalogue too — `memberLabel` takes it as an argument precisely so
+  // it stays a pure function, and a harness that hard-codes "unknown member" is one more copy to drift.
+  return memberLabel(sub, displayName, enLocale.spaceMembers.unknownMember);
+}
+
+// The seeded admin carries a display name (`infra/db/seed.ts`), so the screen shows that, never the
+// subject. Kept beside the helper so a spec never has to know which.
+export const DEV_USER_SHOWN = shownAs("dev-user", "Dev User");

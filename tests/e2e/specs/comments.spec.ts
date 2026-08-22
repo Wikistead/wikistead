@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, openScratch, enterEdit, sleep, API } from "../helpers";
+import { openDemo, openScratch, enterEdit, sleep, API, DEV_USER_SHOWN } from "../helpers";
 
 // P4 UX in a REAL browser: page comments + resolve/tabs, inline comment anchored to
 // a selection (blue underline) that FOLLOWS a live edit, and @mention autocomplete
@@ -74,7 +74,7 @@ test("comments: page comment + @mention; resolve/tabs and inline affordance remo
   // (6) @mention autocomplete from the page-view-scoped directory. dev-user is the only page-viewer.
   await pageInput.fill("@dev");
   await expect(panel.locator("[data-testid=mention-suggest]")).toBeVisible({ timeout: 6000 });
-  await expect(panel.locator("[data-testid=mention-option]").first()).toContainText("dev-user");
+  await expect(panel.locator("[data-testid=mention-option]").first()).toContainText(DEV_USER_SHOWN); // #902
 });
 
 // Light-1: the panel closes in place via × or Esc, but NOT on an outside click (it is

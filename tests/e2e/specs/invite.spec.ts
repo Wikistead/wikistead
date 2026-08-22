@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { WEB_REAL_PORT, MAILPIT_API } from "../helpers";
+import { WEB_REAL_PORT, MAILPIT_API, DEV_USER_SHOWN } from "../helpers";
 
 // Invite → accept in a REAL browser (P1.4), on the real-mode web (5181, no
 // dev-token). Proves the whole seat-lever loop end-to-end through the same-origin
@@ -48,7 +48,7 @@ test("admin invites a member; a fresh identity accepts in the browser and is sea
   // at 5.8s on a fresh stack, while the page itself was fine). Every other first-render assertion in
   // this suite carries a timeout for the same reason.
   await expect(admin.getByRole("heading", { name: "Members", exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(admin.getByText("dev-user")).toBeVisible(); // the admin is listed
+  await expect(admin.getByText(DEV_USER_SHOWN)).toBeVisible(); // the admin is listed (#902: shown name)
 
   const inviteEmail = `invitee${Date.now()}@e2e.test`;
   await admin.getByLabel(INVITE_EMAIL_LABEL).fill(inviteEmail);
