@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { sleep } from "../helpers";
+import { sleep, createScratchSpace } from "../helpers";
 
 // #420 / ADR-164 increment 5: the Admin → Roles console. Real Chromium over the full loop
 // define a custom role → edit it → assign it to a member on a space (the server expands to FGA
@@ -8,6 +8,13 @@ import { sleep } from "../helpers";
 test("#420: role manager — create, edit, assign on a space, unassign, delete", async ({ page }) => {
   const name = `e2e-role-${Date.now()}`;
   await page.goto("/admin/roles");
+  // ⚠️ #890 (2026-08-23): the assign/unassign loop below used to run on `demo_space`, and it took the
+  // seeded `user:dev-user#manager@space:demo_space` grant with it — the console enforces one role per
+  // principal, so assigning REPLACED the manager grant (the replace-confirm this spec clicks past IS
+  // the deletion) and the unassign at the end left nothing behind. Every later spec that renders a
+  // space's settings failed on an empty screen. The fixture reporter this ticket added named this test.
+  // A space this test makes is a space it may empty.
+  const space = await createScratchSpace(page, `roles-420 ${Date.now()}`);
   await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("roles-list")).toContainText("manager"); // built-ins on every plan
 
@@ -35,10 +42,10 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   await rowAfter.getByTestId("role-edit-caps").click();
   await expect(rowAfter.getByTestId("custom-cap-publish")).toBeChecked({ timeout: 10_000 });
 
-  // Assign on the demo space. #514 / ADR-188 slice 4 moved this control OFF the Roles tab (which now only
-  // DEFINES roles) and into the space's own Members tab, so the role's lifecycle is exercised where the
-  // grant actually lives now.
-  await page.goto("/spaces/demo_space/settings/members");
+  // Assign on the scratch space. #514 / ADR-188 slice 4 moved this control OFF the Roles tab (which now
+  // only DEFINES roles) and into the space's own Members tab, so the role's lifecycle is exercised where
+  // the grant actually lives now.
+  await page.goto(`/spaces/${space}/settings/members`);
   // #536 §6: assignment goes through the MERGED picker (one control for built-ins and custom roles);
   // the old space-role-select/-member-input/-add form is gone.
   await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
@@ -49,7 +56,9 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   await expect(page.getByRole("option")).toHaveCount(0); // the listbox is fully closed (radix restores pointer-events)
   await page.getByTestId("space-grant-add").click();
   // #536 ②: adding over an existing different role opens the replace confirm (1 principal = 1
-  // role). Residue rows on the shared demo space make this conditional.
+  // role). It fires here because creating a space makes its creator its manager — which is exactly the
+  // grant that used to be the seed's on `demo_space`. Conditional because the dialog is skipped when
+  // the principal held nothing.
   {
     const replaceConfirm = page.getByTestId("space-role-replace-confirm");
     if (await replaceConfirm.isVisible({ timeout: 1500 }).catch(() => false)) await replaceConfirm.click();
@@ -64,7 +73,7 @@ test("#420: role manager — create, edit, assign on a space, unassign, delete",
   await expect(page.getByTestId("roles-list")).toContainText(name); // still there (409)
 
   // Unassign (again where the grant lives) → then delete succeeds.
-  await page.goto("/spaces/demo_space/settings/members");
+  await page.goto(`/spaces/${space}/settings/members`);
   await page.getByTestId("space-member-item").filter({ hasText: name }).getByTestId("space-role-assign-revoke").click();
   await expect(page.getByTestId("space-member-list")).not.toContainText(name, { timeout: 8000 });
   await page.goto("/admin/roles");

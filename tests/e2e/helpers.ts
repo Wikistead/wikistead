@@ -99,6 +99,33 @@ export async function createScratchPage(page: Page, title = "Scratch"): Promise<
   }, { api: API, title });
 }
 
+/**
+ * A space this spec is allowed to mutate.
+ *
+ * ⚠️ #890 (measured 2026-08-23): a spec that runs a role's assign/unassign loop on `demo_space` takes
+ * the seeded `user:dev-user#manager@space:demo_space` grant away and never gives it back. The console
+ * enforces "one principal, one role", so assigning REPLACES what the principal already held — the
+ * replace-confirm the spec clicks past IS the deletion — and the later unassign leaves nothing. Every
+ * spec that renders a space's settings then fails on an empty screen, which reads as a product
+ * regression. The fixture reporter added by this ticket named the spec within one test.
+ *
+ * The house rule the integrity check states is "a spec must not mutate the shared demo fixture — use a
+ * scratch resource". This is the space-level form of `createScratchPage`.
+ */
+export async function createScratchSpace(page: Page, name = "Scratch Space"): Promise<string> {
+  return page.evaluate(
+    async ({ api, name }) => {
+      const r = await fetch(`${api}/spaces`, {
+        method: "POST",
+        headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      return ((await r.json()) as { id: string }).id;
+    },
+    { api: API, name },
+  );
+}
+
 // #253 / ADR-113: flip the tenant PARENT SWITCH (tenant_settings.public_enabled) via the admin API. The
 // whole anonymous public surface 404s while this is OFF (default), so any spec that expects public rendering
 // must turn it ON first. dev-token is a tenant admin in dev mode. The caller's page must be at the app origin.

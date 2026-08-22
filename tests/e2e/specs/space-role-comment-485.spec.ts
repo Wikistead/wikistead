@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { createScratchSpace } from "../helpers";
 
 // #485 review bounce: the space Members tab offered custom roles that the server then refused —
 // a role carrying `comment` 400'd with `capability "comment" is not assignable at space scope`, because
@@ -8,6 +9,13 @@ import { test, expect } from "@playwright/test";
 // space, and see it land.
 test("#485: a role carrying `comment` assigns at space scope (the bounce is gone)", async ({ page }) => {
   const name = `cmt-role-${Date.now().toString(36)}`;
+  // ⚠️ #890 (2026-08-23): the second member of the family the fixture reporter caught. This assign /
+  // revoke loop used to run on `demo_space`, and the console enforces one role per principal — so
+  // assigning REPLACED `user:dev-user#manager@space:demo_space` (the replace-confirm below is the
+  // deletion) and the revoke at the end left nothing. The reporter names only the FIRST break in a
+  // run, so a second spec doing the same thing is invisible until the first is fixed; this one was
+  // found by counting the family rather than by running again.
+  const space = await createScratchSpace(page, `role-485 ${Date.now().toString(36)}`);
   await page.goto("/admin/roles");
   await expect(page.getByTestId("admin-roles")).toBeVisible({ timeout: 10_000 });
 
@@ -18,8 +26,8 @@ test("#485: a role carrying `comment` assigns at space scope (the bounce is gone
   await page.getByTestId("role-save").click();
   await expect(page.getByTestId("roles-list")).toContainText(name, { timeout: 8000 });
 
-  // assign it where a space role now lives (#514 slice 4)
-  await page.goto("/spaces/demo_space/settings/members");
+  // assign it where a space role now lives (#514 slice 4) — on a space this test made
+  await page.goto(`/spaces/${space}/settings/members`);
   await expect(page.getByTestId("space-members")).toBeVisible({ timeout: 10_000 });
   // #536 §6: the merged picker (one control for built-ins and custom roles)
   await page.getByTestId("space-grant-input").fill("dev");
@@ -29,7 +37,9 @@ test("#485: a role carrying `comment` assigns at space scope (the bounce is gone
   await expect(page.getByRole("option")).toHaveCount(0);
   await page.getByTestId("space-grant-add").click();
   // #536 ②: adding over an existing different role opens the replace confirm (1 principal = 1
-  // role). Residue rows on the shared demo space make this conditional.
+  // role). It fires here because creating a space makes its creator its manager — which is exactly the
+  // grant this used to take from the shared fixture. Conditional because the dialog is skipped when
+  // the principal held nothing.
   {
     const replaceConfirm = page.getByTestId("space-role-replace-confirm");
     if (await replaceConfirm.isVisible({ timeout: 1500 }).catch(() => false)) await replaceConfirm.click();
