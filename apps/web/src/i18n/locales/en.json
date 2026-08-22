@@ -44,7 +44,9 @@
     "confirm": "Confirm",
     "memberSearch": "Search members…",
     "granteeSearch": "Search members or groups…",
-    "copyOnce": "Shown only once. Copy it now."
+    "copyOnce": "Shown only once. Copy it now.",
+    "loadFailed": "Could not load this. It is a problem here, not with what you are looking at.",
+    "loadRetry": "Try again"
   },
   "home": {
     "emptyTitle": "No spaces yet",

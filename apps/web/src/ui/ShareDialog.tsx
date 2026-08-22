@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "./LoadFailed";
 import { Copy, Trash2 } from "lucide-react";
 import { useShareLinks, useCreateShareLink, useRevokeShareLink } from "../data/queries";
 import { notify } from "./toast";
@@ -103,6 +104,10 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
         <div className="mt-3 flex max-h-[55vh] flex-col gap-2 overflow-y-auto" data-testid="link-list">
           {links.isLoading ? (
             <div className="text-sm text-fg-dim">{t("common.loading")}</div>
+          ) : links.isError ? (
+            // #888: said BEFORE the empty branch. "No links" here is an answer about who can reach
+            // this page, and a request that failed established nothing of the sort.
+            <LoadFailed testId="share-links-failed" onRetry={() => { void links.refetch(); }} />
           ) : (links.data?.length ?? 0) === 0 ? (
             <div className="text-sm text-fg-dim">{t("shareDialog.noLinks")}</div>
           ) : (

@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { useAdminSpaces, useAdminDeleteMode, useSetAdminDeleteMode } from "../data/queries";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
@@ -45,7 +46,9 @@ export function AdminSpacesTab() {
         />
       </div>
       {spaces.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
-      {!spaces.isLoading && (spaces.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("adminSpaces.empty")}</p>}
+      {/* #888: a failed fetch is not a tenant with no spaces. */}
+      {spaces.isError && <LoadFailed testId="admin-spaces-failed" onRetry={() => { void spaces.refetch(); }} />}
+      {!spaces.isLoading && !spaces.isError && (spaces.data?.length ?? 0) === 0 && <p className="text-sm text-fg-dim">{t("adminSpaces.empty")}</p>}
 
       {(spaces.data?.length ?? 0) > 0 && (
         <ListBox>

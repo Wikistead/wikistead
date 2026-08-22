@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ListBox } from "../ui/list-rows";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { useSpaceTrash, useRestorePage, usePurgePage, type TrashEntry } from "../data/queries";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/dialogs";
@@ -30,7 +31,10 @@ export function SpaceTrashTab() {
   return (
     <SettingsPane width="list" testId="space-trash" title={t("spaceTrash.title")} description={t("spaceTrash.hint")}>
       {trash.isLoading && <p className="text-sm text-fg-dim">{t("common.loading")}</p>}
-      {!trash.isLoading && (trash.data?.length ?? 0) === 0 && (
+      {/* #888: an unreachable trash is not an empty one — the difference decides whether somebody
+          goes looking for what they deleted. */}
+      {trash.isError && <LoadFailed testId="space-trash-failed" onRetry={() => { void trash.refetch(); }} />}
+      {!trash.isLoading && !trash.isError && (trash.data?.length ?? 0) === 0 && (
         <p className="text-sm text-fg-dim" data-testid="space-trash-empty">{t("spaceTrash.empty")}</p>
       )}
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Copy, Trash2 } from "lucide-react";
 import { useWebhooks, useCreateWebhook, useDeleteWebhook, type WebhookCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
@@ -70,7 +71,11 @@ export function AdminWebhooksTab() {
             </IconButton>
           </ListRow>
         ))}
-        {(hooks.data?.length ?? 0) === 0 && <p className="text-xs text-fg-dim">{t("adminWebhooks.empty")}</p>}
+        {/* #888: this one did not even wait for the request — "no endpoints" flashed while loading
+            and stayed there if the fetch failed. */}
+        {hooks.isError
+          ? <LoadFailed testId="admin-webhooks-failed" onRetry={() => { void hooks.refetch(); }} />
+          : !hooks.isLoading && (hooks.data?.length ?? 0) === 0 && <p className="text-xs text-fg-dim">{t("adminWebhooks.empty")}</p>}
       </ListBox>
       {/* #504: the endpoint-delete confirm — names the URL. */}
       <ConfirmDialog

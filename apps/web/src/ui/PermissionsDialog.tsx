@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "./LoadFailed";
 import { usePageAccess, useGrantAccess, useRevokeAccess, usePageRestrictions, useRestrict, useUnrestrict, usePagePrivate, useSetPrivate, usePagePublic, useSetPublic, usePublicSurface, usePage, usePublished, useTenantGroups, useShareLinks, useSetFrozen, usePageMemberCandidates, usePageCommentAudience, useSetPageCommentAudience, usePageAssignableRoles, useRoleAssignments, useAssignRole, useUnassignRole, type PageRelation } from "../data/queries";
 import { resolveGrantDispatch } from "../settings/grant-dispatch";
 import { notifyRevokeOutcome, notifyRevokeError } from "../settings/revoke-feedback";
@@ -26,7 +27,8 @@ type TabKey = "access" | "restrictions" | "advanced";
 // to the people listed here until it is published.
 export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
-  const { data: grants } = usePageAccess(pageId, open);
+  const access = usePageAccess(pageId, open);
+  const grants = access.data;
   const { data: page } = usePage(pageId);
   const { data: groups } = useTenantGroups(page?.spaceId ?? "", open && !!page?.spaceId);
   const grant = useGrantAccess(pageId);
@@ -411,7 +413,12 @@ export function PermissionsDialog({ pageId, open, onClose }: { pageId: string; o
               })}><X size={14} /></IconButton>
             </div>
           ))}
-          {(grants?.length ?? 0) === 0 && (pageAssignments.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("permissions.empty")}</p>}
+          {/* #888: a failed fetch used to render "nobody has been given access here", which is the
+              most misleading thing this dialog can say — an admin reviewing access reads it as a
+              finding. Either list failing is enough to withhold the claim. */}
+          {(access.isError || pageAssignments.isError)
+            ? <LoadFailed testId="permissions-failed" onRetry={() => { void access.refetch(); void pageAssignments.refetch(); }} />
+            : (grants?.length ?? 0) === 0 && (pageAssignments.data?.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("permissions.empty")}</p>}
         </div>
 
         </TabsContent>

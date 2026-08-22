@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadFailed } from "../ui/LoadFailed";
 import { useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator } from "../components/ui/dropdown-menu";
@@ -52,7 +53,9 @@ export function NotificationBell() {
         <DropdownMenuSeparator />
         <div className="max-h-[min(60vh,24rem)] overflow-y-auto" data-testid="notification-list">
           {list.isLoading && <div className="px-3 py-4 text-center text-sm text-fg-dim">{t("notifications.loading")}</div>}
-          {!list.isLoading && (list.data?.length ?? 0) === 0 && (
+          {/* #888: "nothing new" and "we could not ask" are different things to tell someone. */}
+          {list.isError && <LoadFailed testId="notifications-failed" onRetry={() => { void list.refetch(); }} />}
+          {!list.isLoading && !list.isError && (list.data?.length ?? 0) === 0 && (
             <div className="px-3 py-6 text-center text-sm text-fg-dim" data-testid="notification-empty">{t("notifications.empty")}</div>
           )}
           {list.data?.map((e) => (
