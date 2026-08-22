@@ -21,7 +21,6 @@ import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { onDomainEvent } from '@wikistead/events'
 import { createSpace, deleteSpace, revokeSpaceAccess } from '../routes/spaces.js'
 import { SPACE_GRANT_RELATIONS } from '../space-grant-expansion.js'
-import { drainAuditFor } from './helpers/audit-drain.js'
 import { buildApp } from '../app.js'
 import { ensureMembers, memberTuples } from './helpers/membership.js'
 import type { Tenant } from '@wikistead/types'
@@ -63,13 +62,6 @@ const revoke = (grantee: string, capability: string) =>
     spaceId, tenantId: TENANT, userId: OWNER, grantee, capability, plan: 'business',
   })
 
-async function auditRows(): Promise<number> {
-  await drainAuditFor(adminPool, TENANT)
-  const [{ n }] = await adminPool<[{ n: string }]>`
-    SELECT count(*)::text AS n FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`space:${spaceId}`}
-      AND action = 'space.access_revoked'`
-  return Number(n)
-}
 
 async function firedRevokes(fn: () => Promise<unknown>): Promise<number> {
   let seen = 0
@@ -109,13 +101,14 @@ describe('#619: a rowless revoke deletes what is there, and only claims what it 
     await ensureMembers(TENANT, [grantee.slice('user:'.length)])
     expect(await heldFor(grantee), 'nothing granted to begin with').toEqual(new Set())
 
-    const before = await auditRows()
     const fired = await firedRevokes(() => revoke(grantee, 'view'))
 
     // Success, because the caller's desired state already holds (#619's actual ask) …
     expect(fired, 'no webhook for a removal that removed nothing').toBe(0)
     // … but the ledger stays true: an EE audit chain is hash-linked, so a line here is a permanent lie.
-    expect(await auditRows() - before, 'no audit line either').toBe(0)
+    // (#885: the ledger delta this case also asserted is in `revoke-ledger-audit-885.test.ts`, which
+    // re-runs the scenario. The audit ledger is EE, and reaching its drain helper filtered this CE
+    // suite out of the published tree; the access and webhook assertions are the ones that stay.)
     await deleteTuples(fgaClient, memberTuples(TENANT, [grantee.slice('user:'.length)])).catch(() => {})
   }, 120_000)
 
@@ -144,11 +137,9 @@ describe('#619: a rowless revoke deletes what is there, and only claims what it 
     await ensureMembers(TENANT, [grantee.slice('user:'.length)])
     await writeTuples(fgaClient, SPACE_GRANT_RELATIONS.view.map((relation) => ({ user: grantee, relation, object: `space:${spaceId}` })))
 
-    const before = await auditRows()
     const fired = await firedRevokes(() => revoke(grantee, 'view'))
 
     expect(fired, 'the access really went, so the event fires').toBe(1)
-    expect(await auditRows() - before, 'and the ledger records it').toBe(1)
     expect(await heldFor(grantee)).toEqual(new Set())
     await deleteTuples(fgaClient, memberTuples(TENANT, [grantee.slice('user:'.length)])).catch(() => {})
   }, 120_000)

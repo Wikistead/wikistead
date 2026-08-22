@@ -13,6 +13,10 @@
 //   - a row-backed removal that really deletes the row → success, but the response NAMES what still
 //     grants the capability (`stillCovered`) so the surface can say "removed, but X still grants it".
 //
+// #885: the ledger deltas these cases also checked live in `revoke-ledger-audit-885.test.ts`, which
+// re-runs the scenarios. The ledger is EE, and reaching its drain helper filtered this whole CE
+// suite out of the published tree.
+//
 // Measured on a real Postgres + OpenFGA stack. Three shapes per scope (page AND space): (a) a single
 // role, (b) two roles covering the same capability, (c) a role plus a direct built-in grant.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
@@ -25,7 +29,6 @@ import { onDomainEvent } from '@wikistead/events'
 import { createSpace, deleteSpace, grantSpaceAccess, revokeSpaceAccess } from '../routes/spaces.js'
 import { createPage, deletePage, publishPage, grantPageAccess, revokePageAccess } from '../routes/pages.js'
 import { assignRoleInTx, unassignRoleInTx } from '../routes/roles.js'
-import { drainAuditFor } from './helpers/audit-drain.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -79,15 +82,6 @@ const assign = (roleId: string, resourceType: 'page' | 'space', resourceId: stri
   })
 const canView = (principal: string) => check(fgaClient, principal, 'view', P)
 
-// The audit ledger's own count for THIS resource: outbox + log together, drained first so a pending
-// intent is not mistaken for an absent one (#481's shape).
-async function auditRows(target: string): Promise<number> {
-  await drainAuditFor(adminPool, TENANT)
-  const [{ n }] = await adminPool<[{ n: string }]>`
-    SELECT count(*)::text AS n FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${target}
-      AND action IN ('page.access_revoked', 'space.access_revoked', 'role.unassigned')`
-  return Number(n)
-}
 
 // Capture the revocation webhooks fired during `fn`.
 async function firedRevokes(fn: () => Promise<unknown>): Promise<string[]> {
@@ -133,7 +127,6 @@ describe('#596 page scope: a revoke that changes nothing refuses instead of lyin
     await writeTuples(fgaClient, [{ user: p, relation: 'view_direct', object: `page:${pageId}` }])
     await assign(roleA, 'page', pageId, p) // the covering assignment
 
-    const before = await auditRows(`page:${pageId}`)
     const fired = await firedRevokes(() =>
       revokePageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' }),
     )
@@ -143,7 +136,9 @@ describe('#596 page scope: a revoke that changes nothing refuses instead of lyin
     ).rejects.toMatchObject({ statusCode: 409, code: 'still_covered', coveredBy: [roleA] })
 
     expect(fired, 'no webhook for a revoke that did not happen').toEqual([])
-    expect(await auditRows(`page:${pageId}`), 'no audit row either — the ledger stays true').toBe(before)
+    // (#885: the ledger delta this case also asserted is in `revoke-ledger-audit-885.test.ts`, which
+    // re-runs the scenario. The audit ledger is EE, and reaching its drain helper filtered this CE
+    // suite out of the published tree; the access and webhook assertions are the ones that stay.)
     expect(await canView(p), 'the covering role keeps the access (non-regression)').toBe(true)
   }, 120_000)
 
@@ -194,23 +189,11 @@ describe('#596 review: coverage is FGA truth, names are manage-only, and the led
       SELECT id FROM role_assignments WHERE resource_type = 'page' AND resource_id = ${pageId} AND principal = ${p} AND builtin_capability = 'view'`
     // A DELTA around this one call — a time window would sweep in the legitimate revocations the
     // earlier tests in this file wrote against the same page (measured: it did).
-    const actions = async () => {
-      await drainAuditFor(adminPool, TENANT)
-      const [r] = await adminPool<[{ revoked: string; unassigned: string }]>`
-        SELECT count(*) FILTER (WHERE action = 'page.access_revoked')::text AS revoked,
-               count(*) FILTER (WHERE action = 'role.unassigned')::text AS unassigned
-        FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`page:${pageId}`}`
-      return { revoked: Number(r.revoked), unassigned: Number(r.unassigned) }
-    }
-    const before = await actions()
     const fired = await firedRevokes(() =>
       revokePageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' }),
     )
     expect(grantRow, 'the grant really had a row (else this pins the wrong branch)').toBeTruthy()
     expect(fired, 'no access_revoked webhook: the principal lost nothing').toEqual([])
-    const after = await actions()
-    expect(after.revoked - before.revoked, 'no "access revoked" line for access that was not revoked').toBe(0)
-    expect(after.unassigned - before.unassigned, 'the removal that DID happen is recorded').toBe(1)
     expect(await canView(p), 'and the role still confers view').toBe(true)
   }, 120_000)
 
@@ -221,12 +204,10 @@ describe('#596 review: coverage is FGA truth, names are manage-only, and the led
     const p = sub('pg-real-revoke')
     await grantPageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' })
     expect(await canView(p), 'granted').toBe(true)
-    const before = await auditRows(`page:${pageId}`)
     const fired = await firedRevokes(() =>
       revokePageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' }),
     )
     expect(fired, 'the webhook fires for a revocation that really happened').toEqual(['page.access_revoked'])
-    expect(await auditRows(`page:${pageId}`) - before, 'and the ledger gets its line').toBe(1)
     expect(await canView(p), 'access really went').toBe(false)
   }, 120_000)
 
@@ -278,7 +259,6 @@ describe('#596 space scope: the same three shapes', () => {
     ])
     await assign(roleA, 'space', spaceId, p)
 
-    const before = await auditRows(`space:${spaceId}`)
     const fired = await firedRevokes(() =>
       revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business' }),
     )
@@ -286,7 +266,6 @@ describe('#596 space scope: the same three shapes', () => {
       revokeSpaceAccess(db, fgaClient, app.searchDriver, { spaceId, tenantId: TENANT, userId: OWNER, grantee: p, capability: 'view', plan: 'business' }),
     ).rejects.toMatchObject({ statusCode: 409, code: 'still_covered', coveredBy: [roleA] })
     expect(fired, 'no webhook').toEqual([])
-    expect(await auditRows(`space:${spaceId}`), 'no audit row').toBe(before)
     expect(await canViewSpace(p), 'the role still grants it').toBe(true)
   }, 120_000)
 })
