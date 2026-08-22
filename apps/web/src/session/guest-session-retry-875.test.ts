@@ -143,4 +143,40 @@ describe("#875 the session is the retrying party", () => {
     expect(clock.pending(), "the ceiling plus a rate limit is still a guest who can come back").toBe(1);
     expect(s.ended()).toBeNull();
   });
+
+  // the three lines the re-exchange decides on had no pin at all, and one of them INVERTED —
+  // a `null` used to schedule another knock and now ends the session. Both halves are asserted here
+  // so the next change to that branch has to say which one it means.
+  it("ends on the link's own answer at the boundary, and only on that one", async () => {
+    const clock = fakeClock();
+    refresh.mockResolvedValue({ kind: "reenter" });
+    exchange.mockResolvedValue(null); // 404 — the link answering for itself (#882: the one terminal no)
+    const s = makeGuestSession("L", minted(tokenExpiringIn(5)), undefined, clock.schedule);
+    s.onReconnect(() => {});
+    await s.getToken();
+    expect(s.ended(), "a revoked link does not get retried forever").toBe("gone");
+    expect(clock.pending(), "and nothing is left waiting to knock").toBe(0);
+  });
+
+  it("does not end when the deployment is the one that failed", async () => {
+    const clock = fakeClock();
+    refresh.mockResolvedValue({ kind: "reenter" });
+    exchange.mockResolvedValue("unavailable"); // 5xx / a request that never arrived
+    const s = makeGuestSession("L", minted(tokenExpiringIn(5)), undefined, clock.schedule);
+    s.onReconnect(() => {});
+    await s.getToken();
+    expect(s.ended(), "a restart is not a revocation").toBeNull();
+    expect(clock.pending()).toBe(1);
+  });
+
+  it("ends when the door starts asking for a password instead", async () => {
+    const clock = fakeClock();
+    refresh.mockResolvedValue({ kind: "reenter" });
+    exchange.mockResolvedValue("password_required");
+    const s = makeGuestSession("L", minted(tokenExpiringIn(5)), undefined, clock.schedule);
+    s.onReconnect(() => {});
+    await s.getToken();
+    expect(s.ended()).toBe("unauthorized");
+    expect(clock.pending()).toBe(0);
+  });
 });

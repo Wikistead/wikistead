@@ -15,7 +15,9 @@
 // really was revoked would then say "try again in a moment" forever. 404 is the link answering for
 // itself and stays terminal, which is the line ADR-248 §3.6 already draws for the refresh route.
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fetchGuestToken } from "./apiClient";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fetchGuestToken, refreshGuestToken } from "./apiClient";
 
 const respond = (status: number, body: unknown = {}) => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
@@ -31,6 +33,36 @@ describe("#882 a deployment having a moment is not a revoked link", () => {
   it.each([500, 502, 503, 504, 408, 425])("says 'not now' on %i, not 'this link is dead'", async (status) => {
     respond(status);
     expect(await fetchGuestToken("L")).toBe("unavailable");
+  });
+
+  // the body is a SECOND chance to fail and it was outside the try — the one path this ticket
+  // is named after ("stuck on loading") was still reachable through it. A 200 whose stream is cut
+  // after the headers is exactly what a pod being replaced mid-response produces.
+  it("says 'not now' when a 200's body stops mid-stream", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => { throw new TypeError("network error"); },
+    }));
+    await expect(fetchGuestToken("L")).resolves.toBe("unavailable");
+  });
+
+  it("does the same on the renewal route, where the rejection would escape a non-throwing getter", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => { throw new TypeError("network error"); },
+    }));
+    await expect(refreshGuestToken("L", "t")).resolves.toEqual({ kind: "retry" });
+  });
+
+  // second layer: the route's own `.then` had no catch, so anything the client did not turn
+  // into a value left the page on its skeleton. Both entry paths carry one now.
+  it("has a catch on both of the route's token calls", () => {
+    const src = readFileSync(resolve(import.meta.dirname, "../app/routes.tsx"), "utf8");
+    const share = src.slice(src.indexOf("function ShareRoute("), src.indexOf("\nfunction ", src.indexOf("function ShareRoute(") + 1));
+    expect(share.length, "ShareRoute's body is empty").toBeGreaterThan(200);
+    const calls = share.match(/fetchGuestToken\(/g) ?? [];
+    expect(calls.length, "both entry paths").toBe(2);
+    expect((share.match(/\}\)\.catch\(/g) ?? []).length, "one catch per call").toBe(2);
   });
 
   it("says 'not now' when the request never arrived, instead of never resolving", async () => {

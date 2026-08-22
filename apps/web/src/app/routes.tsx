@@ -1006,7 +1006,10 @@ function ShareRoute() {
       // notice would throw that away, so a transient failure stays here and says so.
       else if (minted === "unavailable") setState({ status: "unavailable" });
       else setState(minted ? { status: "ok", minted } : { status: "denied" });
-    });
+    // second layer. `fetchGuestToken` resolves for every failure it knows about, but a `.then`
+    // with no catch turns anything it does NOT into a page that never leaves the skeleton — the one
+    // symptom this ticket is named after. The screen must always land somewhere it can be left from.
+    }).catch(() => { setSubmitting(false); setState({ status: "unavailable" }); });
   }, [linkId]);
 
   useEffect(() => {
@@ -1021,7 +1024,7 @@ function ShareRoute() {
       else if (minted === "rate_limited") setState({ status: "password", error: "throttled" });
       else if (minted === "unavailable") setState({ status: "unavailable" });
       else setState(minted ? { status: "ok", minted } : { status: "denied" });
-    });
+    }).catch(() => { if (!cancelled) setState({ status: "unavailable" }); }); // as above
     return () => { cancelled = true; };
   }, [linkId]);
 

@@ -134,7 +134,16 @@ export async function refreshGuestToken(linkId: string, token: string): Promise<
   } catch {
     return { kind: "retry" }; // the network, not the session — a request that never arrived decides nothing
   }
-  if (res.ok) return { kind: "renewed", minted: (await res.json()) as GuestToken };
+  if (res.ok) {
+    // same second chance to fail as the first exchange below — a 200 whose body stops
+    // mid-stream rejects, and this one is awaited by the renewal loop, so the rejection would escape
+    // a getter that promises never to throw. A truncated answer is the deployment, not the link.
+    try {
+      return { kind: "renewed", minted: (await res.json()) as GuestToken };
+    } catch {
+      return { kind: "retry" };
+    }
+  }
   if (res.status === 429) return { kind: "retry" };
   if (res.status === 401) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -188,11 +197,22 @@ export async function fetchGuestToken(linkId: string, password?: string, carryin
   if (res.status === 429) return "rate_limited"; // throttled — keep the prompt, show a cool-down notice
   // #882: 404 is the link answering for itself — revoked, expired, or never this deployment's — and
   // that is the only "no" a visitor can act on. Everything else that is not OK is the DEPLOYMENT
-  // having a moment: a 502 from a rolling restart, a gateway timeout, the 404-shaped refusal of a pod
-  // that is draining. Reporting those as a dead link tells somebody who was handed a working address
+  // having a moment: a 502 from a rolling restart, a gateway timeout, a body that stops mid-stream.
+  // (this list used to name "the 404-shaped refusal of a draining pod" as one of them, which
+  // the line above does NOT do and must not — a 404 is indistinguishable from a revoked link BY
+  // DESIGN, #227, so it stays terminal and the note was describing a policy the code never had.)
+  // Reporting those as a dead link tells somebody who was handed a working address
   // that the person who sent it got it wrong. ADR-248 §3.6 already draws this line for the refresh
   // route (#875); the first exchange is the same question asked one step earlier.
   if (res.status === 404) return null;
   if (!res.ok) return "unavailable";
-  return (await res.json()) as GuestToken;
+  try {
+    return (await res.json()) as GuestToken;
+  } catch {
+    // the body is a second chance to fail, and it sat outside the try above — a 200 whose
+    // stream is cut mid-flight (headers already sent, then the pod goes) rejects here. The caller's
+    // `.then` had no catch, so that landed on the skeleton forever: the exact symptom this ticket is
+    // named after, reached by the one route the fix had not covered.
+    return "unavailable";
+  }
 }
