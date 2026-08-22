@@ -178,10 +178,12 @@ describe('#596 review: coverage is FGA truth, names are manage-only, and the led
     expect(out.stillCovered).toEqual([{ capability: 'view', via: 'view' }])
   }, 120_000)
 
-  it('F3: when nothing was lost, the ledger records the UNASSIGNMENT — not an access revocation', async () => {
-    // `page.access_revoked` means "a principal LOST a relation" (the event catalog's own words).
-    // Writing it into a hash-chained ledger while the principal kept every capability is the same lie
-    // in a different column, so the audit falls back to the vocabulary that is true: role.unassigned.
+  it('F3: when nothing was lost, no revocation webhook fires and the access stays', async () => {
+    // ⚠️ the title used to say "the ledger records the UNASSIGNMENT", and this case stopped
+    // reading the ledger when #885 moved the audit half out of the CE tree. A test that names a
+    // promise it no longer checks is worse than a missing one — somebody looking for that promise
+    // finds it green. The ledger half lives in `revoke-ledger-audit-885.test.ts`, where the two
+    // actions are counted apart; what stays here is the webhook and the access itself.
     const p = sub('pg-audit-action')
     await grantPageAccess(db, fgaClient, app.searchDriver, { pageId, tenantId: TENANT, userId: OWNER, grantee: p, relation: 'view', plan: 'business' })
     await assign(roleA, 'page', pageId, p) // covers `view` from another row
@@ -251,7 +253,9 @@ describe('#596 space scope: the same three shapes', () => {
     expect(await canViewSpace(p), 'still granted by the other role').toBe(true)
   }, 120_000)
 
-  it('(c) role + rowless grant: revokeSpaceAccess refuses with 409 — no audit, no webhook', async () => {
+  // "no audit" was in this title after the ledger half moved out. The audit assertion is in
+  // `revoke-ledger-audit-885.test.ts`; this one keeps the refusal and the webhook.
+  it('(c) role + rowless grant: revokeSpaceAccess refuses with 409 — and no webhook', async () => {
     const p = sub('sp-grant-covered')
     await writeTuples(fgaClient, [
       { user: p, relation: 'viewer', object: `space:${spaceId}` },
