@@ -60,18 +60,72 @@ export function firstAssetPath(html: string): string | undefined {
   return m?.[1]
 }
 
+// The Referrer-Policy tokens a browser recognises. Anything else leaves the header unrecognised, and
+// the browser silently applies its own default — so a header carrying only unknown tokens protects
+// exactly as much as no header at all, while reading like a configured one.
+const REFERRER_POLICY_TOKENS = new Set([
+  'no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin',
+  'same-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url',
+])
+
+// The two tokens that send the FULL URL to a cross-origin destination. That is the leak that matters
+// here specifically: this product puts page ids and share tokens in the path, so a full-URL referrer
+// hands a third-party origin the address of a document it was never granted. The other tokens stop at
+// the origin or below. (`origin-when-cross-origin` sends the full URL only same-origin — not a leak.)
+const FULL_URL_REFERRER_POLICIES = new Set(['unsafe-url', 'no-referrer-when-downgrade'])
+
+// A comma-separated Referrer-Policy is legal; the browser uses the LAST token it recognises, so that
+// is the one to judge. Returns undefined when the header names no recognised token at all.
+export function effectiveReferrerPolicy(value: string): string | undefined {
+  const known = value.split(',').map((t) => t.trim().toLowerCase()).filter((t) => REFERRER_POLICY_TOKENS.has(t))
+  return known.length ? known[known.length - 1] : undefined
+}
+
+// One day. Anything shorter expires between two visits, so it is a header rather than a protection.
+export const HSTS_MIN_MAX_AGE = 86400
+
 // Row: security headers (ADR-039 / #187). nosniff + Referrer-Policy ALWAYS; HSTS present iff https.
 // A proxy-misconfig single point of failure — the app now sets these itself, so this verifies the live
 // response actually carries them end-to-end.
+//
+// #879: these used to be PRESENCE checks, which let two settings through that switch the protection OFF
+// while still printing as configured — `Strict-Transport-Security: max-age=0` (tells the browser to
+// FORGET the pin) and `Referrer-Policy: unsafe-url` (sends the full URL, ids and all, to third parties).
+// A gate whose whole job is to block a release must not certify the very misconfiguration it names.
 export function securityHeadersVerdict(headers: Record<string, string>, isHttps: boolean): CheckVerdict {
   const problems: string[] = []
   if ((headers['x-content-type-options'] || '').toLowerCase() !== 'nosniff') problems.push('missing X-Content-Type-Options: nosniff')
-  if (!headers['referrer-policy']) problems.push('missing Referrer-Policy')
-  const hsts = !!headers['strict-transport-security']
-  if (isHttps && !hsts) problems.push('https response missing Strict-Transport-Security')
-  if (!isHttps && hsts) problems.push('non-https response should NOT carry HSTS (misleading)')
-  return { pass: problems.length === 0, detail: problems.join('; ') || `nosniff + Referrer-Policy present; HSTS ${isHttps ? 'present' : 'absent'} (correct for ${isHttps ? 'https' : 'http'})` }
+
+  const rpRaw = headers['referrer-policy']
+  if (!rpRaw) problems.push('missing Referrer-Policy')
+  else {
+    const rp = effectiveReferrerPolicy(rpRaw)
+    if (!rp) problems.push(`Referrer-Policy '${rpRaw}' names no recognised token — the browser falls back to its own default`)
+    else if (FULL_URL_REFERRER_POLICIES.has(rp)) problems.push(`Referrer-Policy '${rp}' sends the FULL URL cross-origin — page ids and share tokens live in the path`)
+  }
+
+  const hstsRaw = headers['strict-transport-security']
+  if (isHttps && !hstsRaw) problems.push('https response missing Strict-Transport-Security')
+  if (!isHttps && hstsRaw) problems.push('non-https response should NOT carry HSTS (misleading)')
+  if (isHttps && hstsRaw) {
+    const m = hstsRaw.match(/max-age\s*=\s*"?(\d+)"?/i)
+    if (!m) problems.push(`Strict-Transport-Security '${hstsRaw}' has no max-age — the directive is required, so the header does nothing`)
+    else {
+      const age = Number(m[1])
+      // max-age=0 is not a weak pin, it is the documented way to REVOKE one.
+      if (age === 0) problems.push('Strict-Transport-Security max-age=0 DISABLES HSTS (tells the browser to forget the pin)')
+      // Below a day a returning visitor is usually unpinned again, so the header is not protection.
+      // Every first-party config ships max-age=31536000 (app.ts, deploy/caddy/Caddyfile).
+      else if (age < HSTS_MIN_MAX_AGE) problems.push(`Strict-Transport-Security max-age=${age} is below ${HSTS_MIN_MAX_AGE}s — too short to protect a returning visitor`)
+      // Sessions live on tenant subdomains (t1.<host>), so a pin on the apex alone protects nobody
+      // where the product actually runs. This is a tenancy requirement, not a generic hardening wish.
+      if (!/includesubdomains/i.test(hstsRaw)) problems.push('Strict-Transport-Security lacks includeSubDomains — tenant subdomains carry the sessions')
+    }
+  }
+
+  return { pass: problems.length === 0, detail: problems.join('; ') || `nosniff + Referrer-Policy '${effectiveReferrerPolicy(headers['referrer-policy'] || '')}' present; HSTS ${isHttps ? `present (${headers['strict-transport-security']})` : 'absent'} (correct for ${isHttps ? 'https' : 'http'})` }
 }
+
 
 // Row: session/affinity cookie is HOST-ONLY (ADR-039 #1) — no `Domain=` attribute, so t1's cookie can
 // never be replayed at t2 (cross-subdomain leak). Pass = NO Set-Cookie carries a Domain attribute.
@@ -172,6 +226,15 @@ export async function runHttpPreflight(
   // server has never served — so they were reading a 404's headers and calling it a posture check.
   await run('security-headers', async () => {
     const r = await get(`${base}/api/healthz`)
+    return securityHeadersVerdict(lowerHeaders(r.headers), isHttps)
+  })
+  // #879: the row above reads an API response, and the APPLICATION sets those headers itself
+  // (app.ts). So it stays green even when the edge sets none — while the response the browser
+  // actually loads, and the one that establishes its HSTS pin, is the SPA document, served by a
+  // different container (apps/web/nginx.conf) through the edge. Measure the shipped document too,
+  // or the row certifies a posture nothing in the browser's path ever had.
+  await run('document-security-headers', async () => {
+    const r = await get(`${base}/`)
     return securityHeadersVerdict(lowerHeaders(r.headers), isHttps)
   })
   await run('api-reachable', async () => {
