@@ -12,7 +12,11 @@
 // ⚠️ WIDTH MEANS SOMETHING DIFFERENT ON EACH SURFACE, so each row says which:
 //   title dictionary  ids confirmed in one fill (cap 2000, sliced 200, ONE lane — #541 gave up
 //                     throughput on purpose so interactive checks interleave)
-//   sidebar tree      spaces on the page — and FIVE filterAuthorized passes run per page, in
+//   sidebar PAGE TREE every row in the space, one pass at four lanes, NO cap and NO budget — the
+//                     surface open question 2 names, and the one the first paint waits on.
+//                     ⚠️ Measured 2026-08-23: 1,000 rows = 5.7 s, and four lanes buy almost nothing
+//                     over one (5.70 vs 5.01 ms/row). A surface defended only by lanes is undefended.
+//   sidebar spaces    spaces on the page — and FIVE filterAuthorized passes run per page, in
 //                     parallel, because the row carries a capability (#710)
 //   search stage 2    candidates Meilisearch handed over for the authoritative confirm
 //
@@ -35,8 +39,10 @@
 //
 // ⚠️ AND ONE THING THE CODE SAYS THAT THE MEASUREMENT DOES NOT. `pages.ts` explains the drop from
 // four lanes to one with "an idle box still completes a full 2000-id confirm in ~1-2s". On an idle
-// box, rotated store, it took 9.7 seconds. The confirm's budget is 2,000 ms, so what actually happens
-// is that roughly 400 ids are confirmed and the dictionary returns `degraded: true`. That is not
+// box, rotated store, it took 9.7 seconds. The confirm's budget is 2,000 ms, so the run stops early
+// and the dictionary returns `degraded: true`. ⚠️ HOW early is NOT measured here: the budget is
+// checked BETWEEN slices of 200, so the stop lands on a slice boundary, and dividing the budget by a
+// per-id average does not give the answer (an earlier note here said "roughly 400" that way). That is not
 // broken — a partial dictionary is under-disclosure and the links fill in on the next fetch — but the
 // sentence the lane count was chosen on describes something else.
 //
@@ -119,6 +125,29 @@ try {
       ['view', 'edit', 'manage', 'moderate', 'manageAccess'].map((rel) =>
         filterAuthorized(fgaClient, USER, rel, ids, undefined, 'space'))))
     console.log(`  ${String(width).padStart(4)} spaces ${t.toFixed(0).padStart(6)} ms  ${(t / width).toFixed(2)} ms/space  (${(t / (width * 5)).toFixed(2)} ms per check)`)
+  }
+
+  // ── sidebar PAGE TREE: every row in the space, one pass, four lanes, no cap and no budget ───────
+  // ⚠️ ADR-241 addendum 1: the row above measures `enrichSpaceRows` — the SPACE list. The tree the
+  // sidebar actually paints is `listPages`, and it is a different question: `filterAuthorized(… 'view',
+  // every row in the space …, 'page', 4)` (pages.ts), with NO slice cap and NO budget. The dictionary's
+  // brakes do not exist here, and the code beside it says the first paint waits on this while the
+  // dictionary is an enhancement. Open question 2 names this surface; nothing had measured it.
+  console.log('\nsidebar PAGE TREE — every row in the space, one pass, FOUR lanes, no cap, no budget (listPages)')
+  for (const width of [50, 200, 500, 1000]) {
+    const ids = pages.slice(0, width)
+    const [t] = await ms(() => filterAuthorized(fgaClient, USER, 'view', ids, undefined, 'page', 4))
+    console.log(`  ${String(width).padStart(4)} rows  ${t.toFixed(0).padStart(6)} ms  ${(t / width).toFixed(2)} ms/row`)
+  }
+
+  // ⚠️ And the same widths at ONE lane, so the four-lane figure above can be read as a ratio rather
+  // than as an absolute — this ticket carries five per-check numbers from five store states, and only
+  // ratios survive that.
+  console.log('\nthe same tree widths at ONE lane (for the ratio, not for the clock)')
+  for (const width of [200, 1000]) {
+    const ids = pages.slice(0, width)
+    const [t] = await ms(() => filterAuthorized(fgaClient, USER, 'view', ids, undefined, 'page', 1))
+    console.log(`  ${String(width).padStart(4)} rows  ${t.toFixed(0).padStart(6)} ms  ${(t / width).toFixed(2)} ms/row`)
   }
 
   // ── search stage 2: one authoritative confirm over the candidate set ─────────────────────────────
