@@ -28,6 +28,14 @@ const codeOf = (f: string): string =>
 const sources = walk(WEB).filter((f) => !/\.test\.tsx?$/.test(f))
 
 describe('#648: nothing offers an ordering the analytics surface cannot honour', () => {
+  // #892: the two cases below assert that a scan found NOTHING, which is also what a scan that ran
+  // over nothing reports. Measured on 2026-08-22: pointing `WEB` at an empty directory left this file
+  // 2/2 green. A pin whose walk has stopped walking is worse than no pin — it reads as coverage.
+  it('scanned the web source at all', () => {
+    expect(sources.length, `no sources found under ${WEB}`).toBeGreaterThanOrEqual(100)
+    expect(sources.some((f) => f.endsWith('AnalyticsDashboard.tsx')), 'the analytics surface itself was not scanned').toBe(true)
+  })
+
   it('no surface builds a sort control for the roll-up', () => {
     // Keyed on the testId suffix rather than on a filename: the dashboard is shared, so a second
     // surface adding its own control would be a new file this scan still catches.

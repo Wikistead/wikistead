@@ -48,6 +48,15 @@ function* walk(dir: string): Generator<string> {
 }
 
 describe("#544: no text-glyph icons in app code", () => {
+  // #892: the case below asserts that the scan found NO offenders, which is also what a scan that ran
+  // over nothing reports. Measured on 2026-08-22: pointing the walk at an empty directory left this
+  // file green. A pin whose walk has stopped walking reads as coverage while checking nothing.
+  it("scanned the source at all", () => {
+    const files = [...walk(srcRoot)];
+    expect(files.length, `no sources found under ${srcRoot}`).toBeGreaterThanOrEqual(100);
+    expect(files.some((f) => f.endsWith("Button.tsx")), "a known source file was not reached").toBe(true);
+  });
+
   it("every control icon is a Lucide component (React) or a trusted constant SVG (DOM)", () => {
     const offenders: string[] = [];
     for (const file of walk(srcRoot)) {
