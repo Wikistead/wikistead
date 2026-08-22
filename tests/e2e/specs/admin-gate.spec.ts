@@ -37,12 +37,26 @@ test("admin: user menu opens the tenant console; space settings rename + delete"
   const createDlg = page.locator("[data-testid=rename-dialog][data-state=open]");
   await createDlg.waitFor();
   await createDlg.locator("input").fill("Settings E2E Space");
-  await createDlg.locator("button[type=submit]").click();
+  // #890: the id of the space this test is allowed to destroy. Read from the creation response
+  // rather than assumed, because everything below is aimed at whatever the gear happens to open.
+  const [createRes] = await Promise.all([
+    page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/spaces")),
+    createDlg.locator("button[type=submit]").click(),
+  ]);
+  const created = ((await createRes.json()) as { id: string }).id;
+  expect(created, "the creation response carries the new space's id").toBeTruthy();
   await sleep(400);
 
   // Open its settings from the gear button (now in the sidebar header) and rename it.
   await page.getByTestId("space-settings-open").click();
-  await expect(page).toHaveURL(/\/spaces\/.+\/settings\/general$/);
+  // ⚠️ #890: this used to be /spaces/.+/settings/general — true of ANY space, including the shared
+  // demo one, and the next lines RENAME AND DELETE whatever it opened. The recorded URLs from the
+  // 2026-08-22 run show it opened /spaces/demo_space/settings/general, so this test was deleting the
+  // fixture every other spec leans on. Naming the id keeps the destruction pointed at what this test
+  // made; if the gear still opens something else, it fails HERE instead of taking the suite with it.
+  await expect(page, "the gear must open the space this test just created").toHaveURL(
+    new RegExp(`/spaces/${created}/settings/general$`),
+  );
   await expect(page.getByTestId("space-general")).toBeVisible();
   await page.getByTestId("space-name-input").fill("Renamed E2E Space");
   await page.getByTestId("space-name-save").click();
