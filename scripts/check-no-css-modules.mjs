@@ -12,22 +12,31 @@ import { fileURLToPath } from 'node:url'
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 const SCAN = join(root, 'apps', 'web', 'src')
 
+// #893: `scanned` is counted alongside the offenders because "I found none" and "I looked at none"
+// print the same sentence otherwise. A walk that stops walking — a moved directory, a filter that
+// stops matching — then reads as a clean tree forever, and nothing reddens to say the guard died.
+let scanned = 0
+
 function walk(dir) {
   const out = []
   for (const entry of readdirSync(dir)) {
     if (entry === 'node_modules' || entry === 'dist') continue
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) out.push(...walk(full))
-    else if (entry.endsWith('.module.css')) out.push(full)
+    else { scanned++; if (entry.endsWith('.module.css')) out.push(full) }
   }
   return out
 }
 
 const offenders = walk(SCAN)
+if (scanned === 0) {
+  console.error(`FAIL: nothing was scanned under ${SCAN.replace(root, '')} — the guard cannot report a clean tree it never read.`)
+  process.exit(1)
+}
 if (offenders.length > 0) {
   for (const f of offenders) console.error(`FAIL: CSS Module found: ${f.replace(root, '')}`)
   console.error('The web UI is Tailwind-only — no *.module.css (Group C-3 migration). Convert it to Tailwind utilities.')
   process.exit(1)
 } else {
-  console.log('OK: no *.module.css under apps/web/src (Tailwind-only).')
+  console.log(`OK: ${scanned} file(s) under apps/web/src scanned, no *.module.css (Tailwind-only).`)
 }
