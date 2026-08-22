@@ -15,9 +15,10 @@
 // time.
 //
 // ⚠️ The verdicts talk about the DELIVERED payload, not the declared type. Two fields reach the wire
-// that no union member declares: `actorKeyId`, distributed onto every event with an `actorId` by
-// ADR-221 §9's conditional type, and `occurredAt`, stamped by `webhookPayload`. A table of declared
-// fields would have made `redact` strip the key from sixty events and reverse ADR-221 §9 in silence.
+// that no union member declares: `actorKeyId` and `occurredAt`. Both are stamped by
+// `enqueueWebhookOutbox`, at the write, because two of the three roads to a durable row do not come
+// through the bus. A table of declared fields would have made the allow-list strip the key from sixty
+// events and reverse ADR-221 §9 in silence.
 import type { DomainEvent } from '@wikistead/events'
 
 /**

@@ -15,10 +15,13 @@ import { readObjectTuples } from '@wikistead/authz'
 
 export type EventDisposition = 'suppress' | 'deliver' | 'not-ready'
 
-// A subject that is nobody, for a relation that answers about the OBJECT. `private` is granted to the
-// typed wildcard `[user:*]`, so any user id answers "is this page private" — the same idiom as
-// `MOVE_PRIVATE_PROBE` in routes/pages.ts, which asks the same question at the move boundary.
-const PRIVATE_PROBE = 'user:__disposition_private_probe__'
+// Subjects that are nobody, for a relation that answers about the OBJECT. `private` is granted to two
+// typed wildcards — `[user:*, share_link:*]` — and a wildcard only matches its own type, so ONE probe
+// answers for one half of the pair. Both are asked because a page privatised before #244's backfill
+// holds only the guest half, and a DESCENDANT of such a page has no tuple of its own for the store read
+// to find: measured, `share_link:` said private and `user:` said not, and the child was delivered.
+// (Same idiom as `MOVE_PRIVATE_PROBE` in routes/pages.ts, which asks at the move boundary.)
+const PRIVATE_PROBES = ['user:__disposition_private_probe__', 'share_link:__disposition_private_probe__']
 
 export async function pageEventDisposition(fga: OpenFgaClient, payload: Record<string, unknown>): Promise<EventDisposition> {
   const pageId = typeof payload.pageId === 'string' ? payload.pageId : (payload.resource as { type?: string; id?: string } | undefined)?.id
@@ -33,6 +36,11 @@ export async function pageEventDisposition(fga: OpenFgaClient, payload: Record<s
     // #228 review point 3: suppress on ANY `private` marker, not just `private@user:*`. The model writes
     // private as the pair [user:*, share_link:*] (model.fga) — relation-only is strictly more defensive
     // (fail toward suppression).
+    // The read is already paid for (it answers `linked` below), so a page with its own marker is
+    // settled here without asking the store twice more. It is relation-only rather than
+    // `private@user:*` — #228 review point 3 — which today catches exactly what the two probes below
+    // catch, because `private` accepts only those two typed wildcards. It stays as the shape that
+    // survives a third subject type being added to that list without this file being revisited.
     const priv = rel.some((k) => k.relation === 'private')
     if (priv) return 'suppress'
     // ⚠️ #862 the read above sees STORED tuples, and `private` is
@@ -46,8 +54,12 @@ export async function pageEventDisposition(fga: OpenFgaClient, payload: Record<s
     // primitive ANDs the ambient scope's restriction, and a restriction that cannot be resolved makes it
     // answer `false` — which HERE would read as "not private" and deliver. The polarity of every other
     // caller is the opposite of this one's. A throw lands in the catch below and suppresses.
-    const { allowed } = await fga.check({ user: PRIVATE_PROBE, relation: 'private', object: `page:${pageId}` })
-    if (allowed) return 'suppress'
+    const answers = await Promise.all(
+      PRIVATE_PROBES.map((user) => fga.check({ user, relation: 'private', object: `page:${pageId}` })),
+    )
+    // `!== false` rather than truthiness: the field is optional on the SDK's response, and an absent
+    // answer is "I do not know", which on this question must not read as "not private".
+    if (answers.some((a) => a.allowed !== false)) return 'suppress'
     return linked ? 'deliver' : 'not-ready'
   } catch { return 'suppress' } // fail closed
 }

@@ -32,7 +32,7 @@ import type { Tenant } from '@wikistead/types'
 const driver = new LogicalSearchDriver()
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 let tenant: Tenant, db: TenantDb, spaceId: string
-let folder: string, child: string, grandchild: string, sibling: string, legacy: string
+let folder: string, child: string, grandchild: string, sibling: string, legacy: string, legacyChild: string, legacyUser: string, legacyUserChild: string
 
 /** Published and linked to its space — the state in which an event about it would be delivered. */
 async function visible(title: string, parentId?: string): Promise<string> {
@@ -54,7 +54,13 @@ beforeAll(async () => {
   // (the backfill exists because such rows exist) and it is the one case the store read catches and a
   // `user:`-subject check does not.
   legacy = await visible('inh862 legacy guest-only marker')
+  legacyChild = await visible('inh862 legacy child', legacy)
   await writeTuples(fgaClient, [{ user: 'share_link:*', relation: 'private', object: `page:${legacy}` }])
+  // The OTHER legacy half. #511 names it: a page privatised before the #244 backfill can hold
+  // `user:*` alone, which is why the retry there writes the pair marker by marker.
+  legacyUser = await visible('inh862 legacy member-only marker')
+  legacyUserChild = await visible('inh862 legacy member-only child', legacyUser)
+  await writeTuples(fgaClient, [{ user: 'user:*', relation: 'private', object: `page:${legacyUser}` }])
   await setPagePrivate(db, fgaClient, driver, { pageId: folder, tenantId: tenant.id, userId: 'dev-user' })
 }, 180_000)
 
@@ -92,6 +98,28 @@ describe('#862 an inherited private page is not spoken of', () => {
     expect(await checkRelation(fgaClient, 'user:inh862-probe', 'private', { type: 'page', id: legacy }),
       'the check cannot see it, which is the point').toBe(false)
     expect(await pageEventDisposition(fgaClient, { pageId: legacy }), 'the store read can').toBe('suppress')
+  }, 60_000)
+
+  it('⚠️ and so is a DESCENDANT of one — the two failures compose', async () => {
+    // The case the first fix missed, and it is the two halves of this file multiplied: the marker is
+    // only the guest wildcard, so a `user:`-subject check cannot see it, AND the child holds no tuple
+    // of its own for the store read to find. Measured before the second fix: `share_link:` said
+    // private, `user:` said not, and the child was delivered.
+    expect(await checkRelation(fgaClient, 'user:inh862-probe', 'private', { type: 'page', id: legacyChild }),
+      'the user half of the pair says no').toBe(false)
+    expect(await checkRelation(fgaClient, 'share_link:inh862-probe', 'private', { type: 'page', id: legacyChild }),
+      'and the guest half says yes').toBe(true)
+    expect(await pageEventDisposition(fgaClient, { pageId: legacyChild }), 'so the gate must too').toBe('suppress')
+  }, 60_000)
+
+  it('⚠️ and the mirror image — a member-only marker and its descendant', async () => {
+    // Both halves of the pair exist in the wild, so both probes are load-bearing: a wildcard only
+    // matches its own type, and one probe answers for one half. Measured: with only the guest probe,
+    // this walk is the one that goes red.
+    expect(await checkRelation(fgaClient, 'share_link:inh862-probe', 'private', { type: 'page', id: legacyUserChild }),
+      'the guest half says no here').toBe(false)
+    expect(await pageEventDisposition(fgaClient, { pageId: legacyUser }), 'the root').toBe('suppress')
+    expect(await pageEventDisposition(fgaClient, { pageId: legacyUserChild }), 'and the child').toBe('suppress')
   }, 60_000)
 
   it('a payload with no pageId is not a page question at all', async () => {

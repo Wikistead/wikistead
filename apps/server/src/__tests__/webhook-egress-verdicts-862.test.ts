@@ -12,7 +12,7 @@
 // the verdicts are the ruled ones, and that the bridge obeys them.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import postgres from 'postgres'
-import { EVENT_CATALOG } from '@wikistead/events'
+import { EVENT_CATALOG, registerActorKeyResolver, resetActorKeyResolver } from '@wikistead/events'
 import type { DomainEvent } from '@wikistead/events'
 import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
@@ -194,6 +194,34 @@ describe('#862 the verdict is applied before the row is durable', () => {
         ? { keyId: 'k1', actorId: 'admin-1', ownerId: 'member-1' }
         : { pageId: 'p1', adminSub: 'admin-1' })
       expect(payload!.occurredAt, `${type} carries when it happened`).toBeTruthy()
+    }
+  })
+
+  it('⚠️ and the key the actor arrived on, on the roads that never see the bus', async () => {
+    // finding 4: `page.published` through the bridge carried `actorKeyId` because `emit` adds it,
+    // and the same event through the publish path did not — so ADR-221 §9 held or not depending on
+    // which road the event took. The stamp is at the write now, and it asks the SAME resolver `emit`
+    // asks. Driven through the resolver rather than by putting the field in the payload: a walk that
+    // hands the key in measures the allow-list, not the stamp, and the first version of this did that
+    // and stayed green with the stamp deleted.
+    registerActorKeyResolver(() => 'key-from-the-request')
+    try {
+      const payload = await storedPayload('page.published', { pageId: 'p1', revisionId: 'r1', actorId: 'u1' })
+      expect(payload!.actorKeyId, 'the in-transaction publish path carries it too').toBe('key-from-the-request')
+    } finally {
+      resetActorKeyResolver()
+    }
+  })
+
+  it('⚠️ and a caller that already named the key keeps theirs', async () => {
+    // The stamp fills a gap; it does not overwrite. An event off the bus arrives with the key `emit`
+    // put on it, and a second answer to the same question is how two answers start disagreeing.
+    registerActorKeyResolver(() => 'the-ambient-one')
+    try {
+      const payload = await storedPayload('page.published', { pageId: 'p1', revisionId: 'r1', actorId: 'u1', actorKeyId: 'the-one-on-the-event' })
+      expect(payload!.actorKeyId).toBe('the-one-on-the-event')
+    } finally {
+      resetActorKeyResolver()
     }
   })
 
