@@ -4242,8 +4242,20 @@ async function confirmWithinBudget(
   // Lanes dropped 4 → 1 (measured): dev's FGA datastore and the app DB share one postgres, and
   // a 4-lane wave = 200 concurrent point checks saturated it — endpoints that never touch FGA at all
   // (/me/settings, /pins) measured 2.1s while a dictionary ran. At 1 lane the instantaneous pressure
-  // quarters and interactive queries interleave between batches; an idle box still completes a full
-  // 2000-id confirm in ~1-2s, and under load the budget above bounds the damage instead of the storm.
+  // quarters and interactive queries interleave between batches, and the budget above bounds the
+  // damage under load instead of the storm.
+  //
+  // ⚠️ #887: this used to add "an idle box still completes a full 2000-id confirm in ~1-2s". It does
+  // not. Measured 2026-08-22 on an idle box against a freshly rotated store (18 tuples, 2,140 with the
+  // fixture; `apps/server/measure-surfaces-755.mjs`): 4.9 ms per id at this shape, so 2,000 ids is
+  // ~9.7 SECONDS of work. With `budgetMs` at 2,000 the confirm therefore reaches roughly 400 of them
+  // and returns `degraded: true` — about a fifth of the cap.
+  //
+  // That is not a fault: a partial dictionary is under-disclosure, and the links fill in on the next
+  // fetch. It is written down because the sentence it replaces was the stated reason for one lane, and
+  // "2,000 in two seconds" and "a fifth of them in two seconds" argue for different lane counts. If
+  // anybody revisits that, the 2.1s interactive-starvation figure above is the measurement to redo
+  // first — it is why one lane was chosen, and it has not been re-measured since.
   const SLICE = 200 // 4 chunks of 50, sequential inside the slice; budget checked between slices
   const started = Date.now()
   const confirmed = new Set<string>()
