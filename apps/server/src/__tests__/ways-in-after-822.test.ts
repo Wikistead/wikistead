@@ -13,6 +13,8 @@
 // fail-closed, so the failure is not a leak but everybody losing access at once.
 import { describe, it, expect, afterEach } from 'vitest'
 import { waysInAfter, assertClosingIsSafe } from '../auth/login-methods.js'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { TenantDb } from '../db/index.js'
 
 type Stub = {
@@ -95,6 +97,90 @@ describe('#822 a door that is selected is not a way in', () => {
     const db = dbStub({ oidcRows: [{ id: 'c1', enabled: true }], localSelected: false })
     const after = await waysInAfter(db, TENANT, { id: 'gone', live: false }, NO_PLATFORM)
     expect(after.length, 'a write that closes nothing was judged as if it closed something').toBe(1)
+  })
+})
+
+describe('#866 a write that takes the KEY away can close the last way in', () => {
+  // THE DEFECT. The floor (`isLastAdmin`) counts administrators and never joins the credential
+  // table, so with passwords the only door and two administrators — A holding one, B holding none —
+  // demoting A passes the floor (B is still an administrator) and lands on the forbidden state:
+  // members can sign in, nobody can administer, and the recovery is a command on the server.
+  const oneAdminHoldsAKey = (holders: number) =>
+    ({
+      sql: Object.assign(
+        async (strings: TemplateStringsArray, ...vals: unknown[]) => {
+          const q = strings.join('?')
+          // `holders` counts key-holding admins OTHER than the excluded one, which is what the
+          // counterfactual asks: the stub answers 0 when the person being demoted is the only one.
+          if (q.includes('local_credentials')) return [{ n: vals.some((v) => v === 'A') ? holders : holders + 1 }]
+          if (q.includes('tenant_oidc')) return []
+          if (q.includes('tenant_login_prefs')) return [{ local_login_enabled: true, platform_login_disabled: false, sso_required: false }]
+          return []
+        },
+        { unsafe: async () => [] },
+      ),
+    }) as unknown as TenantDb
+
+  it('refuses a demotion that leaves no administrator holding a key', async () => {
+    await expect(assertClosingIsSafe(oneAdminHoldsAKey(0), TENANT, { demoting: 'A' }, { env: NO_PLATFORM }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'login_lockout' })
+  })
+
+  it('allows it when another administrator still holds one', async () => {
+    await expect(assertClosingIsSafe(oneAdminHoldsAKey(1), TENANT, { demoting: 'A' }, { env: NO_PLATFORM }))
+      .resolves.toBeUndefined()
+  })
+
+  it('asks the counterfactual about THAT person, not about the roster in general', async () => {
+    // Without the exclusion the predicate answers "somebody holds a key" — which is true of the very
+    // person being demoted, so the guard would wave through the write it exists to stop.
+    const seen: unknown[][] = []
+    const db = {
+      sql: Object.assign(
+        async (strings: TemplateStringsArray, ...vals: unknown[]) => {
+          const q = strings.join('?')
+          if (q.includes('local_credentials')) { seen.push(vals); return [{ n: 1 }] }
+          if (q.includes('tenant_login_prefs')) return [{ local_login_enabled: true, platform_login_disabled: false, sso_required: false }]
+          return []
+        },
+        { unsafe: async () => [] },
+      ),
+    } as unknown as TenantDb
+    await waysInAfter(db, TENANT, { demoting: 'A' }, NO_PLATFORM)
+    expect(seen.length, 'the key question was never asked').toBeGreaterThan(0)
+    expect(seen[0], 'the excluded member was not passed to the key question').toContain('A')
+  })
+})
+
+describe('#822 / #866 every door-closing write asks the question', () => {
+  // ⚠️ Measured while break-checking: removing the guard from the demotion route left every case
+  // above green, because a pure unit over the predicate cannot see whether anybody calls it. The
+  // rules and the wiring are two different things to get wrong, and this ticket is about a guard that
+  // existed and asked the wrong question — a guard that does not exist at all is the same defect with
+  // the volume turned up.
+  const read = (rel: string) => readFileSync(resolve(import.meta.dirname, '..', rel), 'utf8')
+
+  const CLOSING_WRITES: ReadonlyArray<readonly [string, string]> = [
+    ['routes/admin-connections.ts', 'disabling a connection, and deleting one'],
+    ['routes/tenant-oidc.ts', 'disabling the tenant IdP'],
+    ['routes/members.ts', 'demoting an administrator — the key-taking half'],
+  ]
+
+  it.each(CLOSING_WRITES.map(([f, why]) => [f, why] as const))('%s asks it (%s)', (file) => {
+    expect(read(file), `${file} closes a door without asking`).toContain('assertClosingIsSafe(')
+  })
+
+  it('the retired predicate is gone, not left beside the new one', () => {
+    // A "does not count the password door" function left in the module is how the next feature picks
+    // it up — which is exactly how the SAML guard came to have it.
+    expect(read('auth/login-methods.ts')).not.toMatch(/export async function otherLoginMethodsEffective/)
+  })
+
+  it('each route carries a receptacle for repeating itself', () => {
+    // A route without one is a button the console loses the day the answer becomes confirm_required.
+    for (const [file] of CLOSING_WRITES) {
+      expect(read(file), `${file} cannot accept a confirmation`).toMatch(/confirm/)
+    }
   })
 })
 

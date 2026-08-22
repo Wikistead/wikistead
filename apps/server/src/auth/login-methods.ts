@@ -266,12 +266,46 @@ export async function resolveLoginConnections(
  */
 export type WayIn = { id: string; kind: string; usable: 'yes' | 'unknown' }
 
+/**
+ * ⚠️ The shapes a closing write can take, written in ONE place so two halves of an implementation
+ * cannot invent different ones.
+ *
+ * Changing the question from "is the password door selected" to "does an administrator hold a key"
+ * means writes that take the KEY away can close the last way in without touching a login-method
+ * screen at all. `demoting` is its own shape rather than a reuse of `deactivating`, even though both
+ * remove the same person from the key-holding set, because the two refusals are different sentences —
+ * a suspension says they would be the last way in, a demotion says they are the only administrator
+ * who can get back in. One shape would force one wording onto both screens, and a refusal that reads
+ * like a bug gets removed in good faith.
+ */
+export type Closing =
+  | { id: string; live: boolean }   // a connection row
+  | { credentialOf: string }        // this member's password entrance is going away
+  | { deactivating: string }        // this member is being suspended or removed
+  | { demoting: string }            // this member stops being an administrator
+
 export async function waysInAfter(
   db: TenantDb,
   tenant: { id: string; plan: string },
-  closing: { id: string; live: boolean },
+  closing: Closing,
   env?: string | undefined,
 ): Promise<WayIn[]> {
+  // The key-taking shapes do not close a connection: every door stays exactly as it was, and what
+  // changes is whether `local` still has a key behind it. So the list is derived unchanged and only
+  // the `local` classification is asked with that person removed.
+  if (!('id' in closing)) {
+    const excluded = 'credentialOf' in closing ? closing.credentialOf : 'deactivating' in closing ? closing.deactivating : closing.demoting
+    const dropAdminship = 'demoting' in closing
+    const effective = await resolveLoginConnections(db, tenant, env)
+    const out: WayIn[] = []
+    for (const c of effective) {
+      if (c.kind !== 'local') { out.push({ id: c.id, kind: c.kind, usable: 'unknown' }); continue }
+      if (await anAdminHoldsAKey(db, { without: excluded, alsoWithoutAdminship: dropAdminship })) {
+        out.push({ id: c.id, kind: c.kind, usable: 'yes' })
+      }
+    }
+    return out
+  }
   const effective = await resolveLoginConnections(db, tenant, env)
   // The caller says whether the id it is closing is live NOW. `live: false` means the write closes a
   // door that was already shut, which takes nothing away — the same step-aside the older guard makes.
@@ -309,11 +343,20 @@ export async function waysInAfter(
  * ⚠️ A passkey-only administrator is NOT counted (ruled 2026-08-21, deliberately for now). The
  * direction is over-refusal, which is the safe side.
  */
-export async function anAdminHoldsAKey(db: TenantDb): Promise<boolean> {
+export async function anAdminHoldsAKey(
+  db: TenantDb,
+  opts: { without?: string; alsoWithoutAdminship?: boolean } = {},
+): Promise<boolean> {
+  // `without` asks the counterfactual the key-taking writes need: would an administrator still hold a
+  // key once THIS person no longer does. `alsoWithoutAdminship` is the demotion: they keep the
+  // credential, they stop being an administrator — the same exclusion for a different reason, and the
+  // caller says which so the refusal can say it too.
+  const excluded = opts.without ?? null
   const [row] = await db.sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM members m
       JOIN local_credentials c ON c.sub = m.sub
-     WHERE m.role = 'admin' AND m.deactivated_at IS NULL`
+     WHERE m.role = 'admin' AND m.deactivated_at IS NULL
+       AND (${excluded}::text IS NULL OR m.sub <> ${excluded})`
   return (row?.n ?? 0) > 0
 }
 
@@ -338,7 +381,7 @@ export async function anAdminHoldsAKey(db: TenantDb): Promise<boolean> {
 export async function assertClosingIsSafe(
   db: TenantDb,
   tenant: { id: string; plan: string },
-  closing: { id: string; live: boolean },
+  closing: Closing,
   opts: { confirm?: boolean; env?: string | undefined } = {},
 ): Promise<void> {
   const remaining = await waysInAfter(db, tenant, closing, opts.env)

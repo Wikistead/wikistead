@@ -12,6 +12,7 @@ import { enqueueOutbox, processOutboxAsync } from '../search/outbox.js'
 import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
+import { assertClosingIsSafe } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
@@ -268,7 +269,7 @@ export async function membersPlugin(app: FastifyInstance) {
   // Change a member's role (admin ↔ member). ADR-003: DB first, FGA last, inside one
   // tx → a FGA failure rolls the role change back. Cannot demote the last admin
   // (that would lock the tenant out of its own administration).
-  app.patch<{ Params: { sub: string }; Body: { role?: string } }>('/members/:sub', async (req, reply) => {
+  app.patch<{ Params: { sub: string }; Body: { role?: string; confirm?: boolean } }>('/members/:sub', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     const role = req.body?.role
     if (role !== 'admin' && role !== 'member') return reply.code(400).send({ error: 'invalid role' })
@@ -290,8 +291,20 @@ export async function membersPlugin(app: FastifyInstance) {
     }
     if (existing.role === role) return { ok: true } // no-op
 
-    if (existing.role === 'admin' && role === 'member' && (await isLastAdmin(req.db.sql, req.params.sub))) {
-      return reply.code(409).send(await lastAdminRefusal(req.db.sql))
+    if (existing.role === 'admin' && role === 'member') {
+      // The floor first: "would this leave NO administrator". #866 / ADR-251 §3.7 adds the second
+      // question underneath it, and the order matters — a tenant with one administrator gets the
+      // floor's refusal, which is the one that names the right problem.
+      if (await isLastAdmin(req.db.sql, req.params.sub)) {
+        return reply.code(409).send(await lastAdminRefusal(req.db.sql))
+      }
+      // ⚠️ #866: the floor counts administrators, never key-holders — `auth/last-admin.ts` does not
+      // join `local_credentials` at all. So with passwords the only door and two administrators, A
+      // holding one and B holding none, demoting A passes the floor (B is still an administrator) and
+      // lands on the state the ruling forbids: members can sign in, nobody can administer, and the
+      // recovery is a command on the server. The same shape as the suspension beside it, one column
+      // over — a key-holding administrator is made of TWO facts, and only one of them was guarded.
+      await assertClosingIsSafe(req.db, req.tenant, { demoting: req.params.sub }, { confirm: req.body?.confirm })
     }
 
     await req.db.tx(async (tx) => {
