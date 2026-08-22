@@ -33,6 +33,10 @@ test("#604-B: a connection manager finds the console, and sees only their tab", 
 
     await page.goto(`${REAL}/invite?token=${encodeURIComponent(token)}`);
     await expect(page.getByTestId("set-password")).toBeVisible({ timeout: 10_000 });
+    // #807: an accepted password invite asks what to call you, and the submit stays disabled until it
+    // is answered. #889: this spec was the one that did not follow, so the click below waited out its
+    // full minute against a button that was never going to enable.
+    await page.getByTestId("set-password-display-name").fill("Connection Manager");
     await page.getByTestId("set-password-input").fill(PASSWORD);
     await page.getByTestId("set-password-confirm").fill(PASSWORD);
     await page.getByTestId("set-password-submit").click();
