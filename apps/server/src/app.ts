@@ -339,6 +339,19 @@ export async function buildApp(): Promise<FastifyInstance> {
     if (xfp === 'https' || req.protocol === 'https') {
       reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     }
+    // #878 / #148: a response with NO Cache-Control is not "do not cache" — HTTP lets an
+    // intermediary store it heuristically. Measured on the running deployment: `/api/healthz` came
+    // back with no posture at all, and the deploy gate's `api-no-cache` row failed against it.
+    //
+    // ⚠️ A DEFAULT, not an override. Eight routes already choose their own posture on purpose, and two
+    // of them are `public, max-age=300` — the public page bytes, branding, the avatar proxy. A blanket
+    // `no-store` here would quietly delete those decisions, which is why this only fills a header
+    // nobody set. The same reason it lives beside the security headers rather than in a route: the
+    // server is the fortress, and a route added tomorrow inherits the safe answer without being told.
+    //
+    // Static assets are unaffected: nginx serves them from the web image, and this process never sees
+    // that request (`assets-long-cache` passes today and is not this hook's to break).
+    if (!reply.getHeader('cache-control')) reply.header('Cache-Control', 'no-store')
     return payload
   })
 
