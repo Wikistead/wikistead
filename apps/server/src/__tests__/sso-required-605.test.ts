@@ -21,7 +21,11 @@ import { auditLedgerRegistered } from '../audit/sink.js'
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const T = 'tenant_t605'
 const ADMIN = 'dev-user'
-const E = 't605-exempt' // exempt, holds a password
+// ⚠️ E is an ADMINISTRATOR (#836, ruled 2026-08-21): the §R5-4 precondition asks whether an exempt
+// ADMINISTRATOR holds a password, not whether any exempt member does. An exempt ordinary member can
+// get in while the IdP is down and can fix nothing, which is the state the precondition exists to
+// prevent. Rows 3-5 below are about exempt-vs-not and are indifferent to the role.
+const E = 't605-exempt' // exempt administrator, holds a password
 const N = 't605-normal' // not exempt, holds a password
 const PW = 'correct horse battery st4ple!'
 const H = { host: 't605.localhost', authorization: 'Bearer dev-token' }
@@ -49,7 +53,7 @@ beforeAll(async () => {
   await admin`DELETE FROM password_resets WHERE tenant_id = ${T}`
   await admin`DELETE FROM tenant_oidc WHERE tenant_id = ${T}`
   for (const sub of [ADMIN, E, N]) {
-    await admin`INSERT INTO members (tenant_id, sub, email, role) VALUES (${T}, ${sub}, ${sub + '@t605.test'}, ${sub === ADMIN ? 'admin' : 'member'})
+    await admin`INSERT INTO members (tenant_id, sub, email, role) VALUES (${T}, ${sub}, ${sub + '@t605.test'}, ${sub === N ? 'member' : 'admin'})
                 ON CONFLICT (tenant_id, sub) DO UPDATE SET role = EXCLUDED.role, deactivated_at = NULL`
   }
   const hash = await hashPassword(PW)
