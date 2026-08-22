@@ -148,11 +148,27 @@ export async function refreshGuestToken(linkId: string, token: string): Promise<
   return { kind: "retry" };
 }
 
-export async function fetchGuestToken(linkId: string, password?: string): Promise<GuestTokenResult> {
+/**
+ * Exchange a share link for a token.
+ *
+ * `carrying` is a token this visitor still holds, and it is how the pseudonym survives the twelve-hour
+ * ceiling (#813). The server takes the continuation from `Authorization` and from nowhere else
+ * (`share-links.ts`: it verifies the presented token and only carries `anonId` when the link and the
+ * tenant match), so a re-exchange that sends no header is a NEW person as far as the product is
+ * concerned — the pages they created and every edit they made stay behind under the old name, and
+ * rollback-by-actor stops selecting their work.
+ *
+ * ⚠️ Absent on a FIRST exchange, and it must be: a visitor arriving for the first time holds nothing,
+ * and inventing a header there would send an empty credential for the server to reject.
+ */
+export async function fetchGuestToken(linkId: string, password?: string, carrying?: string): Promise<GuestTokenResult> {
   const res = await fetch(`${API_URL}/public/share-links/${encodeURIComponent(linkId)}/token`, {
     method: "POST",
     credentials: "include",
-    headers: password !== undefined ? { "content-type": "application/json" } : undefined,
+    headers: {
+      ...(password !== undefined ? { "content-type": "application/json" } : {}),
+      ...(carrying ? { authorization: `Bearer ${carrying}` } : {}),
+    },
     body: password !== undefined ? JSON.stringify({ password }) : undefined,
   });
   if (res.status === 401) return "password_required"; // needs a password

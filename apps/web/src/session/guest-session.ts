@@ -165,7 +165,11 @@ export function makeGuestSession(
     // `reenter`: the twelve-hour ceiling. Exchanging again with the still-live token in hand is what
     // carries the pseudonym across the boundary — and the pseudonym is the attribution key, so a fresh
     // one would split one person's twelve hours of work between two names in the page's own history.
-    const again = await fetchGuestToken(linkId);
+    // ⚠️ The token we STILL hold is the whole mechanism: the server reads the continuation off the
+    // Authorization header and nowhere else. Calling this with no argument — which is what shipped —
+    // mints a fresh pseudonym at the ceiling, so one person's twelve hours of work ends up split
+    // between two names in the page's own history.
+    const again = await fetchGuestToken(linkId, undefined, token);
     if (again === "password_required") { end = "unauthorized"; return; } // the door asks again; this session is over
     if (again === "rate_limited" || again === null) { scheduleRetry(); return; } // not an answer about the session
     adopt(again);

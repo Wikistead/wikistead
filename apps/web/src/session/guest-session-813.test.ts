@@ -117,13 +117,22 @@ describe("#813 the session", () => {
     answer(401, { error: "session_ended" });
     const after = tokenExpiringIn(300);
     answer(200, minted(after));
-    const s = makeGuestSession("link1", minted(tokenExpiringIn(5)));
+    const initialToken = tokenExpiringIn(5);
+    const s = makeGuestSession("link1", minted(initialToken));
     expect(await s.getToken()).toBe(after);
     expect(s.ended()).toBe(null);
     const [refreshUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const [exchangeUrl] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const [exchangeUrl, exchangeInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(refreshUrl).toContain("/token/refresh");
     expect(exchangeUrl, "the boundary re-entry is the exchange, not the refresh").not.toContain("/refresh");
+    // ⚠️ This assertion used to stop at the URL and discard the RequestInit, and the pseudonym does
+    // not live in the URL — the server reads the continuation off `Authorization` and nowhere else.
+    // So the case named the guarantee, ran the shipping client, and never measured the half that
+    // carries it: the client sent no header at all and this stayed green.
+    const sentAuth = new Headers(exchangeInit.headers as HeadersInit).get("authorization");
+    expect(sentAuth, "the re-entry carries the token still in hand, or it mints a new person").toBe(
+      `Bearer ${initialToken}`,
+    );
   });
 
   it("and if that door now asks for a password, the session is over rather than silently stuck", async () => {
