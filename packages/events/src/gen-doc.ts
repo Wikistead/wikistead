@@ -43,6 +43,11 @@ export function renderEventsMarkdown(egress: EgressSummary): string {
     'signal; recovery actions by our staff are reported to you without naming the person',
     'who performed them. The last column says what each event sends.',
     '',
+    'The last column is about the KIND of event. Separately, an event about one page is',
+    'checked against that page when it is about to be sent: nothing is sent about a private',
+    'page or about a draft that has never been published, because the id alone would say',
+    'the page exists. So an event marked as sent can still be withheld for one page.',
+    '',
   )
   lines.push('| Event | Description | Sent to webhooks |')
   lines.push('|---|---|---|')

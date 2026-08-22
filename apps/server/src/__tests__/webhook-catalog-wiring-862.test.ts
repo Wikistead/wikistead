@@ -12,8 +12,9 @@
 // ⚠️ WHICH ENTRYPOINTS THIS SPEAKS FOR. The live walk goes through `buildApp`, so it measures the
 // API server process and only that one. It cannot say anything about a type emitted from a CLI or a
 // cron — the bridge subscribes inside `buildApp`, so those emits reach nobody. Three such types were
-// ruled out of egress entirely (§C); the fourth, `orphan_draft.claim_expired`, enqueues at its own
-// call site now, and the walk below checks the source rather than driving the sweep.
+// ruled out of egress entirely (§C); the fourth, `orphan_draft.claim_expired`, has no road and would
+// not arrive if it had one, because an orphan draft is unpublished and the drain's existence gate
+// refuses it. That is recorded in `orphan-claim-sweep.ts`, not fixed here.
 //
 // ⚠️ These walks do NOT cover a type added tomorrow, and this header used to claim they did (#862
 // measured it: adding a fictional type to the catalogue left all six green). Only one type is
@@ -125,7 +126,7 @@ describe('#862 every catalogued event reaches the webhook outbox', () => {
     const { join, dirname } = await import('node:path')
     const { fileURLToPath } = await import('node:url')
     const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
-    const sources = ['src/routes/pages.ts', 'src/routes/api-keys.ts', 'src/scripts/orphan-claim-sweep.ts'].map((f) => readFileSync(join(root, f), 'utf8')).join('\n')
+    const sources = ['src/routes/pages.ts', 'src/routes/api-keys.ts'].map((f) => readFileSync(join(root, f), 'utf8')).join('\n')
     for (const type of ENQUEUED_IN_TRANSACTION) {
       expect(
         new RegExp(`enqueueWebhookOutbox\\([\\s\\S]{0,200}?${type.replace('.', '\\.')}`).test(sources),

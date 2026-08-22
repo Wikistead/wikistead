@@ -52,12 +52,13 @@ import { egressVerdict } from './egress.js'
  * cannot reach at all. The publish path writes the row in the same transaction that publishes, so a
  * crash cannot separate the two; the bridge would add a second, weaker copy.
  *
- * ⚠️ `orphan_draft.claim_expired` is here for the other reason (#862 / ADR-108 §F). This subscriber is
- * registered in `buildApp` and nowhere else, and that event is emitted only by `pnpm orphan:sweep` — a
- * separate process with no app in it. "One subscriber closes the gap" is true within a process and
- * false across one, so that call site enqueues for itself.
+ * ⚠️ It is not a place to park a type the bridge cannot reach. `orphan_draft.claim_expired` is emitted
+ * only by `pnpm orphan:sweep`, a separate process with no app in it — "one subscriber closes the gap"
+ * is true within a process and false across one — and it was briefly added here for that reason. It is
+ * not, because the type cannot be delivered anyway: an orphan draft is unpublished, so the drain's
+ * existence gate refuses it. Giving it a road would have bought six retries and a drop.
  */
-export const ENQUEUED_IN_TRANSACTION = new Set<DomainEvent['type']>(['page.published', 'api_key.revoked', 'orphan_draft.claim_expired'])
+export const ENQUEUED_IN_TRANSACTION = new Set<DomainEvent['type']>(['page.published', 'api_key.revoked'])
 
 /**
  * What the bridge OFFERS the outbox: everything the event carries except the routing fields the row
