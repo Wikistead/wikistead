@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useMemberIdentity } from "../data/queries";
 import { assetUrl } from "../data/apiClient";
 import { Avatar } from "../ui/Avatar";
+import { memberLabel } from "../ui/principal-label"; // #859: one wording for a member the product cannot name
 
 // #208: the comment author display. The stored identity is the raw `authorSub` (a member OIDC sub or
 // `guest:<uuid>`) — used for authz server-side and NEVER changed here; this only formats how it READS.
@@ -17,14 +18,20 @@ export function isGuestSub(sub: string): boolean {
   return GUEST_PREFIXES.some((p) => sub.startsWith(p));
 }
 
-// Human-readable author label. Guest → "Guest 3ca3" / "Guest 7f3a" (short, stable). Member → email local-part,
-// or the sub verbatim when it isn't an email. `guestWord` is the localized "Guest".
-export function authorLabel(sub: string, guestWord: string): string {
+// Human-readable author label. Guest → "Guest 3ca3" / "Guest 7f3a" (short, stable). Member → email
+// local-part, or — when the sub is not an email and nothing resolved a name — the SAME wording the
+// member table uses for a person the product cannot name (#578 `memberLabel`).
+//
+// #859 (review rejection): the last branch used to `return sub`. The member table had already been moved
+// onto `memberLabel`, so the same person read as "Unnamed member (a1b2c3d4…)" in settings and as a raw
+// id on their own comments, in the revision list and in the notification feed. A password invite mints
+// `wlocal_<uuid>` (auth/invites.ts), which has no `@`, so the initial admin lands in exactly this branch.
+export function authorLabel(sub: string, guestWord: string, unknownLabel: string): string {
   for (const p of GUEST_PREFIXES) {
     if (sub.startsWith(p)) return `${guestWord} ${sub.slice(p.length, p.length + 4)}`;
   }
   const at = sub.indexOf("@");
-  return at > 0 ? sub.slice(0, at) : sub;
+  return at > 0 ? sub.slice(0, at) : memberLabel(sub, null, unknownLabel);
 }
 
 export function AuthorChip({ sub, name, hasAvatar: hasAvatarProp }: { sub: string; name?: string | null; hasAvatar?: boolean }) {
@@ -40,7 +47,7 @@ export function AuthorChip({ sub, name, hasAvatar: hasAvatarProp }: { sub: strin
   const identity = useMemberIdentity(guest || serverResolved ? null : sub);
   const resolvedName = serverResolved ? (name ?? null) : (identity.data?.displayName ?? null);
   const hasAvatar = serverResolved ? hasAvatarProp === true : identity.data?.hasAvatar === true;
-  const label = resolvedName ?? authorLabel(sub, t("common.guest"));
+  const label = resolvedName ?? authorLabel(sub, t("common.guest"), t("spaceMembers.unknownMember"));
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       {guest ? (

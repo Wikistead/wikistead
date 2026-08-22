@@ -7,8 +7,12 @@ import type { FeedItem } from "./useNotifications";
 // short "Guest 7f3a" pseudonym via the shared authorLabel — the raw share-link id / anon hex NEVER reaches the
 // screen in full (ADR-126 §2 correction 5; ADR-138 C-6 reviewer condition 3).
 export function actorLabel(actor: string, t: TFunction): string {
-  if (actor.startsWith("user:")) return actor.slice(5);
-  if (isGuestSub(actor)) return authorLabel(actor, t("notifications.guest"));
+  // #859: `actor.slice(5)` handed the bare sub to the screen whenever the server resolved no name —
+  // the feed's own comment above says the raw id must never reach the screen, and for guests it never
+  // did. A member with no display name is the case nobody wrote down, and a password invite makes one
+  // on the first day (`wlocal_<uuid>`). Same wording as the member table and the comment author chip.
+  if (actor.startsWith("user:")) return authorLabel(actor.slice(5), t("notifications.guest"), t("spaceMembers.unknownMember"));
+  if (isGuestSub(actor)) return authorLabel(actor, t("notifications.guest"), t("spaceMembers.unknownMember"));
   return t("notifications.guest"); // unknown actor shape → generic, never leak
 }
 

@@ -6,6 +6,7 @@ import { ConfirmDialog } from "../ui/dialogs";
 import { RightPanel } from "../ui/RightPanel";
 import { PanelRowsSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457 loading ≠ empty
 import { notify } from "../ui/toast";
+import { memberLabel } from "../ui/principal-label"; // #859
 import { authorLabel, isGuestSub } from "../comments/AuthorChip";
 import { latestRun, isRevertableRun } from "./revert-run"; // #327 the bulk-revert guards
 
@@ -44,14 +45,22 @@ function fmt(iso: string): string {
 // #379 / ADR-150: a member author resolves to their CHOSEN display name when customized (the shared
 // /members/identities contract; `identities` is the batch-resolved map keyed by bare sub). Fallback =
 // the client-side label (email local-part / sub) exactly as before; guests keep "Guest 7f3a".
-function author(createdBy: string | null, unknown: string, guestWord: string, identities?: Record<string, { displayName: string | null }>): string {
+// #859: `unknown` is the wording for "the product cannot name this person" — the same noun the member
+// table uses. It was already the answer for a MISSING actor; the two branches below used to end at the
+// raw id instead, so one person read three ways across three screens.
+// Exported so the #859 pin can reach it. Its last branch printed the actor verbatim, and a check
+// that could only get here by rendering the whole panel is a check nobody writes — measured: with
+// this function private, restoring the raw-id exit left the acceptance file green.
+export function revisionAuthorLabel(createdBy: string | null, unknown: string, guestWord: string, identities?: Record<string, { displayName: string | null }>): string {
   if (!createdBy) return unknown;
   if (createdBy.startsWith("user:")) {
     const sub = createdBy.slice(5);
-    return identities?.[sub]?.displayName ?? authorLabel(sub, guestWord);
+    return identities?.[sub]?.displayName ?? authorLabel(sub, guestWord, unknown);
   }
-  if (isGuestSub(createdBy)) return authorLabel(createdBy, guestWord);
-  return createdBy;
+  if (isGuestSub(createdBy)) return authorLabel(createdBy, guestWord, unknown);
+  // An actor of a shape nothing here recognises is still not a name. Printing it verbatim was the
+  // last raw-id exit on this surface.
+  return memberLabel(createdBy, null, unknown);
 }
 
 
@@ -78,14 +87,14 @@ export function HistoryPanel({
   // #523 / ADR-190 (slice E sweep): the customized-only /members/identities batch is GONE from this panel.
   // The server already resolves every member author fully (`createdByName`, #486) on this view-gated list,
   // so the extra request could only ever add a name the server had refused to resolve — it cannot, since
-  // full resolution over the same RLS handle is a superset of the customized-only one. `author()` stays for
+  // full resolution over the same RLS handle is a superset of the customized-only one. `revisionAuthorLabel()` stays for
   // the cases the server deliberately does not name: guests/anon, and an unknown/departed author.
   const rawRun = canModerate ? latestRun(revisions ?? []) : null;
   // bulk revert exists only for an anonymous 2+ run — otherwise the history stays a plain list.
   const run = isRevertableRun(rawRun) ? rawRun : null;
   // The bulk-revert run is anonymous-only by contract (isRevertableRun requires a guest/anon actor), so
   // this label never names a member — it is the guest word plus the short id.
-  const runAuthor = run ? author(run.actor, t("history.unknown"), t("common.guest")) : "";
+  const runAuthor = run ? revisionAuthorLabel(run.actor, t("history.unknown"), t("common.guest")) : "";
 
   // #457 the list load draws row skeletons (delay-gated — a fast fetch shows nothing), so
   // "revisions are coming" and "there are none" read differently. The empty wording stays as-is.
@@ -121,7 +130,7 @@ export function HistoryPanel({
               <span className="text-[0.85em]">{fmt(rev.createdAt)}</span>
               {/* #486: prefer the server-resolved name (covers un-customized members too); fall back to the
                   client formatting (guest labels, unknown author) when the server deliberately sent none. */}
-              <span className="text-[0.75em] text-fg-dim">{rev.createdByName ?? author(rev.createdBy, t("history.unknown"), t("common.guest"))}</span>
+              <span className="text-[0.75em] text-fg-dim">{rev.createdByName ?? revisionAuthorLabel(rev.createdBy, t("history.unknown"), t("common.guest"))}</span>
             </div>
             <div className="flex flex-none gap-1.5">
               <button type="button" className={rowBtn} data-testid="revision-diff" onClick={() => onCompare(rev.id)}>
