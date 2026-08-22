@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "wikistead.fullname" . }}-server
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.server.replicas }}
+  selector: { matchLabels: { app: {{ include "wikistead.fullname" . }}-server } }
+  template:
+    metadata:
+      labels:
+        app: {{ include "wikistead.fullname" . }}-server
+        {{- include "wikistead.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # ⚠️ The public shell. `/pub` serves crawler-facing HTML from the SAME index the SPA build
+      # produced, never a hand-maintained copy, and PUBLIC_SHELL_INDEX is fail-closed: unreadable
+      # means the server does not boot. Copying it from the web image is what keeps the two in step.
+      initContainers:
+        - name: copy-web-index
+          image: {{ include "wikistead.image" (list .Values.web .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "cp /usr/share/nginx/html/index.html /shell/index.html"]
+          volumeMounts: [{ name: web-index, mountPath: /shell }]
+      volumes:
+        - { name: web-index, emptyDir: {} }
+      containers:
+        - name: server
+          image: {{ include "wikistead.image" (list .Values.server .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ containerPort: 4000 }]
+          envFrom:
+            - configMapRef: { name: {{ include "wikistead.fullname" . }}-config }
+            - secretRef: { name: {{ .Values.secrets.existingSecret }} }
+          # ⚠️ #815: envFrom names variables after the SECRET'S KEYS, and Kubernetes drops any key
+          # that is not a valid environment-variable name — silently. Four keys here are hyphenated,
+          # so they arrive only because they are mapped explicitly, and the mapping is what makes the
+          # wiring readable besides.
+          env:
+            - { name: PUBLIC_SHELL_INDEX, value: /shell/index.html }
+            - { name: MEILI_MASTER_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: meili-master-key } } }
+            - { name: S3_ACCESS_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: s3-access-key } } }
+            - { name: S3_SECRET_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: s3-secret-key } } }
+            - { name: GUEST_TOKEN_SECRET, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: guest-token-secret } } }
+            {{- with .Values.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
+          volumeMounts:
+            - { name: web-index, mountPath: /shell, readOnly: true }
+          readinessProbe: { httpGet: { path: /readyz, port: 4000 } }
+          livenessProbe: { httpGet: { path: /healthz, port: 4000 } }
+          {{- with .Values.server.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "wikistead.fullname" . }}-server
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  selector: { app: {{ include "wikistead.fullname" . }}-server }
+  ports: [{ port: 4000, targetPort: 4000 }]

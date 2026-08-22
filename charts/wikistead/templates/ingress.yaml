@@ -1,0 +1,102 @@
+{{- if .Values.ingress.enabled }}
+{{/*
+⚠️ TWO Ingress objects, and the split is load-bearing.
+
+The api object carries `rewrite-target: /$1`, and a rewrite annotation applies to the WHOLE Ingress —
+put `/api/(.*)` beside `/auth` and the rewrite eats `/auth` too. Measured on a real cluster (#802): folding them together breaks every route at once.
+
+The path list is the one in `infra/routes/origin-routes.mjs`, which is the canon for the edge, the
+dev proxy and this chart alike; `lint:origin-routes` compares them.
+*/}}
+{{- $full := include "wikistead.fullname" . -}}
+{{- $snippet := `more_set_headers "X-Content-Type-Options: nosniff";
+more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+` -}}
+{{- $hosts := list .Values.host -}}
+{{- if .Values.ingress.wildcardHost }}{{- $hosts = append $hosts (printf "*.%s" .Values.host) }}{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $full }}
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+  annotations:
+    {{- if and .Values.ingress.tls.enabled .Values.ingress.tls.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    {{- end }}
+    # The collaboration socket is long-lived; the defaults would cut it every minute.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: {{ .Values.ingress.tls.enabled | quote }}
+    {{- if .Values.ingress.securityHeaderSnippet }}
+    # ⚠️ Some controllers refuse snippets outright and reject the whole Ingress. Turn this off there
+    # and set the headers in the controller's own configuration instead.
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+{{ $snippet | indent 6 }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}{{- toYaml . | nindent 4 }}{{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: {{- toYaml $hosts | nindent 8 }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    {{- range $h := $hosts }}
+    - host: {{ $h | quote }}
+      http:
+        paths:
+          - { path: /collab, pathType: Prefix, backend: { service: { name: {{ $full }}-collab, port: { number: 4100 } } } }
+          - { path: /auth, pathType: Prefix, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /signup, pathType: Prefix, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /pub, pathType: Prefix, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /robots.txt, pathType: Exact, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /sitemap.xml, pathType: Exact, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /mcp, pathType: Exact, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /mcp/oauth, pathType: Prefix, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /.well-known/oauth-authorization-server, pathType: Exact, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /.well-known/oauth-protected-resource, pathType: Exact, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /webhooks/stripe, pathType: Exact, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /scim/v2, pathType: Prefix, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+          - { path: /, pathType: Prefix, backend: { service: { name: {{ $full }}-web, port: { number: 80 } } } }
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $full }}-api
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+  annotations:
+    {{- if and .Values.ingress.tls.enabled .Values.ingress.tls.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/ssl-redirect: {{ .Values.ingress.tls.enabled | quote }}
+    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # The reason this object exists at all: `/api/x` reaches the server as `/x`.
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    {{- if .Values.ingress.securityHeaderSnippet }}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+{{ $snippet | indent 6 }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}{{- toYaml . | nindent 4 }}{{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: {{- toYaml $hosts | nindent 8 }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    {{- range $h := $hosts }}
+    - host: {{ $h | quote }}
+      http:
+        paths:
+          - { path: /api/(.*), pathType: ImplementationSpecific, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
+    {{- end }}
+{{- end }}

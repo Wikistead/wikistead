@@ -1,0 +1,29 @@
+{{/*
+The environment every pod reads.
+
+#805: the production overlay once had none of this, and the first real cluster discovered one required
+key at a time. The set below is that overlay's, so the chart and the kustomize base answer alike.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wikistead.fullname" . }}-config
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+data:
+  NODE_ENV: production
+  # ⚠️ ADR-035 / #805: OpenFGA's in-memory engine loses every tuple on restart, so the API refuses to
+  # boot in production unless the engine is stated. Unset is not "default" here, it is a failure.
+  OPENFGA_DATASTORE_ENGINE: {{ .Values.openfga.datastoreEngine | quote }}
+  VALKEY_URL: {{ include "wikistead.valkeyUrl" . | quote }}
+  OPENFGA_API_URL: {{ include "wikistead.openfgaApiUrl" . | quote }}
+  MEILI_HOST: {{ include "wikistead.meiliHost" . | quote }}
+  S3_ENDPOINT: {{ include "wikistead.s3Endpoint" . | quote }}
+  S3_BUCKET: {{ .Values.seaweedfs.bucket | quote }}
+  S3_FORCE_PATH_STYLE: {{ .Values.seaweedfs.forcePathStyle | quote }}
+  SERVER_PORT: "4000"
+  COLLAB_PORT: "4100"
+  {{- if .Values.workspaceHostTemplate }}
+  # #806 / ADR-249: the shape of a workspace address, declared once rather than guessed. It has to
+  # match the wildcard the ingress serves, which is one label shallower than the application's host.
+  WKS_TENANT_URL_TEMPLATE: {{ .Values.workspaceHostTemplate | quote }}
+  {{- end }}

@@ -1,0 +1,14 @@
+apiVersion: v2
+name: wikistead
+description: Self-hostable multi-tenant collaborative knowledge base — anonymous real-time editing over a share link, no account required.
+type: application
+# ADR-250 §3: chart version = appVersion = the product tag. CI rewrites both when it cuts a release;
+# a session never does (#138). `0.0.0-unreleased` is deliberately unpullable, matching the production
+# overlay's placeholder — a cluster cannot come up on this chart before the first release exists.
+version: 0.0.0-unreleased
+appVersion: "0.0.0-unreleased"
+home: https://github.com/Wikistead/wikistead
+sources:
+  - https://github.com/Wikistead/wikistead
+kubeVersion: ">=1.24.0-0"
+keywords: [wiki, knowledge-base, collaboration, markdown, self-hosted]

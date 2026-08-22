@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "wikistead.fullname" . }}-web
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector: { matchLabels: { app: {{ include "wikistead.fullname" . }}-web } }
+  template:
+    metadata:
+      labels:
+        app: {{ include "wikistead.fullname" . }}-web
+        {{- include "wikistead.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        # Static nginx: the SPA bundle and nothing else. It reads no configuration and holds no
+        # secret, which is why nothing is mounted here.
+        - name: web
+          image: {{ include "wikistead.image" (list .Values.web .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ containerPort: 80 }]
+          {{- with .Values.web.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.web.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.web.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.web.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "wikistead.fullname" . }}-web
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  selector: { app: {{ include "wikistead.fullname" . }}-web }
+  ports: [{ port: 80, targetPort: 80 }]

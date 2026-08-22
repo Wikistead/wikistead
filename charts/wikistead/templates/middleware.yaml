@@ -1,0 +1,228 @@
+{{/*
+The five services the application needs.
+
+⚠️ These are the manifests from deploy/k8s/base, which that file calls dev-convenience in its own
+words. Single replicas, no backup, no tuning. A production install should be turning each of these off
+and pointing at something the operator already runs — which is exactly what `enabled: false` plus the
+matching `external*` value does.
+*/}}
+{{- $full := include "wikistead.fullname" . -}}
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $full }}-postgres
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.postgres.storage.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources: { requests: { storage: {{ .Values.postgres.storage.size }} } }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $full }}-postgres-initdb
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+data:
+  # ⚠️ ADR-128 separates the authorization store from the application's data by DATABASE, not by
+  # server, so one instance is fine and this is the one line that makes it so. It runs on a FRESH
+  # volume only: an existing cluster that never had it needs `CREATE DATABASE openfga` by hand.
+  10-openfga.sql: |
+    CREATE DATABASE openfga;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-postgres
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: {{ $full }}-postgres } }
+  template:
+    metadata: { labels: { app: {{ $full }}-postgres } }
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          env:
+            - { name: POSTGRES_USER, value: app }
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: postgres-password } } }
+            - { name: POSTGRES_DB, value: app }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: initdb, mountPath: /docker-entrypoint-initdb.d }
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: {{ $full }}-postgres } }
+        - { name: initdb, configMap: { name: {{ $full }}-postgres-initdb } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-postgres
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec: { selector: { app: {{ $full }}-postgres }, ports: [{ port: 5432, targetPort: 5432 }] }
+---
+{{- end }}
+{{- if .Values.valkey.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-valkey
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: {{ $full }}-valkey } }
+  template:
+    metadata: { labels: { app: {{ $full }}-valkey } }
+    spec:
+      containers:
+        - name: valkey
+          image: {{ .Values.valkey.image }}
+          ports: [{ containerPort: 6379 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-valkey
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec: { selector: { app: {{ $full }}-valkey }, ports: [{ port: 6379, targetPort: 6379 }] }
+---
+{{- end }}
+{{- if .Values.openfga.enabled }}
+{{- $fgaUri := .Values.openfga.datastoreUri | default (printf "postgres://app:$(POSTGRES_PASSWORD)@%s-postgres:5432/openfga" $full) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-openfga
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: {{ $full }}-openfga } }
+  template:
+    metadata: { labels: { app: {{ $full }}-openfga } }
+    spec:
+      # The schema has to exist before the API starts, and OpenFGA ships the migration in the same
+      # image — so it runs here rather than as a chart hook.
+      initContainers:
+        - name: migrate
+          image: {{ .Values.openfga.image }}
+          args: ["migrate"]
+          env:
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: postgres-password } } }
+            - { name: OPENFGA_DATASTORE_ENGINE, value: {{ .Values.openfga.datastoreEngine | quote }} }
+            - { name: OPENFGA_DATASTORE_URI, value: {{ $fgaUri | quote }} }
+      containers:
+        - name: openfga
+          image: {{ .Values.openfga.image }}
+          args: ["run"]
+          env:
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: postgres-password } } }
+            - { name: OPENFGA_DATASTORE_ENGINE, value: {{ .Values.openfga.datastoreEngine | quote }} }
+            - { name: OPENFGA_DATASTORE_URI, value: {{ $fgaUri | quote }} }
+          ports: [{ containerPort: 8080 }, { containerPort: 8081 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-openfga
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  selector: { app: {{ $full }}-openfga }
+  ports: [{ name: http, port: 8080, targetPort: 8080 }, { name: grpc, port: 8081, targetPort: 8081 }]
+---
+{{- end }}
+{{- if .Values.meilisearch.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $full }}-meilisearch
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.meilisearch.storage.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources: { requests: { storage: {{ .Values.meilisearch.storage.size }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-meilisearch
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: {{ $full }}-meilisearch } }
+  template:
+    metadata: { labels: { app: {{ $full }}-meilisearch } }
+    spec:
+      containers:
+        - name: meilisearch
+          image: {{ .Values.meilisearch.image }}
+          env:
+            - { name: MEILI_ENV, value: production }
+            # ⚠️ #815: the key is hyphenated, so it can only arrive through an explicit mapping.
+            - { name: MEILI_MASTER_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: meili-master-key } } }
+          ports: [{ containerPort: 7700 }]
+          volumeMounts: [{ name: data, mountPath: /meili_data }]
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: {{ $full }}-meilisearch } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-meilisearch
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec: { selector: { app: {{ $full }}-meilisearch }, ports: [{ port: 7700, targetPort: 7700 }] }
+---
+{{- end }}
+{{- if .Values.seaweedfs.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $full }}-seaweedfs
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.seaweedfs.storage.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources: { requests: { storage: {{ .Values.seaweedfs.storage.size }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-seaweedfs
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: {{ $full }}-seaweedfs } }
+  template:
+    metadata: { labels: { app: {{ $full }}-seaweedfs } }
+    spec:
+      containers:
+        - name: seaweedfs
+          image: {{ .Values.seaweedfs.image }}
+          args: ["server", "-dir=/data", "-s3", "-s3.port=9000", "-s3.config=/etc/seaweedfs/s3.json"]
+          ports: [{ containerPort: 9000 }]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: s3config, mountPath: /etc/seaweedfs, readOnly: true }
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: {{ $full }}-seaweedfs } }
+        # The S3 identities live in the secret, never in this chart: they are credentials.
+        - { name: s3config, secret: { secretName: {{ .Values.secrets.existingSecret }}, items: [{ key: s3-config-json, path: s3.json }] } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-seaweedfs
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec: { selector: { app: {{ $full }}-seaweedfs }, ports: [{ port: 9000, targetPort: 9000 }] }
+{{- end }}

@@ -16,6 +16,7 @@
 // release-side traversal (one probe per row, through a built image and a real proxy) is the
 // primary defence; this is the cheap one that runs on every commit.
 import { existsSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ORIGIN_ROUTES, PROXIED_ROUTES, NOT_EDGE_ROUTES, SIBLING_HOSTS } from '../infra/routes/origin-routes.mjs'
@@ -184,6 +185,89 @@ for (const h of NOT_EDGE_ROUTES) {
   }
 }
 
+// ── The Helm chart ───────────────────────────────────────────────────────────────────────────
+// #802 / ADR-250 §2: the chart TEMPLATES the ingress above, so it is a third copy of the same table
+// and needs the same question asked of it. Rendered rather than read: the paths only exist after
+// Helm has run, and grepping the template would measure the source instead of the output — the
+// distinction #849 was filed for.
+//
+// ⚠️ Rendered WITH the wildcard host on. The chart's default is single-host (#806 closes self-serve
+// creation there rather than handing out an unreachable address), and checking only that shape would
+// leave the per-tenant rows untested in the very check that exists because they were once dropped.
+//
+// The half sleeps when charts/ is absent or helm is not installed, and says which — the same shape as
+// the ingress half above, and for the same reason: a check that dies on a machine without the tool
+// takes the checks after it down with it.
+const chartPath = join(root, 'charts/wikistead')
+let chartRendered = false
+if (!existsSync(chartPath)) {
+  console.log('origin-routes: charts/wikistead absent in this checkout — the chart half sleeps.')
+} else {
+  const rendered = spawnSync('helm', ['template', 'routes-check', chartPath, '--set', 'ingress.wildcardHost=true'], { encoding: 'utf8' })
+  if (rendered.error) {
+    // helm is not on this machine. Nothing to say about the chart, and saying so is the whole report.
+    console.log(`origin-routes: helm is not installed (${rendered.error.code}) — the chart half sleeps.`)
+  } else if (rendered.status !== 0) {
+    // ⚠️ NOT the same case, and treating it as one was a real defect here: the first version of this
+    // half printed "helm unavailable or failed … sleeps" for both, so BREAKING THE CHART turned the
+    // check green. A chart that is present and does not render is a failure of the thing under test.
+    problems.push(
+      `chart: helm template failed (exit ${rendered.status}) — a chart that cannot render cannot be ` +
+      `compared to the table.\n      ${(rendered.stderr || '').trim().split('\n').slice(0, 3).join('\n      ')}`,
+    )
+  } else {
+    chartRendered = true
+    const out = rendered.stdout
+    const ingressDocs = out.split(/^---$/m).filter((doc) => /^kind: Ingress$/m.test(doc))
+    if (ingressDocs.length !== 2) {
+      problems.push(
+        `chart: rendered ${ingressDocs.length} Ingress object(s), expected 2. The api object carries ` +
+        'rewrite-target, and that annotation applies to a WHOLE Ingress — merged, the rewrite eats every other route.',
+      )
+    }
+    const pathsIn = (docs) => new Set(docs.flatMap((d) => [...d.matchAll(/\{\s*path:\s*(\S+?),/g)].map((m) => m[1])))
+    const chartStripped = pathsIn(ingressDocs.filter((d) => /rewrite-target:/.test(d)))
+    const chartPreserved = pathsIn(ingressDocs.filter((d) => !/rewrite-target:/.test(d)))
+    // ⚠️ A path in BOTH objects is not "stripped" — it is ambiguous, and nginx serves whichever
+    // Ingress it picks. Asking only "does a stripping object contain it" reads a duplicate as correct:
+    // measured, adding /api to the path-preserving object left this check green while the API would
+    // reach the server with its prefix still on.
+    for (const dup of [...chartStripped].filter((p) => chartPreserved.has(p))) {
+      problems.push(
+        `chart: ${dup} appears in BOTH Ingress objects. rewrite-target applies per object, so which ` +
+        'behaviour a request gets depends on which Ingress the controller matches — the route has one home.',
+      )
+    }
+    const chartByHost = new Map()
+    for (const doc of ingressDocs) {
+      for (const m of doc.matchAll(/-\s*host:\s*(\S+)\n([\s\S]*?)(?=\n\s*-\s*host:|\n---|$)/g)) {
+        const host = m[1].replace(/"/g, '')
+        const paths = [...m[2].matchAll(/\{\s*path:\s*(\S+?),\s*pathType:\s*(\w+)/g)].map((p) => p[1])
+        chartByHost.set(host, [...(chartByHost.get(host) ?? []), ...paths])
+      }
+    }
+    if (chartByHost.size === 0) problems.push('chart: no host blocks parsed from the rendered ingress — the chart half would pass vacuously')
+    if (![...chartByHost.keys()].some((h) => h.startsWith('*.'))) {
+      problems.push('chart: rendering with ingress.wildcardHost=true produced no wildcard host — per-tenant subdomains would not resolve (ADR-016)')
+    }
+    for (const route of PROXIED_ROUTES) {
+      for (const [host, paths] of chartByHost) {
+        const hit = paths.find((p) => p === route.path || p === `${route.path}/(.*)`)
+        if (!hit) {
+          problems.push(`chart (host ${host}): no path for ${route.path} (→ ${route.upstream}). ${route.why}`)
+          continue
+        }
+        if (chartStripped.has(hit) !== route.strip) {
+          problems.push(
+            `chart (host ${host}): ${hit} is ${chartStripped.has(hit) ? 'in a rewrite-target Ingress (strips)' : 'in an Ingress that preserves the path'} ` +
+            `but the table says strip=${route.strip}.`,
+          )
+        }
+      }
+    }
+  }
+}
+
 if (problems.length) {
   console.error('check-origin-routes: the edge does not match the route table (#724 / ADR-231):')
   for (const p of problems) console.error('  ' + p)
@@ -193,5 +277,6 @@ if (problems.length) {
 console.log(
   `check-origin-routes OK — ${ORIGIN_ROUTES.length} declared routes + ${SIBLING_HOSTS.length} sibling host(s); Caddy and the ingress agree with the table ` +
   `(${PROXIED_ROUTES.filter((r) => r.strip).length} stripped, ${PROXIED_ROUTES.filter((r) => !r.strip).length} path-preserving` +
-  (existsSync(ingressPath) ? ').' : '; ingress half asleep — deploy/k8s not in this checkout).'),
+  (existsSync(ingressPath) ? '' : '; ingress half asleep — deploy/k8s not in this checkout') +
+  (chartRendered ? '; the chart renders the same table' : '; chart half asleep') + ').',
 )

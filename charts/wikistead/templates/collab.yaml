@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "wikistead.fullname" . }}-collab
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.collab.replicas }}
+  selector: { matchLabels: { app: {{ include "wikistead.fullname" . }}-collab } }
+  template:
+    metadata:
+      labels:
+        app: {{ include "wikistead.fullname" . }}-collab
+        {{- include "wikistead.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: collab
+          image: {{ include "wikistead.image" (list .Values.collab .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ containerPort: 4100 }]
+          # ⚠️ CONFIG RIDES envFrom; SECRETS DO NOT. #850: this pod is the outermost thing an anonymous
+          # guest touches — a share link's WebSocket — and it was being handed every credential the
+          # secret holds, including the tenant-wide search key and both object-storage credentials. It
+          # reads neither. A `secretRef` here would hand them all back, so the two it does read are
+          # named one at a time, and adding a third has to be a deliberate line.
+          envFrom:
+            - configMapRef: { name: {{ include "wikistead.fullname" . }}-config }
+          env:
+            - { name: DATABASE_URL, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: DATABASE_URL } } }
+            - { name: GUEST_TOKEN_SECRET, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: guest-token-secret } } }
+            {{- with .Values.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
+          {{- with .Values.collab.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.collab.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.collab.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.collab.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "wikistead.fullname" . }}-collab
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  # A document's clients have to land on the same replica: the CRDT room lives in that process.
+  sessionAffinity: ClientIP
+  selector: { app: {{ include "wikistead.fullname" . }}-collab }
+  ports: [{ port: 4100, targetPort: 4100 }]

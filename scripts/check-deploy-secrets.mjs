@@ -14,12 +14,16 @@
 // because grepping for secret-looking strings finds every example in every comment and gets switched
 // off. `*.enc.yaml` is exempt: its values are ciphertext by definition, and `.sops.yaml` pins which
 // age recipient every such file encrypts to.
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
-const SCAN = join(root, 'deploy')
+// ⚠️ TWO roots since #802. The Helm chart is a second place deployment material is authored, and it
+// renders the same Secrets — a check that walks only `deploy/` would have said "no plaintext
+// credentials" about a tree it never opened. Measured when the chart landed: the walk reported OK
+// with charts/ outside it.
+const SCAN_ROOTS = [join(root, 'deploy'), join(root, 'charts')].filter((d) => existsSync(d))
 
 /**
  * Environment variable names whose value is a credential. A `value:` on one of these is plaintext in
@@ -55,7 +59,12 @@ function walk(dir) {
 
 const offenders = []
 const seen = new Set()
-for (const file of walk(SCAN)) {
+const files = SCAN_ROOTS.flatMap((d) => walk(d))
+// #719: a walk that silently stopped finding files would pass by having nothing to judge.
+if (files.length === 0) { console.error('check-deploy-secrets: walked 0 files — the scan found nothing to read'); process.exit(1) }
+let scanned = 0
+for (const file of files) {
+  scanned++
   // `*.enc.yaml` is the encrypted form — its values are ciphertext by definition.
   if (/\.enc\.ya?ml$/.test(file)) continue
   const rel = relative(root, file).replace(/^deploy\//, '')
@@ -69,7 +78,14 @@ for (const file of walk(SCAN)) {
   for (const line of src.split('\n')) {
     // A comment is prose, not a manifest. Without this the guard reports its own explanation.
     if (/^\s*#/.test(line)) continue
+    // ⚠️ #802: a Helm template expression is not a literal in git. `{{ .Values… }}`, `{{ include … }}`
+    // and Kubernetes' own `$(VAR)` substitution all render elsewhere — the FIRST of these is what the
+    // chart uses for every credential, and flagging them would push somebody to silence the guard on
+    // the one tree it was just taught to read. What still fires here is a real value: a quoted string,
+    // a URI with userinfo, a generator literal.
+    const templated = /\{\{|\$\(/.test(line)
     const flagAlways = (name) => {
+      if (templated) return
       const key = `${rel}:${name}`
       if (seen.has(key)) return
       seen.add(key)
@@ -127,4 +143,7 @@ if (offenders.length > 0 || stale.length > 0) {
   process.exit(1)
 }
 
-console.log(`OK: no plaintext credentials in deploy/ (${seen.size} secret-shaped inline values, ${Object.keys(KNOWN).length} on the ledger)`)
+console.log(
+  `OK: no plaintext credentials in ${SCAN_ROOTS.map((d) => `${d.split('/').pop()}/`).join(' + ')} ` +
+  `(${scanned} file(s) read, ${seen.size} secret-shaped inline values, ${Object.keys(KNOWN).length} on the ledger)`,
+)

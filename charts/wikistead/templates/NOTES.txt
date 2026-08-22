@@ -1,0 +1,35 @@
+Wikistead {{ .Chart.AppVersion }} is installing into {{ .Release.Namespace }}.
+
+Your first administrator is NOT the first person to sign in. Nobody can sign in yet — run this once,
+and open the invite link it prints:
+
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "wikistead.fullname" . }}-server -- \
+    node dist/scripts/local-admin.js <workspace-slug> you@example.com --create
+
+A workspace's slug is the FIRST LABEL of the host it answers on. With host {{ .Values.host }}, the
+slug `docs` means `docs.{{ .Values.host }}` — so the slug is chosen with DNS in mind, not afterwards.
+
+{{- if not .Values.workspaceHostTemplate }}
+
+Self-serve workspace creation is CLOSED on this install, because `workspaceHostTemplate` is unset.
+That is deliberate (#806): without it the product would hand a new workspace an address nobody can
+reach. Set it to the shape your wildcard serves — for example https://{slug}.example.com — and turn
+`ingress.wildcardHost` on. Existing workspaces, sign-in and custom domains are unaffected.
+{{- end }}
+{{- if not .Values.ingress.tls.enabled }}
+
+TLS is off. Guest tokens and session cookies travel in the clear over plain HTTP.
+{{- end }}
+{{- if .Values.secrets.generate }}
+
+Credentials were generated into secret `{{ .Values.secrets.existingSecret }}` and are kept across
+upgrades. They are NOT in your backup unless you put them there:
+
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.secrets.existingSecret }} -o yaml
+{{- end }}
+{{- if and .Values.postgres.enabled (eq .Release.Namespace "default") }}
+
+The bundled Postgres is a single replica with no backup — the manifests it came from call themselves
+dev-convenience. Point `postgres.externalUrl` at something you already run before this holds anything
+you would miss.
+{{- end }}

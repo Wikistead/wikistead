@@ -1,0 +1,140 @@
+# Wikistead — values. ADR-250 §2: this chart TEMPLATES the kustomize base under deploy/k8s/base; it
+# does not redesign the nine-service shape. When the two disagree the base is the source of truth, and
+# `lint:origin-routes` compares the route list in both directions.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Images
+#
+# ADR-162 §2: a tag is pinnable and so is a digest. `digest` wins when both are set, which is what a
+# production deployment should use — a tag is a moving name and a digest is the thing that ran.
+# The registry defaults to the placeholder the manifests carry until #414 arms publication; a chart
+# installed with it fails to pull, which is the honest outcome before any image exists.
+image:
+  registry: ghcr.io/CHANGE_ME
+  # Applies to all three application images unless overridden per service below.
+  tag: ""            # defaults to .Chart.AppVersion
+  digest: ""         # e.g. sha256:… — takes precedence over tag
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+server:
+  replicas: 1
+  image: { repository: wikistead-server, tag: "", digest: "" }
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+collab:
+  replicas: 1
+  image: { repository: wikistead-collab, tag: "", digest: "" }
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+web:
+  replicas: 1
+  image: { repository: wikistead-web, tag: "", digest: "" }
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Addresses
+#
+# `host` is where the application lives. `workspaceHostTemplate` is the SHAPE of a workspace address
+# (#806 / ADR-249) and it is NOT derived from `host`: gluing a slug onto the application's own host is
+# the defect that ticket was filed for. It has to match whatever wildcard the ingress serves.
+host: wikistead.example.com
+workspaceHostTemplate: ""   # e.g. https://{slug}.example.com — unset closes self-serve creation only
+
+ingress:
+  enabled: true
+  className: nginx
+  # ⚠️ TWO objects, always. The api object rewrites `/api/(.*)` to `/$1`, and a rewrite annotation
+  # applies to a whole Ingress — folding the two together makes that rewrite eat every other route.
+  # This is not a style choice; measured it on a real cluster.
+  #
+  # `wildcardHost` adds the `*.host` rule the workspace addresses need. A single-host deployment
+  # leaves it off (#806: signup is closed there rather than pointing somewhere unreachable).
+  wildcardHost: false
+  tls:
+    enabled: true
+    secretName: kb-tls
+    # cert-manager is optional: an operator with their own certificate leaves this empty and creates
+    # the secret themselves.
+    clusterIssuer: letsencrypt-prod
+  # Some controllers refuse `configuration-snippet` outright and reject the whole Ingress with it.
+  # Measured on a real cluster: the deployment there had to strip these to come up.
+  securityHeaderSnippet: true
+  annotations: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Secrets
+#
+# ⚠️ This chart never ships a literal credential (ADR-250 §2). The default is to reference a secret
+# that already exists, made by whatever the operator already trusts — SOPS+age through ksops is what
+# this project uses (ADR-042).
+#
+# `generate: true` is the simple path for a first install: the chart mints random values ONCE and
+# `lookup` keeps them across upgrades. It is opt-in because a generated secret is invisible to the
+# operator's own backup and rotation story.
+secrets:
+  existingSecret: kb-secrets
+  generate: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Middleware
+#
+# Each of the five can be bundled or pointed at something the operator already runs. The bundled
+# manifests are the ones from deploy/k8s/base, which that file's own comment calls dev-convenience —
+# a production install should be turning these off.
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  storage: { size: 20Gi, storageClass: "" }
+  # When enabled=false: the URL the application uses. Both databases may live on one server (ADR-128
+  # separates by DATABASE, not by host); create the `openfga` database there once.
+  externalUrl: ""
+valkey:
+  enabled: true
+  image: valkey/valkey:8-alpine
+  externalUrl: ""
+openfga:
+  enabled: true
+  image: openfga/openfga:latest
+  # ⚠️ `memory` loses every tuple on restart, so the API refuses to boot in production without
+  # `postgres` (ADR-035 / #805). The chart states it rather than leaving it to a ConfigMap nobody wrote.
+  datastoreEngine: postgres
+  datastoreUri: ""     # defaults to the bundled postgres
+  externalApiUrl: ""
+meilisearch:
+  enabled: true
+  image: getmeili/meilisearch:v1.10
+  storage: { size: 10Gi, storageClass: "" }
+  externalHost: ""
+seaweedfs:
+  enabled: true
+  image: chrislusf/seaweedfs:latest
+  storage: { size: 50Gi, storageClass: "" }
+  externalEndpoint: ""
+  bucket: attachments
+  forcePathStyle: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Initialization (ADR-250 §4)
+#
+# Two hooks, both from the server image (#804 put the migrations there).
+hooks:
+  # Runs the migration entrypoint post-install and post-upgrade.
+  migrate: true
+  # Creates the OpenFGA store and model and writes the ids where the application reads them.
+  # ⚠️ Deleted when the product resolves its own store by name at startup (#826) — ADR-250 §4 says so,
+  # and this value is where that removal will show.
+  fgaBootstrap: true
+  backoffLimit: 3
+
+# Extra environment for the application pods, for anything this chart does not name.
+extraEnv: []
+nameOverride: ""
+fullnameOverride: ""
