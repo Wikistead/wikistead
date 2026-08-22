@@ -1,7 +1,9 @@
 // #253 / ADR-113: per-page anonymous public toggle + tenant parent switch. Security-critical (it writes/
 // revokes the anonymous view_base@user:* grant). Real Postgres + OpenFGA. Anti-tests pin the guardrails:
 // manager-only, published-only, public⊥private (a private page is rejected), noindex forced on, the grant is
-// a single tuple (no orphan on unset), the parent switch is a fresh read (ON→OFF→ON), and the audit records.
+// a single tuple (no orphan on unset), the parent switch is a fresh read (ON→OFF→ON).
+// #885: the ledger assertion moved to `public-toggle-audit-885.test.ts` — the audit ledger is EE,
+// and reaching its drain helper filtered this whole CE suite out of the published tree.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
@@ -13,7 +15,6 @@ import {
   createPage, setPagePublic, unsetPagePublic, isPagePublic, setPagePrivate, unsetPagePrivate,
   publicSurfaceEnabled,
 } from '../routes/pages.js'
-import { drainAuditFor } from './helpers/audit-drain.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -68,15 +69,12 @@ describe('#253 setPagePublic guardrails', () => {
     expect(await isPublicRaw(draftPage)).toBe(false)
   })
 
-  it('a published page: grants view_base@user:*, forces noindex, and audits (EE)', async () => {
+  it('a published page: grants view_base@user:* and forces noindex', async () => {
     await setPagePublic(db, fgaClient, driver, { pageId: pubPage, tenantId: TENANT, userId: 'dev-user', plan: 'team' })
     expect(await isPublicRaw(pubPage)).toBe(true) // anonymous grant present
     expect(await isPagePublic(db, fgaClient, { pageId: pubPage, userId: 'dev-user' })).toBe(true)
     const [row] = await admin<{ noindex: boolean }[]>`SELECT noindex FROM pages WHERE id = ${pubPage}`
     expect(row!.noindex).toBe(true) // guardrail 4: noindex forced on
-    await drainAuditFor(admin, TENANT)
-    const audit = await admin<{ action: string }[]>`SELECT action FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`page:${pubPage}`}`
-    expect(audit.some((a) => a.action === 'page.made_public')).toBe(true)
   })
 
   it('unset removes the single grant (no orphan) and can round-trip', async () => {
