@@ -1,5 +1,6 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
+import { mergePaintedWindow } from "./scroll-to-selection"; // #899
 import { apiFetch } from "../data/apiClient";
 import type { Page } from "../data/queries";
 import { useSession } from "../session/SessionProvider";
@@ -76,10 +77,16 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       const r = await apiFetch<PaintAnswer>(`/spaces/${spaceId}/pages/paint?${qs}`, token);
       const branches: PaintAnswer["branches"] = r?.branches ?? [];
       for (const b of branches) {
-        qc.setQueryData(branchKey(spaceId!, b.parentId), {
+        const key = branchKey(spaceId!, b.parentId);
+        const fresh = {
           pages: b.pages, nextCursor: b.nextCursor,
           placeholders: b.placeholders, placeholdersExhausted: b.placeholdersExhausted,
-        } satisfies BranchAnswer);
+        } satisfies BranchAnswer;
+        // #899: KEEP what the reader loaded past this window. The paint always returns a branch's
+        // FIRST window (`paintTree`'s `one()` passes no cursor) and its key carries the open page, so
+        // seeding unconditionally threw away every `more:` a scrolling reader had asked for — on every
+        // navigation. The row they had just clicked went with it, which is the flicker.
+        qc.setQueryData(key, mergePaintedWindow(qc.getQueryData<BranchAnswer>(key), fresh));
       }
       return { paintedParents: branches.map((b) => b.parentId) };
     },

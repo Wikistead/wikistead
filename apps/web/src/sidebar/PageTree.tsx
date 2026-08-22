@@ -7,6 +7,7 @@ import { ChevronRight, Copy, FilePen, FilePlus, FileText, Loader2, Lock, MoreHor
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
 import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX } from "./lazy-tree"; // #623 §6.3
+import { decideScroll, NO_SCROLL_YET, type ScrollMemory } from "./scroll-to-selection"; // #899
 
 // The presentational page-tree — the ONE react-arborist tree + row renderer shared by every surface that
 // shows a space's page hierarchy: the member `Sidebar`, and (read-only) the anonymous public reader-chrome
@@ -129,18 +130,15 @@ export function PageTree({
     () => (selectedId ? containsRow(nodes, `page:${selectedId}`) : false),
     [nodes, selectedId],
   );
-  const scrolledForRef = useRef<string | null>(null);
+  // #899: the rule lives in `decideScroll`, as a pure function, because it is the rule that breaks
+  // and a rule that exists only inside an effect can be measured only by rendering. What it adds to
+  // #736 is a third state: a row that DISAPPEARED and came back is a fresh appearance, not the same
+  // one — which is what every navigation does to a reader who has paged (see that file's header).
+  const scrollMemoryRef = useRef<ScrollMemory>(NO_SCROLL_YET);
   useEffect(() => {
-    if (!selectedId) {
-      scrolledForRef.current = null;
-      return;
-    }
-    // Not in the tree yet (a just-created page, a branch still loading): wait for it to arrive
-    // rather than scrolling to nothing — arriving is what fires this effect again.
-    if (!selectedRowExists) return;
-    if (scrolledForRef.current === selectedId) return;
-    scrolledForRef.current = selectedId;
-    treeRef.current?.scrollTo(`page:${selectedId}`);
+    const { scroll, next } = decideScroll(scrollMemoryRef.current, selectedId, selectedRowExists);
+    scrollMemoryRef.current = next;
+    if (scroll && selectedId) treeRef.current?.scrollTo(`page:${selectedId}`);
   }, [selectedId, selectedRowExists]);
 
   // Route the row action through a ref so NodeRow's identity does NOT depend on it. NodeRow is the
