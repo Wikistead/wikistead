@@ -129,20 +129,98 @@ export async function seedFgaFixtures(): Promise<void> {
 // failed with an empty screen — the tab strip is built from what that tuple grants, so the reds read
 // as a product regression and not as a broken fixture. Measured on 2026-08-22: `space:demo_space` and
 // `page:demo` were both down to ZERO tuples mid-run while `space:acme_space` still had its two.
-export async function missingCoreFixtureTuples(): Promise<string[]> {
+/**
+ * What the integrity check found: anchors that are really gone, or a reason it could not tell.
+ *
+ * ⚠️ Three-valued on purpose (#890, measured 2026-08-23). This used to return only the missing list,
+ * decided by `json.tuples` being empty — so an ERROR RESPONSE looked exactly like an absent tuple. When
+ * the store wedged mid-run (`deadline_exceeded` on every read, Postgres beside it perfectly healthy),
+ * the check reported all twelve anchors as deleted and the reporter named the spec that happened to
+ * finish first. That spec touched none of them; restarting OpenFGA brought all twelve back, so nothing
+ * had ever been deleted. Blaming an innocent spec with confidence is worse than the wall of reds this
+ * instrumentation was built to replace.
+ *
+ * `seedFgaFixtures` already draws this line on the WRITE side ("self-healing that cannot heal has to
+ * say so"). This is the same line on the read side; it was missing because only one side was counted.
+ */
+/**
+ * One anchor's verdict, decided from what the store actually answered.
+ *
+ * ⚠️ Pulled out as a pure function so it can be RUN by a pin. The defect this exists to remove lives in
+ * the classification itself, and a pin that reads the source for a string cannot see whether the branch
+ * it is reading is reachable — the previous version's fatal branch was reachable and wrong.
+ */
+export type AnchorVerdict = { kind: "present" } | { kind: "missing" } | { kind: "unreadable"; why: string };
+
+export function classifyAnchorRead(res: { ok: boolean; status: number } | null, body: unknown, error?: unknown): AnchorVerdict {
+  if (res === null) return { kind: "unreadable", why: `the request never arrived (${String(error)})` };
+  if (!res.ok) return { kind: "unreadable", why: `${res.status} ${typeof body === "string" ? body : ""}`.trim() };
+  if (body === undefined) return { kind: "unreadable", why: "200 with an unreadable body" };
+  const tuples = (body as { tuples?: unknown }).tuples;
+  // A 200 whose shape nobody promised is not an absence. The old code read `!json.tuples` as "gone",
+  // which is how an error body — `{}` after a failed `.json()` — became a deletion report.
+  if (!Array.isArray(tuples)) return { kind: "unreadable", why: "200 without a tuples array" };
+  return tuples.length === 0 ? { kind: "missing" } : { kind: "present" };
+}
+
+export interface FixtureIntegrity {
+  /** Anchors the store answered for, and does not have. */
+  missing: string[];
+  /** Why the store could not be asked. Non-empty means the `missing` list decides nothing. */
+  unreadable: string[];
+}
+
+export async function coreFixtureIntegrity(): Promise<FixtureIntegrity> {
   const { apiUrl, storeId } = fgaEnv();
-  if (!storeId) return [];
+  if (!storeId) return { missing: [], unreadable: [] };
   const missing: string[] = [];
+  const unreadable: string[] = [];
   for (const t of CORE_FGA_TUPLES) {
-    const res = await fga("/read", { tuple_key: t }, apiUrl, storeId);
-    const json = (await res.json().catch(() => ({}))) as { tuples?: unknown[] };
-    if (!json.tuples || json.tuples.length === 0) missing.push(`${t.user}#${t.relation}@${t.object}`);
+    const name = `${t.user}#${t.relation}@${t.object}`;
+    let res: Response | null = null;
+    let body: unknown;
+    let error: unknown;
+    try {
+      res = await fga("/read", { tuple_key: t }, apiUrl, storeId);
+      // The store answering "I cannot" is not the store answering "it is not here", so the failure
+      // body is read as text and the success body as JSON — and a body that will not parse is its own
+      // answer rather than an empty object standing in for one.
+      body = res.ok ? await res.json().catch(() => undefined) : await res.text().catch(() => "");
+    } catch (e) {
+      error = e;
+      res = null;
+    }
+    const verdict = classifyAnchorRead(res, body, error);
+    if (verdict.kind === "missing") missing.push(name);
+    else if (verdict.kind === "unreadable") unreadable.push(`${name}: ${verdict.why}`);
   }
-  return missing;
+  return { missing, unreadable };
+}
+
+/**
+ * Back-compat shim: the missing list alone.
+ *
+ * ⚠️ Callers that decide whether to BLAME somebody must use `coreFixtureIntegrity` and check
+ * `unreadable` first — this shape cannot tell them the difference.
+ */
+export async function missingCoreFixtureTuples(): Promise<string[]> {
+  return (await coreFixtureIntegrity()).missing;
 }
 
 export async function assertDemoFixtureIntact(): Promise<void> {
-  const missing = await missingCoreFixtureTuples();
+  const { missing, unreadable } = await coreFixtureIntegrity();
+  // ⚠️ "I could not ask" fails too, and says so in its own words. Passing on an unreadable store would
+  // make the teardown report "the fixture is fine" about a store it never reached.
+  if (unreadable.length > 0) {
+    throw new Error(
+      `#890 fixture integrity: the store could not be asked about ${unreadable.length} of ` +
+        `${CORE_FGA_TUPLES.length} anchors, so this run proves NOTHING about the fixture:\n  ` +
+        unreadable.join("\n  ") +
+        "\nCheck the store itself (`/healthz`, its own logs) before suspecting any spec. " +
+        "Measured 2026-08-23: OpenFGA wedged at its 3 s deadline with Postgres healthy beside it, and " +
+        "a restart brought every anchor back — nothing had been deleted.",
+    );
+  }
   if (missing.length > 0) {
     throw new Error(
       `#279/#890 fixture integrity: ${missing.length} of ${CORE_FGA_TUPLES.length} shared tuples were DELETED ` +
