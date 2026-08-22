@@ -4,6 +4,10 @@
 // are all at the boundary: whether a pending enrolment is visible before it is confirmed, whether an
 // id belonging to somebody else can be confirmed, whether the same code works twice, and whether the
 // limiter is reading the right counter. None of those are questions about SQL.
+//
+// #885: the two ledger cases live in `totp-enrolment-audit-885.test.ts`. The audit ledger is EE,
+// and reaching its drain helper filtered this whole suite out of the published tree — a second
+// factor is the personal-safety side of the CE/EE line, so these tests belong to CE and now ship.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -11,7 +15,6 @@ import { pool } from '../db/pool.js'
 import { buildApp } from '../app.js'
 import { totpCode, totpCounter, TOTP_STEP_SECONDS } from '../auth/totp.js'
 import { FACTOR_VERIFY_MAX, MAX_FACTORS_PER_MEMBER } from '../routes/second-factor.js'
-import { drainAuditFor } from './helpers/audit-drain.js'
 import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const adminPool = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -27,23 +30,7 @@ let H: { host: string; authorization: string; 'content-type': string }
 let app: FastifyInstance
 const factorIds: string[] = []
 
-/** How many enrolments the ledger holds for this tenant right now. */
-async function countEnrolments(): Promise<number> {
-  await drainAuditFor(adminPool, TENANT)
-  const [row] = await adminPool<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM audit_log
-    WHERE tenant_id = ${TENANT} AND action = 'member.factor_enrolled'`
-  return row?.n ?? 0
-}
 
-/** How many factor REMOVALS the ledger holds. A delta, for the reason `countEnrolments` gives. */
-async function countRemovals(): Promise<number> {
-  await drainAuditFor(adminPool, TENANT)
-  const [row] = await adminPool<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM audit_log
-    WHERE tenant_id = ${TENANT} AND action = 'member.factor_removed'`
-  return row?.n ?? 0
-}
 
 const post = (url: string, body?: unknown) =>
   app.inject({ method: 'POST', url, headers: H, payload: JSON.stringify(body ?? {}) })
@@ -228,26 +215,6 @@ describe('#657: the limiter', () => {
   }, 120_000)
 })
 
-describe('#657: the ledger records getting a factor, not only losing one', () => {
-  it('audits the enrolment with the actor', async () => {
-    // ADR-219's acceptance names this: a ledger that records only the taking-away cannot answer "when
-    // did this account get its factor" — the question asked once an account turns out to have been
-    // reachable by somebody else.
-    // A DELTA, not a count. `audit_log` is append-only and hash-chained, so rows this file wrote on a
-    // previous run are still there — measured: with the audit call deleted entirely, a "> 0" assertion
-    // stayed green off yesterday's rows. The ledger's own permanence is what made the pin vacuous.
-    const before = await countEnrolments()
-    const { factorId, secret } = await start()
-    expect((await post(`/me/factors/${factorId}/confirm`, { code: totpCode(secret, Date.now()) })).statusCode).toBe(200)
-
-    await drainAuditFor(adminPool, TENANT)
-    expect(await countEnrolments(), 'this enrolment reached the ledger').toBe(before + 1)
-    const rows = await adminPool<{ actor: string }[]>`
-      SELECT actor FROM audit_log
-      WHERE tenant_id = ${TENANT} AND action = 'member.factor_enrolled' ORDER BY seq`
-    expect(rows.at(-1)!.actor, 'with the actor').toBe('user:dev-user')
-  }, 120_000)
-})
 
 describe('#657: the counter the store spends is the one the verifier matched', () => {
   it('spends the step the code belongs to', async () => {
@@ -349,20 +316,4 @@ describe('#660: removing a factor', () => {
     await adminPool`DELETE FROM members WHERE sub = ${otherSub}`
   }, 120_000)
 
-  it('records the loss in the ledger — but only of a real factor', async () => {
-    const before = await countRemovals()
-    // an abandoned enrolment first: tidying is not an event in the account's security history
-    const pending = await start()
-    expect((await del(pending.factorId)).statusCode).toBe(204)
-    expect(await countRemovals(), 'clearing a pending row is not a removal').toBe(before)
-
-    const { factorId, secret } = await start()
-    expect((await post(`/me/factors/${factorId}/confirm`, { code: totpCode(secret, Date.now()) })).statusCode).toBe(200)
-    expect((await del(factorId, totpCode(secret, Date.now() + TOTP_STEP_SECONDS * 1000))).statusCode).toBe(204)
-
-    expect(await countRemovals(), 'giving up a real one is').toBe(before + 1)
-    const rows = await adminPool<{ actor: string }[]>`
-      SELECT actor FROM audit_log WHERE tenant_id = ${TENANT} AND action = 'member.factor_removed' ORDER BY seq`
-    expect(rows.at(-1)!.actor).toBe('user:dev-user')
-  }, 180_000)
 })
