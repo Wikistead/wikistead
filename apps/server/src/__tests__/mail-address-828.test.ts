@@ -7,6 +7,8 @@
 // not naming a step.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { tenantBaseUrl, noAddressReason, composeTenantUrl } from '../email/base-url.js'
+// @ts-expect-error — repo-root script module, no types (#621 convention)
+import { ENV_DOCS } from '../../../../scripts/env-catalog.mjs'
 
 // The custom-domain step is a query; everything else is env. A stub that returns rows or none is the
 // whole surface — the LIVE ordering (a verified domain wins, a demoted one stops winning) is #576's
@@ -67,5 +69,26 @@ describe('#828 the address says which step ran out', () => {
     expect(composeTenantUrl('acme', ''), 'a blank value composed an address').toBeNull()
     expect(composeTenantUrl('acme', 'https://wikistead.example.com:8443'), 'the port was dropped')
       .toBe('https://acme.wikistead.example.com:8443')
+  })
+})
+
+describe('#828 the catalog entry has one reading', () => {
+  it('the example it prints is the composition the code performs', () => {
+    // ADR-254 Decision 1. The ambiguity was never in the code — `.env.example` has always said the
+    // zone — but in this sentence, which described the APPLICATION's own origin while the only
+    // consumer prefixed a slug onto it. Making the example executable is what stops it drifting
+    // back: a prose fix nothing runs is one edit from being wrong again.
+    const what = String((ENV_DOCS as Record<string, { what: string }>).WKS_PUBLIC_BASE_URL.what)
+    const example = what.match(/`(https?:\/\/[^`]+)` produces `(https?:\/\/<slug>\.[^`]+)`/)
+    expect(example, `the catalog stopped showing a composition example:\n${what}`).not.toBeNull()
+    const [, zone, claimed] = example!
+    expect(composeTenantUrl('acme', zone!), 'the catalog promises a composition the code does not perform')
+      .toBe(claimed!.replace('<slug>', 'acme'))
+  })
+
+  it('it names the zone rather than the application origin', () => {
+    const what = String((ENV_DOCS as Record<string, { what: string }>).WKS_PUBLIC_BASE_URL.what)
+    expect(what, 'the entry no longer says the slug is prefixed — the reading that broke mail is back')
+      .toMatch(/slug is prefixed/)
   })
 })
