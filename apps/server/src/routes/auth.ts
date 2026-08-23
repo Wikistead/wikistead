@@ -353,6 +353,11 @@ export async function authPlugin(app: FastifyInstance) {
       FROM members WHERE sub = ${req.user.sub} LIMIT 1`
     return {
       sub: req.user.sub,
+      // #905: the tenant the server resolved from the Host. The web composes the collaboration
+      // room name from this; a build-time constant ('tenant_dev') made collab refuse every
+      // member of every other tenant with 'tenant mismatch', and publish then shipped the
+      // empty persisted draft as a success.
+      tenantId: req.tenant.id,
       groups: req.user.groups,
       isAdmin: Boolean(allowed),
       displayName: m?.display_name_override ?? m?.display_name ?? null,

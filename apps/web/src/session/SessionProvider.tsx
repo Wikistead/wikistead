@@ -76,7 +76,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // (.env.realauth pins VITE_DEV_TOKEN= to force real auth).
   const devToken: string | undefined =
     env.VITE_DEV_TOKEN_DISABLE === "1" ? undefined : env.VITE_DEV_TOKEN || undefined;
-  const tenantId: string = env.VITE_TENANT ?? "tenant_dev";
+  // #905: the build-time tenant is only a fallback for the dev-token bypass (the seed tenant's id is
+  // its slug). A real session adopts the tenant the server resolved from the Host — the collab room
+  // name is composed from this value and collab refuses a room whose tenant differs from the token's,
+  // so a constant here silently disconnected every member outside the seed tenant.
+  const envTenant: string = env.VITE_TENANT ?? "tenant_dev";
+  const [tenantId, setTenantId] = useState<string>(envTenant);
 
   const [status, setStatus] = useState<AuthStatus>(devToken ? "authed" : "loading");
   const [sub, setSub] = useState<string | null>(devToken ? "dev-user" : null);
@@ -119,7 +124,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // /auth/me exposes ONLY sub + displayName + picture (never email) — #3. Cookie only:
         // with a dev token this probes for a REAL session (#427 — a logged-in identity must
         // never be masked by the bypass); without one it decides authed vs anon as before.
-        const me = await apiFetch<{ sub: string; isAdmin?: boolean; displayName?: string | null; picture?: string | null }>("/auth/me", ""); // cookie
+        const me = await apiFetch<{ sub: string; tenantId?: string; isAdmin?: boolean; displayName?: string | null; picture?: string | null }>("/auth/me", ""); // cookie
         if (cancelled) return;
         if (!me) {
           if (!devToken) { setStatus("anon"); return; }
@@ -127,6 +132,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           return; // stay in god-mode (a real cookie session still takes over when it exists)
         }
         setSub(me.sub);
+        if (me.tenantId) setTenantId(me.tenantId);
         setIsAdmin(!!me.isAdmin);
         setDisplayName(me.displayName ?? null);
         setPicture(normPicture(me.picture));

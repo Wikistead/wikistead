@@ -107,7 +107,9 @@ describe('session endpoints', () => {
     const me = await app.inject({ method: 'GET', url: '/auth/me', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
     expect(me.statusCode).toBe(200)
     // isAdmin is a UI-convenience signal (tenant#admin). A plain member is false.
-    expect(me.json()).toMatchObject({ sub: MEMBER, isAdmin: false })
+    // #905: tenantId is the tenant resolved from the Host — the web composes the collaboration room
+    // name from it, and collab refuses a room whose tenant differs from the token's.
+    expect(me.json()).toMatchObject({ sub: MEMBER, isAdmin: false, tenantId: tenant.id })
 
     const out = await app.inject({ method: 'POST', url: '/auth/logout', headers: { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` } })
     expect(out.statusCode).toBe(204)
