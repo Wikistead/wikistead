@@ -187,14 +187,14 @@ export const ENV_DOCS = {
     group: 'Object storage',
     default: 'the SDK default (`WHEN_SUPPORTED`)',
     indirect: true,
-    where: ['.env.example'],
+    where: ['.env.example', 'deploy/k8s/overlays/prod/kustomization.yaml', 'charts/wikistead/templates/config.yaml'],
     what: 'Read by the AWS SDK, not by this product. Set it to `WHEN_REQUIRED` so a browser presigned PUT (which sends no checksum header) is accepted by S3-compatible gateways.',
   },
   AWS_RESPONSE_CHECKSUM_VALIDATION: {
     group: 'Object storage',
     default: 'the SDK default',
     indirect: true,
-    where: ['.env.example'],
+    where: ['.env.example', 'deploy/k8s/overlays/prod/kustomization.yaml', 'charts/wikistead/templates/config.yaml'],
     what: 'The reading half of the setting above; `WHEN_REQUIRED` for the same gateways.',
   },
 

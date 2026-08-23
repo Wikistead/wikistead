@@ -25,6 +25,9 @@ data:
   {{- end }}
   S3_BUCKET: {{ .Values.seaweedfs.bucket | quote }}
   S3_FORCE_PATH_STYLE: {{ .Values.seaweedfs.forcePathStyle | quote }}
+  # #912: a browser presigned PUT carries no checksum; without this the SDK signs a URL that demands one.
+  AWS_REQUEST_CHECKSUM_CALCULATION: "WHEN_REQUIRED"
+  AWS_RESPONSE_CHECKSUM_VALIDATION: "WHEN_REQUIRED"
   SERVER_PORT: "4000"
   COLLAB_PORT: "4100"
   {{- if .Values.workspaceHostTemplate }}
