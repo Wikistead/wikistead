@@ -63,6 +63,7 @@ function SpaceSettingsLayout() {
   const resolvedSpace = useResolvedSpace(spaceId); // #710: by id — the roster page is irrelevant here
   const allTabs = useSpaceTabs(spaceId ?? "");
   const location = useLocation();
+  const backTo = spaceId ? `/spaces/${spaceId}` : "/";
 
   // Opening a space's settings makes it the active space, so the accent cascade
   // (BrandingApplier) previews this space's accent live as it's edited on the Theme tab.
@@ -77,7 +78,7 @@ function SpaceSettingsLayout() {
   // face). Viewable but no tab open → 403 (existence already known — deny by permission).
   // The server stays the fortress: rename/delete re-check space#manage regardless.
   const space = resolvedSpace;
-  if (!space) return <AppShell onLogout={logout}><SettingsDenied kind="notFound" /></AppShell>;
+  if (!space) return <AppShell onLogout={logout}><SettingsDenied kind="notFound" backTo={backTo} /></AppShell>;
   // #326: a space MODERATOR is not a manager, but the moderation queue is theirs. They may enter
   // settings to reach that one tab; every other tab stays manager-only, and each of those surfaces
   // re-checks server-side anyway.
@@ -86,7 +87,7 @@ function SpaceSettingsLayout() {
   // calls them. Which tabs a caller reaches is one function now, walked by a pin over the payload's
   // own signals, rather than a list of exceptions each new verb has to be remembered into.
   const open = reachableSpaceTabs(space);
-  if (open.length === 0) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
+  if (open.length === 0) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" backTo={backTo} /></AppShell>;
 
   // Hiding a tab is not closing it: the strip stopped offering `general` to a moderator, and typing the
   // URL still rendered the rename field and the delete button. The server refused every action behind
@@ -94,12 +95,12 @@ function SpaceSettingsLayout() {
   // somebody controls that answer 403 is the same lie #607 came to remove. The tab the URL asks for is
   // checked against the same list the strip is built from.
   const asked = allTabs.find((tb) => location.pathname.endsWith(`/${tb.key}`))?.key as SpaceTabKey | undefined;
-  if (asked && !open.includes(asked)) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
+  if (asked && !open.includes(asked)) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" backTo={backTo} /></AppShell>;
 
   const ctx: SpaceCtx = { spaceId: space.id, name: space.name, accentKey: space.accentKey ?? null, iconImageUrl: space.iconImageUrl ?? null };
   return (
     <AppShell onLogout={logout}>
-      <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={allTabs.filter((tb) => open.includes(tb.key as SpaceTabKey))}>
+      <SettingsShell title={t("spaceSettings.title", { name: space.name })} tabs={allTabs.filter((tb) => open.includes(tb.key as SpaceTabKey))} backTo={backTo}>
         <Outlet context={ctx} />
       </SettingsShell>
     </AppShell>

@@ -138,10 +138,12 @@ export function SettingsPane({
 export function SettingsShell({
   title,
   tabs,
+  backTo = "/",
   children,
 }: {
   title: string;
   tabs: SettingsTab[];
+  backTo?: string;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -153,7 +155,7 @@ export function SettingsShell({
     // centering the whole screen.
     <div className="grid h-full min-h-0 w-full grid-cols-[240px_1fr]">
       <nav className="box-border flex flex-col gap-0.5 overflow-y-auto border-r border-border bg-panel p-3" aria-label={title}>
-        <NavLink to="/" className={backLink} data-testid="settings-back">
+        <NavLink to={backTo} className={backLink} data-testid="settings-back">
           <ArrowLeft size={14} /> {t("settings.back")}
         </NavLink>
         <div className="mb-0.5 px-2 py-1 text-[11px] uppercase tracking-[0.04em] text-fg-dim">{title}</div>
@@ -189,7 +191,7 @@ export function SettingsShell({
 
 // Shown when a screen is reached without authority. The wording differs by reason
 // so the UI matches the leak rule (404 hides existence; 403 admits it but denies).
-export function SettingsDenied({ kind }: { kind: "forbidden" | "notFound" }) {
+export function SettingsDenied({ kind, backTo = "/" }: { kind: "forbidden" | "notFound"; backTo?: string }) {
   const { t } = useTranslation();
   return (
     <SettingsPane
@@ -199,7 +201,7 @@ export function SettingsDenied({ kind }: { kind: "forbidden" | "notFound" }) {
       title={t(kind === "forbidden" ? "settings.forbiddenTitle" : "settings.notFoundTitle")}
       description={t(kind === "forbidden" ? "settings.forbiddenBody" : "settings.notFoundBody")}
     >
-      <NavLink to="/" className={backLink}><ArrowLeft size={14} /> {t("settings.back")}</NavLink>
+      <NavLink to={backTo} className={backLink}><ArrowLeft size={14} /> {t("settings.back")}</NavLink>
     </SettingsPane>
   );
 }
