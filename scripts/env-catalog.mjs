@@ -149,6 +149,10 @@ export const ENV_DOCS = {
     group: 'Authorization',
     internal: 'Test harnesses set this to bring a server up against a store whose model is deliberately mismatched. A deployment that sets it turns off the check that its authorization model is the one it thinks it is.',
   },
+  WIKISTEAD_SKIP_MIGRATION_GUARD: {
+    group: 'Database',
+    internal: 'Starts the server even when migrations the image ships are missing from the database (#910). Set it only to get a process up for diagnosis: every request that touches the missing schema fails with 42703.',
+  },
 
   // ── Search ────────────────────────────────────────────────────────────────────────────────────
   MEILI_HOST: { group: 'Search', default: 'http://localhost:7700', what: 'Meilisearch endpoint.' },

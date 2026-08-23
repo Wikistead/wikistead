@@ -9,6 +9,7 @@ import { startCustomDomainRecheckWorker, recheckIntervalFromEnv } from './routes
 import { startTrashRetentionWorker } from './routes/pages.js'
 import { fgaClient } from '@wikistead/authz'
 import { assertProductionFgaPersistent, assertFgaModelFresh } from './openfga-guard.js'
+import { assertMigrationsApplied } from './db/migration-guard.js'
 
 // #178 / ADR-084: the server bootstrap, extracted from index.ts into a reusable function so BOTH
 // entrypoints share it — the CE entrypoint (apps/server/src/index.ts) and the EE composition root
@@ -21,6 +22,9 @@ export async function startServer(): Promise<FastifyInstance> {
   // Fail fast (non-production): the pinned FGA model must exist and match model.fga (#433) —
   // model drift otherwise surfaces as silent data-shaped authz failures instead of a config error.
   await assertFgaModelFresh()
+  // Fail fast (#910): every migration this image ships must already be in the database's ledger.
+  // A rollout that replaced only the image otherwise boots and fails per request with 42703.
+  await assertMigrationsApplied(pool)
 
   const app = await buildApp()
 
