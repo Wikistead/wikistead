@@ -18,6 +18,11 @@ data:
   OPENFGA_API_URL: {{ include "wikistead.openfgaApiUrl" . | quote }}
   MEILI_HOST: {{ include "wikistead.meiliHost" . | quote }}
   S3_ENDPOINT: {{ include "wikistead.s3Endpoint" . | quote }}
+  {{- $s3pub := include "wikistead.s3PublicHost" . }}
+  {{- if $s3pub }}
+  # #912: presigned URLs are signed for the name the browser will open them under.
+  S3_PUBLIC_ENDPOINT: {{ printf "%s://%s" (ternary "https" "http" .Values.ingress.tls.enabled) $s3pub | quote }}
+  {{- end }}
   S3_BUCKET: {{ .Values.seaweedfs.bucket | quote }}
   S3_FORCE_PATH_STYLE: {{ .Values.seaweedfs.forcePathStyle | quote }}
   SERVER_PORT: "4000"

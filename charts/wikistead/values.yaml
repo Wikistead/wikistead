@@ -118,6 +118,12 @@ seaweedfs:
   image: chrislusf/seaweedfs:latest
   storage: { size: 50Gi, storageClass: "" }
   externalEndpoint: ""
+  # #912: the name the BROWSER reaches the in-chart store at. Uploads and downloads are presigned URLs
+  # the browser opens itself, and the signature covers the host — so the store needs a public name of
+  # its own, not a path on `host`. Empty renders `s3.<host>` and a third Ingress object for it; set it
+  # when the public name must differ (a one-label host behind a proxy whose certificate covers only
+  # `*.example.com`). Ignored when externalEndpoint points at managed S3/R2, which is public already.
+  publicHost: ""
   bucket: attachments
   forcePathStyle: true
 

@@ -109,4 +109,48 @@ spec:
         paths:
           - { path: /api/(.*), pathType: ImplementationSpecific, backend: { service: { name: {{ $full }}-server, port: { number: 4000 } } } }
     {{- end }}
+{{- $s3pub := include "wikistead.s3PublicHost" . }}
+{{- if $s3pub }}
+---
+{{/*
+#912: the attachment host, a third object on purpose. The browser opens presigned URLs here; the
+signature covers host and path, so this host cannot be a path on the app (a rewrite changes what was
+signed) and must not carry the api object's rewrite. SIBLING_HOSTS in infra/routes/origin-routes.mjs
+is the canon; lint:origin-routes compares.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $full }}-s3
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+  annotations:
+    {{- if and .Values.ingress.tls.enabled .Values.ingress.tls.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/ssl-redirect: {{ .Values.ingress.tls.enabled | quote }}
+    # Whole-object uploads: no edge body cap (the app's caps decide) and no spooling.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    {{- if .Values.ingress.securityHeaderSnippet }}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+{{ $snippet | indent 6 }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}{{- toYaml . | nindent 4 }}{{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ $s3pub | quote }}]
+      secretName: {{ .Values.ingress.tls.secretName }}-s3
+  {{- end }}
+  rules:
+    - host: {{ $s3pub | quote }}
+      http:
+        paths:
+          # No rewrite, no sub-path: the path IS part of what was signed.
+          - { path: /, pathType: Prefix, backend: { service: { name: {{ $full }}-seaweedfs, port: { number: 9000 } } } }
+{{- end }}
 {{- end }}

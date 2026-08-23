@@ -96,8 +96,30 @@ for (const m of ing.matchAll(/-\s*host:\s*(\S+)\n([\s\S]*?)(?=\n\s*-\s*host:|\n-
   const paths = [...m[2].matchAll(/\{\s*path:\s*(\S+?),\s*pathType:\s*(\w+)/g)].map((p) => p[1])
   byHost.set(host, [...(byHost.get(host) ?? []), ...paths])
 }
-const hostBlocks = [...byHost].map(([host, paths]) => ({ host, paths }))
-if (hostBlocks.length === 0) problems.push('ingress.yaml: no host blocks parsed — the check would pass vacuously')
+const allHostBlocks = [...byHost].map(([host, paths]) => ({ host, paths }))
+if (allHostBlocks.length === 0) problems.push('ingress.yaml: no host blocks parsed — the check would pass vacuously')
+// #912: a sibling host is a block of its own and is judged by its own rule (below), not by the path
+// table — asking it for /auth would be as wrong as asking the app host for a presigned PUT. It was
+// the missing half of #726 ruling 2: the Caddyfile was required to serve s3.<host>, the ingress was
+// not, and every Kubernetes deployment signed uploads for a name no browser resolves.
+const isSiblingHost = (host) => SIBLING_HOSTS.some((sib) => host.startsWith(`${sib.subdomain}.`))
+const hostBlocks = allHostBlocks.filter((b) => !isSiblingHost(b.host))
+for (const sib of SIBLING_HOSTS) {
+  const block = allHostBlocks.find((b) => b.host.startsWith(`${sib.subdomain}.`) && !b.host.startsWith('*.'))
+  if (!block) {
+    problems.push(`ingress.yaml: no host block for ${sib.subdomain}.<host> (→ ${sib.upstream}:${sib.port}). ${sib.why}`)
+    continue
+  }
+  if (!block.paths.includes('/')) problems.push(`ingress.yaml (host ${block.host}): the sibling host must route / to ${sib.upstream}`)
+  if (block.paths.some((p) => strippedPaths.has(p))) {
+    problems.push(`ingress.yaml (host ${block.host}): the sibling host sits in a rewrite-target Ingress, but the row says strip=${sib.strip}. A presigned URL's signature covers the path.`)
+  }
+  // The block's rule must point at the declared upstream: a host that exists but sends the browser
+  // to the app would pass a host-only check and fail every upload.
+  const ruleText = ing.slice(ing.indexOf(`host: ${block.host}`))
+  const firstBackend = /backend:\s*\{\s*service:\s*\{\s*name:\s*(\S+?),/.exec(ruleText)?.[1]
+  if (firstBackend !== sib.upstream) problems.push(`ingress.yaml (host ${block.host}): routes to ${firstBackend ?? 'nothing'}, the table says ${sib.upstream}`)
+}
 // The wildcard host is how every tenant is reached; losing it would break all of them while the
 // canonical host still looked healthy.
 if (!hostBlocks.some((b) => b.host.startsWith('*.'))) {
@@ -219,10 +241,14 @@ if (!existsSync(chartPath)) {
     chartRendered = true
     const out = rendered.stdout
     const ingressDocs = out.split(/^---$/m).filter((doc) => /^kind: Ingress$/m.test(doc))
-    if (ingressDocs.length !== 2) {
+    // #912: app, api, and one object per sibling host (the in-chart store's public name). The api
+    // object carries rewrite-target, and that annotation applies to a WHOLE Ingress — merged, the
+    // rewrite eats every other route; merged with the store, it rewrites what was signed.
+    const expectedIngress = 2 + SIBLING_HOSTS.length
+    if (ingressDocs.length !== expectedIngress) {
       problems.push(
-        `chart: rendered ${ingressDocs.length} Ingress object(s), expected 2. The api object carries ` +
-        'rewrite-target, and that annotation applies to a WHOLE Ingress — merged, the rewrite eats every other route.',
+        `chart: rendered ${ingressDocs.length} Ingress object(s), expected ${expectedIngress} (app, api, and one per sibling host). ` +
+        'The api object carries rewrite-target, and that annotation applies to a WHOLE Ingress.',
       )
     }
     const pathsIn = (docs) => new Set(docs.flatMap((d) => [...d.matchAll(/\{\s*path:\s*(\S+?),/g)].map((m) => m[1])))
@@ -270,6 +296,19 @@ if (!existsSync(chartPath)) {
     if (chartByHost.size === 0) problems.push('chart: no host blocks parsed from the rendered ingress — the chart half would pass vacuously')
     if (![...chartByHost.keys()].some((h) => h.startsWith('*.'))) {
       problems.push('chart: rendering with ingress.wildcardHost=true produced no wildcard host — per-tenant subdomains would not resolve (ADR-016)')
+    }
+    // #912: the sibling host is judged by its own rule — present, routed to the store, path kept — and
+    // left out of the path-table loop (which would ask it for /auth).
+    for (const sib of SIBLING_HOSTS) {
+      const entry = [...chartByHost].find(([h]) => h.startsWith(`${sib.subdomain}.`))
+      if (!entry) { problems.push(`chart: no Ingress host for ${sib.subdomain}.<host> (→ ${sib.upstream}). ${sib.why}`); continue }
+      const [host, paths] = entry
+      if (!paths.includes('/')) problems.push(`chart (host ${host}): the sibling host must route / to the store`)
+      if (chartStripped.has('/')) problems.push(`chart (host ${host}): the sibling host's / sits in a rewrite-target Ingress; the signature covers the path`)
+      const doc = ingressDocs.find((d) => d.includes(`host: "${host}"`) || d.includes(`host: ${host}`))
+      if (!doc || !new RegExp(`name:\\s*\\S*${sib.upstream}`).test(doc)) problems.push(`chart (host ${host}): does not route to the ${sib.upstream} service`)
+      if (/rewrite-target:/.test(doc ?? '')) problems.push(`chart (host ${host}): the sibling host's Ingress carries rewrite-target`)
+      chartByHost.delete(host)
     }
     for (const route of PROXIED_ROUTES) {
       for (const [host, paths] of chartByHost) {

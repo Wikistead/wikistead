@@ -117,6 +117,14 @@ stack and a production edge answer the same paths by construction — including 
 is how the browser reaches attachment uploads: a presigned URL's signature covers the host, so the
 object store needs a public name of its own rather than a path on the app.
 
+The same holds on Kubernetes: the base manifests and the Helm chart serve `s3.<host>` from a third
+Ingress object (no rewrite — the path is part of what was signed) and the server signs with it
+(`S3_PUBLIC_ENDPOINT`). If your certificate covers only one label (`*.example.com` behind a proxy
+cannot serve `s3.app.example.com`), give the store a one-label name instead — the chart's
+`seaweedfs.publicHost` — and the server, the Ingress and the gateway's allowed origins follow it. A
+deployment that skips this signs every upload for a cluster-internal name, and pasting an image
+silently does nothing.
+
 ## Production (Kubernetes)
 
 Kubernetes manifests are not shipped: the compose file above is the reference

@@ -209,7 +209,11 @@ spec:
       containers:
         - name: seaweedfs
           image: {{ .Values.seaweedfs.image }}
-          args: ["server", "-dir=/data", "-s3", "-s3.port=9000", "-s3.config=/etc/seaweedfs/s3.json"]
+          {{- $scheme := ternary "https" "http" .Values.ingress.tls.enabled }}
+          {{- /* #912: the browser PUTs/GETs presigned URLs cross-origin from the app host(s); the gateway must name them. */}}
+          {{- $origins := list (printf "%s://%s" $scheme .Values.host) }}
+          {{- if .Values.ingress.wildcardHost }}{{ $origins = append $origins (printf "%s://*.%s" $scheme .Values.host) }}{{ end }}
+          args: ["server", "-dir=/data", "-s3", "-s3.port=9000", "-s3.config=/etc/seaweedfs/s3.json", {{ printf "-s3.allowedOrigins=%s" (join "," $origins) | quote }}]
           ports: [{ containerPort: 9000 }]
           volumeMounts:
             - { name: data, mountPath: /data }

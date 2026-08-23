@@ -49,3 +49,13 @@ three pods upgraded".
 {{- if .Values.seaweedfs.externalEndpoint }}{{ .Values.seaweedfs.externalEndpoint }}
 {{- else }}http://{{ include "wikistead.fullname" . }}-seaweedfs:9000{{ end }}
 {{- end }}
+
+{{/*
+#912: the public name of the in-chart object store (empty when storage is external: managed S3/R2 is
+reached by the browser at its own address, so the server signs with S3_ENDPOINT as before).
+*/}}
+{{- define "wikistead.s3PublicHost" -}}
+{{- if .Values.seaweedfs.externalEndpoint }}{{ "" }}
+{{- else if .Values.seaweedfs.publicHost }}{{ .Values.seaweedfs.publicHost }}
+{{- else }}s3.{{ .Values.host }}{{ end }}
+{{- end }}
