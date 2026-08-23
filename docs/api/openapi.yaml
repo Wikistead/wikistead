@@ -445,6 +445,15 @@ paths:
         - { $ref: "#/components/parameters/pageId" }
       requestBody: { content: { application/json: { schema: { type: object, required: [filename, contentType], properties: { filename: { type: string }, contentType: { type: string } } } } } }
       responses: { "201": { description: "{ id, uploadUrl, … }" }, "400": { description: Malformed request body }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
+  /pages/{pageId}/attachments/presign:
+    post:
+      operationId: createPageAttachmentPresign
+      tags: [pages]
+      summary: Presign a direct upload, addressed by page only (the form an edit-link guest can call without knowing the space)
+      parameters:
+        - { $ref: "#/components/parameters/pageId" }
+      requestBody: { content: { application/json: { schema: { type: object, required: [filename, contentType], properties: { filename: { type: string }, contentType: { type: string } } } } } }
+      responses: { "201": { description: "{ id, uploadUrl, … }" }, "400": { description: Malformed request body }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/pages/{pageId}/attachments:
     get:
       operationId: listPageAttachments

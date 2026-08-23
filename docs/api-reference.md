@@ -31,6 +31,10 @@ curl -H "Authorization: Bearer wk_..." https://team.example.com/api/search?q=roa
   expires, and a single visit may keep renewing for at most twelve hours; after that the visitor meets
   the link again, which for a password-protected link means the password. Renewal is part of the
   anonymous surface below, not of the API-key one.
+- Some routes exist in two addressings. Attachment presign is `POST /spaces/{spaceId}/pages/{pageId}/attachments/presign`
+  for a caller who knows the space and `POST /pages/{pageId}/attachments/presign` for one who does not — an
+  edit-link guest holding a single page is never told which space the page sits in. Both run the same
+  check: `edit` on the page. A view-link guest is refused on either.
 
 ## Authorization semantics (what 404 vs 403 means)
 

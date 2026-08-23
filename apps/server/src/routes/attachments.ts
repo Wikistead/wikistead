@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import type { OpenFgaClient } from '@openfga/sdk'
 import { check } from '@wikistead/authz'
 import { assertPageViewable } from '../page-view-gate.js'
@@ -325,23 +325,30 @@ export async function attachmentsPlugin(app: FastifyInstance) {
   // Members OR an edit-link guest (#274 / ADR-135 §4). The guest path adds the two-bucket COUNT cap
   // (bumped here, where the upload slot is reserved) — the per-file SIZE cap lands at confirm, where
   // the authoritative HeadObject size exists. FGA `edit` on the page stays the shared authority.
+  // #914: one handler behind two paths. The space id in the original path was never an input — the
+  // page's FGA `edit` is the whole authority — and a guest holding a PAGE link does not know (and must
+  // not be told, #364) which space the page sits in. So the page-addressed path exists for that
+  // guest; members keep the space-addressed one they already call.
+  const presign = async (req: FastifyRequest<{ Params: { pageId: string }; Body: PresignBody }>, reply: FastifyReply) => {
+    const body = requireBody(req.body) // #667 filename and contentType are both required
+    if (!req.user && req.guest && !(await guestAttachRateAllowed(app.valkey, req.db, { tenantId: req.tenant.id, shareLinkId: req.guest.shareLinkId, anonId: req.guest.anonId }))) {
+      return reply.code(429).send({ error: 'rate limited', reason: 'attach_rate' })
+    }
+    const result = await presignAttachment(req.db, app.storageDriver, app.fga, {
+      tenantId: req.tenant.id,
+      plan: req.tenant.plan,
+      pageId: req.params.pageId,
+      ...(req.user ? { userId: req.user.sub } : { guest: { shareLinkId: req.guest!.shareLinkId } }),
+      filename: body.filename,
+      contentType: body.contentType,
+    })
+    return reply.code(201).send(result)
+  }
   app.post<{ Params: { spaceId: string; pageId: string }; Body: PresignBody }>(
-    '/spaces/:spaceId/pages/:pageId/attachments/presign', { config: { guest: 'edit' } },
-    async (req, reply) => {
-      const body = requireBody(req.body) // #667 filename and contentType are both required
-      if (!req.user && req.guest && !(await guestAttachRateAllowed(app.valkey, req.db, { tenantId: req.tenant.id, shareLinkId: req.guest.shareLinkId, anonId: req.guest.anonId }))) {
-        return reply.code(429).send({ error: 'rate limited', reason: 'attach_rate' })
-      }
-      const result = await presignAttachment(req.db, app.storageDriver, app.fga, {
-        tenantId: req.tenant.id,
-        plan: req.tenant.plan,
-        pageId: req.params.pageId,
-        ...(req.user ? { userId: req.user.sub } : { guest: { shareLinkId: req.guest!.shareLinkId } }),
-        filename: body.filename,
-        contentType: body.contentType,
-      })
-      return reply.code(201).send(result)
-    },
+    '/spaces/:spaceId/pages/:pageId/attachments/presign', { config: { guest: 'edit' } }, presign,
+  )
+  app.post<{ Params: { pageId: string }; Body: PresignBody }>(
+    '/pages/:pageId/attachments/presign', { config: { guest: 'edit' } }, presign,
   )
 
   app.get<{ Params: { spaceId: string; pageId: string } }>(

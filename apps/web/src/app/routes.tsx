@@ -246,6 +246,7 @@ import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
 // TemplatesRoute / RecentChangesRoute / WatchListRoute are lazy-loaded (see the lazy block at the top).
+import { guestImageUploader } from "./guest-uploader"; // #914
 import { uploadAttachment } from "../attachments/useAttachments";
 import { downloadPageExport } from "../data/exportApi";
 import { useActiveSpace } from "./ActiveSpace";
@@ -1230,6 +1231,9 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   const token = apiBearer;
   const { docName, capability } = minted;
   const pageId = docName.replace(/^t:.+?:p:/, "");
+  // #914: paste / drop / the image command, for an edit-link guest only (the member surface builds the
+  // same uploader from its space id).
+  const onUploadImage = useMemo(() => guestImageUploader(capability, pageId, token), [capability, pageId, token]);
   // Anonymous guest identity (never an OIDC account / seat — the project design notes). Guests have
   // no real name → labelled "Guest"; each session gets a distinct auto colour (no
   // picture) so multiple guests on a doc are still visually distinguishable (#8).
@@ -1463,7 +1467,7 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
               canEdit={canEdit}
             />
             <UnsavedBanner reason={liveness.reason} />
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (guest CM body is virtualised too).
                 #207: a guest holds a share token, which the diagram route accepts, so the picture prints
                 here as well. (The public route below has no token and passes none — its plantuml degrades

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "../data/apiClient";
+import { apiFetch, type Bearer } from "../data/apiClient";
 import { useSession } from "../session/SessionProvider";
 
 export interface Attachment {
@@ -35,14 +35,18 @@ export function useAttachments(spaceId: string | undefined, pageId: string) {
 // PUTs bytes straight to the presigned URL (server never proxies them). The
 // content-type must match what was signed. Returns the confirmed attachment id +
 // filename so callers (e.g. inserting an image into the page) can reference it.
+// #914: `spaceId` is null on the guest surface — a page-link guest is not told the space behind the
+// page (#364) — and the server's page-addressed presign exists for exactly that caller. The
+// authority is the page's `edit` either way.
 export async function uploadAttachment(
-  spaceId: string,
+  spaceId: string | null,
   pageId: string,
-  token: string,
+  token: Bearer,
   file: File,
 ): Promise<{ id: string; filename: string }> {
   const ct = file.type || "application/octet-stream";
-  const pres = await apiFetch<Presigned>(`/spaces/${spaceId}/pages/${pageId}/attachments/presign`, token, {
+  const presignPath = spaceId ? `/spaces/${spaceId}/pages/${pageId}/attachments/presign` : `/pages/${pageId}/attachments/presign`;
+  const pres = await apiFetch<Presigned>(presignPath, token, {
     method: "POST",
     body: JSON.stringify({ filename: file.name, contentType: ct }),
   });

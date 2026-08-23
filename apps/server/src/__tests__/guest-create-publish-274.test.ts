@@ -238,6 +238,21 @@ describe('#274 guest attachments (ADR-135 §4)', () => {
     expect((conf.json() as { sizeBytes: number }).sizeBytes).toBe(Buffer.byteLength('guest bytes'))
   })
 
+  // #914: the page-addressed presign is the form a PAGE-link guest can call (they are not told the
+  // space, #364). Same handler, same authority: the page's FGA edit.
+  it('an edit-link guest presigns by page id alone (no space in the path)', async () => {
+    const { pageId, tok } = await guestPageAndToken()
+    const pre = await app.inject({ method: 'POST', url: `/pages/${pageId}/attachments/presign`, headers: guestHeaders(tok), payload: { filename: 'shot.png', contentType: 'image/png' } })
+    expect(pre.statusCode, pre.body).toBe(201)
+    expect((pre.json() as { uploadUrl: string }).uploadUrl).toMatch(/^https?:/)
+  })
+
+  it('a VIEW-link guest cannot presign by page id either (401)', async () => {
+    const viewTok = await mkSpaceTok(await mkSpaceLink('view'), 'view', anon())
+    const pre = await app.inject({ method: 'POST', url: `/pages/${seedPageId}/attachments/presign`, headers: guestHeaders(viewTok), payload: { filename: 'shot.png', contentType: 'image/png' } })
+    expect(pre.statusCode).toBe(401)
+  })
+
   it('a VIEW-link guest cannot presign (401 — the hook rejects a view token on an edit route)', async () => {
     const viewTok = await mkSpaceTok(await mkSpaceLink('view'), 'view', anon())
     const r = await app.inject({ method: 'POST', url: `/spaces/${spaceId}/pages/${seedPageId}/attachments/presign`, headers: guestHeaders(viewTok), payload: { filename: 'x.txt', contentType: 'text/plain' } })
