@@ -221,7 +221,10 @@ export function buildLivePreviewExtensions(opts: LivePreviewSharedOpts, env: Liv
     // resolution for free. Block references stay an outer-surface affordance (the island's doc is a
     // temporary slice; a marker written there only lands on commit, and the entry's page-id anchor
     // semantics are defined on the page surface).
-    ...(readOnly ? [] : [contextMenu({ selfPageId: env.nested ? undefined : opts.selfPageId })]),
+    ...(readOnly ? [] : [contextMenu({
+      selfPageId: env.nested ? undefined : opts.selfPageId,
+      uploadImage: env.nested ? undefined : opts.uploadImage,
+    })]),
     // #223: paste a URL / rich link → Markdown [text](url) (editable surface only; Ctrl+Shift+V pastes plain).
     ...(readOnly ? [] : [pasteLinkify()]),
     // #224 / ADR-104: auto internal links. The decoration plugin is always present but INERT until the host

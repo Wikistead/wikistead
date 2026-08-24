@@ -1,6 +1,18 @@
 import type { EditorView } from "@codemirror/view";
 import { insertImage, insertAttachment, type ImageUploader } from "./commands";
 
+/** Upload files in clipboard/drop order and insert their canonical attachment references. */
+export async function uploadFiles(view: EditorView, upload: ImageUploader, files: File[]): Promise<void> {
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]!;
+    const res = await upload(file).catch(() => null);
+    if (!res) continue;
+    if (file.type.startsWith("image/")) insertImage(view, res.alt, res.ref);
+    else insertAttachment(view, res.alt || file.name, res.ref);
+    if (files.length > 1 && i < files.length - 1) view.dispatch(view.state.replaceSelection("\n"));
+  }
+}
+
 // Drag-and-drop file attach (#273 / ADR-120 generalises the image-only path): dropping
 // file(s) onto the editable preview uploads each via the host's uploader (presign → PUT →
 // confirm) and inserts the stable reference at the drop point — an IMAGE inserts
@@ -19,19 +31,6 @@ export function attachFileDrop(view: EditorView, upload: ImageUploader): void {
   // Upload sequentially; each insert appends at the moving caret. Separate multiple
   // files with a newline so each parses as its own reference (and a standalone-line
   // attachment renders as the full card).
-  const uploadAll = (files: File[]) => {
-    void (async () => {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i]!;
-        const res = await upload(file).catch(() => null);
-        if (!res) continue; // failed upload → nothing inserted (never a broken ref); the orphan blob is GC's
-        if (file.type.startsWith("image/")) insertImage(view, res.alt, res.ref);
-        else insertAttachment(view, res.alt || file.name, res.ref);
-        if (files.length > 1 && i < files.length - 1) view.dispatch(view.state.replaceSelection("\n"));
-      }
-    })();
-  };
-
   const onDragOver = (event: DragEvent) => {
     // Must preventDefault on dragover for a drop to fire. Only intercept file drags
     // so text/selection drags keep CodeMirror's own behavior.
@@ -63,7 +62,7 @@ export function attachFileDrop(view: EditorView, upload: ImageUploader): void {
     // text) means that observer never sees this drop, so the cursor would hang around afterwards.
     // A dragleave targeted at contentDOM is the same signal CM acts on when a drag leaves.
     view.contentDOM.dispatchEvent(new DragEvent("dragleave"));
-    uploadAll(files);
+    void uploadFiles(view, upload, files);
   };
 
   // #273: pasted files (e.g. a copied file from the OS file manager) upload the same way.
@@ -73,7 +72,7 @@ export function attachFileDrop(view: EditorView, upload: ImageUploader): void {
     if (files.length === 0) return;
     event.preventDefault();
     event.stopPropagation();
-    uploadAll(files);
+    void uploadFiles(view, upload, files);
   };
 
   dom.addEventListener("dragover", onDragOver); // bubble — see the note in onDragOver (#488)

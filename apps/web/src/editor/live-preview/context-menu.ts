@@ -11,6 +11,8 @@ import { tableBlockAt } from "../macros/fence";
 import { toggleFenceSettings } from "./fence-settings-panel"; // #456 S4: the declared code-fence settings // #393 pipe tables get the same align entries
 import { nestedSelectionField } from "./macro-edit"; // #549: an active nested selection anchors "Copy block"
 import type { FenceAlign } from "@wikistead/macro-render";
+import { uploadFiles } from "./image-drop";
+import type { ImageUploader } from "./commands";
 
 // M0-4 (ADR-018): the right-click context menu — the superset entry for mouse users.
 // On a selection it offers layer-A decoration (the SAME INLINE_FORMATS as the bubble /
@@ -32,6 +34,7 @@ interface MenuState { pos: number; kind: MenuKind; link?: LinkRange; diagramFrom
 // #325 / ADR-137 slice 2b: the current page's id, provided by the mount (member surface only). Absent on
 // guest / template-preview surfaces — the block-reference entry is then hidden (a ref needs a `pageId#^id`).
 const selfPageIdFacet = Facet.define<string | undefined, string | undefined>({ combine: (v) => v[0] });
+const imageUploaderFacet = Facet.define<ImageUploader | undefined, ImageUploader | undefined>({ combine: (v) => v[0] });
 
 const openMenu = StateEffect.define<MenuState>();
 const closeMenu = StateEffect.define<null>();
@@ -118,27 +121,41 @@ function doCut(view: EditorView): void {
   view.dispatch({ effects: closeMenu.of(null) });
   view.focus();
 }
-function doPaste(view: EditorView): void {
-  close(view);
+export async function pasteFromClipboard(view: EditorView): Promise<void> {
   // Read BOTH text/html and text/plain (clipboard.read) so a rich link normalizes to `[text](href)`,
   // matching the native paste path. Fall back to readText (plain) if read()/permission is unavailable.
-  void (async () => {
-    let text = "", html = "";
-    try {
-      const items = await navigator.clipboard.read();
-      for (const it of items) {
-        if (it.types.includes("text/plain")) text = await (await it.getType("text/plain")).text();
-        if (it.types.includes("text/html")) html = await (await it.getType("text/html")).text();
+  let text = "", html = "";
+  try {
+    const items = await navigator.clipboard.read();
+    const images: File[] = [];
+    for (const it of items) {
+      for (const type of it.types) {
+        if (!type.startsWith("image/")) continue;
+        const blob = await it.getType(type);
+        const extension = type.slice("image/".length).replace(/[^a-z0-9.+-]/gi, "") || "image";
+        images.push(new File([blob], `pasted-image-${images.length + 1}.${extension}`, { type }));
       }
-    } catch {
-      try { text = await navigator.clipboard.readText(); } catch { /* clipboard denied */ }
+      if (it.types.includes("text/plain")) text = await (await it.getType("text/plain")).text();
+      if (it.types.includes("text/html")) html = await (await it.getType("text/html")).text();
     }
-    const sel = view.state.selection.main;
-    const md = linkifyPaste({ text, html, selectedText: view.state.sliceDoc(sel.from, sel.to) });
-    const insert = md ?? text;
-    if (insert) view.dispatch(view.state.replaceSelection(insert), { scrollIntoView: true });
-    view.focus();
-  })();
+    const upload = view.state.facet(imageUploaderFacet);
+    if (images.length > 0) {
+      if (upload) await uploadFiles(view, upload, images);
+      view.focus();
+      return;
+    }
+  } catch {
+    try { text = await navigator.clipboard.readText(); } catch { /* clipboard denied */ }
+  }
+  const sel = view.state.selection.main;
+  const md = linkifyPaste({ text, html, selectedText: view.state.sliceDoc(sel.from, sel.to) });
+  const insert = md ?? text;
+  if (insert) view.dispatch(view.state.replaceSelection(insert), { scrollIntoView: true });
+  view.focus();
+}
+function doPaste(view: EditorView): void {
+  close(view);
+  void pasteFromClipboard(view);
 }
 // Clear inline formatting from the selection: strip the common emphasis markers. A simple
 // strip (not an AST unwrap) — adequate for the bubble's layer-A set; leaves text intact.
@@ -467,6 +484,6 @@ function codeFenceLineAt(state: import("@codemirror/state").EditorState, pos: nu
   return open && posLine >= open.lineNo ? open.lineFrom : null; // unterminated fence runs to the doc end
 }
 
-export function contextMenu(opts: { selfPageId?: string } = {}): Extension {
-  return [menuField, menuEvents, selfPageIdFacet.of(opts.selfPageId)];
+export function contextMenu(opts: { selfPageId?: string; uploadImage?: ImageUploader } = {}): Extension {
+  return [menuField, menuEvents, selfPageIdFacet.of(opts.selfPageId), imageUploaderFacet.of(opts.uploadImage)];
 }
