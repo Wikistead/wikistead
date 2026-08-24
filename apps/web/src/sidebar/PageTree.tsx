@@ -32,17 +32,20 @@ export interface PageTreeNode {
 }
 
 /**
- * #736: is this row anywhere in the tree we are about to render? The scroll-to-selection effect waits
- * for the selected row to EXIST (a page created a moment ago arrives only with the refetch, #274),
- * and a presence answer is what lets it stop depending on the identity of `nodes` — which paging
- * changes on every `more:` fetch without the selection having moved at all.
+ * #736 / #899: where is this row in the tree we are about to render? The effect waits for the selected
+ * row to exist (#274), and its structural path distinguishes paging after the row (leave the reader
+ * alone) from a gap window inserted before it (re-align the row that insertion pushed off-screen).
  */
-function containsRow(nodes: PageTreeNode[], rowId: string): boolean {
-  for (const n of nodes) {
-    if (n.id === rowId) return true;
-    if (n.children?.length && containsRow(n.children, rowId)) return true;
+function rowPosition(nodes: PageTreeNode[], rowId: string, parent = ""): string | null {
+  for (const [index, node] of nodes.entries()) {
+    const position = parent ? `${parent}.${index}` : String(index);
+    if (node.id === rowId) return position;
+    if (node.children?.length) {
+      const childPosition = rowPosition(node.children, rowId, position);
+      if (childPosition !== null) return childPosition;
+    }
   }
-  return false;
+  return null;
 }
 
 // #193: measure the tree container via a CALLBACK ref, not an effect keyed on a stable ref object. The
@@ -128,20 +131,27 @@ export function PageTree({
   // to the tree scrolled back to the open page — including §1's paging, where `more:` appends into the
   // same cache entry and hands us a new array. A reader scrolling past the open page was pulled back
   // on every page they loaded. The trigger is now the event, not the identity: scroll when the
-  // SELECTION changes, or when the selected row APPEARS for the first time (which is #274's case, and
-  // is why that behaviour survives). Paging changes neither, so it no longer moves the viewport.
+  // SELECTION changes, when the selected row APPEARS for the first time (#274), or when a window fills
+  // a gap before that row and changes its structural position. Appending after the row changes none of
+  // those, so ordinary paging still leaves the reader's viewport alone.
   const treeRef = useRef<TreeApi<PageTreeNode> | null>(null);
-  const selectedRowExists = useMemo(
-    () => (selectedId ? containsRow(nodes, `page:${selectedId}`) : false),
+  const selectedRowPosition = useMemo(
+    () => (selectedId ? rowPosition(nodes, `page:${selectedId}`) : null),
     [nodes, selectedId],
   );
   // #899: the rule lives in `decideScroll`, as a pure function, because it is the rule that breaks
   // and a rule that exists only inside an effect can be measured only by rendering. What it adds to
   // #736 is a third state: a row that DISAPPEARED and came back is a fresh appearance, not the same
-  // one — which is what every navigation does to a reader who has paged (see that file's header).
+  // one. #899 also records its structural position, because filling a gap before a still-present row
+  // can push it out of the viewport without ever producing the absent state.
   const scrollMemoryRef = useRef<ScrollMemory>(NO_SCROLL_YET);
   useEffect(() => {
-    const { scroll, next } = decideScroll(scrollMemoryRef.current, selectedId, selectedRowExists);
+    const { scroll, next } = decideScroll(
+      scrollMemoryRef.current,
+      selectedId,
+      selectedRowPosition !== null,
+      selectedRowPosition,
+    );
     if (!scroll || !selectedId) {
       scrollMemoryRef.current = next;
       return;
@@ -169,7 +179,7 @@ export function PageTree({
       if (aligned && !cancelled) scrollMemoryRef.current = next;
     });
     return () => { cancelled = true; };
-  }, [selectedId, selectedRowExists]);
+  }, [selectedId, selectedRowPosition]);
 
   // Route the row action through a ref so NodeRow's identity does NOT depend on it. NodeRow is the
   // react-arborist row renderer: if its identity changes on a re-render, react-arborist REMOUNTS every row —

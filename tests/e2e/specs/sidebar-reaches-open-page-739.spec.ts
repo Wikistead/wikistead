@@ -12,7 +12,7 @@ import { API, sleep } from "../helpers";
 // Real DOM on purpose: happy-dom has no layout engine, so a virtualised tree mounts no rows there and
 // no scroll position can be read. The fixture is deliberately LARGER than PAINT_LIMIT (30), because
 // with fewer pages every row is in the first window and this spec would pass against anything.
-const PAGES = 60;
+const PAGES = 61;
 
 async function makeSpace(name: string, pages = PAGES) {
   const api = await pwRequest.newContext({ baseURL: API, extraHTTPHeaders: { Authorization: "Bearer dev-token", Host: "dev.localhost" } });

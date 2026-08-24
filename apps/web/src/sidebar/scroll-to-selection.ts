@@ -15,12 +15,17 @@
  * the flicker. And because the ref had already been stamped while the row was still there, the return
  * scrolls nothing — the row is present and off-screen, which is the report.
  *
- * So the state is three-valued rather than two: not scrolled, scrolled and the row is here, scrolled
- * and the row has GONE. Only the last one may scroll again for the same selection.
+ * So the state records both presence and structural position. A row that disappears and returns, or
+ * stays present while a gap window is inserted before it, may need alignment again. Appending after
+ * the row leaves its position unchanged and therefore preserves #736's manual-scroll guarantee.
  */
-export type ScrollMemory = { selection: string | null; rowWasPresent: boolean };
+export type ScrollMemory = {
+  selection: string | null;
+  rowWasPresent: boolean;
+  rowPosition: string | null;
+};
 
-export const NO_SCROLL_YET: ScrollMemory = { selection: null, rowWasPresent: false };
+export const NO_SCROLL_YET: ScrollMemory = { selection: null, rowWasPresent: false, rowPosition: null };
 
 export type ScrollDecision = { scroll: boolean; next: ScrollMemory };
 
@@ -54,6 +59,7 @@ export function decideScroll(
   memory: ScrollMemory,
   selectedId: string | null,
   rowExists: boolean,
+  rowPosition = rowExists ? "present" : null,
 ): ScrollDecision {
   // No selection: forget everything. The next selection is a fresh event.
   if (!selectedId) return { scroll: false, next: NO_SCROLL_YET };
@@ -61,17 +67,19 @@ export function decideScroll(
   // The row is not in the tree — a page just created, a branch still loading, or (the #899 case) a
   // window the paint has just replaced. ⚠️ Record the absence: it is what makes the row's return an
   // appearance rather than a continuation.
-  if (!rowExists) return { scroll: false, next: { selection: selectedId, rowWasPresent: false } };
+  if (!rowExists) {
+    return { scroll: false, next: { selection: selectedId, rowWasPresent: false, rowPosition: null } };
+  }
 
-  // The row is here and we have already scrolled for it WHILE it was here: this is paging, or any
-  // other change that leaves the row where it was. #736's whole point — do not move the viewport.
-  if (memory.selection === selectedId && memory.rowWasPresent) {
+  // The row is here at the position already aligned. This includes paging appended after it, so
+  // #736's whole point survives: that ordinary change must not move the reader's viewport.
+  if (memory.selection === selectedId && memory.rowWasPresent && memory.rowPosition === rowPosition) {
     return { scroll: false, next: memory };
   }
 
-  // Either the selection changed, or the row has just appeared — including reappearing after the
-  // paint dropped it. Scroll, and remember that it is here.
-  return { scroll: true, next: { selection: selectedId, rowWasPresent: true } };
+  // The selection changed, the row appeared, or an insertion before it changed its structural path.
+  // Scroll, and remember both its presence and the position that was aligned.
+  return { scroll: true, next: { selection: selectedId, rowWasPresent: true, rowPosition } };
 }
 
 /** One branch window as the sidebar caches it. Only the fields this merge reasons about. */
