@@ -56,7 +56,23 @@ export function decideScroll(
 export type BranchWindow = {
   pages: readonly { id: string }[];
   nextCursor?: string | null;
+  reachedWindow?: BranchWindow;
 };
+
+/** Keep a non-adjacent target window without pretending it follows the first window. */
+export function mergeReachedWindow<T extends BranchWindow>(existing: T | undefined, reached: T): T & { reachedWindow?: T } {
+  if (!existing) return reached as T & { reachedWindow?: T };
+  const held = new Set(existing.pages.map((page) => page.id));
+  if (reached.pages.every((page) => held.has(page.id))) return existing as T & { reachedWindow?: T };
+  return { ...existing, reachedWindow: reached };
+}
+
+/** Rows held by a branch, with a reached window de-duplicated behind the primary run. */
+export function visibleBranchPages<T extends BranchWindow>(branch: T): T["pages"] {
+  if (!branch.reachedWindow) return branch.pages;
+  const held = new Set(branch.pages.map((page) => page.id));
+  return [...branch.pages, ...branch.reachedWindow.pages.filter((page) => !held.has(page.id))] as T["pages"];
+}
 
 /**
  * #899: fold a freshly painted FIRST window into whatever the reader has already loaded.
@@ -75,12 +91,15 @@ export type BranchWindow = {
  * are not adjacent as if they were.
  */
 export function mergePaintedWindow<T extends BranchWindow>(existing: T | undefined, fresh: T): T {
-  if (!existing || existing.pages.length <= fresh.pages.length) return fresh;
+  if (!existing) return fresh;
   // ⚠️ A fresh window with no cursor covers the WHOLE branch, so there is no tail to keep — and
   // keeping one would resurrect rows the branch no longer has. Measured while writing the pin: a
   // deleted row came back through the join, because the join asks where the fresh window ENDS and a
   // shortened window ends earlier.
   if (fresh.nextCursor == null) return fresh;
+  if (existing.pages.length <= fresh.pages.length) {
+    return { ...fresh, reachedWindow: existing.reachedWindow } as T;
+  }
   const last = fresh.pages[fresh.pages.length - 1];
   if (!last) return fresh;
   const at = existing.pages.findIndex((p) => p.id === last.id);
@@ -91,5 +110,10 @@ export function mergePaintedWindow<T extends BranchWindow>(existing: T | undefin
   if (tail.length === 0) return fresh;
   // ⚠️ The cursor comes from the EXISTING entry: it points past the tail we are keeping, while the
   // fresh one points just past the first window and would re-fetch rows already on screen.
-  return { ...fresh, pages: [...fresh.pages, ...tail], nextCursor: existing.nextCursor } as T;
+  return {
+    ...fresh,
+    pages: [...fresh.pages, ...tail],
+    nextCursor: existing.nextCursor,
+    reachedWindow: existing.reachedWindow,
+  } as T;
 }

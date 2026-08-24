@@ -72,6 +72,13 @@ test("#739: opening a link to a page past the first window shows its row, in vie
   })()`);
   expect(inside, "the row is in the scroller's box, not just mounted below it").toBe(true);
 
+  // #899 review rejection: on a fresh reload, reach used to REPLACE the first window with the deep
+  // target window. The selected row looked correct, so the assertion above passed, but scrolling to
+  // the top revealed that Page 000 and the entire branch head had vanished until another navigation.
+  await page.evaluate(`(() => { const box = ${SCROLLER}; if (box) box.scrollTop = 0 })()`);
+  await expect(page.getByText("Page 000", { exact: true }), "the first window survives deep-page reach on reload")
+    .toBeVisible();
+
   // The bound. One path request, and one branch request per level — never a walk down the branch.
   expect(pathCalls.length, `path requests: ${pathCalls.length}`).toBeLessThanOrEqual(1);
   expect(branchCalls.length, `branch requests: ${branchCalls.length} — a loop over \`more:\` would be far more`)

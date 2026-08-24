@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
-import { mergePaintedWindow } from "./scroll-to-selection"; // #899
+import { mergePaintedWindow, mergeReachedWindow, visibleBranchPages } from "./scroll-to-selection"; // #899
 import { apiFetch } from "../data/apiClient";
 import type { Page } from "../data/queries";
 import { useSession } from "../session/SessionProvider";
@@ -22,6 +22,7 @@ import type { PageTreeNode } from "./PageTree";
 export interface BranchAnswer {
   pages: Page[];
   nextCursor: string | null;
+  reachedWindow?: BranchAnswer;
   restarted?: boolean;
   placeholders?: { token: string; under: string | null; parentToken: string | null; pages: Page[] }[];
   placeholdersExhausted?: boolean;
@@ -114,7 +115,11 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       queryFn: async (): Promise<BranchAnswer> => {
         const qs = parentId ? `?parent=${encodeURIComponent(parentId)}` : "";
         const r = await apiFetch<BranchAnswer>(`/spaces/${spaceId}/pages/branch${qs}`, token);
-        return r ?? { pages: [], nextCursor: null };
+        const fresh = r ?? { pages: [], nextCursor: null };
+        return mergePaintedWindow(
+          qc.getQueryData<BranchAnswer>(branchKey(spaceId!, parentId)),
+          fresh,
+        );
       },
     })),
   });
@@ -151,6 +156,7 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       ...r,
       pages: [...(have.pages ?? []), ...r.pages],
       placeholders: r.placeholders ?? have.placeholders,
+      reachedWindow: have.reachedWindow,
     });
   }, [spaceId, token, qc]);
 
@@ -173,7 +179,8 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
     if (reachedFor.current === openPageId) return;
     // Wait for the paint. Acting before it lands would ask for a path the paint is about to deliver.
     if (!paint.data) return;
-    const held = [...byParent.values()].some((b) => b.pages.some((p) => p.id === openPageId));
+    const held = [...byParent.values()].some((branch) =>
+      visibleBranchPages(branch).some((page) => page.id === openPageId));
     reachedFor.current = openPageId;
     if (held) return;
     const wantedFor = openPageId;
@@ -192,9 +199,12 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
         qs.set("cursor", level.cursor);
         qs.set("limit", String(PAINT_LIMIT));
         const b = await apiFetch<BranchAnswer>(`/spaces/${spaceId}/pages/branch?${qs}`, token);
-        // REPLACE rather than append: this window is somewhere else in the branch entirely, and
-        // concatenating it onto the first one would draw the two runs as if they were adjacent.
-        if (b) qc.setQueryData(branchKey(spaceId, level.parentId), b);
+        // This window is somewhere else in the branch entirely. Keep it as a separate reached window:
+        // replacing loses the first window on reload, while concatenating lies that the runs are adjacent.
+        if (b) {
+          const key = branchKey(spaceId, level.parentId);
+          qc.setQueryData(key, mergeReachedWindow(qc.getQueryData<BranchAnswer>(key), b));
+        }
       }
       // Ruling ③: expand the chain even where the reader had collapsed it — they asked for this page by
       // opening it. Done after the fetches so each key already holds its window when the query mounts.
@@ -301,6 +311,10 @@ export function buildLazyNodes(args: {
         published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
       });
     }
+    const primary = new Set(branch.pages.map((page) => page.id));
+    rows.push(...visibleBranchPages(branch)
+      .filter((page) => !primary.has(page.id))
+      .map(pageNode));
     return rows;
   };
 

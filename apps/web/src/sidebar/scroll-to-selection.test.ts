@@ -6,7 +6,7 @@
 // were told apart by a fact that is not stable: "have we scrolled for this selection", which cannot
 // see a row that left and came back.
 import { describe, it, expect } from 'vitest'
-import { decideScroll, mergePaintedWindow, NO_SCROLL_YET, type ScrollMemory } from './scroll-to-selection'
+import { decideScroll, mergePaintedWindow, mergeReachedWindow, visibleBranchPages, NO_SCROLL_YET, type ScrollMemory } from './scroll-to-selection'
 
 /** Drive a sequence and return which steps scrolled — the shape all three tickets are about. */
 const run = (steps: readonly { id: string | null; here: boolean }[]): boolean[] => {
@@ -124,5 +124,34 @@ describe('#899 a repaint keeps what the reader loaded past its window', () => {
     // reader's, and the rows between are the ones the fresh window is authoritative about.
     const out = mergePaintedWindow(w(['a', 'b', 'c', 'd', 'e'], 'cur-e'), w(['a', 'b'], 'cur-b'))
     expect(out.pages.map((p) => p.id)).toEqual(['a', 'b', 'c', 'd', 'e'])
+  })
+})
+
+describe('#899 reload keeps the first and reached windows distinct', () => {
+  const w = (ids: string[], cursor: string | null = null) => ({ pages: ids.map((id) => ({ id })), nextCursor: cursor })
+
+  it('keeps the first window and its paging cursor when reach finds a distant target', () => {
+    const painted = mergePaintedWindow(undefined, w(['a', 'b', 'c'], 'after-c'))
+    const reached = mergeReachedWindow(painted, w(['x', 'selected', 'z'], 'after-z'))
+
+    expect(visibleBranchPages(reached).map((page) => page.id)).toEqual(['a', 'b', 'c', 'x', 'selected', 'z'])
+    expect(reached.nextCursor, 'paging must still fill the gap after the first window').toBe('after-c')
+    expect(reached.reachedWindow?.nextCursor).toBe('after-z')
+  })
+
+  it('de-duplicates a reached window as ordinary paging catches up to it', () => {
+    const reached = mergeReachedWindow(w(['a', 'b', 'c', 'x'], 'after-x'), w(['x', 'selected', 'z'], 'after-z'))
+    expect(visibleBranchPages(reached).map((page) => page.id)).toEqual(['a', 'b', 'c', 'x', 'selected', 'z'])
+  })
+
+  it('keeps the reached window when the first window repaints', () => {
+    const reached = mergeReachedWindow(w(['a', 'b', 'c'], 'after-c'), w(['x', 'selected', 'z'], 'after-z'))
+    const repainted = mergePaintedWindow(reached, w(['a', 'b', 'c'], 'after-c'))
+    expect(visibleBranchPages(repainted).map((page) => page.id)).toEqual(['a', 'b', 'c', 'x', 'selected', 'z'])
+  })
+
+  it('does not add a reached window when the selected page is already held', () => {
+    const first = w(['a', 'selected', 'c'], 'after-c')
+    expect(mergeReachedWindow(first, w(['selected'], 'after-selected'))).toBe(first)
   })
 })
