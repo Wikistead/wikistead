@@ -60,6 +60,7 @@ export function decideScroll(
   selectedId: string | null,
   rowExists: boolean,
   rowPosition = rowExists ? "present" : null,
+  realignMovedRow = true,
 ): ScrollDecision {
   // No selection: forget everything. The next selection is a fresh event.
   if (!selectedId) return { scroll: false, next: NO_SCROLL_YET };
@@ -75,6 +76,9 @@ export function decideScroll(
   // #736's whole point survives: that ordinary change must not move the reader's viewport.
   if (memory.selection === selectedId && memory.rowWasPresent && memory.rowPosition === rowPosition) {
     return { scroll: false, next: memory };
+  }
+  if (memory.selection === selectedId && memory.rowWasPresent && !realignMovedRow) {
+    return { scroll: false, next: { ...memory, rowPosition } };
   }
 
   // The selection changed, the row appeared, or an insertion before it changed its structural path.

@@ -145,12 +145,19 @@ export function PageTree({
   // one. #899 also records its structural position, because filling a gap before a still-present row
   // can push it out of the viewport without ever producing the absent state.
   const scrollMemoryRef = useRef<ScrollMemory>(NO_SCROLL_YET);
+  const readerMovedRef = useRef(false);
+  const previousSelectionRef = useRef(selectedId);
+  if (previousSelectionRef.current !== selectedId) {
+    previousSelectionRef.current = selectedId;
+    readerMovedRef.current = false;
+  }
   useEffect(() => {
     const { scroll, next } = decideScroll(
       scrollMemoryRef.current,
       selectedId,
       selectedRowPosition !== null,
       selectedRowPosition,
+      !readerMovedRef.current,
     );
     if (!scroll || !selectedId) {
       scrollMemoryRef.current = next;
@@ -392,7 +399,20 @@ export function PageTree({
     // drag preview clones a row into a position:fixed FULL-WIDTH overlay (still inside this DOM subtree, so the
     // var cascades) where the row's `w-full` would otherwise stretch to the viewport — a selected row (its menu
     // force-expanded) then produced a viewport-wide ghost. Capping to --tree-w keeps the preview sidebar-width.
-    <div ref={attachTreeBox} className="min-h-0 min-w-0 flex-1 overflow-y-auto" data-testid="page-tree" style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}>
+    <div
+      ref={attachTreeBox}
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto"
+      data-testid="page-tree"
+      style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}
+      onWheelCapture={() => { readerMovedRef.current = true; }}
+      onTouchMoveCapture={() => { readerMovedRef.current = true; }}
+      onPointerDownCapture={() => { readerMovedRef.current = true; }}
+      onKeyDownCapture={(event) => {
+        if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)) {
+          readerMovedRef.current = true;
+        }
+      }}
+    >
       <Tree<PageTreeNode>
         ref={treeRef}
         className="!overflow-x-hidden"

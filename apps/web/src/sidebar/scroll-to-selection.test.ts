@@ -55,6 +55,18 @@ describe('#899 the sidebar scrolls to the open row', () => {
     expect([first.scroll, appendedAfter.scroll]).toEqual([true, false])
   })
 
+  it('keeps the reader put when their own scroll precedes a window insertion', () => {
+    const aligned = decideScroll(NO_SCROLL_YET, 'p1', true, '31').next
+    const moved = decideScroll(aligned, 'p1', true, '61', false)
+    expect(moved.scroll).toBe(false)
+    expect(moved.next.rowPosition).toBe('61')
+  })
+
+  it('still aligns an inserted window before the reader moves', () => {
+    const aligned = decideScroll(NO_SCROLL_YET, 'p1', true, '31').next
+    expect(decideScroll(aligned, 'p1', true, '61', true).scroll).toBe(true)
+  })
+
   it('⚠️ #899: a row that disappears and returns is scrolled to again', () => {
     // THE REPORTED CASE. Reader has scrolled three windows down and clicks a row there. Opening it
     // changes the paint's query key, the paint reseeds that branch with its FIRST window, and the row
