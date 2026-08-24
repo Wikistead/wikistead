@@ -69,19 +69,41 @@ function useSize() {
 }
 
 /**
- * #623 §1: the branch's next page arrives by SCROLLING — this row asks for it when it becomes
- * visible. In a virtualised tree, being RENDERED is being scrolled to: react-arborist only mounts
- * rows inside the viewport, so a mount effect is the "scrolled into view" signal without an observer.
+ * #623 §1 / #745: the branch's next page arrives by scrolling. Virtualisation also renders rows near
+ * a programmatically aligned selection, so visibility alone is not proof of reader intent. Wait for
+ * interaction with this selection before treating a mounted sentinel as a paging request.
  */
-function MoreRow({ onVisible }: { onVisible: () => void }) {
+function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => void }) {
   const asked = useRef(false);
+  const rowRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (asked.current) return;
-    asked.current = true;
-    onVisible();
+    const ask = () => {
+      if (asked.current) return;
+      asked.current = true;
+      onVisible();
+    };
+    if (enabled) {
+      ask();
+      return;
+    }
+    const host = rowRef.current?.closest<HTMLElement>("[data-testid=page-tree]");
+    if (!host) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)) ask();
+    };
+    host.addEventListener("wheel", ask, { capture: true });
+    host.addEventListener("touchmove", ask, { capture: true });
+    host.addEventListener("pointerdown", ask, { capture: true });
+    host.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => {
+      host.removeEventListener("wheel", ask, { capture: true });
+      host.removeEventListener("touchmove", ask, { capture: true });
+      host.removeEventListener("pointerdown", ask, { capture: true });
+      host.removeEventListener("keydown", onKeyDown, { capture: true });
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return <div className="flex h-full items-center px-3 text-fg-dim" data-testid="tree-branch-more"><MoreHorizontal size={13} /></div>;
+  }, [enabled]);
+  return <div ref={rowRef} className="flex h-full items-center px-3 text-fg-dim" data-testid="tree-branch-more"><MoreHorizontal size={13} /></div>;
 }
 
 export function PageTree({
@@ -146,6 +168,8 @@ export function PageTree({
   // can push it out of the viewport without ever producing the absent state.
   const scrollMemoryRef = useRef<ScrollMemory>(NO_SCROLL_YET);
   const readerMovedRef = useRef(false);
+  const [pagingInteractionFor, setPagingInteractionFor] = useState<string | null>(null);
+  const pagingEnabled = pagingInteractionFor === selectedId;
   const previousSelectionRef = useRef(selectedId);
   if (previousSelectionRef.current !== selectedId) {
     previousSelectionRef.current = selectedId;
@@ -203,6 +227,10 @@ export function PageTree({
   onLoadMoreRef.current = onLoadMore;
   const onToggleBranchRef = useRef(onToggleBranch);
   onToggleBranchRef.current = onToggleBranch;
+  const markReaderInteraction = useCallback(() => {
+    readerMovedRef.current = true;
+    setPagingInteractionFor(selectedId);
+  }, [selectedId]);
 
   const NodeRow = useCallback(({ node, style, dragHandle }: NodeRendererProps<PageTreeNode>) => {
     const d = node.data;
@@ -219,7 +247,11 @@ export function PageTree({
       // never contain a colon, so the first segment is the parent.
       const parentId = d.id.slice(MORE_PREFIX.length).split(":")[0]!;
       return (
-        <MoreRow key={d.id} onVisible={() => onLoadMoreRef.current?.(parentId === "root" ? null : parentId)} />
+        <MoreRow
+          key={d.id}
+          enabled={pagingEnabled}
+          onVisible={() => onLoadMoreRef.current?.(parentId === "root" ? null : parentId)}
+        />
       );
     }
     if (d.id.startsWith(PLACEHOLDER_PREFIX)) {
@@ -392,7 +424,7 @@ export function PageTree({
        </div>
       </div>
     );
-  }, [selectedId, canEdit, t, onOpen, deleteMode]);
+  }, [selectedId, canEdit, t, onOpen, deleteMode, pagingEnabled]);
 
   return (
     // #398: expose the measured tree width as a CSS var so a row can cap its width to it. react-arborist's
@@ -404,12 +436,12 @@ export function PageTree({
       className="min-h-0 min-w-0 flex-1 overflow-y-auto"
       data-testid="page-tree"
       style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}
-      onWheelCapture={() => { readerMovedRef.current = true; }}
-      onTouchMoveCapture={() => { readerMovedRef.current = true; }}
-      onPointerDownCapture={() => { readerMovedRef.current = true; }}
+      onWheelCapture={markReaderInteraction}
+      onTouchMoveCapture={markReaderInteraction}
+      onPointerDownCapture={markReaderInteraction}
       onKeyDownCapture={(event) => {
         if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)) {
-          readerMovedRef.current = true;
+          markReaderInteraction();
         }
       }}
     >

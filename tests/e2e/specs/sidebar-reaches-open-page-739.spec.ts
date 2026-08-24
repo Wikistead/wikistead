@@ -105,6 +105,7 @@ test("#745: upward reading is not pulled back when the gap window lands", async 
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   let cursorRequests = 0;
+  let holdReaderRequest = false;
   let releaseGap!: () => void;
   let announceGap!: () => void;
   const gapStarted = new Promise<void>((resolve) => { announceGap = resolve; });
@@ -113,7 +114,8 @@ test("#745: upward reading is not pulled back when the gap window lands", async 
     const cursor = new URL(route.request().url()).searchParams.get("cursor");
     if (!cursor) return route.continue();
     cursorRequests += 1;
-    if (cursorRequests === 2) {
+    if (holdReaderRequest) {
+      holdReaderRequest = false;
       announceGap();
       await gapReleased;
     }
@@ -126,7 +128,10 @@ test("#745: upward reading is not pulled back when the gap window lands", async 
 
   const selected = page.locator("[data-testid=sidebar] [data-testid=tree-page][data-selected]");
   await expect(selected).toBeVisible({ timeout: 20_000 });
-  await gapStarted;
+  const positionedRequests = cursorRequests;
+  await sleep(1_500);
+  expect(cursorRequests, "an untouched reload does not page through the gap beside the selected row")
+    .toBe(positionedRequests);
   const scrollerRect = await page.evaluate(`(() => {
     const box = ${SCROLLER};
     if (!box) return null;
@@ -134,8 +139,10 @@ test("#745: upward reading is not pulled back when the gap window lands", async 
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   })()`);
   expect(scrollerRect, "the virtual tree scroller exists").toBeTruthy();
+  holdReaderRequest = true;
   await page.mouse.move(scrollerRect!.x + scrollerRect!.width / 2, scrollerRect!.y + scrollerRect!.height / 2);
   await page.mouse.wheel(0, -500);
+  await gapStarted;
   await sleep(150);
   const readerTop = await page.evaluate(`(() => ${SCROLLER}?.scrollTop ?? null)()`);
   expect(readerTop, "the real wheel moved the reader upward").not.toBeNull();
