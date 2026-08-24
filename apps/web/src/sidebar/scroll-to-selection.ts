@@ -24,6 +24,28 @@ export const NO_SCROLL_YET: ScrollMemory = { selection: null, rowWasPresent: fal
 
 export type ScrollDecision = { scroll: boolean; next: ScrollMemory };
 
+export type SelectionAlignment = {
+  scroll: () => void | Promise<void>;
+  afterLayout: () => Promise<void>;
+  isVisible: () => boolean;
+  isCancelled?: () => boolean;
+};
+
+/** Retry across tree reconstruction; a scroll request is not evidence that its row became visible. */
+export async function alignSelectedRow(
+  alignment: SelectionAlignment,
+  attempts = 4,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (alignment.isCancelled?.()) return false;
+    await alignment.scroll();
+    await alignment.afterLayout();
+    if (alignment.isCancelled?.()) return false;
+    if (alignment.isVisible()) return true;
+  }
+  return false;
+}
+
 /**
  * ⚠️ Pure, and deliberately so. The rule is what breaks here, and a rule that only exists inside an
  * effect can be measured only by rendering — which is how this one went four months without a pin.

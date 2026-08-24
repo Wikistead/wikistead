@@ -7,7 +7,7 @@ import { ChevronRight, Copy, FilePen, FilePlus, FileText, Loader2, Lock, MoreHor
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
 import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX } from "./lazy-tree"; // #623 §6.3
-import { decideScroll, NO_SCROLL_YET, type ScrollMemory } from "./scroll-to-selection"; // #899
+import { alignSelectedRow, decideScroll, NO_SCROLL_YET, type ScrollMemory } from "./scroll-to-selection"; // #899
 
 // The presentational page-tree — the ONE react-arborist tree + row renderer shared by every surface that
 // shows a space's page hierarchy: the member `Sidebar`, and (read-only) the anonymous public reader-chrome
@@ -117,6 +117,11 @@ export function PageTree({
 }) {
   const { t } = useTranslation();
   const { ref: treeBox, size } = useSize();
+  const treeHostRef = useRef<HTMLDivElement | null>(null);
+  const attachTreeBox = useCallback((el: HTMLDivElement | null) => {
+    treeHostRef.current = el;
+    treeBox(el);
+  }, [treeBox]);
   // #274 (3): keep the ACTIVE row visible — after creating a page the app navigates to it, but
   // in a long (virtualized) tree the new row only exists after the refetch, so the scroll has to wait
   // for it to appear. #736: that used to be spelled `nodes` in the dep list, which meant EVERY change
@@ -137,8 +142,33 @@ export function PageTree({
   const scrollMemoryRef = useRef<ScrollMemory>(NO_SCROLL_YET);
   useEffect(() => {
     const { scroll, next } = decideScroll(scrollMemoryRef.current, selectedId, selectedRowExists);
-    scrollMemoryRef.current = next;
-    if (scroll && selectedId) treeRef.current?.scrollTo(`page:${selectedId}`);
+    if (!scroll || !selectedId) {
+      scrollMemoryRef.current = next;
+      return;
+    }
+    let cancelled = false;
+    const afterLayout = () => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    void alignSelectedRow({
+      scroll: async () => { await treeRef.current?.scrollTo(`page:${selectedId}`, "center"); },
+      afterLayout,
+      isCancelled: () => cancelled,
+      isVisible: () => {
+        const row = treeHostRef.current?.querySelector<HTMLElement>("[data-testid=tree-page][data-selected]");
+        if (!row) return false;
+        let scroller: HTMLElement | null = row.parentElement;
+        while (scroller && scroller !== treeHostRef.current && scroller.scrollHeight <= scroller.clientHeight + 4) {
+          scroller = scroller.parentElement;
+        }
+        const rowRect = row.getBoundingClientRect();
+        const boxRect = (scroller ?? treeHostRef.current)?.getBoundingClientRect();
+        return !!boxRect && rowRect.top >= boxRect.top - 1 && rowRect.bottom <= boxRect.bottom + 1;
+      },
+    }).then((aligned) => {
+      if (aligned && !cancelled) scrollMemoryRef.current = next;
+    });
+    return () => { cancelled = true; };
   }, [selectedId, selectedRowExists]);
 
   // Route the row action through a ref so NodeRow's identity does NOT depend on it. NodeRow is the
@@ -352,7 +382,7 @@ export function PageTree({
     // drag preview clones a row into a position:fixed FULL-WIDTH overlay (still inside this DOM subtree, so the
     // var cascades) where the row's `w-full` would otherwise stretch to the viewport — a selected row (its menu
     // force-expanded) then produced a viewport-wide ghost. Capping to --tree-w keeps the preview sidebar-width.
-    <div ref={treeBox} className="min-h-0 min-w-0 flex-1 overflow-y-auto" data-testid="page-tree" style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}>
+    <div ref={attachTreeBox} className="min-h-0 min-w-0 flex-1 overflow-y-auto" data-testid="page-tree" style={{ "--tree-w": `${size.width || 260}px` } as React.CSSProperties}>
       <Tree<PageTreeNode>
         ref={treeRef}
         className="!overflow-x-hidden"

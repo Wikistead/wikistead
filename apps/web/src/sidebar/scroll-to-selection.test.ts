@@ -6,7 +6,7 @@
 // were told apart by a fact that is not stable: "have we scrolled for this selection", which cannot
 // see a row that left and came back.
 import { describe, it, expect } from 'vitest'
-import { decideScroll, mergePaintedWindow, mergeReachedWindow, visibleBranchPages, NO_SCROLL_YET, type ScrollMemory } from './scroll-to-selection'
+import { alignSelectedRow, decideScroll, mergePaintedWindow, mergeReachedWindow, visibleBranchPages, NO_SCROLL_YET, type ScrollMemory } from './scroll-to-selection'
 
 /** Drive a sequence and return which steps scrolled — the shape all three tickets are about. */
 const run = (steps: readonly { id: string | null; here: boolean }[]): boolean[] => {
@@ -75,6 +75,31 @@ describe('#899 the sidebar scrolls to the open row', () => {
       { id: null, here: false },
       { id: 'p1', here: true },
     ])).toEqual([true, false, true])
+  })
+})
+
+describe('#899 alignment finishes only when the selected row is visible', () => {
+  it('retries after a tree rebuild ignores the first scroll request', async () => {
+    let scrolls = 0
+    let layouts = 0
+    const aligned = await alignSelectedRow({
+      scroll: () => { scrolls += 1 },
+      afterLayout: async () => { layouts += 1 },
+      isVisible: () => layouts >= 2,
+    })
+    expect(aligned).toBe(true)
+    expect(scrolls).toBe(2)
+  })
+
+  it('stops at the bound when no rendered row can confirm the request', async () => {
+    let scrolls = 0
+    const aligned = await alignSelectedRow({
+      scroll: () => { scrolls += 1 },
+      afterLayout: async () => {},
+      isVisible: () => false,
+    }, 3)
+    expect(aligned).toBe(false)
+    expect(scrolls).toBe(3)
   })
 })
 

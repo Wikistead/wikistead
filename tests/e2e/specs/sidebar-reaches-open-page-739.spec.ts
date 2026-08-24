@@ -72,6 +72,18 @@ test("#739: opening a link to a page past the first window shows its row, in vie
   })()`);
   expect(inside, "the row is in the scroller's box, not just mounted below it").toBe(true);
 
+  // #899 second review rejection: the tree can rebuild again after accepting the first scroll. The
+  // selected row must remain aligned once those asynchronous layout passes have settled.
+  await sleep(1_500);
+  const settledInside = await page.evaluate(`(() => {
+    const el = document.querySelector("[data-testid=sidebar] [data-testid=tree-page][data-selected]");
+    const box = ${SCROLLER};
+    if (!el || !box) return null;
+    const a = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+    return a.top >= b.top - 1 && a.bottom <= b.bottom + 1;
+  })()`);
+  expect(settledInside, "the selected row stays aligned after tree layout settles").toBe(true);
+
   // #899 review rejection: on a fresh reload, reach used to REPLACE the first window with the deep
   // target window. The selected row looked correct, so the assertion above passed, but scrolling to
   // the top revealed that Page 000 and the entire branch head had vanished until another navigation.
