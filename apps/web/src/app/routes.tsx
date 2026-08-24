@@ -2058,7 +2058,7 @@ function PublicSpaceSidebar({ tree, home, openId, onOpen }: { tree: ReturnType<t
       )}
       <PageTree nodes={treeNodes} selectedId={openId} onOpen={onOpen}
         onToggleBranch={(id, open) => (open ? tree.expand(id) : tree.collapse(id))}
-        onLoadMore={(parentId) => void tree.loadMore(parentId)} />
+        onLoadMore={(parentId) => tree.loadMore(parentId)} />
     </div>
   );
 }

@@ -132,6 +132,8 @@ test("#745: upward reading is not pulled back when the gap window lands", async 
   await sleep(1_500);
   expect(cursorRequests, "an untouched reload does not page through the gap beside the selected row")
     .toBe(positionedRequests);
+  await expect(page.getByRole("button", { name: "Load more pages" }), "the gap is an honest action, not an ellipsis icon")
+    .toBeVisible();
   const scrollerRect = await page.evaluate(`(() => {
     const box = ${SCROLLER};
     if (!box) return null;
@@ -143,6 +145,9 @@ test("#745: upward reading is not pulled back when the gap window lands", async 
   await page.mouse.move(scrollerRect!.x + scrollerRect!.width / 2, scrollerRect!.y + scrollerRect!.height / 2);
   await page.mouse.wheel(0, -500);
   await gapStarted;
+  await expect(page.locator("[data-testid=tree-branch-more][data-loading=true] [role=status]"), "loading occupies the future page row")
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Load more pages" })).toHaveCount(0);
   await sleep(150);
   const readerTop = await page.evaluate(`(() => ${SCROLLER}?.scrollTop ?? null)()`);
   expect(readerTop, "the real wheel moved the reader upward").not.toBeNull();

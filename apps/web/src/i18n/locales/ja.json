@@ -896,6 +896,7 @@
     "noSpace": "スペースなし",
     "untitledSpace": "無題のスペース",
     "loadFailed": "読み込みに失敗しました。",
+    "loadMorePages": "さらにページを読み込む",
     "placeholderPage": "（表示できないページ）",
     "retry": "再試行",
     "noSpaces": "スペースがまだありません。上から作成してください。",

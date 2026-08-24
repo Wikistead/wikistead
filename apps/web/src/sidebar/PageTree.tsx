@@ -3,7 +3,7 @@ import { SELECTED_ROW } from "../ui/selected-row"; // #632: shared with the sett
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { ChevronRight, Copy, FilePen, FilePlus, FileText, Loader2, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
 import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX } from "./lazy-tree"; // #623 §6.3
@@ -73,15 +73,33 @@ function useSize() {
  * a programmatically aligned selection, so visibility alone is not proof of reader intent. Wait for
  * interaction with this selection before treating a mounted sentinel as a paging request.
  */
-function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => void }) {
+function TreeLoadingRow() {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex h-full items-center gap-2 px-3"
+      data-testid="tree-branch-loading"
+      role="status"
+      aria-label={t("common.loading")}
+    >
+      <span className="size-3.5 flex-none animate-pulse rounded-sm bg-border motion-reduce:animate-none" />
+      <span className="h-2.5 w-2/3 animate-pulse rounded-full bg-border motion-reduce:animate-none" />
+    </div>
+  );
+}
+
+function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => void | Promise<void> }) {
+  const { t } = useTranslation();
   const asked = useRef(false);
   const rowRef = useRef<HTMLDivElement | null>(null);
+  const [loading, setLoading] = useState(false);
+  const ask = useCallback(() => {
+    if (asked.current) return;
+    asked.current = true;
+    setLoading(true);
+    void Promise.resolve(onVisible()).finally(() => setLoading(false));
+  }, [onVisible]);
   useEffect(() => {
-    const ask = () => {
-      if (asked.current) return;
-      asked.current = true;
-      onVisible();
-    };
     if (enabled) {
       ask();
       return;
@@ -101,9 +119,22 @@ function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => vo
       host.removeEventListener("pointerdown", ask, { capture: true });
       host.removeEventListener("keydown", onKeyDown, { capture: true });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
-  return <div ref={rowRef} className="flex h-full items-center px-3 text-fg-dim" data-testid="tree-branch-more"><MoreHorizontal size={13} /></div>;
+  }, [enabled, ask]);
+  return (
+    <div ref={rowRef} className="h-full" data-testid="tree-branch-more" data-loading={loading || undefined}>
+      {loading ? (
+        <TreeLoadingRow />
+      ) : (
+        <button
+          type="button"
+          className="flex h-full w-full cursor-pointer items-center px-3 text-left text-xs text-fg-dim hover:text-foreground"
+          onClick={ask}
+        >
+          {t("sidebar.loadMorePages")}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function PageTree({
@@ -136,7 +167,7 @@ export function PageTree({
   // sentinel child (`unloaded:`) is what made the chevron draw before anything was fetched.
   onToggleBranch?: (pageId: string, open: boolean) => void;
   /** §1: the `more:` row asks for the branch's next page when it scrolls into view. */
-  onLoadMore?: (parentId: string | null) => void;
+  onLoadMore?: (parentId: string | null) => void | Promise<void>;
   onMove?: (args: { dragIds: string[]; parentId: string | null; index: number }) => void;
   disableDrop?: (args: { parentNode: NodeApi<PageTreeNode> | null; dragNodes: NodeApi<PageTreeNode>[] }) => boolean;
 }) {
@@ -239,7 +270,7 @@ export function PageTree({
     if (d.id.startsWith(UNLOADED_CHILD_PREFIX)) {
       // The instant between expanding a row and its branch arriving. Exists mostly unseen: the parent
       // draws its chevron because of this child, and the fetch replaces it on the next render.
-      return <div className="flex h-full items-center px-3 text-fg-dim" data-testid="tree-branch-loading"><Loader2 size={13} className="animate-spin" /></div>;
+      return <TreeLoadingRow />;
     }
     if (d.id.startsWith(MORE_PREFIX)) {
       // `more:<parent>:<cursor>` — the cursor is part of the IDENTITY (a fixed id survived the

@@ -436,7 +436,7 @@ function SidebarImpl() {
           disableDrop={disableDrop}
           deleteMode={currentSpace?.deleteMode ?? "trash_only"}
           onToggleBranch={(id, open) => (open ? lazyTree.expand(id) : lazyTree.collapse(id))}
-          onLoadMore={(parentId) => void lazyTree.loadMore(parentId)}
+          onLoadMore={(parentId) => lazyTree.loadMore(parentId)}
         />
       )}
 
