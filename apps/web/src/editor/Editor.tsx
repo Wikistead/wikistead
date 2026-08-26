@@ -581,7 +581,11 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       openLinkPrompt, // #611
       tagSuggest, // #413
       openTagPrompt, // #413
-      openTemplateInsertPicker,
+      // #916: the seam's PRESENCE gates the palette command (#251) — always handing it over regardless
+      // of guestSurface un-gated a member-only surface (ADR-110: templates have no `config.guest`, so
+      // the fetch a guest's pick triggers 403s and the picker opens on nothing). Withhold it for guests
+      // exactly like the member-only sources above (memberPageId) do.
+      openTemplateInsertPicker: guestSurface ? undefined : openTemplateInsertPicker,
       uploadImage: onUploadImage,
       vim,
       vimCompartment,
