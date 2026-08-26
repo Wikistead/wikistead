@@ -6,7 +6,7 @@ import {
 } from '../auth/factor-policy.js' // #652 / ADR-219 §4, #676 / ADR-222
 import { samlEntitled } from '../auth/saml-entitlement.js'
 import { emit } from '@wikistead/events'
-import { loginMethodCeiling, setPlatformLoginDisabled, anAdminHoldsAKey } from '../auth/login-methods.js' // #836 / ADR-251: the SSO precondition asks the SAME question the doors ask
+import { loginMethodCeiling, setPlatformLoginDisabled, anAdminHoldsAKey, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #836 / ADR-251: the SSO precondition asks the SAME question the doors ask
 import { federatedWayInCount, resolveSsoStance } from '../auth/sso-stance.js'
 import { auditIfEntitled } from '../audit/sink.js'
 import { destroyUnsatisfiedSessions, countSweptSessions } from '../auth/session.js' // #652 / ADR-219 §2, #679
@@ -286,7 +286,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         const [pref] = await req.db.sql<{ local_login_enabled: boolean }[]>`SELECT local_login_enabled FROM tenant_login_prefs LIMIT 1`
         if (!exemptAdmin || !pref?.local_login_enabled) {
           throw Object.assign(
-            new Error('name at least one exempt ADMINISTRATOR who holds a password (and keep password sign-in selected) before requiring SSO — they are the way back in, and the one who can fix things, when the IdP is down.'),
+            new Error(SSO_FLOOR_REFUSAL.needAnExemptAdmin),
             { statusCode: 409, code: 'sso_exemption_required' },
           )
         }
@@ -334,7 +334,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         const [pref] = await req.db.sql<{ sso_required: boolean }[]>`SELECT sso_required FROM tenant_login_prefs LIMIT 1`
         if (pref?.sso_required) {
           throw Object.assign(
-            new Error('SSO is required for this workspace, and an exempt member holding a password is what makes that safe. Turn the SSO requirement off before deselecting passwords.'),
+            new Error(SSO_FLOOR_REFUSAL.passwordsAreWhatMakesItSafe),
             { statusCode: 409, code: 'sso_exemption_required' },
           )
         }
@@ -447,7 +447,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
         SELECT member_sub FROM sso_exemptions WHERE member_sub = ${req.params.sub}`
       if (self && !otherAdmin) {
         throw Object.assign(
-          new Error('this is the last exempt ADMINISTRATOR holding a password — exempt another administrator who has one, or turn the SSO requirement off.'),
+          new Error(SSO_FLOOR_REFUSAL.lastExemptAdmin),
           { statusCode: 409, code: 'sso_exemption_required' },
         )
       }

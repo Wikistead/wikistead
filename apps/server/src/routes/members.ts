@@ -13,7 +13,7 @@ import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { enqueueTupleDeletes, flushTupleDeletes, type TupleIntent } from '../db/tuple-outbox.js' // #896
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
-import { assertClosingIsSafe, anAdminHoldsAKey } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
+import { assertClosingIsSafe, anAdminHoldsAKey, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
@@ -427,7 +427,7 @@ export async function membersPlugin(app: FastifyInstance) {
     if (pref?.sso_required) {
       if (!(await anAdminHoldsAKey(req.db, { exemptOnly: true, without: sub }))) {
         return reply.code(409).send({
-          error: 'name at least one exempt ADMINISTRATOR who holds a password (and keep password sign-in selected) before requiring SSO — they are the way back in when the IdP is down.',
+          error: SSO_FLOOR_REFUSAL.needAnExemptAdmin,
           code: 'sso_exemption_required',
         })
       }

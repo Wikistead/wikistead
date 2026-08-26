@@ -346,6 +346,32 @@ export async function waysInAfter(
  * ⚠️ A passkey-only administrator is NOT counted (ruled 2026-08-21, deliberately for now). The
  * direction is over-refusal, which is the safe side.
  */
+/**
+ * The SSO-exemption floor's refusals, in one place.
+ *
+ * FOUR writes can reach this floor — turning the requirement on, deselecting passwords, revoking an
+ * exemption, and deleting a credential — and this family's whole history is one copy being edited:
+ * #836 narrowed one of three and left the other two loose, #898 found them, and the fourth copy had
+ * meanwhile drifted a clause. Aligning the strings by hand would split again on the next edit, so the
+ * sentences live here and every site reads one.
+ *
+ * ⚠️ Every one of them says ADMINISTRATOR, deliberately. `anAdminHoldsAKey` asks whether an exempt
+ * ADMIN holds a password; a refusal that says "member" tells the operator to exempt an ordinary one,
+ * which walks them straight back into the state this floor exists to prevent — people who can sign in
+ * during an outage and nobody among them who can fix anything.
+ */
+export const SSO_FLOOR_REFUSAL = {
+  /** Turning the requirement ON, and deleting the last exempt admin's credential. */
+  needAnExemptAdmin:
+    'name at least one exempt ADMINISTRATOR who holds a password (and keep password sign-in selected) before requiring SSO — they are the way back in, and the one who can fix things, when the IdP is down.',
+  /** Deselecting password sign-in while the requirement is on. */
+  passwordsAreWhatMakesItSafe:
+    'SSO is required for this workspace, and an exempt ADMINISTRATOR holding a password is what makes that safe. Turn the SSO requirement off before deselecting passwords.',
+  /** Revoking the exemption that is holding the floor up. */
+  lastExemptAdmin:
+    'this is the last exempt ADMINISTRATOR holding a password — exempt another administrator who has one, or turn the SSO requirement off.',
+} as const
+
 export async function anAdminHoldsAKey(
   db: TenantDb,
   opts: { without?: string; exemptOnly?: boolean } = {},
