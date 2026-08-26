@@ -295,7 +295,7 @@ export function mountLivePreview(
   parent: HTMLElement,
   ytext: Y.Text,
   provider: HocuspocusProvider,
-  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; searchPhrasesCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; coEditHost?: CoEditHost } = {},
+  opts: LivePreviewSharedOpts & { vim?: boolean; vimCompartment?: Compartment; displayMode?: DisplayMode; displayModeCompartment?: Compartment; searchPhrasesCompartment?: Compartment; onExitEdit?: () => void; onPublish?: () => void; onPublishStay?: () => void; ephemeralCollab?: EphemeralCollabFactory; macroPresence?: MacroPresence; coEditHost?: CoEditHost } = {},
 ): EditorView {
   // minimalSetup (no line numbers/gutters — this is a reading-style surface).
   const view = new EditorView({
@@ -452,7 +452,7 @@ export function mountLivePreview(
       // Layer (iii): host chrome (editable surface only; view guests get none). The slash palette itself
       // lives in the shared layer (its vimVisualField still precedes the toolbar's bubble, which reads it
       // to suppress itself in vim visual — the factory sits earlier in this array).
-      ...(!opts.readOnly ? [floatingToolbar(), codeFenceSettingsPanel(), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish })] : []), // #456 S4/ code-fence settings — panel + keyboard opener (Mod-Alt-Enter) + hover ✎, in CM's tooltip layer. #549: contextMenu moved into the shared factory (islands need it too)
+      ...(!opts.readOnly ? [floatingToolbar(), codeFenceSettingsPanel(), vimExCommands({ exitEdit: opts.onExitEdit, publish: opts.onPublish, publishStay: opts.onPublishStay })] : []), // #456 S4/ code-fence settings — panel + keyboard opener (Mod-Alt-Enter) + hover ✎, in CM's tooltip layer. #549: contextMenu moved into the shared factory (islands need it too)
       // ADR-122 addendum (b): the nested-editor seam — the slot island builds its decoration/keymap layer
       // from the SAME factory (same opts closure), with nested:true (collab/presence/host chrome excluded).
       nestedLivePreviewConfig.of((env) => buildLivePreviewExtensions(opts, { nested: true, ...env })),

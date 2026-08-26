@@ -143,10 +143,12 @@ export interface EditorProps {
   onLiveness?: (state: Liveness) => void;
   /** #875 / ADR-248 §3.6: the guest session registers its reconnect knock through here. */
   registerReconnect?: (fn: (() => void) | null) => void;
-  // vim ex-command entry points (Light-3): :q → onExitEdit, :w/:wq → onPublish. Pass
-  // STABLE callbacks (useCallback) — captured at mount, not in the surface-effect deps.
+  // vim ex-command entry points (Light-3): :q → onExitEdit, :wq → onPublish, :w → onPublishStay
+  // (#911: :w saves and stays, :wq saves and leaves — distinct callbacks). Pass STABLE callbacks
+  // (useCallback) — captured at mount, not in the surface-effect deps.
   onExitEdit?: () => void;
   onPublish?: () => void;
+  onPublishStay?: () => void;
   // Persist a view-mode task-checkbox toggle (ADR-019): the host POSTs the no-revision
   // endpoint for task `index` and refetches the published snapshot. Provided only for an
   // edit-capable viewer; absent → checkboxes render disabled. `applyFlip` writes the
@@ -188,7 +190,7 @@ function tint(color: string): string {
 // visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
 // the mount functions don't need to know about the TOC.
 
-export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "" as Bearer, publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, registerReconnect, onPublish, onExitEdit, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "" as Bearer, publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, registerReconnect, onPublish, onPublishStay, onExitEdit, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -593,6 +595,8 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       // is the whole point. A publish that cannot be sent is simply not sent; the band above the
       // surface is what says why, and it has been saying so since the connection dropped.
       onPublish: onPublish && (() => { if (liveRef.current) onPublish(); }),
+      // #911: :w goes through the SAME liveness gate as :wq/the button — see the note above.
+      onPublishStay: onPublishStay && (() => { if (liveRef.current) onPublishStay(); }),
       // #92 / ADR-093: the host ephemeral-collab seam — opens a non-persisted room for a co-editing
       // macro modal (excalidraw). Keyed by docName + the macro's anchor; token/url from the same collab.
       // The local user (name/color) is published on the ephemeral awareness so the macro can render

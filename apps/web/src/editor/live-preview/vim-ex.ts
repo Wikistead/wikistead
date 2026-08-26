@@ -3,12 +3,14 @@ import type { EditorView } from "@codemirror/view";
 import { Vim } from "@replit/codemirror-vim";
 
 // Light-3: vim ex commands as ENTRY POINTS to existing actions — :q closes edit mode,
-// :w publishes, :wq publishes (which, in this app, returns to the rendered view — publish
-// == done). The publish path itself is untouched (flush-on-publish stays the bastion);
-// these only invoke the host callbacks. Issued from vim NORMAL-mode `:` (vim owns `:`).
+// :w publishes and STAYS in the edit surface (#911 user ruling: :w is a save, not a way out),
+// :wq publishes and returns to the rendered view (publish == done). The publish path itself is
+// untouched (flush-on-publish stays the bastion); these only invoke the host callbacks. Issued
+// from vim NORMAL-mode `:` (vim owns `:`).
 export interface ExActions {
   exitEdit?: () => void; // :q — leave edit mode (back to the rendered view)
-  publish?: () => void; // :w / :wq — publish via the existing path (→ view on success)
+  publish?: () => void; // :wq — publish via the existing path (→ view on success)
+  publishStay?: () => void; // #911: :w — publish, stay in the edit surface
 }
 
 // Per-view callbacks. Vim.defineEx is GLOBAL, so the handlers read the actions from the
@@ -26,9 +28,11 @@ function registerOnce(): void {
   if (registered) return;
   registered = true;
   Vim.defineEx("quit", "q", (cm: VimAdapter) => actionsOf(cm).exitEdit?.());
-  Vim.defineEx("write", "w", (cm: VimAdapter) => actionsOf(cm).publish?.());
-  // :wq — publish; the existing publish flow transitions to view on success (== :w here,
-  // since publish implies done in this app). Defined explicitly so `:wq` is recognised.
+  // #911: :w publishes and stays — a distinct action from :wq, not the same callback with a
+  // "was it :w or :wq" flag threaded through, so the two entry points cannot drift.
+  Vim.defineEx("write", "w", (cm: VimAdapter) => actionsOf(cm).publishStay?.());
+  // :wq — publish; the existing publish flow transitions to view on success. Defined explicitly
+  // so `:wq` is recognised (codemirror-vim does not compose `:w` + `:q` from the two above).
   Vim.defineEx("wq", "wq", (cm: VimAdapter) => actionsOf(cm).publish?.());
 }
 
