@@ -199,7 +199,7 @@ These exist so the product and its test harness can talk to themselves. Each one
 | Variable | Why it is here |
 | --- | --- |
 | `WIKISTEAD_SKIP_FGA_MODEL_GUARD` | Test harnesses set this to bring a server up against a store whose model is deliberately mismatched. A deployment that sets it turns off the check that its authorization model is the one it thinks it is. |
-| `WIKISTEAD_SKIP_MIGRATION_GUARD` | Starts the server even when migrations the image ships are missing from the database (#910). Set it only to get a process up for diagnosis: every request that touches the missing schema fails with 42703. |
+| `WIKISTEAD_SKIP_MIGRATION_GUARD` | Starts the server even when migrations the image ships are missing from the database. Set it only to get a process up for diagnosis: every request that touches the missing schema fails with 42703. |
 | `WIKISTEAD_TEST_STACK` | The test runner sets this to prove a suite is pointed at the isolated stack rather than a development database. Setting it by hand tells that guard a lie. |
 | `POOL_END_QUIESCE_MS` | How long a shutdown waits for tenant connections that are on their way back before it forces the close. It exists so a machine slow enough to miss the default can be given room; a deployment has no shutdown path to tune, and setting it high enough to matter would trade a reported hang for a silent one. |
 

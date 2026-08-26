@@ -151,7 +151,7 @@ export const ENV_DOCS = {
   },
   WIKISTEAD_SKIP_MIGRATION_GUARD: {
     group: 'Database',
-    internal: 'Starts the server even when migrations the image ships are missing from the database (#910). Set it only to get a process up for diagnosis: every request that touches the missing schema fails with 42703.',
+    internal: 'Starts the server even when migrations the image ships are missing from the database. Set it only to get a process up for diagnosis: every request that touches the missing schema fails with 42703.',
   },
 
   // ── Search ────────────────────────────────────────────────────────────────────────────────────
