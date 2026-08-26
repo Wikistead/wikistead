@@ -12,6 +12,7 @@ import { ConfirmDialog } from "../ui/dialogs"; // #504: deleting a role is irrev
 import { Input } from "../ui/Input";
 import { RadioGroup } from "../ui/RadioGroup";
 import { notify } from "../ui/toast";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Pencil, SlidersHorizontal, X } from "lucide-react"; // #544: icon components, not text glyphs (font fallback squashed them)
 import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
@@ -315,6 +316,12 @@ export function AdminRolesTab() {
             shared `ListBox`, which paints nothing. The card was carrying the boundary twice, in a
             border and in a fill, and the fill is the half that made this tab read as heavier than its
             neighbours. Do not put it back without measuring the boundary problem #581 solved. */}
+        {/* #895 round 4: roles.isError fell all the way through — every `roles.data?.x ?? []` on this
+            screen silently reads as an empty list on a fetch failure, so a permission-listing screen
+            told an admin "no roles" (built-in AND custom) when nothing of the sort was established. */}
+        {roles.isError ? (
+          <LoadFailed testId="roles-failed" onRetry={() => { void roles.refetch(); }} />
+        ) : (<>
         <section className="rounded-md border border-border">  {/* list-box-ok: a SECTION frame, not a row — #581's scope surface, unpainted since #752 */}
           <h3 className="m-0 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-dim" data-testid="roles-section-tenant">{t("adminRoles.sectionTenant")}</h3>
           {/* #539 / #521 / #503: the same 26rem box + inner scroll, because this list grows with the
@@ -369,6 +376,7 @@ export function AdminRolesTab() {
           </div>
         </section>
         {(roles.data?.custom.length ?? 0) === 0 && <p className="m-0 text-xs text-fg-dim">{t("adminRoles.customEmpty")}</p>}
+        </>)}
       </div>
       {creating ? (
         <RoleEditor pending={createRole.isPending}

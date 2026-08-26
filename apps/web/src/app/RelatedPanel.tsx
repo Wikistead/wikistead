@@ -185,7 +185,13 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
             )}
           </div>
           {graphOpen && (
-            miniGraph.data && miniGraph.data.nodes.length > 1 ? (
+            // #895 round 4: miniGraph.isError fell through to graphEmpty ("no connections"), telling a
+            // reader a page has no local graph when a fetch simply failed — the #888 shape, checked
+            // before the empty-vs-populated branch the same way this component's own `related.isError`
+            // guard above already does.
+            miniGraph.isError ? (
+              <LoadFailed testId="local-graph-failed" onRetry={() => { void miniGraph.refetch(); }} />
+            ) : miniGraph.data && miniGraph.data.nodes.length > 1 ? (
               <div className="flex flex-col gap-1">
                 <LocalGraphCanvas
                   data={miniGraph.data}
