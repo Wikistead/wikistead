@@ -81,6 +81,43 @@ test("#448: an EDIT-link guest publishes with :wq and exits with :q", async ({ b
   await expect(viewer.locator("[data-pane=preview] .cm-content")).not.toContainText("DRAFTONLY448");
 });
 
+// #911: on the guest edit surface too, :w must publish and STAY in the editor (only :wq exits).
+test("#911: a GUEST edit-link guest's :w publishes and stays in the editor", async ({ browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const pageId = await newPage(member, "guest vim w page");
+
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(await shareUrl(member, pageId, "edit"));
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+
+  await guest.getByTestId("edit-toggle").click();
+  await sleep(400);
+  await guest.getByTestId("vim-toggle").click();
+  await sleep(300);
+  await guest.click("[data-pane=preview] .cm-content");
+  await guest.keyboard.press("i");
+  await guest.keyboard.type("GUEST W STAYS");
+  await guest.keyboard.press("Escape");
+  await sleep(300);
+
+  await guest.keyboard.type(":w");
+  await guest.keyboard.press("Enter");
+
+  await expect(guest.getByText(/^Published$|^公開しました$/)).toBeVisible({ timeout: 10_000 });
+  // :w must NOT exit — the edit toggle stays absent, the surface stays editable.
+  await sleep(500);
+  expect(await guest.getByTestId("edit-toggle").count()).toBe(0);
+  await expect(guest.locator("[data-pane=preview] .cm-content")).toHaveAttribute("contenteditable", "true");
+
+  // the publish LANDED despite staying: a fresh VIEW-link guest sees the text.
+  const viewer = await (await browser.newContext()).newPage();
+  await viewer.goto(await shareUrl(member, pageId, "view"));
+  await viewer.waitForSelector("[data-pane=preview] .cm-content");
+  await expect(viewer.locator("[data-pane=preview] .cm-content")).toContainText("GUEST W STAYS", { timeout: 10_000 });
+});
+
 test("#448: a VIEW-link guest cannot publish (server bastion — 40x, not 200)", async ({ browser }) => {
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
