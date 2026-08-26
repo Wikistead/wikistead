@@ -40,12 +40,26 @@ function walk(dir: string, out: string[] = []): string[] {
 // So the question is no longer "does this file ask a query whether it failed". It is: DOES THIS FILE
 // DRAW SOMETHING WHEN THE FETCH FAILS. That is one shared component (`LoadFailed`) or an early return,
 // and neither can be satisfied by mentioning a word.
-const EMPTY_STATE = /t\("([\w.]*(?:\.empty|empty[A-Z]\w*|noResults))"\)/g;
+//
+// #895 round 5: the old alternation (`\.empty` / `empty[A-Z]\w*` / `noResults`) required the literal
+// LOWERCASE run "empty" — so a key spelled camelCase with the capital mid-word, `adminRoles.customEmpty`
+// or `related.graphEmpty`, contained no lowercase "empty" substring at all and the walk never found the
+// site — not "handled via borrowing", MISSING FROM THE WALK ENTIRELY, measured (0 matches) before this
+// line changed. `[Ee]mpty` accepts both spellings; `\w*` still allows a trailing word (`emptyTitle`).
+const EMPTY_STATE = /t\("([\w.]*(?:[Ee]mpty\w*|noResults))"\)/g;
 
-// Drawn on failure: the shared view, or the surface removing itself. Both are decisions; a mention of
-// `error` inside a mutation's `onError` is not.
+// Drawn on failure: the shared view, the surface removing itself, or a TERNARY that branches on the
+// same isError/error the component itself is holding (round 5: GuestSidebar's `error ? <ownUI/> : …`
+// — a real #500 fix, in a shape neither of the first two patterns was written to see; broadening
+// EMPTY_STATE surfaced it as a false red). A mention of `error` inside a mutation's `onError` is not
+// this — TERNARY_ON_FAILURE requires the `?` immediately after the identifier, which `onError: () =>`
+// never has.
 const DRAWS_ON_FAILURE = /<LoadFailed\b/;
 const RETURNS_ON_FAILURE = /if\s*\([^)]*\b(?:isError|error)\b[^)]*\)\s*return\b/;
+// `(?!:)` excludes an optional PARAMETER/PROP declaration (`error?: boolean`) — measured: without it,
+// GuestSidebar's own destructured `{ error?: boolean }` signature satisfied this even with its actual
+// `error ? <ownUI/> : …` ternary DELETED, so the break-check that should have gone red stayed green.
+const TERNARY_ON_FAILURE = /\b(?:isError|error)\s*\?(?!:)/;
 
 // ⚠️ Judged per COMPONENT, not per file — and not by a character window either. Both were measured
 // here: with a file-wide rule, taking the failure view out of the audit ledger stayed green because
@@ -83,12 +97,23 @@ const DELEGATED: Record<string, { reason: string; renderPattern: RegExp }> = {
   },
 };
 
+// One evaluation, used everywhere "is this failure handled" is asked — a second copy is exactly how
+// TERNARY_ON_FAILURE nearly went missing from one of the two call sites below.
+const isHandled = (around: string): boolean =>
+  DRAWS_ON_FAILURE.test(around) || RETURNS_ON_FAILURE.test(around) || TERNARY_ON_FAILURE.test(around);
+
 // Empty states that are NOT about a fetch. Named one by one, because a category would swallow the
 // next real one: an empty frontmatter block and an empty page body are facts about the document in
 // hand, not answers a request came back with.
 const NOT_A_FETCH: Record<string, string> = {
   "editor/live-preview/frontmatter.ts": "an empty frontmatter block in the open document",
   "app/routes.tsx": "page.empty / page.emptyEditable describe a page with no body — #886 owns the fetch states here",
+  // #895 round 5: `list.fetch` (Editor.tsx, the `:::tagged`/`:::children` host source) is typed and
+  // documented (decorations.ts, `ListSource.fetch`) to return null for denied AND network failure
+  // INDISTINGUISHABLY — existence-hiding for a member-only, view-filtered list, not an oversight.
+  // Telling the two apart (to draw a LoadFailed on network failure only) would need a new signal this
+  // route deliberately does not send, which makes it a stop:authz design change, not a bug fix.
+  "editor/Editor.tsx": "macro.listEmpty (:::tagged/:::children) — ListSource.fetch is existence-hiding by design (denied and network-failure both resolve null); see decorations.ts's ListSource doc comment",
 };
 
 type Site = { file: string; keys: string[]; handled: boolean; delegated: boolean };
@@ -105,7 +130,7 @@ for (const file of walk(SRC_ROOT)) {
     sites.push({
       file: rel,
       keys: [m[1]!],
-      handled: DRAWS_ON_FAILURE.test(around) || RETURNS_ON_FAILURE.test(around),
+      handled: isHandled(around),
       delegated: rel in DELEGATED,
     });
   }
@@ -123,7 +148,7 @@ for (const [delegatee, { renderPattern }] of Object.entries(DELEGATED)) {
     const src = readFileSync(file, "utf8");
     for (const m of src.matchAll(new RegExp(renderPattern.source, "g"))) {
       const around = componentAround(src, m.index!);
-      callSites.push({ caller: rel, delegatee, handled: DRAWS_ON_FAILURE.test(around) || RETURNS_ON_FAILURE.test(around) });
+      callSites.push({ caller: rel, delegatee, handled: isHandled(around) });
     }
   }
 }
