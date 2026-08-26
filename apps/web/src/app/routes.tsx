@@ -1824,10 +1824,10 @@ function PublicPageContent({ pageId, onSpace }: { pageId: string; onSpace?: (s: 
     return (
       <div data-testid="public-unavailable" style={{ padding: 24, fontFamily: "var(--font-body, sans-serif)" }}>
         <p style={{ margin: 0 }}>{t("publicPage.unavailable")}</p>
-        <button type="button" data-testid="public-unavailable-retry" style={{ marginTop: 12 }}
+        <Button variant="primary" className="mt-3" data-testid="public-unavailable-retry"
           onClick={() => { setState({ status: "loading" }); setReloadKey((k) => k + 1); }}>
           {t("publicPage.unavailableRetry")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -2115,9 +2115,9 @@ function PublicSpaceRoute() {
       <AppShell>
         <div data-testid="public-space-unavailable" style={{ padding: 24 }}>
           <p style={{ margin: 0 }}>{t("publicPage.unavailable")}</p>
-          <button type="button" data-testid="public-space-retry" style={{ marginTop: 12 }} onClick={() => { void lazy.root.refetch(); }}>
+          <Button variant="primary" className="mt-3" data-testid="public-space-retry" onClick={() => { void lazy.root.refetch(); }}>
             {t("publicPage.unavailableRetry")}
-          </button>
+          </Button>
         </div>
       </AppShell>
     );
