@@ -72,3 +72,7 @@ error body — the OIDC/SAML callback (`/auth/callback`) is one of them. `access
 wall, and ADR-259's "this address already belongs to a member here — sign in that way, then add this
 provider from account settings"). Neither carries an API-key error body, since neither reaches a caller
 that would parse one.
+
+`/admin/*` responses are shaped for the console screen that reads them and change without a version
+bump — e.g. `GET /admin/sso-exemptions` carries an `isAdmin` field so that screen can answer the one
+question its own refusal tells an operator to act on. Not part of the OpenAPI-covered surface above.
