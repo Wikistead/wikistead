@@ -66,9 +66,9 @@ the page exists. So an event marked as sent can still be withheld for one page.
 | `tenant.ai_toggled` | An admin turned AI features on or off for the workspace. | Yes |
 | `usage.threshold_crossed` | Usage crossed an alert threshold, ahead of the limit that would start turning requests away. EE and Cloud notify the admin. | Yes |
 | `orphan_draft.enumerated` | An admin listed the private drafts whose author is gone. | Yes |
-| `orphan_draft.claimed` | An admin took temporary access to an orphaned draft; the claim is recorded. | Yes |
-| `orphan_draft.reassigned` | An orphaned draft was handed to an active member. | Yes |
-| `orphan_draft.claim_expired` | A claim on an orphaned draft expired before the draft was handed to anyone. | Yes |
+| `orphan_draft.claimed` | An admin took temporary access to an orphaned draft; the claim is recorded. | Yes, without `pageId` |
+| `orphan_draft.reassigned` | An orphaned draft was handed to an active member. | Yes, without `pageId` |
+| `orphan_draft.claim_expired` | A claim on an orphaned draft expired before the draft was handed to anyone. | Yes, without `pageId` |
 | `scim_token.created` | A SCIM provisioning token was issued (EE). | Yes |
 | `scim_token.revoked` | A SCIM provisioning token was revoked (EE). | Yes |
 | `attachment.confirmed` | An uploaded attachment was confirmed (counts toward storage). | Yes |

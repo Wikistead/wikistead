@@ -20,6 +20,8 @@ import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { EGRESS, egressVerdict } from '../webhooks/egress.js'
+import { pageEventDisposition } from '../page-disposition.js'
+import { fgaClient } from '@wikistead/authz'
 import { bridgeShouldEnqueue } from '../webhooks/bridge.js'
 import { enqueueWebhookOutbox } from '../routes/webhooks.js'
 
@@ -68,9 +70,9 @@ describe('#862 every catalogued type has a verdict', () => {
   it('and the shape of the decision is legible — how many ship, how many do not', () => {
     const by = (k: string) => catalogued.filter((t) => egressVerdict(t).kind === k).length
     // Not a snapshot for its own sake: if a later change makes everything `send` again, this is where
-    // it shows. The numbers are the 2026-08-22 rulings.
+    // it shows. The numbers are the rulings of 2026-08-22 and, for the last three, 2026-08-27 (§K).
     expect(by('drop'), 'the three operator events and both auth events').toBe(5)
-    expect(by('redact'), 'member.locked and the two password resets').toBe(3)
+    expect(by('redact'), 'member.locked, the two password resets, and the orphan-draft trio').toBe(6)
     expect(by('send') + by('drop') + by('redact')).toBe(catalogued.length)
   })
 })
@@ -108,6 +110,41 @@ describe('#862 §D — a lockout does not relay what the attacker typed', () => 
     expect(payload, 'the row is written; only the field is withheld').not.toBeNull()
     expect(payload).not.toHaveProperty('identifier')
     expect(payload!.occurredAt, 'the consumer still learns when').toBeTruthy()
+  })
+})
+
+describe('#862 §K — the orphan-draft trio ships without the page id', () => {
+  const TRIO = ['orphan_draft.claimed', 'orphan_draft.reassigned', 'orphan_draft.claim_expired'] as const
+  const everything = {
+    pageId: 'page-k862', actorId: 'admin-1', adminSub: 'admin-1', newOwner: 'user:someone',
+    expiresAt: '2026-01-01T00:00:00.000Z', occurredAt: '2026-01-01T00:00:00.000Z',
+  }
+
+  it('all three withhold the page id, and the row is still written', async () => {
+    for (const type of TRIO) {
+      expect(egressVerdict(type).kind, type).toBe('redact')
+      const payload = await storedPayload(type, everything)
+      expect(payload, `${type}: the row is written; only the field is withheld`).not.toBeNull()
+      expect(payload, type).not.toHaveProperty('pageId')
+      expect(payload!.occurredAt, `${type}: the consumer still learns when`).toBeTruthy()
+    }
+  })
+
+  // ⚠️ The point of §K is not tidiness. `pageEventDisposition` reads `payload.pageId`, and an orphan
+  // draft is unpublished by definition — no `page#space` tuple — so while the id was in the row the
+  // answer was `not-ready` every time: six retries, then dropped. The table said `ship` and nothing
+  // ever shipped. Withholding the id is what takes these out of a gate they could never pass.
+  it('⚠️ and that is what makes them deliverable at all', async () => {
+    const payload = await storedPayload('orphan_draft.claimed', everything)
+    expect(await pageEventDisposition(fgaClient, payload!), 'no page id in the row → not a page event').toBe('deliver')
+  })
+
+  // Without this, an implementation that stripped `pageId` from EVERY type would pass the case above.
+  // The same unpublished id, on a type whose row still names it, is still gated.
+  it('⚠️ and the strip is scoped to the trio — a page event with the same id is still gated', async () => {
+    const gated = await storedPayload('page.renamed', { pageId: 'page-k862', actorId: 'admin-1' })
+    expect(gated, 'page.renamed still carries its page id').toHaveProperty('pageId')
+    expect(await pageEventDisposition(fgaClient, gated!), 'an unlinked page is not deliverable').not.toBe('deliver')
   })
 })
 

@@ -26,11 +26,12 @@ import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
-import { fgaClient, writeTuples } from '@wikistead/authz'
+import { fgaClient, writeTuples, readObjectTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, deletePage, setPagePrivate, movePage } from '../routes/pages.js'
 import { createShareLink } from '../routes/share-links.js'
+import { claimOrphanDraft } from '../routes/orphan-drafts.js'
 import { drainWebhookOutbox, createWebhook } from '../routes/webhooks.js'
 import { buildApp } from '../app.js'
 import type { FastifyInstance } from 'fastify'
@@ -89,6 +90,39 @@ afterAll(async () => {
   await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' }).catch(() => {})
   await app.close(); await db.release(); await pool.end(); await admin.end()
 }, 120_000)
+
+// #862 / ADR-108 §K (ruled 2026-08-27). The same shape as §G with the opposite cause: no act destroyed
+// the answer here — an orphan draft is unpublished BY DEFINITION, so it never holds a `page#space`
+// tuple and the gate answered `not-ready` every single time. The row said `ship` and nothing ever
+// shipped. The ruling withholds the page id, which takes the type out of the gate's reach entirely.
+describe('#862 §K — an orphan-draft claim', () => {
+  it('is written without the page id, and the drain DELIVERS it instead of retrying it away', async () => {
+    await admin`DELETE FROM webhook_outbox WHERE tenant_id = ${tenant.id}`
+    // An orphan: an unpublished draft that no live member can reach. Created by a live admin (the
+    // space's edit right is what createPage checks), then stripped of every grant — which is the state
+    // a departed author leaves behind, and the one `isOrphanPage` looks for.
+    const pageId = (await createPage(db, fgaClient, driver, {
+      tenantId: tenant.id, spaceId, userId: 'dev-user', title: `k862 orphan draft ${Date.now()}`,
+    })).id
+    const grants = await readObjectTuples(fgaClient, `page:${pageId}`)
+    expect(grants.length, 'the draft starts with the creator grant this then removes').toBeGreaterThan(0)
+    await deleteTuples(fgaClient, grants.map((g) => ({ user: g.user!, relation: g.relation!, object: g.object! })))
+    await claimOrphanDraft(db, fgaClient, { tenantId: tenant.id, pageId, adminSub: 'dev-user', plan: tenant.plan })
+    await settle()
+    const [row] = await rowsFor('orphan_draft.claimed')
+    expect(row, 'the claim enqueued an orphan_draft.claimed').toBeTruthy()
+    const [stored] = await admin<{ payload: Record<string, unknown> }[]>`SELECT payload FROM webhook_outbox WHERE id = ${row!.id}`
+    expect(stored!.payload, 'the ruling is asserted on the ROW, not on the bridge input').not.toHaveProperty('pageId')
+    expect(stored!.payload.actorId, 'who claimed still travels').toBeTruthy()
+
+    const before = await hookFailures()
+    await admin`UPDATE webhooks SET active = TRUE WHERE id = ${hookId}`
+    expect(await drainWebhookOutbox(fgaClient)).toBeGreaterThan(0)
+    // ⚠️ `handled` counts a retry too. Before the ruling this row was retried and eventually dropped,
+    // and `handled` looked the same. The blocked hook's counter only moves on an attempted POST.
+    expect(await hookFailures(), 'DELIVERED — not held back by a gate no orphan draft can pass').toBeGreaterThan(before)
+  }, 120_000)
+})
 
 describe('#862 §G — a purge', () => {
   it('settles a visible page as deliverable, and the drain delivers it instead of retrying it away', async () => {

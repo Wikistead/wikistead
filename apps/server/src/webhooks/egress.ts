@@ -1,10 +1,11 @@
 // #862 / ADR-108 addendum: what leaves the tenant, decided one event type at a time.
 //
 // The bridge was wired to carry everything the catalogue holds, and nobody had read the payloads.
-// Fifty of the seventy-six types reach a tenant-controlled URL without passing any per-instance
-// authorization check — the twenty-five that carry a `pageId` are gated by `pageEventDisposition` at
-// delivery, and the rest are not gated by anything. Four of those payloads turned out to reverse or
+// Fifty of the seventy-six types reached a tenant-controlled URL without passing any per-instance
+// authorization check — the twenty-five that carried a `pageId` were gated by `pageEventDisposition`
+// at delivery, and the rest were gated by nothing. Four of those payloads turned out to reverse or
 // stretch a decision this repository had already made, and the owner ruled on them on 2026-08-22.
+// A fifth ruling followed on 2026-08-27 (§K), which is why twenty-TWO carry a `pageId` today.
 //
 // ── Why a table, and why it is keyed on the union ───────────────────────────────────────────────
 //
@@ -73,6 +74,11 @@ export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
   //       whether the tenant has a hook at all — so an unauthenticated caller can make this product
   //       write a row per request. Anonymous share-link editing is the product's centre, so every
   //       keystroke flush is one of these.
+  //   §K  the orphan-draft trio carried a `pageId`, and an orphan draft is unpublished by definition —
+  //       so it never holds a `page#space` tuple, the delivery gate answered `not-ready` every time,
+  //       and all three were dropped after six retries. They were in the catalogue and unreachable.
+  //       Withholding the page id takes them out of the gate's reach, so the operational fact ("a
+  //       claim expired") arrives while WHICH draft it was on stays inside the tenant.
   'page.created': send('pageId', 'spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
   'page.renamed': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
   'page.moved': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
@@ -108,9 +114,9 @@ export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
   'tenant.login_methods_recovered': drop('#862 / ADR-108 §C (2026-08-22): never the operator id — ADR-169'),
   'tenant.saml_recovered': drop('#862 / ADR-108 §C (2026-08-22): never the operator id — ADR-169'),
   'orphan_draft.enumerated': send('actorId', 'count', 'actorKeyId', 'occurredAt'),
-  'orphan_draft.claimed': send('actorId', 'pageId', 'expiresAt', 'actorKeyId', 'occurredAt'),
-  'orphan_draft.reassigned': send('actorId', 'pageId', 'newOwner', 'actorKeyId', 'occurredAt'),
-  'orphan_draft.claim_expired': send('pageId', 'adminSub', 'occurredAt'),
+  'orphan_draft.claimed': redact(['pageId'], '#862 / ADR-108 §K (2026-08-27): the claim is reportable, which draft it is on is not', 'actorId', 'pageId', 'expiresAt', 'actorKeyId', 'occurredAt'),
+  'orphan_draft.reassigned': redact(['pageId'], '#862 / ADR-108 §K (2026-08-27): the claim is reportable, which draft it is on is not', 'actorId', 'pageId', 'newOwner', 'actorKeyId', 'occurredAt'),
+  'orphan_draft.claim_expired': redact(['pageId'], '#862 / ADR-108 §K (2026-08-27): the claim is reportable, which draft it is on is not', 'pageId', 'adminSub', 'occurredAt'),
   'tenant.custom_domain_added': send('domain', 'occurredAt'),
   'tenant.custom_domain_verified': send('domain', 'occurredAt'),
   'tenant.custom_domain_removed': send('domain', 'occurredAt'),
