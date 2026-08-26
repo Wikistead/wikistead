@@ -69,6 +69,16 @@ const FAILURE_BELONGS_TO_THE_CALLER: Record<string, string> = {
   "app/HomeEmpty.tsx": "presentational: the caller decides there are no spaces and renders this",
 };
 
+// #895 naming the callers in prose (above) is not checking them — the reopened ticket found
+// AdminApiTab rendering ApiKeysPanel with `keys.data ?? []` and never reading `keys.isError`, while
+// this file's exclusion entry kept asserting the delegation was safe because ApiKeysPanel.tsx still
+// existed. So the delegated component's OWN render call is walked here too, generically — every JSX
+// site that renders it, in any file, has to be guarded — which is what would have caught the second
+// caller instead of only the one this ticket happened to touch first.
+const DELEGATED_RENDER_SITE: Record<string, RegExp> = {
+  "settings/ApiKeysPanel.tsx": /<ApiKeysPanel\b/,
+};
+
 // Empty states that are NOT about a fetch. Named one by one, because a category would swallow the
 // next real one: an empty frontmatter block and an empty page body are facts about the document in
 // hand, not answers a request came back with.
@@ -94,6 +104,22 @@ for (const file of walk(SRC_ROOT)) {
       handled: DRAWS_ON_FAILURE.test(around) || RETURNS_ON_FAILURE.test(around),
       delegated: rel in FAILURE_BELONGS_TO_THE_CALLER,
     });
+  }
+}
+
+// Every JSX render of a delegated component, wherever it lives — not just the files this ticket
+// happened to fix. A caller found here that does NOT guard the render is exactly the AdminApiTab gap.
+type CallSite = { caller: string; delegatee: string; handled: boolean };
+const callSites: CallSite[] = [];
+for (const [delegatee, renderPattern] of Object.entries(DELEGATED_RENDER_SITE)) {
+  for (const file of walk(SRC_ROOT)) {
+    const rel = file.slice(SRC_ROOT.length + 1);
+    if (rel === delegatee) continue; // the delegated component itself, not a caller
+    const src = readFileSync(file, "utf8");
+    for (const m of src.matchAll(new RegExp(renderPattern.source, "g"))) {
+      const around = componentAround(src, m.index!);
+      callSites.push({ caller: rel, delegatee, handled: DRAWS_ON_FAILURE.test(around) || RETURNS_ON_FAILURE.test(around) });
+    }
   }
 }
 
@@ -124,6 +150,22 @@ describe("#888 a failed fetch is not an empty list", () => {
         site.handled,
         `${site.file} renders ${site.keys.join(", ")} but nothing when the fetch fails, so a failure ` +
           "reads as a finding. Either draw <LoadFailed> or return early on the error.",
+      ).toBe(true);
+    },
+  );
+
+  it("finds every render site of a delegated component (the walk itself is not vacuous)", () => {
+    expect(callSites.length, "no caller renders a delegated component — the render pattern broke").toBeGreaterThanOrEqual(2);
+  });
+
+  it.each(callSites.map((c) => [`${c.caller} renders ${c.delegatee}`, c] as const))(
+    "%s guards the render on the fetch's own failure",
+    (_label, site) => {
+      expect(
+        site.handled,
+        `${site.caller} renders ${site.delegatee} without reading whether ITS OWN fetch failed — the ` +
+          "delegated component only draws what it is handed, so this caller's failure reads as empty. " +
+          "Either draw <LoadFailed> or return early on the error before this render.",
       ).toBe(true);
     },
   );

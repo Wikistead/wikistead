@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useApiKeys, useApiPolicy, useUpdateApiPolicy, type ApiScope } from "../data/queries";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Select } from "../ui/Select";
 import { notify } from "../ui/toast";
 import { ApiKeysPanel } from "./ApiKeysPanel";
@@ -36,7 +37,11 @@ export function AdminApiTab() {
         options={[{ value: "write", label: t("adminApi.policyWrite") }, { value: "read", label: t("adminApi.policyRead") }]}
       />
 
-      <ApiKeysPanel keys={keys.data ?? []} canIssue maxScope={cap} maxAgeDays={policy.data?.maxAgeDays ?? null} admin />
+      {/* #895 ApiKeysPanel takes its rows as a prop, so the failure is THIS component's to
+          answer — the review that reopened this ticket found it had not, the same shape the account
+          page's own tab was fixed for in the same change. */}
+      {keys.isError && <LoadFailed testId="admin-api-keys-failed" onRetry={() => { void keys.refetch(); }} />}
+      {!keys.isError && <ApiKeysPanel keys={keys.data ?? []} canIssue maxScope={cap} maxAgeDays={policy.data?.maxAgeDays ?? null} admin />}
     </SettingsPane>
   );
 }
