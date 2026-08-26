@@ -2,6 +2,7 @@ import type { DirectiveMacro } from "./registry";
 import { embedHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender shared (degrades to a link)
 import { macroPlaceholder, showPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
 import { safeHref } from "./md-render"; // #319 one shared scheme check for the degrade href (no js:/data:)
+import i18n from "../../i18n";
 
 // :::embed-external — embed an external resource by URL (the body is the URL). #108 / ADR-071 (551)
 // #205 renamed `:::embed` → `:::embed-external` to namespace with `:::embed-page` (embed-<what>).
@@ -77,11 +78,56 @@ export function isAllowlistedEmbed(url: string, allowlist: readonly string[]): b
   });
 }
 
+// #908: some hosts refuse framing entirely (X-Frame-Options/CSP), independent of the tenant allowlist
+// — an admin who allowlists the host to enable ONE embeddable path (e.g. Google Maps' own
+// share→"Embed a map" URL) also allowlists every other page on that host, most of which reject the
+// frame. The result was a blank iframe the browser draws inside its OWN chrome (the product never
+// gets to say anything), read by a reporting user as "the product is broken". This is a HOST+PATH
+// check, deliberately separate from the allowlist: it fires whether or not the host is allowlisted,
+// because the failure is about the URL SHAPE, not about tenant configuration.
+interface UnembeddableRule {
+  test: (u: URL) => boolean;
+  key: string; // i18n key, apps/web/src/i18n/locales/{en,ja}.json
+}
+const UNEMBEDDABLE_RULES: readonly UnembeddableRule[] = [
+  {
+    // Google's share-link shortener (maps.app.goo.gl, any path) and the ordinary Maps site
+    // (google.com/maps/…) both send X-Frame-Options: SAMEORIGIN. Only the URL Google's own
+    // Share → "Embed a map" panel produces (…/maps/embed?pb=…) omits that header.
+    test: (u) =>
+      u.hostname === "maps.app.goo.gl" ||
+      (["www.google.com", "google.com"].includes(u.hostname) &&
+        u.pathname.startsWith("/maps/") &&
+        !u.pathname.startsWith("/maps/embed")),
+    key: "macro.embedUnembeddableGoogleMaps",
+  },
+];
+
+/** A known-unembeddable URL's guidance sentence, or null if `url` matches no known-bad shape. */
+export function unembeddableGuidance(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return null;
+  }
+  const rule = UNEMBEDDABLE_RULES.find((r) => r.test(u));
+  return rule ? rule.key : null;
+}
+
 // Build the embed DOM for a resolved URL: a sandboxed iframe when the host is allowlisted, otherwise
 // a degrade link (never a broken/blocked frame). Kept here (not in the macro's liveRender) because
 // the allowlist is host-injected — the macro itself can't see it (narrow host-API).
 export function buildEmbedElement(url: string, allowlist: readonly string[]): HTMLElement {
   const trimmed = url.trim();
+  const guidanceKey = unembeddableGuidance(trimmed);
+  if (guidanceKey) {
+    const div = document.createElement("div");
+    div.className = "cm-lp-macro cm-lp-embed-unembeddable";
+    div.setAttribute("data-testid", "macro-embed-unembeddable");
+    div.textContent = i18n.t(guidanceKey);
+    return div;
+  }
   if (isAllowlistedEmbed(trimmed, allowlist)) {
     const iframe = document.createElement("iframe");
     iframe.className = "cm-lp-embed-frame";

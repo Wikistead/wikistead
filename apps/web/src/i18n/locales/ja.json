@@ -1288,7 +1288,8 @@
       "pageEmbed": "ページ埋め込み",
       "drawing": "図"
     },
-    "listEmpty": "該当ページはまだありません。"
+    "listEmpty": "該当ページはまだありません。",
+    "embedUnembeddableGoogleMaps": "このリンクは埋め込めません。Google マップの「共有 → 地図を埋め込む」の URL を貼ってください。"
   },
   "templates": {
     "title": "テンプレート",

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
-import { isAllowlistedEmbed, buildEmbedElement } from "./embed";
+import { isAllowlistedEmbed, buildEmbedElement, unembeddableGuidance } from "./embed";
 
 // #108 / ADR-071 (comment 551): external embeds are client-direct sandboxed iframes for
 // operator-allowlisted hosts ONLY; everything else degrades to a link. These verify the
@@ -111,5 +111,59 @@ describe("buildEmbedElement", () => {
     } finally {
       w.happyDOM?.setURL("http://localhost/");
     }
+  });
+});
+
+// #908: a URL whose host rejects framing (X-Frame-Options/CSP) drew a blank iframe with no explanation
+// — the browser's own refusal, inside an iframe the product controls but never gets to annotate. These
+// verify the known-bad-shape detector and that it PREEMPTS the allowlist (a host being allowlisted must
+// not resurrect the blank-iframe failure for a path shape known not to work).
+describe("unembeddableGuidance", () => {
+  it("flags Google's Maps share-link shortener regardless of path", () => {
+    expect(unembeddableGuidance("https://maps.app.goo.gl/abc123")).toBe("macro.embedUnembeddableGoogleMaps");
+  });
+
+  it("flags an ordinary google.com/maps/… page (not the embed path)", () => {
+    expect(unembeddableGuidance("https://www.google.com/maps/place/Tokyo")).toBe("macro.embedUnembeddableGoogleMaps");
+    expect(unembeddableGuidance("https://google.com/maps/@35,139,12z")).toBe("macro.embedUnembeddableGoogleMaps");
+  });
+
+  it("does NOT flag the actual embeddable URL (Share → Embed a map)", () => {
+    expect(unembeddableGuidance("https://www.google.com/maps/embed?pb=!1m18")).toBeNull();
+  });
+
+  it("does not flag an unrelated google.com page or a look-alike host", () => {
+    expect(unembeddableGuidance("https://www.google.com/search?q=x")).toBeNull();
+    expect(unembeddableGuidance("https://evilgoogle.com/maps/x")).toBeNull();
+    expect(unembeddableGuidance("https://maps.app.goo.gl.evil.test/x")).toBeNull();
+  });
+
+  it("does not flag an unrelated host", () => {
+    expect(unembeddableGuidance("https://youtube.com/embed/x")).toBeNull();
+  });
+
+  it("does not throw on an unparseable URL", () => {
+    expect(unembeddableGuidance("not a url")).toBeNull();
+  });
+});
+
+describe("buildEmbedElement — known-unembeddable guidance", () => {
+  it("renders guidance text, never an iframe, for a Google Maps share link — even when the host is allowlisted", () => {
+    const el = buildEmbedElement("https://maps.app.goo.gl/abc123", ["maps.app.goo.gl", "google.com"]);
+    expect(el.tagName).not.toBe("IFRAME");
+    expect(el.getAttribute("data-testid")).toBe("macro-embed-unembeddable");
+    expect(el.textContent).toBeTruthy();
+  });
+
+  it("still embeds the real Google Maps embed URL when google.com is allowlisted", () => {
+    const el = buildEmbedElement("https://www.google.com/maps/embed?pb=!1m18", ["google.com"]);
+    expect(el.tagName).toBe("IFRAME");
+    expect(el.getAttribute("src")).toBe("https://www.google.com/maps/embed?pb=!1m18");
+  });
+
+  it("a non-embeddable Maps URL still degrades to a link (not an iframe) when the host is NOT allowlisted", () => {
+    const el = buildEmbedElement("https://maps.app.goo.gl/abc123", []);
+    expect(el.tagName).not.toBe("IFRAME");
+    expect(el.getAttribute("data-testid")).toBe("macro-embed-unembeddable"); // guidance beats the plain degrade too
   });
 });
