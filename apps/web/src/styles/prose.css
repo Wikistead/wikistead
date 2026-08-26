@@ -148,6 +148,8 @@
 .wks-prose .cm-lp-backlinks-item { color: var(--link, #4ea1ff); text-decoration: none; }
 .wks-prose .cm-lp-backlinks-empty { font-size: 0.85em; color: var(--fg-dim, #888); font-style: italic; padding: 0.2em 0; }
 .wks-prose .cm-lp-embed-degrade { color: var(--link, #4ea1ff); word-break: break-all; }
+/* #908: guidance, not a link — styled muted like a placeholder so it does not read as a broken anchor. */
+.wks-prose .cm-lp-embed-unembeddable { color: var(--fg-dim, #888); font-size: 0.9em; font-style: italic; padding: 0.4em 0; }
 
 /* inline images (#305): Tailwind preflight makes img a block; an image sharing its paragraph with
  * text goes back inline (thumbnail); a standalone image (only child of its paragraph) is a full block. */

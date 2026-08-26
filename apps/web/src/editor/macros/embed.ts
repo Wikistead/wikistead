@@ -78,32 +78,36 @@ export function isAllowlistedEmbed(url: string, allowlist: readonly string[]): b
   });
 }
 
-// #908: some hosts refuse framing entirely (X-Frame-Options/CSP), independent of the tenant allowlist
-// — an admin who allowlists the host to enable ONE embeddable path (e.g. Google Maps' own
-// share→"Embed a map" URL) also allowlists every other page on that host, most of which reject the
-// frame. The result was a blank iframe the browser draws inside its OWN chrome (the product never
-// gets to say anything), read by a reporting user as "the product is broken". This is a HOST+PATH
-// check, deliberately separate from the allowlist: it fires whether or not the host is allowlisted,
-// because the failure is about the URL SHAPE, not about tenant configuration.
+// #908: some hosts refuse framing entirely (X-Frame-Options/CSP) on all but one path, so allowlisting
+// the host to enable that ONE embeddable path also allowlists every other page on it — which built a
+// blank iframe the browser draws inside its OWN chrome (the product never gets to say anything), read
+// by a reporting user as "the product is broken". This is a HOST+PATH check, evaluated ONLY when the
+// URL would otherwise become an iframe (see buildEmbedElement): a host that ISN'T allowlisted already
+// degrades to a link — the existing, correct, content-preserving behaviour export/print (both call
+// this with an empty allowlist, apps/web/src/data/exportBrowser.ts / app/PrintSurface.tsx) depend on,
+// and guidance replacing that link would be a regression (#207's content-loss shape, reintroduced).
 interface UnembeddableRule {
   test: (u: URL) => boolean;
   key: string; // i18n key, apps/web/src/i18n/locales/{en,ja}.json
 }
+// Any of google's own ccTLD storefronts (google.com, google.co.jp, google.co.uk, google.de, …) or its
+// maps.* subdomain, with or without `www.`.
+const GOOGLE_HOST = /^(?:www\.|maps\.)?google\.[a-z]{2,3}(?:\.[a-z]{2})?$/i;
 const UNEMBEDDABLE_RULES: readonly UnembeddableRule[] = [
   {
-    // Google's share-link shortener (maps.app.goo.gl, any path) and the ordinary Maps site
-    // (google.com/maps/…) both send X-Frame-Options: SAMEORIGIN. Only the URL Google's own
-    // Share → "Embed a map" panel produces (…/maps/embed?pb=…) omits that header.
+    // Google Maps sends X-Frame-Options: SAMEORIGIN on every page except the one its own
+    // Share → "Embed a map" panel produces (…/maps/embed?pb=…). Covers the share-link shortener
+    // (maps.app.goo.gl and the bare goo.gl/maps/… form, any path) and the Maps site itself, on any of
+    // Google's ccTLDs and with or without a trailing slash after /maps.
     test: (u) =>
       u.hostname === "maps.app.goo.gl" ||
-      (["www.google.com", "google.com"].includes(u.hostname) &&
-        u.pathname.startsWith("/maps/") &&
-        !u.pathname.startsWith("/maps/embed")),
+      (/^(?:www\.)?goo\.gl$/i.test(u.hostname) && u.pathname.startsWith("/maps")) ||
+      (GOOGLE_HOST.test(u.hostname) && /^\/maps(?:\/|$)/.test(u.pathname) && !u.pathname.startsWith("/maps/embed")),
     key: "macro.embedUnembeddableGoogleMaps",
   },
 ];
 
-/** A known-unembeddable URL's guidance sentence, or null if `url` matches no known-bad shape. */
+/** The i18n key for a known-unembeddable URL's guidance sentence, or null if `url` matches no known-bad shape. */
 export function unembeddableGuidance(url: string): string | null {
   let u: URL;
   try {
@@ -120,15 +124,18 @@ export function unembeddableGuidance(url: string): string | null {
 // the allowlist is host-injected — the macro itself can't see it (narrow host-API).
 export function buildEmbedElement(url: string, allowlist: readonly string[]): HTMLElement {
   const trimmed = url.trim();
-  const guidanceKey = unembeddableGuidance(trimmed);
-  if (guidanceKey) {
-    const div = document.createElement("div");
-    div.className = "cm-lp-macro cm-lp-embed-unembeddable";
-    div.setAttribute("data-testid", "macro-embed-unembeddable");
-    div.textContent = i18n.t(guidanceKey);
-    return div;
-  }
   if (isAllowlistedEmbed(trimmed, allowlist)) {
+    // #908: the allowlist alone can't tell "this path frames fine" from "this path is on the same
+    // host but refuses" — check that BEFORE building the iframe, only here, so a host that was never
+    // allowlisted keeps degrading to a link exactly as before (export/print's contract).
+    const guidanceKey = unembeddableGuidance(trimmed);
+    if (guidanceKey) {
+      const div = document.createElement("div");
+      div.className = "cm-lp-macro cm-lp-embed-unembeddable";
+      div.setAttribute("data-testid", "macro-embed-unembeddable");
+      div.textContent = i18n.t(guidanceKey);
+      return div;
+    }
     const iframe = document.createElement("iframe");
     iframe.className = "cm-lp-embed-frame";
     iframe.src = trimmed;
