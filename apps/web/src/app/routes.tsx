@@ -1402,6 +1402,12 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   const publishForEditor = useCallback(() => { void onPublish(); }, [onPublish]);
   const publishForEditorStay = useCallback(() => { void onPublish({ stay: true }); }, [onPublish]); // vim :w
   const exitEdit = useCallback(() => setEditing(false), []);
+  // #915: the member surface's title-band ring, wired here too. A view-linked guest gets it as well
+  // (unlike onToggleTask, which stays edit-only) — the progress is derived from the published body
+  // they can already read, not a new disclosure, and #290's ProgressRing already renders nothing at
+  // 0/0 so an untouched page shows no ring, same as the member surface.
+  const [taskProgress, setTaskProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  const onTaskProgress = useCallback((p: { done: number; total: number }) => setTaskProgress((prev) => (prev.done === p.done && prev.total === p.total ? prev : p)), []);
 
   const controls: PageControlsProps = {
     canEdit,
@@ -1448,6 +1454,13 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
                   <PageTitle
                     title={isHome ? t("spaceHome.title", { name: pageTitle }) : pageTitle}
                     onRename={canEdit && !isHome ? renameGuestPage : undefined} />
+                  {/* #915: member parity (the band's own row below the title, mirroring where PageMeta
+                      carries the ring on the member surface) — onToggleTask is edit-only, but the
+                      progress itself is derived from the published body a view guest already reads, so
+                      the ring rides here for both capabilities (ProgressRing renders nothing at 0/0). */}
+                  <div className="flex items-center gap-2">
+                    <span className="mt-1 inline-flex self-center" data-testid="band-task-ring"><ProgressRing done={taskProgress.done} total={taskProgress.total} animKey={pageId} /></span>
+                  </div>
                 </div>
                 {/* Desktop: the status chip rides the band row (member parity); mobile keeps the ⋯ controls. */}
                 {/* #406 PageStatus stays at every width. It carries the TOC toggle AND the
@@ -1474,7 +1487,7 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
               canEdit={canEdit}
             />
             <UnsavedBanner reason={liveness.reason} />
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onPublishStay={canEdit ? publishForEditorStay : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onPublishStay={canEdit ? publishForEditorStay : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (guest CM body is virtualised too).
                 #207: a guest holds a share token, which the diagram route accepts, so the picture prints
                 here as well. (The public route below has no token and passes none — its plantuml degrades
