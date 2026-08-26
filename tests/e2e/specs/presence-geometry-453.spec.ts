@@ -89,6 +89,9 @@ const KINDS: { name: string; source: string[]; box: string }[] = [
 
 for (const kind of KINDS) {
   test(`#453 a peer's box hugs the same rect as the local ring — ${kind.name}`, async ({ browser }) => {
+    // #891/#942: isolated from the merge gate — the mermaid case intermittently reads a huge height
+    // gap (a rendering-in-progress race), red in ~2/5 gate runs. Remove this skip once #942 lands.
+    if (kind.name === "mermaid") test.skip(true, "#942: isolated — intermittent height-race on mermaid");
     const ctxA = await browser.newContext();
     const ctxB = await browser.newContext();
     const A = await ctxA.newPage();

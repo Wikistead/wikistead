@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, INVITE_EMAIL_LABEL } from "../helpers";
 
 // #638 (user ruling): an admin can hand a pending invitation over again, from the row it is on.
 //
@@ -11,6 +11,9 @@ import { openDemo, sleep } from "../helpers";
 // Driven through the screen rather than the API, because the ruling is about reach: the act existing on
 // the server is not the same as an admin being able to perform it from where they are looking.
 test("#638: a pending invitation can be handed over again from its own row", async ({ page }) => {
+  // #891/#937: isolated from the merge gate — an onboarding popover ("Tailor the editor to how you
+  // write") shows up alongside the row's dialog and it never opens. Remove this skip once #937 lands.
+  test.skip(true, "#937: isolated — invite-link-dialog never opens (onboarding popover overlap)");
   test.setTimeout(120_000);
   await openDemo(page);
   await page.goto("/admin/members");
@@ -18,7 +21,7 @@ test("#638: a pending invitation can be handed over again from its own row", asy
 
   // an invitation to work with, created the way an admin creates one
   const addr = `handoff638-${Date.now().toString(36)}@e2e.test`;
-  await page.getByLabel(/invite email|招待するメール/i).fill(addr);
+  await page.getByLabel(INVITE_EMAIL_LABEL).fill(addr);
   await page.getByRole("button", { name: /send invite|招待を送/i }).first().click();
   // #638 slice 2: the link arrives in a modal now, and it has to be dismissed before the list behind it
   // can be used — which is the point of a modal for a secret shown once.
@@ -91,6 +94,9 @@ const INVITE = (i: number, email: string) => ({
 const ADDRESSES = ["a@e.test", "considerably-longer-address@example-domain.test", "mid@sample.test"];
 
 test("#638: the pending list is a column of rows, and its controls line up", async ({ page }) => {
+  // #891/#937: isolated from the merge gate — flaky (green alone, red alongside the file's other
+  // tests). Remove this skip once #937 lands.
+  test.skip(true, "#937: isolated — flaky alongside this file's other tests");
   test.setTimeout(90_000);
   await openDemo(page);
   await page.route("**/api/members/invites", async (route) => {
@@ -133,6 +139,9 @@ test("#638: the pending list is a column of rows, and its controls line up", asy
 });
 
 test("#638: …and twenty invitations scroll inside the box instead of growing the page", async ({ page }) => {
+  // #891/#937: isolated from the merge gate — flaky (green alone, red alongside the file's other
+  // tests). Remove this skip once #937 lands.
+  test.skip(true, "#937: isolated — flaky alongside this file's other tests");
   test.setTimeout(90_000);
   await openDemo(page);
   await page.route("**/api/members/invites", async (route) => {

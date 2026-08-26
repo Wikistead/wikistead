@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { e2ePorts } from "../../scripts/stack-offset.mjs";
 import { memberLabel } from "../../apps/web/src/ui/principal-label"; // #902: the screen's own rule
 import enLocale from "../../apps/web/src/i18n/locales/en.json" with { type: "json" };
+import jaLocale from "../../apps/web/src/i18n/locales/ja.json" with { type: "json" };
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -270,3 +271,10 @@ export function shownAs(sub: string, displayName: string | null): string {
 // The seeded admin carries a display name (`infra/db/seed.ts`), so the screen shows that, never the
 // subject. Kept beside the helper so a spec never has to know which.
 export const DEV_USER_SHOWN = shownAs("dev-user", "Dev User");
+
+// #891: the invite-by-email field's accessible name, asked from the shipped copy (not a spec's own
+// guess) for the same reason as DEV_USER_SHOWN above — four specs (admin-gate, avatar-isolation-372,
+// invite-handoff-638, one-secret-title-646) each hard-coded a guessed EN/JA pair that was never the
+// shipped `members.inviteEmail` string in either locale — spec rot that a copy change can't surface,
+// since none of these specs run in any CI gate today (#891).
+export const INVITE_EMAIL_LABEL = new RegExp(`^(${enLocale.members.inviteEmail}|${jaLocale.members.inviteEmail})$`);

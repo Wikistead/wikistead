@@ -107,6 +107,9 @@ test("#317 guest VIEW link: checkbox stays disabled AND the server rejects a dir
 });
 
 test("#317 guest × Reading (edit link): the checkbox flips the draft (#314 parity for guests)", async ({ browser }) => {
+  // #891/#941: isolated from the merge gate — intermittently red only when run alongside the other
+  // 19 gated specs (stable alone). Remove this skip once #941 lands.
+  test.skip(true, "#941: isolated — flaky only inside the full gate run");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPageWithTask(member, "guest-cb-reading");

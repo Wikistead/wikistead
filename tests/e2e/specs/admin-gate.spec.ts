@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep, WEB_REAL_PORT, DEV_USER_SHOWN } from "../helpers";
+import { openDemo, sleep, WEB_REAL_PORT, DEV_USER_SHOWN, INVITE_EMAIL_LABEL } from "../helpers";
 
 // Phase 5a: the two-layer admin console framework + authz gates.
 //  - Positive (dev-mode 5180, dev-user = tenant admin + space manager): the user
@@ -160,7 +160,7 @@ test("non-admin member is denied: admin → 403 (no menu entry); unviewable spac
   await admin.getByTestId("onboarding-banner-dismiss").click({ timeout: 5000 }).catch(() => {});
   await expect(admin.getByTestId("onboarding-banner")).toBeHidden();
   const inviteEmail = `gate${Date.now()}@e2e.test`;
-  await admin.getByLabel("invite email").fill(inviteEmail);
+  await admin.getByLabel(INVITE_EMAIL_LABEL).fill(inviteEmail);
   await admin.getByRole("button", { name: "Send invite" }).click();
   // #638: the link arrives in a modal now (it is shown once and the two links on this screen are made
   // from different places), so it is read from the value inside the box and the modal is dismissed —

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "e2e": "tsx ../../infra/openfga/ensure-e2e-model.ts && playwright test",
+    "e2e:gate": "node scripts/merge-gate.mjs",
     "up": "node scripts/up.mjs",
     "down": "node scripts/down.mjs"
   },

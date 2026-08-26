@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { WEB_REAL_PORT } from "../helpers";
+import { WEB_REAL_PORT, INVITE_EMAIL_LABEL } from "../helpers";
 
 // #372: "another member's uploaded avatar shows for a NEW member". The server trace (ticket)
 // proved every path is sub-scoped (storage key / /auth/me row / per-sub image URL / JIT copies no
@@ -26,7 +26,7 @@ async function loginDefault(page: Page): Promise<void> {
 
 async function makeInvite(admin: Page): Promise<string> {
   await admin.goto(`${WEB}/settings/members`);
-  await admin.getByLabel("invite email").fill(`avatar372-${Date.now()}@e2e.test`);
+  await admin.getByLabel(INVITE_EMAIL_LABEL).fill(`avatar372-${Date.now()}@e2e.test`);
   await admin.getByRole("button", { name: "Send invite" }).click();
   // #638: the link is shown once, in a modal — read the value inside the box, then dismiss it so the
   // console behind is usable again.

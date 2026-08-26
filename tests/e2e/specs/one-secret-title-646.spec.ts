@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openDemo, sleep } from "../helpers";
+import { openDemo, sleep, INVITE_EMAIL_LABEL } from "../helpers";
 
 // #646 (user ruling: unify them): one secret, one name — whichever door it came through.
 //
@@ -19,7 +19,7 @@ test("#646: the invite link dialog is called the same thing from either door", a
 
   // door 1: the form. Creating an invite raises the dialog with the link it just minted.
   const addr = `title646-${Date.now().toString(36)}@e2e.test`;
-  await page.getByLabel(/invite email|招待するメール/i).fill(addr);
+  await page.getByLabel(INVITE_EMAIL_LABEL).fill(addr);
   await page.getByRole("button", { name: /send invite|招待を送/i }).first().click();
   const dialog = page.getByTestId("invite-link-dialog");
   await expect(dialog, "the form's dialog opened").toBeVisible({ timeout: 20_000 });
