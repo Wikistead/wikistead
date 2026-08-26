@@ -65,6 +65,21 @@ export const DOC_CODE_MAP = [
     doc: 'wikistead-docs/src/content/docs/editor/macros.md',
   },
   {
+    // #922: the plain-Markdown notation (not macros) this cheat sheet promises — highlight, footnotes
+    // and math each shipped without a word in the docs (#922's own finding). Bound as a region: none of
+    // these three has a registry to walk, the same shape as the #729 capability rows above. Q3 of #922
+    // deliberately used this existing map instead of a new check (#759, the general "docs rot" fix, was
+    // still in Review when this landed) — this row is meant to be foldable into whatever #759 builds.
+    label: 'plain Markdown notation (highlight/footnote/math)',
+    kind: 'authored',
+    code: [
+      'packages/macro-render/src/highlight-ext.ts',
+      'packages/macro-render/src/footnote-ext.ts',
+      'apps/web/src/editor/live-preview/math.ts',
+    ],
+    doc: 'wikistead-docs/src/content/docs/reference/markdown-notation.md',
+  },
+  {
     // #865: this pointed at `api/reference.md` in the docs repo — a page that has never existed
     // there (`git log --all` on that path is empty). So the most-edited region in the tree was bound
     // to something nobody could update, and once #704 armed the authored half, every PR touching a
