@@ -62,21 +62,25 @@ const componentAround = (src: string, at: number): string => {
   return src.slice(start > -1 ? start : 0, at + endRel);
 };
 
-// Prop-fed surfaces: the data (and therefore the failure) belongs to the caller. Each entry names the
-// caller so the claim can be checked, rather than being a hole with a shrug in it.
-const FAILURE_BELONGS_TO_THE_CALLER: Record<string, string> = {
-  "settings/ApiKeysPanel.tsx": "keys arrive as a prop — AccountPage and AdminApiTab own the fetch",
-  "app/HomeEmpty.tsx": "presentational: the caller decides there are no spaces and renders this",
-};
-
-// #895 naming the callers in prose (above) is not checking them — the reopened ticket found
-// AdminApiTab rendering ApiKeysPanel with `keys.data ?? []` and never reading `keys.isError`, while
-// this file's exclusion entry kept asserting the delegation was safe because ApiKeysPanel.tsx still
-// existed. So the delegated component's OWN render call is walked here too, generically — every JSX
-// site that renders it, in any file, has to be guarded — which is what would have caught the second
-// caller instead of only the one this ticket happened to touch first.
-const DELEGATED_RENDER_SITE: Record<string, RegExp> = {
-  "settings/ApiKeysPanel.tsx": /<ApiKeysPanel\b/,
+// Prop-fed surfaces: the data (and therefore the failure) belongs to the caller, not this component.
+// #895 (round 1): naming the caller in PROSE is not checking it — AdminApiTab rendered
+// ApiKeysPanel with `keys.data ?? []` and never read `keys.isError`, while this file's exclusion entry
+// kept asserting the delegation was safe because ApiKeysPanel.tsx still existed.
+// #895 c68xx (round 2, this reopening): prose was fixed for ApiKeysPanel by walking its render sites
+// (below), but `app/HomeEmpty.tsx` kept a SECOND prose-only entry in a table nothing cross-checked
+// against the first — `HomeLanding` rendered it without reading `spaces.isError` and nothing caught
+// it, because "keeps both exclusion lists live" only proves an entry's file still exists, never that
+// its callers are actually walked. So there is now exactly ONE table: a delegated file with no render
+// pattern is a hole by construction, not by omission.
+const DELEGATED: Record<string, { reason: string; renderPattern: RegExp }> = {
+  "settings/ApiKeysPanel.tsx": {
+    reason: "keys arrive as a prop — AccountPage and AdminApiTab own the fetch",
+    renderPattern: /<ApiKeysPanel\b/,
+  },
+  "app/HomeEmpty.tsx": {
+    reason: "presentational: the caller decides there are no spaces and renders this",
+    renderPattern: /<HomeEmpty\b/,
+  },
 };
 
 // Empty states that are NOT about a fetch. Named one by one, because a category would swallow the
@@ -102,16 +106,17 @@ for (const file of walk(SRC_ROOT)) {
       file: rel,
       keys: [m[1]!],
       handled: DRAWS_ON_FAILURE.test(around) || RETURNS_ON_FAILURE.test(around),
-      delegated: rel in FAILURE_BELONGS_TO_THE_CALLER,
+      delegated: rel in DELEGATED,
     });
   }
 }
 
 // Every JSX render of a delegated component, wherever it lives — not just the files this ticket
-// happened to fix. A caller found here that does NOT guard the render is exactly the AdminApiTab gap.
+// happened to fix. A caller found here that does NOT guard the render is exactly the AdminApiTab gap
+// (round 1) and the HomeLanding gap (round 2).
 type CallSite = { caller: string; delegatee: string; handled: boolean };
 const callSites: CallSite[] = [];
-for (const [delegatee, renderPattern] of Object.entries(DELEGATED_RENDER_SITE)) {
+for (const [delegatee, { renderPattern }] of Object.entries(DELEGATED)) {
   for (const file of walk(SRC_ROOT)) {
     const rel = file.slice(SRC_ROOT.length + 1);
     if (rel === delegatee) continue; // the delegated component itself, not a caller
@@ -134,7 +139,7 @@ describe("#888 a failed fetch is not an empty list", () => {
   it("keeps both exclusion lists live", () => {
     // An allowlist that outlives the thing it excuses is a hole: the file is renamed, the entry stays,
     // and the next surface to take that path is excused by a line about something else.
-    for (const rel of Object.keys(FAILURE_BELONGS_TO_THE_CALLER)) {
+    for (const rel of Object.keys(DELEGATED)) {
       expect(sites.some((s) => s.file === rel), `${rel} no longer renders an empty state — drop the entry`).toBe(true);
     }
     for (const rel of Object.keys(NOT_A_FETCH)) {
@@ -154,8 +159,16 @@ describe("#888 a failed fetch is not an empty list", () => {
     },
   );
 
-  it("finds every render site of a delegated component (the walk itself is not vacuous)", () => {
-    expect(callSites.length, "no caller renders a delegated component — the render pattern broke").toBeGreaterThanOrEqual(2);
+  it("finds at least one render site for every delegated component (the walk is not vacuous)", () => {
+    // Per-entry, not just a total count: a total floor stays green when one entry's render pattern
+    // breaks as long as another entry's call sites make up the number — exactly the shape that let
+    // HomeEmpty's entry sit unchecked while ApiKeysPanel's was walked.
+    for (const delegatee of Object.keys(DELEGATED)) {
+      expect(
+        callSites.some((c) => c.delegatee === delegatee),
+        `${delegatee} is in DELEGATED but no caller renders it — the render pattern broke, or it has no callers left (drop the entry)`,
+      ).toBe(true);
+    }
   });
 
   it.each(callSites.map((c) => [`${c.caller} renders ${c.delegatee}`, c] as const))(

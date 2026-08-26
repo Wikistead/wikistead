@@ -228,6 +228,7 @@ import { TocChrome } from "../toc/TocChrome"; // #227: shared TOC rail/overlay/t
 import { useTocPref } from "../toc/useTocPref";
 import type { Heading } from "../editor/headings";
 import { PermissionsDialog } from "../ui/PermissionsDialog";
+import { LoadFailed } from "../ui/LoadFailed";
 import { Button } from "../ui/Button";
 import { ProseSkeleton, useDelayedFlag } from "../ui/Skeleton";
 import { notify } from "../ui/toast";
@@ -2203,6 +2204,10 @@ function HomeLanding() {
   const { t } = useTranslation();
   const spaces = useSpacesPage();
   if (spaces.isPending) return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  // #895: a failed fetch is not zero spaces — without this guard a 500/network failure fell through to
+  // HomeEmpty's "no spaces yet, ask an administrator", telling a member their workspace is empty when
+  // nothing of the sort was established. Measured on the most-visible surface in the product.
+  if (spaces.isError) return <AppShell><LoadFailed testId="home-spaces-failed" onRetry={() => { void spaces.refetch(); }} /></AppShell>;
   const first = (spaces.data?.spaces ?? [])[0];
   if (first?.homePageId) return <Navigate to={`/p/${first.homePageId}`} replace />;
   if (first) return <Navigate to={`/spaces/${first.id}`} replace />;
