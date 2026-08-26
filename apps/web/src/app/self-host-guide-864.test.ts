@@ -29,10 +29,12 @@ vi.mock("react-i18next", () => ({
 }));
 
 let selfHosted: boolean | undefined = false;
+let isAdmin = true;
 vi.mock("../data/queries", () => ({
   useSpacesPage: () => ({ isPending: false, data: { spaces: [] } }),
   useEntitlements: () => ({ data: { branding: true, selfHosted } }),
 }));
+vi.mock("../session/SessionProvider", () => ({ useSession: () => ({ isAdmin }) }));
 const { HomeEmpty } = await import("./HomeEmpty");
 
 function render(): { text: string; link: string | null } {
@@ -47,7 +49,7 @@ function render(): { text: string; link: string | null } {
   return out;
 }
 
-beforeEach(() => { lang = "en"; selfHosted = false; });
+beforeEach(() => { lang = "en"; selfHosted = false; isAdmin = true; });
 
 describe("#864: the empty desk offers the setup guide to whoever set the server up", () => {
   for (const l of ["en", "ja"]) {
@@ -67,6 +69,17 @@ describe("#864: the empty desk offers the setup guide to whoever set the server 
     // The rest of the empty state is untouched — this ticket adds a line, it does not rewrite one.
     expect(text).toContain(copy("home.emptyTitle"));
     expect(text).toContain(copy("home.emptyBody"));
+  });
+
+  it("⚠️ and does not address an ordinary member as the person who set the server up", () => {
+    // The deployment's shape was the whole condition once, and it is not the whole question. A member
+    // invited next month reaches this same screen before anybody adds them to a space; telling them
+    // "if you stood this server up, read the guide" names somebody they are not — two lines under
+    // "ask an administrator", which for them is the correct advice.
+    selfHosted = true; isAdmin = false;
+    const { text, link } = render();
+    expect(link, "the guide is offered to the operator, not to everyone on their server").toBeNull();
+    expect(text, "and the rest of the empty state still speaks to them").toContain(copy("home.emptyBody"));
   });
 
   it("stays silent while the fact is unknown, rather than guessing", () => {
