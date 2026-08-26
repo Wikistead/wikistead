@@ -549,6 +549,7 @@
     "ssoNeedsExemption": "先にパスワードを持つ例外メンバーを 1 人以上指名してください。IdP 障害時の戻り道になります。",
     "ssoExemptionsLead": "例外メンバーは SSO 必須の間もパスワードでサインインできます。",
     "ssoExemptionNoCredential": "パスワード未設定",
+    "ssoExemptionAdmin": "管理者",
     "ssoExemptionRevoke": "例外を取り消す",
     "ssoExemptionSearch": "例外メンバーを追加…",
     "ssoExemptionRevokeConfirm": "{{sub}} の例外を取り消しますか？SSO 必須の間、この人はパスワードでサインインできなくなります。",

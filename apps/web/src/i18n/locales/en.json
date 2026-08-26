@@ -550,6 +550,7 @@
     "ssoNeedsExemption": "Name at least one exempt member who holds a password first. They are the way back in when the IdP is down.",
     "ssoExemptionsLead": "Exempt members may still sign in with a password while SSO is required.",
     "ssoExemptionNoCredential": "no password yet",
+    "ssoExemptionAdmin": "admin",
     "ssoExemptionRevoke": "Revoke exemption",
     "ssoExemptionSearch": "Add an exempt member…",
     "ssoExemptionRevokeConfirm": "Revoke the exemption for {{sub}}? While SSO is required they will no longer be able to sign in with a password.",

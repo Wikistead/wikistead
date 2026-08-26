@@ -2436,7 +2436,7 @@ export function useUpdateSecondFactorStance() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["login-methods-admin"] }),
   });
 }
-export interface SsoExemptionDTO { memberSub: string; createdAt: string; hasCredential: boolean }
+export interface SsoExemptionDTO { memberSub: string; createdAt: string; hasCredential: boolean; isAdmin: boolean }
 export function useUpdateSsoRequired() {
   const { token } = useSession();
   const qc = useQueryClient();

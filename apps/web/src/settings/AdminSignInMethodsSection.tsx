@@ -730,6 +730,12 @@ export function AdminSignInMethodsSection() {
               {(exemptions.data ?? []).map((x) => (
                 <div key={x.memberSub} className="flex items-center gap-2 text-xs" data-testid="sso-exemption-row">
                   <span className="min-w-0 flex-1 truncate" data-clip="value" data-testid="sso-exemption-name">{nameOf(x.memberSub)}</span>
+                  {x.isAdmin && (
+                    /* #935: the refusal this list exists to unblock says "exempt ANOTHER ADMINISTRATOR
+                       who has one" — the operator needs to see WHICH exempt members are administrators
+                       to follow that instruction from this screen. */
+                    <span className="rounded bg-panel-2 px-1.5 py-px text-[10px] text-fg-dim" data-testid="sso-exemption-admin">{t("adminAuth.ssoExemptionAdmin")}</span>
+                  )}
                   {!x.hasCredential && (
                     /* §5: the credential row is the only honest witness that a key exists — an
                        exemption without one cannot actually sign in yet, and the screen says so */

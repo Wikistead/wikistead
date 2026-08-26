@@ -397,10 +397,21 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     const bar = req.query.cursor?.indexOf('|') ?? -1
     const after = req.query.cursor && bar > 0
       ? { at: req.query.cursor.slice(0, bar), sub: req.query.cursor.slice(bar + 1) } : null
-    const rows = await req.db.sql<{ member_sub: string; created_at: Date; has_credential: boolean; cursor_at: string }[]>`
-      SELECT se.member_sub, se.created_at, (lc.member_sub IS NOT NULL) AS has_credential,
+    // #935: the refusal this list exists to unblock reads "exempt ANOTHER ADMINISTRATOR who has one" —
+    // the screen already carried hasCredential (who has a key) but not role (who is an administrator),
+    // so the one thing the refusal tells an operator to do was not answerable from this screen. Joining
+    // `members` opens no new disclosure: this list is already admin-gated (requireTenantAdmin above),
+    // the same precedent #614 used adding status columns to this same row.
+    //
+    // LEFT JOIN, not JOIN: sso_exemptions carries no FK to members (#623 — an exemption is never
+    // pruned, so it survives the member it named). An INNER join would silently drop those rows from
+    // the list instead of showing them with isAdmin=false, which is a regression this fix must not add.
+    const rows = await req.db.sql<{ member_sub: string; created_at: Date; has_credential: boolean; role: string | null; cursor_at: string }[]>`
+      SELECT se.member_sub, se.created_at, (lc.member_sub IS NOT NULL) AS has_credential, m.role,
              extract(epoch from se.created_at)::text AS cursor_at
-      FROM sso_exemptions se LEFT JOIN local_credentials lc ON lc.member_sub = se.member_sub
+      FROM sso_exemptions se
+      LEFT JOIN local_credentials lc ON lc.member_sub = se.member_sub
+      LEFT JOIN members m ON m.sub = se.member_sub
       WHERE TRUE
         ${after ? req.db.sql`AND (se.created_at, se.member_sub) > (to_timestamp(${after.at}::numeric), ${after.sub})` : req.db.sql``}
       ORDER BY se.created_at, se.member_sub
@@ -409,7 +420,7 @@ export async function adminLoginMethodsPlugin(app: FastifyInstance) {
     const page = hasMore ? rows.slice(0, limit) : rows
     const last = page[page.length - 1]
     return {
-      exemptions: page.map((r) => ({ memberSub: r.member_sub, createdAt: r.created_at, hasCredential: r.has_credential })),
+      exemptions: page.map((r) => ({ memberSub: r.member_sub, createdAt: r.created_at, hasCredential: r.has_credential, isAdmin: r.role === 'admin' })),
       nextCursor: hasMore && last ? `${last.cursor_at}|${last.member_sub}` : null,
     }
   })
