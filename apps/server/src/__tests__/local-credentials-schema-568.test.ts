@@ -99,7 +99,11 @@ describe('#568 §1: a password cannot outlive, escape, or be spoofed into its me
     await seatLocalMember(first, shared)
     await putCredential(first, shared, await hashPassword('pw'))
 
-    await seatLocalMember(second, shared)
+    // ADR-259 §3.2 now refuses a second seat for an address a member already holds, so `second` is
+    // seated under its OWN address here — this test is about `local_credentials.identifier`'s own
+    // UNIQUE constraint, not about whether two members may share `members.email` (they may not, once
+    // seated through the fortress; §3.2 has its own coverage in address-collision-259.test.ts).
+    await seatLocalMember(second, `${second}@e2e.test`)
     await expect(putCredential(second, shared, await hashPassword('pw')), 'two live members cannot share a login name')
       .rejects.toThrow()
 

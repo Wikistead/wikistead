@@ -758,6 +758,7 @@
     "continueWith": "Continue with {{provider}}",
     "errorAccess": "Sign-in couldn't be completed. Please try again or contact your workspace administrator.",
     "errorSeatFull": "This workspace has reached its member limit. Ask an administrator to free a seat or upgrade.",
+    "errorAddressTaken": "This address already belongs to a member of this workspace. Sign in the way you already can, then add this sign-in method from account settings.",
     "joinTitle": "Create your {{product}} workspace",
     "joinBody": "Sign up with your identity provider to get started.",
     "signUp": "Sign up",

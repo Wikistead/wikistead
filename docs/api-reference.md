@@ -65,3 +65,10 @@ billing (`/billing/*`, Stripe webhooks), the MCP endpoints (`/mcp*`, documented 
 anonymous public reader (`/public/*`), and infra probes (`/healthz`, `/readyz`). The
 `api-inventory-407` test keeps the spec and the route table from drifting: adding a member route without
 documenting or explicitly excluding it fails the build.
+
+The browser session flows redirect to `/login?error=<reason>` on refusal rather than returning a JSON
+error body — the OIDC/SAML callback (`/auth/callback`) is one of them. `access` stays deliberately vague
+(no enumeration); `seat_full` and `address_taken` are the two refusals specific enough to name (a billing
+wall, and ADR-259's "this address already belongs to a member here — sign in that way, then add this
+provider from account settings"). Neither carries an API-key error body, since neither reaches a caller
+that would parse one.

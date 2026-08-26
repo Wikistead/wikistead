@@ -270,7 +270,17 @@ export async function acceptInvite(
     // The seat fortress (lock already held above): idempotent for an existing member, cap-checked,
     // atomic member INSERT + FGA. Shared with #101 auto-enrolment so EVERY new-member path goes through
     // the ONE gate. Returns whether it created; acceptInvite answers true either way (membership held).
-    const seated = await enrolUnderSeatCap(tx, deps.fga, tenant, claims, flipped[0]!.role, 'invite')
+    let seated: 'created' | 'exists'
+    try {
+      seated = await enrolUnderSeatCap(tx, deps.fga, tenant, claims, flipped[0]!.role, 'invite')
+    } catch (e) {
+      // ADR-259 §3.4: an invite door stays uniform (somebody holding a token has proved nothing about
+      // the address) — the SAME "this link no longer works" answer acceptLocalInvite already gives for
+      // its own address collision, not a signal that tells this caller who already owns the address.
+      // seat_limit rethrows (the caller distinguishes it from a bad token, unchanged from before).
+      if ((e as { code?: string }).code === 'address_taken') return false
+      throw e
+    }
     await applyInviteRole(tx, deps.fga, tenant, claims.sub, flipped[0]!, seated)
     return true
   })
@@ -361,7 +371,14 @@ export async function acceptLocalInvite(
     // answer is the ordinary "this link no longer works": the same uniform outcome as an expired or
     // consumed token, which is all this path can say without telling a stranger who is a member here.
     if (await memberWithEmail(tx, tenant.id, identifier)) return { ok: false as const }
-    await enrolUnderSeatCap(tx, deps.fga, tenant, claims, invite.role, 'invite', 'local')
+    // ADR-259 §3.4: the fortress asks the same address question again (defence in depth — the check
+    // above is this door's own pre-existing guard, unchanged). An invite door stays uniform either way.
+    try {
+      await enrolUnderSeatCap(tx, deps.fga, tenant, claims, invite.role, 'invite', 'local')
+    } catch (e) {
+      if ((e as { code?: string }).code === 'address_taken') return { ok: false as const }
+      throw e
+    }
     await tx`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
              VALUES (${tenant.id}, ${sub}, ${identifier}, ${passwordHash})`
     await applyInviteRole(tx, deps.fga, tenant, sub, invite, 'created')
@@ -415,6 +432,15 @@ async function applyInviteRole(
 // it harmlessly — advisory locks are re-entrant within a tx). Idempotent by identity (an existing member
 // consumes no seat, no DB/FGA change, no error). Throws 402 seat_limit for a NEW member over the cap →
 // the whole tx rolls back. FGA is written LAST (ADR-003). Returns 'created' | 'exists'.
+//
+// ADR-259 §3.2: also throws 409 address_taken for a NEW member whose address already belongs to a
+// member of this tenant — this is the ONE fortress all three doors pass through (auto-enrol,
+// OIDC invite accept, local invite accept), so this is the ONE place that has to look. It runs
+// AFTER the membership test (an existing member's own sign-in never collides with itself) and does
+// NOT read `email_verified` — the tenant's own IdP can assert that claim, so trusting it here would
+// let whoever configures the IdP absorb an existing password member's seat (ADR-259 §2, CVE-2023-3128's
+// shape). `via` and `identitySource` are passed through unchanged for the error's own body, so a
+// caller can tell an address collision apart from a token failure without re-querying.
 export async function enrolUnderSeatCap(
   tx: Sql,
   fga: OpenFgaClient,
@@ -430,6 +456,9 @@ export async function enrolUnderSeatCap(
 ): Promise<'created' | 'exists'> {
   await lockSeats(tx, tenant.id)
   if (await isMember(tx, claims.sub)) return 'exists'
+  if (await memberWithEmail(tx, tenant.id, claims.email)) {
+    throw Object.assign(new Error('that address already belongs to a member of this tenant'), { statusCode: 409, code: 'address_taken' })
+  }
   const ent = resolveEntitlements(tenant.plan)
   if (isFinite(ent.maxSeats) && (await billableMemberCount(tx)) >= ent.maxSeats) {
     throw Object.assign(new Error('seat limit reached'), { statusCode: 402, code: 'seat_limit' })

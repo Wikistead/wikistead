@@ -205,8 +205,20 @@ describe('#554 S4a: connection management', () => {
   }, 60_000)
 })
 
+// ADR-259 §6.2 (retiring this suite's own anti-test, cited rather than silently dropped): the assertion
+// below — "one address through two connections makes two members" — used to hold for a FRESH sign-in
+// too, which is the shape §3.2 removes: a second connection asserting an address a member already holds
+// is now REFUSED (409 address_taken), not seated as a second person (pinned in auto-enroll.test.ts and
+// invite-duplicate-member-606.test.ts, exercised through all three enrolUnderSeatCap callers).
+//
+// THIS test's own scenario is narrower than that and stays true: both members below are seeded directly
+// via FGA tuples (writeTuples), so neither login here ever reaches enrolUnderSeatCap's NEW-member path —
+// `allowed` is already true for both subs before either sign-in. What it measures is that §3.1 ("two
+// members are never merged") holds for a pair that already exists — a genuinely different question from
+// whether such a pair may be CREATED from scratch, which §3.2 now answers no to. The title undersold that
+// distinction; the sub-title below says it.
 describe('#554 S4b: subject namespacing (§5) — the internal-mint face', () => {
-  it('a minting connection creates wc<conn8>_<ext>; the legacy connection keeps the raw sub — TWO members, no merge', async () => {
+  it('a minting connection creates wc<conn8>_<ext>; the legacy connection keeps the raw sub — an ALREADY-SPLIT pair does not merge on re-login (ADR-259 §3.1; ADR-259 §3.2 is what now stops such a pair from being created fresh — see ADR-259 §6.2)', async () => {
     const minting = randomUUID()
     const prefix = subjectPrefixFor(minting)
     await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, scopes, redirect_uri, enabled, sort, subject_prefix)

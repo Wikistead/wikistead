@@ -355,6 +355,10 @@ export async function establishMemberSession(
     if (!eligible) throw Object.assign(new Error('not a member of this tenant'), { statusCode: 403 })
     // A NEW member goes through the shared seat fortress (advisory lock + cap + member INSERT + FGA). A
     // 402 (cap) or FGA failure rolls the tx back → no member → the caller answers as for a non-member.
+    // ADR-259 §3.2/§3.4: also throws 409 address_taken when this address already belongs to a member
+    // this is the FEDERATED door (a direct sign-in, not an invite token), so unlike an invite door this
+    // one is allowed to explain: the caller (routes/auth.ts) tells the person to sign in the way they
+    // already can and add this provider from account settings, rather than staying vague.
     await deps.db.tx((tx) => enrolUnderSeatCap(tx, deps.fga, tenant, claims, 'member', 'auto'))
   }
 

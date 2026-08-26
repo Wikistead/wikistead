@@ -130,6 +130,9 @@ function useAuthError(): string | null {
   // #346: the IdP was unreachable / misconfigured when starting login — a "temporarily unavailable"
   // message (distinct from access-denied), still vague about WHICH IdP (no enumeration / config leak).
   if (kind === "idp_unavailable") return t("auth.errorIdpUnavailable");
+  // ADR-259 §3.2/§3.4: the FEDERATED door only (auto-enrolment) — the person has just authenticated to
+  // an IdP that itself asserts this address, so naming that much back to them discloses nothing new.
+  if (kind === "address_taken") return t("auth.errorAddressTaken");
   // access / auth / saml all collapse to a single vague message — never reveal WHY (no enumeration).
   return t("auth.errorAccess");
 }

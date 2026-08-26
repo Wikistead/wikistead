@@ -19,7 +19,7 @@ import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { fgaClient } from '@wikistead/authz'
-import { createInvite, acceptLocalInvite } from '../auth/invites.js'
+import { createInvite, acceptLocalInvite, acceptInvite } from '../auth/invites.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -115,6 +115,41 @@ describe('#606: an invite to an existing member is refused, and never seats them
     const { token } = await makeInvite(addr)
     const result = await acceptLocalInvite({ db, fga: fgaClient }, { id: TENANT, plan: 'business' }, token, PASSWORD)
     expect(result.ok, 'a genuine invite is unaffected').toBe(true)
+    expect(await membersWith(addr)).toBe(1)
+  }, 120_000)
+})
+
+// ADR-259 §3.2/§3.4/§5: #606 built this guard on the LOCAL invite door only (issue-time AND accept-time
+// both call memberWithEmail there). An OIDC invite asked NOTHING at either end — issuing one, then
+// accepting it as the identity provider's own sign-in, seated a second person sharing the address. The
+// fortress (enrolUnderSeatCap) now closes it for every caller; this measures the OIDC one specifically,
+// because it is the caller that had ZERO coverage before this ADR.
+describe('#606 → ADR-259 §3.2: an OIDC invite acceptance never seats a second person for a held address', () => {
+  const makeOidcInvite = (addr: string) =>
+    createInvite(db, { tenantId: TENANT, plan: 'business', invitedBy: 'dev-user', email: addr, role: 'member' }) // kind defaults to 'oidc'
+
+  it('accepting an OIDC invite for an address a member already holds answers false — the same uniform outcome as a bad token', async () => {
+    const addr = email('oidc-race')
+    const { token } = await makeOidcInvite(addr) // free at this point — issuing an OIDC invite asks nothing
+    await seatMember(addr) // …and now somebody is here, via SCIM or a first sign-in through another door
+    expect(await membersWith(addr), 'one of them so far').toBe(1)
+
+    const oidcSub = `dup606-oidc-${STAMP}`
+    subs.push(oidcSub)
+    const ok = await acceptInvite({ db, fga: fgaClient }, { id: TENANT, plan: 'business' }, token, { sub: oidcSub, email: addr })
+    expect(ok, 'the same "this link no longer works" answer as an expired or consumed token').toBe(false)
+    expect(await membersWith(addr), 'and no second member was created').toBe(1)
+    expect((await adminPool`SELECT 1 FROM members WHERE tenant_id = ${TENANT} AND sub = ${oidcSub}`).length,
+      'nothing was seated under the identity that tried to accept').toBe(0)
+  }, 120_000)
+
+  it('an OIDC invite for an address nobody holds still works — the guard did not close the door', async () => {
+    const addr = email('oidc-fresh')
+    const { token } = await makeOidcInvite(addr)
+    const oidcSub = `dup606-oidc-fresh-${STAMP}`
+    subs.push(oidcSub)
+    const ok = await acceptInvite({ db, fga: fgaClient }, { id: TENANT, plan: 'business' }, token, { sub: oidcSub, email: addr })
+    expect(ok, 'a genuine invite is unaffected').toBe(true)
     expect(await membersWith(addr)).toBe(1)
   }, 120_000)
 })

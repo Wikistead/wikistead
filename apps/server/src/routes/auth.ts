@@ -281,15 +281,24 @@ export async function authPlugin(app: FastifyInstance) {
 
       const deps = { db, fga: app.fga, valkey: app.valkey, searchDriver: app.searchDriver }
       let sid: string | null = null
+      // ADR-259 §3.2/§3.4: set only when auto-enrolment (the FEDERATED door, not an invite token) hit
+      // the address collision — this is the one door that gets an explanation rather than the vague
+      // refusal, because the person has just authenticated to an IdP that itself asserts this address.
+      let addressTaken = false
       try {
         sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated' }) // existing member → session
       } catch (e) {
-        // Not a member yet. Identity is proven but membership is NOT — login alone
-        // never grants it (the identity≠membership invariant). Membership appears
-        // here ONLY via one of the two explicit grants below; otherwise we reject.
-        // #377: this is the EXPECTED non-member path, so log at debug — but it also swallows a genuine DB/FGA
-        // error indistinguishably, and debug keeps that diagnosable without erroring on every new login.
-        req.log.debug({ err: e, tenantId: tenant.id }, 'auth/callback: no existing member session (identity proven, membership pending)')
+        if ((e as { code?: string }).code === 'address_taken') {
+          addressTaken = true
+          req.log.info({ tenantId: tenant.id }, 'auth/callback: auto-enrolment refused — address already belongs to a member')
+        } else {
+          // Not a member yet. Identity is proven but membership is NOT — login alone
+          // never grants it (the identity≠membership invariant). Membership appears
+          // here ONLY via one of the two explicit grants below; otherwise we reject.
+          // #377: this is the EXPECTED non-member path, so log at debug — but it also swallows a genuine DB/FGA
+          // error indistinguishably, and debug keeps that diagnosable without erroring on every new login.
+          req.log.debug({ err: e, tenantId: tenant.id }, 'auth/callback: no existing member session (identity proven, membership pending)')
+        }
       }
 
       // (1) Invite acceptance — the normal, open-ended membership grant (P1.4).
@@ -320,12 +329,14 @@ export async function authPlugin(app: FastifyInstance) {
       // logged in first. The entrances are signup and `pnpm tenant:local-admin` (slice 1) — the
       // open-core shape, where the first admin is made deliberately rather than raced for.
       if (!sid) {
-        // Seat-full is a billing state the user should see; everything else stays
-        // deliberately VAGUE (no "authenticated but not a member" — that would confirm
-        // the sub exists in the IdP = enumeration).
+        // Seat-full is a billing state the user should see; an address collision (ADR-259 §3.2) is a
+        // FEDERATED-door-only explanation (§3.4) — sign in the way you already can, then add this
+        // provider from account settings; everything else stays deliberately VAGUE (no "authenticated
+        // but not a member" — that would confirm the sub exists in the IdP = enumeration).
         // #377: log the rejection server-side (the user-facing message stays vague — no enumeration leak).
-        req.log.info({ tenantId: tenant.id, seatFull }, 'auth/callback: login rejected (identity proven but no membership grant)')
-        return reply.redirect(seatFull ? '/login?error=seat_full' : '/login?error=access')
+        req.log.info({ tenantId: tenant.id, seatFull, addressTaken }, 'auth/callback: login rejected (identity proven but no membership grant)')
+        const errorParam = addressTaken ? 'address_taken' : seatFull ? 'seat_full' : 'access'
+        return reply.redirect(`/login?error=${errorParam}`)
       }
       reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
       return reply.redirect(st.returnTo)
