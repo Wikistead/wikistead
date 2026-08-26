@@ -147,7 +147,11 @@
     "pageDeleted": "Page deleted",
     "pageTrashed": "Moved to trash",
     "pageDeletedForever": "Page permanently deleted",
-    "spaceCreateDenied": "You do not have permission to create spaces."
+    "spaceCreateDenied": "You do not have permission to create spaces.",
+    "uploadFailed": "Couldn't upload the file",
+    "uploadTooLarge": "That file is too large to upload",
+    "uploadUnsupportedType": "That file type can't be uploaded",
+    "uploadFailedCount": "{{count}} files couldn't be uploaded"
   },
   "theme": {
     "light": "Light",

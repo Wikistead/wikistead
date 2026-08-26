@@ -147,7 +147,11 @@
     "pageDeleted": "ページを削除しました",
     "pageTrashed": "ゴミ箱に移動しました",
     "pageDeletedForever": "ページを完全に削除しました",
-    "spaceCreateDenied": "スペースを作成する権限がありません。"
+    "spaceCreateDenied": "スペースを作成する権限がありません。",
+    "uploadFailed": "アップロードできませんでした",
+    "uploadTooLarge": "このファイルは大きすぎてアップロードできません",
+    "uploadUnsupportedType": "このファイルの種類はアップロードできません",
+    "uploadFailedCount": "{{count}} 件のファイルをアップロードできませんでした"
   },
   "theme": {
     "light": "ライト",

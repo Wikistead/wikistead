@@ -1,16 +1,56 @@
 import type { EditorView } from "@codemirror/view";
 import { insertImage, insertAttachment, type ImageUploader } from "./commands";
+import { ApiError } from "../../data/apiClient";
+import { notify } from "../../ui/toast";
+import i18n from "../../i18n";
+
+// #913: `upload(file)` failing (presign, the direct-to-storage PUT, or confirm) used to be
+// swallowed silently — a broken reference was correctly never inserted, but nothing told the
+// author their paste/drop did anything at all. A THROWN error is a real attempt that failed; an
+// `ImageUploader` returning null without throwing (the member path's "page not resolved yet"
+// guard) stays a silent decline, unchanged — that distinction is exactly why this no longer
+// blanket-catches with `.catch(() => null)`.
+//
+// The PUT step's own failure carries only `upload failed (<status>)` in a plain Error message
+// (useAttachments.ts's uploadAttachment) — a direct cross-origin fetch to storage, not apiFetch,
+// so it never becomes an ApiError. Reading the status from both shapes is what lets a 413 from
+// EITHER step (a size cap the presign endpoint enforces up front, or the one storage enforces on
+// the PUT body) read the same to the person who pasted the file.
+function uploadFailureStatus(err: unknown): number | null {
+  if (err instanceof ApiError) return err.status;
+  if (err instanceof Error) {
+    const m = /\((\d{3})\)/.exec(err.message);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
 
 /** Upload files in clipboard/drop order and insert their canonical attachment references. */
 export async function uploadFiles(view: EditorView, upload: ImageUploader, files: File[]): Promise<void> {
+  const failures: number[] = []; // one entry per failed file, its HTTP status (or null = unknown reason)
   for (let i = 0; i < files.length; i++) {
     const file = files[i]!;
-    const res = await upload(file).catch(() => null);
-    if (!res) continue;
+    let res: { ref: string; alt: string } | null;
+    try {
+      res = await upload(file);
+    } catch (err) {
+      failures.push(uploadFailureStatus(err) ?? -1);
+      continue;
+    }
+    if (!res) continue; // a silent decline (e.g. the page hasn't resolved yet) — not a failure to report
     if (file.type.startsWith("image/")) insertImage(view, res.alt, res.ref);
     else insertAttachment(view, res.alt || file.name, res.ref);
     if (files.length > 1 && i < files.length - 1) view.dispatch(view.state.replaceSelection("\n"));
   }
+  if (failures.length === 0) return; // every file succeeded (or silently declined) — stay quiet, as before
+  if (failures.length > 1) {
+    notify.error(i18n.t("toast.uploadFailedCount", { count: failures.length }));
+    return;
+  }
+  const status = failures[0];
+  if (status === 413) notify.error(i18n.t("toast.uploadTooLarge"));
+  else if (status === 415) notify.error(i18n.t("toast.uploadUnsupportedType"));
+  else notify.error(i18n.t("toast.uploadFailed"));
 }
 
 // Drag-and-drop file attach (#273 / ADR-120 generalises the image-only path): dropping
