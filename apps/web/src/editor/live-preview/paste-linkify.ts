@@ -5,7 +5,7 @@ import { getCM } from "@replit/codemirror-vim";
 import { safeHref } from "../macros/md-render";
 import { linkAt, linksTouching } from "./link-at"; // #611: THE structural link judge (ADR-211 §1)
 import { completeBlockChunk, blockPasteInsert } from "./block-paste";
-import { innermostMacroAt } from "./decorations";
+import { innermostMacroAt, displayMode, syntaxRevealsAt } from "./decorations";
 
 // #223 / ADR-none (rides on ADR-037 + safeHref): auto-linkify a pasted URL / rich link into Markdown
 // `[text](url)`, so the source stays plain Markdown (Open formats) while the live preview shows it clickable.
@@ -85,6 +85,18 @@ export function linkCopyRange(
   // #611 / ADR-211 §1: this used to be the second hand-rolled tree walk — it now reads the ONE judge.
   const hits = linksTouching(state, selFrom, selTo);
   if (hits.length === 0) return null;
+  // #909: expanding is only correct when the selection cuts through a HIDDEN marker — on an EXPOSED
+  // line (the caret/selection put it there, raw `[text](url)` visible) the selection the user made IS
+  // the text they want, and widening it turns "just the URL" into the whole link's source. Decided with
+  // the SAME predicate the live-preview decorations use to hide a link's own markers (`syntaxRevealsAt`)
+  // so this cannot drift from what the user is actually looking at — driven by [selFrom,selTo] directly
+  // rather than `state.selection`, since at a real copy/cut event they are the same range (the caller
+  // passes `view.state.selection.main`) and this keeps `linkCopyRange` a pure function of its own args.
+  const hitLineRevealed = (hit: (typeof hits)[number]): boolean => {
+    const line = state.doc.lineAt(hit.from);
+    return syntaxRevealsAt(state.facet(displayMode), state.readOnly, line.from <= selTo && line.to >= selFrom);
+  };
+  if (hits.every(hitLineRevealed)) return null;
   const from = Math.min(selFrom, hits[0]!.from);
   const to = Math.max(selTo, hits[hits.length - 1]!.to);
   const links = hits.length;
