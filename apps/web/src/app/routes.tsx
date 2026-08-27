@@ -319,6 +319,18 @@ function ShellLoading() {
   );
 }
 
+// #965: pure so the ref-gate rule is pinned directly (no DOM, no dependence on when a background
+// refetch happens to re-fire the effect — the #940 flake this used to be entangled with). `lastAppliedFor`
+// is the ref's CURRENT value; the caller writes `appliedFor` back into the ref only when `apply` is true.
+export function openSpaceForPageDecision(
+  lastAppliedFor: string | undefined,
+  pageId: string | undefined,
+  openSpaceId: string | undefined,
+): { apply: false } | { apply: true; appliedFor: string | undefined; spaceId: string } {
+  if (!openSpaceId || lastAppliedFor === pageId) return { apply: false };
+  return { apply: true, appliedFor: pageId, spaceId: openSpaceId };
+}
+
 function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string; homeSpaceName?: string } = {}) {
   const { t } = useTranslation();
   const params = useParams<{ pageId: string }>();
@@ -369,9 +381,10 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const openSpaceId = page?.spaceId;
   const spaceAppliedForPageRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (openSpaceId && spaceAppliedForPageRef.current !== pageId) {
-      spaceAppliedForPageRef.current = pageId;
-      setActiveSpaceId(openSpaceId);
+    const decision = openSpaceForPageDecision(spaceAppliedForPageRef.current, pageId, openSpaceId);
+    if (decision.apply) {
+      spaceAppliedForPageRef.current = decision.appliedFor;
+      setActiveSpaceId(decision.spaceId);
     }
   }, [pageId, openSpaceId, setActiveSpaceId]);
 
