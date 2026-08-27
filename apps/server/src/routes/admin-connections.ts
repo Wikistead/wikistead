@@ -10,6 +10,7 @@ import { safeFetchJson } from '../safe-fetch.js'
 import { validateIssuer, type DiscoveryFetch } from './tenant-oidc.js'
 import { assertClosingIsSafe, membersStrandedByConnectionDeletion } from '../auth/login-methods.js' // #822 / ADR-251: one question for every door-closing write
 import { revokeConnectionGroups } from '../auth/group-sync.js' // #858 / #962, ADR-259 §3.8: a trust_groups revocation must take effect now
+import { applyConnectionSupersession, SupersessionCollisionError } from '../auth/connection-rekey.js' // #858 / #929, ADR-264: the re-key ADR-259 §3.5 named but withdrew from #960
 
 // #554 S4 / ADR-197 §1-3: the admin management surface for OIDC login connections. tenant#admin
 // gated, RLS-scoped. Scope note: SAML keeps its own surface (/admin/saml — one per tenant, EE) and
@@ -128,8 +129,14 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     const [{ held }] = await req.db.sql<[{ held: number }]>`
       SELECT COUNT(*)::int AS held FROM tenant_oidc`
     if (held >= MAX_OIDC_CONNECTIONS) {
+      // #858 / #929, ADR-264 §3.4: a re-key needs the OLD and NEW connections to exist SIDE BY SIDE
+      // (it declares against two live rows, then the old one is retired) — so a tenant already at the
+      // cap cannot begin one. The message names re-key, not just the cap, because the obvious next
+      // move otherwise is deleting the old connection first, which is the one action that makes the
+      // rescue impossible (the subject_prefix a re-key needs to read is gone with the row).
       throw Object.assign(
-        new Error(`this workspace already has ${MAX_OIDC_CONNECTIONS} connections — remove one before adding another`),
+        new Error(`this workspace already has ${MAX_OIDC_CONNECTIONS} connections — free a slot before adding another. `
+          + `If you're replacing one, do not delete it first: declaring a re-key needs both connections present, and deleting removes that option.`),
         { statusCode: 409, code: 'connection_limit_reached' })
     }
     const b = req.body ?? {}
@@ -321,6 +328,29 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     })
     emit({ type: 'tenant.oidc_updated', tenantId: req.tenant.id, actorId: req.user.sub, enabled: false })
     return reply.code(204).send()
+  })
+
+  // #858 / #929, ADR-264: declares that THIS (`:id`) connection supersedes `oldConnectionId` — the
+  // rescue ADR-259 §3.5 named and #960 explicitly excluded ("re-key EXCLUDED"). Same authority as the
+  // rest of this file (§6 Q4 left the choice open; this operation configures a login-time resolution
+  // exactly like the routes beside it, so it stays under the same gate rather than inventing a new one
+  // without an ADR).
+  app.post<{ Params: { id: string }; Body: { oldConnectionId?: string } }>('/admin/connections/:id/supersede', async (req, reply) => {
+    await requireConnectionManager(app.fga, req.user.sub, req.tenant.id)
+    const oldConnectionId = req.body?.oldConnectionId
+    if (!oldConnectionId) throw Object.assign(new Error('oldConnectionId is required'), { statusCode: 400 })
+    try {
+      const result = await applyConnectionSupersession(req.db, req.tenant, req.user.sub, req.params.id, oldConnectionId)
+      return reply.code(200).send(result)
+    } catch (e) {
+      // #596's lesson: Fastify's default error handler does not forward arbitrary array/object
+      // properties off a thrown Error — send the collision detail explicitly, or the console gets a
+      // code to branch on and nobody to name.
+      if (e instanceof SupersessionCollisionError) {
+        return reply.code(409).send({ error: 'Conflict', message: e.message, code: e.code, collisions: e.collisions })
+      }
+      throw e
+    }
   })
 
   app.post<{ Body: { ids?: string[] } }>('/admin/connections/reorder', async (req, reply) => {
