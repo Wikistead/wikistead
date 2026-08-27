@@ -34,10 +34,6 @@ async function mailpitReceived(api: APIRequestContext, to: string): Promise<bool
 const INVITE_EMAIL_LABEL = "Email address";
 
 test("admin invites a member; a fresh identity accepts in the browser and is seated", async ({ browser, request }) => {
-  // #891/#938: isolated from the merge gate — the shared real-auth tenant has accumulated dozens of
-  // undeleted debris members (from avatar-isolation-372.spec.ts and friends), burying the seeded Dev
-  // User row below the fold. Remove this skip once #938 lands.
-  test.skip(true, "#938: isolated — Dev User buried under real-auth tenant debris");
   // ── admin (dev-user): real OIDC login, then the Admin Console ──────────────
   const adminCtx = await browser.newContext();
   const admin = await adminCtx.newPage();
@@ -52,6 +48,11 @@ test("admin invites a member; a fresh identity accepts in the browser and is sea
   // at 5.8s on a fresh stack, while the page itself was fine). Every other first-render assertion in
   // this suite carries a timeout for the same reason.
   await expect(admin.getByRole("heading", { name: "Members", exact: true })).toBeVisible({ timeout: 20_000 });
+  // #938: the real-auth tenant is shared and never cleaned up (avatar-isolation-372.spec.ts and
+  // friends keep seating fresh members), so the seeded admin row can sit dozens of rows below the
+  // unfiltered fold. The filter is a real server-side query (#623), not a client-side narrowing of
+  // what already loaded, so it finds the row regardless of how much debris precedes it.
+  await admin.getByTestId("members-filter").fill(DEV_USER_SHOWN);
   await expect(admin.getByText(DEV_USER_SHOWN)).toBeVisible(); // the admin is listed (#902: shown name)
 
   const inviteEmail = `invitee${Date.now()}@e2e.test`;
