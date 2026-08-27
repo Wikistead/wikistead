@@ -335,7 +335,7 @@
     "recoveryNeedsFactor": "Set up a second factor first. Recovery codes are the way back past one.",
     "recoveryDisabled": "Recovery codes are turned off for this deployment. An administrator can clear your second factors for you.",
     "recoveryMintFailed": "The codes could not be created. Try again.",
-    "connectionsTitle": "Linked sign-in methods",
+    "connectionsTitle": "Link sign-in methods",
     "connectionsExplainer": "Add another way to sign in to this workspace. Confirm it is you first, with the same three proofs as above.",
     "connectionLinkButton": "Link",
     "connectionLinkedBadge": "Linked",

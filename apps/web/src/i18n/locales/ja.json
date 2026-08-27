@@ -334,7 +334,7 @@
     "recoveryNeedsFactor": "先に第 2 要素を登録してください。リカバリコードはその第 2 要素を通れなくなったときの入り口です。",
     "recoveryDisabled": "この環境ではリカバリコードが無効になっています。管理者に第 2 要素の解除を依頼してください。",
     "recoveryMintFailed": "リカバリコードを作成できませんでした。もう一度お試しください。",
-    "connectionsTitle": "リンク済みのサインイン方法",
+    "connectionsTitle": "サインイン方法をリンク",
     "connectionsExplainer": "このワークスペースへの別のサインイン方法を追加します。上と同じ 3 通りの方法で、先に本人確認を行います。",
     "connectionLinkButton": "リンクする",
     "connectionLinkedBadge": "リンク済み",
