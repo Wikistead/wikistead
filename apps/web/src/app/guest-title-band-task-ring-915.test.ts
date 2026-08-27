@@ -19,9 +19,14 @@ describe("#915 the guest surface shows the title-band task-progress ring", () =>
   it("the guest title band renders the same band-task-ring the member surface does", () => {
     const guestBandStart = src.indexOf('data-testid="guest-title-band"');
     expect(guestBandStart, "guest-title-band testid not found").toBeGreaterThan(-1);
-    // The ring lives within the band's own block — the next ~1200 characters of source comfortably
-    // covers the title + ring markup without reaching into an unrelated later section.
-    const around = src.slice(guestBandStart, guestBandStart + 1200);
+    // The ring lives within the band's own block, which ends where the status chip begins — the
+    // slice is bounded by that STRUCTURE rather than by a character budget. A count was the first
+    // spelling and it was the wrong kind of bound: adding the `total > 0` gate the review
+    // asked for pushed the ring 20 characters past 1200, so the pin failed for a change that moved
+    // nothing. `<PageStatus` is the band row's own closing landmark and is strictly tighter.
+    const bandEnd = src.indexOf("<PageStatus", guestBandStart);
+    expect(bandEnd, "the guest band's closing landmark not found").toBeGreaterThan(guestBandStart);
+    const around = src.slice(guestBandStart, bandEnd);
     expect(around).toContain('data-testid="band-task-ring"');
     expect(around).toContain("<ProgressRing done={taskProgress.done} total={taskProgress.total}");
   });

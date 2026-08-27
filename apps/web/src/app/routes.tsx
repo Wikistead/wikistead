@@ -1514,10 +1514,14 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
                   {/* #915: member parity (the band's own row below the title, mirroring where PageMeta
                       carries the ring on the member surface) — onToggleTask is edit-only, but the
                       progress itself is derived from the published body a view guest already reads, so
-                      the ring rides here for both capabilities (ProgressRing renders nothing at 0/0). */}
-                  <div className="flex items-center gap-2">
-                    <span className="mt-1 inline-flex self-center" data-testid="band-task-ring"><ProgressRing done={taskProgress.done} total={taskProgress.total} animKey={pageId} /></span>
-                  </div>
+                      the ring rides here for both capabilities. ⚠️ #915 (review rejection): the ROW is
+                      gated, not just the ring — a null ring leaves an empty row whose mt-1 is 4 real
+                      px, and only here, since the member row carries PageMeta beside it. */}
+                  {taskProgress.total > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="mt-1 inline-flex self-center" data-testid="band-task-ring"><ProgressRing done={taskProgress.done} total={taskProgress.total} animKey={pageId} /></span>
+                    </div>
+                  )}
                 </div>
                 {/* Desktop: the status chip rides the band row (member parity); mobile keeps the ⋯ controls. */}
                 {/* #406 PageStatus stays at every width. It carries the TOC toggle AND the
