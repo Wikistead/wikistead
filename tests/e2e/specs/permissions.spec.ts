@@ -37,8 +37,12 @@ test("manager grants and revokes page access via the Permissions dialog", async 
   // no string to know in advance — what there is, is one more row than before.
   const rows = page.locator("[data-testid=grant-item]");
   const before = await rows.count();
+  // #574/#623: GET /pages/:id/access answers a PAGE ({ grants, nextCursor }), not a bare array — this
+  // helper used to read `.length` off the response itself and got `undefined` (→ NaN comparisons)
+  // the moment the route grew pagination; this spec's `before`/`serverGrants` never noticed because
+  // pagination never truncates a page this small.
   const serverGrants = async () => page.evaluate(async ({ api, pageId }) =>
-    ((await (await fetch(`${api}/pages/${pageId}/access`, { headers: { Authorization: "Bearer dev-token" } })).json()) as { grantee: string }[]).length,
+    ((await (await fetch(`${api}/pages/${pageId}/access`, { headers: { Authorization: "Bearer dev-token" } })).json()) as { grants: { grantee: string }[] }).grants.length,
     { api: API, pageId });
   const grantsBefore = await serverGrants();
 
@@ -122,8 +126,10 @@ test("privatising a page revokes its share links (confirm shows count)", async (
   }, API);
 
   // Create a page share link up front (guestAccess is a paid entitlement; the demo tenant has it).
+  // #574: GET /pages/:id/share-links answers a PAGE ({ links, nextCursor }), not a bare array — same
+  // shape mismatch as GET /pages/:id/access above.
   const linkCount = async () => page.evaluate(async ({ api, pageId }) =>
-    ((await (await fetch(`${api}/pages/${pageId}/share-links`, { headers: { Authorization: "Bearer dev-token" } })).json()) ?? []).length as number,
+    ((await (await fetch(`${api}/pages/${pageId}/share-links`, { headers: { Authorization: "Bearer dev-token" } })).json()) as { links: unknown[] }).links.length,
     { api: API, pageId });
   await page.evaluate(async ({ api, pageId }) => {
     await fetch(`${api}/share-links`, {
