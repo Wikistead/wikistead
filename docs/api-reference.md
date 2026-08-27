@@ -82,3 +82,8 @@ question its own refusal tells an operator to act on. Not part of the OpenAPI-co
 *already signed-in* member, rather than starting a session. It redirects to `/settings/account/security`
 with `?linked=1` or `?linkError=<reason>` — never JSON — and, unlike `/auth/callback`, is bound to the
 session that started it (refusing a link completed in any other session, the linking-CSRF defence).
+
+`GET /me/settings` (`/me/*` account-screen plumbing, not part of the OpenAPI-covered surface) carries a
+`canOverrideDisplayName` field (ADR-259 §3.7, #961) — the restrictive union that gates the display-name
+override: `identitySource` alone answers a different, narrower question (which door a member's identity
+came from), not whether they may currently write an override.
