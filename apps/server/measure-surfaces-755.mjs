@@ -12,10 +12,16 @@
 // ⚠️ WIDTH MEANS SOMETHING DIFFERENT ON EACH SURFACE, so each row says which:
 //   title dictionary  ids confirmed in one fill (cap 2000, sliced 200, ONE lane — #541 gave up
 //                     throughput on purpose so interactive checks interleave)
-//   sidebar PAGE TREE every row in the space, one pass at four lanes, NO cap and NO budget — the
-//                     surface open question 2 names, and the one the first paint waits on.
-//                     ⚠️ Measured 2026-08-23: 1,000 rows = 5.7 s, and four lanes buy almost nothing
-//                     over one (5.70 vs 5.01 ms/row). A surface defended only by lanes is undefended.
+//   whole-space TREE every row in the space, one pass at four lanes. ⚠️ CORRECTED 2026-08-23: an
+//                     earlier revision of this file called this "the sidebar tree, no cap and no
+//                     budget, the surface the first paint waits on". THE MEMBER SIDEBAR NO LONGER
+//                     TAKES THIS PATH — #623 / ADR-220 §6.3 moved it branch-by-branch
+//                     (`useLazyPageTree`, BRANCH_PAGE_LIMIT 100 / max 500) and retired both the
+//                     whole-space read and #541's `?first=40`. The one remaining caller of
+//                     `listPages` is the GUEST share-link shell, which is the harder case:
+//                     ADR-028's instant revoke means a share_link subject is excluded from the
+//                     tree-confirm cache ON PURPOSE (`cacheable` in pages.ts), so every open pays
+//                     the full width cold. Measured below at member AND guest subjects.
 //   sidebar spaces    spaces on the page — and FIVE filterAuthorized passes run per page, in
 //                     parallel, because the row carries a capability (#710)
 //   search stage 2    candidates Meilisearch handed over for the authoritative confirm
@@ -52,6 +58,7 @@ import { fgaClient, writeTuples, deleteTuples, filterAuthorized } from '@wikiste
 const TENANT = 'tenant_dev'
 const STAMP = Date.now()
 const USER = 'user:dev-user'
+const GUEST = `share_link:ms755-link-${STAMP}`
 
 const sql = postgres(process.env.DATABASE_ADMIN_URL)
 const tuples = []
@@ -77,7 +84,11 @@ try {
   await sql`INSERT INTO spaces (id, tenant_id, name) VALUES (${space}, ${TENANT}, 'measure surfaces 755')`
   spaces.push(space)
   tuples.push({ user: `tenant:${TENANT}`, relation: 'tenant', object: `space:${space}` },
-              { user: USER, relation: 'manager', object: `space:${space}` })
+              { user: USER, relation: 'manager', object: `space:${space}` },
+              // A space-scoped share link, the one principal the tree-confirm cache excludes by design.
+              // `space#viewer` accepts [share_link] (model.fga) — checked in the direct type list, not
+              // inferred from the relation existing.
+              { user: GUEST, relation: 'viewer', object: `space:${space}` })
   const PAGE_N = 2000
   for (let i = 0; i < PAGE_N; i++) {
     const id = `${space}-p${i}`
@@ -127,13 +138,23 @@ try {
     console.log(`  ${String(width).padStart(4)} spaces ${t.toFixed(0).padStart(6)} ms  ${(t / width).toFixed(2)} ms/space  (${(t / (width * 5)).toFixed(2)} ms per check)`)
   }
 
-  // ── sidebar PAGE TREE: every row in the space, one pass, four lanes, no cap and no budget ───────
-  // ⚠️ ADR-241 addendum 1: the row above measures `enrichSpaceRows` — the SPACE list. The tree the
-  // sidebar actually paints is `listPages`, and it is a different question: `filterAuthorized(… 'view',
-  // every row in the space …, 'page', 4)` (pages.ts), with NO slice cap and NO budget. The dictionary's
-  // brakes do not exist here, and the code beside it says the first paint waits on this while the
-  // dictionary is an enhancement. Open question 2 names this surface; nothing had measured it.
-  console.log('\nsidebar PAGE TREE — every row in the space, one pass, FOUR lanes, no cap, no budget (listPages)')
+  // ── the whole-space TREE (`listPages`): every row in the space, one pass, four lanes ────────────
+  // ⚠️ The row above measures `enrichSpaceRows` — the SPACE list. `listPages` is a different question:
+  // `filterAuthorized(… 'view', every row in the space …, 'page', 4)`.
+  //
+  // ⚠️ WHO ACTUALLY PAYS THIS, verified in the shipped tree rather than assumed. `listPages` has ONE
+  // caller left (`GET /spaces/:id/pages`), and the member sidebar stopped calling it: Sidebar.tsx uses
+  // `useLazyPageTree`, and #623 / ADR-220 §6.3 says in so many words that this retires the whole-space
+  // read and #541's `?first=40`. What is left on the route is the guest share-link shell
+  // (routes.tsx `refreshPages`), which sends no `?first=`.
+  //
+  // ⚠️ AND THE CAP DOES NOT BOUND THE WORK. `GUEST_TREE_CAP` (500) is applied by the route to the
+  // RESULT — `pages.slice(0, GUEST_TREE_CAP)` AFTER `listPages` has already confirmed every row. So a
+  // guest opening a link to an N-page space pays N checks to be shown at most 500 rows. The same file
+  // already solves this shape for backlinks (QUERY_DISPLAY_N 200 over QUERY_OVER_FETCH 600): bound the
+  // candidates by a CONSTANT so the work is bounded, and keep "the top N VIEWABLE" rather than
+  // degrading to "the viewable subset of the top N".
+  console.log('\nwhole-space TREE — every row, one pass, FOUR lanes (listPages, member subject)')
   for (const width of [50, 200, 500, 1000]) {
     const ids = pages.slice(0, width)
     const [t] = await ms(() => filterAuthorized(fgaClient, USER, 'view', ids, undefined, 'page', 4))
@@ -148,6 +169,23 @@ try {
     const ids = pages.slice(0, width)
     const [t] = await ms(() => filterAuthorized(fgaClient, USER, 'view', ids, undefined, 'page', 1))
     console.log(`  ${String(width).padStart(4)} rows  ${t.toFixed(0).padStart(6)} ms  ${(t / width).toFixed(2)} ms/row`)
+  }
+
+  // ── the SAME whole-space read, at the GUEST subject — the caller that is actually left ──────────
+  // ⚠️ Two differences from the member row, and both make the guest the worse case:
+  //   1. NO CACHE. `cacheable` in pages.ts excludes `share_link:` subjects, because a revoke is one
+  //      tuple delete and ADR-028 promises it is instant. Every open pays the full width cold.
+  //   2. A CONDITION. The route always sends `context = { current_time }` for a guest, so each check
+  //      carries the `non_expired` evaluation the member's does not.
+  // If the guest row is NOT slower per id, say so — the point of measuring is that it might not be.
+  console.log('\nthe same whole-space read at a GUEST subject (share_link + current_time, no cache)')
+  for (const width of [50, 200, 500, 1000]) {
+    const ids = pages.slice(0, width)
+    const ctx = { current_time: new Date().toISOString() }
+    const [t, allowed] = await ms(() => filterAuthorized(fgaClient, GUEST, 'view', ids, ctx, 'page', 4))
+    // ⚠️ Print how many came back ALLOWED. An all-deny run measures the cheap side ("no" is cheaper
+    // than "yes" — ADR-243 §6.0) and would understate the cost while looking like a valid number.
+    console.log(`  ${String(width).padStart(4)} rows  ${t.toFixed(0).padStart(6)} ms  ${(t / width).toFixed(2)} ms/row  (${allowed.size ?? [...allowed].length}/${width} allowed)`)
   }
 
   // ── search stage 2: one authoritative confirm over the candidate set ─────────────────────────────
