@@ -28,14 +28,14 @@ function walk(dir: string, out: string[] = []): string[] {
 
 // `(x.data?.length ?? 0) === 0`, `!x.data?.length`, `x.data?.length === 0` — the ways this tree spells
 // #895: THE FIRST VERSION OF THIS WALK ONLY KNEW ONE SPELLING. It matched `x.data?.length`, so a
-// surface that destructured (`const { data: revisions } = useX()`) passed straight through, and so did
+// surface that destructured (`const { data: revisions } = useX`) passed straight through, and so did
 // one whose rows arrive already flattened. Twenty surfaces were outside a pin that called itself a
 // discovery walk — including the compliance ledger, which answered "no entries" to a 500.
 //
-// Two more shapes made the old rule wrong in the other direction as well:
-//   ① a surface that reads `error` for ONE code (an entitlement 403) and lets every other failure fall
-//      through to the empty state — it "reads error", so a rule that looks for the word passes it;
-//   ② a surface fed by props, where the failure belongs to the caller and cannot be seen from here.
+// Two more shapes made the old rule wrong in the other direction as well
+// ① a surface that reads `error` for ONE code (an entitlement 403) and lets every other failure fall
+// through to the empty state — it "reads error", so a rule that looks for the word passes it;
+// ② a surface fed by props, where the failure belongs to the caller and cannot be seen from here.
 //
 // So the question is no longer "does this file ask a query whether it failed". It is: DOES THIS FILE
 // DRAW SOMETHING WHEN THE FETCH FAILS. That is one shared component (`LoadFailed`) or an early return,
@@ -52,7 +52,7 @@ const EMPTY_STATE = /t\("([\w.]*(?:[Ee]mpty\w*|noResults))"\)/g;
 // same isError/error the component itself is holding (round 5: GuestSidebar's `error ? <ownUI/> : …`
 // — a real #500 fix, in a shape neither of the first two patterns was written to see; broadening
 // EMPTY_STATE surfaced it as a false red). A mention of `error` inside a mutation's `onError` is not
-// this — TERNARY_ON_FAILURE requires the `?` immediately after the identifier, which `onError: () =>`
+// this — TERNARY_ON_FAILURE requires the `?` immediately after the identifier, which `onError: =>`
 // never has.
 const DRAWS_ON_FAILURE = /<LoadFailed\b/;
 const RETURNS_ON_FAILURE = /if\s*\([^)]*\b(?:isError|error)\b[^)]*\)\s*return\b/;
@@ -230,5 +230,18 @@ describe("#888 a failed fetch is not an empty list", () => {
     expect(view).toContain("common.loadFailed");
     expect(view).toContain("common.loadRetry");
     expect(view).toMatch(/-retry[\s\S]{0,120}onClick=\{onRetry\}/);
+  });
+
+  // #975: the Japanese used to be a literal translation of the English, including its second sentence
+  // ("It is a problem here, not with what you are looking at.") — rendered as a double negative whose
+  // literal sense is "it is not that [it] does not exist". That restated what sentence one ("couldn't
+  // load this") already said — "could not fetch", not "fetched and found empty" — so a reader had to
+  // work through the negation to learn nothing sentence one hadn't already told them. The literal
+  // phrase is quoted in the assertions below (string data, not comment prose).
+  it("#975: the Japanese is not a double-negative restating what the first sentence already said", () => {
+    const ja = JSON.parse(readFileSync(resolve(SRC_ROOT, "i18n/locales/ja.json"), "utf8")) as Record<string, Record<string, string>>;
+    const text = ja.common!.loadFailed;
+    expect(text, "the double negative this ticket removed").not.toContain("ないわけではありません");
+    expect(text, "the double negative this ticket removed").not.toContain("無いわけではありません");
   });
 });
