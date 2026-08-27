@@ -1982,8 +1982,25 @@ export async function listBranch(
   // §4 placeholders are NOT resolved here any more (②): a rare feature must not tax every load.
   // The branch answers immediately; `/pages/tree-placeholders` serves the chains as a follow-up the
   // screen requests after painting. The invisible-children seeds it needs are re-derived there.
+  //
+  // #974: the lock/freeze glyphs (#109 Fix B / #329) never rode this route — `listBranch` backs both
+  // `/pages/paint` and `/pages/branch` (the #623 lazy-tree split), and unlike `listPages` (the retired
+  // whole-space read this replaced) it returned no badge at all, so every row's `private` was
+  // `undefined` → the tree's lock badge could never appear even though `usePage`'s title badge (a
+  // different endpoint, GET /pages/:id) computed it correctly. Same cache and invalidation as there
+  // (`invalidatePageBadge` on every write) — a badge here is a display glyph, not an access decision.
+  const visiblePages = page.filter((r) => visible.has(r.id))
+  const badges = await mapBounded(visiblePages, 16, async (r) => {
+    const hit = getCachedBadge(r.tenant_id, r.id)
+    if (hit) return hit
+    const fresh = await readPageBadges(fga, r.id).catch(() => ({ private: false, frozen: null as PageFreezeLevel | null }))
+    setCachedBadge(r.tenant_id, r.id, fresh)
+    return fresh
+  })
   return {
-    pages: page.filter((r) => visible.has(r.id)).map((r) => ({ ...toPage(r), hasChildren: expandable.has(r.id) })),
+    pages: visiblePages.map((r, i) => ({
+      ...toPage(r), hasChildren: expandable.has(r.id), private: badges[i]!.private, frozen: badges[i]!.frozen,
+    })),
     nextCursor,
     restarted,
   }
