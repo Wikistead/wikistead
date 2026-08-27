@@ -1,5 +1,29 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import { enterEdit, createScratchPage, sleep } from "../helpers";
+
+// #942: mermaid mounts its SVG ASYNCHRONOUSLY (a dynamic `import("mermaid")` + mermaid's own
+// text-measuring layout pass) — the widget grows from an empty container to its final rendered
+// height well after `liveRender` returns and the widget is already visible in the DOM. The shared
+// `.cm-lp-macro-wrap` ResizeObserver keeps CM's OWN heightmap correct as that happens, but the
+// SEPARATE macro-presence overlay (macro-presence-overlay.ts) only re-reads the wrap's rect when
+// its OWN `update()` fires from a genuine CM ViewUpdate — a resize-driven `requestMeasure()` is not
+// guaranteed to produce one before the diagram settles. Reading a peer's box against a wrap that
+// has not yet finished growing measures a stale height, and once no further ViewUpdate happens
+// (nothing else changes for that client), the overlay never re-syncs to the true final rect. The
+// callout/table kinds never race this way because their `liveRender` paints synchronously — only a
+// macro whose OWN render is still in flight after the widget becomes "visible" needs this: waiting
+// for the box's own geometry to stop changing before anything reads it (locally or via presence).
+async function waitForStableBox(locator: Locator, timeoutMs = 8000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let last = await locator.boundingBox();
+  for (;;) {
+    await sleep(150);
+    const now = await locator.boundingBox();
+    if (last && now && Math.abs(now.height - last.height) < 1 && Math.abs(now.width - last.width) < 1) return;
+    last = now;
+    if (Date.now() > deadline) return; // best-effort — the subsequent assertions still measure honestly
+  }
+}
 
 // #453: the LOCAL atom-selection ring and the REMOTE macro-presence box must share one geometry —
 // same rect (the macro wrap, not the full content width), same radius/outline — differing only in
@@ -89,9 +113,6 @@ const KINDS: { name: string; source: string[]; box: string }[] = [
 
 for (const kind of KINDS) {
   test(`#453 a peer's box hugs the same rect as the local ring — ${kind.name}`, async ({ browser }) => {
-    // #891/#942: isolated from the merge gate — the mermaid case intermittently reads a huge height
-    // gap (a rendering-in-progress race), red in ~2/5 gate runs. Remove this skip once #942 lands.
-    if (kind.name === "mermaid") test.skip(true, "#942: isolated — intermittent height-race on mermaid");
     const ctxA = await browser.newContext();
     const ctxB = await browser.newContext();
     const A = await ctxA.newPage();
@@ -117,6 +138,10 @@ for (const kind of KINDS) {
 
       const boxB = B.locator(`[data-pane=preview] ${kind.box}`).first();
       await expect(boxB, `${kind.name} rendered for the observer`).toBeVisible({ timeout: 9000 });
+      // #942: let B's OWN local widget finish settling (mermaid renders its SVG asynchronously) before
+      // anything reads its geometry — otherwise the presence overlay's next read can snapshot a rect
+      // that is still mid-grow, and nothing forces it to re-read once the diagram finishes.
+      await waitForStableBox(boxB);
       await A.locator(`[data-pane=preview] ${kind.box}`).first().click();
       await sleep(800);
       const presence = B.locator("[data-pane=preview] [data-testid=macro-presence]");
