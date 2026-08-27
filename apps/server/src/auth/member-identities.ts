@@ -53,6 +53,13 @@ export async function listLinkedConnectionIds(db: TenantDb, tenantId: string, me
  * outlive the guard that would now refuse it — so linking clears it here, in the same write, rather
  * than leaving a stale value the guard never sees again.
  */
+function identityTaken(): Error {
+  return Object.assign(
+    new Error('this sign-in is already linked to a different member of this workspace'),
+    { statusCode: 409, code: 'identity_taken' },
+  )
+}
+
 export async function linkMemberIdentity(
   db: TenantDb,
   tenantId: string,
@@ -60,21 +67,33 @@ export async function linkMemberIdentity(
   externalSubject: string,
   memberSub: string,
 ): Promise<void> {
-  await db.tx(async (tx) => {
-    const [existing] = await tx<{ member_sub: string }[]>`
+  try {
+    await db.tx(async (tx) => {
+      const [existing] = await tx<{ member_sub: string }[]>`
+        SELECT member_sub FROM member_identities
+        WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId} AND external_subject = ${externalSubject}
+        LIMIT 1`
+      if (existing && existing.member_sub !== memberSub) throw identityTaken()
+      if (existing) return
+      await tx`
+        INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
+        VALUES (${tenantId}, ${connectionId}, ${externalSubject}, ${memberSub})`
+      await tx`UPDATE members SET display_name_override = NULL, updated_at = now() WHERE tenant_id = ${tenantId} AND sub = ${memberSub}`
+    })
+  } catch (e) {
+    // #968: a genuine race (the same sign-in linking from two tabs at once) has both calls' SELECT
+    // above see no row before either INSERTs — the loser's INSERT hits the UNIQUE constraint as a
+    // raw postgres 23505, and that abandons ITS transaction (a Postgres tx that hit an error refuses
+    // every further statement until rollback, so the follow-up read below runs OUTSIDE it, once the
+    // winner's transaction has already committed). Without this, the loser threw a bare 500 — the
+    // route this feeds documents as never answering with JSON (docs/api-reference.md).
+    if ((e as { code?: string }).code !== '23505') throw e
+    const [winner] = await db.sql<{ member_sub: string }[]>`
       SELECT member_sub FROM member_identities
       WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId} AND external_subject = ${externalSubject}
       LIMIT 1`
-    if (existing && existing.member_sub !== memberSub) {
-      throw Object.assign(
-        new Error('this sign-in is already linked to a different member of this workspace'),
-        { statusCode: 409, code: 'identity_taken' },
-      )
-    }
-    if (existing) return
-    await tx`
-      INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
-      VALUES (${tenantId}, ${connectionId}, ${externalSubject}, ${memberSub})`
-    await tx`UPDATE members SET display_name_override = NULL, updated_at = now() WHERE tenant_id = ${tenantId} AND sub = ${memberSub}`
-  })
+    if (!winner || winner.member_sub !== memberSub) throw identityTaken()
+    // Same member: the winner's transaction already inserted the row and cleared the override —
+    // this call needed nothing further, the same harmless-replay outcome as the existing-row check.
+  }
 }
