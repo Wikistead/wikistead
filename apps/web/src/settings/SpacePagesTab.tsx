@@ -123,6 +123,12 @@ export function SpacePagesTab() {
   const moveSource = moveFilter.trim() ? (moveSearch.data?.spaces ?? []) : (spaces.data?.spaces ?? []);
   const moveTargets = moveSource.filter((s) => s.id !== spaceId && s.capability === "manage");
   const moveHasMore = moveFilter.trim() ? (moveSearch.data?.hasMore ?? false) : (spaces.data?.hasMore ?? false);
+  // #985 / ADR-266 §1.4: neither `spaces` nor `moveSearch` had an isError read on this surface, so a
+  // failed destination fetch fell straight into the zero-targets branch below and read as "you manage
+  // no other spaces" — a network failure standing in for a fact about permissions. Same query the
+  // empty-vs-error switch already reads (moveFilter decides which of the two is live).
+  const moveIsError = moveFilter.trim() ? moveSearch.isError : spaces.isError;
+  const moveRefetch = moveFilter.trim() ? moveSearch.refetch : spaces.refetch;
   const runBulkMove = () => {
     const ids = [...selected];
     const targetSpaceId = moveTarget;
@@ -318,7 +324,9 @@ export function SpacePagesTab() {
               value={moveFilter}
               onChange={(e) => setMoveFilter(e.target.value)}
             />
-            {moveTargets.length === 0
+            {moveIsError
+              ? <LoadFailed testId="bulk-move-failed" onRetry={() => { void moveRefetch(); }} />
+              : moveTargets.length === 0
               ? <p className="text-sm text-fg-dim" data-testid="bulk-move-empty">{t("spacePages.moveNoTargets")}</p>
               : (
                 <label className="flex flex-col gap-1 text-sm">
