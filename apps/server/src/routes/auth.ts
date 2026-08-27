@@ -11,6 +11,7 @@ import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
 import { acceptInvite } from '../auth/invites.js'
 import { resolveAvailableLogin, resolveLoginConnections } from '../auth/login-methods.js'
+import { findMemberIdentityLink } from '../auth/member-identities.js'
 
 async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   const { slug, domain } = resolveTenantFromHost(host ?? '')
@@ -215,6 +216,10 @@ export async function authPlugin(app: FastifyInstance) {
       // #554 S4 / ADR-197 §5: the connection's sub namespace — non-null means THIS login mints
       // wc<conn8>_<externalSub> member identities (the legacy connection stays raw).
       let subjectPrefix: string | null = null
+      // #858 / ADR-259 §3.9: the connection this login came through, in the domain the link table
+      // keys on (a tenant_oidc id, or the literal 'platform') — SAML is excluded above, and 'local'
+      // never reaches this handler (password sign-in has no callback).
+      let connectionId: string | undefined = st.connectionId
       try {
         if (st.connectionId) {
           const conn = (await resolveLoginConnections(db, tenant)).find((c) => c.id === st.connectionId && c.kind !== 'saml')
@@ -231,6 +236,9 @@ export async function authPlugin(app: FastifyInstance) {
             const first = await firstEnabledTenantOidc(db)
             trustGroups = first?.trust_groups ?? false
             subjectPrefix = first?.subject_prefix ?? null
+            connectionId = first?.id
+          } else if (resolved) {
+            connectionId = 'platform'
           }
         }
       } catch (e) {
@@ -264,12 +272,23 @@ export async function authPlugin(app: FastifyInstance) {
         claims = { ...claims, groups: [] }
       }
 
+      // #858 / ADR-259 §3.1: a stored link wins over the deterministic mint below — read BEFORE any
+      // prefix is applied, against the RAW external subject, and preferred UNCONDITIONALLY. §5's
+      // #807 case is exactly the reason for "unconditionally": the subject this connection would
+      // otherwise mint may already belong to a different, live member, and the link still wins — an
+      // implementation that only prefers the link when the minted subject has no member row
+      // reproduces that defect while passing every other link case.
+      const linkedSub = connectionId ? await findMemberIdentityLink(db, tenant.id, connectionId, claims.sub) : null
+
       // #554 S4 / ADR-197 §5 + rev3 gate flip: on a namespacing connection, the RAW external sub is
       // validated FIRST (the same refusal shape as a non-member — no oracle), then the namespaced
       // identity is minted and the downstream seams are told the mint is OURS. The S0 gates keep
       // refusing every externally-asserted reserved prefix; only this validated mint passes.
       let subMintedInternally = false
-      if (subjectPrefix) {
+      if (linkedSub) {
+        claims = { ...claims, sub: linkedSub }
+        subMintedInternally = true
+      } else if (subjectPrefix) {
         const { externalSubViolation } = await import('../auth/reserved-subs.js')
         if (externalSubViolation(claims.sub)) {
           req.log.info({ tenantId: tenant.id }, 'auth/callback: raw subject refused before namespacing (reserved/oversize)')
