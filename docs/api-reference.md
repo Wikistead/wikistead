@@ -67,11 +67,11 @@ anonymous public reader (`/public/*`), and infra probes (`/healthz`, `/readyz`).
 documenting or explicitly excluding it fails the build.
 
 The browser session flows redirect to `/login?error=<reason>` on refusal rather than returning a JSON
-error body — the OIDC/SAML callback (`/auth/callback`) is one of them. `access` stays deliberately vague
-(no enumeration); `seat_full` and `address_taken` are the two refusals specific enough to name (a billing
-wall, and ADR-259's "this address already belongs to a member here — sign in that way, then add this
-provider from account settings"). Neither carries an API-key error body, since neither reaches a caller
-that would parse one.
+error body — the OIDC callback (`/auth/callback`) and the EE SAML ACS (`/auth/saml/acs`) both do.
+`access` stays deliberately vague (no enumeration); `seat_full` and `address_taken` are the two refusals
+specific enough to name (a billing wall, and ADR-259's "this address already belongs to a member here —
+sign in that way, then add this provider from account settings"). Neither carries an API-key error body,
+since neither reaches a caller that would parse one.
 
 `/admin/*` responses are shaped for the console screen that reads them and change without a version
 bump — e.g. `GET /admin/sso-exemptions` carries an `isAdmin` field so that screen can answer the one
