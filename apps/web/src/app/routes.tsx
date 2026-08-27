@@ -2243,8 +2243,11 @@ function HomeLanding() {
   // nothing of the sort was established. Measured on the most-visible surface in the product.
   if (spaces.isError) return <AppShell><LoadFailed testId="home-spaces-failed" onRetry={() => { void spaces.refetch(); }} /></AppShell>;
   const first = (spaces.data?.spaces ?? [])[0];
-  if (first?.homePageId) return <Navigate to={`/p/${first.homePageId}`} replace />;
-  if (first) return <Navigate to={`/spaces/${first.id}`} replace />;
+  // #936: AppShell must stay mounted across this redirect, same as every other branch here — a bare
+  // <Navigate> renders null for the commit before the target route takes over, unmounting the header
+  // (and the brand mark inside it) for one frame on every "/" visit that lands on a real workspace.
+  if (first?.homePageId) return <AppShell><Navigate to={`/p/${first.homePageId}`} replace /></AppShell>;
+  if (first) return <AppShell><Navigate to={`/spaces/${first.id}`} replace /></AppShell>;
   return (
     <AppShell>
       <HomeEmpty />

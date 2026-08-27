@@ -6,9 +6,6 @@ import { WEB_REAL_PORT } from "../helpers";
 // line-height), visually mis-centring the title. Pin the glyph-box behaviour: leading-none
 // (computed line-height == font-size) and the mark/text vertical centres coincide.
 test("#442: header brand name is glyph-box centred against the mark (leading-none)", async ({ page }) => {
-  // #891/#936: isolated from the merge gate — reproducibly red on a race where the header
-  // (and brand-mark) briefly unmount right after "/" resolves. Remove this skip once #936 lands.
-  test.skip(true, "#936: isolated — brand-mark races a redirect off \"/\"");
   await page.goto("/");
   await expect(page.getByTestId("brand")).toBeVisible();
   const m = await page.evaluate(() => {
