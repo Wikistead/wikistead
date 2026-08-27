@@ -1,4 +1,4 @@
--- Migration 128: member identity links (#858 / #959, ADR-259 §3.1 / §3.9).
+-- Migration 129: member identity links (#858 / #959, ADR-259 §3.1 / §3.9).
 --
 -- A member gains ways in; two members are never merged (§3.1). This table is the mechanism: an
 -- identity is ADDED to a member without moving `members.sub` — `local_credentials`, `second_factors`
