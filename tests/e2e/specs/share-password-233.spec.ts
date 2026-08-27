@@ -1,14 +1,36 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, enterSplit, resetDoc, sleep } from "../helpers";
+import { openDemo, enterSplit, createScratchPage, sleep } from "../helpers";
 
 // #233 / ADR-107: a password-protected share link. A guest opening it gets a password prompt; a wrong
 // password shows a generic error (wrong ≡ missing), the correct one unlocks the page. Real Chromium.
-async function createPasswordLink(page: Page, password: string): Promise<string> {
-  await page.waitForSelector("[data-testid=tree-page]", { timeout: 5000 });
-  const row = page.locator("[data-testid=tree-page]", { hasText: "Demo Page" }).first();
-  await row.hover();
-  await row.locator("[data-testid=page-actions]").click();
-  await page.locator("[data-testid=page-menu][data-state=open]").getByText("Share").click();
+//
+// #939: this used to edit and share the SEEDED "demo" page (opened via openDemo, found in the tree by
+// its title "Demo Page"). #940's seed fix (infra/db/seed.ts) made "demo" demo_space's HOME page so other
+// specs' assumption that it always exists would survive test churn — but a space's home page is
+// deliberately excluded from `[data-testid=tree-page]` (#364), so `createPasswordLink`'s row lookup could
+// no longer find it and timed out before ever reaching the symptom this ticket was filed to describe.
+// Fixed the way `createScratchPage` exists to fix it: share a page this spec creates and owns, findable
+// by a title nothing else on the shared demo tenant collides with, immune to whatever "demo" becomes next.
+async function createPasswordLink(page: Page, pageTitle: string, password: string): Promise<string> {
+  const row = page.locator("[data-testid=tree-page]", { hasText: pageTitle }).first();
+  await row.waitFor({ timeout: 10000 });
+  // #939 (measured): on a row for the page just navigated to (freshly selected), the FIRST click on
+  // `page-actions` reproducibly leaves `aria-expanded="false"` — verified across attempts including no
+  // hover, an explicit settle wait, and reading the attribute in the same tick right after the click
+  // resolves, so this is not a missed-animation-frame timing issue. The SECOND click always opens it.
+  // Bounded retry rather than a fixed second click, in case a slower run needs one more.
+  const trigger = row.locator("[data-testid=page-actions]");
+  const menu = page.locator("[data-testid=page-menu][data-state=open]");
+  for (let attempt = 1; ; attempt++) {
+    await trigger.click();
+    try {
+      await menu.waitFor({ timeout: 1000 });
+      break;
+    } catch {
+      if (attempt >= 5) throw new Error("page-actions menu never opened after 5 clicks");
+    }
+  }
+  await menu.getByText("Share").click();
   await page.waitForSelector("[data-testid=share-dialog]");
   await page.locator("[data-testid=share-capability]:visible").click();
   await page.locator("[data-testid=share-capability-view]:visible").click();
@@ -25,20 +47,20 @@ async function createPasswordLink(page: Page, password: string): Promise<string>
 }
 
 test("#233: a password-protected link prompts, rejects a wrong password, unlocks with the right one", async ({ browser }) => {
-  // #891/#939: isolated from the merge gate — reproducibly red (share-password-form never appears
-  // for the guest). Remove this skip once #939 lands.
-  test.skip(true, "#939: isolated — share-password-form never appears");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
+  const title = `Secret doc ${Date.now().toString(36)}`;
+  const pageId = await createScratchPage(member, title);
+  await member.goto(`/p/${pageId}`);
+  await member.waitForSelector("[data-pane=preview] .cm-content");
   await enterSplit(member);
-  await resetDoc(member);
   await member.locator("[data-pane=preview] .cm-content").click();
   await member.keyboard.insertText("# Secret doc\n");
   await sleep(400);
   await member.getByTestId("publish-page").click().catch(() => {}); // publish if the button is present
   await sleep(500);
 
-  const url = await createPasswordLink(member, "hunter2");
+  const url = await createPasswordLink(member, title, "hunter2");
   expect(url).toMatch(/\/share\/[0-9a-f-]{36}$/);
 
   const guest = await (await browser.newContext()).newPage();
@@ -62,20 +84,20 @@ test("#233: a password-protected link prompts, rejects a wrong password, unlocks
 // wrong-password budget — a user who mistypes a few times can still unlock. Before the fix, the
 // prompt-display 401 counted, so a single typo (plus a reload) locked the user out.
 test("#233 opening the link + several wrong tries never locks out the correct password", async ({ browser }) => {
-  // #891/#939: isolated from the merge gate — reproducibly red (createPasswordLink's Share-menu
-  // click hits an unstable/detached element). Remove this skip once #939 lands.
-  test.skip(true, "#939: isolated — createPasswordLink's Share click is unstable");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
+  const title = `Secret doc 2 ${Date.now().toString(36)}`;
+  const pageId = await createScratchPage(member, title);
+  await member.goto(`/p/${pageId}`);
+  await member.waitForSelector("[data-pane=preview] .cm-content");
   await enterSplit(member);
-  await resetDoc(member);
   await member.locator("[data-pane=preview] .cm-content").click();
   await member.keyboard.insertText("# Secret doc 2\n");
   await sleep(400);
   await member.getByTestId("publish-page").click().catch(() => {});
   await sleep(500);
 
-  const url = await createPasswordLink(member, "hunter2");
+  const url = await createPasswordLink(member, title, "hunter2");
   const guest = await (await browser.newContext()).newPage();
   await guest.goto(url);
   await expect(guest.getByTestId("share-password-form")).toBeVisible({ timeout: 10000 });
