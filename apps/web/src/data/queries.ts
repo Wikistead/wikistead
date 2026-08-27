@@ -2071,6 +2071,10 @@ export interface CustomDomain {
   challengeRecord: string;
   challengeValue: string;
   passkeysStranded?: number;
+  // #992 / ADR-262 §3.3: `dns` (the tenant proved it through the web route) or `shell` (an operator
+  // registered it with `local-admin --domain`). A shell row is the deployment's own entrance and the
+  // tenant cannot release it — the screen has to say so rather than offer a button that 409s.
+  source?: string;
 }
 
 export function useCustomDomains() {

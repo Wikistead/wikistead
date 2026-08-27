@@ -148,6 +148,14 @@ export function AdminDomainsTab() {
                 </span>
               )}
             </span>
+            {/* #992 / ADR-262 §3.3: an operator-registered row is the DEPLOYMENT's entrance, not one of
+                the tenant's own domains. Without this the two render identically and the only
+                difference a reader meets is a 409 after pressing Release. */}
+            {d.source === "shell" && (
+              <span className="flex-none rounded-full border border-border px-2 py-px text-[11px] uppercase tracking-[0.03em] text-fg-dim" data-testid="domain-operator">
+                {t("adminDomains.operatorManaged")}
+              </span>
+            )}
             <span className="flex-none rounded-full border border-border px-2 py-px text-[11px] uppercase tracking-[0.03em] text-fg-dim" data-testid="domain-status">
               {d.status === "verified" ? t("adminDomains.verified") : t("adminDomains.pending")}
             </span>
@@ -157,7 +165,12 @@ export function AdminDomainsTab() {
                 {t("adminDomains.verify")}
               </Button>
             )}
-            <IconButton aria-label={t("adminDomains.release")} data-testid="domain-release" variant="danger"
+            {/* Disabled, not hidden: a button that vanishes leaves somebody looking for it. The
+                tooltip names where the row IS managed, which is the only thing they can act on. */}
+            <IconButton aria-label={d.source === "shell" ? t("adminDomains.releaseOperator") : t("adminDomains.release")}
+              title={d.source === "shell" ? t("adminDomains.releaseOperator") : undefined}
+              disabled={d.source === "shell"}
+              data-testid="domain-release" variant="danger"
               onClick={() => setPendingRelease(d.domain)}>
               <Trash2 aria-hidden className="h-4 w-4" />
             </IconButton>

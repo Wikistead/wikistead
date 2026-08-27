@@ -1682,6 +1682,8 @@
     "lockedBody": "Upgrade to let your identity provider create and deactivate members automatically."
   },
   "adminDomains": {
+    "operatorManaged": "Operator-managed",
+    "releaseOperator": "This address was registered by an operator and is the deployment’s own entrance. Remove it with the local-admin command, not from here.",
     "title": "Custom domains",
     "body": "Serve your workspace on your own hostname. Add the domain, publish the DNS record we show you, then verify.",
     "domain": "Domain",

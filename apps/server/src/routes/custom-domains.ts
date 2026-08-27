@@ -40,12 +40,26 @@ export interface CustomDomainView {
    * reads the next time it appears, and this screen has to be believed on the day it matters.
    */
   passkeysStranded?: number
+  /**
+   * #992 / ADR-262 §3.3: who registered this row — `dns` (the tenant proved it through the web
+   * route) or `shell` (an operator registered it with `local-admin --domain`, ADR-258).
+   *
+   * The screen needs it because the two are not the same kind of thing: a shell row is the
+   * DEPLOYMENT's own entrance, on a host whose first label is reserved and therefore has no web
+   * route to re-prove through. Without this field the two render identically, with the same delete
+   * button beside them, and a tenant admin can take away an entrance only database access restores.
+   */
+  source: string
 }
 
-function toView(row: { domain: string; verification_token: string; status: string; verified_at: Date | null }): CustomDomainView {
+function toView(row: { domain: string; verification_token: string; status: string; verified_at: Date | null; source?: string }): CustomDomainView {
   return {
     domain: row.domain, status: row.status, verifiedAt: row.verified_at,
     challengeRecord: `${CHALLENGE_PREFIX}.${row.domain}`, challengeValue: row.verification_token,
+    // A tenant promoted to its own schema before migration 131 has no `source` column, and every row
+    // it holds was proved through the web route by construction — `dns` is the truth there, not a
+    // default standing in for an unknown (see readSource below).
+    source: row.source ?? 'dns',
   }
 }
 
@@ -67,13 +81,24 @@ export async function listCustomDomains(
   // `created_at` for the same reason — a name is its own stable order.
   const limit = Math.min(500, Math.max(1, args.limit ?? CUSTOM_DOMAINS_PAGE_LIMIT))
   const after = args.cursor ?? null
-  const rows = await db.sql<{ domain: string; verification_token: string; status: string; verified_at: Date | null }[]>`
-    SELECT domain, verification_token, status, verified_at FROM custom_domains
-     WHERE TRUE
-       ${after != null ? db.sql`AND domain > ${after}` : db.sql``}
-     ORDER BY domain
-     LIMIT ${limit + 1}
-  `
+  type Row = { domain: string; verification_token: string; status: string; verified_at: Date | null; source?: string }
+  const cursor = after != null ? db.sql`AND domain > ${after}` : db.sql``
+  // #992 / ADR-262 §3.3: the row's provenance travels to the screen. ⚠️ The column is missing on a
+  // tenant promoted to its own namespace schema before migration 131 (`ns_*` is a `LIKE` snapshot
+  // taken at promotion, and later migrations only touch `public` — ADR-258 §3.3's stated gap). That
+  // is not an error here: the only writer of `source='shell'` refuses such a schema outright, so a
+  // table without the column HAS no shell rows, and every row in it is dns-proved. Retry once
+  // without the column rather than fail a list that has nothing to hide.
+  const rows = await db.sql<Row[]>`
+    SELECT domain, verification_token, status, verified_at, source FROM custom_domains
+     WHERE TRUE ${cursor} ORDER BY domain LIMIT ${limit + 1}
+  `.catch(async (e: { code?: string }) => {
+    if (e?.code !== '42703') throw e
+    return db.sql<Row[]>`
+      SELECT domain, verification_token, status, verified_at FROM custom_domains
+       WHERE TRUE ${cursor} ORDER BY domain LIMIT ${limit + 1}
+    `
+  })
   // #664 / ADR-219 §1 (ruling 4): a passkey is bound to an RP ID, so moving the tenant to its own
   // domain invalidates every one made under the old host. The ruling requires the warning to appear in
   // the FLOW, before it commits — not in a release note — so the count travels with the row that the
@@ -386,6 +411,31 @@ export function startCustomDomainRecheckWorker(intervalMs = DEFAULT_RECHECK_MS):
 // deleted out of band. Used on explicit release AND on entitlement loss (ADR-064 downgrade).
 export async function removeCustomDomain(db: TenantDb, args: { tenantId: string; domain: string }): Promise<void> {
   const domain = normalizeDomain(args.domain)
+  // #992 / ADR-262 §3.3 (ruling 2026-08-27): a row an OPERATOR registered is not the tenant's to
+  // release. `local-admin --domain` (ADR-258) exists because a host whose first label is reserved has
+  // no web route to prove ownership through — so deleting that row takes away an entrance the tenant
+  // cannot re-create, and only somebody with the administrative DSN can put back.
+  //
+  // ⚠️ REFUSED, not confirmed. The ruling is explicit: putting a dialog in front of an irreversible
+  // act asks somebody to decide who has no way to know it is irreversible. The message names the
+  // command instead, which is the thing they can actually act on.
+  //
+  // The 42703 fallback goes the OPPOSITE way from `registerCustomDomainByOperator`'s, deliberately:
+  // there the column is required to WRITE a shell row, so its absence is an error; here its absence
+  // PROVES there are no shell rows to protect (that writer refuses such a schema), so the delete
+  // proceeds. Only 42703 is swallowed — any other failure is a real one and rethrows.
+  const [row] = await db.sql<{ source: string }[]>`
+    SELECT source FROM custom_domains WHERE tenant_id = ${args.tenantId} AND domain = ${domain}`
+    .catch((e: { code?: string }) => {
+      if (e?.code === '42703') return [] as { source: string }[]
+      throw e
+    })
+  if (row?.source === 'shell') {
+    throw Object.assign(
+      new Error(`"${domain}" was registered by an operator and is this deployment's own entrance — remove it with \`local-admin --domain\`, not from here.`),
+      { statusCode: 409, code: 'operator_managed' },
+    )
+  }
   // #576 re-review 2: this was the ONE status-changing path still clearing the mapping by hand, and it
   // reproduced the exact split it was supposed to be fixed by — deleting the mapped domain of a tenant
   // that holds two verified ones cleared tenants.custom_domain while the OTHER row went on winning
