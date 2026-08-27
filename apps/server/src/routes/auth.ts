@@ -4,14 +4,15 @@ import { acquireTenantDb } from '../db/index.js'
 import type { TenantDb } from '../db/index.js'
 import type { Tenant } from '@wikistead/types'
 import { mintMemberCollabToken } from '@wikistead/auth'
-import { SESSION_COOKIE, destroySession, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
+import { SESSION_COOKIE, destroySession, establishMemberSession, readSession, sessionCookieOptions } from '../auth/session.js'
 import { buildLogin, exchangeCode, loadPlatformOidc, type TenantOidcConfig } from '../auth/oidc.js'
 import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
 import { acceptInvite } from '../auth/invites.js'
 import { resolveAvailableLogin, resolveLoginConnections } from '../auth/login-methods.js'
-import { findMemberIdentityLink } from '../auth/member-identities.js'
+import { findMemberIdentityLink, linkMemberIdentity, listLinkedConnectionIds } from '../auth/member-identities.js'
+import { reauthenticated, locked, countFailure } from './second-factor.js'
 
 async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   const { slug, domain } = resolveTenantFromHost(host ?? '')
@@ -359,6 +360,115 @@ export async function authPlugin(app: FastifyInstance) {
       }
       reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
       return reply.redirect(st.returnTo)
+    } finally {
+      await db.release()
+    }
+  })
+
+  // #947 / ADR-259 §3.3: the tenant's OIDC/platform connections (SAML and password excluded — this
+  // flow is OIDC-only), each marked with whether THIS member already holds a link through it. Member-
+  // gated (the default hook), self-scoped like the rest of /me — the subject is req.user.sub, never a
+  // parameter.
+  app.get('/me/connections', async (req) => {
+    const [connections, linkedIds] = await Promise.all([
+      resolveLoginConnections(req.db, req.tenant),
+      listLinkedConnectionIds(req.db, req.tenant.id, req.user.sub),
+    ])
+    const linked = new Set(linkedIds)
+    return {
+      connections: connections
+        .filter((c) => c.kind === 'oidc' || c.kind === 'platform')
+        .map((c) => ({ id: c.id, kind: c.kind, label: c.label, brand: c.brand, linked: linked.has(c.id) })),
+    }
+  })
+
+  // Where an account-settings link round trip lands (#947): fixed and server-chosen, never a
+  // client-supplied returnTo — there is exactly one sensible destination for "you finished linking".
+  const LINK_RETURN_PATH = '/settings/account/security'
+
+  // #947 / ADR-259 §3.3: re-authenticate, then mint an OIDC round trip bound to THIS session's
+  // member. Re-authentication is asked HERE, before any state exists — the callback below trusts the
+  // session the state names precisely because getting a state at all already cost a proof.
+  app.post<{ Params: { connectionId: string }; Body: { password?: unknown; code?: unknown; passkey?: unknown } }>(
+    '/me/connections/:connectionId/link/start',
+    async (req, reply) => {
+      if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
+        return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
+      }
+      if (!(await reauthenticated(app, req as never, req.body ?? {}))) {
+        await countFailure(app.valkey, req.tenant.id, req.user.sub)
+        return reply.code(401).send({ error: 're-authenticate to link a sign-in method', code: 'reauth_required' })
+      }
+      const conn = (await resolveLoginConnections(req.db, req.tenant))
+        .find((c) => c.id === req.params.connectionId && (c.kind === 'oidc' || c.kind === 'platform'))
+      const cfg = conn ? (conn.kind === 'platform' ? loadPlatformOidc() : await loadTenantOidcById(req.db, conn.id)) : null
+      // Same unified 404 discipline as /auth/login: an unknown/disabled/wrong-kind connection id
+      // answers identically to a missing one — no oracle for which ids exist.
+      if (!conn || !cfg) return reply.code(404).send({ error: 'not found' })
+      const redirectUri = `${req.protocol}://${req.headers.host}/auth/link-callback`
+      const { url, state, nonce, codeVerifier } = await buildLogin(cfg, redirectUri)
+      await saveState(app.valkey, state, {
+        nonce, codeVerifier, tenantId: req.tenant.id, returnTo: LINK_RETURN_PATH,
+        viaTenantOidc: conn.kind === 'oidc', connectionId: conn.id, linkMemberSub: req.user.sub,
+      })
+      return reply.send({ url })
+    },
+  )
+
+  // Where the IdP redirects back to complete a link (#947 / ADR-259 §3.3). PUBLIC in app.ts's hook
+  // (skips the ordinary session resolution) because this handler must resolve the session ITSELF and
+  // refuse unless it is the SAME member who started the link — the linking-CSRF defence a shared hook
+  // cannot express (it would happily accept ANY valid session, which is exactly the attack: start a
+  // link as the attacker, hand the URL to a victim, let the victim's own session complete it).
+  app.get<{ Querystring: { state?: string; code?: string } }>('/auth/link-callback', async (req, reply) => {
+    const tenant = await resolveTenant(req.headers.host)
+    if (!tenant) return reply.code(404).send({ error: 'not found' })
+
+    // Consume-once BEFORE anything else (CSRF + replay defense, same as /auth/callback).
+    const st = await consumeState(app.valkey, req.query?.state ?? '')
+    if (!st || st.tenantId !== tenant.id || !st.linkMemberSub) {
+      return reply.redirect(`${LINK_RETURN_PATH}?linkError=1`)
+    }
+
+    // The session check: the subject is taken from the STATE, and the session is checked against it —
+    // never the other way around (ADR-259 §3.3). Neither value is client-supplied.
+    const sid = req.cookies?.[SESSION_COOKIE]
+    const sess = sid ? await readSession(app.valkey, sid) : null
+    if (!sess || sess.tenantId !== tenant.id || sess.sub !== st.linkMemberSub) {
+      return reply.redirect(`${LINK_RETURN_PATH}?linkError=1`)
+    }
+
+    const db = await acquireTenantDb(tenant)
+    try {
+      const conn = st.connectionId
+        ? (await resolveLoginConnections(db, tenant)).find((c) => c.id === st.connectionId && (c.kind === 'oidc' || c.kind === 'platform'))
+        : null
+      const cfg = conn ? (conn.kind === 'platform' ? loadPlatformOidc() : await loadTenantOidcById(db, conn.id)) : null
+      if (!conn || !cfg || (conn.kind === 'oidc') !== st.viaTenantOidc) {
+        return reply.redirect(`${LINK_RETURN_PATH}?linkError=1`)
+      }
+
+      const currentUrl = `${req.protocol}://${req.headers.host}${req.url}`
+      let claims
+      try {
+        claims = await exchangeCode(cfg, currentUrl, { state: req.query!.state!, nonce: st.nonce, codeVerifier: st.codeVerifier })
+      } catch (e) {
+        req.log.error({ err: e, tenantId: tenant.id }, 'auth/link-callback: OIDC code exchange failed')
+        return reply.redirect(`${LINK_RETURN_PATH}?linkError=1`)
+      }
+
+      // The upstream subject comes from THIS server-verified exchange, never from anything the client
+      // supplied — and the member comes from the state, not from any header or body on this request.
+      try {
+        await linkMemberIdentity(db, tenant.id, conn.id, claims.sub, st.linkMemberSub)
+      } catch (e) {
+        if ((e as { code?: string }).code === 'identity_taken') {
+          req.log.info({ tenantId: tenant.id }, 'auth/link-callback: refused — identity already linked to a different member')
+          return reply.redirect(`${LINK_RETURN_PATH}?linkError=taken`)
+        }
+        throw e
+      }
+      return reply.redirect(`${LINK_RETURN_PATH}?linked=1`)
     } finally {
       await db.release()
     }

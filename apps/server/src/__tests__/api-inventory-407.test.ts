@@ -63,6 +63,10 @@ const EXCLUDED_PATHS = new Set([
   // paper — an integrator driving this would be storing ten standing credentials somewhere, which is the
   // opposite of what the codes are for.
   '/me/recovery-codes', '/me/recovery-codes/challenge',
+  // #947 / ADR-259 §3.3: linking a sign-in method is the same account-screen plumbing as the factor
+  // rows beside it — the OIDC round trip it starts completes at /auth/link-callback, already covered
+  // by the /auth/ prefix exclusion above.
+  '/me/connections', '/me/connections/:connectionId/link/start',
   // #652: the interstitial's own doors live under /auth/, which the prefix list above already excludes;
   // named here only so a reader looking for them finds them beside their siblings.
   '/me/settings', '/me/capabilities', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', '/members/invites/:id/reissue', // account/invite UI plumbing (#638: handing a pending invitation over again is the same console surface)

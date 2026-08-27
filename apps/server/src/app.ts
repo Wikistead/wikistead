@@ -377,6 +377,11 @@ export async function buildApp(): Promise<FastifyInstance> {
         // receiver is public here — NOT all of /webhooks/ (the outbound-webhook admin CRUD /webhooks/:id is
         // a member/admin route and must go through auth; #228 collided with the old broad /webhooks/ prefix).
         req.url.startsWith('/auth/login') || req.url.startsWith('/auth/callback') ||
+        // #947 / ADR-259 §3.3: the connection-linking callback resolves the session ITSELF (it must
+        // refuse unless the browser presenting it is the SAME member who started the link — the
+        // linking-CSRF defence), so it skips this hook's ordinary session resolution deliberately
+        // rather than reusing it.
+        req.url.startsWith('/auth/link-callback') ||
         req.url.startsWith('/auth/saml/') || // SAML SP-initiated login + ACS establish the session (#135)
         req.url.startsWith('/scim/v2/') || // SCIM uses its own scm_ bearer scheme; authenticated in scimPlugin (#134)
         req.url.startsWith('/signup/')) return

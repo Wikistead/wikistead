@@ -76,3 +76,9 @@ since neither reaches a caller that would parse one.
 `/admin/*` responses are shaped for the console screen that reads them and change without a version
 bump — e.g. `GET /admin/sso-exemptions` carries an `isAdmin` field so that screen can answer the one
 question its own refusal tells an operator to act on. Not part of the OpenAPI-covered surface above.
+
+`/auth/link-callback` (ADR-259 §3.3, #947) is a second OIDC-round-trip landing point, distinct from
+`/auth/callback`: it completes an account-settings request to link an additional connection to the
+*already signed-in* member, rather than starting a session. It redirects to `/settings/account/security`
+with `?linked=1` or `?linkError=<reason>` — never JSON — and, unlike `/auth/callback`, is bound to the
+session that started it (refusing a link completed in any other session, the linking-CSRF defence).

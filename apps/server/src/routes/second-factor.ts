@@ -92,7 +92,7 @@ const lockKey = (tenantId: string, sub: string) => `factor:lock:${tenantId}:${su
  * limiter that disappears under load is not a limiter. It says so in the log rather than pretending
  * the member is locked out for a reason they could act on.
  */
-async function locked(valkey: IORedis, tenantId: string, sub: string): Promise<boolean> {
+export async function locked(valkey: IORedis, tenantId: string, sub: string): Promise<boolean> {
   try {
     return (await valkey.get(lockKey(tenantId, sub))) !== null
   } catch (err) {
@@ -102,7 +102,7 @@ async function locked(valkey: IORedis, tenantId: string, sub: string): Promise<b
 }
 
 /** Count a failure, and lock once the window's budget is gone. */
-async function countFailure(valkey: IORedis, tenantId: string, sub: string): Promise<void> {
+export async function countFailure(valkey: IORedis, tenantId: string, sub: string): Promise<void> {
   try {
     const n = await valkey.incr(attemptKey(tenantId, sub))
     if (n === 1) await valkey.expire(attemptKey(tenantId, sub), FACTOR_VERIFY_WINDOW_S)
@@ -134,8 +134,13 @@ async function clearFailures(valkey: IORedis, tenantId: string, sub: string): Pr
  *
  * A session alone is NOT enough, which is the whole point: a stolen session that could mint codes could
  * mint itself a permanent way past the factor.
+ *
+ * Exported (#947 / ADR-259 §3.3): account-settings connection-linking asks the same question this
+ * docstring answers — "is the person at the keyboard still the account holder" — for the same reason
+ * (a stolen session must not be able to mint itself a second way in). Reusing this rather than a copy
+ * keeps the three proofs, and their rules, in the one place ADR-259 §3.3 measured them from.
  */
-async function reauthenticated(
+export async function reauthenticated(
   app: FastifyInstance,
   req: { db: TenantDb; tenant: { id: string }; user: { sub: string }; headers: { host?: string } },
   proof: { password?: unknown; code?: unknown; passkey?: unknown },

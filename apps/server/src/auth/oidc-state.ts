@@ -25,6 +25,12 @@ export interface OidcLoginState {
   // grant) once identity is proven. The invite row is itself consume-once, and so
   // is this state (GETDEL) — double single-use.
   inviteToken?: string
+  // #947 / ADR-259 §3.3: present only for a connection-LINKING round trip, started from account
+  // settings by a member who is already signed in. Carries THAT member's sub — never a proof of
+  // somebody else's identity — so /auth/link-callback can refuse unless the request arrives in the
+  // SAME session as this same member (the linking-CSRF defence; a stolen link-start URL handed to a
+  // victim resolves against the victim's own session, which will never match).
+  linkMemberSub?: string
 }
 
 export async function saveState(valkey: IORedis, state: string, data: OidcLoginState): Promise<void> {

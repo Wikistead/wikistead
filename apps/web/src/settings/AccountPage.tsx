@@ -23,6 +23,7 @@ import { ActivityHeatmap } from "./ActivityHeatmap"; // #483 / ADR-180: personal
 import { ApiKeysPanel } from "./ApiKeysPanel"; // #462: shared with the admin console's key list
 import { SecondFactorPanel } from "./SecondFactorPanel"; // #653 / ADR-219
 import { RecoveryCodesPanel } from "./RecoveryCodesPanel"; // #650 / ADR-226
+import { ConnectionsLinkPanel } from "./ConnectionsLinkPanel"; // #947 / ADR-259 §3.3
 import { downloadTenantExport } from "../data/exportApi"; // #309: whole-tenant Markdown-ZIP export
 import { EditorOnboardingDialog } from "../app/EditorOnboarding"; // #289: "redo the setup questions"
 import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment, type Keybindings, type CommandDef } from "../app/keybindings";
@@ -580,6 +581,9 @@ function SecurityTab() {
           when the device holding them is gone. A tab of its own would be a place nobody visits until
           they cannot reach it. */}
       <RecoveryCodesPanel />
+      {/* #947 / ADR-259 §3.3: linking a second sign-in way is re-authentication, the same subject as
+          the two panels above it. */}
+      <ConnectionsLinkPanel />
     </SettingsPage>
   );
 }

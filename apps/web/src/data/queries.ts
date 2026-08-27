@@ -2906,6 +2906,34 @@ export function useMintRecoveryCodes() {
   });
 }
 
+// ── linking a connection from account settings (#947 / ADR-259 §3.3) ────────────────────────────
+
+export interface AccountConnection { id: string; kind: string; label: string | null; brand: string | null; linked: boolean }
+
+/** The tenant's OIDC/platform connections, each marked with whether THIS member already holds a link. */
+export function useMyConnections() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["me", "connections"],
+    queryFn: () => apiFetch<{ connections: AccountConnection[] }>("/me/connections", token).then((r) => r?.connections ?? []),
+  });
+}
+
+/**
+ * Re-authenticate, then mint an OIDC round trip bound to this session. The server hands back the
+ * IdP's authorize URL; completing the link is a full-page navigation there and back to
+ * `/auth/link-callback` — there is no second call on this side, only the redirect.
+ */
+export function useStartConnectionLink() {
+  const { token } = useSession();
+  return useMutation({
+    mutationFn: (args: { connectionId: string; proof: { password?: string; code?: string; passkey?: unknown } }) =>
+      apiFetch<{ url: string }>(`/me/connections/${encodeURIComponent(args.connectionId)}/link/start`, token, {
+        method: "POST", body: JSON.stringify(args.proof),
+      }),
+  });
+}
+
 /** #660: removing one needs a current code FROM it — possession, not a password (ADR-219 §8). */
 export function useRemoveFactor() {
   const { token } = useSession();
