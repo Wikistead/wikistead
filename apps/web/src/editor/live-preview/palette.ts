@@ -2,7 +2,8 @@ import { EditorView, ViewPlugin, showTooltip, keymap, type Tooltip, type Tooltip
 import { StateField, StateEffect, EditorSelection, Facet, Prec, type EditorState, type Extension } from "@codemirror/state";
 import { Vim, getCM } from "@replit/codemirror-vim";
 import i18n from "../../i18n";
-import { INLINE_FORMATS, insertImage, insertLink, unlink, type InlineFormat, type ImageUploader } from "./commands";
+import { INLINE_FORMATS, insertLink, unlink, type InlineFormat, type ImageUploader } from "./commands";
+import { uploadFiles } from "./image-drop";
 import { orderByRecency, recordUse } from "./palette-recency";
 import { contextHintTooltip } from "./hint";
 import { registeredMacros } from "../macros";
@@ -787,11 +788,13 @@ function imageInsert(upload: ImageUploader, container?: HTMLElement): Extension 
     const file = input.files?.[0];
     input.value = ""; // allow re-picking the same file
     if (!file || !view) return;
-    const v = view;
-    void upload(file).then((res) => { if (res) insertImage(v, res.alt, res.ref); });
+    // #934: the same #913 chokepoint the drag/paste path uses — a presign/PUT/confirm failure used
+    // to be an unhandled rejection with nothing shown (this path had no .catch at all), so the same
+    // oversized image read "too large" from a drop and silence from the picker.
+    void uploadFiles(view, upload, [file]);
   });
   (container ?? document.body).appendChild(input);
-  // Capture the view (for insertImage) + clean up the input when the editor is destroyed.
+  // Capture the view (for uploadFiles' insert) + clean up the input when the editor is destroyed.
   const lifecycle = ViewPlugin.define((v) => { view = v; return { destroy() { input.remove(); view = null; } }; });
   return [imageUploader.of(() => input.click()), lifecycle];
 }
