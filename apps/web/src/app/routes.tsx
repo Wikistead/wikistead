@@ -356,9 +356,24 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
 
   // Opening any page makes its space the active one, so the sidebar follows —
   // including when arriving from cross-space search or a share link.
+  //
+  // #965: keyed on the OPEN PAGE, not on `openSpaceId`'s value. The effect used to reassert
+  // `openSpaceId` on every fire, and it fires more often than "the reader opened a page" — a background
+  // refetch elsewhere in the tree is enough (measured: creating a space from the sidebar while this page
+  // stayed open invalidates caches this component does not itself read, and the very next fire of THIS
+  // effect wrote the open page's space back over the space the sidebar had just switched to, with no
+  // navigation in between). The ref remembers which page this effect last acted for, so a re-fire for
+  // the SAME page — for any reason — is a no-op; only an actual navigation to a different page updates
+  // it, which is the one event the comment above describes.
   const { setActiveSpaceId } = useActiveSpace();
   const openSpaceId = page?.spaceId;
-  useEffect(() => { if (openSpaceId) setActiveSpaceId(openSpaceId); }, [openSpaceId, setActiveSpaceId]);
+  const spaceAppliedForPageRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (openSpaceId && spaceAppliedForPageRef.current !== pageId) {
+      spaceAppliedForPageRef.current = pageId;
+      setActiveSpaceId(openSpaceId);
+    }
+  }, [pageId, openSpaceId, setActiveSpaceId]);
 
   // #336 part B: the sidebar's unpublished-changes dot reads from the ["pages"] list, which has NO poll —
   // so a fresh draft edit did not surface on the dot until a reload. usePublished already polls the OPEN

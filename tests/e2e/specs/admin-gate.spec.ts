@@ -12,10 +12,6 @@ import { openDemo, WEB_REAL_PORT, DEV_USER_SHOWN, INVITE_EMAIL_LABEL } from "../
 const REAL_WEB = `http://dev.localhost:${WEB_REAL_PORT}`;
 
 test("admin: user menu opens the tenant console; space settings rename + delete", async ({ page }) => {
-  // #940/#965: isolated — creating a space while /p/demo is still open leaves the sidebar's active-
-  // space context pointed at demo_space (measured: the switcher never shows the new space's name, not
-  // a timing race — see #965 for the suspected mechanism). Remove once #965 lands.
-  test.skip(true, "#965: isolated — active-space context does not follow a space created while another page is open");
   await openDemo(page);
 
   // User menu → Tenant admin → /admin/members (the re-homed Members screen).
