@@ -286,6 +286,35 @@ function declBody(src: string, name: string): string {
   return stop ? rest.slice(0, stop.index + 1) : rest
 }
 
+/**
+ * Every `app.<method>` call site, tolerant of a NESTED generic (`app.patch<{ Body: {
+ * keybindings?: Record<string, string> } }>(...)`), which `<[^>]*>` cannot balance — it stops at
+ * the first `>`, closing on `Record<string, string` and leaving `(?:<[^>]*>)?` unmatched, so the
+ * WHOLE call (including its string-literal path) becomes invisible to a fixed-depth regex. #967:
+ * measured — this exact shape on `PATCH /me/settings` silently widened `GET /me/activity`'s window
+ * all the way to the NEXT visible registration, folding an unrelated route's full handler into its
+ * scan. `path` is the string-literal first argument when there is one (a GET route we can key by
+ * path); every call, path or not, still counts as a boundary point for window-narrowing.
+ */
+function findAppCalls(src: string, methods: readonly string[]): { method: string; at: number; path: string | null }[] {
+  const out: { method: string; at: number; path: string | null }[] = []
+  const callRe = new RegExp(`app\\.(${methods.join('|')})`, 'g')
+  let m: RegExpExecArray | null
+  while ((m = callRe.exec(src)) !== null) {
+    let i = m.index + m[0].length
+    if (src[i] === '<') {
+      let depth = 0
+      for (; i < src.length; i++) {
+        if (src[i] === '<') depth++
+        else if (src[i] === '>') { depth--; if (depth === 0) { i++; break } }
+      }
+    }
+    const argMatch = /^\s*\(\s*(['"`])([^'"`]*)\1/.exec(src.slice(i))
+    out.push({ method: m[1]!, at: m.index, path: argMatch ? argMatch[2]! : null })
+  }
+  return out
+}
+
 function routesIn(file: string, dir: string = ROUTES): { key: string; body: string; helpers: { name: string; bounded: boolean }[] }[] {
   const abs = resolve(dir, file)
   const src = readFileSync(abs, 'utf8')
@@ -297,13 +326,10 @@ function routesIn(file: string, dir: string = ROUTES): { key: string; body: stri
   // sitting between it and the next GET. Measured: `GET /spaces/:spaceId/share-links` was green solely
   // on a `limit` belonging to a DELETE handler two routes later, and `GET /email/unsubscribe` looked
   // list-shaped while having no query at all.
-  const re = /app\.get(?:<[^>]*>)?\(\s*(['"`])([^'"`]+)\1/g
-  const anyRe = /app\.(?:get|post|put|patch|delete|head|options)(?:<[^>]*>)?\(\s*(['"`])([^'"`]+)\1/g
-  let m: RegExpExecArray | null
-  const starts: { at: number; path: string }[] = []
-  while ((m = re.exec(src)) !== null) starts.push({ at: m.index, path: m[2]! })
-  const registrations: number[] = []
-  while ((m = anyRe.exec(src)) !== null) registrations.push(m.index)
+  const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const
+  const starts: { at: number; path: string }[] = findAppCalls(src, ['get'])
+    .filter((c): c is { method: string; at: number; path: string } => c.path !== null)
+  const registrations: number[] = findAppCalls(src, HTTP_METHODS).map((c) => c.at)
   for (const r of starts) {
     const end = registrations.find((at) => at > r.at) ?? src.length
     let body = src.slice(r.at, end)
