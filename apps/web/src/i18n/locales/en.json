@@ -81,7 +81,7 @@
       "connecting": "The connection dropped. What you type stays here and will be sent when it comes back.",
       "unauthenticated": "This editing session has ended. Open the link again to carry on.",
       "readOnly": "You no longer have permission to edit this page.",
-      "syncing": "Still catching up with the server."
+      "syncing": "Still syncing with the server."
     }
   },
   "pageAnalytics": {
