@@ -41,14 +41,26 @@ describe("memberMenuValues (#614)", () => {
     }
   });
 
-  it("#626: taking the entrance back is an EXTRA item, and only where the server would allow it", () => {
+  it("#626/#949: taking the entrance back is an EXTRA item, and only where the server would allow it", () => {
     // no password → nothing to remove (#627 adds `suspend` to an active member, which is not this claim)
-    expect(memberMenuValues({ has_password: false })).not.toContain("passwordRemove");
-    // a federated member with a password → both errands
-    expect(memberMenuValues({ has_password: true, identity_source: "oidc" })).toContain("passwordRemove");
-    // …but a password-born member has no other way in, and the server refuses with `last_way_in`. An
-    // action that cannot succeed is the defect #596/#606 are about, so it is not offered.
-    expect(memberMenuValues({ has_password: true, identity_source: "local" })).not.toContain("passwordRemove");
+    expect(memberMenuValues({ has_password: false, has_another_way_in: true })).not.toContain("passwordRemove");
+    // a member with a password and another way in → both errands
+    expect(memberMenuValues({ has_password: true, has_another_way_in: true })).toContain("passwordRemove");
+    // …but a member with no OTHER way in has the server refuse with `last_way_in`. An action that cannot
+    // succeed is the defect #596/#606 are about, so it is not offered.
+    expect(memberMenuValues({ has_password: true, has_another_way_in: false })).not.toContain("passwordRemove");
+    // Absent, not false: a list endpoint that predates the field must not light the item up (same rule
+    // as `has_factor` below — this ticket's own review found the opposite mistake, reading the MINTING
+    // proxy `identity_source` instead of asking the server what is true today).
+    expect(memberMenuValues({ has_password: true })).not.toContain("passwordRemove");
+  });
+
+  it("#949: `identity_source` no longer decides this — a linked `local` member IS removable, and a member whose connection was deleted is NOT, regardless of how the identity was minted", () => {
+    // Bug this ticket fixes: a `local`-born member who has since linked a provider has another way in.
+    expect(memberMenuValues({ has_password: true, identity_source: "local", has_another_way_in: true })).toContain("passwordRemove");
+    // Regression this ticket introduced server-side and must not surface here: an `oidc`-born member
+    // whose connection is gone, with no link and no other credential, has none.
+    expect(memberMenuValues({ has_password: true, identity_source: "oidc", has_another_way_in: false })).not.toContain("passwordRemove");
   });
 
   it("and it is a DIFFERENT errand depending on the state", () => {
@@ -141,7 +153,7 @@ describe("#644: the factor reset is offered only to somebody who holds one", () 
     // #614's lesson, in its own shape: an item added here took another away, and the one it took was
     // the last route into a tenant with no working mail. A member can hold both a password and a
     // factor, and both errands stay available.
-    const m = { has_password: true, identity_source: "oidc" as const, has_factor: true };
+    const m = { has_password: true, identity_source: "oidc" as const, has_another_way_in: true, has_factor: true };
     expect(memberMenuValues(m)).toEqual(
       expect.arrayContaining(["password", "passwordRemove", "factorReset"]));
   });

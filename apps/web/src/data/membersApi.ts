@@ -17,6 +17,11 @@ export interface Member {
   identity_source?: "oidc" | "local";
   /** #614: a password entrance exists (existence only — the credential itself never leaves the server). */
   has_password?: boolean;
+  /** #949: whether removing the password entrance above would still leave this member a way in — a
+   *  link or a still-effective mint-derived connection. NOT derivable from `identity_source` (a 'local'
+   *  member may have since linked a provider; an 'oidc' member's connection may have since been
+   *  deleted) — the server computes this the same way it decides whether to refuse the removal. */
+  has_another_way_in?: boolean;
   /** #644: a CONFIRMED second factor exists (existence only, like `has_password`). The console reads it
    *  so it does not offer a reset to somebody holding nothing — that call succeeds with a count of zero,
    *  which reports having done something. */

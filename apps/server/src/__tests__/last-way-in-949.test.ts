@@ -4,6 +4,10 @@
 // who has since linked a provider may have their password removed). This file covers the other two
 // inputs `memberHasAnotherWayIn` (auth/login-methods.ts) reads: a still-effective connection whose
 // prefix this member's sub carries, and the same sub once that connection is gone.
+//
+// review the console read `identity_source` directly instead of this predicate, so the
+// three fixtures below also pin `GET /members`'s `has_another_way_in` field — the SAME shapes, checked
+// through the LIST route the console actually reads from.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -27,6 +31,11 @@ const credentialCount = async (sub: string) =>
     SELECT count(*)::text AS n FROM local_credentials WHERE tenant_id = ${tenant.id} AND member_sub = ${sub}`)[0]!.n)
 const remove = (sub: string) =>
   app.inject({ method: 'DELETE', url: `/members/${sub}/password-setup`, headers: tenant.AUTH })
+const hasAnotherWayIn = async (sub: string): Promise<boolean | undefined> => {
+  const res = await app.inject({ method: 'GET', url: `/members?q=${sub}`, headers: tenant.AUTH })
+  const body = res.json() as { members: { sub: string; has_another_way_in?: boolean }[] }
+  return body.members.find((m) => m.sub === sub)?.has_another_way_in
+}
 
 beforeAll(async () => {
   app = await buildApp()
@@ -49,6 +58,7 @@ describe('#949: the mint-derived input — a still-effective connection prefix',
     await admin`INSERT INTO members (tenant_id, sub, email, role) VALUES (${tenant.id}, ${sub}, ${`${sub}@t949.test`}, 'member')`
     await giveCredential(sub)
     try {
+      expect(await hasAnotherWayIn(sub), 'GET /members must agree with what DELETE is about to allow').toBe(true)
       const res = await remove(sub)
       expect(res.statusCode, res.body).toBe(200)
       expect(await credentialCount(sub)).toBe(0)
@@ -73,6 +83,7 @@ describe('#949: the mint-derived input — a still-effective connection prefix',
     // The connection is removed — admin-connections.ts's only `DELETE FROM tenant_oidc`, reproduced here.
     await admin`DELETE FROM tenant_oidc WHERE id = ${connId}`
     try {
+      expect(await hasAnotherWayIn(sub), 'GET /members must agree with the 409 DELETE is about to return').toBe(false)
       const res = await remove(sub)
       expect(res.statusCode, res.body).toBe(409)
       expect(res.json()).toMatchObject({ code: 'last_way_in' })
@@ -92,6 +103,7 @@ describe('#949: the link input, isolated from the mint-derived one', () => {
                 VALUES (${tenant.id}, ${`t949-conn-${STAMP}`}, ${`t949-ext-${STAMP}`}, ${sub})`
     await giveCredential(sub)
     try {
+      expect(await hasAnotherWayIn(sub), 'a link alone must already read as another way in').toBe(true)
       const res = await remove(sub)
       expect(res.statusCode, res.body).toBe(200)
     } finally {

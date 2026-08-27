@@ -13,7 +13,7 @@ import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { enqueueTupleDeletes, flushTupleDeletes, type TupleIntent } from '../db/tuple-outbox.js' // #896
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
-import { assertClosingIsSafe, anAdminHoldsAKey, memberHasAnotherWayIn, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
+import { assertClosingIsSafe, anAdminHoldsAKey, memberHasAnotherWayIn, subsWithAnotherWayIn, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
@@ -221,8 +221,13 @@ export async function membersPlugin(app: FastifyInstance) {
     const hasMore = rows.length > limit
     const page = hasMore ? rows.slice(0, limit) : rows
     const last = page[page.length - 1]
+    // #949 review `identity_source` is who MINTED the identity, not whether removing a
+    // password would leave this member locked out — a member can be born 'local' and since link a
+    // provider, or born 'oidc' from a connection since deleted. The console's "remove password" item
+    // reads THIS field, computed the same way the route below refuses the write.
+    const anotherWayIn = await subsWithAnotherWayIn(req.db, req.tenant, page.map((m) => m.sub))
     return {
-      members: page,
+      members: page.map((m) => ({ ...m, has_another_way_in: anotherWayIn.has(m.sub) })),
       nextCursor: hasMore && last ? `${last.cursor_at}|${last.sub}` : null,
     }
   })

@@ -503,6 +503,14 @@ export async function assertNotLastWayIn(
 // counterfactual "as if this connection (and any link through it) were already gone", asked BEFORE it
 // actually is. Reused rather than copied, because a second copy of this question is exactly the shape
 // #822 keeps repeating (three guards, one question, answered differently).
+// Pure half of the mint-derived check, split out so a caller holding an already-resolved `effective`
+// list (one `resolveLoginConnections` call) can ask it for many subs — see `subsWithAnotherWayIn`.
+function subjectHasMintDerivedEntrance(sub: string, effective: readonly LoginConnection[]): boolean {
+  const prefix = RESERVED_SUB_RE.exec(sub)?.[0] ?? null
+  if (prefix) return effective.some((c) => c.subjectPrefix === prefix)
+  return effective.some((c) => c.subjectPrefix === null && (c.kind === 'oidc' || c.kind === 'platform'))
+}
+
 export async function memberHasAnotherWayIn(
   db: TenantDb,
   tenant: { id: string; plan: string },
@@ -517,9 +525,29 @@ export async function memberHasAnotherWayIn(
 
   const effective = (await resolveLoginConnections(db, tenant, opts.env))
     .filter((c) => c.id !== opts.excludeConnectionId)
-  const prefix = RESERVED_SUB_RE.exec(sub)?.[0] ?? null
-  if (prefix) return effective.some((c) => c.subjectPrefix === prefix)
-  return effective.some((c) => c.subjectPrefix === null && (c.kind === 'oidc' || c.kind === 'platform'))
+  return subjectHasMintDerivedEntrance(sub, effective)
+}
+
+// #949 review the members LIST needs this same answer for every row on the page, and a
+// naive per-row `memberHasAnotherWayIn` call would re-run `resolveLoginConnections` — a TENANT-WIDE
+// computation, not a per-member one — once per row. One linked-set query (batched with `= ANY`) and one
+// `resolveLoginConnections` call, no matter how many subs are asked about.
+export async function subsWithAnotherWayIn(
+  db: TenantDb,
+  tenant: { id: string; plan: string },
+  subs: readonly string[],
+  opts: { env?: string | undefined } = {},
+): Promise<Set<string>> {
+  if (subs.length === 0) return new Set()
+  const linked = await db.sql<{ member_sub: string }[]>`
+    SELECT DISTINCT member_sub FROM member_identities WHERE tenant_id = ${tenant.id} AND member_sub = ANY(${subs})`
+  const out = new Set(linked.map((r) => r.member_sub))
+  const remaining = subs.filter((s) => !out.has(s))
+  if (remaining.length > 0) {
+    const effective = await resolveLoginConnections(db, tenant, opts.env)
+    for (const sub of remaining) if (subjectHasMintDerivedEntrance(sub, effective)) out.add(sub)
+  }
+  return out
 }
 
 // #858 / #960, ADR-259 §3.5's second half: which members a connection's deletion would touch at all —
