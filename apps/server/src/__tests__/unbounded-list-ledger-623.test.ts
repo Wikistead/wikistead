@@ -124,7 +124,14 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'public.ts:/public/attachments/:id/inline': { kind: 'bounded', why: 'one attachment by id — a row, not a list. The download twin was already here; this one was not.' },
 
   // ── the two trees: ADR-220. Both were invisible to this scan until slice 12 — see NOT_REALLY_BOUNDED.
-  'pages.ts:/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: the whole space, one row per page, plus a per-page confirm.' },
+  // #903 ADR-220 §13: the GUEST branch is now bounded (listPagesGuestBounded → listBranch, capped at
+  // GUEST_TREE_CAP — a share-link no longer pays a `view` Check and a badge read for every page in the
+  // space to show the cap's worth of rows). The MEMBER branch of this SAME route still calls the
+  // uncapped `listPages` (deliberately — ADR-220 §13 scoped members OUT: their answer is the branch
+  // route, and capping the whole-space read for them would be the silent truncation #623 exists to
+  // remove) — so the route as a whole still owes a bound, for that caller. See NOT_REALLY_BOUNDED: the
+  // LIMIT/cursor tokens the scan now sees belong to the guest branch alone.
+  'pages.ts:/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220 §13 (#903): the MEMBER branch reads the whole space, one row per page, plus a per-page confirm. The GUEST branch is bounded.' },
   'public.ts:/public/spaces/:spaceId/pages': { kind: 'debt', why: '#623 ADR-220: 200 children per node to depth 6 — each step bounded, the product is not.' },
 
   // ── ADR-220's two new tree surfaces. The scan cannot see either bound, so both say it here.
@@ -235,6 +242,12 @@ const isBounded = (body: string): boolean => BOUNDED_MARKER.test(withoutSubqueri
 const NOT_REALLY_BOUNDED: Record<string, string> = {
   'public.ts:/public/spaces/:spaceId/pages':
     'the LIMIT bounds ONE node’s children (200); the walk is depth 6, so the response is bounded by 200^6.',
+  // #903: the route body inlines BOTH branches — guest (listPagesGuestBounded → listBranch, which does
+  // carry LIMIT/cursor) and member (listPages, which carries neither). The token scan cannot see the
+  // `if (req.guest)` split, so it reads the whole concatenated body as bounded on the strength of a
+  // branch only the guest caller takes.
+  'pages.ts:/spaces/:spaceId/pages':
+    'the LIMIT/cursor tokens belong to the GUEST branch (listBranch, via listPagesGuestBounded); the MEMBER branch calls the uncapped listPages and the scan cannot see the split.',
 }
 
 /**

@@ -1883,6 +1883,21 @@ export interface BranchPage { pages: Page[]; nextCursor: string | null }
  * does not, and `private` propagates independently. Every row is confirmed on its own, and a row the
  * reader cannot see is ABSENT with no gap to infer it from.
  */
+// #903: the root branch's gate, corrected. `space#viewer` is NOT the one relation every principal who
+// may browse the tree holds — ADR-135 deliberately keeps a space EDIT share-link on `space#editor`
+// alone (never `viewer`/`viewer_member`), so a share-link-only guest with an edit link never leaks the
+// space's templates (`viewer_member` is what `template#view` reads). That split is correct for
+// templates and wrong for the tree: an edit-link guest may edit — and therefore browse — every
+// published, non-private page in the space, exactly as `page#edit_from_space` already grants per page.
+// Checked as two relations rather than widening `viewer` itself, so the template boundary this exists
+// to protect is untouched.
+async function canOpenSpaceRoot(
+  fga: OpenFgaClient, subject: string, spaceId: string, context?: { current_time: string },
+): Promise<boolean> {
+  if (await checkRelation(fga, subject, 'viewer', { type: 'space', id: spaceId }, context)) return true
+  return checkRelation(fga, subject, 'editor', { type: 'space', id: spaceId }, context)
+}
+
 export async function listBranch(
   db: TenantDb,
   fga: OpenFgaClient,
@@ -1902,10 +1917,7 @@ export async function listBranch(
   // below answers the same 404 — including "this page is in a different space", which a caller could
   // otherwise use to test whether an id belongs here.
   if (args.parentId === null) {
-    // `space#viewer` is the model's read relation (there is no `space#view`) — and it is the one the
-    // guest arm needs too: a share_link is a direct type on `viewer`, so this one predicate answers for
-    // members and for a space link alike.
-    if (!(await checkRelation(fga, args.subject, 'viewer', { type: 'space', id: args.spaceId }, args.context))) {
+    if (!(await canOpenSpaceRoot(fga, args.subject, args.spaceId, args.context))) {
       throw notFound()
     }
   } else {
@@ -2108,7 +2120,7 @@ export async function pathToPage(
     // The branch's own gate, identical to `listBranch`'s §2 — an ancestor the reader cannot view
     // truncates the path rather than failing it, exactly as `paintTree` truncates its paint.
     const ok = parentId === null
-      ? await checkRelation(fga, args.subject, 'viewer', { type: 'space', id: args.spaceId }, args.context)
+      ? await canOpenSpaceRoot(fga, args.subject, args.spaceId, args.context)
       : await checkRelation(fga, args.subject, 'view', { type: 'page', id: parentId }, args.context)
     if (!ok) { exhausted = true; break }
     if (budget <= 0) { exhausted = true; break }
@@ -2159,7 +2171,7 @@ export async function branchPlaceholders(
 ): Promise<{ placeholders: PlaceholderNode[]; placeholdersExhausted: boolean }> {
   const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
   if (args.parentId === null) {
-    if (!(await checkRelation(fga, args.subject, 'viewer', { type: 'space', id: args.spaceId }, args.context))) {
+    if (!(await canOpenSpaceRoot(fga, args.subject, args.spaceId, args.context))) {
       throw notFound()
     }
   } else {
@@ -2282,6 +2294,77 @@ export async function paintTree(
  * cut — because a link whose tree is too large to draw should say so rather than look complete.
  */
 export const GUEST_TREE_CAP = 500
+
+/**
+ * #903 / ADR-220 §13: the guest whole-space read, bounded by TREE CLOSURE rather than a flat slice.
+ *
+ * The shipped cap (§6.2) sliced `listPages`'s output AFTER `listPages` had already run a `view` Check
+ * (and a badge read) on every non-deleted page in the space — a 5,000-page space paid 5,000 Checks to
+ * show 500 rows, on every load. A flat SQL `LIMIT` is not a safe fix: `dfsOrder` re-parents a row whose
+ * parent fell outside the cut to the ROOT, a wrong tree shown quietly — worse than a loud cap.
+ *
+ * This walks the tree in DFS pre-order (roots and their subtrees before later siblings, matching the
+ * client's layout) one BRANCH at a time via `listBranch` — reusing §1-3's already-reviewed shape
+ * (parent-confirm, per-node confirm, home-page exclusion) rather than inventing a new authz pattern —
+ * and stops the instant `GUEST_TREE_CAP` VISIBLE pages have been confirmed. A page is pushed to
+ * `visible` before its own children are ever fetched, so the ancestor-inclusion invariant ("a page's
+ * ancestors are included whenever the page is") holds structurally. A subtree behind a page whose
+ * CHEVRON probe found no visible child (`hasChildren` false) is never walked, so an entirely-invisible
+ * subtree costs nothing beyond the one batched check that found it so.
+ *
+ * `truncated` is computed from the closure exhausting its budget — the walk keeps looking for exactly
+ * one more CONFIRMED-VISIBLE page after the cap-th, and only reports truncation if it finds one. A tree
+ * with precisely `GUEST_TREE_CAP` visible pages and nothing past them is NOT truncated; a flat length
+ * compare cannot tell the two apart, which is the quiet lie this section exists to avoid.
+ */
+export async function listPagesGuestBounded(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  // `cap` defaults to the shipped GUEST_TREE_CAP; a caller (the pin) may override it to exercise the
+  // truncation arithmetic against a small, cheap-to-build fixture without changing the shipped constant.
+  args: { spaceId: string; subject: string; context?: { current_time: string }; cap?: number },
+): Promise<{ pages: Page[]; truncated: boolean }> {
+  const cap = args.cap ?? GUEST_TREE_CAP
+  const visible: Page[] = []
+  let truncated = false
+
+  const walk = async (parentId: string | null): Promise<void> => {
+    let cursor: string | undefined
+    for (;;) {
+      if (truncated) return
+      const branch = await listBranch(db, fga, {
+        spaceId: args.spaceId, parentId, subject: args.subject, context: args.context, cursor, limit: BRANCH_PAGE_LIMIT,
+      })
+      for (const p of branch.pages) {
+        if (visible.length >= cap) { truncated = true; return }
+        visible.push(p)
+        if ((p as Page & { hasChildren?: boolean }).hasChildren) {
+          await walk(p.id)
+          if (truncated) return
+        }
+      }
+      if (!branch.nextCursor) return
+      cursor = branch.nextCursor
+    }
+  }
+
+  try {
+    await walk(null)
+  } catch (err) {
+    // `listBranch`'s root check 404s for ITS OWN callers (§2's uniform-404 — a named branch id must not
+    // become a membership oracle), but the whole-space route this feeds has always answered 200 with an
+    // empty (or partial) list for a guest whose grant does not reach the root at all — an expired or
+    // revoked link, most commonly. Reproducing a 404 here would be a NEW, stricter failure mode nothing
+    // asked for; catching it and reporting "nothing visible" matches what the per-page confirm loop this
+    // replaced would have answered anyway (every page denied, zero rows), just without paying for it.
+    // Scoped to the ROOT specifically (nothing fetched yet) — a 404 reached after some pages were
+    // already found is a genuine anomaly (e.g. a page deleted mid-walk) and propagates as one, the same
+    // as it would from a direct `listBranch` caller.
+    if ((err as { statusCode?: number }).statusCode !== 404 || visible.length > 0) throw err
+    return { pages: visible, truncated: false }
+  }
+  return { pages: visible, truncated }
+}
 
 /** #623 / ADR-220 §6.1: how many pages one FLAT listing may carry. */
 export const FLAT_PAGES_LIMIT = 200
@@ -4493,18 +4576,22 @@ export async function pagesPlugin(app: FastifyInstance) {
     } else {
       return reply.code(401).send({ error: 'unauthorized' })
     }
-    // #541: ?first=N → the partial first paint (clamped; see listPages). The full request follows it.
+    // #903 / ADR-220 §13: a GUEST no longer pays for a `view` Check (and a badge read) on every page in
+    // the space to show `GUEST_TREE_CAP` rows — the walk below stops confirming once it has that many
+    // VISIBLE pages, rather than confirming everything and slicing after. §6.2's contract is unchanged:
+    // one response, the full (now bounded) visible set, and a `truncated` flag.
+    //
+    // Members are NOT capped here — the branch route is their answer, and capping the whole-space read
+    // would be the silent truncation this ticket exists to remove. `first=N` (the partial first paint,
+    // #541) is a member-only optimization the guest shell never asks for (§6.2: rendered fully expanded
+    // in one response) — only read for the member arm.
+    if (req.guest) {
+      return listPagesGuestBounded(req.db, app.fga, { spaceId: req.params.spaceId, subject, context })
+    }
     const firstRaw = (req.query as { first?: string } | undefined)?.first
     const firstN = firstRaw != null ? Math.min(100, Math.max(1, Number.parseInt(firstRaw, 10) || 0)) || undefined : undefined
     const pages = await listPages(req.db, app.fga, { spaceId: req.params.spaceId, subject, context, firstN })
-    // #623 / ADR-220 §6.2: the GUEST shell renders this unvirtualised and fully expanded, so its bound
-    // is a CAP WITH A VISIBLE STATE rather than a quiet cut. A space link's tree is small in the
-    // ordinary case; in the extraordinary one a loud refusal beats a lie, and the shell says so.
-    //
-    // Members are NOT capped here — the branch route is their answer, and capping the whole-space read
-    // would be the silent truncation this ticket exists to remove.
-    const capped = req.guest && pages.length > GUEST_TREE_CAP
-    return { pages: capped ? pages.slice(0, GUEST_TREE_CAP) : pages, truncated: Boolean(capped) }
+    return { pages, truncated: false }
   })
 
   // #623 / ADR-220 §5: the first paint — the root branch plus the path to the open page.
