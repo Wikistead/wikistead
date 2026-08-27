@@ -51,7 +51,7 @@
     "memberSearch": "Search members…",
     "granteeSearch": "Search members or groups…",
     "copyOnce": "Shown only once. Copy it now.",
-    "loadFailed": "Could not load this. It is a problem here, not with what you are looking at.",
+    "loadFailed": "Could not load this. Please try again in a moment.",
     "loadRetry": "Try again"
   },
   "home": {
