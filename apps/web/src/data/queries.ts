@@ -795,7 +795,10 @@ export interface AccountSettings {
   displayName: string | null;         // effective: override ?? OIDC ?? null
   oidcDisplayName: string | null;     // IdP value (for the "reset to IdP name" affordance)
   displayNameOverride: string | null; // null = using the OIDC name
-  identitySource: string;             // #523 / ADR-190: 'oidc' → name is IdP-managed (read-only); 'local' → editable
+  identitySource: string;             // #523 / ADR-190: where this identity came from (informational — see canOverrideDisplayName)
+  // #961 / ADR-259 §3.7: the restrictive union that actually gates the field. Read THIS, not
+  // identitySource — a password-door member who has since linked a provider is read-only too.
+  canOverrideDisplayName: boolean;
   editorKeymap: "default" | "vim" | "local"; // startup-mode preference (keymap)
   editorDisplayMode: "live" | "source" | "wysiwyg" | "local"; // startup display mode (ADR-056 / #164 · #289 wysiwyg)
   editorVimClipboard: "off" | "paste"; // vim ⇄ OS clipboard mode (ADR-105 / #225); 'off' = pure vim

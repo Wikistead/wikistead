@@ -135,8 +135,10 @@ function ProfileTab() {
         <label className="mb-1 block text-sm font-medium">{t("account.displayName")}</label>
         {/* #523 / ADR-190 (slice C): an OIDC-sourced user's name is managed by their identity provider —
             authoritative, anti-impersonation — so it is READ-ONLY here (the server also refuses the write).
-            Only a 'local' user may edit it. The override UI is retained, gated to local users. */}
-        {settings.data && settings.data.identitySource !== "local" ? (
+            #961 / ADR-259 §3.7: gated on canOverrideDisplayName, the restrictive union — not raw
+            identitySource — so a password-door member who has since LINKED a provider reads read-only
+            too, matching the guard the write actually enforces. */}
+        {settings.data && !settings.data.canOverrideDisplayName ? (
           <>
             <p className="mb-2 text-xs text-fg-dim">{t("account.displayNameIdpManaged")}</p>
             <p className="text-sm font-medium" data-testid="account-name-readonly">{settings.data.oidcDisplayName ?? (sub ? shortPrincipalId(sub) : "")}</p>

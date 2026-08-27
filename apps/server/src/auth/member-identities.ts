@@ -46,6 +46,12 @@ export async function listLinkedConnectionIds(db: TenantDb, tenantId: string, me
  * (409 `identity_taken`) rather than silently left alone: an `ON CONFLICT DO NOTHING` here would tell
  * the caller the link succeeded while the identity stayed bound to whoever already holds it. A row
  * that already names THIS member is a harmless replay (double-click, retried redirect) and no-ops.
+ *
+ * #961 / ADR-259 §3.7: the INSERT and the display-name-override clear happen in ONE transaction. A
+ * member holding any IdP-asserted way in may not override their name (account.ts's restrictive-union
+ * guard refuses the WRITE), but an override set before this link existed already persists and would
+ * outlive the guard that would now refuse it — so linking clears it here, in the same write, rather
+ * than leaving a stale value the guard never sees again.
  */
 export async function linkMemberIdentity(
   db: TenantDb,
@@ -54,18 +60,21 @@ export async function linkMemberIdentity(
   externalSubject: string,
   memberSub: string,
 ): Promise<void> {
-  const [existing] = await db.sql<{ member_sub: string }[]>`
-    SELECT member_sub FROM member_identities
-    WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId} AND external_subject = ${externalSubject}
-    LIMIT 1`
-  if (existing && existing.member_sub !== memberSub) {
-    throw Object.assign(
-      new Error('this sign-in is already linked to a different member of this workspace'),
-      { statusCode: 409, code: 'identity_taken' },
-    )
-  }
-  if (existing) return
-  await db.sql`
-    INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
-    VALUES (${tenantId}, ${connectionId}, ${externalSubject}, ${memberSub})`
+  await db.tx(async (tx) => {
+    const [existing] = await tx<{ member_sub: string }[]>`
+      SELECT member_sub FROM member_identities
+      WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId} AND external_subject = ${externalSubject}
+      LIMIT 1`
+    if (existing && existing.member_sub !== memberSub) {
+      throw Object.assign(
+        new Error('this sign-in is already linked to a different member of this workspace'),
+        { statusCode: 409, code: 'identity_taken' },
+      )
+    }
+    if (existing) return
+    await tx`
+      INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
+      VALUES (${tenantId}, ${connectionId}, ${externalSubject}, ${memberSub})`
+    await tx`UPDATE members SET display_name_override = NULL, updated_at = now() WHERE tenant_id = ${tenantId} AND sub = ${memberSub}`
+  })
 }

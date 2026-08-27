@@ -46,9 +46,13 @@ export interface AccountSettings {
   displayName: string | null          // effective: override ?? OIDC ?? null
   oidcDisplayName: string | null      // the IdP value (for the "reset to IdP name" label)
   displayNameOverride: string | null  // the user's override (null = using OIDC)
-  // #523 / ADR-190: where this identity came from. 'oidc' → the name is IdP-managed and the override
-  // is refused (the UI shows it read-only); 'local' → the user may edit it. (slice C)
+  // #523 / ADR-190: where this identity came from (the raw column — informational only). (slice C)
   identitySource: string
+  // #961 / ADR-259 §3.7: the RESTRICTIVE UNION that actually gates the override — true only when
+  // identitySource is 'local' AND the member holds no member_identities link. Read this, not
+  // identitySource, to decide whether to show the field editable: a password-door member who has
+  // since linked a provider is still refused (identitySource alone would wrongly say yes).
+  canOverrideDisplayName: boolean
   editorKeymap: KeymapMode            // startup-mode preference (keymap)
   editorDisplayMode: DisplayModePref  // startup display mode (ADR-056 / #164)
   editorVimClipboard: VimClipboardMode // vim ⇄ OS clipboard mode (ADR-105 / #225); 'off' = pure vim
@@ -77,11 +81,15 @@ export async function getAccountSettings(db: TenantDb, args: { subject: string }
   // JSONB comes back as a raw JSON string from this pg driver — parse it (null → {}).
   const kb = m.keybindings == null ? {} : typeof m.keybindings === 'string' ? JSON.parse(m.keybindings) : m.keybindings
   const chromeRaw = m.editor_chrome == null ? null : typeof m.editor_chrome === 'string' ? JSON.parse(m.editor_chrome) : m.editor_chrome
+  // #961 / ADR-259 §3.7: the same restrictive union the write guard enforces, read here so the screen
+  // can show the field read-only for a linked member rather than offering a control the write refuses.
+  const [linked] = await db.sql<[{ one: number }?]>`SELECT 1 AS one FROM member_identities WHERE member_sub = ${args.subject}`
   return {
     displayName: m.display_name_override ?? m.display_name ?? null,
     oidcDisplayName: m.display_name ?? null,
     displayNameOverride: m.display_name_override ?? null,
     identitySource: m.identity_source ?? 'oidc',
+    canOverrideDisplayName: m.identity_source === 'local' && !linked,
     editorKeymap: (KEYMAP_MODES as string[]).includes(m.editor_keymap ?? '') ? (m.editor_keymap as KeymapMode) : 'local',
     editorDisplayMode: (DISPLAY_MODE_PREFS as string[]).includes(m.editor_display_mode ?? '') ? (m.editor_display_mode as DisplayModePref) : 'local',
     editorVimClipboard: (VIM_CLIPBOARD_MODES as string[]).includes(m.editor_vim_clipboard ?? '') ? (m.editor_vim_clipboard as VimClipboardMode) : 'off',
@@ -170,8 +178,16 @@ export async function updateAccountSettings(
     // the server is the fortress, so a direct write is refused (403). A 'local' user may still set one.
     // ALLOWLIST (fail-safe): only a 'local' user may override — any other source (today 'oidc', and any
     // future IdP value like 'saml') is refused, so a new provider can never fail OPEN into an override.
+    //
+    // #961 / ADR-259 §3.7: a RESTRICTIVE UNION, not merely `identity_source`. A member seated through the
+    // password door (identity_source = 'local') who has since LINKED an OIDC/platform connection
+    // (member_identities) holds an IdP-asserted way in too — reading identity_source alone would let
+    // them come in through password and write an override that the OIDC upsert on their linked
+    // connection then contradicts every time they use it. Holding ANY IdP-asserted way in refuses the
+    // override, regardless of which door was used for THIS request.
     const [src] = await db.sql<[{ identity_source: string }?]>`SELECT identity_source FROM members WHERE sub = ${args.subject}`
-    if (src?.identity_source !== 'local') {
+    const [linked] = await db.sql<[{ one: number }?]>`SELECT 1 AS one FROM member_identities WHERE member_sub = ${args.subject}`
+    if (src?.identity_source !== 'local' || linked) {
       throw Object.assign(new Error('your display name is managed by your identity provider'), { statusCode: 403 })
     }
     const v = args.displayNameOverride?.trim() ? args.displayNameOverride.trim() : null

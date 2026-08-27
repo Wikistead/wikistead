@@ -11,6 +11,7 @@ import { pool } from '../db/pool.js'
 import { acquireTenantDb, type TenantDb } from '../db/index.js'
 import { buildApp } from '../app.js'
 import { getAccountSettings, updateAccountSettings, setAvatar, clearAvatar } from '../routes/account.js'
+import { linkMemberIdentity } from '../auth/member-identities.js'
 import type { Tenant } from '@wikistead/types'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -18,6 +19,7 @@ const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolation: 'logical' }) as Tenant
 const SUB_A = `acct-a-${Date.now().toString(36)}`
 const SUB_B = `acct-b-${Date.now().toString(36)}`
+const SUB_C = `acct-c-${Date.now().toString(36)}` // #961: local-door member who then LINKS a connection
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 7)])
 
 let app: FastifyInstance
@@ -27,19 +29,21 @@ beforeAll(async () => {
   app = await buildApp()
   await app.ready()
   db = await acquireTenantDb(asTenant(TENANT))
-  for (const sub of [SUB_A, SUB_B]) {
+  for (const sub of [SUB_A, SUB_B, SUB_C]) {
     await admin`INSERT INTO members (tenant_id, sub, email, display_name, role)
       VALUES (${TENANT}, ${sub}, ${`${sub}@x.test`}, 'IdP Name', 'member')
       ON CONFLICT (tenant_id, sub) DO NOTHING`
   }
   // #523 / ADR-190: display-name override is now LOCAL-user-only. SUB_A is a 'local' user so the
   // ADR-020 override tests below still exercise that (preserved) path; SUB_B stays 'oidc' (the default)
-  // for the slice-B reject test.
-  await admin`UPDATE members SET identity_source = 'local' WHERE tenant_id = ${TENANT} AND sub = ${SUB_A}`
+  // for the slice-B reject test. SUB_C starts 'local' too (#961: a password-door member who then LINKS
+  // a connection mid-test — the restrictive union has to hold true for the door AND the link).
+  await admin`UPDATE members SET identity_source = 'local' WHERE tenant_id = ${TENANT} AND sub IN (${SUB_A}, ${SUB_C})`
 }, 30_000)
 
 afterAll(async () => {
-  await admin`DELETE FROM members WHERE sub IN (${SUB_A}, ${SUB_B})`.catch(() => {})
+  // member_identities rows cascade with the member row (ON DELETE CASCADE) — no separate cleanup.
+  await admin`DELETE FROM members WHERE sub IN (${SUB_A}, ${SUB_B}, ${SUB_C})`.catch(() => {})
   await db.release()
   await app.close()
   await admin.end()
@@ -75,6 +79,29 @@ describe('account settings (ADR-020)', () => {
     expect(row!.display_name_override, 'the refused override never wrote').toBeNull()
     // the local user (SUB_A) override path is unchanged (identity_source = 'local' set in beforeAll)
     expect((await updateAccountSettings(db, { subject: SUB_A, displayNameOverride: 'Local Choice' })).displayNameOverride).toBe('Local Choice')
+  })
+
+  // #961 / ADR-259 §3.7: the RESTRICTIVE UNION. `identity_source` alone was the exploit rev1's rule
+  // reopened — SUB_C signs in through the password door (identity_source stays 'local' forever; the
+  // login upsert never touches it) but has ALSO linked an OIDC connection, which is an IdP-asserted way
+  // in just as real as SUB_B's. Break-check: guard identity_source alone and this test's second
+  // assertion reddens.
+  it('a local (password-door) member who has LINKED a provider may not override either, and linking clears an existing override in the same write', async () => {
+    await updateAccountSettings(db, { subject: SUB_C, displayNameOverride: 'Before Link' })
+    expect((await getAccountSettings(db, { subject: SUB_C })).displayNameOverride).toBe('Before Link')
+
+    await linkMemberIdentity(db, TENANT, `961-conn-${SUB_C}`, `961-ext-${SUB_C}`, SUB_C)
+
+    // §5: the link write clears the existing override in the SAME write — the person is told rather
+    // than finding their old choice silently outlive a guard that would now refuse it.
+    expect((await getAccountSettings(db, { subject: SUB_C })).displayNameOverride, 'cleared by the link write').toBeNull()
+
+    // and going forward, SUB_C is refused — identity_source is still 'local', so a guard reading only
+    // that column would wrongly allow this.
+    await expect(updateAccountSettings(db, { subject: SUB_C, displayNameOverride: 'After Link' }))
+      .rejects.toMatchObject({ statusCode: 403 })
+    const [row] = await admin<{ display_name_override: string | null }[]>`SELECT display_name_override FROM members WHERE tenant_id = ${TENANT} AND sub = ${SUB_C}`
+    expect(row!.display_name_override, 'the refused override never wrote').toBeNull()
   })
 
   it('the override SURVIVES a re-login OIDC upsert (display_name change does not clobber it)', async () => {
