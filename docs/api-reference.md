@@ -89,6 +89,13 @@ that state exists — nothing sets it yet, so no request's behavior differs toda
 bump — e.g. `GET /admin/sso-exemptions` carries an `isAdmin` field so that screen can answer the one
 question its own refusal tells an operator to act on. Not part of the OpenAPI-covered surface above.
 
+`POST /admin/connections/{id}/supersede` (ADR-264, #929) declares that `{id}` (a live connection)
+supersedes another connection given as `oldConnectionId` in the body — the recreate-an-IdP-connection
+rescue: it links every member the retiring connection minted to the same subject under the new
+connection, so a re-created OIDC provider does not seat them as new members. Refused (409) unless the
+two connections share both `issuer` and `client_id`, and again if the new connection has already
+seated a different member at a subject the re-key would claim (`supersession_collision`, naming both).
+
 `/auth/link-callback` (ADR-259 §3.3, #947) is a second OIDC-round-trip landing point, distinct from
 `/auth/callback`: it completes an account-settings request to link an additional connection to the
 *already signed-in* member, rather than starting a session. It redirects to `/settings/account/security`
