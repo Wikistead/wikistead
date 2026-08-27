@@ -164,10 +164,15 @@ export async function drainImportJobs(deps: JobDeps): Promise<number> {
   // A worker that died mid-import leaves a row saying "running" forever, which also holds the space's
   // one-import slot shut. It CANNOT be retried — pages it already created are real and re-running would
   // duplicate them — so it is settled as failed, honestly worded. This is the only place that reaps it.
+  //
+  // ADR-252 §6a ruling 2 (#810): a workspace being removed is not written to, including by this reaper
+  // — a stale-claim mark is still a write. `tenants.deleted_at` (migration 132) is unwritten today, so
+  // this excludes nothing yet.
   await pool`
     UPDATE imports SET status = 'failed', updated_at = now(),
       error = 'the worker stopped before this import finished; pages it had already created were kept'
-    WHERE status = 'running' AND claimed_at < now() - ${IMPORT_STALE_CLAIM}::interval`
+    WHERE status = 'running' AND claimed_at < now() - ${IMPORT_STALE_CLAIM}::interval
+      AND tenant_id NOT IN (SELECT id FROM tenants WHERE deleted_at IS NOT NULL)`
 
   const rows = await claimOutboxBatch<ClaimedRow>({
     table: 'imports',
@@ -182,9 +187,15 @@ export async function drainImportJobs(deps: JobDeps): Promise<number> {
     try {
       await runOneImport(deps, row)
     } catch (e) {
+      // ADR-252 §6a ruling 2 (#810): `AND status = 'running'` — independent of removal, a pre-existing
+      // defect this ADR's own review found: without the guard, a `failed` mark written here (or by the
+      // stale-claim reaper above) can be silently overwritten by this same row's OWN unconditional
+      // `status = 'done'` write below if the run actually completes after this branch already decided
+      // it failed (or after the reaper decided the claim was stale). The write below carries the same
+      // guard for the same reason, in the other direction.
       await pool`
         UPDATE imports SET status = 'failed', error = ${e instanceof Error ? e.message : String(e)},
-          archive_key = NULL, updated_at = now() WHERE id = ${row.id}`
+          archive_key = NULL, updated_at = now() WHERE id = ${row.id} AND status = 'running'`
     }
     if (row.archive_key) await deps.storage.deleteObject(row.archive_key).catch(() => {})
     handled++
@@ -204,6 +215,15 @@ async function runOneImport(deps: JobDeps, row: ClaimedRow): Promise<void> {
   // synchronous import (a namespace-promoted tenant works here for free — ADR-001).
   const db = await acquireTenantDb(tenant)
   let lastWrite = 0
+  // ADR-252 §6a ruling 2 (#810): `runOneImport` never re-reads its own row after claiming, so a
+  // reaper's `failed` mark (above, or the stale-claim reap) does not by itself stop this from running
+  // to completion and overwriting it with `done`. This flag is how a removal in flight actually CUTS a
+  // running import — set (fire-and-forget, not awaited: `onProgress` is a synchronous callback) on the
+  // SAME throttled cadence as the `claimed_at` refresh below, so `PROGRESS_WRITE_MS` is the upper bound
+  // on how long a cut takes to be OBSERVED, not how long it takes to take effect (the node in flight
+  // when the tenant enters its grace period always finishes; the observation on a later tick is what
+  // stops the next one from starting).
+  let cutForRemoval = false
   try {
     const report = await runPreparedImport(
       { db, fga: deps.fga, storage: deps.storage, driver: deps.driver },
@@ -212,6 +232,10 @@ async function runOneImport(deps: JobDeps, row: ClaimedRow): Promise<void> {
         tenantId: row.tenant_id, spaceId: row.space_id, userId: row.executor_sub, plan: String(tenant.plan),
         parentPageId: row.parent_page_id, publish: row.publish,
         onProgress: (done) => {
+          // Checked BEFORE the throttle's early return: once observed, every subsequent node — not
+          // only the next throttled tick — cuts immediately, so the cut does not itself wait out a
+          // second full throttle window on top of the one it took to observe removal.
+          if (cutForRemoval) throw new Error('this workspace is being removed; the import was cut')
           const now = Date.now()
           if (now - lastWrite < PROGRESS_WRITE_MS) return
           lastWrite = now
@@ -219,13 +243,20 @@ async function runOneImport(deps: JobDeps, row: ClaimedRow): Promise<void> {
           // than "the import is big". Fire-and-forget: progress is a courtesy, never a reason to fail.
           void pool`UPDATE imports SET nodes_done = ${done}, claimed_at = now(), updated_at = now() WHERE id = ${row.id}`
             .catch(() => {})
+          void pool<{ id: string }[]>`SELECT id FROM tenants WHERE id = ${row.tenant_id} AND deleted_at IS NOT NULL`
+            .then((r) => { if (r.length > 0) cutForRemoval = true })
+            .catch(() => {})
         },
       },
     )
+    // ADR-252 §6a ruling 2 (#810): `AND status = 'running'` — see the matching guard on the `failed`
+    // write in drainImportJobs. Without it, a run that completes AFTER something else (the reaper, or
+    // the removal cut above via a thrown error caught by materializeImport's own rollback path)
+    // already settled this row silently overwrites that settlement with `done`.
     await pool`
       UPDATE imports SET status = 'done', report = ${JSON.stringify(report)}::jsonb,
         nodes_done = ${report.pagesCreated}, archive_key = NULL, updated_at = now()
-      WHERE id = ${row.id}`
+      WHERE id = ${row.id} AND status = 'running'`
   } finally {
     await db.release()
   }

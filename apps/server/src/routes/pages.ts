@@ -18,7 +18,7 @@ import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
 import { resolveTreePlaceholders, PLACEHOLDER_NODE_MAX, type PlaceholderNode } from './tree-placeholders.js' // #623 / ADR-220 §4
 import type { TenantDb } from '../db/index.js'
-import { pool, registry, acquireTenantDb } from '../db/index.js' // #411: cross-tenant trash retention sweep
+import { pool, registry, acquireTenantDb, listActiveTenantIds } from '../db/index.js' // #411: cross-tenant trash retention sweep
 import { flushDraft } from '../collab-flush.js'
 import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate for the sidebar ring
 import { evaluatePublishAbuse } from '../abuse-filter.js' // #328 / ADR-140: publish-boundary abuse filter
@@ -3521,7 +3521,8 @@ export async function sweepExpiredTrash(fga: OpenFgaClient, driver: SearchDriver
   // tuples read in 43 seconds to find the one marker that mattered, on every sweep.
   const marked = (await readUserTuplesByType(fga, 'user:*', 'page:', 'trashed'))
     .map((t) => t.object.slice('page:'.length))
-  const tenants = await pool<{ id: string }[]>`SELECT id FROM tenants`
+  // ADR-252 §6a ruling 1 (#810): the shared enumeration chokepoint — see db/registry.ts.
+  const tenants = await listActiveTenantIds(pool)
   let purged = 0
   for (const { id: tenantId } of tenants) {
     const tenant = await registry.findById(tenantId)

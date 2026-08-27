@@ -2,7 +2,7 @@ export { pool } from './pool.js'
 export { withTenantTx } from './with-tenant.js' // #382: the isolation-aware tx for non-request contexts
 export { acquireTenantDb } from './tenant-db.js'
 export type { TenantDb } from './tenant-db.js'
-export { TenantRegistry } from './registry.js'
+export { TenantRegistry, listActiveTenantIds } from './registry.js'
 
 import { pool } from './pool.js'
 import { TenantRegistry } from './registry.js'

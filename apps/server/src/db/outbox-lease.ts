@@ -23,7 +23,25 @@ export const OUTBOX_STALE_CLAIM = '2 minutes'
 // Claim a disjoint batch (across workers/instances — SKIP LOCKED) of due rows, marking them
 // claimed. `extraDue` narrows candidacy (e.g. the webhook backoff gate `next_attempt_at <= now()`);
 // `orderBy` picks the fairness column (created_at for FIFO outboxes, next_attempt_at for scheduled).
-export async function claimOutboxBatch<T extends Row>(opts: {
+//
+// ADR-252 §6a rulings 2/3 (#810): THE single chokepoint every claiming outbox rides — the ADR's own
+// review measured this directly ("the word is made load-bearing where the freeze actually lives:
+// claimOutboxBatch... a `frozen` declaration there IS the exclusion — the drain cannot declare it and
+// skip it, because declaring it is how it happens"). So the exclusion lives here, once, rather than as
+// a per-worker declaration nothing outside this function could actually enforce.
+//
+// `T extends Row & { tenant_id: string }` (ruling 3): a future outbox row type that omits `tenant_id`
+// fails to COMPILE here, before a table without the column this claim's WHERE clause depends on could
+// ever be built — "stopping before it is built is cheaper" than the alternative, which is
+// `outbox-lease.ts`'s own `catch { /* next tick retries */ } ` (left untouched by this ticket, on
+// purpose — see §6a ruling 3) swallowing the 42703 a claim against a missing column would throw.
+//
+// `tenants.deleted_at IS NOT NULL` (migration 132) excludes a workspace's rows from ever being claimed
+// while its grace period is open — nothing writes that column yet (ADR-252 §1/§2 is not landed by this
+// ticket), so every row is claimable today, unchanged. `tenants` carries no RLS policy (the global
+// registry — see db/index.ts), so the bare-pool subquery here returns real rows rather than the
+// silent-zero an RLS-scoped read would give a system-scope background worker (#479's shape).
+export async function claimOutboxBatch<T extends Row & { tenant_id: string }>(opts: {
   table: string
   returning: string[]
   batch: number
@@ -44,6 +62,7 @@ export async function claimOutboxBatch<T extends Row>(opts: {
     WHERE id IN (
       SELECT id FROM ${table}
       WHERE (claimed_at IS NULL OR claimed_at < now() - ${OUTBOX_STALE_CLAIM}::interval)
+        AND tenant_id NOT IN (SELECT id FROM tenants WHERE deleted_at IS NOT NULL)
         ${due}
       ORDER BY ${order}
       LIMIT ${opts.batch}

@@ -1,0 +1,11 @@
+-- Migration 132: tenants.deleted_at — the grace-period marker (ADR-252 §6a, #810).
+--
+-- ADR-252's removal design (§1/§2) is not landed by this migration — only the state the rest of the
+-- ADR's §6a infrastructure slice needs to exist against: a workspace being removed is not an instant
+-- delete, it is a grace period, and "is this workspace in its grace period" needs a column to read.
+-- `tenants` had none (measured in the ADR's own survey). NULL = active (every existing tenant, by the
+-- DEFAULT), non-NULL = the grace period began at this instant. Nothing in this migration ever WRITES
+-- the column — that write path is §1/§2's, still to come — so every guard built against it today reads
+-- NULL for every row and excludes nothing, which is the correct, inert state until the write path
+-- exists. `NOT VALID`-free: no rows to backfill, this is a pure additive column.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;

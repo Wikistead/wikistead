@@ -7,7 +7,7 @@ import { emit } from '@wikistead/events'
 import type { Capability, ResourceRef } from '@wikistead/types'
 import { pool } from '../db/pool.js'
 import { reportLinkVisit } from '../funnel/sink.js'
-import { withTenantTx } from '../db/index.js' // #382
+import { withTenantTx, listActiveTenantIds } from '../db/index.js' // #382
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import type { TenantDb } from '../db/index.js'
 import { hashSharePassword, verifySharePassword } from './share-link-password.js'
@@ -412,7 +412,8 @@ export async function revokeResourceShareLinks(
 // under its own app.tenant_id (set_config), mirroring drainAuditOutbox's per-tenant loop. Returns the number
 // of links healed (FGA cleared + revoke completed).
 export async function sweepShareLinkRevokeFailures(fga: OpenFgaClient): Promise<number> {
-  const tenants = await pool<{ id: string }[]>`SELECT id FROM tenants`
+  // ADR-252 §6a ruling 1 (#810): the shared enumeration chokepoint — see registry.ts.
+  const tenants = await listActiveTenantIds(pool)
   let healed = 0
   for (const { id: tenantId } of tenants) {
     try {

@@ -19,7 +19,7 @@
 // "confirmed items are never re-sent".
 import { fgaClient } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
-import { acquireTenantDb, registry } from '../db/index.js'
+import { acquireTenantDb, registry, listActiveTenantIds } from '../db/index.js'
 import { pageEventDisposition } from '../page-disposition.js'
 import type { FeedEventType } from '../routes/notifications.js' // #900: the writer decides the words
 import { registerEmailBuilder, type EmailBuildResult, type EmailOutboxRow } from './outbox.js'
@@ -36,11 +36,14 @@ const DIGEST_PRODUCER_LOCK = 547_004
 export async function produceDigestJobs(log: (m: string) => void = () => {}): Promise<number> {
   return (await pool.begin(async (lockTx) => {
     await lockTx`SELECT pg_advisory_xact_lock(${DIGEST_PRODUCER_LOCK})`
-    const tenants = await pool<{ id: string }[]>`SELECT id FROM tenants`
+    // ADR-252 §6a ruling 1 (#810): the shared enumeration chokepoint, not a bare `SELECT id FROM
+    // tenants` — a workspace being removed is structurally excluded here rather than by a per-worker
+    // declaration nothing here has a claim to attach one to.
+    const tenants = await listActiveTenantIds(pool)
     let produced = 0
     const { withTenantTx } = await import('../db/index.js')
-    for (const t of tenants) {
-      const rows = await withTenantTx(t.id, async (tx) => tx<{ sub: string }[]>`
+    for (const { id: tenantId } of tenants) {
+      const rows = await withTenantTx(tenantId, async (tx) => tx<{ sub: string }[]>`
         SELECT m.sub FROM members m
         WHERE m.email_digest = true
           AND COALESCE(m.notifications_enabled, true)
@@ -52,10 +55,10 @@ export async function produceDigestJobs(log: (m: string) => void = () => {}): Pr
               AND f.event_type <> 'mention')
           AND NOT EXISTS (
             SELECT 1 FROM email_outbox o
-            WHERE o.tenant_id = ${t.id} AND o.member_sub = m.sub AND o.class = 'digest')`).catch(() => [] as { sub: string }[])
+            WHERE o.tenant_id = ${tenantId} AND o.member_sub = m.sub AND o.class = 'digest')`).catch(() => [] as { sub: string }[])
       for (const r of rows) {
-        await withTenantTx(t.id, async (tx) => {
-          await tx`INSERT INTO email_outbox (tenant_id, member_sub, class) VALUES (${t.id}, ${r.sub}, 'digest')`
+        await withTenantTx(tenantId, async (tx) => {
+          await tx`INSERT INTO email_outbox (tenant_id, member_sub, class) VALUES (${tenantId}, ${r.sub}, 'digest')`
           await tx`UPDATE members SET email_digest_last_at = now() WHERE sub = ${r.sub}`
         })
         produced += 1

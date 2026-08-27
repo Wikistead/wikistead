@@ -84,3 +84,22 @@ export class TenantRegistry {
     return entry.tenant
   }
 }
+
+// ADR-252 §6a ruling 1 (#810): the shared chokepoint for the four periodic workers that walk `tenants`
+// directly with no per-row claim to exclude a removed workspace from (`sweepExpiredTrash`,
+// `recheckCustomDomains`, `sweepShareLinkRevokeFailures`, the digest producer — none of them declare
+// anything, because there is no claim for a declaration to attach to; a declaration on the walk would be
+// a census, not an enforcement, per the ruling). This is the one thing all four are asked to call
+// instead of a bare `SELECT id FROM tenants`, so the exclusion lives in ONE place rather than four —
+// `unbounded-list-ledger-623.test.ts`'s whole argument, applied here to `tenants` instead of a list
+// route: the question a discovery pin can ask changes from "did you declare a condition" (unenforceable
+// — the condition and the walk are two different pieces of text that can drift) to "did you enumerate
+// `tenants` through this function" (mechanical — either the call is there or it is not).
+//
+// `deleted_at` (migration 132) is written by NOTHING yet — ADR-252 §1/§2 (the removal design this
+// column exists for) is not landed by this ticket — so every row reads NULL and this excludes nothing
+// today. That is the correct, inert state: the guard exists ahead of the write path it guards, the way
+// ADR-252 §6a ruling 3 asks the outbox type constraint to exist ahead of a table that would need it.
+export async function listActiveTenantIds(sql: Sql): Promise<{ id: string }[]> {
+  return sql<{ id: string }[]>`SELECT id FROM tenants WHERE deleted_at IS NULL`
+}

@@ -8,7 +8,7 @@ import { secondFactorStance } from '../auth/factor-policy.js' // #680 / ADR-222 
 import { emit } from '@wikistead/events'
 import { entitlementDenied } from '../entitlement-ux.js'
 import { pool } from '../db/pool.js'
-import { withTenantTx, type TenantDb } from '../db/index.js'
+import { withTenantTx, listActiveTenantIds, type TenantDb } from '../db/index.js'
 import { CHALLENGE_PREFIX, txtChallengePresent, type ResolveTxt } from '../auth/dns-challenge.js'
 
 // Custom-domain verification registry (#123 / ADR-065). A Pro tenant brings its own domain;
@@ -231,7 +231,9 @@ export async function recheckCustomDomains(
   // EVERY tenant, not just the ones `tenants.custom_domain` still points at: tenantBaseUrl decides
   // from the custom_domains row's status, so a verified row whose mapping drifted to NULL is exactly
   // the state that must still be re-checked. custom_domains is RLS'd, so this cannot be one join.
-  const tenants = await pool<{ id: string }[]>`SELECT id FROM tenants`
+  // ADR-252 §6a ruling 1 (#810): the shared enumeration chokepoint — a workspace being removed is
+  // structurally excluded here, not by a per-worker declaration this walk has no claim to hang one on.
+  const tenants = await listActiveTenantIds(pool)
   const demoted: string[] = []
   const restored: string[] = []
   let checked = 0
