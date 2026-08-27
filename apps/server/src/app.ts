@@ -1,5 +1,5 @@
 import Fastify from 'fastify'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
 import formbody from '@fastify/formbody'
@@ -207,7 +207,36 @@ export async function buildApp(): Promise<FastifyInstance> {
     })
   })
 
-  await app.register(cors, { origin: true })
+  // #989: `{ origin: true }` reflects WHATEVER Origin header a request carries — every website on the
+  // internet passes this app's own CORS check. `sameSite: 'lax'` on the session cookie (session.ts)
+  // already blocks it from riding a cross-site fetch/XHR (only a top-level navigation carries a `lax`
+  // cookie cross-site), and `credentials` is not set here (no `Access-Control-Allow-Credentials`), so
+  // this was not a demonstrated cookie-theft hole — but it is still the wrong default: it lets any page
+  // a visitor has open make CORS-visible requests against every tenant host and read the JSON back for
+  // anything that does not depend on a cookie, and a future change that turns `credentials` on (or
+  // loosens `sameSite`) would turn this from defense-in-depth into a live one at the same instant,
+  // silently. The delegate form gets per-request access to `req` (the plain `origin` option does not),
+  // so the allowed origin is derived from THIS request's own (trustProxy-resolved) host — same-origin
+  // only, both schemes (dev serves over http). No current caller needs more: browser API-key
+  // integrations are not a documented cross-origin pattern (api-reference.md — the MCP connector and
+  // server-to-server calls are, and neither goes through a browser's CORS check at all), and guest
+  // host-embed (a real future cross-origin need) is unbuilt (#555, Blocked).
+  // ⚠️ The bare-function form of the second `register()` argument is NOT `@fastify/cors`'s own
+  // per-request delegate — Fastify/avvio intercepts a plain function there FIRST, as its own
+  // "compute static options once from the parent instance" mechanism, and calls it with different
+  // arguments entirely (measured: `cb is not a function`, since avvio's own callback landed where a
+  // `FastifyRequest` was expected — @fastify/cors's own `typeof opts === 'function'` branch in its
+  // source is consequently unreachable through `register()`). The `{ delegator }` object form is the
+  // one that actually reaches @fastify/cors's per-request resolver with `req` in hand.
+  await app.register(cors, {
+    delegator: (req: FastifyRequest, cb: (err: Error | null, opts: { origin: (origin: string | undefined, ocb: (err: Error | null, allow: boolean) => void) => void }) => void) => {
+      const host = req.hostname
+      const allowed = new Set([`https://${host}`, `http://${host}`])
+      cb(null, {
+        origin: (origin, ocb) => ocb(null, origin == null || allowed.has(origin)),
+      })
+    },
+  })
   await app.register(cookie)
   await app.register(formbody) // SAML ACS uses the form-urlencoded POST binding (#135)
 

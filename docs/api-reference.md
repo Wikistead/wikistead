@@ -35,6 +35,9 @@ curl -H "Authorization: Bearer wk_..." https://team.example.com/api/search?q=roa
   for a caller who knows the space and `POST /pages/{pageId}/attachments/presign` for one who does not — an
   edit-link guest holding a single page is never told which space the page sits in. Both run the same
   check: `edit` on the page. A view-link guest is refused on either.
+- CORS allows only same-origin browser requests (the tenant's own host, either scheme) — a page on a
+  different site cannot call this API from JS in a visitor's browser. A non-browser caller (`curl`,
+  server-to-server) is unaffected; CORS is a browser-enforced policy, not a server-side auth boundary.
 
 ## Authorization semantics (what 404 vs 403 means)
 
