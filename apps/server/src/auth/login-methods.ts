@@ -385,7 +385,8 @@ export const SSO_FLOOR_REFUSAL = {
     'SSO is required for this workspace, and an exempt ADMINISTRATOR holding a password is what makes that safe. Turn the SSO requirement off before deselecting passwords.',
   /** Revoking the exemption that is holding the floor up. */
   lastExemptAdmin:
-    'this is the last exempt ADMINISTRATOR holding a password — exempt another administrator who has one, or turn the SSO requirement off.',
+    'this is the last exempt ADMINISTRATOR holding a password — exempt another administrator who has one, or turn the SSO requirement off. ' +
+    'If nobody else can sign in, an operator can create a new administrator at a fresh address and give each stranded member a password entrance (ADR-259 §3.5a).',
 } as const
 
 export async function anAdminHoldsAKey(
@@ -438,7 +439,11 @@ export async function assertNotLastExemptAdmin(
   if (await anAdminHoldsAKey(db, { exemptOnly: true, without: sub })) return // another exempt admin still holds a key
   if (!(await anAdminHoldsAKey(db, { exemptOnly: true }))) return // TRANSITION: the floor was ALREADY down — refusing takes nothing back
   if (confirm) return // RULED: warned, and they chose to go on
-  throw Object.assign(new Error(SSO_FLOOR_REFUSAL.lastExemptAdmin), { statusCode: 409, code: 'confirm_required' })
+  // #925 / ADR-251 §3.8a/§7-8: `floor: 'sso_exempt'` distinguishes this refusal from
+  // `assertClosingIsSafe`'s own `confirm_required` (which carries `remainingKind` instead) — the two
+  // can now fire on the same write and are not the same sentence (#866 shipped, #963 had to un-ship,
+  // the shape this field exists to stop recurring). A caller that reads only `code` collapses them.
+  throw Object.assign(new Error(SSO_FLOOR_REFUSAL.lastExemptAdmin), { statusCode: 409, code: 'confirm_required', floor: 'sso_exempt' })
 }
 
 /**

@@ -93,9 +93,18 @@ export async function suspendMember(
   // matching suspension must never reach these — `assertClosingIsSafe` has no self-protection against
   // that the way `assertNotLastExemptAdmin`'s own transition check does, and a re-deactivation of an
   // already-suspended admin would otherwise turn an idempotent repeat into a fresh confirm_required.
+  //
+  // ⚠️ `isLastAdmin` runs FIRST, ahead of the new guards — not after, as an earlier draft of this
+  // change had it. `isLastAdmin`'s throw (`LastAdminSuspensionError`) is the one SCIM's
+  // `deactivateScimUser` translates into a `scimType`-bearing error (#627); the new guards throw a
+  // plain, untranslated 409. Reaching the new guards first for the literal last-admin case would have
+  // silently downgraded an already-correct SCIM answer to a bare one the SCIM client cannot parse —
+  // #627's mistake recurring a third time, this time from the opposite direction (a newer, less
+  // specific guard shadowing an older, more specific one). The demotion and delete routes do not have
+  // this hazard: both already call their own `isLastAdmin` before this ticket's new calls.
   const [pre] = await deps.db.sql<MemberState[]>`
     SELECT role, groups, deactivated_at, deactivation_reason FROM members WHERE sub = ${sub}`
-  if (pre && pre.role === 'admin' && !isIdempotentNoop(pre, opts.reason)) {
+  if (pre && pre.role === 'admin' && !isIdempotentNoop(pre, opts.reason) && !(await isLastAdmin(deps.db.sql, sub))) {
     await assertNotLastExemptAdmin(deps.db, tenant, sub, !!opts.confirm)
     await assertClosingIsSafe(deps.db, tenant, { deactivating: sub }, { confirm: opts.confirm })
   }

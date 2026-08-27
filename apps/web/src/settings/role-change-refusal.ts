@@ -34,10 +34,12 @@ export function roleChangeRefusalKey(e: unknown): string {
     // which is what the floor's wording sends the reader off to do.
     case "login_lockout":
       return "members.lockoutRefused";
-    // ADR-251 §3.2: one way in would remain and the product cannot promise it works. The screen has
-    // no confirm affordance, so the sentence has to name the way forward instead of implying one.
+    // ADR-251 §3.2 / §3.8a: one way in would remain and the product cannot promise it works — OR
+    // (§7-8: `floor: 'sso_exempt'`) this write would empty the SSO-exempt floor specifically. Two
+    // different sentences behind the same code (#866 shipped the collapse, #963 had to un-ship it);
+    // reading `floor` is what keeps this screen from repeating that.
     case "confirm_required":
-      return "members.confirmRequired";
+      return e.floor === "sso_exempt" ? "members.exemptFloorConfirmRequired" : "members.confirmRequired";
     // A suspended member's role is not changed until they are back (members.ts).
     case "member_suspended":
       return "members.suspendedRoleChange";

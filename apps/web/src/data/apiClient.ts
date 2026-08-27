@@ -28,6 +28,12 @@ export class ApiError extends Error {
   // DIFFERENT question from `remainingKind` above, and the reason it carries its own code rather than
   // sharing `confirm_required` (review one code, two questions, was indistinguishable).
   strandedSubs?: string[];
+  // #925 / ADR-251 §7-8: which FLOOR a `confirm_required` refusal is standing on — `assertClosingIsSafe`
+  // (no `floor`, `remainingKind` instead) and `assertNotLastExemptAdmin` (`floor: 'sso_exempt'`) can
+  // now both answer a single member write with the same code and different sentences (#866 shipped,
+  // #963 had to un-ship the collapse). Same pattern as `strandedSubs` above: a new field, not a new
+  // code, because both really are "confirm to override" — only the reason differs.
+  floor?: string;
   constructor(public status: number, public path: string, message: string) {
     super(message);
     this.name = "ApiError";
@@ -47,6 +53,7 @@ export function apiErrorFrom(status: number, path: string, body: unknown): ApiEr
   if (Array.isArray(b.coveredBy) && b.coveredBy.every((v) => typeof v === "string")) err.coveredBy = b.coveredBy as string[];
   if (typeof b.remainingKind === "string") err.remainingKind = b.remainingKind;
   if (Array.isArray(b.strandedSubs) && b.strandedSubs.every((v) => typeof v === "string")) err.strandedSubs = b.strandedSubs as string[];
+  if (typeof b.floor === "string") err.floor = b.floor;
   return err;
 }
 

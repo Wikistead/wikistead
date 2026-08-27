@@ -12,7 +12,7 @@
 // rules are what is dangerous here; getting them wrong locks a workspace out, and the store is
 // fail-closed, so the failure is not a leak but everybody losing access at once.
 import { describe, it, expect, afterEach } from 'vitest'
-import { waysInAfter, assertClosingIsSafe, assertNotLastExemptAdmin, anAdminHoldsAKey } from '../auth/login-methods.js'
+import { waysInAfter, assertClosingIsSafe, assertNotLastExemptAdmin, anAdminHoldsAKey, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { TenantDb } from '../db/index.js'
@@ -112,7 +112,14 @@ describe('#866 a write that takes the KEY away can close the last way in', () =>
           const q = strings.join('?')
           // `holders` counts key-holding admins OTHER than the excluded one, which is what the
           // counterfactual asks: the stub answers 0 when the person being demoted is the only one.
-          if (q.includes('local_credentials')) return [{ n: vals.some((v) => v === 'A') ? holders : holders + 1 }]
+          if (q.includes('local_credentials')) {
+            // #925 / ADR-251 §3.8a: an UNEXCLUDED `anAdminHoldsAKey` (no `without`, so no `m.sub <>`
+            // in its text) is the floor's own transition check — "was the floor already down before
+            // this write". Every test in this block is about A holding a key, so it answers yes and
+            // the write reaches the counterfactual instead of stepping aside on an already-down floor.
+            if (!q.includes('m.sub <>')) return [{ n: 1 }]
+            return [{ n: vals.some((v) => v === 'A') ? holders : holders + 1 }]
+          }
           if (q.includes('tenant_oidc')) return []
           if (q.includes('tenant_login_prefs')) return [{ local_login_enabled: true, platform_login_disabled: false, sso_required: false }]
           return []
@@ -367,7 +374,15 @@ describe('#925 / ADR-251 §3.8b: an exempt admin with an open password door is a
         async (strings: TemplateStringsArray) => {
           const q = strings.join('?')
           if (q.includes('sso_exemptions')) return excludedIsTheExemptKeyHolder ? [{ member_sub: 'A' }] : []
-          if (q.includes('local_credentials')) { const n = answers[i] ?? 0; i++; return [{ n }] }
+          if (q.includes('local_credentials')) {
+            // #925 / ADR-251 §3.8c: `assertClosingIsSafe`'s own equality read ("does the excluded
+            // person themselves hold a key") has no `m.sub <>` in its text. B, the harmless admin
+            // these fixtures close, holds a real (non-exempt) key, so this always answers yes and lets
+            // the write reach `waysInAfter` rather than short-circuiting before the synthetic door is
+            // ever asked about — which would pass this test for the wrong reason.
+            if (!q.includes('m.sub <>')) return [{ n: 1 }]
+            const n = answers[i] ?? 0; i++; return [{ n }]
+          }
           if (q.includes('tenant_oidc')) return [{ id: 'c1', enabled: true }]
           if (q.includes('tenant_saml')) return []
           if (q.includes('tenant_login_prefs')) return [{ sso_required: true, local_login_enabled: true, platform_login_disabled: false }]
@@ -398,4 +413,99 @@ describe('#925 / ADR-251 §3.8b: an exempt admin with an open password door is a
   // isolation with a call sequence matched to ITS two-call shape (this block's `scenario` stub is
   // shaped for `waysInAfter`'s different, single-call sequence instead — reusing it here silently
   // answers a different question than the one asked, the same trap #925's own C reproduction found).
+})
+
+describe('#925 / ADR-251 §6-17: the synthetic door does not appear when the password door itself is off', () => {
+  // ⚠️ Independent review measured that reverting §3.8b's fix to rev12's 2-conjunct form
+  // (dropping `loginMethodCeiling(env).has('local')` and `localLoginEnabled(db)`, keeping only
+  // `biting` + `exemptOnly`) left this file's 31 tests green — neither conjunct was pinned. These two
+  // fixtures close that gap, one per conjunct, each independently.
+  it('local_login_enabled = false: the door does not appear even though an exempt admin holds a key', async () => {
+    // adminWithKey: 1 means anAdminHoldsAKey WOULD answer yes if asked — the point is that
+    // localLoginEnabled(db) being false must short-circuit before that question is ever reached.
+    const db = dbStub({ oidcRows: [{ id: 'c1', enabled: true }], ssoRequired: true, localSelected: false, adminWithKey: 1 })
+    const after = await waysInAfter(db, TENANT, { deactivating: 'B' }, NO_PLATFORM)
+    expect(after.some((w) => w.kind === 'local'), "a 'local' door appeared despite local_login_enabled being false").toBe(false)
+  })
+
+  it('LOGIN_METHODS excludes local (the deployment ceiling): the door does not appear even though the tenant selected it', async () => {
+    // The tenant's own preference is ON (localSelected: true) — the ceiling is a DEPLOYMENT-level
+    // restriction that does not rewrite the tenant's row (login-methods.ts:8-9's own comment), so this
+    // fixture is the one rev12's 2-conjunct fix could not see at all (it never asked about the ceiling).
+    const db = dbStub({ oidcRows: [{ id: 'c1', enabled: true }], ssoRequired: true, localSelected: true, adminWithKey: 1 })
+    const after = await waysInAfter(db, TENANT, { deactivating: 'B' }, 'tenant-oidc,saml')
+    expect(after.some((w) => w.kind === 'local'), 'a local door appeared despite LOGIN_METHODS excluding local').toBe(false)
+  })
+})
+
+describe('#925 / ADR-251 §6-15: the role gate — ordinary members never reach the new guards', () => {
+  const read = (rel: string) => readFileSync(resolve(import.meta.dirname, '..', rel), 'utf8')
+
+  it("member-suspension.ts gates the new guards on role === 'admin'", () => {
+    const src = read('auth/member-suspension.ts')
+    const idx = src.indexOf('await assertNotLastExemptAdmin(deps.db')
+    expect(idx, 'the guard call moved or was renamed — re-read this file before trusting it').toBeGreaterThan(-1)
+    const before = src.slice(Math.max(0, idx - 400), idx)
+    expect(before, "the new guards must be gated on role === 'admin', or an ordinary member's suspension would ask confirm_required for an exempt floor it cannot touch").toMatch(/role === 'admin'/)
+  })
+
+  it("routes/members.ts gates BOTH new call sites (the demotion PATCH and the DELETE) on role === 'admin'", () => {
+    const src = read('routes/members.ts')
+    const calls = [...src.matchAll(/await assertNotLastExemptAdmin\(req\.db/g)]
+    expect(calls.length, 'expected exactly 2 call sites in this file (demotion PATCH, DELETE) — a third would need its own row here').toBe(2)
+    for (const m of calls) {
+      const before = src.slice(Math.max(0, m.index! - 1500), m.index!)
+      expect(before, `the call at file offset ${m.index} is not visibly gated on role === 'admin'`).toMatch(/role === 'admin'/)
+    }
+  })
+})
+
+describe("#925 / ADR-251 §7-8/§6-18: the two confirm_requireds are distinguishable, and the exempt-floor one names the recovery route", () => {
+  it("assertNotLastExemptAdmin's refusal carries floor: 'sso_exempt'", async () => {
+    // Call-order stub (the exemptOnly JOIN fragment is invisible to a strings-only stub, as measured
+    // in the §3.8a describe block above): 1st local_credentials call is `without: A` (must answer 0 —
+    // nobody ELSE holds the floor up), 2nd is unexcluded (must answer 1 — A themselves does, or the
+    // TRANSITION check would step aside instead of warning).
+    let i = 0
+    const answers = [0, 1]
+    const stub = {
+      sql: Object.assign(
+        async (strings: TemplateStringsArray) => {
+          const q = strings.join('?')
+          if (q.includes('sso_exemptions')) return [{ member_sub: 'A' }]
+          if (q.includes('local_credentials')) { const n = answers[i] ?? 0; i++; return [{ n }] }
+          if (q.includes('tenant_login_prefs')) return [{ sso_required: true, local_login_enabled: false, platform_login_disabled: false }]
+          return []
+        },
+        { unsafe: async () => [] },
+      ),
+    } as unknown as TenantDb
+    await expect(assertNotLastExemptAdmin(stub, TENANT, 'A', false)).rejects.toMatchObject({ floor: 'sso_exempt', code: 'confirm_required' })
+  })
+
+  it("assertClosingIsSafe's own confirm_required does NOT carry floor — the two must stay tellable apart", async () => {
+    const db = dbStub({ oidcRows: [{ id: 'c1', enabled: true }, { id: 'c2', enabled: true }], localSelected: false })
+    await expect(assertClosingIsSafe(db, TENANT, { id: 'c1', live: true }, { env: NO_PLATFORM }))
+      .rejects.not.toHaveProperty('floor')
+  })
+
+  it("the exempt-floor refusal text names ADR-259 §3.5a's recovery route (acceptance condition)", () => {
+    expect(SSO_FLOOR_REFUSAL.lastExemptAdmin).toMatch(/ADR-259 §3\.5a/)
+  })
+})
+
+describe('#925 / ADR-251 §3.8d: the confirm receptacle pin is ROUTE-scoped, not file-scoped', () => {
+  // ⚠️ routes/members.ts now carries TWO key-taking writes (the demotion PATCH and the DELETE), each
+  // with its OWN receptacle shape (a body field vs a query param). The file-level `/confirm/` scan
+  // above would pass even if one of the two lost its receptacle, as long as the OTHER still mentioned
+  // the word anywhere in the file — this asserts each route's own type signature, independently.
+  const src = readFileSync(resolve(import.meta.dirname, '../routes/members.ts'), 'utf8')
+
+  it('the demotion route (PATCH) declares a body confirm field', () => {
+    expect(src).toContain("app.patch<{ Params: { sub: string }; Body: { role?: string; confirm?: boolean } }>('/members/:sub'")
+  })
+
+  it('the DELETE route declares a query-string confirm field', () => {
+    expect(src).toContain("app.delete<{ Params: { sub: string }; Querystring: { confirm?: string } }>('/members/:sub'")
+  })
 })

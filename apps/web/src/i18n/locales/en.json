@@ -1206,6 +1206,7 @@
     "lastDirectAdmin": "A group holds admin, but group-granted admins can be lost by an IdP-side change. At least one directly granted admin must remain.",
     "lockoutRefused": "That would leave nobody who can sign in and administer this workspace. Give another administrator a way in first.",
     "confirmRequired": "That would leave a single way in, and this screen cannot check that it works. Set up another one under sign-in methods, then try again.",
+    "exemptFloorConfirmRequired": "That would leave this workspace with no exempt administrator who can sign in if the identity provider goes down. Exempt another administrator, or turn off the SSO requirement, first.",
     "suspendedRoleChange": "This member is suspended. Bring them back before changing their role.",
     "groupRolesTitle": "From groups",
     "removePassword": "Remove password entrance",
