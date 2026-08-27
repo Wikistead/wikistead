@@ -687,6 +687,17 @@ body {
    content to blur as the document scrolls up behind the band. */
 [data-pane="preview"] .lp-editor-host > .cm-editor > .cm-scroller > .cm-content,
 .lp-editor-host > .cm-editor > .cm-scroller > .cm-content { padding-top: var(--wks-band-h, 0px); }
+/* #977: UnsavedBanner (routes.tsx) is a normal-flow sibling rendered right before Editor's own root,
+   and it already clears the same absolute band with its own `marginTop: var(--wks-band-h)` — so once
+   the banner is in the DOM, .cm-content is no longer the first flow element after the band, and the
+   padding-top above would clear a band the banner already cleared, stacking a second band-height gap.
+   `.lp-editor-host` is mounted several levels inside Editor's root (editor-livepreview.ts appends it
+   into Editor's own previewRef div), not a direct sibling of the banner, so a plain `~` sibling
+   combinator on `.lp-editor-host` itself would never match — the condition has to live on the shared
+   PARENT (has the banner as a direct child?) and reach `.lp-editor-host` as an ordinary descendant of
+   that same parent, regardless of how deep Editor nests it. Higher specificity than the rule above (an
+   extra :has()), so source order doesn't matter here; still placed right after it for proximity. */
+:has(> [data-testid="not-saving-banner"]) .lp-editor-host > .cm-editor > .cm-scroller > .cm-content { padding-top: 0; }
 
 /* #267 the template preview mounts the editor's read-only surface in a BOUNDED box (picker pane /
    manage panel). The page-level clearances above (72px floating-controls room, header-band offset) don't
