@@ -138,32 +138,40 @@ test("#638: the pending list is a column of rows, and its controls line up", asy
   expect(m.scrolls, "three invitations do not need a scrollbar").toBe(false);
 });
 
-test("#638: …and twenty invitations scroll inside the box instead of growing the page", async ({ page }) => {
-  // #891/#937: isolated from the merge gate — flaky (green alone, red alongside the file's other
-  // tests). Remove this skip once #937 lands.
+// #891/#937: isolated from the merge gate — flaky (green alone, red alongside the file's other
+// tests). c891-gate-2 found this in-body `test.skip` does not actually stop the gate from
+// failing: Playwright resolves the `page` fixture (a real browser context) before the test body
+// — including this skip call — ever runs, so a slow/loaded run can still time out "setting up
+// page" and fail the whole gate, with the isolation counter none the wiser. Wrapping in its own
+// describe applies the skip at collection time, before any fixture is requested. Remove the
+// wrapper once #937 lands.
+test.describe(() => {
   test.skip(true, "#937: isolated — flaky alongside this file's other tests");
-  test.setTimeout(90_000);
-  await openDemo(page);
-  await page.route("**/api/members/invites", async (route) => {
-    if (route.request().method() !== "GET") return route.fallback();
-    await route.fulfill({
-      status: 200, contentType: "application/json",
-      body: JSON.stringify({ invites: Array.from({ length: 40 }, (_, i) => INVITE(i, `bulk${i}@e.test`)) }),
-    });
-  });
-  await page.goto("/admin/members");
-  await expect(page.getByTestId("invite-list")).toBeVisible({ timeout: 20_000 });
-  await sleep(500);
 
-  const m = await page.evaluate(() => {
-    const box = document.querySelector<HTMLElement>('[data-testid="invite-list"]')!;
-    return {
-      rows: document.querySelectorAll('[data-testid="invite-row"]').length,
-      scrolls: box.scrollHeight > box.clientHeight + 1,
-      boxHeight: Math.round(box.getBoundingClientRect().height),
-    };
+  test("#638: …and twenty invitations scroll inside the box instead of growing the page", async ({ page }) => {
+    test.setTimeout(90_000);
+    await openDemo(page);
+    await page.route("**/api/members/invites", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({ invites: Array.from({ length: 40 }, (_, i) => INVITE(i, `bulk${i}@e.test`)) }),
+      });
+    });
+    await page.goto("/admin/members");
+    await expect(page.getByTestId("invite-list")).toBeVisible({ timeout: 20_000 });
+    await sleep(500);
+
+    const m = await page.evaluate(() => {
+      const box = document.querySelector<HTMLElement>('[data-testid="invite-list"]')!;
+      return {
+        rows: document.querySelectorAll('[data-testid="invite-row"]').length,
+        scrolls: box.scrollHeight > box.clientHeight + 1,
+        boxHeight: Math.round(box.getBoundingClientRect().height),
+      };
+    });
+    expect(m.rows, "the stub filled the list").toBeGreaterThan(20);
+    expect(m.scrolls, "the box scrolls rather than the page growing").toBe(true);
+    expect(m.boxHeight, `the box stops growing (${m.boxHeight}px)`).toBeLessThan(500);
   });
-  expect(m.rows, "the stub filled the list").toBeGreaterThan(20);
-  expect(m.scrolls, "the box scrolls rather than the page growing").toBe(true);
-  expect(m.boxHeight, `the box stops growing (${m.boxHeight}px)`).toBeLessThan(500);
 });
