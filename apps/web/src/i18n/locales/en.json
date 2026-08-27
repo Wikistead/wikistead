@@ -31,7 +31,9 @@
     "confirmLastWayInTitle": "Close the last way in?",
     "confirmLastWayInBody": "After this, {{door}} would be the only way anyone signs in, and this deployment cannot check that it works. If it stops letting people through, getting back in means running a command on the server.",
     "doorGeneric": "single sign-on",
-    "platformName": "the shared sign-in service"
+    "platformName": "the shared sign-in service",
+    "confirmStrandedTitle": "Sign out these members for good?",
+    "confirmStrandedBody": "Deleting this connection would leave {{names}} with no way to sign in. Their content stays, but they cannot get back in without an operator running a command on the server."
   },
   "common": {
     "cancel": "Cancel",

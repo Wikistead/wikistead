@@ -128,7 +128,29 @@ export const CONFIRM_COPY: Record<string, { title: string; message: string }> = 
   // be left and asks whether to go on. Ruled 2026-08-21: the last living way in may only be closed
   // with an explicit confirmation.
   lastWayIn: { title: "adminConnections.confirmLastWayInTitle", message: "adminConnections.confirmLastWayInBody" },
+  // #858 / #960, ADR-259 §3.5: a DIFFERENT server-started confirmation — a connection delete that would
+  // strand specific members, not the workspace-wide "one door left" question `lastWayIn` answers.
+  // review it used to share `lastWayIn`'s code and rendered `lastWayIn`'s dialog (wrong
+  // door, nobody named) — `confirmationNeededFor` below is what keeps the two apart now.
+  membersStranded: { title: "adminConnections.confirmStrandedTitle", message: "adminConnections.confirmStrandedBody" },
 };
+
+// #960 review `confirm_required` (#822) and the connection-delete stranding refusal
+// used to share one code, so this screen could only ever open #822's dialog for both. Pure so the two
+// are provably distinguishable without rendering anything (sign-in-methods-960.test.ts feeds it the
+// EXACT shapes each server route sends today).
+export type NeededConfirmation =
+  | { kind: "lastWayIn"; door: string }
+  | { kind: "membersStranded"; subs: string[] }
+  | null;
+export function confirmationNeededFor(
+  e: { code?: string; remainingKind?: string; strandedSubs?: string[] } | null | undefined,
+): NeededConfirmation {
+  if (!e) return null;
+  if (e.code === "confirm_required") return { kind: "lastWayIn", door: e.remainingKind ?? "" };
+  if (e.code === "members_stranded") return { kind: "membersStranded", subs: e.strandedSubs ?? [] };
+  return null;
+}
 
 /**
  * Confirmations here that carry NO heading, and why that is not the #683 defect.
@@ -292,6 +314,8 @@ export function AdminSignInMethodsSection() {
   // request — the write already went and came back with a question — so the retry has to be held
   // here and replayed with the answer attached.
   const [lastWayIn, setLastWayIn] = useState<{ door: string; retry: () => void } | null>(null);
+  // #960: the OTHER server-started confirmation — see `confirmationNeededFor` and `CONFIRM_COPY.membersStranded`.
+  const [membersStranded, setMembersStranded] = useState<{ subs: string[]; retry: () => void } | null>(null);
   // The server names the door by its CONNECTION kind. Say it in the reader's words; an unknown kind
   // falls back to the generic sentence rather than printing an internal token at somebody.
   const doorName = (kind: string): string =>
@@ -300,9 +324,11 @@ export function AdminSignInMethodsSection() {
     : kind === "local" ? t("adminAuth.methodLocal")
     : t("adminConnections.doorGeneric");
   const askedFirst = (e: unknown, retry: () => void): boolean => {
-    if (!(e instanceof ApiError) || e.code !== "confirm_required") return false;
-    setLastWayIn({ door: String((e as unknown as { remainingKind?: string }).remainingKind ?? ""), retry });
-    return true;
+    if (!(e instanceof ApiError)) return false;
+    const needed = confirmationNeededFor(e);
+    if (needed?.kind === "lastWayIn") { setLastWayIn({ door: needed.door, retry }); return true; }
+    if (needed?.kind === "membersStranded") { setMembersStranded({ subs: needed.subs, retry }); return true; }
+    return false;
   };
 
   const onError = (e: unknown) => {
@@ -1027,6 +1053,19 @@ export function AdminSignInMethodsSection() {
         confirmLabel={t("common.confirm")}
         onClose={() => setLastWayIn(null)}
         onConfirm={() => { lastWayIn?.retry(); setLastWayIn(null); }}
+      />
+      {/* #858 / #960, ADR-259 §3.5: the OTHER server-started confirmation — deleting a connection would
+          strand these specific members, not "leave one door for the workspace" (`lastWayIn` above).
+          review it must name who, in the member-list's own display-name rule, never a
+          raw sub. */}
+      <ConfirmDialog
+        open={membersStranded !== null}
+        title={t("adminConnections.confirmStrandedTitle")}
+        message={membersStranded ? t("adminConnections.confirmStrandedBody", { names: membersStranded.subs.map(nameOf).join(", ") }) : ""}
+        confirmTestId="admin-members-stranded-confirm"
+        confirmLabel={t("common.confirm")}
+        onClose={() => setMembersStranded(null)}
+        onConfirm={() => { membersStranded?.retry(); setMembersStranded(null); }}
       />
       <ConfirmDialog
         open={deleting !== null}

@@ -22,6 +22,12 @@ export class ApiError extends Error {
   // #596: a `still_covered` revoke refusal names what keeps granting the capability, so the
   // dialog can tell the manager what to remove instead of a generic failure.
   coveredBy?: string[];
+  // #822: which CONNECTION KIND would be the one door left, on a `confirm_required` refusal.
+  remainingKind?: string;
+  // #960: which MEMBERS a connection deletion would strand, on a `members_stranded` refusal — a
+  // DIFFERENT question from `remainingKind` above, and the reason it carries its own code rather than
+  // sharing `confirm_required` (review one code, two questions, was indistinguishable).
+  strandedSubs?: string[];
   constructor(public status: number, public path: string, message: string) {
     super(message);
     this.name = "ApiError";
@@ -39,6 +45,8 @@ export function apiErrorFrom(status: number, path: string, body: unknown): ApiEr
   if (typeof b.code === "string") err.code = b.code;
   if (b.upgrade === true) err.upgrade = true;
   if (Array.isArray(b.coveredBy) && b.coveredBy.every((v) => typeof v === "string")) err.coveredBy = b.coveredBy as string[];
+  if (typeof b.remainingKind === "string") err.remainingKind = b.remainingKind;
+  if (Array.isArray(b.strandedSubs) && b.strandedSubs.every((v) => typeof v === "string")) err.strandedSubs = b.strandedSubs as string[];
   return err;
 }
 

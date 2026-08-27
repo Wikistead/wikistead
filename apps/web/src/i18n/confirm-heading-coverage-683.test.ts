@@ -60,10 +60,12 @@ describe("#683: every confirmation on this screen is accounted for", () => {
     const headed = rendered - HEADLESS_CONFIRMS.length;
     // #822 added the fourth: the last-way-in confirmation, which starts on the SERVER (a 409 the write
     // already got) rather than before the request like the other three.
-    expect(headed, "a confirmation appeared that nothing here explains").toBe(4);
+    // #960 added the fifth: the members-stranded confirmation — the SAME shape (a server-started 409)
+    // but a DIFFERENT question, which is why it carries its own code and its own dialog.
+    expect(headed, "a confirmation appeared that nothing here explains").toBe(5);
     // …and every title rendered in this file comes from the table or is a dialog's own dedicated key
     // never a control's label. Measured below; this leg only fixes the population.
-    expect(Object.keys(CONFIRM_COPY).length, "the table lost an entry").toBe(6); // #822 added lastWayIn
+    expect(Object.keys(CONFIRM_COPY).length, "the table lost an entry").toBe(7); // #960 added membersStranded
   });
 
   it("no confirmation is headed with a control's label", () => {

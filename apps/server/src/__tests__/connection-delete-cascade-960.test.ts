@@ -86,7 +86,10 @@ describe('#960: deleting a connection takes its links with it, atomically', () =
     try {
       const refused = await del(conn.id)
       expect(refused.statusCode, refused.body).toBe(409)
-      expect(refused.json()).toMatchObject({ code: 'confirm_required', strandedSubs: [sub] })
+      expect(refused.json()).toMatchObject({ code: 'members_stranded', strandedSubs: [sub] })
+      // review this MUST NOT be `confirm_required` — that is #822's code, for a
+      // different question, and the console's #822 dialog would render for it (wrong door, no names).
+      expect(refused.json().code, 'this refusal must not collide with #822\'s vocabulary').not.toBe('confirm_required')
       expect(await linkCount(conn.id), 'refused — nothing touched').toBe(1)
       expect(await connectionExists(conn.id)).toBe(true)
 
@@ -107,7 +110,7 @@ describe('#960: deleting a connection takes its links with it, atomically', () =
     try {
       const refused = await del(conn.id)
       expect(refused.statusCode, refused.body).toBe(409)
-      expect(refused.json()).toMatchObject({ code: 'confirm_required', strandedSubs: [sub] })
+      expect(refused.json()).toMatchObject({ code: 'members_stranded', strandedSubs: [sub] })
 
       const confirmed = await del(conn.id, true)
       expect(confirmed.statusCode, confirmed.body).toBe(204)

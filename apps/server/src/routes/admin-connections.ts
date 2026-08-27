@@ -279,8 +279,9 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     // #858 / #960, ADR-259 §3.5: a SECOND, per-member question — `assertClosingIsSafe` just asked
     // whether the WORKSPACE keeps a way in; this one asks whether any INDIVIDUAL member, reachable only
     // through this connection (a stored link, or a sub this connection mints), is about to lose theirs.
-    // Same vocabulary (`confirm_required`), different question — so a confirmed delete of a connection
-    // nobody's last door depends on still passes through here with nothing to name.
+    // review a DISTINCT code, not `confirm_required` — sharing that vocabulary with
+    // `assertClosingIsSafe` above let the console's #822 dialog render for this refusal too, naming the
+    // wrong door and never naming who would actually be locked out. `?confirm=1` still answers both.
     const stranded = await membersStrandedByConnectionDeletion(req.db, req.tenant, row.id)
     if (stranded.length > 0 && !confirmed) {
       // #596's lesson, repeated: Fastify's default error shape drops custom props — send
@@ -288,7 +289,7 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
       return reply.code(409).send({
         error: 'Conflict',
         message: 'this would strand a member with no other way in. Confirm to continue.',
-        code: 'confirm_required',
+        code: 'members_stranded',
         strandedSubs: stranded,
       })
     }
