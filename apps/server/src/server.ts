@@ -8,7 +8,7 @@ import { pool } from './db/pool.js'
 import { startCustomDomainRecheckWorker, recheckIntervalFromEnv } from './routes/custom-domains.js' // #576: a domain that stopped being ours must stop deciding link hosts
 import { startTrashRetentionWorker } from './routes/pages.js'
 import { fgaClient } from '@wikistead/authz'
-import { assertProductionFgaPersistent, assertFgaModelFresh } from './openfga-guard.js'
+import { assertProductionFgaPersistent, resolveFgaForBoot } from './openfga-guard.js'
 import { assertMigrationsApplied } from './db/migration-guard.js'
 
 // #178 / ADR-084: the server bootstrap, extracted from index.ts into a reusable function so BOTH
@@ -19,12 +19,15 @@ import { assertMigrationsApplied } from './db/migration-guard.js'
 export async function startServer(): Promise<FastifyInstance> {
   // Fail fast: in production OpenFGA must be persistent (postgres), not in-memory (ADR-035).
   assertProductionFgaPersistent()
-  // Fail fast (non-production): the pinned FGA model must exist and match model.fga (#433) —
-  // model drift otherwise surfaces as silent data-shaped authz failures instead of a config error.
-  await assertFgaModelFresh()
   // Fail fast (#910): every migration this image ships must already be in the database's ledger.
-  // A rollout that replaced only the image otherwise boots and fails per request with 42703.
+  // Ordered before FGA resolution: resolution's witness table (ADR-253 §3.4a) is itself one of
+  // those migrations, and this guard's error names the real cause instead of a raw 42P01.
   await assertMigrationsApplied(pool)
+  // ADR-253: finds (or, the first time, creates) this deployment's OpenFGA store and reconciles its
+  // model to the image's infra/openfga/model.fga, in every environment — #433's old pinned-id guard
+  // is gone (it required OPENFGA_STORE_ID/OPENFGA_MODEL_ID to be hand-transcribed and skipped itself
+  // entirely in production).
+  await resolveFgaForBoot(process.env, pool)
 
   const app = await buildApp()
 

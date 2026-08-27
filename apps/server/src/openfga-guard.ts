@@ -23,92 +23,108 @@ export function assertProductionFgaPersistent(env: NodeJS.ProcessEnv = process.e
   }
 }
 
-// #433: non-production startup guard against FGA MODEL DRIFT. When a parallel worktree
-// re-bootstraps the shared dev store (or model.fga moves under a stale .env pin), every
-// check silently runs against the wrong model shape — pages stop creating, suites go red
-// in data-shaped ways, and the cause is invisible. This converts that silence into an
-// explicit config error at startup: the pinned OPENFGA_MODEL_ID must exist in the store
-// AND match the repo's model.fga.
+// ADR-253 §3.1-§3.8: the product finds (or, on a deployment that has never had one, creates) its
+// own OpenFGA store, and keeps its model reconciled to the DSL the running image carries — in every
+// environment, not just non-production. This REPLACES #433's old guard, which read
+// OPENFGA_STORE_ID / OPENFGA_MODEL_ID directly from the environment, required both, and skipped
+// itself entirely in production (§1(b): production had NO model verification at all).
 //
-// Scope: skipped in production (models are pinned by the deploy; infra/ does not ship)
-// and when model.fga is not present next to the running source. Escape hatch:
-// WIKISTEAD_SKIP_FGA_MODEL_GUARD=1.
-
+// §8③ (ruled 2026-08-26, option iv): the model comparison below runs ONLY on the boot that WROTE a
+// model — a boot that adopted an existing one is "the same implementation reading the same file
+// twice" and gets no second opinion from reading it a third time. A boot that wrote and cannot read
+// its own write back refuses: in this deployment's shape (`server` at 2 replicas, `openfga` at 1),
+// at most one of two pods can ever be the writer, and a refusal there closes into a restart-and-
+// re-resolve loop that only a genuinely broken store keeps open (ADR-253 §8③①②).
 const RECOVERY =
   'Recover: for dev, re-run `pnpm --filter @wikistead/server fga:bootstrap` and update ' +
   'OPENFGA_STORE_ID / OPENFGA_MODEL_ID in .env (or `pnpm dev:setup` — WARNING: wipes dev FGA ' +
   'tuples). For the test stacks run `pnpm setup:server-test` / `pnpm setup:e2e` (their suite ' +
-  'commands also self-heal). Bypass (not recommended): WIKISTEAD_SKIP_FGA_MODEL_GUARD=1.';
+  'commands also self-heal).';
 
-export async function assertFgaModelFresh(
-  env: NodeJS.ProcessEnv = process.env,
-  opts: { tries?: number; delayMs?: number } = {},
+export async function resolveFgaForBoot(
+  env: NodeJS.ProcessEnv,
+  sql: import('postgres').Sql,
+  opts: { tries?: number; delayMs?: number; log?: (line: string) => void } = {},
 ): Promise<void> {
-  if (env.NODE_ENV === 'production') return;
-  if (env.WIKISTEAD_SKIP_FGA_MODEL_GUARD === '1') return;
-
-  const { readFile } = await import('node:fs/promises');
+  const log = opts.log ?? ((line: string) => console.log(line));
   const { existsSync } = await import('node:fs');
+  const { readFile } = await import('node:fs/promises');
   const { dirname } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const { chooseModelDslPath } = await import('./openfga-model-path.js');
-  // ADR-253 §3.2: two candidates, no operator override — an authorization model may not differ
-  // from the image's, unlike a migration's SQL. Neither present is a refusal, not a shrug: a boot
-  // that cannot read the model it is supposed to speak says so, in words a downstream throw does
-  // not carry.
+  const { OpenFgaClient } = await import('@openfga/sdk');
+  const {
+    resolveStoreBindingLocked,
+    reconcileModel,
+    DUMMY_STORE_ID,
+  } = await import('./openfga-resolve.js');
+  const { supplyResolvedFga } = await import('@wikistead/authz');
+
+  // ADR-253 §3.2: the DSL is needed before the store can be bound to a model at all — resolve it
+  // first so a missing DSL refuses before any network call, in words naming both candidates.
   const choice = chooseModelDslPath(dirname(fileURLToPath(import.meta.url)), existsSync);
   if (choice.kind === 'none') {
     throw new Error(
       `FATAL: infra/openfga/model.fga is not present at either place this guard looks: ` +
-        `${choice.candidates.join(', ')} (#433 drift guard, ADR-253 §3.2). ${RECOVERY}`,
+        `${choice.candidates.join(', ')} (ADR-253 §3.2). ${RECOVERY}`,
     );
   }
-  const modelPath = choice.path;
+  const dsl = await readFile(choice.path, 'utf8');
 
-  const storeId = env.OPENFGA_STORE_ID;
-  const modelId = env.OPENFGA_MODEL_ID;
-  if (!storeId || !modelId) {
+  const apiUrl = env.OPENFGA_API_URL ?? 'http://localhost:8080';
+  const anonymous = new OpenFgaClient({ apiUrl, storeId: DUMMY_STORE_ID });
+  const binding = await resolveStoreBindingLocked(sql, anonymous, env.OPENFGA_STORE_ID);
+
+  if (binding.kind === 'wait-for-migration') {
     throw new Error(
-      `FATAL: OPENFGA_STORE_ID / OPENFGA_MODEL_ID missing from the environment — the FGA model ` +
-        `guard cannot verify the authz model (#433). ${RECOVERY}`,
+      'FATAL: this database has not been migrated far enough to have the OpenFGA store-binding ' +
+        'witness (ADR-253 §3.4a) — run the migrate job first. ' + RECOVERY,
     );
   }
+  if (binding.kind === 'refuse') {
+    throw new Error(`FATAL: ${binding.message}. ${RECOVERY}`);
+  }
 
-  const [{ dslToModel, canonicalModel }, { OpenFgaClient }] = await Promise.all([
-    import('@wikistead/authz'),
-    import('@openfga/sdk'),
-  ]);
-  const wanted = dslToModel(await readFile(modelPath, 'utf8'));
-  const fga = new OpenFgaClient({ apiUrl: env.OPENFGA_API_URL ?? 'http://localhost:8080', storeId });
+  const fga = new OpenFgaClient({ apiUrl, storeId: binding.storeId });
+  const reconciled = await reconcileModel(fga, binding.storeId, dsl, env.OPENFGA_MODEL_ID);
 
-  // Retry a few times: `pnpm dev` often races `docker compose up`. After the retries any
-  // failure (store dead, model id unknown, FGA down) becomes the same explicit config error.
-  const tries = opts.tries ?? 5;
-  const delayMs = opts.delayMs ?? 1000;
-  let current: unknown;
-  let lastErr: unknown;
-  for (let i = 0; i < tries; i++) {
-    try {
-      const { authorization_model } = await fga.readAuthorizationModel({ authorizationModelId: modelId });
-      current = authorization_model;
-      break;
-    } catch (e) {
-      lastErr = e;
-      if (i < tries - 1) await new Promise((r) => setTimeout(r, delayMs));
+  const skip = env.WIKISTEAD_SKIP_FGA_MODEL_GUARD === '1';
+  if (reconciled.wrote && !skip) {
+    const tries = opts.tries ?? 5;
+    const delayMs = opts.delayMs ?? 1000;
+    let readBack: unknown;
+    let lastErr: unknown;
+    for (let i = 0; i < tries; i++) {
+      try {
+        const { authorization_model } = await fga.readAuthorizationModel({ authorizationModelId: reconciled.modelId });
+        readBack = authorization_model;
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (i < tries - 1) await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    if (!readBack) {
+      throw new Error(
+        `FATAL: this boot wrote model ${reconciled.modelId} to store ${binding.storeId} and could ` +
+          `not read it back — the write may not have landed (ADR-253 §8③). Last error: ${lastErr}. ` +
+          RECOVERY,
+      );
     }
   }
-  if (!current) {
-    throw new Error(
-      `FATAL: pinned FGA model ${modelId} could not be read from store ${storeId} — the store was ` +
-        `recreated, the pin is stale, or OpenFGA is unreachable (#433 drift guard). ` +
-        `Last error: ${lastErr}. ${RECOVERY}`,
-    );
-  }
-  if (JSON.stringify(canonicalModel(current)) !== JSON.stringify(canonicalModel(wanted))) {
-    throw new Error(
-      `FATAL: pinned FGA model ${modelId} does not match this checkout's infra/openfga/model.fga — ` +
-        `the model moved (rebase / parallel session) and authz checks would run against the wrong ` +
-        `shape (#433 drift guard). ${RECOVERY}`,
-    );
-  }
+
+  supplyResolvedFga(fga, reconciled.modelId);
+
+  // ADR-253 §3.8/§6: what this boot actually connected to, and whether anything went unverified —
+  // an operator must be able to answer "what am I authorizing against" without reading the code.
+  const storeState = env.OPENFGA_STORE_ID ? 'given' : binding.created ? 'created' : 'found';
+  const modelState = reconciled.wrote ? 'written' : 'found';
+  const expected = reconciled.expectedButNotAdopted
+    ? ` (OPENFGA_MODEL_ID expected ${reconciled.expectedButNotAdopted}, not adopted)`
+    : '';
+  const skipNote = reconciled.wrote && skip ? ' — WIKISTEAD_SKIP_FGA_MODEL_GUARD=1: this write was NOT verified' : '';
+  log(
+    `openfga-resolve: store=${binding.storeId} (${storeState}), model=${reconciled.modelId} ` +
+      `(${modelState})${expected}${skipNote}`,
+  );
 }
