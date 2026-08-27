@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { openDemo, enterEdit, sleep, API } from "../helpers";
 
 // #374 ② / ADR-149 §1: macros must render on the GUEST edit-share reader. mermaid is pure-client (no server, no
@@ -6,29 +6,29 @@ import { openDemo, enterEdit, sleep, API } from "../helpers";
 // hypothesis is disproven). The pageId-dependent SERVER-render macros (plantuml/Kroki, transclude) are wired by
 // passing pageId to the guest Editor mount (the /pages/:id/plantuml/render route is already `guest: 'view'`),
 // but the e2e stack has no Kroki so plantuml always degrades to source here → those stay needs-human-check.
-async function newPage(page: Page, title: string): Promise<string> {
-  return page.evaluate(async ({ api, title }) => {
-    const r = await fetch(`${api}/spaces/demo_space/pages`, {
-      method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" }, body: JSON.stringify({ title }),
-    });
-    return (await r.json()).id as string;
-  }, { api: API, title });
+//
+// #989: plain NODE-side fetch, not page.evaluate — called before `member` has navigated anywhere (still
+// `about:blank`, an opaque origin the app's now same-origin-only CORS always refuses regardless of policy),
+// and Node's own fetch is not subject to browser CORS at all (see helpers.ts's createScratchPage).
+async function newPage(title: string): Promise<string> {
+  const r = await fetch(`${API}/spaces/demo_space/pages`, {
+    method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" }, body: JSON.stringify({ title }),
+  });
+  return ((await r.json()) as { id: string }).id;
 }
-async function editShareUrl(page: Page, pageId: string): Promise<string> {
-  const id = await page.evaluate(async ({ api, pageId }) => {
-    const r = await fetch(`${api}/share-links`, {
-      method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-      body: JSON.stringify({ resource: { type: "page", id: pageId }, capability: "edit", expiresInSeconds: null }),
-    });
-    return (await r.json()).id as string;
-  }, { api: API, pageId });
+async function editShareUrl(pageId: string): Promise<string> {
+  const r = await fetch(`${API}/share-links`, {
+    method: "POST", headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+    body: JSON.stringify({ resource: { type: "page", id: pageId }, capability: "edit", expiresInSeconds: null }),
+  });
+  const id = ((await r.json()) as { id: string }).id;
   return `/share/${id}`;
 }
 
 test("#374: an edit-share guest renders macros (mermaid diagram) on the guest surface", async ({ browser }) => {
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
-  const pageId = await newPage(member, "guest-macro-374");
+  const pageId = await newPage("guest-macro-374");
   await member.goto(`/p/${pageId}`);
   await member.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(300);
@@ -37,7 +37,7 @@ test("#374: an edit-share guest renders macros (mermaid diagram) on the guest su
   await member.keyboard.insertText("top\n```mermaid\nflowchart TD\n  A --> B\n```\nbelow\n");
   await sleep(2800); // collab debounce so the edit guest loads this draft
 
-  const url = await editShareUrl(member, pageId);
+  const url = await editShareUrl(pageId);
   const guest = await (await browser.newContext()).newPage();
   await guest.goto(url);
   await guest.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });

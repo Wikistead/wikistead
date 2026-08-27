@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { openDemo, sleep, API } from "../helpers";
 
 // #448: vim :w/:wq/:q on the GUEST edit surface. The server publish route has been guest:'edit'
@@ -6,38 +6,38 @@ import { openDemo, sleep, API } from "../helpers";
 // client wiring was missing: the guest Editor got no onExitEdit/onPublish, so the vim ex commands
 // resolved to undefined and silently no-opped. This drives a real EDIT-link guest through
 // :wq (publish + exit) and :q (exit only), and pins that a VIEW-link guest still cannot publish.
-async function newPage(page: Page, title: string): Promise<string> {
-  return page.evaluate(async ({ api, title }) => {
-    const r = await fetch(`${api}/spaces/demo_space/pages`, {
-      method: "POST",
-      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-      body: JSON.stringify({ title }),
-    });
-    return (await r.json()).id as string;
-  }, { api: API, title });
+// #989: plain NODE-side fetch, not page.evaluate — a browser-context fetch is subject to the app's real
+// (now same-origin-only) CORS policy, and `API` is a different port than the page (see helpers.ts's
+// createScratchPage for the full reasoning). Node's own fetch is not subject to it.
+async function newPage(title: string): Promise<string> {
+  const r = await fetch(`${API}/spaces/demo_space/pages`, {
+    method: "POST",
+    headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  return ((await r.json()) as { id: string }).id;
 }
-async function shareUrl(page: Page, pageId: string, capability: "view" | "edit"): Promise<string> {
-  const id = await page.evaluate(async ({ api, pageId, capability }) => {
-    const r = await fetch(`${api}/share-links`, {
-      method: "POST",
-      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-      body: JSON.stringify({ resource: { type: "page", id: pageId }, capability, expiresInSeconds: null }),
-    });
-    return (await r.json()).id as string;
-  }, { api: API, pageId, capability });
+async function shareUrl(pageId: string, capability: "view" | "edit"): Promise<string> {
+  const r = await fetch(`${API}/share-links`, {
+    method: "POST",
+    headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+    body: JSON.stringify({ resource: { type: "page", id: pageId }, capability, expiresInSeconds: null }),
+  });
+  const id = ((await r.json()) as { id: string }).id;
   return `/share/${id}`;
+}
+async function publishPage(pageId: string): Promise<void> {
+  await fetch(`${API}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
 }
 
 test("#448: an EDIT-link guest publishes with :wq and exits with :q", async ({ browser }) => {
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
-  const pageId = await newPage(member, "guest vim ex page");
-  await member.evaluate(async ({ api, pageId }) => {
-    await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
-  }, { api: API, pageId });
+  const pageId = await newPage("guest vim ex page");
+  await publishPage(pageId);
 
   const guest = await (await browser.newContext()).newPage();
-  await guest.goto(await shareUrl(member, pageId, "edit"));
+  await guest.goto(await shareUrl(pageId, "edit"));
   await guest.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(400);
 
@@ -60,7 +60,7 @@ test("#448: an EDIT-link guest publishes with :wq and exits with :q", async ({ b
 
   // the publish LANDED: a fresh VIEW-link guest sees the text in the published snapshot
   const viewer = await (await browser.newContext()).newPage();
-  await viewer.goto(await shareUrl(member, pageId, "view"));
+  await viewer.goto(await shareUrl(pageId, "view"));
   await viewer.waitForSelector("[data-pane=preview] .cm-content");
   await expect(viewer.locator("[data-pane=preview] .cm-content")).toContainText("GUESTVIMPUBLISHED", { timeout: 10_000 });
 
@@ -88,10 +88,10 @@ test("#911: a GUEST edit-link guest's :w publishes and stays in the editor", asy
   test.skip(true, "#973: isolated — guest edit surface's initial paint times out under the gate's load");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
-  const pageId = await newPage(member, "guest vim w page");
+  const pageId = await newPage("guest vim w page");
 
   const guest = await (await browser.newContext()).newPage();
-  await guest.goto(await shareUrl(member, pageId, "edit"));
+  await guest.goto(await shareUrl(pageId, "edit"));
   await guest.waitForSelector("[data-pane=preview] .cm-content");
   await sleep(400);
 
@@ -116,7 +116,7 @@ test("#911: a GUEST edit-link guest's :w publishes and stays in the editor", asy
 
   // the publish LANDED despite staying: a fresh VIEW-link guest sees the text.
   const viewer = await (await browser.newContext()).newPage();
-  await viewer.goto(await shareUrl(member, pageId, "view"));
+  await viewer.goto(await shareUrl(pageId, "view"));
   await viewer.waitForSelector("[data-pane=preview] .cm-content");
   await expect(viewer.locator("[data-pane=preview] .cm-content")).toContainText("GUEST W STAYS", { timeout: 10_000 });
 });
@@ -124,18 +124,14 @@ test("#911: a GUEST edit-link guest's :w publishes and stays in the editor", asy
 test("#448: a VIEW-link guest cannot publish (server bastion — 40x, not 200)", async ({ browser }) => {
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
-  const pageId = await newPage(member, "guest view no publish");
-  await member.evaluate(async ({ api, pageId }) => {
-    await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
-  }, { api: API, pageId });
-  const url = await shareUrl(member, pageId, "view");
+  const pageId = await newPage("guest view no publish");
+  await publishPage(pageId);
+  const url = await shareUrl(pageId, "view");
   const linkId = url.split("/").pop()!;
   // mint the guest token the same way the landing page does, then fire the publish POST with it
-  const status = await member.evaluate(async ({ api, pageId, linkId }) => {
-    const mint = await fetch(`${api}/public/share-links/${linkId}/token`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-    const { token } = await mint.json();
-    const r = await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
-    return r.status;
-  }, { api: API, pageId, linkId });
+  const mint = await fetch(`${API}/public/share-links/${linkId}/token`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const { token } = (await mint.json()) as { token: string };
+  const r = await fetch(`${API}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  const status = r.status;
   expect(status).toBeGreaterThanOrEqual(400);
 });

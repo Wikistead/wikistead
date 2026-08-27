@@ -56,25 +56,27 @@ export async function sweepConnections(issuerPrefixes: string[]): Promise<void> 
 // published_md comes out empty — making "type → sleep → publish → assert the view" specs flaky. Polling the
 // real published body (re-publishing until it lands) replaces the non-deterministic fixed sleep, so a slow
 // flush just costs another poll instead of a false red. Throws if the content never lands within the timeout.
+//
+// #989: runs as a plain NODE-side fetch against `API`, not inside page.evaluate — a browser-context fetch
+// is subject to the app's real (now same-origin-only) CORS policy, and callers of this helper routinely
+// invoke it before the page has navigated anywhere (still `about:blank`, an opaque origin CORS always
+// refuses regardless of policy). `page` is kept in the signature for call-site compatibility even though
+// the fetch itself no longer touches it.
 export async function publishAndWait(page: Page, id: string, expectSubstring: string, timeoutMs = 15000): Promise<void> {
-  await page.evaluate(
-    async ({ api, id, expect, timeoutMs }) => {
-      const H = { Authorization: "Bearer dev-token" };
-      const deadline = Date.now() + timeoutMs;
-      let last = "";
-      while (Date.now() < deadline) {
-        await fetch(`${api}/pages/${id}/publish`, { method: "POST", headers: H });
-        const r = await fetch(`${api}/pages/${id}/published`, { headers: H });
-        if (r.ok) {
-          last = ((await r.json())?.publishedMd as string | null) ?? "";
-          if (last.includes(expect)) return;
-        }
-        await new Promise((res) => setTimeout(res, 400));
-      }
-      throw new Error(`publishAndWait: /published never contained "${expect}" within ${timeoutMs}ms (last: "${last.slice(0, 80)}")`);
-    },
-    { api: API, id, expect: expectSubstring, timeoutMs },
-  );
+  void page;
+  const H = { Authorization: "Bearer dev-token" };
+  const deadline = Date.now() + timeoutMs;
+  let last = "";
+  while (Date.now() < deadline) {
+    await fetch(`${API}/pages/${id}/publish`, { method: "POST", headers: H });
+    const r = await fetch(`${API}/pages/${id}/published`, { headers: H });
+    if (r.ok) {
+      last = (((await r.json()) as { publishedMd?: string | null })?.publishedMd) ?? "";
+      if (last.includes(expectSubstring)) return;
+    }
+    await sleep(400);
+  }
+  throw new Error(`publishAndWait: /published never contained "${expectSubstring}" within ${timeoutMs}ms (last: "${last.slice(0, 80)}")`);
 }
 
 export async function openDemo(page: Page) {
@@ -88,17 +90,19 @@ export async function openDemo(page: Page) {
 // Create a REAL throwaway page in demo_space and return its id. Editor specs that need
 // an isolated doc (no shared-demo presence ghosts) use this instead of navigating to a
 // made-up /p/<id>: a non-existent page is no longer an editable phantom (every page
-// belongs to a space — the page#space premise), so tests must edit real pages. The
-// caller's page must already be at the app origin (so the cross-origin POST is allowed).
+// belongs to a space — the page#space premise), so tests must edit real pages.
+//
+// #989: a plain NODE-side fetch (see publishAndWait above for why) — most callers invoke this before
+// `page` has navigated anywhere, which a browser-context fetch cannot survive at all now (CORS refuses
+// an opaque `about:blank` origin, and a relative URL has no base to resolve against either).
 export async function createScratchPage(page: Page, title = "Scratch"): Promise<string> {
-  return page.evaluate(async ({ api, title }) => {
-    const r = await fetch(`${api}/spaces/demo_space/pages`, {
-      method: "POST",
-      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-      body: JSON.stringify({ title }),
-    });
-    return ((await r.json()) as { id: string }).id;
-  }, { api: API, title });
+  void page;
+  const r = await fetch(`${API}/spaces/demo_space/pages`, {
+    method: "POST",
+    headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  return ((await r.json()) as { id: string }).id;
 }
 
 /**
@@ -113,33 +117,32 @@ export async function createScratchPage(page: Page, title = "Scratch"): Promise<
  *
  * The house rule the integrity check states is "a spec must not mutate the shared demo fixture — use a
  * scratch resource". This is the space-level form of `createScratchPage`.
+ *
+ * #989: plain NODE-side fetch — see `createScratchPage`'s comment for why.
  */
 export async function createScratchSpace(page: Page, name = "Scratch Space"): Promise<string> {
-  return page.evaluate(
-    async ({ api, name }) => {
-      const r = await fetch(`${api}/spaces`, {
-        method: "POST",
-        headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      return ((await r.json()) as { id: string }).id;
-    },
-    { api: API, name },
-  );
+  void page;
+  const r = await fetch(`${API}/spaces`, {
+    method: "POST",
+    headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return ((await r.json()) as { id: string }).id;
 }
 
 // #253 / ADR-113: flip the tenant PARENT SWITCH (tenant_settings.public_enabled) via the admin API. The
 // whole anonymous public surface 404s while this is OFF (default), so any spec that expects public rendering
-// must turn it ON first. dev-token is a tenant admin in dev mode. The caller's page must be at the app origin.
+// must turn it ON first. dev-token is a tenant admin in dev mode.
+//
+// #989: plain NODE-side fetch — see `createScratchPage`'s comment for why.
 export async function setPublicSurface(page: Page, enabled: boolean): Promise<void> {
-  await page.evaluate(async ({ api, enabled }) => {
-    const r = await fetch(`${api}/admin/public-settings`, {
-      method: "PUT",
-      headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    });
-    if (!r.ok) throw new Error(`public-settings PUT failed: ${r.status}`);
-  }, { api: API, enabled });
+  void page;
+  const r = await fetch(`${API}/admin/public-settings`, {
+    method: "PUT",
+    headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!r.ok) throw new Error(`public-settings PUT failed: ${r.status}`);
 }
 
 // Convenience for single-client editor specs: load the app, create a scratch page, open

@@ -19,22 +19,21 @@ test("#449: a space-link guest can search their space and a hit opens in the gue
   await sleep(300);
   await publishAndWait(member, id, `${term} body`);
   // indexing is async (outbox → Meili); poll the API directly (not the UI, which would cache)
+  // #989: plain NODE-side fetch, not page.evaluate — see helpers.ts's createScratchPage for why.
   await expect.poll(
-    () => member.evaluate(async ({ api, q }) => {
-      const r = await fetch(`${api}/search?q=${encodeURIComponent(q)}`, { headers: { Authorization: "Bearer dev-token" } });
+    async () => {
+      const r = await fetch(`${API}/search?q=${encodeURIComponent(term)}`, { headers: { Authorization: "Bearer dev-token" } });
       return ((await r.json()) as unknown[]).length;
-    }, { api: API, q: term }),
+    },
     { timeout: 20_000, intervals: [500, 1000, 1000] },
   ).toBeGreaterThan(0);
 
-  const link = await member.evaluate(async (api) => {
-    const res = await fetch(`${api}/share-links`, {
-      method: "POST",
-      headers: { Authorization: "Bearer dev-token", "Content-Type": "application/json" },
-      body: JSON.stringify({ resource: { type: "space", id: "demo_space" }, capability: "view", expiresInSeconds: null }),
-    });
-    return { status: res.status, body: await res.json() as { id: string } };
-  }, API);
+  const linkRes = await fetch(`${API}/share-links`, {
+    method: "POST",
+    headers: { Authorization: "Bearer dev-token", "Content-Type": "application/json" },
+    body: JSON.stringify({ resource: { type: "space", id: "demo_space" }, capability: "view", expiresInSeconds: null }),
+  });
+  const link = { status: linkRes.status, body: (await linkRes.json()) as { id: string } };
   expect(link.status).toBe(201);
 
   const guest = await (await browser.newContext()).newPage();
@@ -85,14 +84,13 @@ test("#449: a space-link guest can search their space and a hit opens in the gue
 test("#449: Ctrl-K opens guest search", async ({ browser }) => {
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
-  const link = await member.evaluate(async (api) => {
-    const res = await fetch(`${api}/share-links`, {
-      method: "POST",
-      headers: { Authorization: "Bearer dev-token", "Content-Type": "application/json" },
-      body: JSON.stringify({ resource: { type: "space", id: "demo_space" }, capability: "view", expiresInSeconds: null }),
-    });
-    return (await res.json() as { id: string }).id;
-  }, API);
+  // #989: plain NODE-side fetch, not page.evaluate — see helpers.ts's createScratchPage for why.
+  const linkRes = await fetch(`${API}/share-links`, {
+    method: "POST",
+    headers: { Authorization: "Bearer dev-token", "Content-Type": "application/json" },
+    body: JSON.stringify({ resource: { type: "space", id: "demo_space" }, capability: "view", expiresInSeconds: null }),
+  });
+  const link = ((await linkRes.json()) as { id: string }).id;
 
   const guest = await (await browser.newContext()).newPage();
   await guest.goto(`/share/${link}`);
