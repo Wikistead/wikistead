@@ -2338,10 +2338,18 @@ export async function listPagesGuestBounded(
       for (const p of branch.pages) {
         if (visible.length >= cap) { truncated = true; return }
         visible.push(p)
-        if ((p as Page & { hasChildren?: boolean }).hasChildren) {
-          await walk(p.id)
-          if (truncated) return
-        }
+        // #903 design-review NOT gated on `hasChildren`. That flag is `listBranch`'s CHEVRON
+        // probe (CHEVRON_PROBE_CAP = 3 children) — a display hint whose false negative was accepted by
+        // #623 because the cost was "no expand arrow drawn". Using it to decide whether to
+        // recurse turns that same false negative into a dropped, CONFIRMED-VISIBLE page: a parent with
+        // 4+ children whose first 3 (by position) are all invisible reports `hasChildren: false` even
+        // when its 4th child is visible, and the old code never looked past that. Every visible page's
+        // children are walked unconditionally; a subtree that turns out to have no visible descendant
+        // costs one more (typically empty) `listBranch` call, not a budget slot — §13(a)'s own
+        // condition ("a page whose subtree is entirely invisible must not consume closure budget
+        // without producing a visible row") is about the CAP counter, not query count.
+        await walk(p.id)
+        if (truncated) return
       }
       if (!branch.nextCursor) return
       cursor = branch.nextCursor
