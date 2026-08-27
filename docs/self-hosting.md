@@ -194,6 +194,13 @@ A workspace reached on two hosts (for example after moving to a custom domain) n
 **both** registered at the IdP. The console shows the URI for the host you are on;
 that is the value to paste, and there is nothing to type back.
 
+**A second redirect URI is needed for account-settings linking** (ADR-259 §3.3): a
+member adding this connection to an account they already have completes the round
+trip at `<scheme>://<host>/auth/link-callback`, not `/auth/callback` — register
+**both** on any IdP that allowlists redirect URIs (most do). Omitting the second one
+does not break ordinary sign-in; it only breaks the "link this sign-in method" button
+in account settings, which fails at the IdP before reaching this product's code.
+
 **Discovery is required.** Only the issuer URL is configured, and the server fetches
 `<issuer>/.well-known/openid-configuration` to find the authorization, token and JWKS
 endpoints. There is no manual-endpoint mode. Enabling a connection **fails with a 400
