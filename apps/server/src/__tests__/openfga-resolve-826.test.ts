@@ -7,6 +7,7 @@ import { dslToModel } from '@wikistead/authz'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import {
+  listAllStores,
   searchByName,
   storeExists,
   readWitness,
@@ -54,9 +55,9 @@ describe('ADR-253 §3.3 searchByName', () => {
   })
 })
 
-// A fake narrow enough to drive resolveStoreBinding's decision flow, not the real HTTP client. The
-// unambiguous single-page listing shape is asserted separately in listAllStores (not exercised
-// against a live multi-store FGA here — that would require creating real duplicate stores).
+// A fake narrow enough to drive resolveStoreBinding's decision flow, not the real HTTP client. This
+// fake always answers in a single page — listAllStores's own pagination-draining is pinned separately
+// below ("listAllStores drains every page"), against a dedicated multi-page fake.
 function fakeFga(opts: { stores: FgaStoreSummary[]; live: Set<string> }): OpenFgaClient {
   return {
     listStores: async () => ({ stores: opts.stores, continuation_token: '' }),
@@ -66,6 +67,33 @@ function fakeFga(opts: { stores: FgaStoreSummary[]; live: Set<string> }): OpenFg
     },
   } as unknown as OpenFgaClient
 }
+
+describe('ADR-253 §3.3 listAllStores drains every page', () => {
+  // The doc comment on listAllStores names the exact failure this catches: bootstrap.ts,
+  // reset-test-store.ts and model-drift.ts each read only the first page, so a store sitting on page
+  // two reads as "none" — §3.4 turns that into a CREATE, and every boot after refuses forever because
+  // now there really are two.
+  it('a store that only appears on page two is not missed', async () => {
+    let calls = 0
+    const paged = {
+      listStores: async () => {
+        calls++
+        if (calls === 1) {
+          return { stores: [{ id: 'a', name: 'something-else' }], continuation_token: 'page-2' }
+        }
+        return { stores: [{ id: 'store-on-page-2', name: STORE_NAME }], continuation_token: '' }
+      },
+    } as unknown as OpenFgaClient
+
+    const out = await listAllStores(paged)
+
+    expect(out).toEqual([
+      { id: 'a', name: 'something-else' },
+      { id: 'store-on-page-2', name: STORE_NAME },
+    ])
+    expect(calls, 'must actually follow the continuation token, not just accept the first page').toBe(2)
+  })
+})
 
 describe('ADR-253 §3.4a the witness table missing is a distinct wait, not a refusal', () => {
   it("resolveStoreBinding answers 'wait-for-migration' before the table exists", async () => {
