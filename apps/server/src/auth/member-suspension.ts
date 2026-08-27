@@ -7,6 +7,7 @@ import type { TenantDb } from '../db/index.js'
 import { billableMemberCount, lockSeats } from './invites.js'
 import { syncMemberGroups } from './group-sync.js'
 import { isLastAdmin } from './last-admin.js'
+import { assertClosingIsSafe, assertNotLastExemptAdmin } from './login-methods.js' // #925 / ADR-251 §3.8/§3.8a
 import { destroyMemberSessions } from './session.js'
 import { auditIfEntitled } from '../audit/sink.js'
 
@@ -55,6 +56,13 @@ interface MemberState {
   deactivation_reason: string | null
 }
 
+/** The same idempotency rule the transaction below re-checks (ruling 5: a frozen member is not
+ *  "already suspended" to an admin; a SCIM repeat must not claim to have handled an admin's decision).
+ *  Shared so the #925 pre-check and the write itself cannot drift into disagreeing about a no-op. */
+const isIdempotentNoop = (m: MemberState, reason: SuspensionReason): boolean =>
+  (!!m.deactivated_at && m.deactivation_reason === reason) ||
+  (reason === 'scim' && !!m.deactivated_at && !isScimSuspension(m.deactivation_reason))
+
 export class LastAdminSuspensionError extends Error {
   statusCode = 409
   code = 'last_admin'
@@ -75,8 +83,23 @@ export async function suspendMember(
   deps: { db: TenantDb; fga: OpenFgaClient; valkey?: IORedis },
   tenant: { id: string; plan: string },
   sub: string,
-  opts: { reason: SuspensionReason; actor: string },
+  opts: { reason: SuspensionReason; actor: string; confirm?: boolean },
 ): Promise<SuspendOutcome> {
+  // #925 / ADR-251 §3.8: the floor question, ahead of the transaction — option (a) of the ADR's two
+  // (reads outside the tx and outside lockSeats's advisory lock, the same pre-existing limit of a
+  // read-then-write guard `assertClosingIsSafe` already has everywhere else it is called). Re-checks
+  // the SAME idempotency the tx below re-checks, gated the same way the shipped demotion/delete routes
+  // gate their OWN isLastAdmin check: an ordinary member, a not-found sub, or a repeat of an already-
+  // matching suspension must never reach these — `assertClosingIsSafe` has no self-protection against
+  // that the way `assertNotLastExemptAdmin`'s own transition check does, and a re-deactivation of an
+  // already-suspended admin would otherwise turn an idempotent repeat into a fresh confirm_required.
+  const [pre] = await deps.db.sql<MemberState[]>`
+    SELECT role, groups, deactivated_at, deactivation_reason FROM members WHERE sub = ${sub}`
+  if (pre && pre.role === 'admin' && !isIdempotentNoop(pre, opts.reason)) {
+    await assertNotLastExemptAdmin(deps.db, tenant, sub, !!opts.confirm)
+    await assertClosingIsSafe(deps.db, tenant, { deactivating: sub }, { confirm: opts.confirm })
+  }
+
   let revoked: string[] = []
   const outcome = await deps.db.tx(async (tx): Promise<SuspendOutcome> => {
     // #573 re-review NEW-2: reading inside the tx is not serialization. Two concurrent suspensions of
@@ -88,8 +111,7 @@ export async function suspendMember(
     if (!m) return 'notMember'
     // Idempotent only for a suspension of the SAME kind. A frozen member is not "already suspended" to
     // an admin (ruling 5), and a SCIM repeat must not claim to have handled an admin's decision.
-    if (m.deactivated_at && m.deactivation_reason === opts.reason) return 'already'
-    if (opts.reason === 'scim' && m.deactivated_at && !isScimSuspension(m.deactivation_reason)) return 'already'
+    if (isIdempotentNoop(m, opts.reason)) return 'already'
     if (m.role === 'admin' && (await isLastAdmin(tx, sub))) throw new LastAdminSuspensionError()
 
     const prevGroups = m.groups ?? []

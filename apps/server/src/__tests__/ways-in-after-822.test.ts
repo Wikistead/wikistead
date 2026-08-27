@@ -12,7 +12,7 @@
 // rules are what is dangerous here; getting them wrong locks a workspace out, and the store is
 // fail-closed, so the failure is not a leak but everybody losing access at once.
 import { describe, it, expect, afterEach } from 'vitest'
-import { waysInAfter, assertClosingIsSafe, anAdminHoldsAKey } from '../auth/login-methods.js'
+import { waysInAfter, assertClosingIsSafe, assertNotLastExemptAdmin, anAdminHoldsAKey } from '../auth/login-methods.js'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { TenantDb } from '../db/index.js'
@@ -163,7 +163,12 @@ describe('#822 / #866 every door-closing write asks the question', () => {
   const CLOSING_WRITES: ReadonlyArray<readonly [string, string]> = [
     ['routes/admin-connections.ts', 'disabling a connection, and deleting one'],
     ['routes/tenant-oidc.ts', 'disabling the tenant IdP'],
-    ['routes/members.ts', 'demoting an administrator — the key-taking half'],
+    ['routes/members.ts', 'demoting an administrator, and removing one — the key-taking half'],
+    // #925 / ADR-251 §3.8d: `suspendMember` writes `members.role` NOWHERE (it only clears it via
+    // deactivation columns), so it lived outside every file this ledger already named — exactly the
+    // shape #925 itself is a report of (§3.7 named four writes; this ledger did not independently
+    // notice three of them were unguarded). One line, so the ledger stays one file short of nothing.
+    ['auth/member-suspension.ts', 'suspending a member — SCIM inherits the same verb for free'],
   ]
 
   it.each(CLOSING_WRITES.map(([f, why]) => [f, why] as const))('%s asks it (%s)', (file) => {
@@ -228,12 +233,21 @@ describe('#836 requiring SSO needs an exempt ADMINISTRATOR, not any exempt membe
     expect(body, 'a deactivated administrator would count').toMatch(/deactivated_at IS NULL/)
   })
 
-  it('the door-closing writes do not ask the narrowed question', () => {
+  it('the general per-connection question is not built with the exemption narrowing baked in', () => {
     // Only the SSO precondition narrows to the exempt list; the doors ask about administrators
-    // generally. A narrowing that leaked into the doors would refuse writes for the wrong reason.
+    // generally. A narrowing that leaked into the GENERAL question would refuse writes for the wrong
+    // reason. ⚠️ #925 / ADR-251 §3.8b: `waysInAfter`'s key-taking branch now ALSO calls
+    // `anAdminHoldsAKey` with `exemptOnly` — legitimately, for the synthetic exempt door — so a bare
+    // substring scan of the whole function (the shape this pin used before #925) would false-positive
+    // on that addition. What must still never happen is the per-connection LOOP's own general
+    // question — asked once per remaining connection, in either branch — narrowing itself.
     const src = readFileSync(resolve(import.meta.dirname, '../auth/login-methods.ts'), 'utf8')
     const waysIn = src.slice(src.indexOf('export async function waysInAfter'), src.indexOf('export async function anAdminHoldsAKey'))
-    expect(waysIn, 'the door question narrowed itself to the exemption list').not.toMatch(/exemptOnly/)
+    const generalCalls = [...waysIn.matchAll(/if \(await anAdminHoldsAKey\(db(?:, \{[^}]*\})?\)\)/g)].map((m) => m[0])
+    expect(generalCalls.length, 'the general per-connection question moved or was renamed — re-read this file before trusting it').toBe(2)
+    for (const call of generalCalls) {
+      expect(call, 'the door question narrowed itself to the exemption list').not.toMatch(/exemptOnly/)
+    }
   })
 })
 
@@ -275,4 +289,113 @@ describe('#822 the three answers', () => {
     await expect(assertClosingIsSafe(db, TENANT, { id: 'c1', live: true }, { confirm: true, env: NO_PLATFORM }))
       .rejects.toMatchObject({ code: 'login_lockout' })
   })
+})
+
+describe('#925 / ADR-251 §3.8a: assertNotLastExemptAdmin — warned, not refused outright', () => {
+  // A purpose-built stub. `exemptOnly`'s conditional JOIN fragment is invisible to a strings-only stub
+  // (documented above, #822's own measured limit — postgres.js splices it at send time, and this fake
+  // tag function's OWN recursive call for the fragment resolves to a value, never rejoining the outer
+  // template's `strings`). Order is the only knob available: `assertNotLastExemptAdmin` asks
+  // `anAdminHoldsAKey` at most twice, in a fixed sequence — `{exemptOnly, without: sub}` then, only if
+  // that answered 0, `{exemptOnly}` alone — so `answers` is consumed in that order.
+  const stub = (opts: { selected: boolean; exempt: boolean; answers: number[] }) => {
+    let i = 0
+    return {
+      sql: Object.assign(
+        async (strings: TemplateStringsArray) => {
+          const q = strings.join('?')
+          if (q.includes('sso_exemptions')) return opts.exempt ? [{ member_sub: 'A' }] : []
+          if (q.includes('local_credentials')) { const n = opts.answers[i] ?? 0; i++; return [{ n }] }
+          if (q.includes('tenant_login_prefs')) return [{ sso_required: opts.selected, local_login_enabled: false, platform_login_disabled: false }]
+          return []
+        },
+        { unsafe: async () => [] },
+      ),
+    } as unknown as TenantDb
+  }
+
+  it('steps aside when the stance is not selected at all', async () => {
+    const db = stub({ selected: false, exempt: true, answers: [0, 0] })
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBeUndefined()
+  })
+
+  it("steps aside when the write's target is not exempt — not this floor's business", async () => {
+    const db = stub({ selected: true, exempt: false, answers: [0, 0] })
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBeUndefined()
+  })
+
+  it('steps aside when another exempt admin still holds a key', async () => {
+    const db = stub({ selected: true, exempt: true, answers: [1] }) // first call (without A) answers 1
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBeUndefined()
+  })
+
+  it('TRANSITION: steps aside when the floor was already down — refusing would take nothing back', async () => {
+    // first call (without A) answers 0 — nobody else holds one; second call (A included) ALSO answers
+    // 0 — so A never held a key either, meaning this write removes nothing the floor still had.
+    const db = stub({ selected: true, exempt: true, answers: [0, 0] })
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBeUndefined()
+  })
+
+  it('WARNS (confirm_required, not a hard refusal) when this write empties the floor', async () => {
+    // first call (without A) answers 0; second call (A included) answers 1 — A itself is the floor.
+    const db = stub({ selected: true, exempt: true, answers: [0, 1] })
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false))
+      .rejects.toMatchObject({ statusCode: 409, code: 'confirm_required' })
+  })
+
+  it('RULED 2026-08-27 (#925): a repeat with confirm goes through — the warning can be overridden', async () => {
+    const db = stub({ selected: true, exempt: true, answers: [0, 1] })
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', true)).resolves.toBeUndefined()
+  })
+})
+
+describe('#925 / ADR-251 §3.8b: an exempt admin with an open password door is a real way in', () => {
+  // Reproduces the ADR's own measured table: sso_required, one federated connection, A is the sole
+  // exempt admin holding a password. Wired the way the routes wire it — assertNotLastExemptAdmin
+  // first, then assertClosingIsSafe — so this is also the regression test for §3.8's core bug (a
+  // harmless admin's suspension/removal/demotion asking confirm_required for a floor it never touched).
+  const scenario = (excludedIsTheExemptKeyHolder: boolean) => {
+    // waysInAfter's key-taking branch asks, per remaining connection, `anAdminHoldsAKey(db, {without})`
+    // (general — answers 0, `local` is stripped from `effective` under a biting stance so this branch
+    // is never reached for a `local` entry) and then ONE call for the synthetic exempt door,
+    // `anAdminHoldsAKey(db, {exemptOnly, without})`: 1 if A still holds the floor (excluded is NOT A),
+    // 0 if excluded IS A (the write takes A's own key away).
+    let i = 0
+    const answers = excludedIsTheExemptKeyHolder ? [0] : [1]
+    return {
+      sql: Object.assign(
+        async (strings: TemplateStringsArray) => {
+          const q = strings.join('?')
+          if (q.includes('sso_exemptions')) return excludedIsTheExemptKeyHolder ? [{ member_sub: 'A' }] : []
+          if (q.includes('local_credentials')) { const n = answers[i] ?? 0; i++; return [{ n }] }
+          if (q.includes('tenant_oidc')) return [{ id: 'c1', enabled: true }]
+          if (q.includes('tenant_saml')) return []
+          if (q.includes('tenant_login_prefs')) return [{ sso_required: true, local_login_enabled: true, platform_login_disabled: false }]
+          return []
+        },
+        { unsafe: async () => [] },
+      ),
+    } as unknown as TenantDb
+  }
+
+  it("waysInAfter carries a synthetic 'yes' door when the exempt admin's password door is open", async () => {
+    const db = scenario(false) // closing somebody who is NOT the exempt key-holder
+    const after = await waysInAfter(db, TENANT, { deactivating: 'B' }, NO_PLATFORM)
+    expect(after.map((w) => [w.kind, w.usable])).toContainEqual(['local', 'yes'])
+  })
+
+  it('demoting/suspending/deleting the harmless admin B is ALLOWED — B never held the exempt floor up', async () => {
+    // THE regression this ticket exists to fix: before §3.8b, `local` is stripped from `effective`
+    // under a biting stance, so no entry can ever be `'yes'`, and `assertClosingIsSafe` asked
+    // `confirm_required` for every key-taking write regardless of whose key it was.
+    const db = scenario(false)
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'B', false)).resolves.toBeUndefined()
+    await expect(assertClosingIsSafe(db, TENANT, { deactivating: 'B' }, { env: NO_PLATFORM })).resolves.toBeUndefined()
+  })
+
+  // Closing A (the exempt key-holder) itself is §3.8a's own question — covered by the "WARNS" and
+  // "TRANSITION" cases in the describe block above, which exercise `assertNotLastExemptAdmin` in
+  // isolation with a call sequence matched to ITS two-call shape (this block's `scenario` stub is
+  // shaped for `waysInAfter`'s different, single-call sequence instead — reusing it here silently
+  // answers a different question than the one asked, the same trap #925's own C reproduction found).
 })

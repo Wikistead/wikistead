@@ -308,6 +308,21 @@ export async function waysInAfter(
         out.push({ id: c.id, kind: c.kind, usable: 'yes' })
       }
     }
+    // #925 / ADR-251 §3.8b: under a biting stance, `resolveLoginConnections` correctly strips `local`
+    // from the list above (it is not a door for ordinary members) — but an EXEMPT admin whose password
+    // door is actually open is still a real way back in, and with `local` gone from `effective` no
+    // entry above can ever be marked `'local'`, so none can ever be marked `'yes'`. Ask both halves
+    // directly, the way admin-login-methods.ts's own exemption check does, rather than through a door
+    // this stance has already stripped from view. All three conjuncts, matching resolveLoginConnections
+    // §212/§321's own three (a lowered ceiling does not rewrite the tenant's stored preference row, so
+    // two conjuncts alone still answer 'yes' for a door LOGIN_METHODS itself has 404ing).
+    const { resolveSsoStance } = await import('./sso-stance.js')
+    if ((await resolveSsoStance(db, tenant, env)).biting
+      && loginMethodCeiling(env).has('local')
+      && (await localLoginEnabled(db))
+      && (await anAdminHoldsAKey(db, { exemptOnly: true, without: excluded }))) {
+      out.push({ id: 'sso-exemption', kind: 'local', usable: 'yes' })
+    }
     return out
   }
   const effective = await resolveLoginConnections(db, tenant, env)
@@ -393,6 +408,37 @@ export async function anAdminHoldsAKey(
      WHERE m.role = 'admin' AND m.deactivated_at IS NULL
        AND (${excluded}::text IS NULL OR m.sub <> ${excluded})`
   return (row?.n ?? 0) > 0
+}
+
+/**
+ * ADR-251 §3.8a. RULED 2026-08-27 (#925): a key-taking write that would empty the SSO-exempt
+ * floor is WARNED, not refused outright — `waysInAfter`'s ordinary `confirm_required` shape, not a
+ * hard throw. Asked FIRST, ahead of `assertClosingIsSafe`, on all four key-taking writes.
+ *
+ * Narrow deliberately: it fires only when the target IS one of the currently-exempt admins, removing
+ * them would leave none, and the floor was not already broken (the transition check, mirroring
+ * `assertClosingIsSafe`'s own `closing.live` step-aside) — a write that does not touch the exempt
+ * floor at all falls through to `assertClosingIsSafe` exactly as before.
+ *
+ * `.selected`, not `.biting`: `biting` can go false with no write at all (a federated connection
+ * disabled, or its secret failing to decrypt) and come back true just as silently when restored — a
+ * floor keyed on it would stop protecting during that window. `.selected` has no such window, and it
+ * is what the exemption-revoke door this mirrors (`admin-login-methods.ts`) already reads.
+ */
+export async function assertNotLastExemptAdmin(
+  db: TenantDb,
+  tenant: { plan: string },
+  sub: string,
+  confirm: boolean,
+): Promise<void> {
+  const { resolveSsoStance, isSsoExempt } = await import('./sso-stance.js')
+  const stance = await resolveSsoStance(db, tenant)
+  if (!stance.selected) return
+  if (!(await isSsoExempt(db, sub))) return // this write's target isn't exempt — not this floor's business
+  if (await anAdminHoldsAKey(db, { exemptOnly: true, without: sub })) return // another exempt admin still holds a key
+  if (!(await anAdminHoldsAKey(db, { exemptOnly: true }))) return // TRANSITION: the floor was ALREADY down — refusing takes nothing back
+  if (confirm) return // RULED: warned, and they chose to go on
+  throw Object.assign(new Error(SSO_FLOOR_REFUSAL.lastExemptAdmin), { statusCode: 409, code: 'confirm_required' })
 }
 
 /**

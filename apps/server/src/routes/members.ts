@@ -13,7 +13,7 @@ import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { enqueueTupleDeletes, flushTupleDeletes, type TupleIntent } from '../db/tuple-outbox.js' // #896
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
-import { assertClosingIsSafe, anAdminHoldsAKey, memberHasAnotherWayIn, subsWithAnotherWayIn, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
+import { assertClosingIsSafe, assertNotLastExemptAdmin, anAdminHoldsAKey, memberHasAnotherWayIn, subsWithAnotherWayIn, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
@@ -310,6 +310,10 @@ export async function membersPlugin(app: FastifyInstance) {
       // lands on the state the ruling forbids: members can sign in, nobody can administer, and the
       // recovery is a command on the server. The same shape as the suspension beside it, one column
       // over — a key-holding administrator is made of TWO facts, and only one of them was guarded.
+      // #925 / ADR-251 §3.8a: the SSO-exempt floor is asked FIRST — it is a narrower, WARNED question
+      // ("is this the last exempt admin"), distinct from assertClosingIsSafe's ("is there any usable
+      // way in at all"). Two confirm_requireds can fire on one write and they are not the same sentence.
+      await assertNotLastExemptAdmin(req.db, req.tenant, req.params.sub, !!req.body?.confirm)
       await assertClosingIsSafe(req.db, req.tenant, { demoting: req.params.sub }, { confirm: req.body?.confirm })
     }
 
@@ -343,7 +347,7 @@ export async function membersPlugin(app: FastifyInstance) {
   // #627 / ADR-213: SUSPEND and REACTIVATE, the operations a tenant without SCIM had no way to reach.
   // The verb is shared with the directory (auth/member-suspension.ts) — an admin's suspension differs
   // only in its reason, and the reason is what the ledger and the seat count read.
-  app.post<{ Params: { sub: string } }>('/members/:sub/suspend', async (req, reply) => {
+  app.post<{ Params: { sub: string }; Querystring: { confirm?: string } }>('/members/:sub/suspend', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     // #627 setting 3: not yourself. An admin who suspends their own account signs themselves out of a
     // console they may be the only one holding — the last-admin guard below catches the worst case, but
@@ -352,9 +356,12 @@ export async function membersPlugin(app: FastifyInstance) {
       return reply.code(409).send({ error: 'you cannot suspend yourself', code: 'self_suspend' })
     }
     try {
+      // #925 / ADR-251 §3.7/§3.8: suspendMember itself asks the exempt-floor and door-closing
+      // questions now (before its transaction opens) — this is one of the three member routes with
+      // no body, so `confirm` rides the query string, the same convention DELETE /members/:sub uses.
       const outcome = await suspendMember(
         { db: req.db, fga: app.fga, valkey: app.valkey }, req.tenant, req.params.sub,
-        { reason: 'admin', actor: `user:${req.user.sub}` },
+        { reason: 'admin', actor: `user:${req.user.sub}`, confirm: req.query?.confirm === '1' },
       )
       if (outcome === 'notMember') return reply.code(404).send({ error: 'member not found' })
       return reply.code(200).send({ suspended: true, alreadySuspended: outcome === 'already' })
@@ -565,13 +572,21 @@ export async function membersPlugin(app: FastifyInstance) {
 
   // Remove a member. ADR-003 ordering; then revoke ALL their live sessions so the
   // removal is immediate (not at TTL). Cannot remove the last admin.
-  app.delete<{ Params: { sub: string } }>('/members/:sub', async (req, reply) => {
+  app.delete<{ Params: { sub: string }; Querystring: { confirm?: string } }>('/members/:sub', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     const [existing] = await req.db.sql<[{ role: string; groups: string[] }?]>`
       SELECT role, groups FROM members WHERE sub = ${req.params.sub}`
     if (!existing) return reply.code(404).send({ error: 'member not found' })
     if (existing.role === 'admin' && (await isLastAdmin(req.db.sql, req.params.sub))) {
       return reply.code(409).send(await lastAdminRefusal(req.db.sql))
+    }
+    // #925 / ADR-251 §3.8 / §3.8a: this write takes the key away the same as a demotion or a
+    // suspension, and a removal can close the last way in exactly like the other two — the floor
+    // question first (warned), then the general "is there any usable way in left" question.
+    if (existing.role === 'admin') {
+      const confirmed = req.query?.confirm === '1'
+      await assertNotLastExemptAdmin(req.db, req.tenant, req.params.sub, confirmed)
+      await assertClosingIsSafe(req.db, req.tenant, { deactivating: req.params.sub }, { confirm: confirmed })
     }
 
     let revokedKeyIds: string[] = []
