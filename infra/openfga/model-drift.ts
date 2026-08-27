@@ -20,34 +20,14 @@ import { existsSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { OpenFgaClient } from '@openfga/sdk'
-import { transformer } from '@openfga/syntax-transformer'
+// #253: the DSL transform and its canonical comparison now live in one place — this file and
+// apps/server/src/openfga-guard.ts both import them rather than keeping their own copies.
+// `infra/` is not a workspace member (no package.json), so this resolves through the root
+// node_modules under tsx exactly as this file's `@openfga/sdk` import already does — which means
+// it reads packages/authz's BUILT dist, so a runner that skips turbo's `^build` sees a stale one.
+import { canonicalModel, dslToModel } from '@wikistead/authz'
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-
-// Canonicalize for comparison: sort object keys recursively; drop the server-added id
-// field, null/undefined, and EMPTY values — arrays, objects, and strings (the read-back
-// fills defaults the DSL transform omits: `generic_types: []`, `module: ""`,
-// `condition: ""`) — all meaning "absent".
-// KEEP IN SYNC with apps/server/src/openfga-guard.ts (the dev startup guard carries its
-// own copy — the server can't import across the infra/ boundary).
-export function canonicalModel(v: unknown): unknown {
-  if (Array.isArray(v)) {
-    const arr = v.map(canonicalModel).filter((x) => x !== undefined)
-    return arr.length ? arr : undefined
-  }
-  if (v && typeof v === 'object') {
-    const out: Record<string, unknown> = {}
-    for (const k of Object.keys(v as Record<string, unknown>).sort()) {
-      if (k === 'id') continue
-      const val = canonicalModel((v as Record<string, unknown>)[k])
-      if (val === undefined || val === null) continue
-      out[k] = val
-    }
-    return Object.keys(out).length ? out : undefined
-  }
-  if (v === '') return undefined
-  return v ?? undefined
-}
 
 // The store name every stack's bootstrap.ts creates/reuses (one FGA instance per stack,
 // so the fixed name is unambiguous within a stack).
@@ -121,7 +101,7 @@ export async function ensureStackModel(opts: EnsureStackOpts): Promise<void> {
   }
 
   const dsl = await readFile(join(repoRoot, 'infra/openfga/model.fga'), 'utf8')
-  const wanted = transformer.transformDSLToJSONObject(dsl)
+  const wanted = dslToModel(dsl)
   const fga = new OpenFgaClient({ apiUrl, storeId })
 
   // #751: WHICH matching model is pinned matters as much as whether one matches.

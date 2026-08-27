@@ -20,8 +20,11 @@
 // Enumeration is bounded by the spaces table (per-space object reads — OpenFGA has no list-all),
 // exactly like migrate-218-direct-leaves.ts.
 import { OpenFgaClient } from '@openfga/sdk'
-import { transformer } from '@openfga/syntax-transformer'
-import { readFileSync } from 'node:fs'
+import { dslToModel } from '@wikistead/authz'
+import { chooseModelDslPath } from '../openfga-model-path.js'
+import { readFileSync, existsSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
 
 const FINAL_EDITOR = 'define editor: [share_link, share_link with non_expired] or editor_member'
@@ -34,7 +37,19 @@ const FINAL_VIEWER_MEMBER = 'define viewer_member: [user, group#member] or edito
 const STEP_A_VIEWER_MEMBER = 'define viewer_member: [user, group#member] or editor or moderator'
 
 export function finalDsl(): string {
-  return readFileSync(new URL('../../../../infra/openfga/model.fga', import.meta.url), 'utf8')
+  // ADR-253 §3.2: the same two-candidate resolver `openfga-guard.ts` uses, not a hard-coded
+  // repository-only path — the old form worked only in a checkout and never in a deploy tree. This
+  // file sits one directory deeper (src/scripts, dist/scripts) than the guard's own module, so it
+  // goes up one level first to ask from the same depth.
+  const serverModuleDir = dirname(dirname(fileURLToPath(import.meta.url)))
+  const choice = chooseModelDslPath(serverModuleDir, existsSync)
+  if (choice.kind === 'none') {
+    throw new Error(
+      `migrate-editor-274: infra/openfga/model.fga is not present at either place this looks: ` +
+        `${choice.candidates.join(', ')} (ADR-253 §3.2).`,
+    )
+  }
+  return readFileSync(choice.path, 'utf8')
 }
 
 // Step A is DERIVED from the final DSL (one source — no second .fga file to drift). If the final
@@ -47,7 +62,7 @@ export function stepADsl(final: string): string {
 }
 
 export async function writeModel(fga: OpenFgaClient, dsl: string): Promise<string> {
-  const json = transformer.transformDSLToJSONObject(dsl)
+  const json = dslToModel(dsl)
   const res = await fga.writeAuthorizationModel(json as Parameters<OpenFgaClient['writeAuthorizationModel']>[0])
   return res.authorization_model_id!
 }

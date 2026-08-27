@@ -53,5 +53,11 @@ COPY --from=build /out /app
 # (src/migrations-dir.ts); the repository layout it looks at last is three levels above /app and
 # therefore outside the image entirely.
 COPY infra/db/migrations /app/migrations
+# ADR-253 §3.2: same shape, same reason — an operator holding only the image needs the authorization
+# model to self-resolve the OpenFGA store/model, and infra/ (where the DSL lives in a checkout) is
+# outside the image. Beside the package, where openfga-model-path.ts looks first; unlike the
+# migrations there is no environment-variable override, because an authorization model may not
+# differ from the one this code was built against.
+COPY infra/openfga/model.fga /app/model.fga
 WORKDIR /app
 CMD ["node", "dist/index.js"]

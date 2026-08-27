@@ -74,7 +74,6 @@
     "yjs": "^13.6.0"
   },
   "devDependencies": {
-    "@openfga/syntax-transformer": "^0.2.1",
     "@redocly/openapi-core": "^2.39.0",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^8.0.1",

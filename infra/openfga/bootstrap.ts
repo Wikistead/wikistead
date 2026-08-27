@@ -7,7 +7,9 @@ import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { OpenFgaClient } from '@openfga/sdk'
-import { transformer } from '@openfga/syntax-transformer'
+// #253: see infra/openfga/model-drift.ts's comment on this import — resolves through the root
+// node_modules under tsx, reading packages/authz's built dist.
+import { dslToModel } from '@wikistead/authz'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 
@@ -33,7 +35,7 @@ const dir = dirname(fileURLToPath(import.meta.url))
 
   // Apply the authorization model (DSL → JSON).
   const dsl = await readFile(join(dir, 'model.fga'), 'utf8')
-  const model = transformer.transformDSLToJSONObject(dsl)
+  const model = dslToModel(dsl)
 
   const fga = new OpenFgaClient({ apiUrl, storeId })
   const { authorization_model_id } = await fga.writeAuthorizationModel(model as any)

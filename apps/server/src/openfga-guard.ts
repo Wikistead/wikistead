@@ -33,26 +33,6 @@ export function assertProductionFgaPersistent(env: NodeJS.ProcessEnv = process.e
 // Scope: skipped in production (models are pinned by the deploy; infra/ does not ship)
 // and when model.fga is not present next to the running source. Escape hatch:
 // WIKISTEAD_SKIP_FGA_MODEL_GUARD=1.
-// Canonicalization is a copy of infra/openfga/model-drift.ts (KEEP IN SYNC — the server
-// cannot import across the infra/ boundary).
-function canonicalModel(v: unknown): unknown {
-  if (Array.isArray(v)) {
-    const arr = v.map(canonicalModel).filter((x) => x !== undefined);
-    return arr.length ? arr : undefined;
-  }
-  if (v && typeof v === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(v as Record<string, unknown>).sort()) {
-      if (k === 'id') continue;
-      const val = canonicalModel((v as Record<string, unknown>)[k]);
-      if (val === undefined || val === null) continue;
-      out[k] = val;
-    }
-    return Object.keys(out).length ? out : undefined;
-  }
-  if (v === '') return undefined;
-  return v ?? undefined;
-}
 
 const RECOVERY =
   'Recover: for dev, re-run `pnpm --filter @wikistead/server fga:bootstrap` and update ' +
@@ -69,11 +49,21 @@ export async function assertFgaModelFresh(
 
   const { readFile } = await import('node:fs/promises');
   const { existsSync } = await import('node:fs');
-  const { join, dirname } = await import('node:path');
+  const { dirname } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
-  // apps/server/{src,dist} → repo root is three levels up; packaged builds carry no infra/ → skip.
-  const modelPath = join(dirname(fileURLToPath(import.meta.url)), '../../..', 'infra/openfga/model.fga');
-  if (!existsSync(modelPath)) return;
+  const { chooseModelDslPath } = await import('./openfga-model-path.js');
+  // ADR-253 §3.2: two candidates, no operator override — an authorization model may not differ
+  // from the image's, unlike a migration's SQL. Neither present is a refusal, not a shrug: a boot
+  // that cannot read the model it is supposed to speak says so, in words a downstream throw does
+  // not carry.
+  const choice = chooseModelDslPath(dirname(fileURLToPath(import.meta.url)), existsSync);
+  if (choice.kind === 'none') {
+    throw new Error(
+      `FATAL: infra/openfga/model.fga is not present at either place this guard looks: ` +
+        `${choice.candidates.join(', ')} (#433 drift guard, ADR-253 §3.2). ${RECOVERY}`,
+    );
+  }
+  const modelPath = choice.path;
 
   const storeId = env.OPENFGA_STORE_ID;
   const modelId = env.OPENFGA_MODEL_ID;
@@ -84,11 +74,11 @@ export async function assertFgaModelFresh(
     );
   }
 
-  const [{ transformer }, { OpenFgaClient }] = await Promise.all([
-    import('@openfga/syntax-transformer'),
+  const [{ dslToModel, canonicalModel }, { OpenFgaClient }] = await Promise.all([
+    import('@wikistead/authz'),
     import('@openfga/sdk'),
   ]);
-  const wanted = transformer.transformDSLToJSONObject(await readFile(modelPath, 'utf8'));
+  const wanted = dslToModel(await readFile(modelPath, 'utf8'));
   const fga = new OpenFgaClient({ apiUrl: env.OPENFGA_API_URL ?? 'http://localhost:8080', storeId });
 
   // Retry a few times: `pnpm dev` often races `docker compose up`. After the retries any
