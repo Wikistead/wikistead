@@ -68,7 +68,7 @@ describe('ADR-253 §3.2 the model DSL ships with the image that needs it', () =>
   })
 
   // #849's other half: a source regex for "asks the resolver" can miss the real reader. Both named
-  // consumers (ADR-253 §3.2) are exercised for real elsewhere — `assertFgaModelFresh` by
+  // consumers (ADR-253 §3.2) are exercised for real elsewhere — `resolveFgaForBoot` by
   // fga-model-guard-433.test.ts, which runs the guard end to end — but that file never imports
   // `openfga-model-path.js` by name, so it would stay green if the guard silently grew its own path
   // again. This asserts the import survives, which the running suite then holds meaningful.
