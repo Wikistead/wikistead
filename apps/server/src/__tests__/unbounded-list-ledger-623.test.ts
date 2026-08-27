@@ -102,6 +102,18 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   // somebody else. They are not new routes and not new debt; they are debt that was being counted
   // as paid. Classified one at a time, by reading each handler.
   'auth.ts:/auth/login-options': { kind: 'bounded', why: '#623 (ruling 3-4): a tenant may HOLD at most MAX_OIDC_CONNECTIONS (20) — the bound is on existence, enforced at the POST with a 409, and the sign-in screen shows every one (created = shown, pinned in connection-cap-623). Paging was rejected: reorder saves the complete ordered id list, and "load more ways to sign in" is not a product.' },
+  // #947 / ADR-259 §3.3: the same underlying list as /auth/login-options above (resolveLoginConnections),
+  // bounded by the same MAX_OIDC_CONNECTIONS (20) cap — filtered to oidc/platform and paired with THIS
+  // member's own link rows (member_identities), which cannot exceed the connection count either (one
+  // link per connection, UNIQUE). The scan judges each helper on its own text and cannot see that the
+  // second helper's cardinality is bounded BY the first's, hence the explicit line.
+  'auth.ts:/me/connections': { kind: 'bounded', why: 'resolveLoginConnections is capped at MAX_OIDC_CONNECTIONS (20, connection-cap-623); listLinkedConnectionIds reads one member_sub\'s own rows in member_identities, at most one per connection that exists (UNIQUE (tenant_id, connection_id, external_subject) per member), so it cannot outgrow the connection list it is paired with.' },
+  // #947 / ADR-259 §3.3: never returns a list at all — a redirect target. It resolves the state's
+  // connectionId against resolveLoginConnections with `.find`, exactly like /auth/login and
+  // /auth/callback beside it (which the scan reads as bounded only by the accident of an unrelated
+  // `LIMIT 1` token in a same-file-inlined helper, firstEnabledTenantOidc — this route calls no such
+  // helper, so it gets no free pass from the same coincidence).
+  'auth.ts:/auth/link-callback': { kind: 'bounded', why: 'a redirect handler, never a JSON list — resolveLoginConnections is read once to `.find()` the single connection the state names (capped at MAX_OIDC_CONNECTIONS), and linkMemberIdentity writes at most one row. The response is a Location header regardless of connection count.' },
 
   // ── surfaced by slice 12's SECOND instrument fix: a bound marker that belonged to a scalar subquery,
   // or to a lower-case variable. Five routes, each read by hand. `GET /spaces` was one of them and
