@@ -52,7 +52,8 @@ Tags are plain strings (case-insensitive); no inline #tag notation exists.
 ## Inline
 - Highlight: \`==highlighted==\`
 - Footnotes: a reference \`[^1]\` and a definition line \`[^1]: the note\`.
-- Math: \`$$ … $$\` (block).
+- Math: \`$$ … $$\` (block) or \`$ … $\` (inline, e.g. \`$x^2$\`). A \`$\` next to a digit with no space
+  (e.g. "$5 and $6") is read as currency, not math, so ordinary prices are safe to write as-is.
 
 Prefer plain CommonMark/GFM where it suffices; reach for a macro only when you need its behavior. Never invent
 notation not listed here.`
