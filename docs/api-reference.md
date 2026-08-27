@@ -73,6 +73,15 @@ specific enough to name (a billing wall, and ADR-259's "this address already bel
 sign in that way, then add this provider from account settings"). Neither carries an API-key error body,
 since neither reaches a caller that would parse one.
 
+## Background processing
+
+Several routes queue work a background worker settles later (imports, webhook delivery, email, search
+indexing) rather than doing it inline — the initiating response (e.g. `202` from `POST
+/spaces/{spaceId}/import`) is not itself completion. This surface has no user-visible change from
+ADR-252 §6a (#810): that ticket lands the infrastructure a future tenant-removal grace period will read
+(`tenants.deleted_at`, unwritten today) so these workers can already exclude a workspace mid-removal once
+that state exists — nothing sets it yet, so no request's behavior differs today.
+
 `/admin/*` responses are shaped for the console screen that reads them and change without a version
 bump — e.g. `GET /admin/sso-exemptions` carries an `isAdmin` field so that screen can answer the one
 question its own refusal tells an operator to act on. Not part of the OpenAPI-covered surface above.
