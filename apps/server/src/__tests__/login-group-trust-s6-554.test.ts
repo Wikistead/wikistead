@@ -5,9 +5,14 @@
 //   - an UNTRUSTED connection's asserted groups never land: members.groups stays [], and no FGA
 //     group#member tuple appears (the R1 rule: the column, not only the tuples);
 //   - the TRUSTED connection (the backfilled legacy shape) keeps today's exact behavior;
-//   - the drop uses absent-claim semantics DELIBERATELY: an untrusted login after a trusted one
-//     empties the column the same way a trusted group-less login would — a recorded decision,
-//     not an accident.
+//   - #858 / #962, ADR-259 §3.8 SUPERSEDES this file's original third claim ("an untrusted login
+//     after a trusted one empties the column the same way a trusted group-less login would"). That
+//     was S6's wholesale-overwrite model: one column, last login wins. #962 replaced it with a
+//     UNION across every connection a member has signed in through (member_connection_groups) —
+//     the whole point being that a SECOND connection's login must NOT erase what a FIRST, still-
+//     trusted connection asserted. An untrusted connection's OWN slice still carries nothing (its
+//     claim is dropped before it ever reaches the upsert, same as always); what changed is that
+//     this no longer clears a DIFFERENT connection's contribution to the union.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -78,16 +83,17 @@ describe('#554 S6: per-connection group trust', () => {
     expect(await fgaGroupMember(), 'no group#member tuple synced').toBe(false)
   }, 60_000)
 
-  it('the trusted (legacy-shaped) connection keeps today\'s behavior; a later untrusted login empties by absent-claim semantics', async () => {
+  it('the trusted (legacy-shaped) connection keeps today\'s behavior; a later untrusted login through a DIFFERENT connection does not erase it (#962)', async () => {
     issuer.setSubject(MEMBER, { email: 'm@s6.test', groups: ['Engineering'] })
     await login(trusted)
     expect(await memberGroups()).toEqual(['Engineering'])
     expect(await fgaGroupMember(), 'trusted claim syncs to FGA').toBe(true)
 
-    // the recorded decision: dropped = the same as an IdP that sent no groups claim
+    // #962: `untrusted`'s own claim still drops (dropped before it ever reaches the upsert), but it
+    // must not erase what the TRUSTED connection's slice still asserts — the union, not the last write.
     await login(untrusted)
-    expect(await memberGroups(), 'untrusted login behaves like a group-less login').toEqual([])
-    expect(await fgaGroupMember(), 'the diff removes the previous groups').toBe(false)
+    expect(await memberGroups(), 'a different connection\'s untrusted login must not erase the trusted one\'s grant').toEqual(['Engineering'])
+    expect(await fgaGroupMember(), 'the trusted connection\'s slice still holds Engineering').toBe(true)
   }, 60_000)
 })
 
@@ -95,15 +101,18 @@ describe('#554 S6: per-connection group trust', () => {
 // defaults untrusted (deleting migration 093's DEFAULT/backfill must go RED, not stay green
 // because every fixture spells the flag out).
 describe('#554 S6 review N3: the default is untrusted', () => {
-  it('a connection that never mentions trust_groups drops the claim', async () => {
+  it('a connection that never mentions trust_groups drops ITS OWN claim (its slice stays empty)', async () => {
     const defaulted = randomUUID()
     await admin`INSERT INTO tenant_oidc (id, tenant_id, issuer, client_id, client_secret_enc, scopes, redirect_uri, enabled, sort)
       VALUES (${defaulted}, ${tenantId}, ${issuer.url}, ${CLIENT_ID}, NULL, 'openid email profile', ${`http://${HOST}/auth/callback`}, true, 9)`
     try {
-      issuer.setSubject(MEMBER, { email: 'm@s6.test', groups: ['Engineering'] })
+      // A DIFFERENT group, so this test can tell "did NOT persist through this connection" apart
+      // from "the union still holds Engineering from the trusted connection's earlier login (#962)".
+      issuer.setSubject(MEMBER, { email: 'm@s6.test', groups: ['Sales'] })
       await login(defaulted)
-      expect(await memberGroups(), 'DEFAULT false — no flag, no trust').toEqual([])
-      expect(await fgaGroupMember()).toBe(false)
+      expect(await memberGroups(), 'no flag = untrusted by default — Sales never lands, and Engineering (the trusted connection\'s standing grant, #962) survives').toEqual(['Engineering'])
+      expect(await fgaGroupMember(), 'Engineering — asserted by the still-trusted connection — remains synced').toBe(true)
+      expect((await fgaClient.check({ user: `user:${MEMBER}`, relation: 'member', object: `group:${groupFgaId(tenantId, 'Sales')}` })).allowed, 'Sales must never have landed').toBe(false)
     } finally {
       await admin`DELETE FROM tenant_oidc WHERE id = ${defaulted}`
     }

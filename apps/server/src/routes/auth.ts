@@ -306,7 +306,7 @@ export async function authPlugin(app: FastifyInstance) {
       // refusal, because the person has just authenticated to an IdP that itself asserts this address.
       let addressTaken = false
       try {
-        sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated' }) // existing member → session
+        sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated', connectionId }) // existing member → session
       } catch (e) {
         if ((e as { code?: string }).code === 'address_taken') {
           addressTaken = true
@@ -329,7 +329,7 @@ export async function authPlugin(app: FastifyInstance) {
       if (!sid && st.inviteToken) {
         try {
           if (await acceptInvite({ db, fga: app.fga }, tenant, st.inviteToken, claims, { subMintedInternally })) {
-            sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated' })
+            sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated', connectionId })
           }
         } catch (e) {
           // A seat-cap hit (402) is surfaced distinctly so the user learns the tenant is

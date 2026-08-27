@@ -9,6 +9,7 @@ import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
 import { validateIssuer, type DiscoveryFetch } from './tenant-oidc.js'
 import { assertClosingIsSafe, membersStrandedByConnectionDeletion } from '../auth/login-methods.js' // #822 / ADR-251: one question for every door-closing write
+import { revokeConnectionGroups } from '../auth/group-sync.js' // #858 / #962, ADR-259 §3.8: a trust_groups revocation must take effect now
 
 // #554 S4 / ADR-197 §1-3: the admin management surface for OIDC login connections. tenant#admin
 // gated, RLS-scoped. Scope note: SAML keeps its own surface (/admin/saml — one per tenant, EE) and
@@ -253,15 +254,24 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     let secretEnc = row.client_secret_enc
     if (b.clientSecret === null) secretEnc = null
     else if (b.clientSecret) secretEnc = encryptSecret(b.clientSecret)
-    await req.db.sql`
-      UPDATE tenant_oidc SET
-        issuer = ${issuer}, client_id = ${(b.clientId ?? row.client_id).trim()}, client_secret_enc = ${secretEnc},
-        scopes = ${(b.scopes ?? row.scopes).trim() || 'openid email profile'}, redirect_uri = ${(b.redirectUri ?? row.redirect_uri).trim()},
-        enabled = ${enabled}, label = ${labelRes.label},
-        trust_groups = ${b.trustGroups ?? row.trust_groups}, groups_claim = ${b.groupsClaim !== undefined ? (b.groupsClaim?.trim() || null) : row.groups_claim},
-        mcp_enabled = ${b.mcpEnabled ?? row.mcp_enabled},
-        updated_at = now()
-      WHERE id = ${row.id}`
+    await req.db.tx(async (tx) => {
+      await tx`
+        UPDATE tenant_oidc SET
+          issuer = ${issuer}, client_id = ${(b.clientId ?? row.client_id).trim()}, client_secret_enc = ${secretEnc},
+          scopes = ${(b.scopes ?? row.scopes).trim() || 'openid email profile'}, redirect_uri = ${(b.redirectUri ?? row.redirect_uri).trim()},
+          enabled = ${enabled}, label = ${labelRes.label},
+          trust_groups = ${b.trustGroups ?? row.trust_groups}, groups_claim = ${b.groupsClaim !== undefined ? (b.groupsClaim?.trim() || null) : row.groups_claim},
+          mcp_enabled = ${b.mcpEnabled ?? row.mcp_enabled},
+          updated_at = now()
+        WHERE id = ${row.id}`
+      // #858 / #962, ADR-259 §3.8: revoking trust must take effect NOW — a member this connection was
+      // asserting groups for does not keep them until their next login, which could be never (the
+      // connection they log in through daily might be a different, still-trusted one). Same
+      // transaction as the row update, so a later failure in this block leaves neither half applied.
+      if (b.trustGroups === false && row.trust_groups) {
+        await revokeConnectionGroups(tx, app.fga, req.tenant.id, row.id)
+      }
+    })
     emit({ type: 'tenant.oidc_updated', tenantId: req.tenant.id, actorId: req.user.sub, enabled })
     return reply.code(204).send()
   })
@@ -302,6 +312,10 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     // spans two tables plus two literals, which Postgres cannot express as one column's constraint), so
     // nothing but this transaction stops a link from outliving the connection it named.
     await req.db.tx(async (tx) => {
+      // #858 / #962, ADR-259 §3.8: a deleted connection stops asserting groups exactly like a
+      // trust_groups revocation does — same helper, same transaction, so a rollback of the delete
+      // rolls the group write back with it (no window where groups are gone but the connection is not).
+      await revokeConnectionGroups(tx, app.fga, req.tenant.id, row.id)
       await tx`DELETE FROM member_identities WHERE tenant_id = ${req.tenant.id} AND connection_id = ${row.id}`
       await tx`DELETE FROM tenant_oidc WHERE id = ${row.id}`
     })

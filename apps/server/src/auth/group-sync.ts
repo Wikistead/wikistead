@@ -104,3 +104,62 @@ export async function syncMemberGroups(
   await converge(added, 'write')
   await converge(removed, 'delete')
 }
+
+// #858 / #962, ADR-259 §3.8: `members.groups` used to be the LAST connection's claim, wholesale —
+// harmless with one way in, a silent demotion the moment a second connection's login (asserting
+// fewer or different groups) overwrote what the first one asserted. Each connection now keeps its
+// OWN slice in `member_connection_groups`, and `members.groups` is the UNION across every slice the
+// member holds — never smaller than any single connection's current claim.
+export async function unionForMember(sql: Sql, tenantId: string, sub: string): Promise<string[]> {
+  const rows = await sql<{ g: string }[]>`
+    SELECT DISTINCT unnest(groups) AS g FROM member_connection_groups
+    WHERE tenant_id = ${tenantId} AND member_sub = ${sub}`
+  return rows.map((r) => r.g).sort()
+}
+
+// Called from every OIDC/SAML/platform login upsert (never `local` — a password login carries no
+// claims to assert), inside the SAME transaction that writes `members.groups`, so a mid-write
+// failure leaves the slice and the mirror consistent with each other. `groups` is already
+// trust-gated to `[]` by the caller when the connection does not trust the claim (ADR-197 §6) —
+// storing an empty slice for an untrusted connection is correct: it contributes nothing to the
+// union without erasing what a DIFFERENT, trusted connection asserted.
+export async function recordConnectionGroups(
+  sql: Sql,
+  tenantId: string,
+  connectionId: string,
+  sub: string,
+  groups: readonly string[],
+): Promise<string[]> {
+  await sql`
+    INSERT INTO member_connection_groups (tenant_id, connection_id, member_sub, groups, updated_at)
+    VALUES (${tenantId}, ${connectionId}, ${sub}, ${sql.array([...groups])}, now())
+    ON CONFLICT (tenant_id, connection_id, member_sub) DO UPDATE SET groups = EXCLUDED.groups, updated_at = now()`
+  return unionForMember(sql, tenantId, sub)
+}
+
+// #858 / #962, ADR-259 §3.8: a connection's trust_groups flips true → false — the members it was
+// asserting groups FOR must stop carrying them immediately, not at their next login. Deletes this
+// connection's slice for every member that held one (so a later re-trust starts from nothing stale)
+// and mirrors each affected member's new (smaller) union into `members.groups` + FGA, in the same
+// shape a login does.
+export async function revokeConnectionGroups(
+  sql: Sql,
+  fga: OpenFgaClient,
+  tenantId: string,
+  connectionId: string,
+): Promise<string[]> {
+  const affected = await sql<{ member_sub: string }[]>`
+    SELECT member_sub FROM member_connection_groups WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId}`
+  if (affected.length === 0) return []
+  await sql`DELETE FROM member_connection_groups WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId}`
+  const subs = affected.map((r) => r.member_sub)
+  const prevRows = await sql<{ sub: string; groups: string[] }[]>`
+    SELECT sub, groups FROM members WHERE tenant_id = ${tenantId} AND sub = ANY(${subs})`
+  const prevBySub = new Map(prevRows.map((r) => [r.sub, r.groups]))
+  for (const sub of subs) {
+    const next = await unionForMember(sql, tenantId, sub)
+    await sql`UPDATE members SET groups = ${sql.array(next)}, updated_at = now() WHERE tenant_id = ${tenantId} AND sub = ${sub}`
+    await syncMemberGroups(fga, tenantId, sub, prevBySub.get(sub) ?? [], next)
+  }
+  return subs
+}

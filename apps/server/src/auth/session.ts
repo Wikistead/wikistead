@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto'
 import type IORedis from 'ioredis'
 import type { OpenFgaClient } from '@openfga/sdk'
 import type { TenantDb } from '../db/index.js'
-import { syncMemberGroups } from './group-sync.js'
+import { syncMemberGroups, recordConnectionGroups } from './group-sync.js'
 import { coerceGroups } from './oidc.js'
 import { enrollEligible } from './enroll-policy.js'
 import { getEnrollConfig } from './enroll-domains.js'
@@ -318,6 +318,13 @@ export async function establishMemberSession(
     // `local` — the unsatisfied end — so a path that forgets is answered conservatively rather than
     // handed a pass. All five product callers name it; a pin holds them to that.
     door?: SessionDoor
+    // #858 / #962, ADR-259 §3.8: the connection this login came through, in the domain
+    // `member_connection_groups.connection_id` shares with `member_identities` — a tenant_oidc id, a
+    // tenant_saml id, or the literal 'platform'. Absent for `localIdentity` (a password login carries
+    // no claims to assert) and for the narrow legacy-state window auth.ts documents (predates
+    // connection binding) — either way the caller falls back to writing `claims.groups` directly,
+    // today's behavior, rather than losing the group write entirely.
+    connectionId?: string
   },
 ): Promise<string> {
   // #554 / ADR-197 §5 (S0): the reserved internal sub space — an externally-asserted subject that
@@ -394,11 +401,29 @@ export async function establishMemberSession(
     : await deps.db.tx(async (tx) => {
     const [prevRow] = await tx<[{ groups: string[] }?]>`
       SELECT groups FROM members WHERE tenant_id = ${tenant.id} AND sub = ${claims.sub}`
-    const [r] = await tx<[{ role: string; groups: string[] }]>`
+    // The row must exist BEFORE `member_connection_groups` can hold a slice for it (that table's FK
+    // requires it) — this INSERT is that row, seeded with the raw claim as a placeholder wherever a
+    // union is about to replace it below. `groups` stays out of the ON CONFLICT SET on purpose: the
+    // union write is authoritative for an EXISTING member, and letting this statement also touch it
+    // would race the very thing it is establishing the row for.
+    let [r] = await tx<[{ role: string; groups: string[] }]>`
       INSERT INTO members (tenant_id, sub, email, display_name, picture_url, groups)
       VALUES (${tenant.id}, ${claims.sub}, ${claims.email ?? null}, ${claims.name ?? null}, ${claims.picture ?? null}, ${deps.db.sql.array(claims.groups ?? [])})
       ON CONFLICT (tenant_id, sub) DO UPDATE SET
-        email = EXCLUDED.email, display_name = EXCLUDED.display_name, picture_url = EXCLUDED.picture_url, groups = EXCLUDED.groups, updated_at = now()
+        email = EXCLUDED.email, display_name = EXCLUDED.display_name, picture_url = EXCLUDED.picture_url, updated_at = now()
+      RETURNING role, groups
+    `
+    // #858 / #962, ADR-259 §3.8: `members.groups` is not "what this login asserted" — it is the UNION
+    // of what every connection this member has signed in through currently asserts. Recording this
+    // connection's slice is what makes a second connection's login stop erasing the first's grant;
+    // falling back to the raw claim keeps the pre-#962 behavior for the narrow case (no connection
+    // bound) where there is nothing to union against.
+    const groups = opts?.connectionId
+      ? await recordConnectionGroups(tx, tenant.id, opts.connectionId, claims.sub, claims.groups ?? [])
+      : (claims.groups ?? [])
+    ;[r] = await tx<[{ role: string; groups: string[] }]>`
+      UPDATE members SET groups = ${deps.db.sql.array(groups)}, updated_at = now()
+      WHERE tenant_id = ${tenant.id} AND sub = ${claims.sub}
       RETURNING role, groups
     `
     await syncMemberGroups(deps.fga, tenant.id, claims.sub, prevRow?.groups ?? [], r.groups)
