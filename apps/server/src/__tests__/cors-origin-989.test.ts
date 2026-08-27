@@ -1,7 +1,8 @@
 // #989: CORS reflected WHATEVER Origin header a request carried (`{ origin: true }`) — every website on
-// the internet passed this app's own CORS check. Fixed to allow only the request's OWN (trustProxy-
-// resolved) host, both schemes. A request with no Origin header (server-to-server, curl, same-origin
-// navigation) is not a CORS request at all and is unaffected either way.
+// the internet passed this app's own CORS check. Fixed to allow only the request's OWN Host (read from
+// req.headers.host, NOT the trustProxy-resolved hostname — the review — so a forged
+// X-Forwarded-Host cannot widen the allow-set), both schemes. A request with no Origin header
+// (server-to-server, curl, same-origin navigation) is not a CORS request at all and is unaffected either way.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.js'
@@ -51,6 +52,24 @@ describe('#989: CORS allows only the request\'s own origin', () => {
     const res = await app.inject({ method: 'GET', url: '/healthz', headers: { host: 'dev.localhost' } })
     expect(res.statusCode).toBe(200)
     expect(res.headers['access-control-allow-origin']).toBeUndefined()
+  })
+
+  it('⚠️ #989 review: a forged X-Forwarded-Host does not widen the allow-set', async () => {
+    // trustProxy is on (deploy/k8s's ingress passes X-Forwarded-* through), so a naive `req.hostname`
+    // read would have preferred this header over the real Host — letting a request that never arrived
+    // as evil.example get evil.example's origin allowed. The boundary must read req.headers.host only.
+    const res = await app.inject({
+      method: 'GET', url: '/healthz',
+      headers: { host: 'dev.localhost', 'x-forwarded-host': 'evil.example', origin: 'https://evil.example' },
+    })
+    expect(res.headers['access-control-allow-origin'], 'X-Forwarded-Host widened the allow-set').toBeUndefined()
+  })
+
+  it('a Host header carrying a port still allows only that host (port stripped, matching resolveTenantFromHost)', async () => {
+    const res = await app.inject({
+      method: 'GET', url: '/healthz', headers: { host: 'dev.localhost:5173', origin: 'https://dev.localhost' },
+    })
+    expect(res.headers['access-control-allow-origin']).toBe('https://dev.localhost')
   })
 
   it('credentials are not enabled — no Access-Control-Allow-Credentials header', async () => {

@@ -216,11 +216,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // anything that does not depend on a cookie, and a future change that turns `credentials` on (or
   // loosens `sameSite`) would turn this from defense-in-depth into a live one at the same instant,
   // silently. The delegate form gets per-request access to `req` (the plain `origin` option does not),
-  // so the allowed origin is derived from THIS request's own (trustProxy-resolved) host — same-origin
-  // only, both schemes (dev serves over http). No current caller needs more: browser API-key
-  // integrations are not a documented cross-origin pattern (api-reference.md — the MCP connector and
-  // server-to-server calls are, and neither goes through a browser's CORS check at all), and guest
-  // host-embed (a real future cross-origin need) is unbuilt (#555, Blocked).
+  // so the allowed origin is derived from THIS request's own host — same-origin only, both schemes
+  // (dev serves over http). No current caller needs more: browser API-key integrations are not a
+  // documented cross-origin pattern (api-reference.md — the MCP connector and server-to-server calls
+  // are, and neither goes through a browser's CORS check at all), and guest host-embed (a real future
+  // cross-origin need) is unbuilt (#555, Blocked).
   // ⚠️ The bare-function form of the second `register()` argument is NOT `@fastify/cors`'s own
   // per-request delegate — Fastify/avvio intercepts a plain function there FIRST, as its own
   // "compute static options once from the parent instance" mechanism, and calls it with different
@@ -228,9 +228,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   // `FastifyRequest` was expected — @fastify/cors's own `typeof opts === 'function'` branch in its
   // source is consequently unreachable through `register()`). The `{ delegator }` object form is the
   // one that actually reaches @fastify/cors's per-request resolver with `req` in hand.
+  // #989 review: the host MUST come from `req.headers.host`, not `req.hostname` — under
+  // `trustProxy: true`, Fastify's `hostname`/`host` getters prefer an incoming `X-Forwarded-Host` over
+  // the real `Host` header, so a request carrying a forged XFH could widen the allow-set to a name the
+  // request never actually arrived as. `resolveTenantFromHost` below already reads `req.headers.host`
+  // for exactly this reason (tenant resolution has the same forgery concern) — this uses the identical
+  // input, split the same way, so the two boundaries never answer "what host is this?" differently.
   await app.register(cors, {
     delegator: (req: FastifyRequest, cb: (err: Error | null, opts: { origin: (origin: string | undefined, ocb: (err: Error | null, allow: boolean) => void) => void }) => void) => {
-      const host = req.hostname
+      const host = (req.headers.host ?? '').split(':')[0]
       const allowed = new Set([`https://${host}`, `http://${host}`])
       cb(null, {
         origin: (origin, ocb) => ocb(null, origin == null || allowed.has(origin)),
