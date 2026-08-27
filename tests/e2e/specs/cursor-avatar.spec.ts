@@ -1,5 +1,5 @@
 import { test, expect, type Browser } from "@playwright/test";
-import { enterEdit, createScratchPage, sleep } from "../helpers";
+import { enterEdit, createScratchPage, sleep, DEV_USER_SHOWN } from "../helpers";
 
 // #8 the presence showcase: a remote collaborator's caret carries an avatar + name
 // flag. This is an ADDITIVE overlay on yCollab — foundation.spec (ghost cursor) and
@@ -38,8 +38,12 @@ test("a remote caret shows an avatar + name flag", async ({ browser }: { browser
     // The name/initials live in CSS ::after/::before (content: attr(...)), NOT as text
     // nodes — so a presence flag never pollutes document-text/offset logic. Assert the
     // backing data-* attributes the pseudo-elements render from.
-    await expect(name).toHaveAttribute("data-name", "dev-user");
-    await expect(avatar).toHaveAttribute("data-initials", "DE");
+    // #904: the issuer's `name` claim no longer equals the subject, so these two lines can finally
+    // tell the display-name path from the subject path. While the claim WAS the subject they could
+    // not: with no name, SessionProvider falls back to `shortPrincipalId(sub)`, and shortening
+    // "dev-user" returns "dev-user" — so both assertions passed with the name resolution removed.
+    await expect(name).toHaveAttribute("data-name", DEV_USER_SHOWN);
+    await expect(avatar).toHaveAttribute("data-initials", "DU");
     expect(await avatar.locator("img").count()).toBe(0);
 
     // The overlay does NOT add a second yCollab caret — foundation's count invariant

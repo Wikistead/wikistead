@@ -26,6 +26,29 @@ export interface E2eIssuer {
   close(): Promise<void>;
 }
 
+/**
+ * The `name` claim this issuer puts in the id token, derived from the subject.
+ *
+ * ⚠️ It used to BE the subject (`name: s`), and that made a whole class of assertion impossible to
+ * write. The login upsert stores the claim as `members.display_name` (session.ts), every surface
+ * resolves a person through `display_name_override ?? display_name`, and the fallback when there is
+ * no name is `shortPrincipalId(sub)`. With the name equal to the subject, "the screen shows the
+ * display name" and "the screen shows the subject" produce the SAME string — so a spec asserting
+ * either one stays green with the name resolution removed entirely. `avatar-431.spec.ts` said so in
+ * a comment ("both are dev-user, so header and meta agreed BY ACCIDENT and the defect was
+ * invisible") and worked around it by writing a name into the row itself before each run.
+ *
+ * Derived rather than fixed because the subject varies per request (the `e2e_sub` cookie), so a
+ * constant would name every persona the same. `dev-user` → `Dev User`, which is also what
+ * `infra/db/seed.ts` writes for that row, so the seed and the login agree instead of overwriting
+ * each other.
+ */
+export function displayNameFor(sub: string): string {
+  return sub.split(/[-_]+/).filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 export async function startE2eIssuer(opts: { clientId: string; sub?: string; port?: number }): Promise<E2eIssuer> {
   const sub = opts.sub ?? "dev-user";
   const { publicKey, privateKey } = await generateKeyPair("RS256");
@@ -80,7 +103,7 @@ export async function startE2eIssuer(opts: { clientId: string; sub?: string; por
             res.writeHead(400, { "content-type": "application/json" }); return res.end('{"error":"invalid_grant"}');
           }
           const s = pending.sub;
-          const idToken = await new SignJWT({ nonce: pending.nonce, email: `${s}@e2e.test`, name: s })
+          const idToken = await new SignJWT({ nonce: pending.nonce, email: `${s}@e2e.test`, name: displayNameFor(s) })
             .setProtectedHeader({ alg: "RS256", kid: "e2e-key" })
             .setIssuedAt().setIssuer(issuerUrl).setAudience(opts.clientId).setSubject(s).setExpirationTime("5m")
             .sign(privateKey as KeyLike);

@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 // @ts-expect-error — repo-root JS helper, no types
 import { e2ePorts } from "../../scripts/stack-offset.mjs";
 import { memberLabel } from "../../apps/web/src/ui/principal-label"; // #902: the screen's own rule
+import { displayNameFor } from "./oidc-issuer"; // #904: the claim that becomes members.display_name
 import enLocale from "../../apps/web/src/i18n/locales/en.json" with { type: "json" };
 import jaLocale from "../../apps/web/src/i18n/locales/ja.json" with { type: "json" };
 
@@ -268,9 +269,16 @@ export function shownAs(sub: string, displayName: string | null): string {
   return memberLabel(sub, displayName, enLocale.spaceMembers.unknownMember);
 }
 
-// The seeded admin carries a display name (`infra/db/seed.ts`), so the screen shows that, never the
-// subject. Kept beside the helper so a spec never has to know which.
-export const DEV_USER_SHOWN = shownAs("dev-user", "Dev User");
+// What the screen shows for the seeded admin. The display name comes from the ISSUER's `name` claim,
+// not from the seed: the login upsert overwrites `members.display_name` with the claim on every
+// sign-in (session.ts), so the seed's value only survives until the first login. Asking the issuer's
+// own derivation is therefore asking the thing that actually decides.
+//
+// ⚠️ This is deliberately NOT `shownAs("dev-user", "dev-user")`, which is what the running system
+// produced before #904. That version passes while asserting nothing: the no-name fallback is
+// `shortPrincipalId(sub)`, and shortening `dev-user` returns `dev-user`, so the display-name path and
+// the subject path collapse to one string and the pin survives deleting `memberLabel` outright.
+export const DEV_USER_SHOWN = shownAs("dev-user", displayNameFor("dev-user"));
 
 // #891: the invite-by-email field's accessible name, asked from the shipped copy (not a spec's own
 // guess) for the same reason as DEV_USER_SHOWN above — four specs (admin-gate, avatar-isolation-372,
