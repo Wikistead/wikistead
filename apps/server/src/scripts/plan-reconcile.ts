@@ -9,7 +9,7 @@
 // gates); the existing-overage freeze (deactivation) is a separate enforcement step (ADR-064).
 import postgres from 'postgres'
 import { emit } from '@wikistead/events'
-import { resolveEntitlements } from '@wikistead/entitlements'
+import { resolveEntitlements, isManagedDeployment } from '@wikistead/entitlements'
 import { PLAN_DOWNGRADE_GRACE_S } from '../plan.js'
 import { revokeAllCustomDomains } from '../routes/custom-domains.js'
 
@@ -54,7 +54,7 @@ async function revokeCustomDomainsIfLost(sql: postgres.Sql, tenantId: string, ne
 export async function reconcilePlans(
   sql: postgres.Sql,
   opts: { graceSeconds?: number } = {},
-): Promise<{ committed: number; domainsRevoked: string[] }> {
+): Promise<{ committed: number; domainsRevoked: string[]; resolverRegistered: boolean }> {
   const grace = opts.graceSeconds ?? PLAN_DOWNGRADE_GRACE_S
   const due = await sql<{ id: string; plan: string; pending_plan: string }[]>`
     SELECT id, plan, pending_plan FROM tenants
@@ -79,14 +79,25 @@ export async function reconcilePlans(
       committed++
     }
   }
-  return { committed, domainsRevoked }
+  // #928 ruling (2) / #993: forcing (registering a Cloud resolver here) is deferred to when billing
+  // actually runs in production — but this batch must not run silent about it. `isManagedDeployment()`
+  // is false for both a genuine self-host build (correct, UNLIMITED is the product) AND a Cloud
+  // deployment whose entrypoint forgot to call registerCloudEntitlements (customDomain/maxSeats
+  // silently resolve to UNLIMITED/Infinity, so this batch's seat-freeze and domain-revocation never
+  // fire) — the two are indistinguishable from in here, so the caller reports which one it saw rather
+  // than guessing. A self-hosted operator reading it learns nothing new; whoever owns Cloud's boot
+  // learns immediately if this ever regresses.
+  return { committed, domainsRevoked, resolverRegistered: isManagedDeployment() }
 }
 
 // CLI entry: run only when invoked directly (not when imported by a test).
 if (import.meta.url === `file://${process.argv[1]}`) {
   const adminPool = postgres(process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL!)
   try {
-    const { committed, domainsRevoked } = await reconcilePlans(adminPool)
+    const { committed, domainsRevoked, resolverRegistered } = await reconcilePlans(adminPool)
+    if (!resolverRegistered) {
+      console.log('plan:reconcile — no entitlements resolver registered: this run enforced NOTHING (maxSeats/customDomain resolve UNLIMITED). Expected for self-host; if this is Cloud, registerCloudEntitlements was not called at boot.')
+    }
     console.log(`plan:reconcile — committed ${committed} elapsed downgrade(s)`)
     if (domainsRevoked.length > 0) {
       // Printed, never swallowed: until #235 automates it, deleting each domain's Certificate is a
