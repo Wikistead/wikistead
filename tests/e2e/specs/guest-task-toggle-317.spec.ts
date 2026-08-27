@@ -107,9 +107,6 @@ test("#317 guest VIEW link: checkbox stays disabled AND the server rejects a dir
 });
 
 test("#317 guest × Reading (edit link): the checkbox flips the draft (#314 parity for guests)", async ({ browser }) => {
-  // #891/#941: isolated from the merge gate — intermittently red only when run alongside the other
-  // 19 gated specs (stable alone). Remove this skip once #941 lands.
-  test.skip(true, "#941: isolated — flaky only inside the full gate run");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPageWithTask(member, "guest-cb-reading");
@@ -118,17 +115,22 @@ test("#317 guest × Reading (edit link): the checkbox flips the draft (#314 pari
   const guest = await (await browser.newContext()).newPage();
   await guest.goto(url);
   await guest.waitForSelector("[data-pane=preview] .cm-content");
-  await sleep(800);
+  // #941: fixed sleeps here (800/600/300ms) assumed the shared stack always keeps up. Inside the
+  // 20-spec merge gate it does not — the checkbox widget renders from a collab sync that shares the
+  // stack with 19 other specs' fixtures, and a flat delay that is generous alone is not generous
+  // under that load. Each step below waits for the box ITSELF (Playwright's own retrying assert,
+  // default 5s, raised here since collab sync — not just paint — is what it is waiting through)
+  // rather than for a clock, both on first render and again after each mode switch (the box is a
+  // different render each time: edit view, then Reading).
+  await expect(guest.getByTestId("task-checkbox")).toBeVisible({ timeout: 10_000 });
   await guest.click("[data-testid=edit-toggle]");
   await guest.waitForSelector("[data-pane=preview] .cm-content");
-  await sleep(600); // collab sync
+  await expect(guest.getByTestId("task-checkbox")).toBeVisible({ timeout: 10_000 });
   await guest.getByTestId("displaymode-reading").click();
-  await sleep(300);
 
   const box = guest.getByTestId("task-checkbox");
-  await expect(box).toBeVisible();
+  await expect(box).toBeVisible({ timeout: 10_000 });
   await expect(box).toBeEnabled(); // #314: Reading blocks prose edits, not task ticks
   await box.click();
-  await sleep(300);
   await expect(box).toBeChecked(); // the draft flipped (a normal Y.Text edit over guest collab)
 });
