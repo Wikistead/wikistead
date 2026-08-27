@@ -137,12 +137,12 @@ export const ENV_DOCS = {
   OPENFGA_STORE_ID: {
     group: 'Authorization',
     default: 'unset (found by name, or created on first boot)',
-    what: 'OpenFGA store holding this deployment\'s tuples. Unset, the server finds a store named `wikistead` or creates one on the first boot that has never had one (ADR-253) — a chart or compose file need not carry this. Set it to bind explicitly instead: no listing happens, and a wrong or missing id refuses the boot rather than authorizing against nothing.',
+    what: 'OpenFGA store holding this deployment\'s tuples. Unset, the server finds a store named `wikistead` or creates one on the first boot that has never had one — a chart or compose file need not carry this. Set it to bind explicitly instead: no listing happens, and a wrong or missing id refuses the boot rather than authorizing against nothing.',
   },
   OPENFGA_MODEL_ID: {
     group: 'Authorization',
     default: 'unset (reconciled to the image\'s model.fga on every boot)',
-    what: 'ADR-253: pins the STORE, not a frozen model — the model is always brought up to the DSL the running image carries, so a deployment cannot silently keep speaking a shape that image no longer does. Setting this records what you expected and the boot reports it if a later image adopts something else; it does not stop that adoption.',
+    what: 'Pins the STORE, not a frozen model — the model is always brought up to the DSL the running image carries, so a deployment cannot silently keep speaking a shape that image no longer does. Setting this records what you expected and the boot reports it if a later image adopts something else; it does not stop that adoption.',
   },
   OPENFGA_DATASTORE_ENGINE: {
     group: 'Authorization',
