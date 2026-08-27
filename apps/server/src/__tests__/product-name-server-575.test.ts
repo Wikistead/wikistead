@@ -34,6 +34,7 @@ const ALLOWED: Record<string, string> = {
   'routes/mcp.ts': 'serverInfo.name: the MCP client keys its config off this identifier',
   'auth/dns-challenge.ts': '_wikistead-challenge: a DNS record name the operator publishes',
   'deploy/cert-manifest.ts': 'wikistead.io/* : kubernetes label keys',
+  'openfga-resolve.ts': "STORE_NAME = 'wikistead': the OpenFGA store's own name, an identifier every self-resolving deployment's tooling already creates it under (ADR-253 §3.3), not a display name",
   'email/index.ts': 'noreply@wikistead.local: the fallback mail DOMAIN, not a display name',
 }
 const ALLOWED_EE: Record<string, string> = {
