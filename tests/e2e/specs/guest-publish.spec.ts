@@ -122,3 +122,62 @@ test("guest EDIT link can publish", async ({ browser }: { browser: Browser }) =>
   }, { api: API, pageId });
   expect(publishedMd ?? "").toContain("PUBLISHEDBYGUEST");
 });
+
+// #917: PageStatus's "unpublished" badge and Editor's dirtySignal, member-surface parity for guests.
+test("#917: an EDIT-link guest sees the unpublished badge while a draft diverges, and it clears on publish", async ({ browser }: { browser: Browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const pageId = await newPage(member, "guest unpublished badge page");
+  // published once already, so the badge's FIRST appearance is unambiguously due to the guest's own
+  // edit diverging from it — not "a brand new page has nothing published yet".
+  await member.goto(`/p/${pageId}`);
+  await member.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(300);
+  await enterEdit(member);
+  await member.click("[data-pane=preview] .cm-content");
+  await member.keyboard.type("ALREADYPUBLISHED917");
+  await sleep(2800);
+  await member.evaluate(async ({ api, pageId }) => {
+    await fetch(`${api}/pages/${pageId}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+  }, { api: API, pageId });
+
+  const url = await shareUrl(member, pageId, "edit");
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(url);
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(800);
+  // nothing diverges yet — the badge is absent, not merely invisible-but-present
+  await expect(guest.getByTestId("unpublished-badge")).toHaveCount(0);
+
+  await enterEdit(guest);
+  await guest.click("[data-pane=preview] .cm-content");
+  await guest.keyboard.type(" GUESTDIVERGES917");
+  // #917's own poll (1500ms, member-surface cadence) — no fixed-interval assumption beyond that; this
+  // waits for the badge itself rather than a guessed settle time.
+  await expect(guest.getByTestId("unpublished-badge")).toBeVisible({ timeout: 8_000 });
+
+  await guest.click("[data-testid=publish-page]");
+  await expect(guest.getByTestId("unpublished-badge")).toHaveCount(0, { timeout: 8_000 });
+});
+
+test("#917: a VIEW-link guest never sees the unpublished badge (member-only surface)", async ({ browser }: { browser: Browser }) => {
+  const member = await (await browser.newContext()).newPage();
+  await openDemo(member);
+  const pageId = await newPage(member, "guest view no badge page");
+  await member.goto(`/p/${pageId}`);
+  await member.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(300);
+  await enterEdit(member);
+  await member.click("[data-pane=preview] .cm-content");
+  await member.keyboard.type("VIEWERSEESNOTHING917");
+  await sleep(2800);
+  // NOT published — this member-side draft is exactly the kind of divergence the badge exists for,
+  // and a view guest must not be told about it in any form (they cannot act on it either way).
+  const url = await shareUrl(member, pageId, "view");
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto(url);
+  await guest.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(800);
+  await expect(guest.getByTestId("unpublished-badge")).toHaveCount(0);
+  await expect(guest.getByTestId("draft-badge")).toHaveCount(0);
+});

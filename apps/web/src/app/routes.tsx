@@ -1272,6 +1272,10 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   // picture) so multiple guests on a doc are still visually distinguishable (#8).
   const [guest] = useState(() => ({ name: t("collab.guest"), color: colorFromString(`guest-${Math.random()}`), picture: null }));
   const [publishedMd, setPublishedMd] = useState<string | null>(null);
+  // #917: the same draft-vs-published fact the member surface reads from `usePublished` — the server's
+  // `getPublished` already computes and returns it for a view-capable guest too (`guest: 'view'`), it was
+  // just never captured into guest state.
+  const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(false);
   // #457 has the FIRST /published fetch settled? Until it has, the body area is "loading", not
   // "empty" — the same distinction the member surface draws. Set on BOTH resolve and deny/expire (a
   // denied guest sees the empty view, not an eternal skeleton).
@@ -1324,12 +1328,22 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   const effectiveVim = vim && !vimForcedOff;
 
   const reloadPublished = useCallback(() => {
-    apiFetch<{ title?: string; isHome?: boolean; publishedMd: string | null; canComment?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
-      .then((r) => { setPublishedMd(r?.publishedMd ?? null); setPageTitle(r?.title ?? ""); setIsHome(!!r?.isHome); setCanComment(!!r?.canComment); })
+    apiFetch<{ title?: string; isHome?: boolean; publishedMd: string | null; canComment?: boolean; hasUnpublishedChanges?: boolean }>(`/pages/${encodeURIComponent(pageId)}/published`, token)
+      .then((r) => { setPublishedMd(r?.publishedMd ?? null); setPageTitle(r?.title ?? ""); setIsHome(!!r?.isHome); setCanComment(!!r?.canComment); setHasUnpublishedChanges(!!r?.hasUnpublishedChanges); })
       .catch(() => { /* denied/expired → empty view */ })
       .finally(() => setPublishedLoaded(true));
   }, [pageId, token]);
   useEffect(() => { reloadPublished(); }, [reloadPublished]);
+  // #917: the member surface's `usePublished` polls every 1500ms so the badge catches an edit without a
+  // reload (routes.tsx's own note on that: presence-safe, a SERVER poll, never an editor signal — driving
+  // this off `dirtySignal` instead would regress the presence e2e, memory editor-dirty-presence-constraint).
+  // The guest surface has no such poll at all; only while actually editing does re-checking make sense —
+  // a view-only guest, or one who isn't typing, has no draft to diverge.
+  useEffect(() => {
+    if (!editing || !canEdit) return;
+    const id = setInterval(reloadPublished, 1500);
+    return () => clearInterval(id);
+  }, [editing, canEdit, reloadPublished]);
   // #464 / ADR-175: a view-guest's genuine READ is signalled once per page open (view mode) — the server
   // view-gates it (guest tokens carry `view`) and aggregates it (guests are never named in the roster).
   const viewSignaledRef = useRef<string | null>(null);
@@ -1407,6 +1421,11 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   const onLiveness = useCallback((s: Liveness) => setLiveness(s), []);
   const livenessRef = useRef(liveness);
   livenessRef.current = liveness;
+  // #917: member-surface parity (routes.tsx's own `dirtySig`) — an external store the Editor's DOM
+  // `input` listener flips optimistically, read by `PageActions`/`PageControlsMobile`'s `useDirty`.
+  // `GuestPageContent` remounts fresh per page (`key={openId}` at its GuestSpace call site, or a whole
+  // new mount per page-link route), so unlike the member surface there is no page-switch reset to wire.
+  const dirtySig = useRef(createDirtySignal()).current;
 
   // #911 user ruling: `:w` saves and stays; `:wq` and the toolbar button save and return to view.
   const onPublish = useCallback(async (opts?: { stay?: boolean }) => {
@@ -1418,13 +1437,14 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
     try {
       await apiFetch(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" });
       notify.success(t("toast.published"));
+      dirtySig.set(false); // #917: member-surface parity — a fresh publish has nothing left to diverge
       if (!opts?.stay) setEditing(false); // publish = done → back to the rendered view
     } catch {
       notify.error(t("toast.publishFailed"));
     }
     setPublishing(false);
     reloadPublished();
-  }, [pageId, token, t, reloadPublished]);
+  }, [pageId, token, t, reloadPublished, dirtySig]);
   // #448: vim :w/:wq/:q parity with the member surface — publish must be fire-and-forget for the
   // Editor's () => void contract; :q exits edit mode without publishing.
   const publishForEditor = useCallback(() => { void onPublish(); }, [onPublish]);
@@ -1437,6 +1457,11 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   const [taskProgress, setTaskProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const onTaskProgress = useCallback((p: { done: number; total: number }) => setTaskProgress((prev) => (prev.done === p.done && prev.total === p.total ? prev : p)), []);
 
+  // #917: guests never see "draft" — that state is "created but never published", a member-only concept
+  // (a guest's edit link always points at an already-published page, or one a guest just created and
+  // immediately holds edit access to, which is "unpublished" the instant it diverges, not "draft").
+  const publishState: "unpublished" | null = canEdit && hasUnpublishedChanges ? "unpublished" : null;
+
   const controls: PageControlsProps = {
     canEdit,
     editing,
@@ -1448,6 +1473,8 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
     displayMode,
     onCycleDisplayMode: cycleDisplayMode,
     onSetDisplayMode: setDisplayMode,
+    // #917: the badge member parity — see `publishState` above.
+    publishState,
     canPublish: true,
     onPublish: canEdit ? publishForEditor : undefined,
     publishing,
@@ -1457,6 +1484,8 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
     onToggleComments: () => setCommentsOpen((o) => !o),
     tocOpen: tocOn,
     onToggleToc: () => setTocOn(!tocOn),
+    // #917: member-surface parity — see `dirtySig` above.
+    dirtySignal: dirtySig,
   };
   return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -1515,7 +1544,7 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
               canEdit={canEdit}
             />
             <UnsavedBanner reason={liveness.reason} />
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onPublishStay={canEdit ? publishForEditorStay : undefined} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onPublishStay={canEdit ? publishForEditorStay : undefined} onToggleTask={canEdit ? onToggleTask : undefined} dirtySignal={dirtySig} />
             {/* #505 the paginating print surface (guest CM body is virtualised too).
                 #207: a guest holds a share token, which the diagram route accepts, so the picture prints
                 here as well. (The public route below has no token and passes none — its plantuml degrades
