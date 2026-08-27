@@ -42,6 +42,7 @@
     "tenant:promote": "tsx --env-file=../../.env src/scripts/promote-tenant.ts",
     "private:backfill": "tsx --env-file=../../.env src/scripts/private-sharelink-backfill.ts",
     "viewer-member:backfill": "tsx --env-file=../../.env src/scripts/viewer-member-backfill.ts",
+    "openfga:forget-store-binding": "tsx --env-file=../../.env src/scripts/forget-openfga-store-binding.ts",
     "test": "tsx ../../infra/openfga/ensure-test-model.ts && vitest run",
     "fga:migrate-editor": "tsx --env-file=../../.env src/scripts/migrate-editor-274.ts"
   },
