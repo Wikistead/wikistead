@@ -497,20 +497,71 @@ export async function assertNotLastWayIn(
 // `wlocal_` (the local-invite mint) asserts neither: it names no connection, and its only entrance is
 // the credential already excluded above — so it falls through both checks to `false` without a special
 // case, the same way a deleted connection's `wc…_` prefix does.
+//
+// #960 reuses this same predicate for the OTHER door-closing write that can strand a member — deleting
+// a connection takes its links and its mint-derived entrance with it — via `excludeConnectionId`: the
+// counterfactual "as if this connection (and any link through it) were already gone", asked BEFORE it
+// actually is. Reused rather than copied, because a second copy of this question is exactly the shape
+// #822 keeps repeating (three guards, one question, answered differently).
 export async function memberHasAnotherWayIn(
   db: TenantDb,
   tenant: { id: string; plan: string },
   sub: string,
-  env?: string | undefined,
+  opts: { env?: string | undefined; excludeConnectionId?: string } = {},
 ): Promise<boolean> {
   const [link] = await db.sql<{ id: string }[]>`
-    SELECT id FROM member_identities WHERE tenant_id = ${tenant.id} AND member_sub = ${sub} LIMIT 1`
+    SELECT id FROM member_identities WHERE tenant_id = ${tenant.id} AND member_sub = ${sub}
+      ${opts.excludeConnectionId ? db.sql`AND connection_id <> ${opts.excludeConnectionId}` : db.sql``}
+    LIMIT 1`
   if (link) return true
 
-  const effective = await resolveLoginConnections(db, tenant, env)
+  const effective = (await resolveLoginConnections(db, tenant, opts.env))
+    .filter((c) => c.id !== opts.excludeConnectionId)
   const prefix = RESERVED_SUB_RE.exec(sub)?.[0] ?? null
   if (prefix) return effective.some((c) => c.subjectPrefix === prefix)
   return effective.some((c) => c.subjectPrefix === null && (c.kind === 'oidc' || c.kind === 'platform'))
+}
+
+// #858 / #960, ADR-259 §3.5's second half: which members a connection's deletion would touch at all —
+// the candidate set `memberHasAnotherWayIn`'s counterfactual is checked against. Two ways a member is
+// touched: a stored LINK through this connection (ADR-259 §3.1), or a sub whose prefix this connection
+// mints (the mint-derived entrance §3.9 reads). A member touched neither way is not this connection's
+// business, so the caller never has to run the (per-member) counterfactual query against everybody.
+export async function membersReachableThroughConnection(
+  db: TenantDb,
+  tenant: { id: string; plan: string },
+  connectionId: string,
+): Promise<string[]> {
+  const [conn] = await db.sql<{ subject_prefix: string | null }[]>`
+    SELECT subject_prefix FROM tenant_oidc WHERE id = ${connectionId}`
+  const linked = await db.sql<{ member_sub: string }[]>`
+    SELECT DISTINCT member_sub FROM member_identities WHERE tenant_id = ${tenant.id} AND connection_id = ${connectionId}`
+  const minted = conn?.subject_prefix
+    ? await db.sql<{ sub: string }[]>`
+        SELECT sub FROM members WHERE tenant_id = ${tenant.id} AND sub LIKE ${conn.subject_prefix + '%'}`
+    : []
+  return [...new Set([...linked.map((r) => r.member_sub), ...minted.map((r) => r.sub)])]
+}
+
+// #858 / #960, ADR-259 §3.5: "a member left with no link and no credential has just lost their last
+// way in" — asked BEFORE the connection is deleted, in ADR-251's vocabulary (`confirm_required`, not a
+// hard refusal, because a rule that always refuses gives an SSO-only tenant a connection it can never
+// remove). Returns the subs that would be stranded; an empty array means the delete needs no confirm.
+export async function membersStrandedByConnectionDeletion(
+  db: TenantDb,
+  tenant: { id: string; plan: string },
+  connectionId: string,
+  env?: string | undefined,
+): Promise<string[]> {
+  const candidates = await membersReachableThroughConnection(db, tenant, connectionId)
+  const stranded: string[] = []
+  for (const sub of candidates) {
+    const [cred] = await db.sql<{ member_sub: string }[]>`
+      SELECT member_sub FROM local_credentials WHERE tenant_id = ${tenant.id} AND member_sub = ${sub}`
+    if (cred) continue
+    if (!(await memberHasAnotherWayIn(db, tenant, sub, { env, excludeConnectionId: connectionId }))) stranded.push(sub)
+  }
+  return stranded
 }
 
 // #537's kind-level lockout guard is RETIRED (#822 / ADR-251 §3.4 — named here so the seam does not

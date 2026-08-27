@@ -8,7 +8,7 @@ import { emit } from '@wikistead/events'
 import { encryptSecret } from '../auth/secret-crypto.js'
 import { safeFetchJson } from '../safe-fetch.js'
 import { validateIssuer, type DiscoveryFetch } from './tenant-oidc.js'
-import { assertClosingIsSafe } from '../auth/login-methods.js' // #822 / ADR-251: one question for every door-closing write
+import { assertClosingIsSafe, membersStrandedByConnectionDeletion } from '../auth/login-methods.js' // #822 / ADR-251: one question for every door-closing write
 
 // #554 S4 / ADR-197 §1-3: the admin management surface for OIDC login connections. tenant#admin
 // gated, RLS-scoped. Scope note: SAML keeps its own surface (/admin/saml — one per tenant, EE) and
@@ -274,12 +274,36 @@ export async function adminConnectionsPlugin(app: FastifyInstance, opts?: { disc
     if (!row) throw Object.assign(new Error('not found'), { statusCode: 404 })
     // ⚠️ DELETE takes no body, so the confirmation rides the query string. Without a receptacle here
     // the console could no longer delete a connection at all once the answer became confirm_required.
-    await assertClosingIsSafe(req.db, req.tenant, { id: row.id, live: row.enabled }, { confirm: req.query?.confirm === '1' })
+    const confirmed = req.query?.confirm === '1'
+    await assertClosingIsSafe(req.db, req.tenant, { id: row.id, live: row.enabled }, { confirm: confirmed })
+    // #858 / #960, ADR-259 §3.5: a SECOND, per-member question — `assertClosingIsSafe` just asked
+    // whether the WORKSPACE keeps a way in; this one asks whether any INDIVIDUAL member, reachable only
+    // through this connection (a stored link, or a sub this connection mints), is about to lose theirs.
+    // Same vocabulary (`confirm_required`), different question — so a confirmed delete of a connection
+    // nobody's last door depends on still passes through here with nothing to name.
+    const stranded = await membersStrandedByConnectionDeletion(req.db, req.tenant, row.id)
+    if (stranded.length > 0 && !confirmed) {
+      // #596's lesson, repeated: Fastify's default error shape drops custom props — send
+      // `strandedSubs` explicitly, or the console has a code to branch on but nobody to name.
+      return reply.code(409).send({
+        error: 'Conflict',
+        message: 'this would strand a member with no other way in. Confirm to continue.',
+        code: 'confirm_required',
+        strandedSubs: stranded,
+      })
+    }
     // Members the connection minted keep their rows and grants (FGA is untouched); only this way
     // IN dies. Recovery for an accidental delete is re-creating the connection — but the minted
     // subject_prefix derives from the NEW id, so their sign-in identities do NOT reconnect: stated,
     // and the UI warns before the delete.
-    await req.db.sql`DELETE FROM tenant_oidc WHERE id = ${row.id}`
+    //
+    // ATOMIC with the connection row (§3.5): `connection_id` carries no foreign key (§3.9 — its domain
+    // spans two tables plus two literals, which Postgres cannot express as one column's constraint), so
+    // nothing but this transaction stops a link from outliving the connection it named.
+    await req.db.tx(async (tx) => {
+      await tx`DELETE FROM member_identities WHERE tenant_id = ${req.tenant.id} AND connection_id = ${row.id}`
+      await tx`DELETE FROM tenant_oidc WHERE id = ${row.id}`
+    })
     emit({ type: 'tenant.oidc_updated', tenantId: req.tenant.id, actorId: req.user.sub, enabled: false })
     return reply.code(204).send()
   })
