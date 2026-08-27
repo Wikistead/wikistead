@@ -54,8 +54,9 @@ describe("#873 a left-bar band names its own colour", () => {
   const sites = leftBarSites();
 
   it("finds the bands at all — a scan of nothing would satisfy every assertion below", () => {
-    // Measured today: seven. The number is asserted loosely on purpose (bands come and go), but zero
-    // and one are the states where this file would be reporting on a tree it never read.
+    // Measured today: six (#978 retired UnsavedBanner's, the seventh, in favour of a toast). The
+    // number is asserted loosely on purpose (bands come and go), but zero and one are the states
+    // where this file would be reporting on a tree it never read.
     expect(sites.length, "no wks-left-bar element found — the walk is measuring nothing").toBeGreaterThan(4);
   });
 
@@ -73,10 +74,4 @@ describe("#873 a left-bar band names its own colour", () => {
       ).toBe(true);
     },
   );
-
-  it("the band that says edits are not arriving is the danger colour, not the accent", () => {
-    const banner = sites.find((s) => s.where.startsWith("editor/UnsavedBanner"));
-    expect(banner, "the not-saving banner is gone — this assertion is about a component that must exist").toBeDefined();
-    expect(banner!.className).toContain("[--wks-left-bar-color:var(--danger)]");
-  });
 });

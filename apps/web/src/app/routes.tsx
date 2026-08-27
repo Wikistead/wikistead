@@ -41,7 +41,7 @@ import { SetPasswordForm } from "./SetPasswordForm";
 
 
 import { Editor, type AnchorGetter } from "../editor/Editor";
-import { UnsavedBanner } from "../editor/UnsavedBanner";
+import { useNotLiveToast } from "../editor/useNotLiveToast";
 import type { Liveness } from "../editor/collab";
 import { makeGuestSession, type GuestSession } from "../session/guest-session";
 import { isServerFault, isServerFaultError, HttpStatusError, loadVerdict } from "./serverFault"; // #886 / #681: one place decides "the server failed"
@@ -608,6 +608,8 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // cannot close over the state value without going stale.
   const livenessRef = useRef(liveness);
   livenessRef.current = liveness;
+  // #978 / ADR-261: the band that used to sit above the surface is now this dismissible toast.
+  useNotLiveToast(`notlive:member:${pageId}`, liveness.reason);
 
   // #911 user ruling: `:w` saves and stays in the edit surface; `:wq` and the toolbar Publish button
   // save and return to the rendered view. One publish path (still fire-and-forget, still #448-stable),
@@ -618,7 +620,10 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     // half the report did not cover. A member's socket dies the same way; the reason the demo found
     // it as a guest is that only a guest's credential expires on a timer. Publishing here would
     // snapshot a draft missing everything typed since, and say "published".
-    if (!livenessRef.current.live) return;
+    // #978: this return used to be silent — the band above was the only word of it, and once
+    // the band becomes a dismissible toast a reader who already dismissed it would click Publish
+    // into total silence. Pair the withholding with its own toast so the click is never mute.
+    if (!livenessRef.current.live) { notify.error(t("toast.publishBlockedNotLive")); return; }
     publishMutate(undefined, {
       onSuccess: () => { dirtySig.set(false); if (!opts?.stay) setEditing(false); notify.success(t("toast.published")); },
       onError: () => notify.error(t("toast.publishFailed")),
@@ -911,7 +916,6 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               empty={!editing && !pageQ.isLoading && !publishedQ.isLoading && !(published?.publishedMd ?? "").trim()}
               canEdit={canEdit}
             />
-            <UnsavedBanner reason={liveness.reason} />
             <Editor key={docName} docName={docName} pageId={pageId} token={getCollabToken} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onPublishStay={publishPageStay} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (the live CM body is virtualised → prints one screenful).
                 #207: the SAME diagram seam the export gets — without it the browser's own File → Print drew
@@ -1421,6 +1425,8 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   const onLiveness = useCallback((s: Liveness) => setLiveness(s), []);
   const livenessRef = useRef(liveness);
   livenessRef.current = liveness;
+  // #978 / ADR-261: the band that used to sit above the surface is now this dismissible toast.
+  useNotLiveToast(`notlive:guest:${pageId}`, liveness.reason);
   // #917: member-surface parity (routes.tsx's own `dirtySig`) — an external store the Editor's DOM
   // `input` listener flips optimistically, read by `PageActions`/`PageControlsMobile`'s `useDirty`.
   // `GuestPageContent` remounts fresh per page (`key={openId}` at its GuestSpace call site, or a whole
@@ -1432,7 +1438,8 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
     // Read at the click, from a ref: this callback is `useCallback`-stable so the editor's
     // mount-captured `:w` wiring can hold it (#448), which is exactly what makes a closed-over value
     // stale here.
-    if (!livenessRef.current.live) return;
+    // #978: pair the withholding with its own toast — see the member surface's publishPage.
+    if (!livenessRef.current.live) { notify.error(t("toast.publishBlockedNotLive")); return; }
     setPublishing(true);
     try {
       await apiFetch(`/pages/${encodeURIComponent(pageId)}/publish`, token, { method: "POST" });
@@ -1547,7 +1554,6 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
               empty={publishedLoaded && !editing && !(publishedMd ?? "").trim()}
               canEdit={canEdit}
             />
-            <UnsavedBanner reason={liveness.reason} />
             <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onPublishStay={canEdit ? publishForEditorStay : undefined} onToggleTask={canEdit ? onToggleTask : undefined} dirtySignal={dirtySig} />
             {/* #505 the paginating print surface (guest CM body is virtualised too).
                 #207: a guest holds a share token, which the diagram route accepts, so the picture prints

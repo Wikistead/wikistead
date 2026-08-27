@@ -9,6 +9,13 @@ export const notify = {
   success: (title: string) => toast.success(title),
   error: (title: string) => toast.error(title),
   info: (title: string) => toast(title),
+  // A toast for a STATE rather than an EVENT: it stays until the reader dismisses it (the
+  // close button) or the caller calls `dismiss`, instead of the default few seconds. Passing
+  // the same `id` again updates that toast in place — Sonner keys on `id` — so a state that
+  // moves through several phases (e.g. connecting → syncing) never stacks duplicates (#978).
+  persistent: (id: string, title: string, description?: string) =>
+    toast(title, { id, duration: Infinity, description }),
+  dismiss: (id: string) => toast.dismiss(id),
 };
 
 export function Toasts() {

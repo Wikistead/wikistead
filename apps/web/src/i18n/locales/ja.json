@@ -144,6 +144,7 @@
     "actionFailed": "問題が発生しました",
     "taskToggleDirty": "この項目を変更するには、先に下書きの変更を公開してください",
     "taskToggleNotStored": "このチェックはサーバに届かなかったので、元に戻しました。接続を確かめてもう一度お試しください。",
+    "publishBlockedNotLive": "公開されませんでした。まだサーバに変更が届いていません。接続を確かめてもう一度お試しください。",
     "saved": "保存しました",
     "spaceDeleted": "スペースを削除しました",
     "pageDeleted": "ページを削除しました",
