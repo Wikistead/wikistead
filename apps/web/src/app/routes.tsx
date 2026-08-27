@@ -2283,7 +2283,7 @@ function HomeLanding() {
   // #895: a failed fetch is not zero spaces — without this guard a 500/network failure fell through to
   // HomeEmpty's "no spaces yet, ask an administrator", telling a member their workspace is empty when
   // nothing of the sort was established. Measured on the most-visible surface in the product.
-  if (spaces.isError) return <AppShell><LoadFailed testId="home-spaces-failed" onRetry={() => { void spaces.refetch(); }} /></AppShell>;
+  if (spaces.isError) return <AppShell><LoadFailed testId="home-spaces-failed" variant="page" onRetry={() => { void spaces.refetch(); }} /></AppShell>;
   const first = (spaces.data?.spaces ?? [])[0];
   // #936: AppShell must stay mounted across this redirect, same as every other branch here — a bare
   // <Navigate> renders null for the commit before the target route takes over, unmounting the header

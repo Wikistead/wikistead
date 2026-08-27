@@ -67,7 +67,7 @@ export function WatchListRoute() {
       </h1>
       {isLoading && <div className="py-8 text-center text-fg-dim">{t("notifications.loading")}</div>}
       {/* #895: "you are watching nothing" is a claim about the reader's own settings. */}
-      {isError && <LoadFailed testId="watch-list-failed" onRetry={() => { void refetch(); }} />}
+      {isError && <LoadFailed testId="watch-list-failed" variant="page" onRetry={() => { void refetch(); }} />}
       {!isLoading && !isError && rows.length === 0 && (
         <div className="py-10 text-center text-fg-dim" data-testid="watch-list-empty">{t("watches.empty")}</div>
       )}

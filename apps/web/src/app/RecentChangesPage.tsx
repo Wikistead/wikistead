@@ -45,7 +45,7 @@ export function RecentChangesRoute() {
         <p className="text-fg-dim">{t("common.loading")}</p>
       ) : isError ? (
         // #895: said BEFORE the empty branch. A feed that could not be fetched is not a quiet week.
-        <LoadFailed testId="recent-changes-failed" onRetry={() => { void refetch(); }} />
+        <LoadFailed testId="recent-changes-failed" variant="page" onRetry={() => { void refetch(); }} />
       ) : items.length === 0 ? (
         <p className="text-fg-dim" data-testid="recent-changes-empty">{t("recentChanges.empty")}</p>
       ) : (

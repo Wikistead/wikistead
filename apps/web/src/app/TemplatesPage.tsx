@@ -36,7 +36,7 @@ export function TemplatesRoute() {
         <p className="text-fg-dim">{t("common.loading")}</p>
       ) : isError ? (
         // #895: "you have no templates" is a claim about the reader's own library.
-        <LoadFailed testId="templates-failed" onRetry={() => { void refetch(); }} />
+        <LoadFailed testId="templates-failed" variant="page" onRetry={() => { void refetch(); }} />
       ) : templates.length === 0 ? (
         <p className="text-fg-dim" data-testid="templates-empty">{t("templates.empty")}</p>
       ) : (
