@@ -2,6 +2,9 @@ export { makeFga, fgaClient, fgaModelId } from './client.js'
 // #253: the DSL transform and its canonical comparison, in one place — apps/server's guard and
 // infra/openfga's drift-healer both consume this rather than keeping their own copies.
 export { dslToModel, canonicalModel, modelsMatch } from './model.js'
+// ADR-253 §3.4: the store-binding decision table, pure — no IO.
+export { decideStoreBinding, describeRefusal } from './store-binding.js'
+export type { Witness, Candidate, StoreBindingOutcome, RefusalReason } from './store-binding.js'
 export { check, checkRelation, checkMemberAccess, filterAuthorized } from './check.js'
 export { isTenantAdmin, requireTenantAdmin, requireTenantAdminOr404, isSpaceCreator, isApiKeyIssuer, isConnectionManager, requireConnectionManager, isRoleManager, requireRoleManager, isAuditReader, requireAuditReader, isTenantMember } from './tenant-admin.js' // #383: one tenant-admin gate (+ #445 space_creator, #496 api_key_issue, #471 membership)
 export type { CheckContext, MemberAccess } from './check.js'
