@@ -202,11 +202,16 @@ describe('#836 requiring SSO needs an exempt ADMINISTRATOR, not any exempt membe
   } as unknown as TenantDb
 
   it('narrows the shared predicate to the exemption list, rather than writing a second rule', () => {
-    // The point is not that a query exists; it is that ONE predicate answers both questions. Two
-    // copies is how this family arrived at two guards that disagreed.
+    // The point is not that a query exists; it is that the PRECONDITION (is this an admin with a key?)
+    // answers both the ON and OFF questions through the one predicate. Two copies of THAT ANSWER is how
+    // this family arrived at two guards that disagreed. #935 later joined `members` in the LIST route
+    // above this one for an unrelated reason (displaying role — a fact, not a precondition decision),
+    // so the scan is narrowed to the precondition's own route (DELETE, the last one in the file) rather
+    // than the whole file — matching the slicing the other two cases in this block already use.
     const src = readFileSync(resolve(import.meta.dirname, '../routes/admin-login-methods.ts'), 'utf8')
-    expect(src, 'the precondition writes its own rule instead of asking the shared one').toContain('anAdminHoldsAKey(req.db, { exemptOnly: true })')
-    expect(src, 'a second copy of the role predicate is back').not.toMatch(/JOIN members m ON m\.sub = se\.member_sub/)
+    const precondition = src.slice(src.indexOf("app.delete<{ Params: { sub: string } }>('/admin/sso-exemptions/:sub'"))
+    expect(precondition, 'the precondition writes its own rule instead of asking the shared one').toContain('anAdminHoldsAKey(req.db, { exemptOnly: true')
+    expect(precondition, 'a second copy of the role predicate is back').not.toMatch(/JOIN members m ON m\.sub = se\.member_sub/)
   })
 
   it('narrows the same predicate rather than writing a second one', () => {
