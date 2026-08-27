@@ -35,6 +35,20 @@ export function UnsavedBanner({ reason }: { reason: NotLiveReason | null }) {
       role="status"
       data-testid="not-saving-banner"
       data-reason={reason}
+      // #873 (review rejection 2): the title band above (bandRef, routes.tsx) is `position: absolute`
+      // with `z-20`, so this banner — a normal-flow sibling with no positioning of its own — painted
+      // BELOW it regardless of DOM order (an absolutely-positioned, z-indexed element always paints
+      // over static in-flow content). The band overlays the top of the scroller rather than pushing it
+      // down, so this banner rendered right where the band sits, hidden under its frosted layer.
+      //
+      // ⚠️ Not fixed by moving the banner INSIDE the band: the band's height is published as
+      // `--wks-band-h` by a ResizeObserver the editor's own top padding reads (routes.tsx), so folding
+      // the banner into that box would make the TITLE band itself grow and shrink every time
+      // connectivity flips — the band-height churn ADR-248 §3.2 was written to avoid. Pushing this
+      // element down by the band's own published height, as a plain sibling AFTER it, keeps the two
+      // independent: the title band's height never depends on liveness, and this banner simply clears
+      // whatever height the band currently publishes.
+      style={{ marginTop: "var(--wks-band-h, 0px)" }}
       // #873 (review rejection): the class alone got the strip's DEFAULT, `var(--accent)` — blue. The
       // border beside it was already `--danger`, so the band read as ordinary information while its
       // border said otherwise. ⚠️ A mistyped token would have been visible (Tailwind drops what it
