@@ -7,7 +7,7 @@ import { API } from "../helpers";
 const H = { Authorization: "Bearer dev-token", "content-type": "application/json" };
 
 test("#500: a 500 from the guest tree shows an error + retry, not the empty message; retry recovers", async ({ browser }) => {
-  test.skip(true, "#996: isolated — flaky under the 20-spec gate, a different assertion fails each run (demo_space is a shared fixture; suspected fixture-timing race, unconfirmed)");
+  test.skip(true, "#998: isolated — flaky under the 20-spec gate, a different assertion fails each run (demo_space is a shared fixture; suspected fixture-timing race, unconfirmed)");
   // a space link over demo_space (it has published pages)
   const res = await fetch(`${API}/share-links`, {
     method: "POST",

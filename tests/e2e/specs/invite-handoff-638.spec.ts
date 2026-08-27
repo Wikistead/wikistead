@@ -148,12 +148,12 @@ test("#638: the pending list is a column of rows, and its controls line up", asy
   expect(m.scrolls, "three invitations do not need a scrollbar").toBe(false);
 });
 
-// #997: in a describe, not an in-body test.skip — a `{ page }` fixture is resolved by Playwright BEFORE
+// #999: in a describe, not an in-body test.skip — a `{ page }` fixture is resolved by Playwright BEFORE
 // an in-body skip call is reached (the exact #973 trap this session already worked around once), and
 // this test's own `page.goto("/admin/members")` is precisely where it timed out under the 20-spec gate's
 // load. describe-scoped skip is evaluated at collection time, before the fixture is ever requested.
 test.describe(() => {
-  test.skip(true, "#997: isolated — page.goto('/admin/members') timed out under the 20-spec gate's shared load");
+  test.skip(true, "#999: isolated — page.goto('/admin/members') timed out under the 20-spec gate's shared load");
   test("#638: …and twenty invitations scroll inside the box instead of growing the page", async ({ page }) => {
     test.setTimeout(90_000);
     await openDemo(page);
