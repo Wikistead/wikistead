@@ -3,6 +3,7 @@
 // driven by a fake OpenFgaClient so the decision flow is exercised without a live multi-store FGA.
 import { describe, it, expect, afterEach, afterAll } from 'vitest'
 import { FgaApiNotFoundError, type OpenFgaClient } from '@openfga/sdk'
+import { dslToModel } from '@wikistead/authz'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
 import {
@@ -14,9 +15,13 @@ import {
   forgetWitness,
   resolveStoreBinding,
   resolveStoreBindingLocked,
+  reconcileModel,
   STORE_NAME,
   type FgaStoreSummary,
 } from '../openfga-resolve.js'
+
+const DSL_A = 'model\n  schema 1.1\n\ntype user\n\ntype doc\n  relations\n    define viewer: [user]\n'
+const DSL_B = 'model\n  schema 1.1\n\ntype user\n\ntype doc\n  relations\n    define viewer: [user]\n    define editor: [user]\n'
 
 // DROP/re-CREATE TABLE requires the admin role — the runtime `pool` is NOSUPERUSER and cannot (by
 // design; see db/pool.ts's own header). Used only by the §3.4a test below.
@@ -244,5 +249,68 @@ describe('ADR-253 §3.6 concurrent resolution produces one store', () => {
       }),
     )
     expect(createCalls, 'the unlocked control did not race — widen the artificial delay above').toBeGreaterThan(1)
+  })
+})
+
+// A fake model store narrow enough to drive reconcileModel's branches: it holds whatever the last
+// write() call sent (so a round-trip through it is content-stable), plus an optional seed.
+function fakeModelStore(seed?: unknown) {
+  const written: { id: string; content: unknown }[] = seed ? [{ id: 'seed', content: seed }] : []
+  let writes = 0
+  const fga = {
+    readAuthorizationModels: async () => {
+      const newest = written[written.length - 1]
+      return { authorization_models: newest ? [{ id: newest.id, ...(newest.content as object) }] : [] }
+    },
+    writeAuthorizationModel: async (body: unknown) => {
+      writes++
+      const id = `written-${writes}`
+      written.push({ id, content: body })
+      return { authorization_model_id: id }
+    },
+  } as unknown as OpenFgaClient
+  return { fga, writes: () => writes }
+}
+
+describe('ADR-253 §3.5 reconcileModel', () => {
+  it('no model in the store at all → writes the DSL and adopts the new id', async () => {
+    const { fga, writes } = fakeModelStore()
+    const out = await reconcileModel(fga, 'store-1', DSL_A, undefined)
+    expect(out.wrote).toBe(true)
+    expect(out.modelId).toBe('written-1')
+    expect(writes()).toBe(1)
+  })
+
+  it('the newest model already matches the DSL → adopts it, writes nothing', async () => {
+    const { fga, writes } = fakeModelStore(dslToModel(DSL_A))
+    const out = await reconcileModel(fga, 'store-1', DSL_A, undefined)
+    expect(out.wrote).toBe(false)
+    expect(out.modelId).toBe('seed')
+    expect(writes()).toBe(0)
+  })
+
+  it('the newest model differs from the DSL → writes the DSL and adopts the new id (#751: newest, not "any matching one")', async () => {
+    const { fga, writes } = fakeModelStore(dslToModel(DSL_A))
+    const out = await reconcileModel(fga, 'store-1', DSL_B, undefined)
+    expect(out.wrote).toBe(true)
+    expect(out.modelId).toBe('written-1')
+    expect(writes()).toBe(1)
+  })
+
+  it('an OPENFGA_MODEL_ID that matches what was adopted reports no divergence', async () => {
+    const { fga } = fakeModelStore(dslToModel(DSL_A))
+    const out = await reconcileModel(fga, 'store-1', DSL_A, 'seed')
+    expect(out.expectedButNotAdopted).toBeNull()
+  })
+
+  it('an OPENFGA_MODEL_ID naming something ELSE than what was adopted is reported, never enforced', async () => {
+    // ADR-253 §3.1 (ruled 2026-08-21): the pin never changes what is adopted — reconciliation runs
+    // the same regardless, and a stale expectation is stated, not refused and not silently dropped.
+    const { fga, writes } = fakeModelStore(dslToModel(DSL_A))
+    const out = await reconcileModel(fga, 'store-1', DSL_A, 'some-other-model-id')
+    expect(out.wrote).toBe(false)
+    expect(out.modelId).toBe('seed')
+    expect(out.expectedButNotAdopted).toBe('some-other-model-id')
+    expect(writes()).toBe(0)
   })
 })

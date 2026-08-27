@@ -1,10 +1,8 @@
-// ADR-253 §3.1/§3.3/§3.4/§3.4a/§3.6: which OpenFGA store this deployment binds to — found, not
-// transcribed. This module answers ONLY "which store" (and whether it had to be created); §3.5's
-// model reconcile is wired in separately, the same separation migration-guard.ts keeps between the
-// pure verdict and the boot-time refusal.
+// ADR-253 §3.1/§3.3/§3.4/§3.4a/§3.5/§3.6: which OpenFGA store and model this deployment binds to —
+// found, not transcribed.
 import type { Sql } from 'postgres'
 import { OpenFgaClient, FgaApiNotFoundError } from '@openfga/sdk'
-import { decideStoreBinding, describeRefusal, type Witness, type Candidate } from '@wikistead/authz'
+import { decideStoreBinding, describeRefusal, dslToModel, modelsMatch, type Witness, type Candidate } from '@wikistead/authz'
 
 /** Every store name this product's tooling creates (`infra/openfga/bootstrap.ts` and its kin). */
 export const STORE_NAME = 'wikistead'
@@ -184,4 +182,53 @@ export async function resolveStoreBindingLocked(
     await writeWitness(locked, id)
     return { kind: 'bound', storeId: id, created: true }
   })
+}
+
+export interface ModelReconcileResult {
+  modelId: string
+  wrote: boolean
+  /**
+   * Set only when an operator's `OPENFGA_MODEL_ID` named something OTHER than what was adopted.
+   * ADR-253 §3.1/§3.5: this is recorded as what the operator expected and reported — the pin no
+   * longer holds a deployment on a model this code does not speak, so a divergence is stated rather
+   * than enforced or refused.
+   */
+  expectedButNotAdopted: string | null
+}
+
+/**
+ * ADR-253 §3.5: content-addressed, not id-addressed. The store's newest model is read and compared
+ * against the DSL by {@link modelsMatch}'s canonical comparison; a match adopts the newest id, a
+ * mismatch (including no model at all) writes the DSL and adopts the id OpenFGA returns. `#751`:
+ * newest, never "a matching model exists somewhere in the store" — a non-newest match makes every
+ * check pay a datastore read (measured: 1111 ms vs 4 ms for a 50-id batch).
+ */
+export async function reconcileModel(
+  fga: OpenFgaClient,
+  storeId: string,
+  dsl: string,
+  expectedModelId: string | undefined,
+): Promise<ModelReconcileResult> {
+  const wanted = dslToModel(dsl)
+  const { authorization_models } = await fga.readAuthorizationModels({ storeId, pageSize: 1 })
+  const newest = authorization_models?.[0]
+
+  let modelId: string
+  let wrote = false
+  if (newest && modelsMatch(newest, wanted)) {
+    modelId = newest.id
+  } else {
+    const { authorization_model_id } = await fga.writeAuthorizationModel(
+      wanted as Parameters<OpenFgaClient['writeAuthorizationModel']>[0],
+      { storeId },
+    )
+    modelId = authorization_model_id
+    wrote = true
+  }
+
+  return {
+    modelId,
+    wrote,
+    expectedButNotAdopted: expectedModelId && expectedModelId !== modelId ? expectedModelId : null,
+  }
 }
