@@ -68,6 +68,14 @@ import { assertStackTarget } from '../../scripts/assert-stack-target.mjs'
       VALUES ('demo', 'tenant_dev', 'demo_space', 'Demo Page', false)
       ON CONFLICT (tenant_id, id) DO NOTHING
     `
+    // #940: this predates ADR-157's home-page pointer (#364) — `demo_space` seeded a page but never
+    // registered it as the space's home, so `HomeLanding`'s own documented fallback for a home-less
+    // space (routes.tsx: land on `/spaces/<id>` instead of a page) fired for the product's most-used
+    // fixture. That fallback is correct; the fixture was incomplete. Idempotent and safe to re-point
+    // even if a test moved it: `demo` is the one page every other spec assumes still exists here.
+    await tx`
+      UPDATE spaces SET home_page_id = 'demo' WHERE tenant_id = 'tenant_dev' AND id = 'demo_space'
+    `
     // Seed the admin member row to match the FGA seed (dev-user is tenant#admin).
     // Keeps the members table consistent with FGA so the tenant is NOT member-less
     // (the first-admin bootstrap must not fire for an already-admined tenant).
@@ -78,7 +86,12 @@ import { assertStackTarget } from '../../scripts/assert-stack-target.mjs'
       -- distinction) reads the members.groups column, so with an empty directory none of them can be
       -- exercised at all: a test either skips or measures the empty case and reports nothing.
       VALUES ('tenant_dev', 'dev-user', 'dev@example.com', 'Dev User', 'admin', ARRAY['wiki Editors'])
-      ON CONFLICT (tenant_id, sub) DO UPDATE SET groups = EXCLUDED.groups
+      -- #940: display_name was DROPPED from this UPSERT's conflict clause, so a row already seeded
+      -- with the wrong value (measured on the shared stack: 'dev-user', the sub itself, not 'Dev
+      -- User') stayed wrong forever — the search candidate row that reads it then rendered the raw
+      -- sub instead of falling through to memberLabel's "unknown" case OR showing the real name.
+      -- Seeding is meant to be an idempotent baseline; every column it writes belongs on this line.
+      ON CONFLICT (tenant_id, sub) DO UPDATE SET groups = EXCLUDED.groups, display_name = EXCLUDED.display_name
     `
     console.log('seeded: tenant_dev / demo_space / demo (page) / admin member')
 

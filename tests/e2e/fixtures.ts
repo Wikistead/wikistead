@@ -275,6 +275,12 @@ export async function seedFixtures() {
     await sql`DELETE FROM spaces WHERE tenant_id = ${E2E.tenant}`;
     await sql`INSERT INTO spaces (id, tenant_id, name) VALUES ('demo_space', ${E2E.tenant}, 'Demo Space')`;
     await sql`INSERT INTO pages (id, tenant_id, space_id, title) VALUES ('demo', ${E2E.tenant}, 'demo_space', 'Demo Page')`;
+    // #940: this predates ADR-157's home-page pointer (#364) — the space above never registered its
+    // page as home, so HomeLanding's own documented fallback for a home-less space (land on
+    // `/spaces/<id>` instead of a page) fired for the product's most-used fixture. That fallback is
+    // correct; the fixture was incomplete — measured landing at /spaces/demo_space instead of /p/demo
+    // after any flow that revisits "/" (e.g. a space delete's post-action redirect).
+    await sql`UPDATE spaces SET home_page_id = 'demo' WHERE tenant_id = ${E2E.tenant} AND id = 'demo_space'`;
 
     // Locked fixtures: present in Postgres (RLS returns them) but with NO FGA
     // grant, so dev-user can neither view nor edit them.
