@@ -19,7 +19,9 @@ import { CHALLENGE_PREFIX, txtChallengePresent, type ResolveTxt } from '../auth/
 // a Certificate is only ever created for a `verified` row.
 
 // Basic hostname validation: lowercased FQDN, no scheme/path/port, ≤253 chars.
-function normalizeDomain(raw: string): string {
+// Exported (#863 / ADR-258 §3.2): the operator registration path calls this rather than copying its
+// pattern, so the two writers of this table can never validate a hostname differently.
+export function normalizeDomain(raw: string): string {
   const d = (raw ?? '').trim().toLowerCase()
   if (!/^(?=.{1,253}$)([a-z0-9](-?[a-z0-9])*\.)+[a-z]{2,}$/.test(d)) {
     throw Object.assign(new Error('invalid domain'), { statusCode: 400, code: 'invalid_domain' })
@@ -241,10 +243,15 @@ export async function recheckCustomDomains(
       // a demotion caused by our own resolver being down for a day would otherwise be permanent,
       // repairable only through an endpoint with no UI behind it (migration 097 says why it is
       // limited to the sweep's own demotions and never completes a human's enrolment).
+      // #863 / ADR-258 §3.4: a shell-registered row has no TXT record to find, so re-checking it would
+      // demote it about a day later. The exemption reads the `source` column — positive (`= 'shell'`),
+      // never "the lookup failed" — so a route-registered domain that genuinely stops proving itself is
+      // still demoted.
       const rows = await withTenantTx(tenant.id, async (tx) => tx<DomainRow[]>`
         SELECT domain, verification_token, check_failures, verified_at, last_ok_at, status, auto_demoted_at
         FROM custom_domains
-        WHERE status = 'verified' OR (status = 'pending' AND auto_demoted_at IS NOT NULL)
+        WHERE (status = 'verified' OR (status = 'pending' AND auto_demoted_at IS NOT NULL))
+          AND source <> 'shell'
         ORDER BY domain`)
       for (const row of rows) {
         checked++
@@ -414,6 +421,79 @@ export async function revokeAllCustomDomains(sql: Sql, tenantId: string): Promis
   })
   for (const r of rows) emit({ type: 'tenant.custom_domain_removed', tenantId, domain: r.domain })
   return rows.map((r) => r.domain)
+}
+
+// #863 / ADR-258: `local-admin --domain` registers a custom domain from the operator's database
+// access rather than the DNS-TXT challenge, for a deployment served on a hostname whose first label is
+// reserved (`docs.example.com` and the like) and therefore has no first-run path through the web route.
+//
+// ⚠️ Deliberately NOT entitlement-gated (§3.2) — the resolver is per-process, no CLI entrypoint
+// registers one, so a plan check here would only ever refuse the operator, never anyone else.
+export async function registerCustomDomainByOperator(tenantId: string, rawDomain: string): Promise<{ domain: string }> {
+  const domain = normalizeDomain(rawDomain)
+  const firstLabel = domain.split('.')[0]!
+
+  // §3.2, evaluated first: a host whose first label is ANOTHER workspace's slug would take that
+  // workspace's entrance the moment it resolves (`loadTenant` tries `findByDomain` before
+  // `findBySlug`) — the DNS challenge was the only thing preventing this on the web route, and this
+  // command is the one that removes the challenge. Cheaper than the walk below (one row, one index),
+  // so it runs first and is the answer an operator can act on without asking anybody.
+  const [slugHolder] = await pool<{ id: string; slug: string }[]>`SELECT id, slug FROM tenants WHERE slug = ${firstLabel}`
+  if (slugHolder && slugHolder.id !== tenantId) {
+    throw Object.assign(
+      new Error(`"${firstLabel}" is workspace "${slugHolder.slug}"'s own address — registering "${domain}" from the shell would take its entrance`),
+      { statusCode: 409, code: 'slug_conflict' },
+    )
+  }
+
+  // §3.2, evaluated second: `UNIQUE (domain)` alone cannot see a domain held by a workspace promoted
+  // to its own namespace schema (its `custom_domains` row lives in `ns_*`, not `public`), so the
+  // command asks the question the constraint cannot — one tenant at a time, through the resolver, on
+  // the runtime pool (never the administrative DSN, which bypasses RLS and would silently miss every
+  // promoted tenant), naming the holder rather than reporting a bare constraint violation.
+  const others = await pool<{ id: string; slug: string }[]>`SELECT id, slug FROM tenants WHERE id != ${tenantId}`
+  for (const holder of others) {
+    const [row] = await withTenantTx(holder.id, (tx) => tx<{ domain: string }[]>`
+      SELECT domain FROM custom_domains WHERE domain = ${domain}`)
+    if (row) {
+      throw Object.assign(
+        new Error(`"${domain}" is already registered to workspace "${holder.slug}"`),
+        { statusCode: 409, code: 'domain_taken' },
+      )
+    }
+  }
+
+  const token = randomBytes(24).toString('base64url')
+  await withTenantTx(tenantId, async (tx) => {
+    // §3.3: a tenant promoted to a namespace schema before migration 131 ran has no `source` column
+    // (`ns_*` is a `LIKE` snapshot taken at promotion; later migrations only touch `public`). Named
+    // rather than left to fail on a bare 42703 that reads like a bug.
+    try {
+      await tx`SELECT source FROM custom_domains LIMIT 0`
+    } catch (e) {
+      if ((e as { code?: string }).code === '42703') {
+        throw Object.assign(
+          new Error(`tenant ${tenantId}'s custom_domains table has no "source" column — its namespace schema was promoted before migration 131 ran, and namespace schemas are not backfilled (see recheckCustomDomains's comment for the same gap)`),
+          { code: 'schema_missing_source_column' },
+        )
+      }
+      throw e
+    }
+    // §5 idempotency: a second run leaves one row and does not reset `check_failures`, `last_ok_at`
+    // or `auto_demoted_at` on a row the operator has since changed — so a conflict on the (already
+    // proven-safe, by the walk above) domain is silently kept rather than overwritten.
+    await tx`
+      INSERT INTO custom_domains (tenant_id, domain, verification_token, status, source, verified_at, last_ok_at)
+      VALUES (${tenantId}, ${domain}, ${token}, 'verified', 'shell', now(), now())
+      ON CONFLICT (domain) DO NOTHING
+    `
+    // §3.6: `verified_at` is set to now() above so `syncDomainMapping`'s `ORDER BY verified_at DESC`
+    // behaves ordinarily — a NULL would sort first under Postgres's NULLS FIRST and win forever.
+    await syncDomainMapping(tx, tenantId)
+  })
+  emit({ type: 'tenant.custom_domain_added', tenantId, domain })
+  emit({ type: 'tenant.custom_domain_verified', tenantId, domain })
+  return { domain }
 }
 
 export async function customDomainsPlugin(app: FastifyInstance) {

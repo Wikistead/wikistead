@@ -1,0 +1,18 @@
+-- Migration 131: custom_domains.source (#863, ADR-258 §3.3).
+--
+-- Every row this table has ever held so far was proved through the DNS-TXT challenge. ADR-258 adds a
+-- SECOND writer — `local-admin --domain`, which proves possession of the administrative database DSN
+-- instead — and the liveness sweep (#576) must never re-check or demote that row (it has no TXT record
+-- to find). The distinction has to survive as data, not as an absence: a nullable column with "NULL
+-- means shell" or a negative predicate (`source IS DISTINCT FROM 'dns'`) would exempt every row that
+-- existed before this migration ran — every domain anyone ever proved through the web route — and #576
+-- would go advisory in one deploy, silently. So the column is NOT NULL, defaults to 'dns' (existing
+-- rows are DNS-proved by construction — the DEFAULT backfills them), and the sweep's exemption reads
+-- `source = 'shell'` and nothing else — positive, not the absence of anything.
+--
+-- Does not reach a tenant promoted to its own schema before this migration ran (`ns_*` is a `LIKE`
+-- snapshot taken at promotion time, and `migrate.ts` does not fan out to those schemas) — a pre-existing,
+-- repo-wide gap `recheckCustomDomains` already documents against migrations 095-097. This migration does
+-- not close it; ADR-258 §3.3 has the callers check for the column and name the gap rather than fail on a
+-- bare 42703.
+ALTER TABLE custom_domains ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'dns';

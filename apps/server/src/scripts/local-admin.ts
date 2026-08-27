@@ -24,6 +24,7 @@ import { createInvite } from '../auth/invites.js'
 import { acquireTenantDb } from '../db/index.js'
 import { isValidSlug } from '../auth/provisioning.js'
 import { readTenantUrlTemplate } from '../auth/tenant-url-template.js'
+import { registerCustomDomainByOperator } from '../routes/custom-domains.js'
 import type { Tenant } from '@wikistead/types'
 
 export interface LocalAdminResult {
@@ -36,12 +37,14 @@ export interface LocalAdminResult {
   enabledLocalLogin: boolean
   inviteUrl: string
   expiresAt: Date
+  /** #863 / ADR-258: set when `--domain` registered a custom domain in this run */
+  registeredDomain?: string
 }
 
 /** The whole act, in one place, so the CLI wrapper is only argument parsing and printing. */
 export async function createLocalAdmin(
   sql: postgres.Sql,
-  args: { slug: string; email: string; create?: boolean; plan?: string; by?: string; origin?: string },
+  args: { slug: string; email: string; create?: boolean; plan?: string; by?: string; origin?: string; domain?: string },
 ): Promise<LocalAdminResult> {
   if (!args.email.includes('@')) throw new Error(`"${args.email}" is not an email address — it becomes the sign-in name`)
 
@@ -114,6 +117,14 @@ export async function createLocalAdmin(
       operatorOverride: true,
     })
 
+    // #863 / ADR-258 §3.1: writes the custom_domains row and the tenants mirror in its OWN transaction
+    // (withTenantTx, resolved through the tenant ID rather than the object above — the object's
+    // `isolation: 'logical'` is a literal, and a namespace-promoted tenant needs the column read).
+    let registeredDomain: string | undefined
+    if (args.domain) {
+      registeredDomain = (await registerCustomDomainByOperator(tenant.id, args.domain)).domain
+    }
+
     await sql.begin(async (tx) => {
       await appendOperatorEntry(tx, {
         actor: `operator:${args.by ?? os.userInfo().username}`,
@@ -131,6 +142,18 @@ export async function createLocalAdmin(
           at: new Date().toISOString(),
         })
       }
+      // §3.1: "writing which workspace owns a hostname, with no ownership challenge, is the most
+      // ledger-worthy thing this command does" — a THIRD write, on the admin connection, after the
+      // row+mirror transaction committed (a mapping with no ledger line is a gap in the record; a
+      // ledger line with no mapping is a lie about what happened).
+      if (registeredDomain) {
+        await appendOperatorEntry(tx, {
+          actor: `operator:${args.by ?? os.userInfo().username}`,
+          action: 'tenant.custom_domain_registered_by_operator',
+          target: `tenant:${tenant!.id}`,
+          at: new Date().toISOString(),
+        })
+      }
     })
 
     return {
@@ -138,6 +161,7 @@ export async function createLocalAdmin(
       steppedOverStance: stance.biting, enabledLocalLogin,
       inviteUrl: `${origin}/invite?token=${invite.token}`,
       expiresAt: invite.expiresAt,
+      ...(registeredDomain ? { registeredDomain } : {}),
     }
   } finally {
     await db.release()
@@ -177,6 +201,15 @@ export function renderLocalAdmin(r: LocalAdminResult): string[] {
     out.push('         The stance itself was NOT changed — it still applies to everyone else, and to this')
     out.push('         person once they are in. Recorded in the operator ledger as tenant.sso_stance_overridden.')
   }
+  if (r.registeredDomain) {
+    // #863 / ADR-258 §6.1: the ONE real cost this command's proof (database access, not DNS) leaves
+    // unpaid — if the hostname does not point at this server yet, cert-manager retries the ACME
+    // challenge and burns its failed-validation budget. This line is that hand-off, said once, up
+    // front, rather than discovered later as a stuck certificate.
+    out.push(`custom domain registered: ${r.registeredDomain} (recorded verified — no DNS challenge was run)`)
+    out.push(`  point ${r.registeredDomain} at this server's address before relying on it — a certificate`)
+    out.push('  request will not succeed, and mail will link to a host that answers nothing, until it does.')
+  }
   out.push(`first-admin invite (expires ${r.expiresAt.toISOString()}):`)
   out.push(`  ${r.inviteUrl}`)
   return out
@@ -190,7 +223,7 @@ export async function cliMain(): Promise<void> {
   const positional = argv.filter((a) => !a.startsWith('--'))
   const [slug, email] = positional
   if (!slug || !email) {
-    console.error('usage: pnpm tenant:local-admin <tenantSlug> <email> [--create] [--plan=free] [--by=<operator>] [--origin=https://…]')
+    console.error('usage: pnpm tenant:local-admin <tenantSlug> <email> [--create] [--plan=free] [--by=<operator>] [--origin=https://…] [--domain=docs.example.com]')
     process.exit(2)
   }
   const sql = postgres(process.env.DATABASE_ADMIN_URL!)
@@ -201,6 +234,7 @@ export async function cliMain(): Promise<void> {
       ...(flag('plan') ? { plan: flag('plan')! } : {}),
       ...(flag('by') ? { by: flag('by')! } : {}),
       ...(flag('origin') ? { origin: flag('origin')! } : {}),
+      ...(flag('domain') ? { domain: flag('domain')! } : {}),
     })
     for (const line of renderLocalAdmin(res)) console.log(line)
   } catch (e) {
