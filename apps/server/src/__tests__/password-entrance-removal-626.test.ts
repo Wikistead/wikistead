@@ -20,7 +20,6 @@ const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
 const STAMP = Date.now().toString(36)
 const FED = `pw626-fed-${STAMP}`    // arrived through a connection: removing the password leaves a way in
-const LOCAL = `pw626-local-${STAMP}` // password-born: the password IS the way in
 const H = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
 const H_NO_BODY = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
 
@@ -31,6 +30,12 @@ let app: FastifyInstance
 let own: PrivateTenant
 const OWN_FED = 'pw894-fed'      // the exempt member whose credential is removed
 const OWN_OTHER = 'pw894-other'  // a second exempt member, added to flip the answer on purpose
+// #949 widened what counts as shared state: `memberHasAnotherWayIn`'s mint-derived check reads EVERY
+// effective connection in the tenant, where the retired `identity_source` column read only this row.
+// LOCAL's whole claim is "no connection admits this sub", which twenty-plus other files writing
+// `tenant_oidc` on `tenant_dev` can no longer be trusted not to disturb — so it moves in with the
+// SSO-floor cases below, onto a tenant this file owns alone.
+const LOCAL = 'pw894-local' // password-born: the password IS the way in
 
 const giveCredential = async (sub: string) =>
   admin`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
@@ -42,9 +47,8 @@ const credentialCount = async (sub: string) =>
 beforeAll(async () => {
   app = await buildApp()
   await app.ready()
-  await seatMembers(admin, TENANT, [FED, LOCAL])
+  await seatMembers(admin, TENANT, [FED])
   await admin`UPDATE members SET identity_source = 'oidc' WHERE tenant_id = ${TENANT} AND sub = ${FED}`
-  await admin`UPDATE members SET identity_source = 'local' WHERE tenant_id = ${TENANT} AND sub = ${LOCAL}`
   // #949 / ADR-259 §3.9: FED's "arrived through a connection" is now measured by a stored link, not by
   // `identity_source` (the proxy #949 retires). `connection_id` carries no foreign key by design (§3.9),
   // so a fixture string naming no real row is exactly the shape a member's own link takes.
@@ -53,6 +57,9 @@ beforeAll(async () => {
               ON CONFLICT DO NOTHING`
 
   own = await privateTenant(admin, 'pw894')
+  await admin`INSERT INTO members (tenant_id, sub, email, role, identity_source)
+              VALUES (${own.id}, ${LOCAL}, ${`${LOCAL}@pw894.test`}, 'member', 'local')
+              ON CONFLICT (tenant_id, sub) DO UPDATE SET identity_source = 'local'`
   for (const sub of [OWN_FED, OWN_OTHER]) {
     await admin`INSERT INTO members (tenant_id, sub, email, role, identity_source)
                 VALUES (${own.id}, ${sub}, ${`${sub}@pw894.test`}, 'member', 'oidc')
@@ -67,13 +74,13 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
-  for (const sub of [FED, LOCAL]) {
+  for (const sub of [FED]) {
     await admin`DELETE FROM password_resets WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`.catch(() => {})
     await admin`DELETE FROM local_credentials WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`.catch(() => {})
     await admin`DELETE FROM sso_exemptions WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`.catch(() => {})
     await admin`DELETE FROM member_identities WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`.catch(() => {})
   }
-  await unseatMembers(admin, TENANT, [FED, LOCAL])
+  await unseatMembers(admin, TENANT, [FED])
   await admin`UPDATE tenant_login_prefs SET sso_required = false WHERE tenant_id = ${TENANT}`.catch(() => {})
   await own?.dispose()
   await app.close(); await admin.end(); await pool.end()
@@ -108,12 +115,17 @@ describe('#626: the password entrance can be taken back', () => {
     // any federated door at all, which let a `wlocal_` member be locked out for good on an OIDC tenant
     // (their sub arrives from no connection) and refused every removal on a tenant using the shared
     // platform IdP. "Suspend them" (#627) is the operation for "stop this person signing in".
-    await giveCredential(LOCAL)
-    const res = await remove(LOCAL)
+    //
+    // #949: on `own`, not `tenant_dev` — the claim is "no connection anywhere in this tenant admits this
+    // sub", and `tenant_dev` is a moving target (twenty-plus files write its `tenant_oidc` rows).
+    await ownCredential(LOCAL)
+    const res = await ownRemove(LOCAL)
     expect(res.statusCode, res.body).toBe(409)
     expect(res.json()).toMatchObject({ code: 'last_way_in' })
-    expect(await credentialCount(LOCAL), 'and nothing was removed').toBe(1)
-    await admin`DELETE FROM local_credentials WHERE tenant_id = ${TENANT} AND member_sub = ${LOCAL}`
+    const [{ n }] = await admin<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM local_credentials WHERE tenant_id = ${own.id} AND member_sub = ${LOCAL}`
+    expect(Number(n), 'and nothing was removed').toBe(1)
+    await admin`DELETE FROM local_credentials WHERE tenant_id = ${own.id} AND member_sub = ${LOCAL}`
   })
 
   // ⚠️ #894: this case lives in its OWN tenant, and the three assertions below say why.
