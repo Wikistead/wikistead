@@ -73,6 +73,12 @@ afterAll(async () => {
 describe('#654: the paths that take a credential take the factors with it', () => {
   it('removing the password removes them', async () => {
     const sub = await member('pw')
+    // #949: this fixture's subject is a bare `wlocal_` shape (never routed through a real local invite,
+    // which would have set `identity_source = 'local'`), so it carries no other way in of its own — give
+    // it one, or the route's per-member "last way in" guard refuses before this test's actual subject
+    // (whether the factor follows the credential) is ever reached.
+    await admin`INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
+                VALUES (${T}, ${`f654-conn-${STAMP}`}, ${`f654-ext-${STAMP}`}, ${sub})`
     expect(await factorCount(sub), 'the fixture has a factor to lose').toBe(1)
     const res = await call('DELETE', `/members/${encodeURIComponent(sub)}/password-setup`)
     expect(res.statusCode, `the removal answered :: ${res.body}`).toBeLessThan(400)

@@ -1,6 +1,7 @@
 import { samlEntitled } from './saml-entitlement.js'
 import type { TenantDb } from '../db/index.js'
 import { loadPlatformOidc, type TenantOidcConfig } from './oidc.js'
+import { RESERVED_SUB_RE } from './reserved-subs.js'
 
 // #537 / ADR-195: the ONE place that answers "which login methods does this tenant offer right now?".
 // Two layers: the deployment env is a CEILING (`LOGIN_METHODS`), the tenant's own configuration selects
@@ -474,6 +475,42 @@ export async function assertNotLastWayIn(
     new Error('this is the last effective way to sign in. Enable another connection first, or have an operator run `pnpm tenant:login-methods`.'),
     { statusCode: 409, code: 'login_lockout' },
   )
+}
+
+// #858 / #949, ADR-259 §3.9: the per-MEMBER question `DELETE /members/:sub/password-setup` asks —
+// distinct from `anAdminHoldsAKey` and `assertNotLastWayIn` above, which are both WORKSPACE questions
+// (can ANYBODY still get in). `identity_source === 'local'` used to stand in for "this is their only
+// door", and a link breaks that proxy in both directions: a `local` member who has since linked a
+// provider has two ways in and was refused for nothing; a member whose connection was deleted has none
+// and was let through. #822 is the shape this family keeps repeating — a proxy read where the real
+// question should be asked.
+//
+// Excludes the password credential itself: the caller already found it (it is what this route is
+// about to remove), so this asks only "is there something ELSE" — a link, or a mint-derived entrance.
+//
+//   a LINK             member_identities, any connection (ADR-259 §3.1 — written by #947 / #960)
+//   a MINT-DERIVED      this sub's prefix still names a connection that is still effective, or —
+//   entrance            transitionally, for a sub with no recognisable prefix — a legacy tenant-oidc
+//                       connection (predates #554, subjectPrefix null) or the platform connection is
+//                       still effective and would still admit a raw external subject
+//
+// `wlocal_` (the local-invite mint) asserts neither: it names no connection, and its only entrance is
+// the credential already excluded above — so it falls through both checks to `false` without a special
+// case, the same way a deleted connection's `wc…_` prefix does.
+export async function memberHasAnotherWayIn(
+  db: TenantDb,
+  tenant: { id: string; plan: string },
+  sub: string,
+  env?: string | undefined,
+): Promise<boolean> {
+  const [link] = await db.sql<{ id: string }[]>`
+    SELECT id FROM member_identities WHERE tenant_id = ${tenant.id} AND member_sub = ${sub} LIMIT 1`
+  if (link) return true
+
+  const effective = await resolveLoginConnections(db, tenant, env)
+  const prefix = RESERVED_SUB_RE.exec(sub)?.[0] ?? null
+  if (prefix) return effective.some((c) => c.subjectPrefix === prefix)
+  return effective.some((c) => c.subjectPrefix === null && (c.kind === 'oidc' || c.kind === 'platform'))
 }
 
 // #537's kind-level lockout guard is RETIRED (#822 / ADR-251 §3.4 — named here so the seam does not

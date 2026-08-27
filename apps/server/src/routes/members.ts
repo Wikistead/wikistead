@@ -13,7 +13,7 @@ import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { enqueueTupleDeletes, flushTupleDeletes, type TupleIntent } from '../db/tuple-outbox.js' // #896
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
-import { assertClosingIsSafe, anAdminHoldsAKey, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
+import { assertClosingIsSafe, anAdminHoldsAKey, memberHasAnotherWayIn, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
@@ -395,18 +395,20 @@ export async function membersPlugin(app: FastifyInstance) {
   app.delete<{ Params: { sub: string } }>('/members/:sub/password-setup', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
     const sub = req.params.sub
-    const [member] = await req.db.sql<[{ sub: string; identity_source: string }?]>`
-      SELECT sub, identity_source FROM members WHERE sub = ${sub}`
+    const [member] = await req.db.sql<[{ sub: string }?]>`
+      SELECT sub FROM members WHERE sub = ${sub}`
     if (!member) return reply.code(404).send({ error: 'member not found' })
     const [cred] = await req.db.sql<[{ member_sub: string }?]>`
       SELECT member_sub FROM local_credentials WHERE member_sub = ${sub}`
     if (!cred) return reply.code(404).send({ error: 'this member has no password entrance', code: 'no_password_entrance' })
 
-    // (1) THIS PERSON's way in, not the tenant's. A `wlocal_` sub arrives from no connection at all — the
-    // prefix is stamped by the connection that mints it — so "does the tenant have a federated door" both
-    // lets a local-only member be locked out for good AND refuses every removal on a tenant using the
-    // shared platform IdP, which is not a door anyone here came through either.
-    if (member.identity_source === 'local') {
+    // (1) THIS PERSON's way in, not the tenant's — ADR-259 §3.9. `identity_source === 'local'` was a
+    // PROXY for "this is their only door", and a link breaks the proxy in both directions: a `local`
+    // member who has since linked a provider has two ways in and was refused for nothing (fixed here);
+    // a member whose connection was deleted has none and was let through (also fixed — the mint-derived
+    // check reads "still effective", not a static column). See `memberHasAnotherWayIn` for the two
+    // things that count as another door once this credential is gone.
+    if (!(await memberHasAnotherWayIn(req.db, req.tenant, sub))) {
       return reply.code(409).send({
         error: 'this is the only way this member can sign in — suspend them instead of removing their password',
         code: 'last_way_in',

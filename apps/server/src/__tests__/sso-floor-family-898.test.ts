@@ -33,6 +33,12 @@ const seat = async (sub: string, role: 'admin' | 'member') => {
               VALUES (${pt.id}, ${sub}, ${`${sub}@t.test`}, 'x') ON CONFLICT DO NOTHING`
   await admin`INSERT INTO sso_exemptions (tenant_id, member_sub, created_by) VALUES (${pt.id}, ${sub}, 'dev-user')
               ON CONFLICT DO NOTHING`
+  // #949: this file is about the SSO floor, not `memberHasAnotherWayIn` — give each member a way in
+  // besides the credential the guard removes, or the per-member "last way in" check fires first and
+  // the floor logic these cases exercise never runs.
+  await admin`INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
+              VALUES (${pt.id}, ${`sso898-conn-${sub}`}, ${`sso898-ext-${sub}`}, ${sub})
+              ON CONFLICT DO NOTHING`
 }
 const unseat = async (sub: string) => {
   await admin`DELETE FROM sso_exemptions WHERE tenant_id = ${pt.id} AND member_sub = ${sub}`

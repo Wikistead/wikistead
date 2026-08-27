@@ -45,12 +45,24 @@ beforeAll(async () => {
   await seatMembers(admin, TENANT, [FED, LOCAL])
   await admin`UPDATE members SET identity_source = 'oidc' WHERE tenant_id = ${TENANT} AND sub = ${FED}`
   await admin`UPDATE members SET identity_source = 'local' WHERE tenant_id = ${TENANT} AND sub = ${LOCAL}`
+  // #949 / ADR-259 §3.9: FED's "arrived through a connection" is now measured by a stored link, not by
+  // `identity_source` (the proxy #949 retires). `connection_id` carries no foreign key by design (§3.9),
+  // so a fixture string naming no real row is exactly the shape a member's own link takes.
+  await admin`INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
+              VALUES (${TENANT}, ${`pw626-conn-${STAMP}`}, ${`pw626-ext-${STAMP}`}, ${FED})
+              ON CONFLICT DO NOTHING`
 
   own = await privateTenant(admin, 'pw894')
   for (const sub of [OWN_FED, OWN_OTHER]) {
     await admin`INSERT INTO members (tenant_id, sub, email, role, identity_source)
                 VALUES (${own.id}, ${sub}, ${`${sub}@pw894.test`}, 'member', 'oidc')
                 ON CONFLICT (tenant_id, sub) DO UPDATE SET identity_source = 'oidc'`
+    // #949: this file's SSO-floor cases are about the floor, not about `memberHasAnotherWayIn` — each
+    // member needs a way in besides the credential the case removes, or the new per-member "last way
+    // in" check fires first and the floor logic underneath it never runs.
+    await admin`INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
+                VALUES (${own.id}, ${`pw894-conn-${sub}`}, ${`pw894-ext-${sub}`}, ${sub})
+                ON CONFLICT DO NOTHING`
   }
 }, 120_000)
 
@@ -59,6 +71,7 @@ afterAll(async () => {
     await admin`DELETE FROM password_resets WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`.catch(() => {})
     await admin`DELETE FROM local_credentials WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`.catch(() => {})
     await admin`DELETE FROM sso_exemptions WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`.catch(() => {})
+    await admin`DELETE FROM member_identities WHERE tenant_id = ${TENANT} AND member_sub = ${sub}`.catch(() => {})
   }
   await unseatMembers(admin, TENANT, [FED, LOCAL])
   await admin`UPDATE tenant_login_prefs SET sso_required = false WHERE tenant_id = ${TENANT}`.catch(() => {})
