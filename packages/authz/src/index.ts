@@ -1,4 +1,4 @@
-export { makeFga, fgaClient, fgaModelId } from './client.js'
+export { makeFga, fgaClient, fgaModelId, supplyResolvedFga, resetResolvedFgaForTests } from './client.js'
 // #253: the DSL transform and its canonical comparison, in one place — apps/server's guard and
 // infra/openfga's drift-healer both consume this rather than keeping their own copies.
 export { dslToModel, canonicalModel, modelsMatch } from './model.js'
