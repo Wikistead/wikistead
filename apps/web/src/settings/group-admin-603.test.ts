@@ -14,6 +14,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ApiError } from "../data/apiClient";
+import { roleChangeRefusalKey } from "./role-change-refusal"; // #866: the mapping moved out of the screen
 import {
   groupConferredRoles, buildUnifiedRows, groupRoleValue,
   type TenantAssignment, type RowMember, type GroupRoleRow,
@@ -22,6 +24,8 @@ import {
 const asg = (over: Partial<TenantAssignment>): TenantAssignment => ({
   id: "a1", roleId: null, roleName: "admin", principal: "group:abc#member", ...over,
 });
+
+const refusal = (code: string) => Object.assign(new ApiError(409, "/members/x", code), { code });
 
 describe("#603: what a group confers is reported by mechanism, for every role", () => {
   it("a custom role NAMED admin is reported as that custom role; the built-in tier as the tier", () => {
@@ -91,9 +95,15 @@ describe("#603: the floor's 409 carries its reason to the reader", () => {
   });
 
   it("the members screen maps the server's code, not the status alone", () => {
+    // #866 moved the mapping OUT of the screen and into `roleChangeRefusalKey`, because collapsing
+    // every other 409 onto the floor's sentence was its own defect. This case is re-anchored on the
+    // mechanism rather than on the file the mapping used to sit in: what #603 protects is that the
+    // CODE decides, and that the two refusals keep two sentences. Asked as behaviour, so the next
+    // move of this table does not silence the case a third time.
+    expect(roleChangeRefusalKey(refusal("last_direct_admin")), "the code decides the sentence").toBe("members.lastDirectAdmin");
+    expect(roleChangeRefusalKey(refusal("last_admin")), "the ordinary 409 keeps its own words").toBe("members.lastAdmin");
+    expect(roleChangeRefusalKey(refusal("last_direct_admin"))).not.toBe(roleChangeRefusalKey(refusal("last_admin")));
     const src = readFileSync(resolve(import.meta.dirname, "./MembersPage.tsx"), "utf8");
-    expect(src, "the code decides the sentence").toContain('e.code === "last_direct_admin"');
-    expect(src, "the ordinary 409 keeps its own words").toContain('t("members.lastAdmin")');
     expect(src, "no hard-coded English refusal survives").not.toContain('"Cannot change the last admin."');
   });
 });

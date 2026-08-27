@@ -7,6 +7,7 @@ import { FormRow } from "../ui/FormRow";
 import { ConfirmDialog, SecretDialog } from "../ui/dialogs"; // #504: removal / DSAR erasure / invite revoke confirm first
 import { Input } from "../ui/Input";
 import { memberLabel } from "../ui/principal-label"; // #859: one wording for a member the product cannot name
+import { roleChangeRefusalKey } from "./role-change-refusal"; // #866: one sentence per refusal, never the floor's for all of them
 import { Select } from "../ui/Select";
 import { Avatar } from "../ui/Avatar";
 import {
@@ -172,15 +173,13 @@ export function MembersPage() {
     setError(null);
     try { await fn(); await refresh(); }
     catch (e) {
-      // #603 (user condition on the floor ruling): the 409 says WHY. With a group holding admin, the
-      // plain "cannot change the last admin" reads as a bug — the reason (group-conferred admins can
-      // be lost at the IdP, one DIRECT admin must remain) is the sentence that stops the next person
-      // from removing the guard in good faith. The server picks the code; this maps it to the locale.
-      setError(
-        e instanceof ApiError && e.status === 409 && e.code === "last_direct_admin" ? t("members.lastDirectAdmin")
-        : e instanceof ApiError && e.status === 409 ? t("members.lastAdmin")
-        : t("toast.actionFailed"),
-      );
+      // #603 (user condition on the floor ruling): the 409 says WHY. The server picks the code; the
+      // table beside this file maps it to the locale.
+      // #866 (review rejection): a TOAST, like every other refusal of this family — the sign-in methods
+      // screen already answers the same `login_lockout` through `notify.error`, and this screen was
+      // the one place that answered inline, in a crimson paragraph above a list the reader is not
+      // looking at while they operate a row's Select.
+      notify.error(t(roleChangeRefusalKey(e)));
     }
   };
 
