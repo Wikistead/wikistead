@@ -56,10 +56,24 @@ const servedByIngress = (url: string): boolean => {
 }
 
 // ── what each topology declares ────────────────────────────────────────────────────────────────
+// `collab` (below `server` in the file) carries its OWN, separately-set `WKS_PUBLIC_BASE_URL: ""`
+// (#726 — it reads none of this service's env, blanked for the same reason as its neighbours).
+// A file-wide regex match can't tell the two apart: deleting only the SERVER line (the exact
+// regression Decision 2 exists to catch, since `env_file: [.env]` would then let the operator's own
+// `.env` show through) still finds collab's identical line and reports the file unchanged. Every
+// read below is scoped to the `server:` service block for this reason.
+/** Lines from `server:` up to (not including) the next top-level (2-space-indented) service key. */
+const serverServiceBlock = (): string => {
+  const lines = read('docker-compose.yml').split('\n')
+  const start = lines.findIndex((l) => /^ {2}server:\s*$/.test(l))
+  expect(start, 'the server service was renamed or removed').toBeGreaterThan(-1)
+  const end = lines.findIndex((l, i) => i > start && /^ {2}\S.*:\s*$/.test(l))
+  return (end === -1 ? lines.slice(start) : lines.slice(start, end)).join('\n')
+}
+
 /** The compose effective value: `environment:` wins, `env_file` shows through only when absent. */
 const composeDeclaredZone = (): string | null => {
-  const yml = read('docker-compose.yml')
-  const inEnvironment = yml.match(/^\s+WKS_PUBLIC_BASE_URL:\s*(.*)$/m)
+  const inEnvironment = serverServiceBlock().match(/^\s+WKS_PUBLIC_BASE_URL:\s*(.*)$/m)
   if (inEnvironment) {
     const raw = inEnvironment[1]!.trim().replace(/^["']|["']$/g, '')
     return raw === '' ? null : raw
@@ -82,7 +96,9 @@ describe('#828 the address a topology composes is one it serves, or none', () =>
     // ⚠️ Deleting the line does not remove the variable: the service carries `env_file: [.env]` and
     // compose merges the file in. This pin is the difference between "absent" and "blank", which
     // `composeDeclaredZone` above deliberately cannot tell apart (it answers null for both).
-    expect(read('docker-compose.yml'), 'the line was deleted; the operator\'s own .env now shows through')
+    // ⚠️ Scoped to `serverServiceBlock()`, not the whole file — collab carries the identical
+    // `WKS_PUBLIC_BASE_URL: ""` line a few services down, which would mask the server line's deletion.
+    expect(serverServiceBlock(), 'the server line was deleted; the operator\'s own .env now shows through')
       .toMatch(/^\s+WKS_PUBLIC_BASE_URL:\s*""\s*$/m)
   })
 
@@ -124,11 +140,13 @@ describe('#828 the prose that stands in for a check is itself checked', () => {
   // Decision 3 chose prose over a check and NAMED that prose as what stands in for one. Prose that
   // nothing asserts is one edit from being gone. Brittle and present beats absent, given that the
   // alternative here was to have no check at all.
+  // ⚠️ Scoped to `serverServiceBlock()`, not a fixed-size window over the whole file — a file-wide
+  // slice would happily anchor on collab's identical blank line and read ITS (empty) neighbourhood.
   const around = (): string => {
-    const yml = read('docker-compose.yml')
-    const at = yml.search(/^\s+WKS_PUBLIC_BASE_URL:\s*""\s*$/m)
-    expect(at, 'the value moved; this pin is reading the wrong part of the file').toBeGreaterThan(-1)
-    return yml.slice(Math.max(0, at - 1800), at)
+    const block = serverServiceBlock()
+    expect(block, 'the value moved; this pin is reading the wrong service block')
+      .toMatch(/^\s+WKS_PUBLIC_BASE_URL:\s*""\s*$/m)
+    return block
   }
 
   it('names precondition 1: one workspace, named after the site host\'s first label', () => {
