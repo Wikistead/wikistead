@@ -1,13 +1,9 @@
-// #1005 / ADR-260 §3.1: the two-language set every server-composed string (mail, the personal-space
-// name) resolves against. Temporary local copy — #1006 lands a package both apps/web and apps/server
-// depend on, and this becomes a re-export of that list rather than a second one (ADR-260 §3.3 forbids
-// exactly the split a second copy would start).
-export const LANGS = ['en', 'ja'] as const
-export type Lang = (typeof LANGS)[number]
-
-export function isKnownLang(v: string | null | undefined): v is Lang {
-  return v != null && (LANGS as readonly string[]).includes(v)
-}
+// #1005 / ADR-260 §3.1: mail locale resolution built on the shared vocabulary. #1006 landed the
+// package both apps/web and apps/server depend on (@wikistead/i18n-shared) — LANGS/Lang/isKnownLang
+// are re-exported from there rather than declared here, closing out #1005's temporary local copy.
+import { LANGS, isKnownLang, type Lang } from '@wikistead/i18n-shared'
+export { LANGS, isKnownLang }
+export type { Lang }
 
 // ADR-260 §3.1: the member's own locale, then the tenant default, then 'en' — collected in one place
 // so every caller resolves the same way. §3.4: an unknown/unset locale is never an error, only 'en'.

@@ -2,14 +2,17 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
+import { LANGS, type Lang } from "@wikistead/i18n-shared";
 
 // i18n foundation (Phase 3b-1). Default locale is English; Japanese is available.
 // The active language is resolved once at startup (persisted choice ▷ browser
 // locale ▷ English) and can be switched at runtime via the header LanguageToggle.
 // Japanese is core to the product's positioning, so reaching it must not require
 // editing config — the switcher (Phase 5) is that launch-required path.
-export const LANGS = ["en", "ja"] as const;
-export type Lang = (typeof LANGS)[number];
+// #1006 / ADR-260 §6.4: re-exported rather than declared here — apps/server's mail locale resolver
+// reads the SAME list, and a second copy of a two-item array is exactly the drift ADR-260 forbids.
+export { LANGS };
+export type { Lang };
 const KEY = "wks.lang";
 
 function detectLang(): Lang {

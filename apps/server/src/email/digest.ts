@@ -21,7 +21,13 @@ import { fgaClient } from '@wikistead/authz'
 import { pool } from '../db/pool.js'
 import { acquireTenantDb, registry, listActiveTenantIds } from '../db/index.js'
 import { pageEventDisposition } from '../page-disposition.js'
-import type { FeedEventType } from '../routes/notifications.js' // #900: the writer decides the words
+// #900: the writer (fanOutFeedEvent, routes/notifications.ts) decides the words this type can hold.
+// #1006 / ADR-225 §4.1: imported from @wikistead/i18n-shared rather than from routes/notifications.js
+// so this file's own edits never touch apps/server/src/routes/** — that glob is bound to
+// docs/api-reference.md, and this type has no HTTP surface of its own to document. Structurally the
+// SAME six-value union notifications.ts declares for fanOutFeedEvent's own parameter; TypeScript
+// would flag either side the day the two stop agreeing.
+import type { FeedEventType } from '@wikistead/i18n-shared'
 import { registerEmailBuilder, type EmailBuildResult, type EmailOutboxRow } from './outbox.js'
 import type { EmailBranding } from './outbox.js'
 import { startOutboxDrainWorker } from '../db/outbox-lease.js'
