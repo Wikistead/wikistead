@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
-import { LoadFailed } from "../ui/LoadFailed";
+import { ListState } from "../ui/ListState";
 import { Copy, Trash2 } from "lucide-react";
 import { useWebhooks, useCreateWebhook, useDeleteWebhook, type WebhookCreated } from "../data/queries";
 import { Button, IconButton } from "../ui/Button";
@@ -60,22 +60,29 @@ export function AdminWebhooksTab() {
       )}
 
       <ListBox className="mt-5" data-testid="webhook-list">
-        {(hooks.data ?? []).map((h) => (
-          <ListRow key={h.id} data-testid="webhook-item">
-            {!h.active && <span className="flex-none rounded-full border border-[var(--danger)] px-2 py-px text-[11px] uppercase tracking-[0.03em] text-[var(--danger)]" data-testid="webhook-disabled">{t("adminWebhooks.disabled")}</span>}
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">{h.url}</span>
-            {/* #504: red at rest + confirm (the secret cannot be re-shown; a re-add is a new endpoint). */}
-            <IconButton aria-label={t("adminWebhooks.delete")} data-testid="webhook-delete" variant="danger"
-              onClick={() => setDeleting({ id: h.id, url: h.url })}>
-              <Trash2 size={14} />
-            </IconButton>
-          </ListRow>
-        ))}
-        {/* #888: this one did not even wait for the request — "no endpoints" flashed while loading
-            and stayed there if the fetch failed. */}
-        {hooks.isError
-          ? <LoadFailed testId="admin-webhooks-failed" onRetry={() => { void hooks.refetch(); }} />
-          : !hooks.isLoading && (hooks.data?.length ?? 0) === 0 && <p className="text-xs text-fg-dim">{t("adminWebhooks.empty")}</p>}
+        {/* ADR-266 §3.1: this was #888's own "did not even wait for the request" surface — "no
+            endpoints" flashed while loading and stayed if the fetch failed. The chokepoint keeps
+            the same loading-shows-nothing shape (`loading={null}`) without a hand-rolled guard. */}
+        <ListState
+          query={hooks}
+          fallback={[]}
+          isEmpty={(list) => list.length === 0}
+          loading={null}
+          empty={<p className="text-xs text-fg-dim">{t("adminWebhooks.empty")}</p>}
+          testId="admin-webhooks-failed"
+        >
+          {(list) => list.map((h) => (
+            <ListRow key={h.id} data-testid="webhook-item">
+              {!h.active && <span className="flex-none rounded-full border border-[var(--danger)] px-2 py-px text-[11px] uppercase tracking-[0.03em] text-[var(--danger)]" data-testid="webhook-disabled">{t("adminWebhooks.disabled")}</span>}
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">{h.url}</span>
+              {/* #504: red at rest + confirm (the secret cannot be re-shown; a re-add is a new endpoint). */}
+              <IconButton aria-label={t("adminWebhooks.delete")} data-testid="webhook-delete" variant="danger"
+                onClick={() => setDeleting({ id: h.id, url: h.url })}>
+                <Trash2 size={14} />
+              </IconButton>
+            </ListRow>
+          ))}
+        </ListState>
       </ListBox>
       {/* #504: the endpoint-delete confirm — names the URL. */}
       <ConfirmDialog

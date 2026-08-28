@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LoadFailed } from "../ui/LoadFailed";
+import { ListState } from "../ui/ListState";
 import { RadioGroup } from "../ui/RadioGroup";
 import { useNavigate } from "react-router-dom";
 import { ChevronRight, Link as LinkIcon, Maximize2 } from "lucide-react";
@@ -108,55 +108,64 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
       <div className="flex flex-col gap-4">
         {/* §Backlinks — 1-hop pages that link here (moved from the standalone panel). */}
         <RelatedSection title={t("related.backlinks")} count={backlinks.length}>
-          {/* #895: "nothing links here" is an answer about the page. A failed fetch is not. */}
-          {backlinksFailed ? (
-            <LoadFailed testId="backlinks-failed" onRetry={() => { void refetchBacklinks(); }} />
-          ) : backlinks.length === 0 ? (
-            <p className="text-[13px] text-fg-dim" data-testid="backlinks-empty">{t("backlinks.empty")}</p>
-          ) : (
-            // #623: the section scrolls, the panel does not grow. A page that everything links to
-            // returns up to 200 backlinks, and unboxed they pushed §Related and §Local graph so far
-            // below the fold that the panel read as if it had one section. Same box as the admin
-            // lists (#639/#581) rather than a second one invented for the rail.
-            <ListBox>
-              <ul className="flex flex-col gap-0.5">
-                {backlinks.map((b) => (
-                  <li key={b.id}>{linkBtn(b.id, b.title, `backlink-${b.id}`)}</li>
-                ))}
-              </ul>
-            </ListBox>
-          )}
+          {/* ADR-266 §3.1: "nothing links here" is an answer about the page — a failed fetch is not,
+              and this component no longer decides which of the three it is showing. */}
+          <ListState
+            query={{ isError: backlinksFailed, data, refetch: refetchBacklinks }}
+            fallback={[]}
+            isEmpty={(rows) => rows.length === 0}
+            empty={<p className="text-[13px] text-fg-dim" data-testid="backlinks-empty">{t("backlinks.empty")}</p>}
+            testId="backlinks-failed"
+          >
+            {(rows) => (
+              // #623: the section scrolls, the panel does not grow. A page that everything links to
+              // returns up to 200 backlinks, and unboxed they pushed §Related and §Local graph so far
+              // below the fold that the panel read as if it had one section. Same box as the admin
+              // lists (#639/#581) rather than a second one invented for the rail.
+              <ListBox>
+                <ul className="flex flex-col gap-0.5">
+                  {rows.map((b) => (
+                    <li key={b.id}>{linkBtn(b.id, b.title, `backlink-${b.id}`)}</li>
+                  ))}
+                </ul>
+              </ListBox>
+            )}
+          </ListState>
         </RelatedSection>
         {/* §Related — 2-hop pages that share a link with this one, grouped by the shared link (Scrapbox-style).
             Both edge ends are view-filtered server-side (#322 / ADR-133 §3). */}
         <RelatedSection title={t("related.related")} count={relatedCount}>
-          {related.isError ? (
-            <LoadFailed testId="related-failed" onRetry={() => { void related.refetch(); }} />
-          ) : relatedGroups.length === 0 ? (
-            <p className="text-[13px] text-fg-dim" data-testid="related-empty">{t("related.empty")}</p>
-          ) : (
-            // #623: same box, same reason — 20 groups of up to 12 pages is 240 rows.
-            <ListBox className="flex flex-col gap-3" data-testid="related-groups">
-              {relatedGroups.map((g) => (
-                <div key={g.intermediate.id} className="flex flex-col gap-0.5">
-                  {/* the shared link (intermediate) heads its group; clicking it navigates to that page. */}
-                  <button
-                    type="button"
-                    data-testid={`related-via-${g.intermediate.id}`}
-                    className="truncate text-left text-[11px] text-fg-dim hover:text-[var(--link)] hover:underline"
-                    onClick={() => navigate(`/p/${g.intermediate.id}`)}
-                  >
-                    {t("related.via")} {g.intermediate.title || t("backlinks.untitled")}
-                  </button>
-                  <ul className="flex flex-col gap-0.5 pl-2">
-                    {g.pages.map((p) => (
-                      <li key={p.id}>{linkBtn(p.id, p.title, `related-${p.id}`)}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </ListBox>
-          )}
+          <ListState
+            query={related}
+            fallback={{ groups: [], truncated: false }}
+            isEmpty={(d) => d.groups.length === 0}
+            empty={<p className="text-[13px] text-fg-dim" data-testid="related-empty">{t("related.empty")}</p>}
+            testId="related-failed"
+          >
+            {(d) => (
+              // #623: same box, same reason — 20 groups of up to 12 pages is 240 rows.
+              <ListBox className="flex flex-col gap-3" data-testid="related-groups">
+                {d.groups.map((g) => (
+                  <div key={g.intermediate.id} className="flex flex-col gap-0.5">
+                    {/* the shared link (intermediate) heads its group; clicking it navigates to that page. */}
+                    <button
+                      type="button"
+                      data-testid={`related-via-${g.intermediate.id}`}
+                      className="truncate text-left text-[11px] text-fg-dim hover:text-[var(--link)] hover:underline"
+                      onClick={() => navigate(`/p/${g.intermediate.id}`)}
+                    >
+                      {t("related.via")} {g.intermediate.title || t("backlinks.untitled")}
+                    </button>
+                    <ul className="flex flex-col gap-0.5 pl-2">
+                      {g.pages.map((p) => (
+                        <li key={p.id}>{linkBtn(p.id, p.title, `related-${p.id}`)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </ListBox>
+            )}
+          </ListState>
         </RelatedSection>
         {/* §Local graph (#394 / ADR-147) — collapsed by default; the square mini canvas draws the 1-hop
             neighbourhood (server view-filtered both ends), the expand button opens the depth-2 modal. */}
@@ -185,33 +194,36 @@ export function RelatedPanel({ pageId, onClose }: { pageId: string; onClose: () 
             )}
           </div>
           {graphOpen && (
-            // #895 round 4: miniGraph.isError fell through to graphEmpty ("no connections"), telling a
-            // reader a page has no local graph when a fetch simply failed — the #888 shape, checked
-            // before the empty-vs-populated branch the same way this component's own `related.isError`
-            // guard above already does.
-            miniGraph.isError ? (
-              <LoadFailed testId="local-graph-failed" onRetry={() => { void miniGraph.refetch(); }} />
-            ) : miniGraph.data && miniGraph.data.nodes.length > 1 ? (
-              <div className="flex flex-col gap-1">
-                <LocalGraphCanvas
-                  data={miniGraph.data}
-                  onOpenPage={(id) => navigate(`/p/${id}`)}
-                  className="aspect-square w-full overflow-hidden rounded-md border border-border"
-                />
-                {miniGraph.data.hiddenCount > 0 && (
-                  <button
-                    type="button"
-                    data-testid="local-graph-more"
-                    className="cursor-pointer text-left text-[12px] text-[var(--link)] hover:underline"
-                    onClick={() => setGraphModal(true)}
-                  >
-                    {t("related.graphMore", { count: miniGraph.data.hiddenCount })}
-                  </button>
-                )}
-              </div>
-            ) : (
-              <p className="text-[13px] text-fg-dim" data-testid="local-graph-empty">{t("related.graphEmpty")}</p>
-            )
+            // ADR-266 §3.1: this used to be the site of #895 round 4 — miniGraph.isError fell through
+            // to graphEmpty ("no connections") on a failed fetch. The chokepoint removes the branch
+            // that let that happen rather than relying on a ternary getting the order right again.
+            <ListState
+              query={miniGraph}
+              fallback={{ center: "", nodes: [], edges: [], hiddenCount: 0 }}
+              isEmpty={(d) => !(d.nodes.length > 1)}
+              empty={<p className="text-[13px] text-fg-dim" data-testid="local-graph-empty">{t("related.graphEmpty")}</p>}
+              testId="local-graph-failed"
+            >
+              {(d) => (
+                <div className="flex flex-col gap-1">
+                  <LocalGraphCanvas
+                    data={d}
+                    onOpenPage={(id) => navigate(`/p/${id}`)}
+                    className="aspect-square w-full overflow-hidden rounded-md border border-border"
+                  />
+                  {d.hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      data-testid="local-graph-more"
+                      className="cursor-pointer text-left text-[12px] text-[var(--link)] hover:underline"
+                      onClick={() => setGraphModal(true)}
+                    >
+                      {t("related.graphMore", { count: d.hiddenCount })}
+                    </button>
+                  )}
+                </div>
+              )}
+            </ListState>
           )}
         </section>
       </div>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
-import { LoadFailed } from "../ui/LoadFailed";
+import { ListState } from "../ui/ListState";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Eye, FileStack, Pencil, Trash2, X } from "lucide-react";
 import { TemplateBodyPreview } from "../editor/TemplateBodyPreview";
@@ -22,7 +22,6 @@ export function TemplatesRoute() {
   const [renaming, setRenaming] = useState<TemplateSummary | null>(null);
   const [deleting, setDeleting] = useState<TemplateSummary | null>(null);
   const [previewing, setPreviewing] = useState<TemplateSummary | null>(null);
-  const templates = data ?? [];
 
   return (
     <div className="mx-auto max-w-[46rem] px-4 py-8 text-[length:var(--text-ui)]" data-testid="templates-page">
@@ -32,20 +31,24 @@ export function TemplatesRoute() {
       <h1 className="mb-4 flex items-center gap-2 text-[length:var(--text-lg)] font-semibold">
         <FileStack size={18} /> {t("templates.title")}
       </h1>
-      {isLoading ? (
-        <p className="text-fg-dim">{t("common.loading")}</p>
-      ) : isError ? (
-        // #895: "you have no templates" is a claim about the reader's own library.
-        <LoadFailed testId="templates-failed" variant="page" onRetry={() => { void refetch(); }} />
-      ) : templates.length === 0 ? (
-        <p className="text-fg-dim" data-testid="templates-empty">{t("templates.empty")}</p>
-      ) : (
+      {/* ADR-266 §3.1: "you have no templates" is a claim about the reader's own library — the
+          chokepoint means this page cannot make that claim on a failed fetch. */}
+      <ListState
+        query={{ isLoading, isError, data, refetch }}
+        fallback={[]}
+        isEmpty={(rows) => rows.length === 0}
+        loading={<p className="text-fg-dim">{t("common.loading")}</p>}
+        empty={<p className="text-fg-dim" data-testid="templates-empty">{t("templates.empty")}</p>}
+        variant="page"
+        testId="templates-failed"
+      >
+        {(rows) => (
         <ListBox>
           {/* #623 slice 10: the shared box from #639 — the same 26rem everywhere, so a long list
               scrolls inside itself instead of growing the page. The server bound landed in slice 4; the
               container waited until #639 settled, so this did not become a second one. */}
         <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
-            {templates.map((tpl) => (
+            {rows.map((tpl) => (
               <li key={tpl.id} data-testid="template-row" className="flex items-center gap-2 px-3 py-2">
                 <span
                   data-testid="template-scope-badge"
@@ -73,7 +76,8 @@ export function TemplatesRoute() {
             ))}
           </ul>
       </ListBox>
-      )}
+        )}
+      </ListState>
 
       <RenameDialog
         open={renaming !== null}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LoadFailed } from "./LoadFailed";
+import { ListState } from "./ListState";
 import { Copy, Trash2 } from "lucide-react";
 import { useShareLinks, useCreateShareLink, useRevokeShareLink } from "../data/queries";
 import { notify } from "./toast";
@@ -102,16 +102,17 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
         </div>
 
         <div className="mt-3 flex max-h-[55vh] flex-col gap-2 overflow-y-auto" data-testid="link-list">
-          {links.isLoading ? (
-            <div className="text-sm text-fg-dim">{t("common.loading")}</div>
-          ) : links.isError ? (
-            // #888: said BEFORE the empty branch. "No links" here is an answer about who can reach
-            // this page, and a request that failed established nothing of the sort.
-            <LoadFailed testId="share-links-failed" onRetry={() => { void links.refetch(); }} />
-          ) : (links.data?.length ?? 0) === 0 ? (
-            <div className="text-sm text-fg-dim">{t("shareDialog.noLinks")}</div>
-          ) : (
-            links.data!.map((l) => (
+          {/* ADR-266 §3.1: the chokepoint — a failed fetch cannot render as "no links" here because
+              this component no longer decides which of the three states it is showing. */}
+          <ListState
+            query={links}
+            fallback={[]}
+            isEmpty={(data) => data.length === 0}
+            loading={<div className="text-sm text-fg-dim">{t("common.loading")}</div>}
+            empty={<div className="text-sm text-fg-dim">{t("shareDialog.noLinks")}</div>}
+            testId="share-links-failed"
+          >
+            {(data) => data.map((l) => (
               <div key={l.id} className="flex items-center gap-2">
                 <span className="whitespace-nowrap text-xs text-fg-dim">
                   {l.capability === "edit" ? t("shareDialog.edit") : t("shareDialog.view")}
@@ -141,8 +142,8 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
                   <Trash2 size={14} />
                 </IconButton>
               </div>
-            ))
-          )}
+            ))}
+          </ListState>
         </div>
         {copied && <div className="mt-1 text-xs text-fg-dim">{t("shareDialog.copied")}</div>}
 

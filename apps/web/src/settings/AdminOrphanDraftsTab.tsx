@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
-import { LoadFailed } from "../ui/LoadFailed";
+import { ListState } from "../ui/ListState";
 import { useOrphanDrafts, useClaimOrphanDraft, useReassignOrphanDraft } from "../data/queries";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -22,19 +22,20 @@ export function AdminOrphanDraftsTab() {
   const [claimed, setClaimed] = useState<Record<string, boolean>>({});
   const [owner, setOwner] = useState<Record<string, string>>({});
 
-  const list = orphans.data ?? [];
-
   return (
     <SettingsPane width="list" testId="admin-orphans" title={t("adminOrphans.title")} description={t("adminOrphans.body")}>
 
-      {orphans.isLoading ? (
-        <p className="text-sm text-fg-dim">{t("common.loading")}</p>
-      ) : orphans.isError ? (
-        // #895: an admin reading "no orphaned drafts" acts on it. A failed fetch established none.
-        <LoadFailed testId="admin-orphans-failed" onRetry={() => { void orphans.refetch(); }} />
-      ) : list.length === 0 ? (
-        <p className="text-sm text-fg-dim" data-testid="admin-orphans-empty">{t("adminOrphans.empty")}</p>
-      ) : (
+      {/* ADR-266 §3.1: an admin reading "no orphaned drafts" acts on it — the chokepoint means a
+          failed fetch can no longer read as that answer. */}
+      <ListState
+        query={orphans}
+        fallback={[]}
+        isEmpty={(list) => list.length === 0}
+        loading={<p className="text-sm text-fg-dim">{t("common.loading")}</p>}
+        empty={<p className="text-sm text-fg-dim" data-testid="admin-orphans-empty">{t("adminOrphans.empty")}</p>}
+        testId="admin-orphans-failed"
+      >
+        {(list) => (
         <ListBox>
           {/* #623 slice 10: the shared box from #639 — the same 26rem everywhere, so a long list
               scrolls inside itself instead of growing the page. The server bound landed in slice 4; the
@@ -87,7 +88,8 @@ export function AdminOrphanDraftsTab() {
             ))}
           </ul>
       </ListBox>
-      )}
+        )}
+      </ListState>
     </SettingsPane>
   );
 }
