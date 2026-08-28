@@ -105,10 +105,19 @@ describe('#863 / ADR-258: local-admin --domain', () => {
   }, 60_000)
 
   it('refuses a host another workspace already holds, naming the holder — including across a promoted schema', async () => {
+    // ADR-258 §5: "the fixture has to silence TWO constraints" — `custom_domains.domain UNIQUE`
+    // (silenced by promoting the holder, below) AND `tenants.custom_domain UNIQUE` (the mirror). A
+    // holder with only ONE verified domain leaves the mirror pointed at `host` too, so a target
+    // registering `host` would still 23505 when the MIRROR row is written even with the all-tenant walk deleted
+    // — a constraint answering "for free" rather than the walk this pin claims to guard. The holder
+    // therefore carries a SECOND, strictly newer verified domain, which `syncDomainMapping`'s
+    // `ORDER BY verified_at DESC LIMIT 1` puts in the mirror instead, leaving `host` in no
+    // constraint at all — only the application's own walk can still refuse it.
     const holderSlug = `co863handbook2_${STAMP}`
     const holderId = await mkTenant(holderSlug)
     const targetId = await mkTenant(`co863target${STAMP}`)
-    const host = `docs2-${STAMP}.example.com`
+    const host = `docs2-${STAMP}.example.com` // reserved-shaped label, nobody's slug — reaches the walk
+    const holderSecondHost = `handbook2-other-${STAMP}.example.com`
 
     // The holder is PROMOTED to its own namespace schema — `UNIQUE (domain)` cannot see a row that
     // lives in ns_<holder>, so this is the case the plain constraint would miss.
@@ -116,9 +125,26 @@ describe('#863 / ADR-258: local-admin --domain', () => {
     await promoteTenantToNamespace({ id: holderId, slug: holderSlug, plan: 'business', isolation: 'logical' } as Tenant, admin)
     await admin`UPDATE tenants SET isolation = 'namespace' WHERE id = ${holderId}`
     await registerCustomDomainByOperator(holderId, host)
+    await registerCustomDomainByOperator(holderId, holderSecondHost)
+    // Force the ordering deterministically rather than relying on two `now()`s landing apart —
+    // ADR-258 §5: "a tie lets the ordering fall back on the target host … which is a false green."
+    // Written directly (mirroring this file's other `UPDATE custom_domains SET …` fixtures) because
+    // `syncDomainMapping` is module-private and re-registering does not touch an existing row's
+    // `verified_at` (§5 idempotency).
+    await admin`UPDATE custom_domains SET verified_at = now() + interval '1 second'
+                WHERE tenant_id = ${holderId} AND domain = ${holderSecondHost}`
+    await admin`UPDATE tenants SET custom_domain = ${holderSecondHost} WHERE id = ${holderId}`
 
-    await expect(registerCustomDomainByOperator(targetId, host))
-      .rejects.toMatchObject({ statusCode: 409, code: 'domain_taken' })
+    // Assert the pin's own premises before relying on them — ADR-258 §5: "the moment either drifts
+    // this goes back to being green for the wrong reason."
+    const noPublicRow = await admin`SELECT 1 FROM custom_domains WHERE domain = ${host}`
+    expect(noPublicRow, 'no public.custom_domains row for host — UNIQUE(domain) has nothing to say').toHaveLength(0)
+    const [holderMirror] = await admin<{ custom_domain: string | null }[]>`SELECT custom_domain FROM tenants WHERE id = ${holderId}`
+    expect(holderMirror!.custom_domain, 'the mirror points at the SECOND domain, not host').toBe(holderSecondHost)
+
+    const rejection = await registerCustomDomainByOperator(targetId, host).catch((e: unknown) => e)
+    expect(rejection, 'the app\'s own walk refuses, not a bare constraint violation').toMatchObject({ statusCode: 409, code: 'domain_taken' })
+    expect((rejection as { code?: string }).code, 'never the raw Postgres unique_violation').not.toBe('23505')
 
     // the row itself lives in the holder's own schema, not in public
     const inSchema = await admin.unsafe(
