@@ -129,6 +129,19 @@ function collectBaseIdentifiers(node: ts.Node): Set<string> {
     if (ts.isBinaryExpression(n)) { visit(n.left); visit(n.right); return; }
     if (ts.isConditionalExpression(n)) { visit(n.condition); visit(n.whenTrue); visit(n.whenFalse); return; }
     if (ts.isPrefixUnaryExpression(n)) return visit(n.operand);
+    // #1016: an object literal reaches here now that call arguments are walked (`fn({ hasPassword:
+    // set.data?.hasPassword })`). The generic fallback below would also visit each PROPERTY KEY as a
+    // plain Identifier — `hasPassword` the key, not `hasPassword` a binding — producing a base
+    // identifier this component never declared. Only the values (and a shorthand's own name) refer to
+    // anything in scope.
+    if (ts.isObjectLiteralExpression(n)) {
+      for (const prop of n.properties) {
+        if (ts.isPropertyAssignment(prop)) visit(prop.initializer);
+        else if (ts.isShorthandPropertyAssignment(prop)) visit(prop.name);
+        else if (ts.isSpreadAssignment(prop)) visit(prop.expression);
+      }
+      return;
+    }
     if (ts.isIdentifier(n)) { out.add(n.text); return; }
     ts.forEachChild(n, visit);
   };
@@ -205,7 +218,18 @@ function resolveExpr(fn: ts.FunctionLikeDeclaration, expr: ts.Expression, hooks:
     // than guessing it is safe.
     // dash-ok: developer-facing residue-table text, not UI copy
     if (/^use[A-Z]/.test(callee)) return { giveUp: callee, reason: `bound to ${callee}(...) — not imported from a queries module, so the resolver cannot tell whether it can fail` };
-    return { queries: [] };
+    // #1016: a plain helper wrapping query data (`visible(backlinks.data ?? [])`) carries the query
+    // reference in its ARGUMENTS, not in the callee — walk those the same way any other expression is
+    // walked, instead of dropping them on the floor. The callee's own body is never opened: whatever
+    // query backs the result is already visible at the call site, in the argument expression.
+    if (expr.arguments.length === 0) {
+      // dash-ok: developer-facing residue-table text, not UI copy
+      return { giveUp: callee, reason: `bound to ${callee}(...) — a zero-argument call the resolver cannot trace to a query` };
+    }
+    const argResults = expr.arguments.map((arg) => resolveExpr(fn, arg, hooks, visited));
+    const argGiveUp = argResults.find((r): r is { giveUp: string; reason: string } => "giveUp" in r);
+    if (argGiveUp) return argGiveUp;
+    return { queries: argResults.flatMap((r) => ("queries" in r ? r.queries : [])) };
   }
   const ids = collectBaseIdentifiers(expr);
   if (ids.size === 0) return { queries: [] };

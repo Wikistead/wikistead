@@ -66,6 +66,11 @@ const KNOWN_SAFE: Record<string, string> = {
   "app/routes.tsx::page.empty": "BodyPlaceholder's `empty`/`canEdit` are props — routes.tsx returns the page.notFound branch on pageQ.isError before BodyPlaceholder is ever rendered",
   "app/routes.tsx::page.emptyEditable": "same BodyPlaceholder props as page.empty",
   "app/HomeEmpty.tsx::home.emptySelfHostGuide": "deliberately fails closed — `entitlements.data?.selfHosted === true` reads false on a failed/unanswered fetch just as it does on a real 'no', and the in-file comment records that this is chosen, not missed (guessing would put a self-host link in front of a paying tenant)",
+  // #1016: fixed by walking a plain call's arguments — these three surfaced only because the resolver
+  // can now see far enough to notice it still cannot verify them (a custom hook, or a hop through one).
+  "app/LoginScreen.tsx::auth.noMethods": "`useLoginOptions`'s own definition swallows a failed fetch to `{ methods: [\"oidc\"] }` by design — its in-file comment records the fail-open DISPLAY choice (the buttons it draws are still server-refused URLs) as deliberate, not missed",
+  "app/routes.tsx::publicPage.notFound": "the PublicSpaceRoute occurrence reads `treeVerdict = loadVerdict(lazy.root.isError, lazy.root.error)` — a direct `.isError`/`.error` check on `usePublicLazyTree`'s own `root` query, one hop through a custom hook the resolver does not open",
+  "settings/RecoveryCodesPanel.tsx::account.recoveryNoProof": "`methods` partly derives from `browserCanUseFactorKind(\"passkey\")` — read by hand (factor-kind.ts): a synchronous `window`/`PublicKeyCredential` capability check, no query involved",
 };
 
 // ADR-266 §3.3 (the owner's #759 ruling this reuses): the surfaces the checker cannot yet clear
@@ -74,8 +79,19 @@ const KNOWN_SAFE: Record<string, string> = {
 // return shape is not react-query's). A site NOT in this list that comes back unhandled/give-up fails
 // its own assertion below — this table only widens what a NAMED, tracked site is allowed to be.
 const RESIDUE: Record<string, string> = {
-  "app/FactorStep.tsx::auth.factorNoWebauthn": "`kind` is a parameter of a small enrolment-step helper, not a query — not independently verified this session",
+  // #1016: `kind` is the enrolment-step-helper parameter this entry already named; `kinds` is the
+  // OTHER occurrence's own prop, reached through `doorProofs(kinds, webauthn)` now that a plain call's
+  // arguments are walked — same "the fetch belongs to the caller" shape, not independently verified.
+  "app/FactorStep.tsx::auth.factorNoWebauthn": "`kind` is a parameter of a small enrolment-step helper, not a query; the other occurrence's `proofs = doorProofs(kinds, webauthn)` reads the `kinds` prop the same way — not independently verified this session",
   "app/PageViewsChart.tsx::pageAnalytics.noViews": "bound via `useMemo` over query data — the resolver does not trace into a callback body",
+  // #1016: `pages` is a prop (the fetch belongs to routes.tsx, which renders this with `error={pagesError}`)
+  // reached through `buildTree(pages)` now that a plain call's arguments are walked — by hand: the
+  // sibling `error ?` arm earlier in the same ternary chain already excludes the failure state before
+  // `tree.length === 0` can render, but `findGate` only sees the nearest ternary, not the whole chain.
+  "app/GuestSidebar.tsx::share.spaceEmpty": "`tree = buildTree(pages)` reads the `pages` prop — the fetch belongs to routes.tsx (by hand: its own `error` arm, one ternary level up, already excludes this branch on failure)",
+  // #1016: `changed = rowsHaveChanges(rows)` reads `rows`, bound via `useMemo` over `usePublished`'s
+  // data — same shape as the Sidebar.tsx entries below, reached now that a plain call's arguments walk.
+  "history/DiffModal.tsx::history.noChanges": "`rows` (read via `rowsHaveChanges(rows)`) is bound via `useMemo` over `usePublished`'s data — the resolver does not trace into a callback body",
   "app/RecentChangesPage.tsx::recentChanges.empty": "`useFeed` is a custom hook, not imported from a queries module",
   "attachments/AttachmentsPanel.tsx::attachments.empty": "`useAttachments` is a custom hook, not imported from a queries module",
   "notifications/WatchListPage.tsx::watches.empty": "`useWatchList` is a custom hook, not imported from a queries module",
@@ -323,6 +339,38 @@ describe("#3.2 the resolver gives up loudly on a chain it cannot follow", () => 
     const v = judgeSite(sf, found[0]!);
     expect(v.kind).toBe("give-up");
     if (v.kind === "give-up") expect(v.identifier).toBe("useWidgetItems");
+  });
+});
+
+// #1016: a plain (non-`use`-prefixed) function call used to drop its own ARGUMENTS on the floor
+// `visible(backlinks.data ?? [])` read as `vacuous` (nothing to check) no matter what the argument
+// carried, guarded or not. Three fixtures in one file, each a real site `judgeSite` runs against.
+describe("#1016 a plain call's arguments are walked, not dropped", () => {
+  const dir = resolve(import.meta.dirname, "discovery/__fixtures__/call-args");
+  const file = resolve(dir, "Surface.tsx");
+  const src = readFileSync(file, "utf8");
+  const sf = parseSource(file, src);
+  const rel = "discovery/__fixtures__/call-args/Surface.tsx";
+
+  it("resolves through the helper to the query it wraps, when guarded — handled, not vacuous", () => {
+    const site = findSites(rel, src).find((s) => s.key === "backlinks.empty")!;
+    const v = judgeSite(sf, site);
+    expect(v.kind).toBe("handled");
+    if (v.kind === "handled") expect(v.queries).toContain("backlinks");
+  });
+
+  it("resolves through the helper to the query it wraps, when NOT guarded — unhandled, not vacuous", () => {
+    const site = findSites(rel, src).find((s) => s.key === "related.empty")!;
+    const v = judgeSite(sf, site);
+    expect(v.kind).toBe("unhandled");
+    if (v.kind === "unhandled") expect(v.query).toBe("backlinks");
+  });
+
+  it("a zero-argument opaque call gives up loudly instead of reading as vacuous", () => {
+    const site = findSites(rel, src).find((s) => s.key === "related.graphEmpty")!;
+    const v = judgeSite(sf, site);
+    expect(v.kind).toBe("give-up");
+    if (v.kind === "give-up") expect(v.identifier).toBe("opaqueRows");
   });
 });
 
