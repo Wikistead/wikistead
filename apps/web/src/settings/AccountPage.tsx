@@ -506,6 +506,19 @@ function NotificationsTab() {
         </label>
         <p className="mb-0 mt-1 text-[length:var(--text-xs)] text-fg-dim">{t("account.notifications.emailDigestHint")}</p>
       </SettingsCard>
+      {/* #1007 / ADR-260 §3.1/§3.2: the language MAIL is written in — never the app's own UI
+          language, which stays the browser's own setting (LanguageToggle, unrelated to this). */}
+      <SettingsCard testid="account-language-card">
+        <label className="mb-1 block text-sm font-medium">{t("account.notifications.language")}</label>
+        <p className="mb-2 text-xs text-fg-dim">{t("account.notifications.languageHint")}</p>
+        <RadioGroup
+          value={settings.data?.language ?? "workspace"}
+          onChange={(v) => update.mutate({ language: v === "workspace" ? null : (v as "en" | "ja") })}
+          ariaLabel={t("account.notifications.language")}
+          testId="account-language"
+          options={(["workspace", "en", "ja"] as const).map((v) => ({ value: v, label: t(`account.notifications.language_${v}`) }))}
+        />
+      </SettingsCard>
       <SettingsCard testid="notifications-mask-card">
         <div className="mb-2 text-[length:var(--text-ui)] text-foreground">{t("account.notifications.defaultMask")}</div>
         <p className="mb-3 text-[length:var(--text-xs)] text-fg-dim">{t("account.notifications.defaultMaskHint")}</p>

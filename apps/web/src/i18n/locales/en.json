@@ -266,6 +266,11 @@
       "emailImmediateHint": "Email me when someone mentions me (title and link only).",
       "emailDigest": "Daily digest email",
       "emailDigestHint": "One daily rollup of activity on pages and spaces I watch.",
+      "language": "Mail language",
+      "languageHint": "The language WikiStead writes mail to you in. This does not change the app's own language.",
+      "language_workspace": "Follow the workspace default",
+      "language_en": "English",
+      "language_ja": "Japanese",
       "defaultMask": "Default event types",
       "defaultMaskHint": "Applied to watches without their own type filter. All types are on by default."
     },

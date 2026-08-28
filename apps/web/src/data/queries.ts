@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousDa
 import { apiFetch, assetUrl } from "./apiClient";
 import type { ImportStatusRow } from "./exportApi";
 import { useSession } from "../session/SessionProvider";
+import type { Lang } from "@wikistead/i18n-shared";
 
 // Shapes mirror the server DTOs (apps/server/src/routes/{spaces,pages}.ts).
 // IMPORTANT: GET /spaces and GET /spaces/:id/pages are FGA-filtered server-side
@@ -835,6 +836,9 @@ export interface AccountSettings {
   defaultEventMask: string[]; // #362: default event mask for mask-less watches ([] = all types)
   emailImmediate: boolean; // #547: mention email (default ON; under the kill switch)
   emailDigest: boolean; // #547: daily watch digest email (default OFF; under the kill switch)
+  // #1007 / ADR-260 §3.1/§3.2: the MAIL language override — null = unset (falls back to the
+  // workspace default, then English). Not the app's own UI language, which stays browser-local.
+  language: Lang | null;
 }
 // #379 / ADR-150: resolve author subs to display identity (customized members only — the server omits
 // non-members / cross-tenant / un-customized identically, no membership oracle). Cached PER SUB (the
@@ -895,7 +899,7 @@ export function useUpdateAccountSettings() {
   const { token } = useSession();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; editorVimClipboard?: "off" | "paste"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean }) =>
+    mutationFn: (body: { displayNameOverride?: string | null; editorKeymap?: "default" | "vim" | "local"; editorDisplayMode?: "live" | "source" | "wysiwyg" | "local"; editorVimClipboard?: "off" | "paste"; keybindings?: Record<string, string>; editorChrome?: EditorChromeVisibility | null; onboardingCompleted?: boolean; notificationsEnabled?: boolean; defaultEventMask?: string[]; emailImmediate?: boolean; emailDigest?: boolean; language?: Lang | null }) =>
       apiFetch<AccountSettings>("/me/settings", token, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["account-settings"] }),
   });

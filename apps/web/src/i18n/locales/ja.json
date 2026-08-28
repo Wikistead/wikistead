@@ -266,6 +266,11 @@
       "emailImmediateHint": "メンションされたらメールで通知します（タイトルとリンクのみ）。",
       "emailDigest": "デイリーダイジェスト メール",
       "emailDigestHint": "ウォッチ中のページ/スペースの動きを 1 日 1 通にまとめて届けます。",
+      "language": "メールの言語",
+      "languageHint": "WikiSteadがあなたに送るメールの言語です。アプリ自体の表示言語は変わりません。",
+      "language_workspace": "ワークスペースの既定に従う",
+      "language_en": "English",
+      "language_ja": "日本語",
       "defaultMask": "既定のイベント種別",
       "defaultMaskHint": "種別フィルタを持たないウォッチに適用されます。既定では全種別オンです。"
     },
