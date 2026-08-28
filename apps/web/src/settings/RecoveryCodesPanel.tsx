@@ -6,6 +6,7 @@ import { Input } from "../ui/Input";
 import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { notify } from "../ui/toast";
 import { ApiError } from "../data/apiClient";
+import { LoadFailed } from "../ui/LoadFailed";
 import { startAuthentication } from "@simplewebauthn/browser";
 import {
   useMyRecoveryCodes, useMintRecoveryCodes, useRecoveryReauthChallenge, useMyFactors,
@@ -304,6 +305,11 @@ export function RecoveryCodesPanel() {
           <Button variant="default" className="self-start" data-testid="recovery-done"
             onClick={() => setMinted(null)}>{t("account.recoverySaved")}</Button>
         </div>
+      ) : set.isError ? (
+        // ADR-266 §1.3: `set.isError` was never read here — a failed fetch fell into the `remaining
+        // === 0` branch and told the member they had no recovery codes, which is exactly #500's
+        // "error is not empty" shape on a security-critical surface.
+        <LoadFailed testId="recovery-status-failed" onRetry={() => { void set.refetch(); }} />
       ) : (
         <>
           <p className="mb-2 text-xs" data-testid="recovery-status">
