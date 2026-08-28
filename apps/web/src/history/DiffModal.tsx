@@ -36,7 +36,7 @@ export function DiffModal({ pageId, revId, onClose }: { pageId: string; revId: s
   const { t } = useTranslation();
   const { data: revisions } = usePageRevisions(pageId);
   const { data: oldContent, isLoading, isError, refetch } = useRevisionContent(pageId, revId);
-  const { data: published } = usePublished(pageId);
+  const { data: published, isError: publishedIsError, refetch: refetchPublished } = usePublished(pageId);
   const rev = (revisions ?? []).find((r) => r.id === revId);
   const rows = useMemo(
     () => (oldContent == null ? [] : sideBySide(oldContent, published?.publishedMd ?? "")),
@@ -55,9 +55,20 @@ export function DiffModal({ pageId, revId, onClose }: { pageId: string; revId: s
         {isLoading && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
         {/* ADR-266 §1.3: `isError` was never read here — a failed content fetch fell into the
             zero-rows branch and reported "no changes" for a request that never answered. */}
-        {!isLoading && isError && <LoadFailed testId="diff-failed" onRetry={() => { void refetch(); }} />}
-        {!isLoading && !isError && !changed && <p className="text-sm text-muted-foreground" data-testid="diff-no-changes">{t("history.noChanges")}</p>}
-        {!isLoading && !isError && changed && (
+        {/* #1015: usePublished had the same gap — `published?.publishedMd ?? ""` read a failed fetch
+            as "the published body is empty", which a diff against real revision text renders as
+            "the whole page was deleted." Guard it the same way, with its own refetch. */}
+        {!isLoading && (isError || publishedIsError) && (
+          <LoadFailed
+            testId="diff-failed"
+            onRetry={() => {
+              void refetch();
+              void refetchPublished();
+            }}
+          />
+        )}
+        {!isLoading && !isError && !publishedIsError && !changed && <p className="text-sm text-muted-foreground" data-testid="diff-no-changes">{t("history.noChanges")}</p>}
+        {!isLoading && !isError && !publishedIsError && changed && (
           <div data-testid="diff-grid" className="min-h-0 flex-1 overflow-auto rounded-md border font-mono text-xs leading-relaxed">
             <div className="grid grid-cols-[auto_1fr_auto_1fr]">
               {rows.map((row, i) => (
