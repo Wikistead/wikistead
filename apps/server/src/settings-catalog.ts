@@ -2,6 +2,11 @@
 // server deps) so it is the SINGLE source for BOTH the account route's validation AND the
 // generated settings reference — a new option cannot be added to one without the other.
 
+// #1007 / ADR-260 §6.2 / §7 item 3: validated against the SAME LANGS the mail resolver (#1005) and
+// the web switcher (#1006) read — not a second, catalog-local enum for the same two values.
+import { LANGS, type Lang } from '@wikistead/i18n-shared'
+export { LANGS, type Lang }
+
 export type KeymapMode = 'default' | 'vim' | 'local'
 export const KEYMAP_MODES: KeymapMode[] = ['default', 'vim', 'local']
 
@@ -58,6 +63,13 @@ const DISPLAY_DESC: Record<DisplayModePref, string> = {
   wysiwyg: 'Always start in WYSIWYG (hidden-syntax) mode.',
   local: "Follow this device's last choice (the default).",
 }
+// #1007 / ADR-260 §3.1: the language MAIL is written in — never the app's own UI language, which
+// stays the browser's business (§3.1's own closing line; a per-tenant `default_lang` fallback exists
+// for the same reason, and this setting is the per-member override of it, not a UI switch's twin).
+const LANG_DESC: Record<Lang, string> = {
+  en: 'Mail from this workspace is written in English.',
+  ja: 'Mail from this workspace is written in Japanese.',
+}
 
 const HEADER = `<!--
   AUTO-GENERATED — DO NOT EDIT BY HAND.
@@ -76,6 +88,9 @@ export function renderAccountSettingsMarkdown(): string {
   for (const m of DISPLAY_MODE_PREFS) lines.push(`| \`${m}\` | ${DISPLAY_DESC[m]} |`)
   lines.push('', '## Vim system clipboard (cross-device)', '', '| Value | Meaning |', '|---|---|')
   for (const m of VIM_CLIPBOARD_MODES) lines.push(`| \`${m}\` | ${VIM_CLIPBOARD_DESC[m]} |`)
+  lines.push('', '## Mail language (ADR-260 §3.1 — mail only, not the app UI)', '', '| Value | Meaning |', '|---|---|')
+  for (const l of LANGS) lines.push(`| \`${l}\` | ${LANG_DESC[l]} |`)
+  lines.push('', 'Unset falls back to the workspace default, then English (ADR-260 §3.1).')
   lines.push('', '## Custom key bindings', '')
   lines.push(`Rebindable commands: ${REMAPPABLE_COMMANDS.map((c) => `\`${c}\``).join(', ')}.`)
   lines.push('', `Reserved (never bindable — browser-owned): ${RESERVED_KEYS.map((k) => `\`${k}\``).join(', ')}.`)

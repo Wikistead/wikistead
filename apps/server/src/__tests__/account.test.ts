@@ -142,6 +142,22 @@ describe('account settings (ADR-020)', () => {
     await expect(updateAccountSettings(db, { subject: SUB_A, editorDisplayMode: 'reading' })).rejects.toMatchObject({ statusCode: 400 })
   })
 
+  // #1007 / ADR-260 §3.1/§3.2/§6.2: the member's mail-language override — validated against the
+  // shared LANGS (#1006), stored on members.locale (#1005). Unset (null) is the default; an explicit
+  // null CLEARS it back to that default, same shape as displayNameOverride above.
+  it('language round-trips (en/ja), defaults to null (unset), rejects an unknown code, and null clears it', async () => {
+    expect((await getAccountSettings(db, { subject: SUB_B })).language, 'unset by default').toBeNull()
+    for (const l of ['ja', 'en'] as const) {
+      expect((await updateAccountSettings(db, { subject: SUB_A, language: l })).language).toBe(l)
+      const [row] = await admin<{ locale: string | null }[]>`SELECT locale FROM members WHERE tenant_id = ${TENANT} AND sub = ${SUB_A}`
+      expect(row!.locale, 'the column agrees — not just the response').toBe(l)
+    }
+    await expect(updateAccountSettings(db, { subject: SUB_A, language: 'fr' })).rejects.toMatchObject({ statusCode: 400 })
+    expect((await updateAccountSettings(db, { subject: SUB_A, language: null })).language, 'explicit null clears it').toBeNull()
+    // self-scope: B untouched throughout
+    expect((await getAccountSettings(db, { subject: SUB_B })).language).toBeNull()
+  })
+
   it('#289 / ADR-115: editorChrome round-trips with strict shape; onboarding marker is one-way', async () => {
     // default (never enrolled): null chrome + null onboarding marker
     const before = await getAccountSettings(db, { subject: SUB_B })

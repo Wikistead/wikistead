@@ -114,3 +114,9 @@ session that started it (refusing a link completed in any other session, the lin
 `canOverrideDisplayName` field (ADR-259 §3.7, #961) — the restrictive union that gates the display-name
 override: `identitySource` alone answers a different, narrower question (which door a member's identity
 came from), not whether they may currently write an override.
+
+`language` (ADR-260 §3.1/§3.2, #1007) is the member's OWN mail-language override — `en` | `ja` | `null`
+(unset, falling back to the workspace's `tenant_settings.default_lang`, then English). `PATCH
+/me/settings` validates a non-null value against the same `LANGS` the mail resolver and the web
+switcher read (`@wikistead/i18n-shared`), and an explicit `null` clears the override. It does NOT
+change the app's own UI language, which stays a browser-local choice.
