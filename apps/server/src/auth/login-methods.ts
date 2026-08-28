@@ -426,19 +426,25 @@ export async function anAdminHoldsAKey(
  * floor keyed on it would stop protecting during that window. `.selected` has no such window, and it
  * is what the exemption-revoke door this mirrors (`admin-login-methods.ts`) already reads.
  */
+/**
+ * Returns `true` when the floor WOULD have refused and `confirm` let it through — ADR-251 §3.8c
+ * (option C): a machine caller is always `confirm: true`, and this is how `suspendMember` learns
+ * whether that auto-confirm actually crossed the floor (and so owes the audit ledger an entry naming
+ * it), rather than duplicating this predicate's own logic at the call site.
+ */
 export async function assertNotLastExemptAdmin(
   db: TenantDb,
   tenant: { plan: string },
   sub: string,
   confirm: boolean,
-): Promise<void> {
+): Promise<boolean> {
   const { resolveSsoStance, isSsoExempt } = await import('./sso-stance.js')
   const stance = await resolveSsoStance(db, tenant)
-  if (!stance.selected) return
-  if (!(await isSsoExempt(db, sub))) return // this write's target isn't exempt — not this floor's business
-  if (await anAdminHoldsAKey(db, { exemptOnly: true, without: sub })) return // another exempt admin still holds a key
-  if (!(await anAdminHoldsAKey(db, { exemptOnly: true }))) return // TRANSITION: the floor was ALREADY down — refusing takes nothing back
-  if (confirm) return // RULED: warned, and they chose to go on
+  if (!stance.selected) return false
+  if (!(await isSsoExempt(db, sub))) return false // this write's target isn't exempt — not this floor's business
+  if (await anAdminHoldsAKey(db, { exemptOnly: true, without: sub })) return false // another exempt admin still holds a key
+  if (!(await anAdminHoldsAKey(db, { exemptOnly: true }))) return false // TRANSITION: the floor was ALREADY down — refusing takes nothing back
+  if (confirm) return true // RULED: warned, and they chose to go on (or, for SCIM, auto-confirmed — the caller logs it)
   // #925 / ADR-251 §3.8a/§7-8: `floor: 'sso_exempt'` distinguishes this refusal from
   // `assertClosingIsSafe`'s own `confirm_required` (which carries `remainingKind` instead) — the two
   // can now fire on the same write and are not the same sentence (#866 shipped, #963 had to un-ship,
@@ -464,12 +470,20 @@ export async function assertNotLastExemptAdmin(
  * (`b.enabled === false && row.enabled`, the SAML guard's enabled→disabled check, and this function's
  * own step-aside through `closing.live`). Two rules would be a defect; there is one.
  */
+/**
+ * Returns `true` when the "one unverifiable door left" refusal WOULD have fired and `opts.confirm`
+ * let it through — ADR-251 §3.8c (option C): a machine caller is always `confirm: true`, and this is
+ * how `suspendMember` learns whether that auto-confirm actually crossed the floor (owing the audit
+ * ledger an entry naming it), rather than duplicating this predicate's own logic at the call site.
+ * `login_lockout` (nothing left at all) always throws regardless of `confirm` — there is no "warn and
+ * proceed" for a write with no remedy behind it, so it carries no return value to report.
+ */
 export async function assertClosingIsSafe(
   db: TenantDb,
   tenant: { id: string; plan: string },
   closing: Closing,
   opts: { confirm?: boolean; env?: string | undefined } = {},
-): Promise<void> {
+): Promise<boolean> {
   const remaining = await waysInAfter(db, tenant, closing, opts.env)
   // ⚠️ Read on the TRANSITION, not the post-state. Every guard in this area is written that way, and
   // for the door-closing shapes the callers carry the difference themselves (`b.enabled === false &&
@@ -480,7 +494,7 @@ export async function assertClosingIsSafe(
   // with nothing configured refused every role change.
   if (remaining.length === 0 && !('id' in closing)) {
     const before = await waysInAfter(db, tenant, { id: '', live: false }, opts.env)
-    if (before.length === 0) return
+    if (before.length === 0) return false
   }
   if (remaining.length === 0) {
     throw Object.assign(
@@ -488,8 +502,8 @@ export async function assertClosingIsSafe(
       { statusCode: 409, code: 'login_lockout' },
     )
   }
-  if (remaining.length > 1 || remaining[0]!.usable === 'yes') return
-  if (opts.confirm) return
+  if (remaining.length > 1 || remaining[0]!.usable === 'yes') return false
+  if (opts.confirm) return true
   throw Object.assign(
     new Error('this would leave one way in, and it cannot be verified from here. Confirm to continue.'),
     { statusCode: 409, code: 'confirm_required', remainingKind: remaining[0]!.kind },

@@ -102,11 +102,20 @@ export async function suspendMember(
   // #627's mistake recurring a third time, this time from the opposite direction (a newer, less
   // specific guard shadowing an older, more specific one). The demotion and delete routes do not have
   // this hazard: both already call their own `isLastAdmin` before this ticket's new calls.
+  //
+  // #925 / ADR-251 §3.8c (ruling C): a machine caller is never asked to confirm — SCIM is always
+  // `confirm: true` on both floor questions, regardless of what (if anything) it passed in `opts`,
+  // which today is nothing at all (`deactivateScimUser` has no `confirm` parameter to send). The two
+  // predicates report back whether the auto-confirm actually CROSSED a floor (would have refused had
+  // `confirm` been false) — the audit ledger owes an entry naming which one, not a generic removal.
+  const isScim = opts.reason === 'scim'
+  const crossed: Array<'sso_exempt' | 'last_signin_admin'> = []
   const [pre] = await deps.db.sql<MemberState[]>`
     SELECT role, groups, deactivated_at, deactivation_reason FROM members WHERE sub = ${sub}`
   if (pre && pre.role === 'admin' && !isIdempotentNoop(pre, opts.reason) && !(await isLastAdmin(deps.db.sql, sub))) {
-    await assertNotLastExemptAdmin(deps.db, tenant, sub, !!opts.confirm)
-    await assertClosingIsSafe(deps.db, tenant, { deactivating: sub }, { confirm: opts.confirm })
+    const confirm = isScim ? true : !!opts.confirm
+    if (await assertNotLastExemptAdmin(deps.db, tenant, sub, confirm)) crossed.push('sso_exempt')
+    if (await assertClosingIsSafe(deps.db, tenant, { deactivating: sub }, { confirm })) crossed.push('last_signin_admin')
   }
 
   let revoked: string[] = []
@@ -141,6 +150,17 @@ export async function suspendMember(
       action: opts.reason === 'scim' ? 'member.removed' : 'member.suspended',
       target: `user:${sub}`,
     })
+    // #925 / ADR-251 §3.8c / §6-18: "the auto-confirmed pass is not silent" — a directory sync that
+    // crossed a floor gets its OWN ledger row naming which one, alongside (not instead of) the plain
+    // `member.removed` row above. A generic "member removed" is the failure mode this condition exists
+    // to prevent: it is the ONLY signal that this recoverable-but-bad case happened at all.
+    for (const floor of crossed) {
+      await auditIfEntitled(tx, tenant, {
+        actor: opts.actor,
+        action: floor === 'sso_exempt' ? 'tenant.sso_exempt_floor_emptied' : 'admin.last_signin_administrator_closed',
+        target: `user:${sub}`,
+      })
+    }
     for (const k of revokedKeys) {
       await auditIfEntitled(tx, tenant, { actor: opts.actor, action: 'api_key.revoked', target: `api_key:${k.id}` })
     }

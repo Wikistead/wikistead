@@ -135,7 +135,7 @@ describe('#866 a write that takes the KEY away can close the last way in', () =>
 
   it('allows it when another administrator still holds one', async () => {
     await expect(assertClosingIsSafe(oneAdminHoldsAKey(1), TENANT, { demoting: 'A' }, { env: NO_PLATFORM }))
-      .resolves.toBeUndefined()
+      .resolves.toBe(false)
   })
 
   it('asks the counterfactual about THAT person, not about the roster in general', async () => {
@@ -261,7 +261,9 @@ describe('#836 requiring SSO needs an exempt ADMINISTRATOR, not any exempt membe
 describe('#822 the three answers', () => {
   it('allows a write that leaves a door somebody has a key to', async () => {
     const db = dbStub({ oidcRows: [{ id: 'c1', enabled: true }], localSelected: true, adminWithKey: 1 })
-    await expect(assertClosingIsSafe(db, TENANT, { id: 'c1', live: true }, { env: NO_PLATFORM })).resolves.toBeUndefined()
+    // #925 / ADR-251 §3.8c: the return value is `false` when no floor was crossed (the CE console
+    // ignores it; SCIM's suspendMember reads it to decide whether the ledger owes a named entry).
+    await expect(assertClosingIsSafe(db, TENANT, { id: 'c1', live: true }, { env: NO_PLATFORM })).resolves.toBe(false)
   })
 
   it('refuses a write that leaves nothing at all', async () => {
@@ -278,7 +280,9 @@ describe('#822 the three answers', () => {
 
   it('lets the same write through when it repeats itself with confirm', async () => {
     const db = dbStub({ oidcRows: [{ id: 'c1', enabled: true }, { id: 'c2', enabled: true }], localSelected: false })
-    await expect(assertClosingIsSafe(db, TENANT, { id: 'c1', live: true }, { confirm: true, env: NO_PLATFORM })).resolves.toBeUndefined()
+    // #925 / ADR-251 §3.8c: `true` — this IS the one-unverifiable-door case, and `confirm` is what let
+    // it through (a machine caller's ALWAYS-true `confirm` is how SCIM's suspendMember detects a crossing).
+    await expect(assertClosingIsSafe(db, TENANT, { id: 'c1', live: true }, { confirm: true, env: NO_PLATFORM })).resolves.toBe(true)
   })
 
   it('⚠️ does not ask when two or more doors remain — the tidy-up case', async () => {
@@ -286,7 +290,7 @@ describe('#822 the three answers', () => {
     // `local`, that turned every ordinary connection tidy-up in an SSO-only tenant into a 409. The
     // ruling says "the last living way in", so the trigger is literally that.
     const db = dbStub({ oidcRows: [{ id: 'c1', enabled: true }, { id: 'c2', enabled: true }, { id: 'c3', enabled: true }], localSelected: false })
-    await expect(assertClosingIsSafe(db, TENANT, { id: 'c1', live: true }, { env: NO_PLATFORM })).resolves.toBeUndefined()
+    await expect(assertClosingIsSafe(db, TENANT, { id: 'c1', live: true }, { env: NO_PLATFORM })).resolves.toBe(false)
   })
 
   it('confirm cannot buy its way past a lockout', async () => {
@@ -323,24 +327,26 @@ describe('#925 / ADR-251 §3.8a: assertNotLastExemptAdmin — warned, not refuse
 
   it('steps aside when the stance is not selected at all', async () => {
     const db = stub({ selected: false, exempt: true, answers: [0, 0] })
-    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBeUndefined()
+    // #925 / ADR-251 §3.8c: `false` — not applicable, no floor crossed (distinct from `true`, which
+    // means "applicable AND confirm let it through" — see the WARN/confirm cases below).
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBe(false)
   })
 
   it("steps aside when the write's target is not exempt — not this floor's business", async () => {
     const db = stub({ selected: true, exempt: false, answers: [0, 0] })
-    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBeUndefined()
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBe(false)
   })
 
   it('steps aside when another exempt admin still holds a key', async () => {
     const db = stub({ selected: true, exempt: true, answers: [1] }) // first call (without A) answers 1
-    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBeUndefined()
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBe(false)
   })
 
   it('TRANSITION: steps aside when the floor was already down — refusing would take nothing back', async () => {
     // first call (without A) answers 0 — nobody else holds one; second call (A included) ALSO answers
     // 0 — so A never held a key either, meaning this write removes nothing the floor still had.
     const db = stub({ selected: true, exempt: true, answers: [0, 0] })
-    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBeUndefined()
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', false)).resolves.toBe(false)
   })
 
   it('WARNS (confirm_required, not a hard refusal) when this write empties the floor', async () => {
@@ -352,7 +358,9 @@ describe('#925 / ADR-251 §3.8a: assertNotLastExemptAdmin — warned, not refuse
 
   it('RULED 2026-08-27 (#925): a repeat with confirm goes through — the warning can be overridden', async () => {
     const db = stub({ selected: true, exempt: true, answers: [0, 1] })
-    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', true)).resolves.toBeUndefined()
+    // #925 / ADR-251 §3.8c: `true` — this IS the empties-the-floor case, and `confirm` is what let it
+    // through (a machine caller's ALWAYS-true `confirm` is how SCIM's suspendMember detects a crossing).
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'A', true)).resolves.toBe(true)
   })
 })
 
@@ -404,8 +412,8 @@ describe('#925 / ADR-251 §3.8b: an exempt admin with an open password door is a
     // under a biting stance, so no entry can ever be `'yes'`, and `assertClosingIsSafe` asked
     // `confirm_required` for every key-taking write regardless of whose key it was.
     const db = scenario(false)
-    await expect(assertNotLastExemptAdmin(db, TENANT, 'B', false)).resolves.toBeUndefined()
-    await expect(assertClosingIsSafe(db, TENANT, { deactivating: 'B' }, { env: NO_PLATFORM })).resolves.toBeUndefined()
+    await expect(assertNotLastExemptAdmin(db, TENANT, 'B', false)).resolves.toBe(false)
+    await expect(assertClosingIsSafe(db, TENANT, { deactivating: 'B' }, { env: NO_PLATFORM })).resolves.toBe(false)
   })
 
   // Closing A (the exempt key-holder) itself is §3.8a's own question — covered by the "WARNS" and
