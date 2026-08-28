@@ -6,11 +6,11 @@ import { WEB, WEB_PORT } from "../helpers";
 // globalSetup runs a real minimal OIDC issuer (issuing sub "dev-user") and points
 // tenant_dev's OIDC config at it.
 
-// #805: isolated at the describe level, not in-body — this test requires `{ page }`, and Playwright
+// #1000: isolated at the describe level, not in-body — this test requires `{ page }`, and Playwright
 // resolves that fixture BEFORE an in-body test.skip runs (the same trap #973's guest-vim-ex-448 fix
 // documents). Raising the skip to describe scope evaluates it at collection time, ahead of the fixture.
 test.describe(() => {
-  test.skip(true, "#805: isolated — real OIDC login never sets the session cookie under the #891 gate's stack (reproduces on a fresh stack, confirmed unrelated to #925)");
+  test.skip(true, "#1000: isolated — real OIDC login never sets the session cookie under the #891 gate's stack (reproduces on a fresh stack, confirmed unrelated to #925)");
 
   test("real OIDC login through the same-origin proxy sets a working host-only session", async ({ page }) => {
     // Full browser flow: /auth/login → IdP /authorize → /auth/callback → cookie → app.
