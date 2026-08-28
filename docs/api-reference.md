@@ -96,6 +96,14 @@ connection, so a re-created OIDC provider does not seat them as new members. Ref
 two connections share both `issuer` and `client_id`, and again if the new connection has already
 seated a different member at a subject the re-key would claim (`supersession_collision`, naming both).
 
+`GET /pages/{pageId}/embed/frameability` (ADR-267, #970) is UI plumbing behind the `:::embed-external`
+macro, not part of the OpenAPI-covered surface: given an already-allowlisted URL, it answers whether
+that URL refuses to be framed (`X-Frame-Options` / CSP `frame-ancestors`, read from a headers-only
+`safeFetch` — the same page-view gate and provider allowlist as `GET /pages/{pageId}/embed`, so the
+SSRF-exposed population is identical). A probe that cannot answer (timeout, a redirecting URL) verdicts
+`embeddable` — a missed refusal is today's shipped behavior; a false refusal would replace a working
+embed with a sentence. Verdicts are cached per full URL, not per host.
+
 `/auth/link-callback` (ADR-259 §3.3, #947) is a second OIDC-round-trip landing point, distinct from
 `/auth/callback`: it completes an account-settings request to link an additional connection to the
 *already signed-in* member, rather than starting a session. It redirects to `/settings/account/security`

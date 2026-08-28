@@ -968,6 +968,15 @@ export const embedAllowlist = Facet.define<readonly string[], readonly string[]>
   combine: (values) => values[0] ?? [],
 });
 
+// #970 / ADR-267 §3: host-mediated per-URL frameability probe. The macro never fetches (host-API is
+// {theme} only); absent (export/print, template preview, or a surface with no page scope) ⇒
+// buildEmbedElement falls back to the OLD synchronous client-side table, exactly as it did before this
+// facet existed — never a hard requirement, the same optional-capability shape as the other host seams.
+export type EmbedFrameabilityCheck = (url: string) => Promise<"embeddable" | "refused">;
+export const embedFrameabilityCheck = Facet.define<EmbedFrameabilityCheck | null, EmbedFrameabilityCheck | null>({
+  combine: (values) => (values.length ? values[values.length - 1]! : null),
+});
+
 // #205 part 2 / #210: the host seam that opens a title-search PAGE PICKER for `:::embed-page`. The
 // host (Editor) shows a command-palette modal whose candidates come from GET /search — which is
 // FGA-view-filtered (two-stage guard), so a page the user can't view is never offered (no existence
@@ -2154,7 +2163,12 @@ function withNestedMacroHosts<T>(view: EditorView, theme: MacroTheme, fn: () => 
   const resolveNested = view.state.facet(transcludeResolver);
   const renderNestedDiagram = view.state.facet(diagramRenderer);
   return withEmbedHost(
-    { build: (url: string) => buildEmbedElement(url, view.state.facet(embedAllowlist)) },
+    {
+      build: (url: string) => buildEmbedElement(url, view.state.facet(embedAllowlist), {
+        checkFrameability: view.state.facet(embedFrameabilityCheck) ?? undefined,
+        onMeasure: () => view.requestMeasure(),
+      }),
+    },
     () => withDiagramHost(
       renderNestedDiagram === noopDiagramRenderer
         ? null
@@ -2958,7 +2972,12 @@ class MacroWidget extends WidgetType {
           // measure hook is CodeMirror's — an async result changes the block's height.
           slotEnv: {
             list: view.state.facet(listSource),
-            embed: { build: (url: string) => buildEmbedElement(url, view.state.facet(embedAllowlist)) },
+            embed: {
+              build: (url: string) => buildEmbedElement(url, view.state.facet(embedAllowlist), {
+                checkFrameability: view.state.facet(embedFrameabilityCheck) ?? undefined,
+                onMeasure: () => view.requestMeasure(),
+              }),
+            },
             editable: !view.state.readOnly,
             label: directiveLabel(view.state.doc.lineAt(this.from).text, this.name),
             onMeasure: () => view.requestMeasure(),

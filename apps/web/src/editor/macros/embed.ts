@@ -119,48 +119,103 @@ export function unembeddableGuidance(url: string): string | null {
   return rule ? rule.key : null;
 }
 
+// #970 / ADR-267 §3: the host-mediated, per-URL frameability probe. Absent (export/print, and any
+// future surface that doesn't wire it — always paired with an empty allowlist today, so the branch
+// below is unreachable there) falls back to the OLD client-side table (unembeddableGuidance),
+// synchronously, exactly as before #970.
+export interface EmbedFrameabilityOpts {
+  readonly checkFrameability?: (url: string) => Promise<"embeddable" | "refused">;
+  /** CodeMirror's measure hook — the async swap below changes the block's height (block-widget rule). */
+  readonly onMeasure?: () => void;
+}
+
+function buildIframe(trimmed: string): HTMLIFrameElement {
+  const iframe = document.createElement("iframe");
+  iframe.className = "cm-lp-embed-frame";
+  iframe.src = trimmed;
+  iframe.setAttribute("data-testid", "macro-embed-frame");
+  // Minimal-but-functional sandbox for a TRUSTED allowlisted host (comment 551: keep grants such as
+  // allow-scripts to a minimum). No allow-top-navigation / allow-modals / allow-downloads. Privacy
+  // no-referrer so the embedding page URL isn't leaked to the external host (comment 551 privacy concern).
+  // #108 (comment 643) defence-in-depth: allow-same-origin ONLY for a cross-origin frame — same-origin
+  // is already rejected above, but never combine allow-scripts + allow-same-origin on our own origin
+  // (that pair disables the sandbox), so drop it if the src ever resolves same-origin.
+  let sameOrigin = false;
+  try { sameOrigin = typeof window !== "undefined" && !!window.location && new URL(trimmed).origin === window.location.origin; } catch { /* unparseable → treat as cross-origin (still sandboxed) */ }
+  iframe.setAttribute("sandbox", sameOrigin ? "allow-scripts allow-popups allow-presentation" : "allow-scripts allow-same-origin allow-popups allow-presentation");
+  // #108 bounce: `no-referrer` suppresses the Referer entirely, which triggers YouTube error 153
+  // ("video player configuration error") — YouTube's required-minimum-functionality doc says an
+  // embedded player must receive a Referer and forbids a Referrer-Policy that strips it, recommending
+  // `strict-origin-when-cross-origin` (the de-facto fix — Pimcore/react-player/fancyapps all use it).
+  // Privacy is still protected: strict-origin-when-cross-origin sends ONLY the origin (host) cross-
+  // origin — never the path/query/page content — and only to operator-allowlisted hosts, so the
+  // comment-551 "don't leak the embedding page URL" intent holds for path/content.
+  iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+  iframe.setAttribute("loading", "lazy");
+  iframe.setAttribute("allow", "fullscreen"); // YouTube/Vimeo expect the fullscreen permission policy
+  iframe.setAttribute("allowfullscreen", "");
+  return iframe;
+}
+
+// #970: the generic (not vendor-specific) refusal — a sentence plus the SAME real link the degrade
+// path below offers, so "can't embed this here" always keeps the one thing that matters: a way to
+// actually reach the content (#207's content-loss shape, avoided the same way LoadFailed avoids it).
+function buildUnembeddableGuidance(trimmed: string): HTMLElement {
+  const div = document.createElement("div");
+  div.className = "cm-lp-macro cm-lp-embed-unembeddable";
+  div.setAttribute("data-testid", "macro-embed-unembeddable");
+  const p = document.createElement("p");
+  p.textContent = i18n.t("macro.embedUnembeddable");
+  div.appendChild(p);
+  const href = safeHref(trimmed);
+  if (href) {
+    const a = document.createElement("a");
+    a.setAttribute("data-testid", "macro-embed-unembeddable-link");
+    a.href = href;
+    a.textContent = trimmed;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer nofollow";
+    div.appendChild(a);
+  }
+  return div;
+}
+
 // Build the embed DOM for a resolved URL: a sandboxed iframe when the host is allowlisted, otherwise
 // a degrade link (never a broken/blocked frame). Kept here (not in the macro's liveRender) because
 // the allowlist is host-injected — the macro itself can't see it (narrow host-API).
-export function buildEmbedElement(url: string, allowlist: readonly string[]): HTMLElement {
+export function buildEmbedElement(url: string, allowlist: readonly string[], opts?: EmbedFrameabilityOpts): HTMLElement {
   const trimmed = url.trim();
   if (isAllowlistedEmbed(trimmed, allowlist)) {
-    // #908: the allowlist alone can't tell "this path frames fine" from "this path is on the same
-    // host but refuses" — check that BEFORE building the iframe, only here, so a host that was never
-    // allowlisted keeps degrading to a link exactly as before (export/print's contract).
-    const guidanceKey = unembeddableGuidance(trimmed);
-    if (guidanceKey) {
-      const div = document.createElement("div");
-      div.className = "cm-lp-macro cm-lp-embed-unembeddable";
-      div.setAttribute("data-testid", "macro-embed-unembeddable");
-      div.textContent = i18n.t(guidanceKey);
-      return div;
+    if (opts?.checkFrameability) {
+      // #970 / ADR-267 §3.1/§3.3: placeholder → probe → swap, the SAME lifecycle mountHostList uses for
+      // an async host slot. NOT optimistic: building the iframe first and yanking it on a late refusal
+      // would show the browser's OWN opaque "refused to connect" frame for a moment — precisely what
+      // #908 exists to prevent. A probe FAILURE still ends in the iframe (fail open, §3.3) — only a
+      // definite refusal ends in guidance.
+      const holder = document.createElement("div");
+      holder.className = "cm-lp-macro cm-lp-embed-external";
+      holder.setAttribute("data-testid", "macro-embed-loading");
+      void opts.checkFrameability(trimmed).then(
+        (verdict) => {
+          holder.replaceChildren(verdict === "refused" ? buildUnembeddableGuidance(trimmed) : buildIframe(trimmed));
+          holder.setAttribute("data-testid", "macro-embed-external");
+          opts.onMeasure?.();
+        },
+        () => {
+          // The checker itself is written to never reject (network failure ⇒ resolves "embeddable"),
+          // but a host-provided function is not guaranteed to honour that — fail open here too.
+          holder.replaceChildren(buildIframe(trimmed));
+          holder.setAttribute("data-testid", "macro-embed-external");
+          opts.onMeasure?.();
+        },
+      );
+      return holder;
     }
-    const iframe = document.createElement("iframe");
-    iframe.className = "cm-lp-embed-frame";
-    iframe.src = trimmed;
-    iframe.setAttribute("data-testid", "macro-embed-frame");
-    // Minimal-but-functional sandbox for a TRUSTED allowlisted host (comment 551: keep grants such as
-    // allow-scripts to a minimum). No allow-top-navigation / allow-modals / allow-downloads. Privacy
-    // no-referrer so the embedding page URL isn't leaked to the external host (comment 551 privacy concern).
-    // #108 (comment 643) defence-in-depth: allow-same-origin ONLY for a cross-origin frame — same-origin
-    // is already rejected above, but never combine allow-scripts + allow-same-origin on our own origin
-    // (that pair disables the sandbox), so drop it if the src ever resolves same-origin.
-    let sameOrigin = false;
-    try { sameOrigin = typeof window !== "undefined" && !!window.location && new URL(trimmed).origin === window.location.origin; } catch { /* unparseable → treat as cross-origin (still sandboxed) */ }
-    iframe.setAttribute("sandbox", sameOrigin ? "allow-scripts allow-popups allow-presentation" : "allow-scripts allow-same-origin allow-popups allow-presentation");
-    // #108 bounce: `no-referrer` suppresses the Referer entirely, which triggers YouTube error 153
-    // ("video player configuration error") — YouTube's required-minimum-functionality doc says an
-    // embedded player must receive a Referer and forbids a Referrer-Policy that strips it, recommending
-    // `strict-origin-when-cross-origin` (the de-facto fix — Pimcore/react-player/fancyapps all use it).
-    // Privacy is still protected: strict-origin-when-cross-origin sends ONLY the origin (host) cross-
-    // origin — never the path/query/page content — and only to operator-allowlisted hosts, so the
-    // comment-551 "don't leak the embedding page URL" intent holds for path/content.
-    iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
-    iframe.setAttribute("loading", "lazy");
-    iframe.setAttribute("allow", "fullscreen"); // YouTube/Vimeo expect the fullscreen permission policy
-    iframe.setAttribute("allowfullscreen", "");
-    return iframe;
+    // No probe capability on this surface (export/print — always paired with an empty allowlist, so
+    // this branch is unreachable there today) — the old client-side table, synchronously.
+    const guidanceKey = unembeddableGuidance(trimmed);
+    if (guidanceKey) return buildUnembeddableGuidance(trimmed);
+    return buildIframe(trimmed);
   }
   // Degrade to a plain link (Open formats) — but ONLY for a safe scheme. #319 (anon-XSS gate): the
   // body is arbitrary user text, and this DOM becomes a LIVE `<a>` (unlike renderMarkdownToDom's textContent

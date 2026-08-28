@@ -1311,7 +1311,8 @@
       "drawing": "図"
     },
     "listEmpty": "該当ページはまだありません。",
-    "embedUnembeddableGoogleMaps": "このリンクは埋め込めません。Google マップの「共有 → 地図を埋め込む」の URL を貼ってください。"
+    "embedUnembeddableGoogleMaps": "このリンクは埋め込めません。Google マップの「共有 → 地図を埋め込む」の URL を貼ってください。",
+    "embedUnembeddable": "このページはここに埋め込んで表示できません。"
   },
   "templates": {
     "title": "テンプレート",

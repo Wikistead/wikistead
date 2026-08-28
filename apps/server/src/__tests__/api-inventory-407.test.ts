@@ -32,6 +32,7 @@ const EXCLUDED_PATHS = new Set([
   '/pages/link-status',            // editor dead-link decoration feed (bulk, UI-shaped)
   '/pages/:pageId/title-dictionary', // editor auto-link dictionary (UI-shaped)
   '/pages/:pageId/embed',          // editor embed resolution (UI-shaped)
+  '/pages/:pageId/embed/frameability', // #970 / ADR-267: the async per-URL frameability probe beside it (UI-shaped)
   '/pages/:pageId/plantuml/render', // editor diagram proxy
   '/templates/:id/plantuml/render', // editor diagram proxy (template preview)
   '/pages/:pageId/private', '/pages/:pageId/public', '/pages/:pageId/restrict', '/pages/:pageId/freeze', // permission dialog plumbing (grants API covers integration)

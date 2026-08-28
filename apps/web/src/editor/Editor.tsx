@@ -15,6 +15,7 @@ import { useTheme } from "../app/ThemeProvider";
 import { makeMacroPresence } from "./macro-presence";
 import { makeResolverSet } from "./resolver-set"; // #381 / ADR-163: the surface declares its context
 import { makeLinkStatusResolver } from "./link-status";
+import { makeEmbedFrameabilityChecker } from "./embed-frameability-resolver";
 import { PageEmbedPicker } from "./PageEmbedPicker";
 import { EmbedUrlModal } from "./EmbedUrlModal";
 import { LinkPromptModal } from "./LinkPromptModal"; // #611: the WYSIWYG link dialog
@@ -255,6 +256,12 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   // sandboxed iframe. Stable reference (react-query) so it doesn't churn the surface remount.
   const embedQuery = useEmbedProviders();
   const embedProviders = useMemo(() => embedQuery.data?.providers ?? [], [embedQuery.data]);
+  // #970 / ADR-267 §3: the async per-URL frameability probe. Page-INTERACTION opt (same reasoning as
+  // linkStatus above) — gated on a real page id, since the route needs one to run the page-view gate.
+  const checkEmbedFrameability = useMemo(
+    () => (pageId ? makeEmbedFrameabilityChecker(apiToken, pageId) : undefined),
+    [apiToken, pageId],
+  );
   // #205 part 2: the `:::embed-page` title-search picker. The slash command calls openPageEmbedPicker
   // (stable, so it doesn't churn the surface remount); we stash the CM callback, open the modal, and
   // resolve it with the chosen page id (or null on cancel). Candidates are FGA-view-filtered by
@@ -552,7 +559,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
             });
           }
         : undefined;
-      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, onToggleTask: onToggleTaskInView, titleLinks, list, linkStatus });
+      const v = mountPublishedView(previewHost, publishedMd ?? "", { resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, checkEmbedFrameability, onToggleTask: onToggleTaskInView, titleLinks, list, linkStatus });
       views.push(v);
       previewViewRef.current = v;
       if (anchorGetterRef) anchorGetterRef.current = null;
@@ -576,6 +583,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
       renderDiagram,
       resolveTransclude,
       embedProviders,
+      checkEmbedFrameability,
       openPageEmbedPicker,
       openEmbedUrlPrompt,
       openLinkPrompt, // #611
@@ -669,7 +677,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
     };
     // vim excluded (Compartment reconfigure, not a remount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, openPageEmbedPicker, openEmbedUrlPrompt, openLinkPrompt, openTemplateInsertPicker, onUploadImage, titleLinks, tagSuggest, openTagPrompt]);
+  }, [docName, token, collabUrl, surfaceKey, resolveImageUrl, resolveAttachment, renderDiagram, resolveTransclude, embedProviders, checkEmbedFrameability, openPageEmbedPicker, openEmbedUrlPrompt, openLinkPrompt, openTemplateInsertPicker, onUploadImage, titleLinks, tagSuggest, openTagPrompt]);
 
   // vim on/off: reconfigure the Compartment IN PLACE (no remount → collab/presence
   // untouched). Only meaningful on the edit surface.

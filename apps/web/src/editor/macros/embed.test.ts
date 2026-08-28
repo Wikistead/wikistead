@@ -163,12 +163,15 @@ describe("unembeddableGuidance", () => {
 });
 
 describe("buildEmbedElement — known-unembeddable guidance", () => {
-  it("renders the actual translated guidance sentence, never an iframe, when the host IS allowlisted", () => {
+  it("renders the generic guidance sentence + a real link, never an iframe, when the host IS allowlisted", () => {
     const el = buildEmbedElement("https://maps.app.goo.gl/abc123", ["maps.app.goo.gl", "google.com"]);
     expect(el.tagName).not.toBe("IFRAME");
     expect(el.getAttribute("data-testid")).toBe("macro-embed-unembeddable");
-    // #908: a resolved i18n SENTENCE, not the raw key falling through a broken lookup.
-    expect(el.textContent).toBe("This link can't be embedded. Paste the URL from Google Maps' Share → Embed a map instead.");
+    // #970: a GENERIC sentence (no vendor name) — the table stopped naming a vendor's text (§3.2).
+    expect(el.textContent).toContain("This page can't be shown in a frame here.");
+    // #970: always offers the way back — a dead end in kinder words is still a dead end.
+    const link = el.querySelector('[data-testid="macro-embed-unembeddable-link"]');
+    expect(link?.getAttribute("href")).toBe("https://maps.app.goo.gl/abc123");
   });
 
   it("still embeds the real Google Maps embed URL when google.com is allowlisted", () => {
@@ -196,5 +199,53 @@ describe("buildEmbedElement — known-unembeddable guidance", () => {
       expect(el.getAttribute("data-testid"), url).toBe("macro-embed-degrade");
       expect(el.getAttribute("href"), url).toBe(url);
     }
+  });
+});
+
+// #970 / ADR-267 §3.1/§3.3: the host-mediated async probe. buildEmbedElement returns a LOADING
+// placeholder synchronously (never an optimistic iframe — §3.3's note that showing-then-yanking an
+// iframe on a late refusal reintroduces the exact opaque-frame flash #908 removed) and swaps once the
+// probe resolves.
+describe("buildEmbedElement — async frameability (opts.checkFrameability)", () => {
+  const allow = ["youtube.com"];
+
+  it("returns a loading placeholder synchronously — never an iframe before the probe resolves", () => {
+    const el = buildEmbedElement("https://youtube.com/embed/x", allow, { checkFrameability: () => new Promise(() => {}) });
+    expect(el.tagName).not.toBe("IFRAME");
+    expect(el.getAttribute("data-testid")).toBe("macro-embed-loading");
+  });
+
+  it("swaps to the iframe when the probe resolves embeddable", async () => {
+    const el = buildEmbedElement("https://youtube.com/embed/x", allow, { checkFrameability: async () => "embeddable" });
+    await Promise.resolve().then(() => Promise.resolve()); // flush the microtask the .then() callback runs on
+    expect(el.querySelector("iframe")).not.toBeNull();
+    expect(el.getAttribute("data-testid")).toBe("macro-embed-external");
+  });
+
+  it("swaps to guidance (never an iframe) when the probe resolves refused", async () => {
+    const el = buildEmbedElement("https://youtube.com/embed/x", allow, { checkFrameability: async () => "refused" });
+    await Promise.resolve().then(() => Promise.resolve());
+    expect(el.querySelector("iframe")).toBeNull();
+    expect(el.querySelector('[data-testid="macro-embed-unembeddable-link"]')?.getAttribute("href")).toBe("https://youtube.com/embed/x");
+  });
+
+  it("⚠️ §3.3 fail-open: a REJECTING checker still ends in the iframe, never guidance", async () => {
+    const el = buildEmbedElement("https://youtube.com/embed/x", allow, { checkFrameability: async () => { throw new Error("network"); } });
+    await Promise.resolve().then(() => Promise.resolve());
+    expect(el.querySelector("iframe"), "a probe failure must fail OPEN (#207's content-loss is the worse direction)").not.toBeNull();
+  });
+
+  it("calls the block-widget onMeasure hook after the async swap (height changed)", async () => {
+    let measured = 0;
+    buildEmbedElement("https://youtube.com/embed/x", allow, { checkFrameability: async () => "embeddable", onMeasure: () => { measured++; } });
+    await Promise.resolve().then(() => Promise.resolve());
+    expect(measured, "onMeasure must fire — the swap changes the block's height").toBe(1);
+  });
+
+  it("a non-allowlisted host never calls checkFrameability at all — the probe only ever sees a URL that would otherwise become an iframe", () => {
+    let called = false;
+    const el = buildEmbedElement("https://example.com/x", allow, { checkFrameability: async () => { called = true; return "embeddable"; } });
+    expect(el.getAttribute("data-testid")).toBe("macro-embed-degrade");
+    expect(called, "a URL that degrades to a link must never be probed").toBe(false);
   });
 });

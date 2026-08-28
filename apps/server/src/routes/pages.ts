@@ -39,6 +39,7 @@ import { groupGrantee, groupNameByFgaId, resolveGroupName } from '../auth/group-
 import { listAllGroupNames } from './spaces.js' // #623: the one bounded group-name query
 import { auditIfEntitled } from '../audit/sink.js'
 import { resolveEmbed, EmbedDeniedError } from '../embed-resolve.js'
+import { checkFrameability, EmbedFrameabilityDeniedError } from '../embed-frameability.js'
 import { resolveTranscludeRef } from '../transclude-resolve.js'
 import { renderPlantumlResult } from '../plantuml-render.js'
 import { assertPageViewable } from '../page-view-gate.js'
@@ -5165,6 +5166,26 @@ export async function pagesPlugin(app: FastifyInstance) {
       return await resolveEmbed({ fga: app.fga }, { principal: subject, pageId: req.params.pageId, url, allowlist: row?.embed_providers ?? [], context })
     } catch (e) {
       if (e instanceof EmbedDeniedError || (e as { statusCode?: number })?.statusCode === 403) {
+        return reply.code(403).send({ error: 'embed not available' }) // uniform — no provider/existence leak
+      }
+      throw e
+    }
+  })
+
+  // #970 / ADR-267 §3.1: is THIS specific, already-allowlisted URL actually frameable? A header-only
+  // probe (X-Frame-Options / CSP frame-ancestors) of a URL the client would otherwise iframe — same
+  // page-view gate + provider allowlist + SSRF guard as /embed above (checkFrameability), so the SSRF
+  // population is identical; the difference is this never reads a body. Member or view-guest.
+  app.get<{ Params: { pageId: string }; Querystring: { url?: string } }>('/pages/:pageId/embed/frameability', { config: { guest: 'view' } }, async (req, reply) => {
+    const { subject, context } = principalForPage(req, req.params.pageId)
+    const url = req.query?.url
+    if (!url) return reply.code(400).send({ error: 'url is required' })
+    const [row] = await req.db.sql<{ embed_providers: string[] }[]>`SELECT embed_providers FROM tenant_settings WHERE tenant_id = ${req.tenant.id}`
+    try {
+      const { verdict } = await checkFrameability({ fga: app.fga }, { principal: subject, pageId: req.params.pageId, url, allowlist: row?.embed_providers ?? [], context })
+      return { verdict }
+    } catch (e) {
+      if (e instanceof EmbedFrameabilityDeniedError || (e as { statusCode?: number })?.statusCode === 403) {
         return reply.code(403).send({ error: 'embed not available' }) // uniform — no provider/existence leak
       }
       throw e
