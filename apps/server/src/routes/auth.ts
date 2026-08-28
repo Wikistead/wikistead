@@ -305,12 +305,19 @@ export async function authPlugin(app: FastifyInstance) {
       // the address collision — this is the one door that gets an explanation rather than the vague
       // refusal, because the person has just authenticated to an IdP that itself asserts this address.
       let addressTaken = false
+      // #930 / ADR-263 §3.1: the connection released no `email` claim at all — distinct from a
+      // collision (nobody else's address is at stake), and safe to explain: it names only what THIS
+      // login's own IdP just asserted, nothing about another member.
+      let emailRequired = false
       try {
         sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated', connectionId }) // existing member → session
       } catch (e) {
         if ((e as { code?: string }).code === 'address_taken') {
           addressTaken = true
           req.log.info({ tenantId: tenant.id }, 'auth/callback: auto-enrolment refused — address already belongs to a member')
+        } else if ((e as { code?: string }).code === 'email_required') {
+          emailRequired = true
+          req.log.info({ tenantId: tenant.id }, 'auth/callback: auto-enrolment refused — connection released no email claim')
         } else {
           // Not a member yet. Identity is proven but membership is NOT — login alone
           // never grants it (the identity≠membership invariant). Membership appears
@@ -336,6 +343,12 @@ export async function authPlugin(app: FastifyInstance) {
           // full; any other failure stays vague. A bad/expired/revoked token returns false
           // (not throw) → it never reaches here, so token existence is not leaked.
           if ((e as { code?: string }).code === 'seat_limit') seatFull = true
+          // #930 / ADR-263 §3.1: an OIDC invite still seats through the shared fortress, so the same
+          // no-email refusal can fire here — an invite token proves nothing about the address either.
+          else if ((e as { code?: string }).code === 'email_required') {
+            emailRequired = true
+            req.log.info({ tenantId: tenant.id }, 'auth/callback: invite acceptance refused — connection released no email claim')
+          }
           // #377: a non-seat-cap failure here (FGA write, DB) previously vanished silently — log it (the user
           // still gets the vague error; only the operator gains a diagnosable trail).
           else req.log.error({ err: e, tenantId: tenant.id }, 'auth/callback: invite acceptance / session establish failed')
@@ -354,8 +367,8 @@ export async function authPlugin(app: FastifyInstance) {
         // provider from account settings; everything else stays deliberately VAGUE (no "authenticated
         // but not a member" — that would confirm the sub exists in the IdP = enumeration).
         // #377: log the rejection server-side (the user-facing message stays vague — no enumeration leak).
-        req.log.info({ tenantId: tenant.id, seatFull, addressTaken }, 'auth/callback: login rejected (identity proven but no membership grant)')
-        const errorParam = addressTaken ? 'address_taken' : seatFull ? 'seat_full' : 'access'
+        req.log.info({ tenantId: tenant.id, seatFull, addressTaken, emailRequired }, 'auth/callback: login rejected (identity proven but no membership grant)')
+        const errorParam = addressTaken ? 'address_taken' : seatFull ? 'seat_full' : emailRequired ? 'email_required' : 'access'
         return reply.redirect(`/login?error=${errorParam}`)
       }
       reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())

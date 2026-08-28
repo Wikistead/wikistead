@@ -73,7 +73,9 @@ describe('acceptInvite — happy path + role', () => {
 
   it('an admin-role invite also grants the FGA admin tuple', async () => {
     const { token } = await createInvite(db, { tenantId, plan: 'free', invitedBy: 'owner-1', email: null, role: 'admin' })
-    expect(await acceptInvite({ db, fga: fgaClient }, asTenant(tenantId), token, { sub: 'invitee-adm' })).toBe(true)
+    // #930 / ADR-263 §3.1: a seat requires an address — the OIDC claims carry it here, unrelated to
+    // what this test is actually about (the admin FGA tuple), so it must not go missing.
+    expect(await acceptInvite({ db, fga: fgaClient }, asTenant(tenantId), token, { sub: 'invitee-adm', email: 'invitee-adm@x.test' })).toBe(true)
     expect(await hasRel('user:invitee-adm', 'admin', `tenant:${tenantId}`)).toBe(true)
     await deleteTuples(fgaClient, [
       { user: 'user:invitee-adm', relation: 'member', object: `tenant:${tenantId}` },
@@ -85,7 +87,9 @@ describe('acceptInvite — happy path + role', () => {
 describe('acceptInvite — consume-once / revoke / expiry / tampering', () => {
   it('rejects a second use of the same token (consume-once)', async () => {
     const { token } = await createInvite(db, { tenantId, plan: 'free', invitedBy: 'owner-1', email: null, role: 'member' })
-    expect(await acceptInvite({ db, fga: fgaClient }, asTenant(tenantId), token, { sub: 'once-1' })).toBe(true)
+    // #930 / ADR-263 §3.1: a seat requires an address — unrelated to what this test is about
+    // (consume-once), so the first, successful accept must carry one.
+    expect(await acceptInvite({ db, fga: fgaClient }, asTenant(tenantId), token, { sub: 'once-1', email: 'once-1@x.test' })).toBe(true)
     // Second accept by a DIFFERENT identity must fail — and create no member.
     expect(await acceptInvite({ db, fga: fgaClient }, asTenant(tenantId), token, { sub: 'once-2' })).toBe(false)
     expect(await memberCount('once-2')).toBe(0)
@@ -139,8 +143,10 @@ describe('acceptInvite — tenant isolation (cannot cross tenants)', () => {
 describe('acceptInvite — ADR-003 rollback', () => {
   it('a FGA write failure rolls back the member row AND the invite flip', async () => {
     const { id, token } = await createInvite(db, { tenantId, plan: 'free', invitedBy: 'owner-1', email: null, role: 'member' })
+    // #930 / ADR-263 §3.1: must clear the email-required floor to reach the FGA write this test
+    // actually injects a failure into.
     await expect(
-      acceptInvite({ db, fga: fgaFailingWrite() }, asTenant(tenantId), token, { sub: 'rollback-1' }),
+      acceptInvite({ db, fga: fgaFailingWrite() }, asTenant(tenantId), token, { sub: 'rollback-1', email: 'rollback-1@x.test' }),
     ).rejects.toThrow(/injected FGA write failure/)
     // No half-member: no member row, and the invite is STILL pending (flip undone).
     expect(await memberCount('rollback-1')).toBe(0)

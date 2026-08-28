@@ -89,7 +89,9 @@ describe('#638: a pending invite can be handed over again', () => {
 
     expect(await acceptInvite({ db, fga: app.fga }, asTenant(TENANT), first, { sub: `reissue638-old-${STAMP}` }),
       'the link that was handed out before the re-issue').toBe(false)
-    expect(await acceptInvite({ db, fga: app.fga }, asTenant(TENANT), fresh, { sub: `reissue638-new-${STAMP}` }),
+    // #930 / ADR-263 §3.1: a seat requires an address — unrelated to what this test is about
+    // (the reissued token still works), so the successful accept must carry one.
+    expect(await acceptInvite({ db, fga: app.fga }, asTenant(TENANT), fresh, { sub: `reissue638-new-${STAMP}`, email: `reissue638-new-${STAMP}@x.test` }),
       'the link that replaced it').toBe(true)
   }, 120_000)
 

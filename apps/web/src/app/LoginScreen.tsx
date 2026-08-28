@@ -134,6 +134,9 @@ function useAuthError(): string | null {
   // ADR-259 §3.2/§3.4: the FEDERATED door only (auto-enrolment) — the person has just authenticated to
   // an IdP that itself asserts this address, so naming that much back to them discloses nothing new.
   if (kind === "address_taken") return t("auth.errorAddressTaken");
+  // #930 / ADR-263 §3.1: names only what this login's own assertion carried (or didn't) — no
+  // enumeration of anybody else.
+  if (kind === "email_required") return t("auth.errorEmailRequired");
   // access / auth / saml all collapse to a single vague message — never reveal WHY (no enumeration).
   return t("auth.errorAccess");
 }

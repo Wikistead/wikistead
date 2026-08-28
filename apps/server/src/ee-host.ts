@@ -29,7 +29,7 @@ export { registerSamlEntitlement } from './auth/saml-entitlement.js' // #693 the
 export { cliMain as loginMethodsCliMain } from './scripts/login-methods.js'
 export { cliMain as localAdminCliMain } from './scripts/local-admin.js'
 export { loginMethodCeiling, assertClosingIsSafe } from './auth/login-methods.js' // #537: SAML start/ACS honour the deployment ceiling; #822/ADR-251: the SAML disable guard asks the SAME question as the other doors, about ways in rather than configured methods
-export { billableMemberCount, lockSeats } from './auth/invites.js'
+export { billableMemberCount, lockSeats, memberWithEmail } from './auth/invites.js' // #930 / ADR-263 §3.2: SCIM asks the same address question the other three seating doors ask
 // #688: the LEDGER moved into @wikistead-ee/server (write side, drain, viewer, transparency). What the
 // seam carries now is the CE half: the vocabulary + the registration point (sink), and the generic
 // plumbing the moved code rides. `auditIfEntitled` stays exported — it is the CE facade, and EE code

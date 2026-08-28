@@ -456,6 +456,17 @@ export async function enrolUnderSeatCap(
 ): Promise<'created' | 'exists'> {
   await lockSeats(tx, tenant.id)
   if (await isMember(tx, claims.sub)) return 'exists'
+  // #930 / ADR-263 §3.1 (owner ruling 2026-08-27, rev2): a seat requires an address. The identity's
+  // IdP released no `email` claim — refused HERE, before the seat is spent, rather than seated with
+  // no way to ever compare it against a later arrival for the same person (#858's duplicate-seat
+  // gap). Checked before `memberWithEmail` deliberately: that predicate can no longer be asked to
+  // answer for an address that does not exist, so this floor is a precondition of asking it at all.
+  if (!(claims.email ?? '').trim()) {
+    throw Object.assign(
+      new Error("this identity provider did not release an email address, and every member needs one — configure the connection to release the `email` claim, or invite this person with a password instead"),
+      { statusCode: 409, code: 'email_required' },
+    )
+  }
   if (await memberWithEmail(tx, tenant.id, claims.email)) {
     throw Object.assign(new Error('that address already belongs to a member of this tenant'), { statusCode: 409, code: 'address_taken' })
   }
