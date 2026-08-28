@@ -84,4 +84,38 @@ describe("#919 context-menu image paste", () => {
     expect(view.state.doc.length).toBe(0);
     view.destroy();
   });
+
+  // design-review round-2 findings: a ClipboardItem's types are ALTERNATE representations of
+  // the same data, not independent images — Ctrl+V's clipboardData.files gives one File per item.
+  it("uploads once per ClipboardItem even when it exposes the same image under multiple types", async () => {
+    setClipboard([clipboardItem({
+      "image/png": new Blob(["png"], { type: "image/png" }),
+      "image/svg+xml": new Blob(["svg"], { type: "image/svg+xml" }),
+      "text/html": new Blob(["<img>"], { type: "text/html" }),
+    })]);
+    const upload = vi.fn<ImageUploader>().mockResolvedValue({ ref: "wks-attachment:a1", alt: "shot" });
+    const view = editor(upload);
+
+    await pasteFromClipboard(view);
+
+    expect(upload).toHaveBeenCalledOnce();
+    expect(view.state.doc.toString()).toBe("![shot](wks-attachment:a1)");
+    view.destroy();
+  });
+
+  // A nested surface (table cell, callout body) never gets an uploader (editor-livepreview.ts always
+  // passes uploadImage: undefined there) — Ctrl+V never attaches attachFileDrop on that surface either,
+  // so text pasted alongside an image must still land, not be dropped by the image branch's early return.
+  it("falls through to inserting the accompanying text when the surface has no uploader", async () => {
+    setClipboard([clipboardItem({
+      "image/png": new Blob(["png"], { type: "image/png" }),
+      "text/plain": new Blob(["important text"], { type: "text/plain" }),
+    })]);
+    const view = editor();
+
+    await pasteFromClipboard(view);
+
+    expect(view.state.doc.toString()).toBe("important text");
+    view.destroy();
+  });
 });

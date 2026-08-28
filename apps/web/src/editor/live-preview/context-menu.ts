@@ -129,18 +129,26 @@ export async function pasteFromClipboard(view: EditorView): Promise<void> {
     const items = await navigator.clipboard.read();
     const images: File[] = [];
     for (const it of items) {
-      for (const type of it.types) {
-        if (!type.startsWith("image/")) continue;
-        const blob = await it.getType(type);
-        const extension = type.slice("image/".length).replace(/[^a-z0-9.+-]/gi, "") || "image";
-        images.push(new File([blob], `pasted-image-${images.length + 1}.${extension}`, { type }));
+      // A single ClipboardItem's types are ALTERNATE representations of the same data (e.g. the
+      // same screenshot as both image/png and image/svg+xml) — Ctrl+V's clipboardData.files gives
+      // one File per item, so take only the first image/* type here too, or the same image uploads
+      // once per representation (design-review finding on this ticket's own landing).
+      const imageType = it.types.find((type) => type.startsWith("image/"));
+      if (imageType) {
+        const blob = await it.getType(imageType);
+        const extension = imageType.slice("image/".length).replace(/[^a-z0-9.+-]/gi, "") || "image";
+        images.push(new File([blob], `pasted-image-${images.length + 1}.${extension}`, { type: imageType }));
       }
       if (it.types.includes("text/plain")) text = await (await it.getType("text/plain")).text();
       if (it.types.includes("text/html")) html = await (await it.getType("text/html")).text();
     }
     const upload = view.state.facet(imageUploaderFacet);
-    if (images.length > 0) {
-      if (upload) await uploadFiles(view, upload, images);
+    // Only take over the paste (skipping the text/html fallback below) when there is an uploader to
+    // hand the images to — a nested surface with no uploader (facet unset) must fall through to the
+    // text insertion path, matching Ctrl+V there (attachFileDrop is never attached on that surface),
+    // instead of silently dropping any text pasted alongside the image (design-review finding).
+    if (images.length > 0 && upload) {
+      await uploadFiles(view, upload, images);
       view.focus();
       return;
     }
