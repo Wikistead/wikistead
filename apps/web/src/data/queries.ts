@@ -146,11 +146,36 @@ export function useResolvedSpaces(ids: string[], enabled = true) {
   });
 }
 
-/** One id through the batch resolver. undefined = still resolving; null = not visible / gone. */
-export function useResolvedSpace(id: string | undefined | null, enabled = true): Space | null | undefined {
+export interface ResolvedSpaceState {
+  data: Space | null | undefined;
+  isPending: boolean;
+  isError: boolean;
+  refetch: () => unknown;
+}
+
+// #1014: `data === undefined` alone cannot tell "still in flight" from "retries exhausted, the
+// fetch failed" — both collapsed to the same value, so a caller like SpaceHomeRoute had no signal
+// to draw a failure/retry state on and fell through to its empty panel instead. isPending/isError
+// are react-query's own fields, passed straight through (house shape, not a new one).
+export function useResolvedSpaceState(id: string | undefined | null, enabled = true): ResolvedSpaceState {
   const q = useResolvedSpaces(id ? [id] : [], enabled);
-  if (!id) return null;
-  return q.data === undefined ? undefined : (q.data[id] ?? null);
+  if (!id) return { data: null, isPending: false, isError: false, refetch: q.refetch };
+  return {
+    data: q.data === undefined ? undefined : (q.data[id] ?? null),
+    isPending: q.isPending,
+    isError: q.isError,
+    refetch: q.refetch,
+  };
+}
+
+/**
+ * One id through the batch resolver. undefined = still resolving OR the fetch failed; null = not
+ * visible / gone. Callers that only need the value (not the loading/error distinction) can use
+ * this; a caller that must render a failure state (e.g. SpaceHomeRoute) uses
+ * `useResolvedSpaceState` instead, since this shape alone cannot carry `isError` (#1014).
+ */
+export function useResolvedSpace(id: string | undefined | null, enabled = true): Space | null | undefined {
+  return useResolvedSpaceState(id, enabled).data;
 }
 
 // #710 C: the NAME-ORDERED browse (#287's "show all"), paged — the reader pages through on demand;

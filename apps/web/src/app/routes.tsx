@@ -239,7 +239,7 @@ import { SearchBox } from "../search/SearchBox";
 import { useSession } from "../session/SessionProvider";
 import { fetchGuestToken, apiFetch, assetUrl, type GuestToken } from "../data/apiClient";
 import { FALLBACK_PRODUCT_NAME, useProductName } from "./product-name";
-import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpacesPage, useResolvedSpace, useBranding, invalidateSpaces, type Page } from "../data/queries";
+import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpacesPage, useResolvedSpace, useResolvedSpaceState, useBranding, invalidateSpaces, type Page } from "../data/queries";
 import { TenantBrand } from "./BrandLockup"; // #430 the public header uses the shared two-slot lockup
 import { Avatar } from "../ui/Avatar"; // #430 the public header's space chip (shared primitive)
 import { GuestSidebar } from "./GuestSidebar";
@@ -2211,17 +2211,19 @@ function PublicSpaceRoute() {
 // #364 / ADR-157 §5-§6: the space ROOT route — the member landing for a space. Renders the HOME page
 // with the FULL page machinery (PageRoute with an override id), or the empty state: the space-name
 // heading + a "write the homepage" button visible ONLY to edit-capable viewers (owner ruling 3).
-function SpaceHomeRoute() {
+export function SpaceHomeRoute() {
   const { t } = useTranslation();
   const { spaceId } = useParams<{ spaceId: string }>();
   const { status, logout, token } = useSession();
-  const spaceResolved = useResolvedSpace(spaceId, status === "authed");
+  const spaceState = useResolvedSpaceState(spaceId, status === "authed");
+  const spaceResolved = spaceState.data;
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const { setActiveSpaceId } = useActiveSpace();
   // #710: resolved by id — a space on any roster page (or none) answers the same way. null is
-  // DEFINITIVE (gone or not visible, uniformly), undefined is still in flight.
+  // DEFINITIVE (gone or not visible, uniformly), undefined is still in flight or the fetch failed
+  // (spaceState.isError, checked below, tells the two apart).
   const space = spaceResolved ?? undefined;
   // #364 ①: the sidebar follows the URL here, not an opened page. The page-driven sync (PageRoute)
   // never fires for a home-less space (the empty state opens no page), so a direct /spaces/:id link left
@@ -2230,6 +2232,18 @@ function SpaceHomeRoute() {
   useEffect(() => { if (space?.id) setActiveSpaceId(space.id); }, [space?.id, setActiveSpaceId]);
   if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
   if (status === "anon") return <LoginScreen />;
+  // #1014: an exhausted retry on /spaces/resolve used to collapse to the same `undefined` as an
+  // in-flight fetch, so it fell all the way through to the space-home-empty panel below — a silent,
+  // permanent blank screen with no way to tell it apart from a genuinely home-less space. Checked
+  // before the null (definitively-not-found) branch: isError and null are mutually exclusive here,
+  // but ordering it first keeps the two failure-shaped branches next to each other.
+  if (spaceState.isError) {
+    return (
+      <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>
+        <LoadFailed testId="space-home-failed" variant="page" onRetry={() => { void spaceState.refetch(); }} />
+      </AppShell>
+    );
+  }
   if (spaceResolved === null) {
     return (
       <AppShell sidebar={<Sidebar />} search={<SearchBox />} onLogout={logout}>

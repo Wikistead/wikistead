@@ -102,7 +102,6 @@ const RESIDUE: Record<string, string> = {
   "sidebar/Sidebar.tsx::sidebar.noSpaces": "bound via `useMemo` over query data — the resolver does not trace into a callback body (by hand: `spacesQ.isError` is checked above this branch)",
   "sidebar/Sidebar.tsx::sidebar.noPages": "bound via `useMemo` over query data (by hand: `pagesQ.isError` is checked above this branch)",
   "sidebar/SpaceSwitcher.tsx::sidebar.noSpacesMatch": "bound via `useMemo` over query data — the resolver does not trace into a callback body",
-  "app/routes.tsx::page.notFound": "the SpaceHomeRoute occurrence reads `spaceResolved`, `useResolvedSpace`'s own null|undefined|T result (not a react-query object — #710) — by hand, null is documented as definitive and undefined as in-flight, so this is plausibly already correct; the resolver's `.isError`-shaped assumption cannot verify a hook with a different return shape",
 };
 
 const sites: (Site & { verdict: Verdict })[] = [];
