@@ -10,6 +10,7 @@ import { resolveTenantEmailDriver, type EmailDriver, type EmailMessage } from '@
 import { pool } from '../db/pool.js'
 import { claimOutboxBatch, startOutboxDrainWorker } from '../db/outbox-lease.js'
 import { withTenantTx } from '../db/with-tenant.js'
+import { resolveMailLocale, type Lang } from '../locale.js'
 
 export interface EmailOutboxRow {
   id: string
@@ -36,7 +37,9 @@ export type EmailBuildResult =
 // a bare-pool read from a builder answers empty and every mail would silently wear the deployment
 // default. Resolving it once per row also means one read instead of one per builder.
 export interface EmailBranding { productName: string; displayName: string | null; logoUrl: string | null; whitelabel: boolean }
-export type EmailBuilder = (rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding }) => Promise<EmailBuildResult>
+// #1005 / ADR-260 §3.1/§5: resolved the same way and in the same tenant tx as branding, for the same
+// reason (members and tenant_settings are FORCE RLS — a bare-pool read of either answers empty).
+export type EmailBuilder = (rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding; locale: Lang }) => Promise<EmailBuildResult>
 
 const builders = new Map<string, EmailBuilder>()
 export function registerEmailBuilder(cls: string, builder: EmailBuilder): void {
@@ -106,11 +109,12 @@ export async function drainEmailOutbox(deps: { fallback: EmailDriver; log?: (m: 
       if (!tenant) { await drop([row.id], log, 'tenant gone'); handled++; continue }
       // recipient address resolves at SEND time (sub-keyed rows; an IdP-side address change is picked
       // up automatically — ADR-196 §7 keying note). Missing/deactivated member → drop, never retry.
-      const members = await withTenantTx(tenant, async (tx) => tx<{ email: string | null; deactivated_at: Date | null }[]>`
-        SELECT email, deactivated_at FROM members WHERE sub = ${row.member_sub}`)
+      const members = await withTenantTx(tenant, async (tx) => tx<{ email: string | null; deactivated_at: Date | null; locale: string | null }[]>`
+        SELECT email, deactivated_at, locale FROM members WHERE sub = ${row.member_sub}`)
       if (members.length === 0) { await drop([row.id], log, 'member gone'); handled++; continue }
       if (members[0]!.deactivated_at != null) { await drop([row.id], log, 'member deactivated'); handled++; continue }
       const to = members[0]!.email
+      const memberLocale = members[0]!.locale
       if (!to) { await drop([row.id], log, 'member has no address'); handled++; continue }
       const { tenantBaseUrl, noAddressReason } = await import('./base-url.js')
       const address = await withTenantTx(tenant, async (tx) => tenantBaseUrl(tx as never, { id: tenant.id, slug: tenant.slug }))
@@ -124,11 +128,20 @@ export async function drainEmailOutbox(deps: { fallback: EmailDriver; log?: (m: 
         unaddressed.add(tenant.id)
         log(`email outbox: ${tenant.slug} has no address for links — ${noAddressReason(address)}`)
       }
-      // #575 slice B: the same short tenant tx shape — inside it because tenant_settings is FORCE RLS.
+      // #575 slice B / #1005: the same short tenant tx shape — inside it because tenant_settings is
+      // FORCE RLS. The member's locale (read above, in its own tenant tx) resolves against the tenant
+      // default read here, so both halves of ADR-260 §3.1's fallback come from an RLS'd read.
       const { getTenantBranding } = await import('../routes/branding.js')
       const { productName } = await import('../product-name.js')
-      const b = await withTenantTx(tenant, async (tx) => getTenantBranding({ sql: tx } as never, tenant.plan))
-      const branding = { productName: productName(), displayName: b.displayName, logoUrl: b.logoUrl, whitelabel: b.whitelabel }
+      const { tenantDefaultLang } = await import('../auth/session.js')
+      const { branding, locale } = await withTenantTx(tenant, async (tx) => {
+        const b = await getTenantBranding({ sql: tx } as never, tenant.plan)
+        const tenantLang = await tenantDefaultLang({ sql: tx } as never)
+        return {
+          branding: { productName: productName(), displayName: b.displayName, logoUrl: b.logoUrl, whitelabel: b.whitelabel },
+          locale: resolveMailLocale(memberLocale, tenantLang),
+        }
+      })
       // fold (§6): gather this key's DUE siblings so K pending rows become one message. The advisory
       // lock serializes competing workers on the key; rows claimed here are marked so the batch that
       // claimed them elsewhere skips them (claimed_at was just refreshed by our claim).
@@ -145,7 +158,7 @@ export async function drainEmailOutbox(deps: { fallback: EmailDriver; log?: (m: 
         group = [row, ...siblings]
       }
       for (const g of group) done.add(g.id)
-      const built = await builder(group, { tenantId: tenant.id, baseUrl, branding })
+      const built = await builder(group, { tenantId: tenant.id, baseUrl, branding, locale })
       if (built.kind === 'skip') { await drop(group.map((g) => g.id), log, `builder skip: ${built.reason}`); handled++; continue }
       if (built.kind === 'retry') { for (const g of group) await retryOrDrop(g, log, built.reason); handled++; continue }
       const driver = resolveTenantEmailDriver({ tenantId: tenant.id, plan: String(tenant.plan) }, deps.fallback)

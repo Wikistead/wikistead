@@ -14,6 +14,7 @@ import { getEnrollConfig } from './enroll-domains.js'
 import { enrolUnderSeatCap } from './invites.js'
 import { ensurePersonalSpace } from '../routes/spaces.js'
 import type { SearchDriver } from '../search/index.js'
+import { isKnownLang, type Lang } from '../locale.js'
 
 export const SESSION_COOKIE = 'wks_sess'
 
@@ -90,13 +91,15 @@ const memberKey = (tenantId: string, sub: string) => `member-sess:${tenantId}:${
 // Fresh 256-bit id on every login → no session fixation (a pre-auth id is never
 // promoted; each established session gets a brand-new id).
 // #419: the tenant's default language for server-composed strings. v1 consumers: the personal-space
-// initial name ONLY (an app-wide locale default is a separate, deliberately unopened design). NULL /
-// missing row / unknown value → 'en' (pre-#419 behaviour).
-export async function tenantDefaultLang(db: TenantDb): Promise<'en' | 'ja'> {
+// initial name ONLY (an app-wide locale default is a separate, deliberately unopened design) — #1005
+// widens the READER to mail (ADR-260 §3.1), but this function's own value semantics do not change: NULL
+// / missing row / unknown value → 'en' (pre-#419 behaviour), now expressed as the shared `isKnownLang`
+// check rather than a private `=== 'ja'` ternary, so this and the mail resolver cannot drift apart.
+export async function tenantDefaultLang(db: TenantDb): Promise<Lang> {
   try {
     const [row] = await db.sql<[{ default_lang: string | null }?]>`
       SELECT default_lang FROM tenant_settings LIMIT 1`
-    return row?.default_lang === 'ja' ? 'ja' : 'en'
+    return isKnownLang(row?.default_lang) ? row!.default_lang : 'en'
   } catch {
     return 'en' // best-effort (the caller's whole block is best-effort too)
   }
@@ -104,7 +107,7 @@ export async function tenantDefaultLang(db: TenantDb): Promise<'en' | 'ja'> {
 
 // #419: the localized personal-space initial name. An empty display name falls back to a
 // language-appropriate generic ("Personal Space", or its Japanese counterpart).
-export function personalSpaceName(displayName: string, lang: 'en' | 'ja'): string {
+export function personalSpaceName(displayName: string, lang: Lang): string {
   if (!displayName) return lang === 'ja' ? 'マイスペース' : 'Personal Space'
   return lang === 'ja' ? `${displayName}のスペース` : `${displayName}'s Space`
 }
