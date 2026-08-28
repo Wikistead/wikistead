@@ -3,6 +3,12 @@
 // empty display name falls back per-language. Existing spaces are never renamed (ensurePersonalSpace
 // short-circuits on the existing row — pinned here). Real Postgres (the dev tenant's settings row is
 // flipped and restored around the ja assertions).
+//
+// #1013: the dev tenant carries no tenant_settings row in a freshly-seeded stack (nothing inserts one),
+// so a bare UPDATE — which affects zero rows against a table with nothing to match — silently never set
+// default_lang, and every assertion here read the unset fallback regardless of what the test asked for.
+// The first write in each test/afterAll block establishes the row with INSERT … ON CONFLICT; the plain
+// UPDATEs after it are safe because that row now exists for the rest of this file's run.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
@@ -25,7 +31,8 @@ beforeAll(async () => {
 }, 30_000)
 
 afterAll(async () => {
-  await admin`UPDATE tenant_settings SET default_lang = NULL WHERE tenant_id = ${tenant.id}`
+  await admin`INSERT INTO tenant_settings (tenant_id, default_lang) VALUES (${tenant.id}, NULL)
+              ON CONFLICT (tenant_id) DO UPDATE SET default_lang = NULL`
   await admin`DELETE FROM spaces WHERE personal_owner_sub = ${SUB}`
   await db.release()
   await pool.end()
@@ -43,7 +50,8 @@ describe('personalSpaceName (#419 — pure)', () => {
 
 describe('tenantDefaultLang + first-login naming (#419 — real PG)', () => {
   it("unset → 'en'; 'ja' → 'ja'; unknown values fall back to 'en'", async () => {
-    await admin`UPDATE tenant_settings SET default_lang = NULL WHERE tenant_id = ${tenant.id}`
+    await admin`INSERT INTO tenant_settings (tenant_id, default_lang) VALUES (${tenant.id}, NULL)
+                ON CONFLICT (tenant_id) DO UPDATE SET default_lang = NULL`
     expect(await tenantDefaultLang(db)).toBe('en')
     await admin`UPDATE tenant_settings SET default_lang = 'ja' WHERE tenant_id = ${tenant.id}`
     expect(await tenantDefaultLang(db)).toBe('ja')
@@ -59,7 +67,8 @@ describe('tenantDefaultLang + first-login naming (#419 — real PG)', () => {
     expect(row?.name).toBe('Alexのスペース')
 
     // The tenant flips to en and the member logs in again — the EXISTING space keeps its name.
-    await admin`UPDATE tenant_settings SET default_lang = NULL WHERE tenant_id = ${tenant.id}`
+    await admin`INSERT INTO tenant_settings (tenant_id, default_lang) VALUES (${tenant.id}, NULL)
+                ON CONFLICT (tenant_id) DO UPDATE SET default_lang = NULL`
     const name2 = personalSpaceName('Alex', await tenantDefaultLang(db))
     expect(name2).toBe("Alex's Space")
     await ensurePersonalSpace(db, fgaClient, { tenantId: tenant.id, userId: SUB, name: name2, plan: tenant.plan })
