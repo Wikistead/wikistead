@@ -609,7 +609,10 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const livenessRef = useRef(liveness);
   livenessRef.current = liveness;
   // #978 / ADR-261: the band that used to sit above the surface is now this dismissible toast.
-  useNotLiveToast(`notlive:member:${pageId}`, liveness.reason);
+  // #978 view-only never joins the collab room (Editor.tsx), so `liveness` stays stuck at
+  // its initial {live:false, reason:"connecting"} forever — gate on canEdit or every view-only
+  // reader gets a persistent false-positive toast that never clears.
+  useNotLiveToast(`notlive:member:${pageId}`, canEdit ? liveness.reason : null);
 
   // #911 user ruling: `:w` saves and stays in the edit surface; `:wq` and the toolbar Publish button
   // save and return to the rendered view. One publish path (still fire-and-forget, still #448-stable),
@@ -1426,7 +1429,9 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   const livenessRef = useRef(liveness);
   livenessRef.current = liveness;
   // #978 / ADR-261: the band that used to sit above the surface is now this dismissible toast.
-  useNotLiveToast(`notlive:guest:${pageId}`, liveness.reason);
+  // #978 same view-only gate as the member surface — a view-only share-link visitor never
+  // joins the collab room, so `liveness` never leaves its initial "connecting" without this.
+  useNotLiveToast(`notlive:guest:${pageId}`, canEdit ? liveness.reason : null);
   // #917: member-surface parity (routes.tsx's own `dirtySig`) — an external store the Editor's DOM
   // `input` listener flips optimistically, read by `PageActions`/`PageControlsMobile`'s `useDirty`.
   // `GuestPageContent` remounts fresh per page (`key={openId}` at its GuestSpace call site, or a whole
