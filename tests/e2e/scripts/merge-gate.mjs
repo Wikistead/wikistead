@@ -15,6 +15,14 @@ import { fileURLToPath } from "node:url";
 const e2eDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const specsDir = join(e2eDir, "specs");
 
+// #890 admin-roles-420.spec.ts and space-role-comment-485.spec.ts are NOT in this list — the
+// destructive-write fix that made them use createScratchSpace/createScratchGroup instead of mutating
+// the shared demo_space is therefore not re-verified on every merge, only the fixture-guard mechanism
+// they exercise (which every run wires via playwright.config.ts regardless of which specs run). They
+// are small enough to dodge the #926 wedge (~488 specs in) on their own, so they get their own targeted
+// run instead of waiting on that: `pnpm --filter @wikistead/e2e e2e:fixture-guard-890`. Fold them into
+// GATE_SPECS (or give them a dedicated CI step) once someone measures the combined runtime is still
+// cheap enough for every merge.
 export const GATE_SPECS = [
   // guest-*
   "guest-edit-macros-374.spec.ts",
