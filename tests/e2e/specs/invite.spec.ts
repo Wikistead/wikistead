@@ -14,6 +14,17 @@ const WEB = `http://dev.localhost:${WEB_REAL_PORT}`;
 // #484: derived from WKS_STACK_OFFSET like every other port — see helpers.ts.
 const MAILPIT = MAILPIT_API;
 
+// #1001: tenant_dev's OIDC connection carries a subject prefix (ADR-197 §5 — every connection the
+// seed or the admin screen creates gets one), so a brand-new identity's FIRST login through it never
+// keeps the raw external subject the issuer asserted: the callback mints `wc<conn8>_<external sub>`
+// and that mint IS the member's sub from here on. Asserting the raw external sub would only have ever
+// passed against an unprefixed (pre-#590) connection, which nothing seeds any more.
+const MINTED_SUB = /^wc[0-9a-f]{8}_/;
+function expectSeatedFrom(sub: string, externalSub: string): void {
+  expect(sub).toMatch(MINTED_SUB);
+  expect(sub.replace(MINTED_SUB, "")).toBe(externalSub);
+}
+
 async function mailpitReceived(api: APIRequestContext, to: string): Promise<boolean> {
   for (let i = 0; i < 15; i++) {
     const r = await api.get(`${MAILPIT}/messages`);
@@ -34,10 +45,11 @@ async function mailpitReceived(api: APIRequestContext, to: string): Promise<bool
 const INVITE_EMAIL_LABEL = "Email address";
 
 test("admin invites a member; a fresh identity accepts in the browser and is seated", async ({ browser, request }) => {
-  // #1001: isolated — the admin's own real OIDC login (below) never completes under the #891 gate's
-  // stack, so the console never renders (reproduces on a fresh stack; likely the same root cause as
-  // #1000's login.spec.ts failure — both hit the same OIDC round trip). Confirmed unrelated to #925.
-  test.skip(true, "#1001: isolated — see comment above");
+  // #1001: this used to fail on EVERY stack — same root cause as #1000's login.spec.ts failure (the
+  // admin's own real OIDC login never resolved to the seeded member; fixed in infra/db/seed.ts). Once
+  // that was fixed, the invitee's own accept-flow assertion below also needed updating: a fresh
+  // identity's first login through this connection now genuinely mints a namespaced sub (ADR-197 §5),
+  // which the old raw-sub assertion never got far enough to exercise.
   // ── admin (dev-user): real OIDC login, then the Admin Console ──────────────
   const adminCtx = await browser.newContext();
   const admin = await adminCtx.newPage();
@@ -85,16 +97,14 @@ test("admin invites a member; a fresh identity accepts in the browser and is sea
   // Seated: a host-only member session on the tenant origin, as the invitee.
   const me = await invitee.request.get(`${WEB}/api/auth/me`);
   expect(me.status()).toBe(200);
-  expect((await me.json()).sub).toBe(inviteeSub);
+  expectSeatedFrom((await me.json()).sub, inviteeSub);
 
   await adminCtx.close();
   await inviteeCtx.close();
 });
 
 test("the same invite link cannot be accepted twice (consume-once)", async ({ browser }) => {
-  // #1001: isolated — same underlying cause as the test above (the admin's real OIDC login never
-  // completes under the #891 gate's stack). See that test's comment; confirmed unrelated to #925.
-  test.skip(true, "#1001: isolated — see comment above");
+  // #1001: same fixed root cause as the test above — see its comment.
   // Admin issues one invite.
   const adminCtx = await browser.newContext();
   const admin = await adminCtx.newPage();
@@ -117,7 +127,7 @@ test("the same invite link cannot be accepted twice (consume-once)", async ({ br
   await p1.goto(link!);
   await p1.getByRole("button", { name: "Accept invite" }).click();
   await p1.waitForURL((u) => !u.pathname.startsWith("/auth/") && u.pathname !== "/invite", { timeout: 20_000 });
-  expect((await (await p1.request.get(`${WEB}/api/auth/me`)).json()).sub).toBe(firstSub);
+  expectSeatedFrom((await (await p1.request.get(`${WEB}/api/auth/me`)).json()).sub, firstSub);
   await c1.close();
 
   // Second, different identity tries the SAME link → consumed → no membership.
