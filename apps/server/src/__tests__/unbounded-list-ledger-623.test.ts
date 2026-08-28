@@ -91,6 +91,7 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   'pages.ts:/pages/:pageId/published': { kind: 'bounded', why: 'one published page by id — a row, not a list.' },
   'pages.ts:/pages/:pageId/excerpt': { kind: 'bounded', why: 'one excerpt for one page — a row, not a list.' },
   'pages.ts:/pages/:pageId/comment-audience': { kind: 'bounded', why: 'one audience setting for one page — a settings record.' },
+  'pages.ts:/pages/:pageId/embed/frameability': { kind: 'bounded', why: '#970 / ADR-267: one tenant_settings row (the provider allowlist) plus a single-URL header probe — a settings record and one fetch, not a list.' },
   'pages.ts:/pages/:pageId/member-candidates': { kind: 'bounded', why: 'searchMemberCandidates carries LIMIT 10 (spaces.ts) — the bound is real, it just lives in another file.' },
   // …the public single-resource routes, visible to this scan for the first time in slice 12.
   'public.ts:/public/pages/:pageId': { kind: 'bounded', why: 'one public page by id — a row, not a list.' },
