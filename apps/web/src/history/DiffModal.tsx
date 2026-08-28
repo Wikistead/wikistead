@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import { usePageRevisions, useRevisionContent, usePublished } from "../data/queries";
+import { LoadFailed } from "../ui/LoadFailed";
 import { sideBySide, rowsHaveChanges, type DiffRow } from "./diff";
 
 // Near-fullscreen side-by-side diff (ADR-019 D6 + Design-5 follow-up). Rendered as a
@@ -34,7 +35,7 @@ function DiffRowCells({ row }: { row: DiffRow }) {
 export function DiffModal({ pageId, revId, onClose }: { pageId: string; revId: string; onClose: () => void }) {
   const { t } = useTranslation();
   const { data: revisions } = usePageRevisions(pageId);
-  const { data: oldContent, isLoading } = useRevisionContent(pageId, revId);
+  const { data: oldContent, isLoading, isError, refetch } = useRevisionContent(pageId, revId);
   const { data: published } = usePublished(pageId);
   const rev = (revisions ?? []).find((r) => r.id === revId);
   const rows = useMemo(
@@ -52,8 +53,11 @@ export function DiffModal({ pageId, revId, onClose }: { pageId: string; revId: s
         </DialogHeader>
 
         {isLoading && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
-        {!isLoading && !changed && <p className="text-sm text-muted-foreground" data-testid="diff-no-changes">{t("history.noChanges")}</p>}
-        {!isLoading && changed && (
+        {/* ADR-266 §1.3: `isError` was never read here — a failed content fetch fell into the
+            zero-rows branch and reported "no changes" for a request that never answered. */}
+        {!isLoading && isError && <LoadFailed testId="diff-failed" onRetry={() => { void refetch(); }} />}
+        {!isLoading && !isError && !changed && <p className="text-sm text-muted-foreground" data-testid="diff-no-changes">{t("history.noChanges")}</p>}
+        {!isLoading && !isError && changed && (
           <div data-testid="diff-grid" className="min-h-0 flex-1 overflow-auto rounded-md border font-mono text-xs leading-relaxed">
             <div className="grid grid-cols-[auto_1fr_auto_1fr]">
               {rows.map((row, i) => (
