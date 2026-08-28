@@ -6,32 +6,31 @@ import { WEB, WEB_PORT } from "../helpers";
 // globalSetup runs a real minimal OIDC issuer (issuing sub "dev-user") and points
 // tenant_dev's OIDC config at it.
 
-// #1000: isolated at the describe level, not in-body — this test requires `{ page }`, and Playwright
-// resolves that fixture BEFORE an in-body test.skip runs (the same trap #973's guest-vim-ex-448 fix
-// documents). Raising the skip to describe scope evaluates it at collection time, ahead of the fixture.
-test.describe(() => {
-  test.skip(true, "#1000: isolated — real OIDC login never sets the session cookie under the #891 gate's stack (reproduces on a fresh stack, confirmed unrelated to #925)");
+// #1000: this used to fail on EVERY stack, fresh or not — the real OIDC round trip never set the
+// session cookie. Root cause (found and fixed in infra/db/seed.ts): a fresh tenant_oidc connection
+// mints a NAMESPACED sub (ADR-197 §5) for whatever the IdP asserts, but the seeded admin member row is
+// the raw sub 'dev-user' with no member_identities link bridging the two — so this login could never
+// resolve back to that member. The seed now links the connection to 'dev-user' the same way a live
+// member would from account settings (ADR-259 §3.3), which keeps the prefixing feature itself intact.
+test("real OIDC login through the same-origin proxy sets a working host-only session", async ({ page }) => {
+  // Full browser flow: /auth/login → IdP /authorize → /auth/callback → cookie → app.
+  await page.goto("/auth/login");
+  await page.waitForURL((u) => !u.pathname.startsWith("/auth/"), { timeout: 15_000 });
 
-  test("real OIDC login through the same-origin proxy sets a working host-only session", async ({ page }) => {
-    // Full browser flow: /auth/login → IdP /authorize → /auth/callback → cookie → app.
-    await page.goto("/auth/login");
-    await page.waitForURL((u) => !u.pathname.startsWith("/auth/"), { timeout: 15_000 });
+  // The session cookie was set, host-only on the web host (no Domain).
+  const sess = (await page.context().cookies()).find((c) => c.name === "wks_sess");
+  expect(sess, "session cookie set after login").toBeTruthy();
+  expect(sess!.domain).toContain("dev.localhost");
 
-    // The session cookie was set, host-only on the web host (no Domain).
-    const sess = (await page.context().cookies()).find((c) => c.name === "wks_sess");
-    expect(sess, "session cookie set after login").toBeTruthy();
-    expect(sess!.domain).toContain("dev.localhost");
+  // Authenticated, same-origin: /api/auth/me returns the logged-in member.
+  const me = await page.request.get(`${WEB}/api/auth/me`);
+  expect(me.status()).toBe(200);
+  expect((await me.json()).sub).toBe("dev-user");
 
-    // Authenticated, same-origin: /api/auth/me returns the logged-in member.
-    const me = await page.request.get(`${WEB}/api/auth/me`);
-    expect(me.status()).toBe(200);
-    expect((await me.json()).sub).toBe("dev-user");
-
-    // Cross-tenant: the host-only cookie is NOT applicable to another tenant's host,
-    // so the browser won't send it there, and that origin is unauthenticated.
-    const acmeCookies = await page.context().cookies(`http://acme.localhost:${WEB_PORT}`);
-    expect(acmeCookies.find((c) => c.name === "wks_sess"), "cookie must not cross to another tenant host").toBeUndefined();
-    const acme = await page.request.get(`http://acme.localhost:${WEB_PORT}/api/auth/me`);
-    expect(acme.status()).not.toBe(200);
-  });
+  // Cross-tenant: the host-only cookie is NOT applicable to another tenant's host,
+  // so the browser won't send it there, and that origin is unauthenticated.
+  const acmeCookies = await page.context().cookies(`http://acme.localhost:${WEB_PORT}`);
+  expect(acmeCookies.find((c) => c.name === "wks_sess"), "cookie must not cross to another tenant host").toBeUndefined();
+  const acme = await page.request.get(`http://acme.localhost:${WEB_PORT}/api/auth/me`);
+  expect(acme.status()).not.toBe(200);
 });

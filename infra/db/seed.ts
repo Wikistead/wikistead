@@ -124,6 +124,18 @@ import { assertStackTarget } from '../../scripts/assert-stack-target.mjs'
         VALUES (${connId}, 'tenant_dev', ${process.env.OIDC_ISSUER!}, ${process.env.OIDC_CLIENT_ID!},
                 ${clientSecret ? encryptSecret(clientSecret) : null}, ${process.env.OIDC_REDIRECT_URI!}, true,
                 ${subjectPrefixFor(connId)})`
+      // #1000: a fresh connection mints a NAMESPACED sub (ADR-197 §5) for anything the IdP asserts, but
+      // the seeded admin member above is the RAW sub 'dev-user' with no member_identities row bridging
+      // the two — so a real OIDC round trip through this connection (login.spec.ts, invite.spec.ts) can
+      // never resolve back to that member and always lands on the generic access-denied redirect. Real
+      // deployments avoid this because a live member LINKS a new connection from account settings
+      // (ADR-259 §3.3) before its prefix can shadow them; the seed never performs that step. Modeling
+      // exactly that link keeps the prefixing feature itself untouched and only makes the fixture
+      // internally consistent.
+      await tx`
+        INSERT INTO member_identities (tenant_id, connection_id, external_subject, member_sub)
+        VALUES ('tenant_dev', ${connId}, 'dev-user', 'dev-user')
+        ON CONFLICT (tenant_id, connection_id, external_subject) DO NOTHING`
     }
     console.log('seeded: tenant_dev / tenant_oidc')
 
