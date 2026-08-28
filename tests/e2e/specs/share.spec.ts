@@ -1,17 +1,36 @@
 import { test, expect, type Page, type Browser } from "@playwright/test";
-import { openDemo, resetDoc, paneText, enterSplit, enterEdit, API } from "../helpers";
+import { openDemo, paneText, enterSplit, enterEdit, createScratchPage, API } from "../helpers";
 async function ensureExpanded(page: Page) {
-  // Active space follows the open page (demo), so the demo row is already in the
-  // sidebar tree — just wait for it (no space-expand; that would open the switcher).
+  // Active space follows the open page, so its row is already in the sidebar
+  // tree — just wait for it (no space-expand; that would open the switcher).
   await page.waitForSelector("[data-testid=tree-page]", { timeout: 5000 });
 }
-async function createLink(page: Page, capability: "view" | "edit"): Promise<string> {
+// #969: this used to share the SEEDED "demo" page, found in the tree by its title "Demo Page". #940's
+// seed fix made "demo" demo_space's HOME page — but a space's home page is deliberately excluded from
+// `[data-testid=tree-page]` (#364), so the row lookup below could never find it, in a unit run or a
+// gate run alike (the same #939 class of defect, fixed there with createScratchPage). Callers now pass
+// the title of a page THEY created and own, immune to whatever "demo" becomes next.
+async function createLink(page: Page, pageTitle: string, capability: "view" | "edit"): Promise<string> {
   await ensureExpanded(page);
-  // Open the demo row's "…" menu and pick Share.
-  const row = page.locator("[data-testid=tree-page]", { hasText: "Demo Page" }).first();
+  // Open the page's row "…" menu and pick Share.
+  const row = page.locator("[data-testid=tree-page]", { hasText: pageTitle }).first();
   await row.hover();
-  await row.locator("[data-testid=page-actions]").click();
-  await page.locator("[data-testid=page-menu][data-state=open]").getByText("Share").click();
+  // #969 (same defect share-password-233.spec.ts's #939 fix measured): on a row for the page just
+  // navigated to (freshly selected), the FIRST click on `page-actions` reproducibly leaves
+  // `aria-expanded="false"` — the SECOND click always opens it. Bounded retry rather than a fixed
+  // second click, in case a slower run needs one more.
+  const trigger = row.locator("[data-testid=page-actions]");
+  const menu = page.locator("[data-testid=page-menu][data-state=open]");
+  for (let attempt = 1; ; attempt++) {
+    await trigger.click();
+    try {
+      await menu.waitFor({ timeout: 1000 });
+      break;
+    } catch {
+      if (attempt >= 5) throw new Error("page-actions menu never opened after 5 clicks");
+    }
+  }
+  await menu.getByText("Share").click();
   await page.waitForSelector("[data-testid=share-dialog]", { timeout: 10000 });
   // Two ShareDialog instances mount (sidebar + page route); only the open one is
   // visible, so scope the Select to the visible trigger.
@@ -34,21 +53,26 @@ async function createLink(page: Page, capability: "view" | "edit"): Promise<stri
 // regression. Every wait below is now a condition with its own budget and message, so the run is as
 // fast as the stack allows and a genuine failure names the step instead of expiring anonymously.
 test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied", async ({ browser }: { browser: Browser }) => {
-  test.skip(true, "#969: isolated — tree-page row never found (unit and gate runs both)");
   test.slow(); // triples the budget: three contexts + collab propagation is legitimately slow work
   const member = await (await browser.newContext()).newPage();
+  // #969: a scratch page this test owns (see createLink's comment) — not the shared "demo" page, and
+  // freshly created, so it needs no resetDoc.
   await openDemo(member);
+  const title = `Share scratch ${Date.now().toString(36)}`;
+  const pageId = await createScratchPage(member, title);
+  await member.goto(`/p/${pageId}`);
+  await member.waitForSelector("[data-pane=preview] .cm-content");
   // P3: editor defaults to read-only view; the member edits + reads the source
   // pane below, so open the editable split.
   await enterSplit(member);
-  await resetDoc(member);
+  await member.click("[data-pane=preview] .cm-content"); // focus before typing (no resetDoc to do it for us)
   // #470: a marker the guest must SEE before we ask it to type. The old fixed second was the only
   // thing standing between "the guest's editor exists" and "the collab channel is live"; waiting for
   // real content proves the channel instead of hoping, and costs nothing on a warm stack.
   await member.keyboard.type("seed-470");
 
   // member creates an EDIT link
-  const editUrl = await createLink(member, "edit");
+  const editUrl = await createLink(member, title, "edit");
   expect(editUrl).toMatch(/\/share\/[0-9a-f-]{36}$/);
 
   // anonymous guest opens it and can edit
@@ -77,7 +101,7 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
   // Check the capability itself, on both layers: the UI must not offer the affordance, and the server
   // must not accept the write even if it did.
   await member.bringToFront();
-  const viewUrl = await createLink(member, "view");
+  const viewUrl = await createLink(member, title, "view");
   const viewer = await (await browser.newContext()).newPage();
   await viewer.goto(viewUrl);
   await viewer.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
