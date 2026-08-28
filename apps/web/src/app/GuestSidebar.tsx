@@ -47,7 +47,9 @@ function buildTree(pages: Page[]): TreeNode[] {
 // #457 `loading` distinguishes "the tree hasn't arrived" from "the space has no pages" — the
 // same three-state discipline the member sidebar got in #492 (#500 added the error/retry leg). The
 // skeleton is delay-gated so a fast tree fetch never flashes it.
-export function GuestSidebar({ pages, loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, truncated = false }: { pages: Page[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error?: boolean; onRetry?: () => void; truncated?: boolean }) {
+// `error` is required, not optional: the caller owns the fetch (#500), and an omitted prop here would
+// silently read as "not erroring" — the exact error-reads-as-empty shape #500 exists to prevent.
+export function GuestSidebar({ pages, loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, truncated = false }: { pages: Page[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error: boolean; onRetry?: () => void; truncated?: boolean }) {
   const { t } = useTranslation();
   const showSkeleton = useDelayedFlag(loading);
   const tree = buildTree(pages);
