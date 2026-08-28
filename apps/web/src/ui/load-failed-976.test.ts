@@ -79,8 +79,10 @@ describe("#976 LoadFailed has a full-page appearance for page-body surfaces", ()
   });
 
   it("ShareDialog keeps the inline appearance (it lives inside a dialog)", () => {
+    // ADR-266 §3.1: migrated onto <ListState>, which draws LoadFailed itself — the marker moves to
+    // the chokepoint, the claim under test (no page variant inside a dialog) does not.
     const src = readFileSync(resolve(SRC_ROOT, "ui/ShareDialog.tsx"), "utf8");
-    const around = componentAround(src, "<LoadFailed");
-    expect(around.slice(0, 200), "a dialog surface must not switch to the page variant").not.toMatch(/variant="page"/);
+    const around = componentAround(src, "<ListState");
+    expect(around.slice(0, 400), "a dialog surface must not switch to the page variant").not.toMatch(/variant="page"/);
   });
 });
