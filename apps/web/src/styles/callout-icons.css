@@ -285,21 +285,8 @@ mark{background:color-mix(in srgb,var(--accent,#4ea1ff) 22%,transparent);color:i
     .cm-lp-macro-setting select, .cm-lp-macro-setting input) { color-scheme: dark; }
 }
 
-/* #632 (user ruling): the notice/error strip — same rule as the callout bar, for the boxes that
-   are not callouts (upgrade notice, the auth error bands). `border-left` follows the frame's radius and
-   bends at both ends; this is a rectangle that does not. The frame keeps its own rounding, and the
-   left padding carries the 3px the border used to occupy so nothing inside shifts.
-   A class rather than five copies of the same utilities: the fifth box written next month gets it by
-   asking for it, not by somebody remembering the trick. */
-.wks-left-bar{position:relative;padding-left:calc(var(--wks-left-bar-pad,0.875rem) + var(--wks-bar-w, 3px))}
-/* #632 (review rejection): the strip is a positioned pseudo-element, and `border-radius` clips the
-   BACKGROUND of a box, not its absolutely-positioned children. So a square strip drawn to the very edge
-   pokes out at the rounded corners — invisible in light, obvious in dark against the warning yellow.
-   Straightening the bar had removed the bend and left this in its place, which is the same complaint
-   wearing different clothes.
-
-   `inherit` is what makes one rule enough: the strip takes the radius of whatever box it is drawn in,
-   so the callout's 4px, the notice's 8px and the login band's 6px each get a strip that follows their
-   own silhouette. Clipping the BOX instead (`overflow: hidden`) would have worked for the corners and
-   cut every tooltip and menu that opens out of these boxes. */
-.wks-left-bar{background-image:linear-gradient(to right, var(--wks-left-bar-color,var(--accent)) 0 var(--wks-bar-w, 3px), rgba(0,0,0,0) var(--wks-bar-w, 3px));background-repeat:no-repeat}
+/* #632's .wks-left-bar (the notice/error left-rule strip) lived here — #979 / ADR-268 §3, ruling (design B) replaced it everywhere with ui/NoticeBand.tsx (a tinted panel + icon, no rule).
+   Removed rather than left dead: the class's whole reason to exist was "the fifth box written next
+   month gets it by asking for it" (its own #632 comment) — leaving it here is exactly the invitation
+   for a sixth box to bring the retired vocabulary back. --wks-bar-w stays; the callout panel bar
+   above (line ~43) still uses it and is unrelated to this retirement. */

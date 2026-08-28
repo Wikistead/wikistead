@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
+import { NoticeBand } from "../ui/NoticeBand";
 import { OneTimeSecret } from "../ui/OneTimeSecret";
 import { QrCode } from "../ui/QrCode"; // #653 the same code the settings screen draws
 import { assetUrl } from "../data/apiClient";
@@ -244,15 +245,14 @@ export function FactorStep(
         )}
       </div>
       {failed && (
-        <div className="wks-left-bar rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
-          data-testid="login-factor-error" role="alert">
+        <NoticeBand kind="danger" title={t("auth.factorErrorTitle")} testId="login-factor-error" role="alert">
           {t(failed === "unavailable" ? "auth.temporarilyUnavailable"
             : failed === "badCode" ? "account.factorCodeWrong"
             // #650: the recovery door answers one refusal for four causes on purpose, so the sentence
             // must not name one of them ("that code is wrong" would be a guess about which it was).
             : failed === "recovery" ? "auth.recoveryCodeFailed"
             : "auth.factorFailed")}
-        </div>
+        </NoticeBand>
       )}
 
       {stage === "required" ? (

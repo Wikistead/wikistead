@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
+import { NoticeBand } from "../ui/NoticeBand";
 import { assetUrl } from "../data/apiClient";
 import { FactorStep } from "./FactorStep"; // #652 / ADR-219 §6: the half-authenticated step
 import { isServerFault } from "./serverFault";
@@ -81,10 +82,9 @@ export function LocalLoginForm({ returnTo, disabled, onStage }: {
   return (
     <form className="flex flex-col gap-2" onSubmit={submit} data-testid="login-local">
       {failed && (
-        <div className="wks-left-bar rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
-          data-testid="login-local-error" role="alert">
+        <NoticeBand kind="danger" title={t("auth.errorTitle")} testId="login-local-error" role="alert">
           {t(failed === "needsAddress" ? "auth.resetNeedsAddress" : failed === "unavailable" ? "auth.temporarilyUnavailable" : "auth.localFailed")}
-        </div>
+        </NoticeBand>
       )}
       <Input
         type="email" autoComplete="username" value={identifier} disabled={disabled || busy}

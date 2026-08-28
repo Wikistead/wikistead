@@ -9,6 +9,7 @@ import { useBranding } from "../data/queries";
 import { FALLBACK_PRODUCT_NAME } from "./product-name";
 import { assetUrl } from "../data/apiClient";
 import { Button } from "../ui/Button";
+import { NoticeBand } from "../ui/NoticeBand";
 import { ProviderMark } from "./ProviderMark";
 import { LocalLoginForm } from "./LocalLoginForm";
 
@@ -192,11 +193,7 @@ export function LoginScreen() {
               a tenant with only a password it was untrue. The title keeps the spacing the pair had. */}
           {!half && <h1 className="mb-5 text-xl font-semibold">{t("auth.signInTitle", { product })}</h1>}
           {error && (
-            <div
-              className="wks-left-bar mb-4 rounded-md border border-border bg-panel-2 px-3 py-2 text-sm [--wks-left-bar-color:var(--danger)] [--wks-left-bar-pad:0.75rem]"
-              data-testid="login-error"
-              role="alert"
-            >
+            <NoticeBand kind="danger" title={t("auth.errorTitle")} testId="login-error" role="alert" className="mb-4">
               {error}
               {/* #605 / ADR-210 §3 (iii): the recovery door surfaces ONLY on the failure that means it
                   is needed — never on the ordinary login screen (everyone would see a door that works
@@ -207,7 +204,7 @@ export function LoginScreen() {
                   <a href="/login/recovery" className="text-xs underline" data-testid="login-recovery-link">{t("auth.recoveryLink")}</a>
                 </div>
               )}
-            </div>
+            </NoticeBand>
           )}
           {hasLocal && localLeads && (
             <LocalLoginForm returnTo={returnTo} disabled={navigating !== null} onStage={(stage) => setHalf(stage !== null)} />
