@@ -42,4 +42,15 @@ export const SCREEN_VOCABULARY = {
     // managing and no button. That is the drift this surface is armed for.
     keys: ['manage'],
   },
+  // #981, continuing the staged arming (13 surfaces remained with no owner — measured by #981's own
+  // audit that #837's follow-up ADR only DECLARES the rest, it does not arm them). `builtIn` is the
+  // one state the roles page already describes in prose ("built-in and custom under one framework");
+  // `create` / `rename` / `delete` are declared with a `:none:` reason in the docs page's own
+  // frontmatter rather than forced into prose that would need a rewrite this ticket does not do
+  // the staged-arming ruling (#741 ②) is about not reddening a page nobody has fixed, not about
+  // arming only what needs no docs edit at all.
+  'admin-surface:roles': {
+    ns: 'adminRoles',
+    keys: ['builtIn', 'create', 'rename', 'delete'],
+  },
 }

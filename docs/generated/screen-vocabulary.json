@@ -32,6 +32,24 @@
         "ja": "削除"
       }
     },
+    "admin-surface:roles": {
+      "builtIn": {
+        "en": "built-in",
+        "ja": "組込"
+      },
+      "create": {
+        "en": "New role",
+        "ja": "新しいロール"
+      },
+      "delete": {
+        "en": "Delete role",
+        "ja": "ロールを削除"
+      },
+      "rename": {
+        "en": "Rename role",
+        "ja": "名前を変更"
+      }
+    },
     "admin-surface:spaces": {
       "manage": {
         "en": "Manage",
