@@ -166,14 +166,21 @@ export function AdminDomainsTab() {
               </Button>
             )}
             {/* Disabled, not hidden: a button that vanishes leaves somebody looking for it. The
-                tooltip names where the row IS managed, which is the only thing they can act on. */}
-            <IconButton aria-label={d.source === "shell" ? t("adminDomains.releaseOperator") : t("adminDomains.release")}
-              title={d.source === "shell" ? t("adminDomains.releaseOperator") : undefined}
-              disabled={d.source === "shell"}
-              data-testid="domain-release" variant="danger"
-              onClick={() => setPendingRelease(d.domain)}>
-              <Trash2 aria-hidden className="h-4 w-4" />
-            </IconButton>
+                tooltip names where the row IS managed, which is the only thing they can act on.
+                #992 NOT a native `title` — #530 banned it (untestable, unthemeable, never
+                fires on keyboard focus), and it slipped past the ban pin because the attribute sat
+                on its own line. The wrapping `<span>` carries `data-tip` (the fast tooltip host,
+                tooltip-host.ts) rather than the button itself: Chrome/Safari drop a disabled form
+                control out of pointer hit-testing, so a hover over it resolves to whatever is
+                UNDER it — normally nothing, but the wrapper puts something there to catch it. */}
+            <span className="inline-flex" data-tip={d.source === "shell" ? t("adminDomains.releaseOperator") : undefined}>
+              <IconButton aria-label={d.source === "shell" ? t("adminDomains.releaseOperator") : t("adminDomains.release")}
+                disabled={d.source === "shell"}
+                data-testid="domain-release" variant="danger"
+                onClick={() => setPendingRelease(d.domain)}>
+                <Trash2 aria-hidden className="h-4 w-4" />
+              </IconButton>
+            </span>
           </ListRow>
         ))}
         {/* #895: same shape as the audit tab — `err` is read only for the entitlement code, so any
