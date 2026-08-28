@@ -34,6 +34,10 @@ services:
     depends_on:
       openfga-migrate: { condition: service_completed_successfully }
     ports: ["${SRVTEST_FGA_HTTP_PORT:-8092}:8080", "${SRVTEST_FGA_GRPC_PORT:-8093}:8081"]
+    environment:
+      # #926: same reasoning as docker-compose.e2e.yml — this stack's postgres is dedicated to
+      # server-test alone, not the shared dev instance #541's cap of 10 was written to protect.
+      OPENFGA_DATASTORE_MAX_OPEN_CONNS: "40"
 
   meilisearch:
     extends: { file: docker-compose.middleware.yml, service: meilisearch }
