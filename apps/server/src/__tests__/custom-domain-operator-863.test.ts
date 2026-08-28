@@ -230,6 +230,32 @@ describe('#863 / ADR-258: local-admin --domain', () => {
     expect(t!.custom_domain, 'the later web-verified domain takes the mirror — the operator moved their own entrance').toBe(webHost)
   }, 60_000)
 
+  it('the row and the mirror are one transaction: a mid-transaction mirror-write failure leaves no custom_domains row', async () => {
+    // ADR-258 §5 / §3.1: "the row and the mirror are one transaction … make the `tenants` mirror
+    // write fail and assert no `custom_domains` row survives." The failure has to be injected INSIDE
+    // the transaction rather than staged in the data — giving another tenant the same mirror value
+    // would trip §3.2's cross-tenant walk first, measuring the refusal instead of the atomicity (§5
+    // says so explicitly). A CHECK constraint on the exact mirror value is a failure with no data
+    // dependency: it only fires on the `UPDATE tenants SET custom_domain = …` inside
+    // `syncDomainMapping`, after the `custom_domains` INSERT in the SAME `withTenantTx` transaction.
+    const slug = `co863atomic${STAMP}`
+    const tenantId = await mkTenant(slug)
+    const host = `atomic-${STAMP}.example.com`
+    const guard = `co863_atomicity_guard_${STAMP}`
+
+    await admin.unsafe(`ALTER TABLE tenants ADD CONSTRAINT ${guard} CHECK (custom_domain IS DISTINCT FROM '${host}')`)
+    try {
+      await expect(registerCustomDomainByOperator(tenantId, host)).rejects.toThrow()
+    } finally {
+      await admin.unsafe(`ALTER TABLE tenants DROP CONSTRAINT ${guard}`)
+    }
+
+    const rows = await admin`SELECT 1 FROM custom_domains WHERE tenant_id = ${tenantId} AND domain = ${host}`
+    expect(rows, 'the mirror write failed inside the transaction — the row must not survive it').toHaveLength(0)
+    const [t] = await admin<{ custom_domain: string | null }[]>`SELECT custom_domain FROM tenants WHERE id = ${tenantId}`
+    expect(t!.custom_domain, 'and the mirror itself was never set').toBeNull()
+  }, 60_000)
+
   it('local-admin --domain registers the domain, prints the DNS hand-off, and records a third ledger entry', async () => {
     const slug = `co863cli${STAMP}`
     madeSlugs.push(slug)
