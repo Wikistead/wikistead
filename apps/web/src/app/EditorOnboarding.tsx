@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { SquareTerminal, Eye, Code, Check, X } from "lucide-react"; // #493: WYSIWYG glyph is Eye now
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -130,6 +131,7 @@ export function FirstRunOnboarding() {
   const { t } = useTranslation();
   const { status } = useSession();
   const settings = useAccountSettings();
+  const location = useLocation();
   // LATCH: once the first-run gate fires (marker null) the dialog stays open until the user closes
   // it — applying a preset marks the flow completed mid-dialog (the settings refetch flips the gate),
   // and without the latch the dialog would vanish before the "here's what changed" screen.
@@ -148,7 +150,15 @@ export function FirstRunOnboarding() {
 
   // Existing members (backfilled completed) who never picked a chrome: a small dismissible
   // banner announcing the setup, opening the same flow.
-  const showBanner = !firstRun && !redoOpen && !bannerDismissed && settings.data.editorChrome === null && settings.data.onboardingCompletedAt !== null;
+  //
+  // #1001: EDITOR PAGES ONLY. The banner's own layout comment above (#339, "sit ABOVE the edit-mode
+  // bottom toolbar") already assumed an editor-page geometry; rendering it from AppShell put it on
+  // every route instead, where its fixed bottom-20 position can sit on top of unrelated bottom-of
+  // -viewport controls (measured: it intercepted the admin console's "Send invite" button in a fresh
+  // browser context, where nothing has dismissed it yet). The CTA ("tailor the editor") is meaningless
+  // outside the editor too, so scoping it there fixes both the overlap and the mismatch.
+  const onEditorPage = location.pathname.startsWith("/p/");
+  const showBanner = onEditorPage && !firstRun && !redoOpen && !bannerDismissed && settings.data.editorChrome === null && settings.data.onboardingCompletedAt !== null;
   const dismissBanner = () => {
     setBannerDismissed(true);
     try { localStorage.setItem(BANNER_LS, "1"); } catch { /* no storage */ }
