@@ -5,7 +5,7 @@ import { getCM } from "@replit/codemirror-vim";
 import { safeHref } from "../macros/md-render";
 import { linkAt, linksTouching } from "./link-at"; // #611: THE structural link judge (ADR-211 §1)
 import { completeBlockChunk, blockPasteInsert } from "./block-paste";
-import { innermostMacroAt, displayMode, syntaxRevealsAt } from "./decorations";
+import { innermostMacroAt, displayMode, syntaxRevealsAt, explicitEntryCovers } from "./decorations";
 
 // #223 / ADR-none (rides on ADR-037 + safeHref): auto-linkify a pasted URL / rich link into Markdown
 // `[text](url)`, so the source stays plain Markdown (Open formats) while the live preview shows it clickable.
@@ -77,6 +77,14 @@ export function linkifyPaste(input: { text: string; html: string; selectedText: 
 // and return the complete Markdown source (so a copy over a rendered `[hoge](url)` yields the full source,
 // not the `hoge](` fragment CM's raw-slice copy produced). For a clean single-link selection, also return a
 // safeHref-gated `<a>` HTML (createElement, never innerHTML). Returns null when no link is touched.
+// #909 (design decision, recorded rather than left implicit): in live mode a Shift+click landing
+// INSIDE a still-collapsed label (mousedown resolves against the pre-reveal render, before the click's own
+// selection triggers the reveal) can still produce a syntax-cutting fragment — #223's original guarantee
+// ("select across a collapsed link → always get the full source") does not hold for that one interaction.
+// Accepted rather than chased: it is a narrow case with no expand-based fix (the touched/exposed line's
+// slice IS what the fix uses to decide whether to widen, and here that decision is made before the
+// exposure it should have known about), and closing it would mean re-expanding text that IS on screen as
+// its exact raw form on every OTHER interaction — the #909 regression this function exists to fix.
 export function linkCopyRange(
   state: EditorState,
   selFrom: number,
@@ -88,15 +96,30 @@ export function linkCopyRange(
   // #909: expanding is only correct when the selection cuts through a HIDDEN marker — on an EXPOSED
   // line (the caret/selection put it there, raw `[text](url)` visible) the selection the user made IS
   // the text they want, and widening it turns "just the URL" into the whole link's source. Decided with
-  // the SAME predicate the live-preview decorations use to hide a link's own markers (`syntaxRevealsAt`)
-  // so this cannot drift from what the user is actually looking at — driven by [selFrom,selTo] directly
-  // rather than `state.selection`, since at a real copy/cut event they are the same range (the caller
-  // passes `view.state.selection.main`) and this keeps `linkCopyRange` a pure function of its own args.
-  const hitLineRevealed = (hit: (typeof hits)[number]): boolean => {
-    const line = state.doc.lineAt(hit.from);
-    return syntaxRevealsAt(state.facet(displayMode), state.readOnly, line.from <= selTo && line.to >= selFrom);
+  // the SAME predicates the live-preview decorations use to hide a link's own markers (`hideMarker`'s
+  // `lineRevealed`, i.e. `explicitEntryCovers` then `syntaxRevealsAt`) so this cannot drift from what the
+  // user is actually looking at — driven by [selFrom,selTo] directly rather than `state.selection`, since
+  // at a real copy/cut event they are the same range (the caller passes `view.state.selection.main`) and
+  // this keeps `linkCopyRange` a pure function of its own args.
+  // #909 finding (b): a marker hides per the LINE IT SITS ON, so a link's own [from,to] is the
+  // wrong thing to test — a label spanning multiple lines can have one line's markers revealed and
+  // another's still hidden, and checking only `lineAt(hit.from)` missed that split. What actually matters
+  // is whether the SELECTION itself sits entirely on revealed lines: `sliceDoc(selFrom, selTo)` is what a
+  // default copy returns verbatim, so if every line that range touches is already showing raw text, that
+  // slice already IS the exact on-screen selection and needs no widening — regardless of whether some
+  // OTHER part of a touched link, outside the selection, happens to still be hidden elsewhere.
+  const lineRevealedHere = (line: { from: number; to: number }): boolean =>
+    explicitEntryCovers(state, line.from, line.to) ||
+    syntaxRevealsAt(state.facet(displayMode), state.readOnly, line.from <= selTo && line.to >= selFrom);
+  const selectionRevealed = (): boolean => {
+    for (let pos = selFrom; ;) {
+      const line = state.doc.lineAt(pos);
+      if (!lineRevealedHere(line)) return false;
+      if (line.to >= selTo) return true;
+      pos = line.to + 1;
+    }
   };
-  if (hits.every(hitLineRevealed)) return null;
+  if (selectionRevealed()) return null;
   const from = Math.min(selFrom, hits[0]!.from);
   const to = Math.max(selTo, hits[hits.length - 1]!.to);
   const links = hits.length;

@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { EditorState } from "@codemirror/state";
 import { markdownExtension } from "../markdown-config";
 import { displayMode } from "./decorations";
+import { macroEdit, setMacroRenderActive } from "./macro-edit";
 import { linkCopyRange } from "./paste-linkify";
 
 // #223 comment 895 (root cause A): CM's copy is a raw doc-slice, so copying a rendered `[hoge](url)` over a
@@ -84,5 +85,37 @@ describe("#909 linkCopyRange — live mode reveals on touch, an exact selection 
   it("still returns null when the selection touches no link (nothing to reconsider)", () => {
     const s = stateOf("just some plain text");
     expect(linkCopyRange(s, 0, 9)).toBeNull();
+  });
+});
+
+// #909 (design-review, second independent verification of #909's own landing) finding (b): a
+// marker hides per the LINE IT SITS ON (hideMarker → lineRevealed), not per the whole link's [from,to] —
+// a link whose label spans a soft line break can have one line's markers revealed and the other's still
+// hidden. Checking `lineAt(hit.from)` alone (the link's OWN start line) instead of the lines the
+// SELECTION itself touches reintroduced #909's bug for exactly this shape.
+describe("#909 finding (b) — a link's label spanning a line break does not confuse the check", () => {
+  it("selecting inside the URL, entirely on the exposed second line, is not widened", () => {
+    const s = stateOf("x [ho\nge](https://ex.test/pq) y");
+    const from = s.doc.toString().indexOf("ex.test");
+    const to = from + "ex.test".length;
+    // sanity: the two-line label really is one Link node reaching back onto the first line.
+    expect(s.doc.lineAt(from).text).toBe("ge](https://ex.test/pq) y");
+    expect(linkCopyRange(s, from, to)).toBeNull();
+  });
+});
+
+// #909 finding (c): `rangeRevealed`/`lineRevealed` (what `hideMarker` actually uses) check
+// `explicitEntryCovers` (Ctrl+Enter) before falling back to `syntaxRevealsAt`; linkCopyRange's own
+// predicate skipped that first branch, so a link inside an explicitly-entered (raw-shown) block in
+// WYSIWYG — where syntaxRevealsAt alone would say "hidden" — was wrongly widened despite already being
+// on screen as raw text.
+describe("#909 finding (c) — explicit entry (Ctrl+Enter) reveals a link the same as a touch does", () => {
+  it("a link inside an explicitly-entered WYSIWYG range is not widened", () => {
+    const s0 = EditorState.create({
+      doc: "[hoge](https://ex.test/pq)",
+      extensions: [markdownExtension(), displayMode.of("wysiwyg"), macroEdit],
+    });
+    const s = s0.update({ effects: setMacroRenderActive.of({ from: 0, to: s0.doc.length, raw: true }) }).state;
+    expect(linkCopyRange(s, 3, 7)).toBeNull();
   });
 });

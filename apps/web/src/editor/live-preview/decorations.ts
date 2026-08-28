@@ -3687,7 +3687,10 @@ export function syntaxRevealsAt(mode: DisplayMode, readOnly: boolean, underSelec
 // path at all in WYSIWYG (enterMacroAt dispatched the effect, but the reveal predicates ignored it).
 // Containment (not overlap) so an active block never bleeds reveal into its neighbours; readOnly still
 // never reveals (nothing to edit). Esc / caret-out clears the field (escExit) in every mode alike.
-function explicitEntryCovers(state: EditorState, from: number, to: number): boolean {
+// Exported for paste-linkify.ts's linkCopyRange (#909 finding c): rangeRevealed/lineRevealed check
+// this before falling to syntaxRevealsAt, and linkCopyRange's own reveal predicate must too, or a link
+// revealed only via explicit entry (Ctrl+Enter) reads as hidden and gets wrongly expanded on copy.
+export function explicitEntryCovers(state: EditorState, from: number, to: number): boolean {
   if (state.readOnly) return false;
   const a = state.field(macroRenderActiveField, false);
   return !!a && a.from <= from && a.to >= to;
