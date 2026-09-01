@@ -123,10 +123,13 @@ test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied",
 
   // revoke the edit link (authenticated API) -> a fresh guest is denied
   const editId = editUrl.split("/").pop()!;
-  const status = await member.evaluate(async ({ id, api }) => {
-    const r = await fetch(`${api}/share-links/${id}`, { method: "DELETE", headers: { Authorization: "Bearer dev-token" } });
-    return r.status;
-  }, { id: editId, api: API });
+  // #969 / #989: a NODE-side fetch, not `member.evaluate`. `API` is the server's own origin (a
+  // different port from the page), so once #989 stopped reflecting every Origin back, a fetch issued
+  // from the BROWSER context is a cross-origin DELETE the app's CORS policy refuses — it surfaced as
+  // `TypeError: Failed to fetch` here. `helpers.ts`'s `publishAndWait` moved for the same reason.
+  const status = (await fetch(`${API}/share-links/${editId}`, {
+    method: "DELETE", headers: { Authorization: "Bearer dev-token" },
+  })).status;
   expect(status).toBe(204);
 
   const denied = await (await browser.newContext()).newPage();
