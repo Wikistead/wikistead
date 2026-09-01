@@ -2306,7 +2306,7 @@ export async function paintTree(
 export const GUEST_TREE_CAP = 500
 
 /**
- * #903 / ADR-220 §13: the guest whole-space read, bounded by TREE CLOSURE rather than a flat slice.
+ * #903 / ADR-220 §13+§14: the guest whole-space read, bounded by TREE CLOSURE rather than a flat slice.
  *
  * The shipped cap (§6.2) sliced `listPages`'s output AFTER `listPages` had already run a `view` Check
  * (and a badge read) on every non-deleted page in the space — a 5,000-page space paid 5,000 Checks to
@@ -2318,14 +2318,32 @@ export const GUEST_TREE_CAP = 500
  * (parent-confirm, per-node confirm, home-page exclusion) rather than inventing a new authz pattern —
  * and stops the instant `GUEST_TREE_CAP` VISIBLE pages have been confirmed. A page is pushed to
  * `visible` before its own children are ever fetched, so the ancestor-inclusion invariant ("a page's
- * ancestors are included whenever the page is") holds structurally. A subtree behind a page whose
- * CHEVRON probe found no visible child (`hasChildren` false) is never walked, so an entirely-invisible
- * subtree costs nothing beyond the one batched check that found it so.
+ * ancestors are included whenever the page is") holds structurally.
+ *
+ * ⚠️ NOT gated on `hasChildren`. That flag is `listBranch`'s CHEVRON probe (`CHEVRON_PROBE_CAP` = 3
+ * children) — a display hint whose false negative was acceptable for §623's original purpose (no expand
+ * arrow drawn) but would silently DROP a confirmed-visible page here if used to skip recursion (§903
+ * design-review found exactly this in an earlier version of this function). Every visible page's
+ * children are walked UNCONDITIONALLY; a subtree that turns out to have no visible descendant costs one
+ * more (typically empty) `listBranch` call, not a budget slot — the CAP counter (`cap`, below) is what
+ * "must not consume budget without producing a visible row" is about, not query count.
+ *
+ * §14 (rev10, ADR-220): a walk still cannot descend past an INVISIBLE page's own identity (`listBranch`'s
+ * §2 gate refuses a named parent the caller cannot view) — so a visible page whose PARENT is invisible
+ * (an unpublished folder holding one published child, an ordinary editing state) would otherwise be lost
+ * exactly like `hasChildren` used to lose one. Each branch read collects the invisible ids it rejected
+ * (`onInvisible`) and, once its own pages are exhausted, hands them to `resolveGuestPlaceholders` —
+ * ADR-220 §4's member placeholder mechanism (`/pages/tree-placeholders`), extended to share-link guests
+ * for its DESCEND path only (never the direct-grant path, which guests structurally have none of). Any
+ * page it confirms visible is pushed flat (`parentId: null`) into `visible` and walked like any other —
+ * `GuestSidebar.tsx`'s client-side re-rooting (the promise §4.4 makes: "a permitted page is never
+ * orphaned out of the tree") receives it exactly as it already handles a parentless row.
  *
  * `truncated` is computed from the closure exhausting its budget — the walk keeps looking for exactly
  * one more CONFIRMED-VISIBLE page after the cap-th, and only reports truncation if it finds one. A tree
  * with precisely `GUEST_TREE_CAP` visible pages and nothing past them is NOT truncated; a flat length
- * compare cannot tell the two apart, which is the quiet lie this section exists to avoid.
+ * compare cannot tell the two apart, which is the quiet lie this section exists to avoid. §14's own
+ * placeholder-budget exhaustion (see `placeholderBudget` below) folds into this SAME flag.
  */
 export async function listPagesGuestBounded(
   db: TenantDb,
