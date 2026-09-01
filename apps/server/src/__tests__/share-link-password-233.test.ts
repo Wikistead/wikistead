@@ -14,7 +14,9 @@ import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
 import { createShareLink, mintTokenForShareLink } from '../routes/share-links.js'
-import { hashSharePassword, verifySharePassword } from '../routes/share-link-password.js'
+import { hashSharePassword, needsSharePasswordRehash, parseSharePassword, verifySharePassword } from '../routes/share-link-password.js'
+import { randomBytes, scrypt as scryptCb } from 'node:crypto'
+import { promisify } from 'node:util'
 import { check, writeTuples } from '@wikistead/authz'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
@@ -75,6 +77,38 @@ describe('#233 mint password gate (3-way)', () => {
     await admin`UPDATE share_links SET expires_at = now() - interval '1 hour' WHERE id = ${link.id}`
     expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 's3cret' })).toBeNull()
   })
+})
+
+// #986 / ADR-107 correction: rows written before the parameters were raised must keep opening their
+// link, and must be rewritten at today's parameters the one moment the plaintext is in hand. Driven
+// through `mintTokenForShareLink` — the shipped door — rather than the KDF functions, because the
+// upgrade is a WRITE and the pure functions cannot see whether anybody performs it.
+describe('#986 the below-floor record opens the link, then upgrades in place', () => {
+  it('a legacy two-field hash mints a token and is rewritten to the parameterised form', async () => {
+    const link = await mkLink({ password: 's3cret' })
+    // Exactly what the pre-#986 code stored: node's default parameters, two fields, no N/r/p.
+    const salt = randomBytes(16)
+    const legacy = `scrypt$${salt.toString('hex')}$${((await promisify(scryptCb)('s3cret', salt, 32)) as Buffer).toString('hex')}`
+    await admin`UPDATE share_links SET password_hash = ${legacy} WHERE id = ${link.id}`
+
+    const minted = await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 's3cret' })
+    expect(minted, 'the visitor is NOT locked out by the raise').not.toBe('password_required')
+    expect(minted).not.toBeNull()
+
+    // The upgrade is best-effort and runs on the entry path, so poll rather than assume it landed
+    // before the token was returned.
+    let stored = legacy
+    for (let i = 0; i < 40 && stored === legacy; i++) {
+      await new Promise((r) => setTimeout(r, 50))
+      const [row] = await admin<{ password_hash: string }[]>`SELECT password_hash FROM share_links WHERE id = ${link.id}`
+      stored = row!.password_hash
+    }
+    expect(stored, 'rewritten at the current parameters').not.toBe(legacy)
+    expect(parseSharePassword(stored)!.N, 'and the new record states them').toBeGreaterThanOrEqual(131072)
+    expect(needsSharePasswordRehash(stored), 'so it is not due another upgrade').toBe(false)
+    expect(await verifySharePassword('s3cret', stored), 'and the same password still opens it').toBe(true)
+    expect(await mintTokenForShareLink(fgaClient, tenant.id, link.id, { password: 'nope' })).toBe('password_required')
+  }, 60_000)
 })
 
 describe('#233 space-link password ⊥ private page (ADR-107 required integration test)', () => {

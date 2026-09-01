@@ -10,7 +10,7 @@ import { reportLinkVisit } from '../funnel/sink.js'
 import { withTenantTx, listActiveTenantIds } from '../db/index.js' // #382
 import { resolveTenantFromHost, loadTenant } from '../tenant.js'
 import type { TenantDb } from '../db/index.js'
-import { hashSharePassword, verifySharePassword } from './share-link-password.js'
+import { hashSharePassword, needsSharePasswordRehash, verifySharePassword } from './share-link-password.js'
 import type IORedis from 'ioredis'
 
 // Rate-limit windows for the public share-link exchange (#107 / ADR-026). Starting points —
@@ -552,6 +552,26 @@ export async function mintTokenForShareLink(
   if (row.password_hash && !opts.passwordProvenByToken) {
     const password = opts.password
     if (!password || !(await verifySharePassword(password, row.password_hash))) return 'password_required'
+    // #986: the opportunistic upgrade, the shape ADR-198 §4 already uses for member passwords — this
+    // is the ONE moment the plaintext is in hand. Rows written before #986 are in the un-parameterised
+    // two-field form at node's default N; they keep verifying (never locked out) and are rewritten
+    // here at today's parameters. The KDF runs BEFORE the write and outside any transaction: holding a
+    // pooled connection for the length of a scrypt is the lesson this file's own header records.
+    const stale = row.password_hash
+    if (needsSharePasswordRehash(stale)) {
+      try {
+        const fresh = await hashSharePassword(password)
+        // Guarded on the value that was just verified, so two visitors entering at once cannot have
+        // the slower one's write land on top of the faster one's.
+        await withTenantTx(tenantId, async (tx) => {
+          await tx`UPDATE share_links SET password_hash = ${fresh} WHERE id = ${row.id} AND password_hash = ${stale}`
+        })
+      } catch (err) {
+        // Never fails the entry: the visitor proved the password, and an upgrade that could refuse
+        // them a token would be a worse outcome than a row that stays at its old parameters.
+        console.error('[share-links] password re-hash failed (entry still granted)', err)
+      }
+    }
   }
 
   // Token TTL is the SHORT of the configured guest TTL and the link's remaining

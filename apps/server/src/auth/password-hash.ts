@@ -7,11 +7,14 @@
 //     s2$<N>$<r>$<p>$<saltBase64>$<hashBase64>
 //
 // Two node-specific facts this file exists to encode (both measured, ADR-198 §4):
-//   - `128 * N * r` at N=2^15, r=8 is exactly 32 MiB, which exceeds node's DEFAULT maxmem and throws
-//     ERR_CRYPTO_INVALID_SCRYPT_PARAMS. maxmem is therefore set explicitly.
-//   - each verification costs ≈60 ms of CPU on a libuv thread, and the pool defaults to FOUR. An
+//   - `128 * N * r` exceeds node's DEFAULT maxmem and throws ERR_CRYPTO_INVALID_SCRYPT_PARAMS, so
+//     maxmem is set explicitly — and DERIVED from the parameters rather than written as a literal,
+//     because #986 raised N and a hard-coded 64 MiB would have started throwing on every hash.
+//   - a verification costs real CPU on a libuv thread, and the pool defaults to FOUR. An
 //     unauthenticated endpoint that burns one per request is a cheap exhaustion lever, so
-//     verifications run under a small concurrency cap (ADR-198 §4 C4) and queue beyond it.
+//     verifications run under a small concurrency cap (ADR-198 §4 C4) and queue beyond it. The cap
+//     is SHARED with the share-link password store (#986): the thread pool it protects is one pool,
+//     and both of its users are reachable without authenticating.
 //
 // Never call these inside a transaction: the KDF would hold a database connection for its whole
 // duration (the share-link password lesson).
@@ -22,22 +25,33 @@ const scrypt = promisify(scryptCb) as (
   password: string | Buffer, salt: Buffer, keylen: number, options: { N: number; r: number; p: number; maxmem: number },
 ) => Promise<Buffer>
 
-// OWASP's interactive floor. Raise N here; existing hashes keep their own parameters and re-hash on
-// their owner's next successful login (see needsRehash).
-export const SCRYPT_N = 32768
+// OWASP's stated minimum for scrypt (Password Storage Cheat Sheet). Raise N here; existing hashes
+// keep their own parameters and re-hash on their owner's next successful login (see needsRehash).
+//
+// ⚠️ #986: this said "OWASP's interactive floor" at N=2^15 and it was not — the floor is 2^17, four
+// times higher, and nobody had re-checked the number against the source since it was written down.
+// The pin that guards it asserts `>= 131072` by RUNNING the hash and reading the parameters back out
+// of the stored string, so raising the floor again never needs a matching test edit.
+export const SCRYPT_N = 131072
 export const SCRYPT_R = 8
 export const SCRYPT_P = 1
 const KEYLEN = 64
 const SALT_BYTES = 16
-// 128 * 32768 * 8 = 32 MiB; give the allocator headroom rather than sitting exactly on the limit.
-const MAXMEM = 64 * 1024 * 1024
+
+/**
+ * scrypt allocates `128 * N * r` bytes; node refuses if that exceeds `maxmem`. Derived, never a
+ * literal: at N=2^17, r=8 the requirement is exactly 128 MiB, and the 64 MiB constant this replaced
+ * would have made every hash throw. The multiple gives the allocator headroom rather than sitting
+ * exactly on the limit; the floor keeps small legacy parameters from lowering it.
+ */
+export const maxmemFor = (n: number, r: number): number => Math.max(64 * 1024 * 1024, 256 * n * r)
 
 // ── concurrency cap (C4) ────────────────────────────────────────────────────
 // A FIFO of waiters, not a semaphore library: the whole mechanism is "at most K KDFs in flight".
 const MAX_CONCURRENT_KDF = 4
 let inFlight = 0
 const waiting: (() => void)[] = []
-async function withKdfSlot<T>(fn: () => Promise<T>): Promise<T> {
+export async function withKdfSlot<T>(fn: () => Promise<T>): Promise<T> {
   if (inFlight >= MAX_CONCURRENT_KDF) await new Promise<void>((resolve) => waiting.push(resolve))
   inFlight++
   try {
@@ -52,7 +66,7 @@ const enc = (b: Buffer) => b.toString('base64')
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(SALT_BYTES)
-  const hash = await withKdfSlot(() => scrypt(password, salt, KEYLEN, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: MAXMEM }))
+  const hash = await withKdfSlot(() => scrypt(password, salt, KEYLEN, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: maxmemFor(SCRYPT_N, SCRYPT_R) }))
   return `s2$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${enc(salt)}$${enc(hash)}`
 }
 
@@ -78,7 +92,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const parsed = parseHash(stored)
   if (!parsed) return false
   const { N, r, p, salt, hash } = parsed
-  const maxmem = Math.max(MAXMEM, 256 * N * r)
+  const maxmem = maxmemFor(N, r)
   let derived: Buffer
   try {
     derived = await withKdfSlot(() => scrypt(password, salt, hash.length, { N, r, p, maxmem }))
