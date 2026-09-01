@@ -222,11 +222,36 @@ export async function reissueInvite(
 //    link for the same person therefore costs one seat, not two.
 //  - 402 (not 403): the cap is a billing limit. A bad/expired token is a separate concern
 //    (returns false → the route answers uniformly, leaking nothing about token existence).
+// #995 / ADR-269 §2.1: a refusal that happens AFTER the invite has been flipped to `accepted`. Thrown
+// from inside the tx callback so postgres.js rolls the flip back — a callback that RETURNS false
+// commits, which is how a refused acceptance used to leave `status='accepted'` with no member behind
+// it (and, because reissue/revoke both act on `status='pending'`, an invite the administrator could
+// neither resend nor revoke). Caught by the exported function itself, never by a route: the routes
+// translate only the codes they know and turn anything else into a 500.
+class InviteRefused extends Error {
+  readonly code = 'invite_refused' as const
+  constructor(readonly inviteId: string, readonly reason: string) {
+    super(`invite acceptance refused: ${reason}`)
+  }
+}
+
+// ADR-269 §2.3 as ruled on #995: the signal is a structured log line, present in EVERY
+// deployment — not an audit-ledger row, which a tenant without that entitlement would never see.
+// It names the invite (which the administrator already has in front of them) and the reason; never
+// the address, and never the claimant, who is by construction not a member of this tenant.
+export interface InviteLog { warn: (obj: Record<string, unknown>, msg: string) => void }
+function reportRefusal(log: InviteLog | undefined, tenantId: string, e: InviteRefused): void {
+  ;(log ?? console).warn(
+    { tenantId, inviteId: e.inviteId, reason: e.reason },
+    'invite acceptance refused after the token was proven; the invite stays pending',
+  )
+}
+
 //
 // ADR-003: the invite flip + member INSERT happen in one tx; FGA is written LAST, so a FGA
 // failure rolls back the accept and the member row (no half member).
 export async function acceptInvite(
-  deps: { db: TenantDb; fga: OpenFgaClient },
+  deps: { db: TenantDb; fga: OpenFgaClient; log?: InviteLog },
   tenant: { id: string; plan: string },
   token: string,
   claims: { sub: string; email?: string | null; name?: string | null },
@@ -247,7 +272,9 @@ export async function acceptInvite(
     const { externalSubViolation } = await import('./reserved-subs.js')
     if (externalSubViolation(claims.sub)) return false
   }
-  return deps.db.tx(async (tx) => {
+  let accepted: boolean
+  try {
+    accepted = await deps.db.tx(async (tx) => {
     // Serialize seat decisions for this tenant for the rest of the tx (atomic cap check).
     await lockSeats(tx, tenant.id)
 
@@ -256,7 +283,7 @@ export async function acceptInvite(
     // #582: the flip also returns the carried role and WHO invited them. The inviter is the audit
     // actor: `assignRoleTxCore` records `user:<actorSub>`, so passing the accepting member would write
     // "they gave themselves this role" into the ledger.
-    const flipped = await tx<{ role: InviteRole; role_id: string | null; invited_by: string }[]>`
+    const flipped = await tx<{ id: string; role: InviteRole; role_id: string | null; invited_by: string }[]>`
       UPDATE invites
          SET status = 'accepted', accepted_sub = ${claims.sub}, accepted_at = now()
        WHERE token_hash = ${hashInviteToken(token)}
@@ -264,7 +291,7 @@ export async function acceptInvite(
          AND kind       = 'oidc'
          AND status     = 'pending'
          AND expires_at > now()
-      RETURNING role, role_id, invited_by
+      RETURNING id, role, role_id, invited_by
     `
     if (flipped.length === 0) return false // unknown / expired / consumed / revoked / cross-tenant
     // The seat fortress (lock already held above): idempotent for an existing member, cap-checked,
@@ -278,12 +305,19 @@ export async function acceptInvite(
       // the address) — the SAME "this link no longer works" answer acceptLocalInvite already gives for
       // its own address collision, not a signal that tells this caller who already owns the address.
       // seat_limit rethrows (the caller distinguishes it from a bad token, unchanged from before).
-      if ((e as { code?: string }).code === 'address_taken') return false
+      // #995: thrown, not returned — the flip above must roll back with the refusal.
+      if ((e as { code?: string }).code === 'address_taken') throw new InviteRefused(flipped[0]!.id, 'address_taken')
       throw e
     }
     await applyInviteRole(tx, deps.fga, tenant, claims.sub, flipped[0]!, seated)
     return true
-  })
+    })
+  } catch (e) {
+    if (!(e instanceof InviteRefused)) throw e
+    reportRefusal(deps.log, tenant.id, e)
+    return false
+  }
+  return accepted
 }
 
 // #568 / ADR-198 §2: accept a LOCAL invite — the variant where the person sets a password instead of
@@ -300,7 +334,7 @@ export async function acceptInvite(
 // sentence to whoever is holding the link, and telling them apart would say something about the
 // tenant to someone who is not in it.
 export async function acceptLocalInvite(
-  deps: { db: TenantDb; fga: OpenFgaClient },
+  deps: { db: TenantDb; fga: OpenFgaClient; log?: InviteLog },
   tenant: { id: string; plan: string },
   token: string,
   password: string,
@@ -340,9 +374,10 @@ export async function acceptLocalInvite(
   const passwordHash = await hashPassword(password)
   const sub = `wlocal_${randomUUID()}`
 
-  return deps.db.tx(async (tx) => {
+  try {
+    return await deps.db.tx(async (tx) => {
     await lockSeats(tx, tenant.id)
-    const flipped = await tx<{ role: InviteRole; role_id: string | null; invited_by: string; email: string | null }[]>`
+    const flipped = await tx<{ id: string; role: InviteRole; role_id: string | null; invited_by: string; email: string | null }[]>`
       UPDATE invites
          SET status = 'accepted', accepted_sub = ${sub}, accepted_at = now()
        WHERE token_hash = ${hashInviteToken(token)}
@@ -350,12 +385,15 @@ export async function acceptLocalInvite(
          AND kind       = 'local'
          AND status     = 'pending'
          AND expires_at > now()
-      RETURNING role, role_id, invited_by, email
+      RETURNING id, role, role_id, invited_by, email
     `
     if (flipped.length === 0) return { ok: false as const } // unknown / expired / consumed / revoked / not a local invite
     const invite = flipped[0]!
+    // #995 / ADR-269 §2.1: every refusal from here on is a THROW, so the flip above rolls back. All
+    // three pre-checks and the fortress's own refusal share the commit-on-return defect (§1.3).
+    const refuse = (reason: string): never => { throw new InviteRefused(invite.id, reason) }
     const identifier = (invite.email ?? '').trim().toLowerCase()
-    if (!identifier) return { ok: false as const } // the CHECK makes this unreachable; belt and braces
+    if (!identifier) refuse('no_identifier') // the CHECK makes this unreachable; belt and braces
     // Trimmed, and empty means absent — the same normalisation the account screen applies to an
     // edited display name (`account.ts`), so the two doors cannot disagree about what a name is.
     const claims = { sub, email: identifier, name: displayName?.trim() ? displayName.trim() : null }
@@ -364,19 +402,19 @@ export async function acceptLocalInvite(
     // on the credential INSERT afterwards left a tuple for a member the database then discarded.
     // Asking first turns that into the ordinary "this link no longer works" answer.
     const taken = await tx`SELECT 1 FROM local_credentials WHERE identifier = ${identifier}`
-    if (taken.length > 0) return { ok: false as const }
+    if (taken.length > 0) refuse('identifier_taken')
     // #606: and the same question the issue path asked, asked again here. A link issued while the
     // address was free is still a valid token after that person joins by some other route (SCIM, an
     // OIDC first sign-in), and accepting it then would seat them a SECOND time under a new sub. The
     // answer is the ordinary "this link no longer works": the same uniform outcome as an expired or
     // consumed token, which is all this path can say without telling a stranger who is a member here.
-    if (await memberWithEmail(tx, tenant.id, identifier)) return { ok: false as const }
+    if (await memberWithEmail(tx, tenant.id, identifier)) refuse('address_taken')
     // ADR-259 §3.4: the fortress asks the same address question again (defence in depth — the check
     // above is this door's own pre-existing guard, unchanged). An invite door stays uniform either way.
     try {
       await enrolUnderSeatCap(tx, deps.fga, tenant, claims, invite.role, 'invite', 'local')
     } catch (e) {
-      if ((e as { code?: string }).code === 'address_taken') return { ok: false as const }
+      if ((e as { code?: string }).code === 'address_taken') refuse('address_taken')
       throw e
     }
     await tx`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
@@ -388,7 +426,12 @@ export async function acceptLocalInvite(
     // gets shut by the thing it exists to get around. The row is already read above for the stance, so
     // this is one field on the way out rather than a second look at a single-use token.
     return { ok: true as const, sub, operatorIssued: operatorRow?.operator_issued === true }
-  })
+    })
+  } catch (e) {
+    if (!(e instanceof InviteRefused)) throw e
+    reportRefusal(deps.log, tenant.id, e)
+    return { ok: false as const }
+  }
 }
 
 // #582 / ADR-202 §2: apply the role the invite carried, in the SAME tx that seated the member.

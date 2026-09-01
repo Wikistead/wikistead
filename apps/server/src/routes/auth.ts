@@ -335,7 +335,7 @@ export async function authPlugin(app: FastifyInstance) {
       let seatFull = false
       if (!sid && st.inviteToken) {
         try {
-          if (await acceptInvite({ db, fga: app.fga }, tenant, st.inviteToken, claims, { subMintedInternally })) {
+          if (await acceptInvite({ db, fga: app.fga, log: req.log }, tenant, st.inviteToken, claims, { subMintedInternally })) {
             sid = await establishMemberSession(deps, tenant, claims, { subMintedInternally, door: 'federated', connectionId })
           }
         } catch (e) {
