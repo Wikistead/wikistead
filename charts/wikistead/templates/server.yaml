@@ -30,7 +30,8 @@ spec:
         - name: server
           image: {{ include "wikistead.image" (list .Values.server .) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports: [{ containerPort: 4000 }]
+          # ADR-270: `metrics` is the Prometheus listener — a second port the ingress never publishes.
+          ports: [{ name: http, containerPort: 4000 }, { name: metrics, containerPort: 9464 }]
           envFrom:
             - configMapRef: { name: {{ include "wikistead.fullname" . }}-config }
             - secretRef: { name: {{ .Values.secrets.existingSecret }} }
@@ -44,6 +45,8 @@ spec:
             - { name: S3_ACCESS_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: s3-access-key } } }
             - { name: S3_SECRET_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: s3-secret-key } } }
             - { name: GUEST_TOKEN_SECRET, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: guest-token-secret } } }
+            # ADR-270: optional — absent, the server boots with metrics off and logs that it did.
+            - { name: METRICS_TOKEN, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: metrics-token, optional: true } } }
             {{- with .Values.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
           volumeMounts:
             - { name: web-index, mountPath: /shell, readOnly: true }
@@ -69,4 +72,4 @@ metadata:
   labels: {{- include "wikistead.labels" . | nindent 4 }}
 spec:
   selector: { app: {{ include "wikistead.fullname" . }}-server }
-  ports: [{ port: 4000, targetPort: 4000 }]
+  ports: [{ name: http, port: 4000, targetPort: 4000 }, { name: metrics, port: 9464, targetPort: 9464 }]

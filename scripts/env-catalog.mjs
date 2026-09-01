@@ -76,6 +76,17 @@ export const ENV_DOCS = {
   COLLAB_PORT: { group: 'Runtime', default: '4100', what: 'Port the collaboration (WebSocket) server listens on.' },
   PORT: { group: 'Runtime', default: '4100', what: 'Port for the operator console process (`operator/main.ts`), which is deployed separately from the API.' },
   WEB_PORT: { group: 'Runtime', default: '5173', what: 'Port the web dev server listens on. Build output is static, so this affects development only.' },
+  // ── Observability (#987 / ADR-270) ────────────────────────────────────────────────────────────
+  METRICS_TOKEN: {
+    group: 'Observability',
+    default: '(unset — metrics off)',
+    what: 'Bearer token a Prometheus scrape presents to `GET /metrics`. Unset, the route does not exist and its listener is not started; the server says so at boot. Set it to any long random string and give the same value to your scrape config (`bearer_token`).',
+  },
+  METRICS_PORT: {
+    group: 'Observability',
+    default: '9464',
+    what: 'Port the metrics listener binds. It is a separate listener from the API (`SERVER_PORT`) so the ingress never publishes it; scrape it from inside the cluster or network.',
+  },
   WKS_BRAND_NAME: { group: 'Runtime', default: 'Wikistead', what: 'Product name shown in the interface and in outgoing mail, for a rebranded deployment.' },
   WKS_PUBLIC_BASE_URL: {
     group: 'Runtime',

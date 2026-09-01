@@ -10,6 +10,7 @@ import { startTrashRetentionWorker } from './routes/pages.js'
 import { fgaClient } from '@wikistead/authz'
 import { assertProductionFgaPersistent, resolveFgaForBoot } from './openfga-guard.js'
 import { assertMigrationsApplied } from './db/migration-guard.js'
+import { startMetricsListener } from './metrics.js'
 
 // #178 / ADR-084: the server bootstrap, extracted from index.ts into a reusable function so BOTH
 // entrypoints share it — the CE entrypoint (apps/server/src/index.ts) and the EE composition root
@@ -33,6 +34,13 @@ export async function startServer(): Promise<FastifyInstance> {
 
   const port = Number(process.env.SERVER_PORT ?? 4000)
   app.listen({ port, host: '0.0.0.0' }).catch((e) => {
+    app.log.error(e)
+    process.exit(1)
+  })
+
+  // #987 / ADR-270: the Prometheus exposition plane — its own listener, never a tenant-app route (see
+  // metrics.ts). Unset METRICS_TOKEN keeps it off and says so, in this log, at boot.
+  startMetricsListener({ token: process.env.METRICS_TOKEN, port: process.env.METRICS_PORT }, (m) => app.log.info(m)).catch((e) => {
     app.log.error(e)
     process.exit(1)
   })

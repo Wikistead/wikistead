@@ -126,7 +126,7 @@ function renderAdminTabsJson(): string {
  * `docs:check` cannot let one land.
  */
 const ENV_GROUP_ORDER = [
-  'Runtime', 'Database', 'Cache and queues', 'Authorization', 'Search', 'Object storage', 'Email',
+  'Runtime', 'Observability', 'Database', 'Cache and queues', 'Authorization', 'Search', 'Object storage', 'Email',
   'Sign-in', 'Second factors', 'Guests and sharing', 'Billing', 'Background workers', 'Import',
   'AI and MCP', 'Diagrams', 'Development and tooling',
 ] as const

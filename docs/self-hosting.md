@@ -328,6 +328,7 @@ The ones a deployment almost always sets:
 | `WKS_PUBLIC_BASE_URL` | the zone **above** your site host — see below. Unset (the shipped default) means mention and digest mail is not sent |
 | `STRIPE_*` | Cloud billing only; leave empty when self-hosting (CE is unlimited) |
 | `PLANTUML_RENDER_URL` | optional Kroki-compatible base URL; unset → PlantUML fences degrade to source |
+| `METRICS_TOKEN` / `METRICS_PORT` | Prometheus `/metrics` on its own listener (default port 9464, never published by the ingress); unset token = metrics off, said at boot — see Operations |
 
 ### Mention and digest email needs an address to link to
 
@@ -371,6 +372,26 @@ The override file is the mechanism because the compose file pins the value in th
 - **Health**: `server` exposes `healthz`/`readyz`; deep dependency-readiness
   checks are tracked in #400 — keep infra-level probes on Postgres/OpenFGA/Meili
   in the meantime.
+- **Metrics** (ADR-270): `server` exposes Prometheus text on **its own listener**,
+  `:9464/metrics` (`METRICS_PORT`), bearer-gated by `METRICS_TOKEN`. It is a separate
+  port on purpose: the ingress publishes only the API port, so the exposition is
+  reachable from inside your cluster or network and nowhere else. Leave the token
+  unset and the route does not exist — the server logs `metrics: disabled` at boot
+  so you can tell that state from a wrong token. To scrape:
+
+  ```yaml
+  scrape_configs:
+    - job_name: wikistead
+      bearer_token: <the METRICS_TOKEN value>
+      static_configs: [{ targets: ["server:9464"] }]
+  ```
+
+  Labels never carry a workspace, member, page or space identifier — only the route
+  template, method and status class — so the exposition is safe to ship to a shared
+  Prometheus. The Helm chart mints `metrics-token` into its generated secret; with
+  the k8s base, add the `metrics-token` key to `kb-secrets` (it is optional). The
+  compose profile does not publish the port; add one to `docker-compose.override.yml`
+  if your Prometheus is outside the compose network.
 - **Pre-production gate**: before going live, walk the items that can only be
   verified in a real environment — cookie scoping across tenant subdomains,
   XFF trust, WS timeouts, noindex behaviour, and rate-limit fan-out across
