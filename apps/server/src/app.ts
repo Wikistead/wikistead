@@ -12,6 +12,7 @@ import type { TenantDb } from './db/index.js'
 import { fgaClient, isTenantMember, openAuthzScope, setAuthzRestriction, setAuthzApiKey, currentAuthzScope, registerAuthzDegradationSink } from '@wikistead/authz'
 import { makeMemberVerifier, looksLikeGuestToken, verifyGuestToken } from '@wikistead/auth'
 import { verifyApiKey } from './api-key-auth.js'
+import { instrumentRequests } from './metrics.js' // #1037 / ADR-270 §3.4
 import { isNarrowedKey, getNarrowedKeyGate } from '@wikistead/hooks'
 
 // #628 / ADR-215 §2: routes that hand out a SECOND credential, or take one away. Shut to a narrowed key
@@ -185,6 +186,12 @@ export async function buildApp(opts: BuildAppOpts = {}): Promise<FastifyInstance
   // per-IP rate limit on the public share-link exchange (#107). In dev (no proxy) there is
   // no XFF, so req.ip stays the socket address. Always deploy behind the trusted proxy.
   const app = Fastify({ logger: opts.logStream ? { stream: opts.logStream } : true, trustProxy: true })
+
+  // #1037 / ADR-270 §3.4: request duration and count, by route template — never by tenant. Added
+  // FIRST: a hook joins an encapsulated plugin's context only if it exists when that plugin is
+  // registered, and the not-found context is sealed the same way — added at the end of this function
+  // it never saw a 404 (measured).
+  instrumentRequests(app)
 
   // #619: the LAST line before a response body leaves the process. #578 translated the two tuple
   // helpers, which covers what the product writes on purpose — but an FGA failure can also arrive

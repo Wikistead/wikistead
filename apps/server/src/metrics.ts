@@ -18,11 +18,49 @@
 // metrics would otherwise never learn otherwise.
 import Fastify, { type FastifyInstance } from 'fastify'
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { Registry, collectDefaultMetrics } from 'prom-client'
+import { Registry, Histogram, Counter, collectDefaultMetrics } from 'prom-client'
 
-/** The process-wide registry every instrument registers on (#1037 adds the request instruments). */
+/** The process-wide registry every instrument registers on. */
 export const metricsRegistry = new Registry()
 collectDefaultMetrics({ register: metricsRegistry })
+
+// #1037 / ADR-270 §3.4: the request instruments. Labels are bounded to what is true of the PROCESS —
+// the route TEMPLATE (`/pages/:pageId`, never the literal path, which carries an id), the method,
+// and the status class. No tenant, user, page or space identifier is ever a label value: a label
+// with one value per tenant both grows without bound and tells whoever reads the exposition how
+// much traffic each workspace serves. A request that matched no route is `(unmatched)`, so a
+// scanner's random paths cannot mint one series each.
+const REQUEST_LABELS = ['route', 'method', 'status_class'] as const
+
+export const httpRequestDuration = new Histogram({
+  name: 'wikistead_http_request_duration_seconds',
+  help: 'Time to answer an HTTP request, by route template, method and status class.',
+  labelNames: REQUEST_LABELS,
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  registers: [metricsRegistry],
+})
+
+export const httpRequestsTotal = new Counter({
+  name: 'wikistead_http_requests_total',
+  help: 'HTTP requests answered, by route template, method and status class.',
+  labelNames: REQUEST_LABELS,
+  registers: [metricsRegistry],
+})
+
+export const UNMATCHED_ROUTE = '(unmatched)'
+
+/** Observe every answered request on `app`. Called once from buildApp; measured by a pin (#1037). */
+export function instrumentRequests(app: FastifyInstance): void {
+  app.addHook('onResponse', async (req, reply) => {
+    const labels = {
+      route: req.routeOptions?.url ?? UNMATCHED_ROUTE,
+      method: req.method,
+      status_class: `${Math.floor(reply.statusCode / 100)}xx`,
+    }
+    httpRequestDuration.observe(labels, reply.elapsedTime / 1000)
+    httpRequestsTotal.inc(labels)
+  })
+}
 
 export const METRICS_PORT_DEFAULT = 9464
 
