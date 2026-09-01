@@ -114,6 +114,10 @@ const KINDS: { name: string; source: string[]; box: string }[] = [
 
 for (const kind of KINDS) {
   test(`#453 a peer's box hugs the same rect as the local ring — ${kind.name}`, async ({ browser }) => {
+    // #1024: isolated — the callout case alone times out (60s) under the #891 gate's 20-spec run,
+    // on master as well as on the branch that found it; green when the presence specs run by
+    // themselves. One red, one ticket (#891 ruling) — the other kinds keep running.
+    if (kind.name === "callout") test.skip(true, "#1024: isolated — times out under the #891 gate's 20-spec run");
     const ctxA = await browser.newContext();
     const ctxB = await browser.newContext();
     const A = await ctxA.newPage();
