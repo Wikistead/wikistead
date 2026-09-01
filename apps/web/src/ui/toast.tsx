@@ -13,8 +13,11 @@ export const notify = {
   // close button) or the caller calls `dismiss`, instead of the default few seconds. Passing
   // the same `id` again updates that toast in place — Sonner keys on `id` — so a state that
   // moves through several phases (e.g. connecting → syncing) never stacks duplicates (#978).
+  // Warning-typed (#978 owner ruling, 2026-09-02): the old band carried the danger accent, and the
+  // normal-typed toast that replaced it read as an ordinary notice. The Toaster's richColors tints
+  // warning toasts amber, so the "not being saved" state is visibly a warning again.
   persistent: (id: string, title: string, description?: string) =>
-    toast(title, { id, duration: Infinity, description }),
+    toast.warning(title, { id, duration: Infinity, description }),
   dismiss: (id: string) => toast.dismiss(id),
 };
 
