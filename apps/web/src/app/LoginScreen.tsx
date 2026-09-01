@@ -93,6 +93,18 @@ export function connectionButtonText(conn: LoginConnection, t: (k: string, o?: R
   return conn.label ?? t("auth.signInSso");
 }
 
+// #947 (D2): the account-settings link list names a way in by WHAT IT IS, never by the verb the
+// sign-in button carries. That list's heading already says "link", so a row reading "Sign in with
+// your platform account — Link" put two verbs on one line and the reviewer flagged it. Same precedence
+// as the button (preset brand, then the admin's label, then the kind) with the verb taken off.
+export function connectionName(conn: LoginConnection, t: (k: string) => string): string {
+  if (conn.brand && conn.brand in PRESET_LABELS) return PRESET_LABELS[conn.brand]!;
+  if (conn.label) return conn.label;
+  if (conn.kind === "saml") return t("auth.connectionNameSaml");
+  if (conn.kind === "platform") return t("auth.connectionNamePlatform");
+  return t("auth.connectionNameSso");
+}
+
 // #602 / ADR-206 §3 (user ruling): the social start URL is GONE with the route it called. Signing in
 // with Google is a preset CONNECTION now — one path, one place the mark comes from — instead of a
 // second mechanism that reached the same broker with a `?provider=` hint.

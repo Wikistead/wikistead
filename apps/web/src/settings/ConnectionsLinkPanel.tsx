@@ -11,7 +11,7 @@ import {
 } from "../data/queries";
 import { browserCanUseFactorKind, proofBeginsOnChoice } from "./factor-kind";
 import { ProviderMark } from "../app/ProviderMark";
-import { connectionButtonText } from "../app/LoginScreen";
+import { connectionName } from "../app/LoginScreen";
 import { LoadFailed } from "../ui/LoadFailed";
 import {
   RecoveryReauthForm, proofsHeld, initialMethod, pickReauthMethod, type ReauthMethod,
@@ -52,7 +52,7 @@ function ConnectionRow({ conn, onLink, busy }: { conn: AccountConnection; onLink
     <div className="flex items-center justify-between gap-2 rounded-md border border-border p-2" data-testid={`connection-row-${conn.id}`}>
       <div className="flex items-center gap-2 text-sm">
         {conn.brand && <ProviderMark preset={conn.brand} />}
-        <span>{connectionButtonText(conn, t)}</span>
+        <span>{connectionName(conn, t)}</span>
       </div>
       {conn.linked ? (
         <span className="flex items-center gap-1 text-xs text-fg-dim" data-testid={`connection-linked-${conn.id}`}>
