@@ -16,7 +16,7 @@ import { collectPageViewEvent } from '../analytics/sink.js' // #464 / ADR-175, b
 import { resolveEntitlements } from '@wikistead/entitlements' // #464: EE gate for the analytics dashboard
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
-import { resolveTreePlaceholders, PLACEHOLDER_NODE_MAX, type PlaceholderNode } from './tree-placeholders.js' // #623 / ADR-220 §4
+import { resolveTreePlaceholders, resolveGuestPlaceholders, PLACEHOLDER_NODE_MAX, type PlaceholderNode } from './tree-placeholders.js' // #623 / ADR-220 §4, §14
 import type { TenantDb } from '../db/index.js'
 import { pool, registry, acquireTenantDb, listActiveTenantIds } from '../db/index.js' // #411: cross-tenant trash retention sweep
 import { flushDraft } from '../collab-flush.js'
@@ -1909,6 +1909,11 @@ export async function listBranch(
     context?: { current_time: string }
     limit?: number
     cursor?: string
+    // #903 / ADR-220 §14: a side channel, never a return field. `/pages/branch` returns this function's
+    // result directly to the wire (member AND guest), so the invisible complement this callback exposes
+    // must be structurally impossible to serialize — a function argument cannot appear in Fastify's JSON
+    // output, where a `BranchPage` field could leak it by a caller simply forgetting to strip it.
+    onInvisible?: (ids: string[]) => void
   },
 ): Promise<BranchPage & { restarted: boolean }> {
   const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
@@ -2003,6 +2008,10 @@ export async function listBranch(
   // different endpoint, GET /pages/:id) computed it correctly. Same cache and invalidation as there
   // (`invalidatePageBadge` on every write) — a badge here is a display glyph, not an access decision.
   const visiblePages = page.filter((r) => visible.has(r.id))
+  // #903 / ADR-220 §14: `page` (not `kids`) — the chevron probe's 3-per-row sample is a display hint,
+  // not this branch's real child set, and would under-report the invisible complement the guest walk
+  // needs to find hidden-behind-invisible-parent descendants.
+  args.onInvisible?.(page.filter((r) => !visible.has(r.id)).map((r) => r.id))
   const badges = await mapBounded(visiblePages, 16, async (r) => {
     const hit = getCachedBadge(r.tenant_id, r.id)
     if (hit) return hit
@@ -2323,18 +2332,29 @@ export async function listPagesGuestBounded(
   fga: OpenFgaClient,
   // `cap` defaults to the shipped GUEST_TREE_CAP; a caller (the pin) may override it to exercise the
   // truncation arithmetic against a small, cheap-to-build fixture without changing the shipped constant.
-  args: { spaceId: string; subject: string; context?: { current_time: string }; cap?: number },
+  // `placeholderBudget` defaults to the shipped PLACEHOLDER_NODE_MAX for the same reason (§14 below).
+  args: { spaceId: string; subject: string; context?: { current_time: string }; cap?: number; placeholderBudget?: number },
 ): Promise<{ pages: Page[]; truncated: boolean }> {
   const cap = args.cap ?? GUEST_TREE_CAP
   const visible: Page[] = []
   let truncated = false
+  // #903 / ADR-220 §14: a SEPARATE budget from `cap`. `cap` bounds what the tree DISPLAYS (confirmed
+  // VISIBLE rows); this bounds what the walk may EXAMINE while descending through invisible territory
+  // looking for more of them — the same two-dimension split §4.3 already draws for the member path.
+  // Conflating them would let one all-draft space with a deep visible leaf spend the whole display cap
+  // just walking invisible parents, before a single real row is shown.
+  const placeholderBudget = { left: args.placeholderBudget ?? PLACEHOLDER_NODE_MAX }
+  let placeholdersExhausted = false
+  const toTreePage = (row: unknown) => toPage(row as PageRow) as unknown as { id: string; [k: string]: unknown }
 
   const walk = async (parentId: string | null): Promise<void> => {
     let cursor: string | undefined
+    const invisibleIds: string[] = []
     for (;;) {
       if (truncated) return
       const branch = await listBranch(db, fga, {
         spaceId: args.spaceId, parentId, subject: args.subject, context: args.context, cursor, limit: BRANCH_PAGE_LIMIT,
+        onInvisible: (ids) => invisibleIds.push(...ids),
       })
       for (const p of branch.pages) {
         if (visible.length >= cap) { truncated = true; return }
@@ -2352,8 +2372,25 @@ export async function listPagesGuestBounded(
         await walk(p.id)
         if (truncated) return
       }
-      if (!branch.nextCursor) return
+      if (!branch.nextCursor) break
       cursor = branch.nextCursor
+    }
+    if (truncated || !invisibleIds.length) return
+    // #903 / ADR-220 §14: path 2 only, volunteered flat in THIS response — the defect ADR-220
+    // §4.4's "the guest tree still re-roots (#245)" promised and §13(a)'s closure walk broke, because it
+    // can never descend past a parent it is not allowed to view. `parentId` here is every invisible id
+    // this branch's own read just found (the seeds), never re-derived by a second query.
+    if (placeholderBudget.left <= 0) { placeholdersExhausted = true; return }
+    const { pages: found, exhausted } = await resolveGuestPlaceholders(db, fga, {
+      spaceId: args.spaceId, subject: args.subject, context: args.context,
+      invisibleChildIds: invisibleIds, toPage: toTreePage, budget: placeholderBudget,
+    })
+    if (exhausted) placeholdersExhausted = true
+    for (const pg of found) {
+      if (visible.length >= cap) { truncated = true; return }
+      visible.push(pg as unknown as Page)
+      await walk(pg.id as string)
+      if (truncated) return
     }
   }
 
@@ -2372,7 +2409,10 @@ export async function listPagesGuestBounded(
     if ((err as { statusCode?: number }).statusCode !== 404 || visible.length > 0) throw err
     return { pages: visible, truncated: false }
   }
-  return { pages: visible, truncated }
+  // #903 / ADR-220 §14: placeholder-budget exhaustion folds into the SAME `truncated` flag — §6.2's
+  // "never a quiet cut" applies to this failure mode too, and the guest shell has exactly one signal
+  // for "this tree may be incomplete" already; a second wire field for the same idea is not warranted.
+  return { pages: visible, truncated: truncated || placeholdersExhausted }
 }
 
 /** #623 / ADR-220 §6.1: how many pages one FLAT listing may carry. */

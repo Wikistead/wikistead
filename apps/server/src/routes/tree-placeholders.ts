@@ -274,3 +274,50 @@ export async function resolveTreePlaceholders(
   }
   return { placeholders: ctx.out, placeholdersExhausted: ctx.exhausted }
 }
+
+function collectPages(draft: Draft, out: TreePage[], ctx: Ctx): void {
+  for (const r of draft.pages) out.push(placedPage(ctx, r))
+  for (const c of draft.children) collectPages(c, out, ctx)
+}
+
+/**
+ * Path 2 ONLY, for a guest's whole-space closure walk (#903 / ADR-220 §14). `resolveTreePlaceholders`
+ * refuses any subject that is not `user:`-prefixed (§4.4) — deliberately, since path 1 (`grantsPath`)
+ * reads a principal's OWN direct-grant tuples, which a `share_link:` subject never has (its view arrives
+ * through the space cascade, not a page-level grant —). Path 2 (`descend`) only asks
+ * `filterAuthorized(subject, 'view', …)`, so it is subject-shape-independent; this calls it directly,
+ * skipping both the gate and path 1.
+ *
+ * Returns FLAT pages with `parentId` nulled (§4.1: a descended page must never carry its real —
+ * invisible — parent id), never the `PlaceholderNode` grouping: the guest tree has no placeholder-anchor
+ * UI, and `GuestSidebar`'s `buildTree` already re-roots any page whose parent is absent from the flat
+ * set to the top level (the pre-#903 behaviour this restores) — which is exactly this shape.
+ */
+export async function resolveGuestPlaceholders(
+  db: TenantDb,
+  fga: OpenFgaClient,
+  args: {
+    spaceId: string
+    subject: string
+    invisibleChildIds: string[]
+    context?: { current_time: string } | undefined
+    toPage: (row: Record<string, unknown>) => TreePage
+    budget: { left: number }
+  },
+): Promise<{ pages: TreePage[]; exhausted: boolean }> {
+  // Same defence as §4.4's scope check, kept for a confined caller even though guest requests never
+  // carry a restriction today (only an API-key-scoped request does — `setAuthzRestriction` in app.ts).
+  const scope = currentAuthzScope()
+  if (scope?.restriction) return { pages: [], exhausted: false }
+  const ctx: Ctx = {
+    db, fga, spaceId: args.spaceId, subject: args.subject, context: args.context, toPage: args.toPage,
+    budget: args.budget, byInvisibleId: new Map(), out: [], exhausted: false,
+  }
+  const pages: TreePage[] = []
+  for (const seed of args.invisibleChildIds) {
+    if (ctx.budget.left <= 0) { ctx.exhausted = true; break }
+    const draft = await descend(ctx, seed)
+    if (draft) collectPages(draft, pages, ctx)
+  }
+  return { pages, exhausted: ctx.exhausted }
+}

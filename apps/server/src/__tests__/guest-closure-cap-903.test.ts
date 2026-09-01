@@ -14,7 +14,7 @@ import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
-import { createPage, listPagesGuestBounded } from '../routes/pages.js'
+import { createPage, listPagesGuestBounded, listBranch } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
 
 // ADR-220 §13's own warning, restated by #903 design-review "a pin that measures only `view`
@@ -221,5 +221,132 @@ describe('#903 / ADR-220 §13: the FGA cost itself is bounded by cap, not by spa
     // confirm (the pre-#903 shape) would run.
     expect(checkedIds(), `only ${checkedIds()} ids checked`).toBeLessThan(CAP + 15)
     expect(readCalls(), `only ${readCalls()} badge reads`).toBeLessThanOrEqual(CAP + 10)
+  })
+})
+
+// #903 / ADR-220 §14: a VISIBLE page sitting under an INVISIBLE ancestor. §13(a)'s closure walk
+// can never descend into a parent it is not allowed to view, so a page like this was silently dropped —
+// a regression from the pre-#903 flat `listPages` behaviour `GuestSidebar`'s `buildTree` re-roots for
+// (the comment "a permitted page is never orphaned out of the tree" is still in that file, describing a
+// promise the server stopped keeping). §14 restores it via `resolveTreePlaceholders`'s path 2 (descend),
+// volunteered flat in this same response.
+describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is still found', () => {
+  const driver3 = new LogicalSearchDriver()
+  const STAMP3 = `${Date.now().toString(36)}y`
+  const LINK3 = `gcc903ph-${STAMP3}`
+  let tenant3: Tenant, db3: TenantDb, space3: string
+  const ids3: Record<string, string> = {}
+
+  async function page3(title: string, parentId: string | null, visible: boolean) {
+    const id = (await createPage(db3, fgaClient, driver3, {
+      tenantId: tenant3.id, spaceId: space3, userId: 'dev-user', title, parentId,
+    })).id
+    await pool`UPDATE pages SET published_md = 'b', published_at = now() WHERE id = ${id}`
+    if (visible) await writeTuples(fgaClient, [{ user: `space:${space3}`, relation: 'space', object: `page:${id}` }])
+    ids3[title] = id
+    return id
+  }
+
+  beforeAll(async () => {
+    tenant3 = (await new TenantRegistry(pool).findBySlug('dev'))!
+    db3 = await acquireTenantDb(tenant3)
+    space3 = (await createSpace(db3, fgaClient, {
+      tenantId: tenant3.id, userId: 'dev-user', plan: tenant3.plan, name: `gcc903ph-${STAMP3}`,
+    })).id
+    await writeTuples(fgaClient, [{ user: `share_link:${LINK3}`, relation: 'viewer', object: `space:${space3}` }])
+
+    // the exact case: an invisible ROOT (never granted `space`) whose only child IS visible.
+    const draftRoot = await page3('draftRoot', null, false)
+    await page3('draftRoot-child-VISIBLE', draftRoot, true)
+
+    // Two invisible layers deep, then a visible grandchild whose OWN child is visible too — proves
+    // `descend` recurses through consecutive invisible nodes, and that a surfaced page re-enters the
+    // NORMAL walk (its own child arrives via `listBranch`, not another `descend`).
+    const deepA = await page3('deepA-invisible', null, false)
+    const deepB = await page3('deepB-invisible', deepA, false)
+    const deepC = await page3('deepC-VISIBLE', deepB, true)
+    await page3('deepC-child-VISIBLE', deepC, true)
+
+    // A control: an ordinary visible root, unaffected by any of the above.
+    await page3('normalRoot', null, true)
+  }, 300_000)
+
+  afterAll(async () => {
+    await deleteTuples(fgaClient, [{ user: `share_link:${LINK3}`, relation: 'viewer', object: `space:${space3}` }]).catch(() => {})
+    await pool`DELETE FROM pages WHERE space_id = ${space3}`.catch(() => {})
+    await deleteSpace(db3, fgaClient, driver3, { tenantId: tenant3.id, spaceId: space3, userId: 'dev-user' }).catch(() => {})
+    await db3.release()
+  }, 300_000)
+
+  const subject3 = `share_link:${LINK3}`
+  const ctx3 = { current_time: new Date().toISOString() }
+
+  it('a visible child of an invisible ROOT is found, with its real (invisible) parent id nulled', async () => {
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
+    const found = out.pages.find((p) => p.title === 'draftRoot-child-VISIBLE')
+    expect(found, 'the page must appear').toBeTruthy()
+    // §4.1: never the real (invisible) parent id — that IS the invisible page's id.
+    expect(found!.parentId).toBeNull()
+  })
+
+  it('the invisible ancestor itself is never named anywhere in the response', async () => {
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
+    const draftRootId = ids3['draftRoot']!
+    expect(out.pages.some((p) => p.id === draftRootId), 'the invisible page must not appear as a row').toBe(false)
+    expect(out.pages.some((p) => p.parentId === draftRootId), 'no row may point at it as a parent').toBe(false)
+  })
+
+  it('a two-layer invisible chain still surfaces the visible grandchild, and its own visible child too', async () => {
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
+    const titles = out.pages.map((p) => p.title)
+    expect(titles).toContain('deepC-VISIBLE')
+    expect(titles, 'the surfaced page re-enters the normal walk for its OWN children').toContain('deepC-child-VISIBLE')
+    const grandchild = out.pages.find((p) => p.title === 'deepC-child-VISIBLE')!
+    const surfaced = out.pages.find((p) => p.title === 'deepC-VISIBLE')!
+    // the grandchild is an ORDINARY page — its real parent id is the surfaced (now-known) page's id,
+    // which IS present in this response (the ancestor-inclusion invariant, §13's own condition).
+    expect(grandchild.parentId).toBe(surfaced.id)
+  })
+
+  it('an ordinary visible root is unaffected', async () => {
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
+    expect(out.pages.some((p) => p.title === 'normalRoot')).toBe(true)
+  })
+
+  it('a placeholder budget too small to reach a deep chain truncates loudly, not silently', async () => {
+    // budget=1 lets the walk examine only the FIRST invisible seed it tries (root-level: draftRoot and
+    // deepA-invisible are both root-level invisible seeds) before running out — whichever one it does
+    // NOT reach must not be silently absent from a response that also claims completeness.
+    const out = await listPagesGuestBounded(db3, fgaClient, {
+      spaceId: space3, subject: subject3, context: ctx3, cap: 50, placeholderBudget: 1,
+    })
+    expect(out.truncated, 'the placeholder budget ran out — §6.2\'s loud-cap rule applies here too').toBe(true)
+  })
+
+  it('view Checks stay bounded by the placeholder budget, not by how deep the invisible chain runs', async () => {
+    const { fga, checkedIds } = countingFga(fgaClient)
+    const out = await listPagesGuestBounded(db3, fga, {
+      spaceId: space3, subject: subject3, context: ctx3, cap: 50, placeholderBudget: 50,
+    })
+    expect(out.truncated).toBe(false)
+    // 2 root-level branches (root, then normalRoot's siblings) + walking draftRoot-child-VISIBLE's own
+    // (empty) branch + deepC-VISIBLE's + deepC-child-VISIBLE's — small and bounded, nowhere near a
+    // space-wide scan.
+    expect(checkedIds(), `only ${checkedIds()} ids checked`).toBeLessThan(30)
+  })
+
+  // `listBranch`'s new `onInvisible` callback (#903 §14) is a side channel specifically so `/pages/branch`
+  // — which returns this function's result DIRECTLY to the wire for both members and guests — cannot leak
+  // the invisible-children complement by a caller forgetting to strip a response field. This pin measures
+  // the actual return object's own keys, not the type, since a type-level guarantee cannot catch a field
+  // added to the object at runtime.
+  it('listBranch never puts the invisible complement on its own return value', async () => {
+    let fired = false
+    const result = await listBranch(db3, fgaClient, {
+      spaceId: space3, parentId: null, subject: subject3, context: ctx3,
+      onInvisible: (ids) => { fired = ids.length > 0 },
+    })
+    expect(fired, 'the fixture root has an invisible child (deepA-invisible) — the callback must see it').toBe(true)
+    expect(Object.keys(result).sort()).toEqual(['nextCursor', 'pages', 'restarted'])
   })
 })
