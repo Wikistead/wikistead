@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # CE collab image (#414 / ADR-161 pre-slice). CE-ONLY COPY list (see apps/server/Dockerfile for why
 # `COPY packages ./packages` is forbidden — the ADR-084 artifact boundary).
-FROM node:20-slim AS base
+FROM node:22-slim AS base
 RUN corepack enable
 WORKDIR /repo
 

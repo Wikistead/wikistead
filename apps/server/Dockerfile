@@ -3,7 +3,7 @@
 # workspace packages the server depends on — NEVER `COPY packages ./packages`, which would embed the
 # proprietary EE packages (packages/ee-server, packages/entitlements-cloud) into an AGPL artifact
 # (ADR-084 boundary; the EE image builds from the private overlay repo with its own Dockerfile).
-FROM node:20-slim AS base
+FROM node:22-slim AS base
 RUN corepack enable
 WORKDIR /repo
 
