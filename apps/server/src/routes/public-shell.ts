@@ -58,13 +58,39 @@ export function injectShellHead(template: string, head: string): string {
   return template.replace('</head>', `${head}</head>`)
 }
 
+// #990 / ADR-277 §Decision item 3: the ONE surface where `frame-src` is a real second layer. The
+// built index.html carries a meta CSP with `frame-src 'self' https:` (it cannot name a per-tenant
+// value); this header, sent only by /pub/*, narrows that to the tenant's own embed allowlist
+// (`tenant_settings.embed_providers`, ADR-071). A header CSP and a meta CSP are enforced as their
+// intersection, so this cannot loosen anything the meta tag says — only tighten it.
+//
+// The allowlist is HOSTNAMES an administrator typed. Only a hostname-shaped entry reaches the header:
+// a stray `;` or space would otherwise let a tenant admin write further directives into their own
+// public pages' policy, and while that is their own surface, a header is not the place to find out.
+// `isAllowlistedEmbed` (apps/web) accepts `host === h || host.endsWith('.' + h)`, hence the pair.
+const EMBED_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
+export function publicFrameSrc(providers: readonly string[]): string {
+  const hosts = [...new Set(providers.map((h) => h.trim().toLowerCase().replace(/^\.+/, '')))].filter((h) => EMBED_HOST.test(h))
+  const sources = hosts.flatMap((h) => [`https://${h}`, `https://*.${h}`])
+  return `frame-src 'self'${sources.length ? ' ' + sources.join(' ') : ''}`
+}
+
+async function tenantEmbedProviders(tenantId: string): Promise<string[]> {
+  return withTenantTx(tenantId, async (tx) => {
+    const [row] = await tx<{ embed_providers: string[] | null }[]>`SELECT embed_providers FROM tenant_settings WHERE tenant_id = ${tenantId}`
+    return row?.embed_providers ?? []
+  }) as Promise<string[]>
+}
+
 export async function publicShellPlugin(app: FastifyInstance) {
   const template = loadShellTemplate()
   if (!template) return // dev/prod split: no built index.html configured → the shell is off (ADR-154 §1)
 
   const generic404 = injectShellHead(template, '<meta name="robots" content="noindex">')
-  const send = (reply: import('fastify').FastifyReply, code: number, html: string) =>
-    reply.code(code).header('cache-control', 'no-store').type('text/html; charset=utf-8').send(html)
+  // Every shell response carries the per-tenant frame-src header (#990); the generic 404 carries the
+  // bare `'self'`, since a 404 that named a tenant's allowlist would be an existence oracle.
+  const send = (reply: import('fastify').FastifyReply, code: number, html: string, frameSrc = publicFrameSrc([])) =>
+    reply.code(code).header('cache-control', 'no-store').header('content-security-policy', frameSrc).type('text/html; charset=utf-8').send(html)
 
   // The single-page public reader URL. Head carries: robots (page OR space noindex — the same OR the
   // JSON route computes), the escaped title, and the canonical URL.
@@ -90,7 +116,7 @@ export async function publicShellPlugin(app: FastifyInstance) {
     head += `<meta property="og:title" content="${title}">`
     if (description) head += `<meta property="og:description" content="${description}"><meta name="description" content="${description}">`
     head += `<meta property="og:type" content="article"><meta property="og:url" content="${canonical}"><meta name="twitter:card" content="summary">`
-    return send(reply, 200, injectShellHead(template, head))
+    return send(reply, 200, injectShellHead(template, head), publicFrameSrc(await tenantEmbedProviders(tenant.id)))
   })
 
   // The public-space reader URL. Space-level: title = space name; robots = the space's noindex
@@ -116,7 +142,7 @@ export async function publicShellPlugin(app: FastifyInstance) {
     if (spaceRow.noindex) head += '<meta name="robots" content="noindex">'
     head += `<title>${title}</title><link rel="canonical" href="${canonical}">`
     head += `<meta property="og:title" content="${title}"><meta property="og:type" content="website"><meta property="og:url" content="${canonical}"><meta name="twitter:card" content="summary">`
-    return send(reply, 200, injectShellHead(template, head))
+    return send(reply, 200, injectShellHead(template, head), publicFrameSrc(await tenantEmbedProviders(tenant.id)))
   })
 }
 

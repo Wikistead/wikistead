@@ -17,7 +17,7 @@ import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
 import { LogicalSearchDriver } from '../search/index.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage, deletePage } from '../routes/pages.js'
-import { loadShellTemplate, injectShellHead } from '../routes/public-shell.js'
+import { loadShellTemplate, injectShellHead, publicFrameSrc } from '../routes/public-shell.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -90,6 +90,34 @@ describe('shell template plumbing (#409 — pure)', () => {
     delete process.env.PUBLIC_SHELL_INDEX
     expect(loadShellTemplate()).toBeNull()
     process.env.PUBLIC_SHELL_INDEX = saved
+  })
+})
+
+// #990 / ADR-277 §Decision item 3: /pub/* is the one surface where frame-src is a second layer — a
+// per-tenant HTTP header that intersects with the meta CSP the built shell carries.
+describe('#990: /pub/* sends a per-tenant frame-src header', () => {
+  it('the allowlist becomes host + wildcard-subdomain sources; anything not hostname-shaped is dropped', () => {
+    expect(publicFrameSrc([])).toBe("frame-src 'self'")
+    expect(publicFrameSrc(['YouTube.com', '.vimeo.com', 'youtube.com'])).toBe("frame-src 'self' https://youtube.com https://*.youtube.com https://vimeo.com https://*.vimeo.com")
+    // a header is built from strings an administrator typed: a directive separator or a scheme
+    // never reaches it (break-check: drop the hostname filter and this reddens)
+    expect(publicFrameSrc(["evil.com; script-src 'unsafe-inline'", 'https://x.com', 'a b.com', 'localhost'])).toBe("frame-src 'self'")
+  })
+
+  it('a public page answers with the tenant\'s own allowlist; the generic 404 answers with bare self', async () => {
+    await admin`UPDATE tenant_settings SET embed_providers = ${admin.array(['youtube.com'])} WHERE tenant_id = ${tenant.id}`
+    try {
+      const ok = await app.inject({ method: 'GET', url: `/pub/${publicPage}`, headers: H })
+      expect(ok.statusCode).toBe(200)
+      expect(ok.headers['content-security-policy'], 'the tenant allowlist, as a header').toBe("frame-src 'self' https://youtube.com https://*.youtube.com")
+      const absent = await app.inject({ method: 'GET', url: '/pub/no-such-page', headers: H })
+      expect(absent.statusCode).toBe(404)
+      expect(absent.headers['content-security-policy'], 'a 404 must not name the allowlist (existence oracle)').toBe("frame-src 'self'")
+      const space = await app.inject({ method: 'GET', url: `/pub/space/${spaceId}`, headers: H })
+      if (space.statusCode === 200) expect(space.headers['content-security-policy']).toContain('https://youtube.com')
+    } finally {
+      await admin`UPDATE tenant_settings SET embed_providers = ${admin.array([])} WHERE tenant_id = ${tenant.id}`
+    }
   })
 })
 
