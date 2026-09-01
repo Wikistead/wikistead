@@ -44,6 +44,11 @@ afterAll(async () => {
 
 describe('#828 the drain explains the address once', () => {
   it('three unaddressable messages produce one explanation, and it names the step', async () => {
+    // #1057: the drain claims EVERY pending row on the shared stack, not just this file's, and
+    // `handled` below counts what it claimed. A row another test left behind (measured: 4 for 3 on
+    // the CE build's full suite, green in isolation) is not this pin's subject — consume whatever
+    // is pending first, so the count and the once-per-drain line are judged on these three alone.
+    await drainEmailOutbox({ fallback: noop, batch: 500 })
     await enqueueEmailOutbox([1, 2, 3].map(() => ({ tenantId: T, memberSub: SUB, class: CLASS })))
     const lines: string[] = []
     const handled = await drainEmailOutbox({ fallback: noop, log: (m) => lines.push(m), batch: 50 })
