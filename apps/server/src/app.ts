@@ -146,7 +146,12 @@ declare module 'fastify' {
 // Build the Fastify app WITHOUT listening, so tests can drive it via app.inject
 // (the auth hook — cookie sessions, cross-tenant rejection — is HTTP-level and
 // must be exercised through real requests). The entry (index.ts) calls listen().
-export async function buildApp(): Promise<FastifyInstance> {
+export interface BuildAppOpts {
+  /** Test seam (#1039): where pino writes. Production never sets it; a pin reads the real lines. */
+  logStream?: NodeJS.WritableStream
+}
+
+export async function buildApp(opts: BuildAppOpts = {}): Promise<FastifyInstance> {
   // #537 B8: a ceiling that names no valid method would 404 every login and lock everyone out —
   // that is a configuration error, surfaced at boot, never as mysterious 404s.
   assertLoginCeilingValid()
@@ -179,7 +184,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // X-Forwarded-For; without this req.ip would be the proxy's address, defeating the
   // per-IP rate limit on the public share-link exchange (#107). In dev (no proxy) there is
   // no XFF, so req.ip stays the socket address. Always deploy behind the trusted proxy.
-  const app = Fastify({ logger: true, trustProxy: true })
+  const app = Fastify({ logger: opts.logStream ? { stream: opts.logStream } : true, trustProxy: true })
 
   // #619: the LAST line before a response body leaves the process. #578 translated the two tuple
   // helpers, which covers what the product writes on purpose — but an FGA failure can also arrive
@@ -197,22 +202,14 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.setErrorHandler((err, req, reply) => {
     const status = (err as { statusCode?: number }).statusCode ?? 500
     const speaksFga = /FGA API|openfga|tuple to be written|cannot delete a tuple|relation '[^']*' not found/i.test(String((err as Error | undefined)?.message ?? ''))
-    if (!speaksFga) {
-      // #987 / ADR-270 §3.5: a custom error handler REPLACES Fastify's default one, and the default
-      // was the only thing that logged a thrown 5xx — measured (#1039): with this handler in place, a
-      // route that threw produced no error-level line at all. One line, one stable shape: the route
-      // TEMPLATE (never the literal path — that carries ids), method, status, request id and the
-      // error with its stack. Never the headers or the body: a self-hosted product's logs are where
-      // secrets and personal data would leak first. A deliberate 4xx is an answer, not a failure,
-      // and stays out of the error level.
-      if (status >= 500) {
-        req.log.error(
-          { err, route: req.routeOptions?.url ?? null, method: req.method, status, reqId: req.id },
-          'unhandled request error',
-        )
-      }
-      return reply.code(status).send(err)
-    }
+    // #987 / ADR-270 §3.5 (#1039): this handler does NOT log the error itself. `reply.send(err)` with
+    // an Error instance re-enters Fastify's error path, and its fallback handler writes the one
+    // structured line — `{ req, res, err }` at error level for a 5xx, info for a 4xx, with the stack
+    // and the request id, never the body or the headers. A first cut of #1039 added a second
+    // `req.log.error` here on the strength of a measurement that swapped `req.log` and missed that
+    // Fastify logs through `reply.log`; every 5xx then logged twice. The pin now reads the real
+    // stream (`buildApp({ logStream })`) and counts exactly one.
+    if (!speaksFga) return reply.code(status).send(err)
     req.log.error({ err }, 'the permission store refused a call; its text was withheld from the response')
     return reply.code(status >= 500 ? status : 500).send({
       statusCode: status >= 500 ? status : 500,

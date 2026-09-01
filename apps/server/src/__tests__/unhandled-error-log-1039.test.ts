@@ -1,68 +1,62 @@
 // #987 / ADR-270 §3.5 (rev 2: structured error logs only): an unhandled route error produces exactly
-// ONE error-level log line with a stable, greppable shape — route template, method, status, request
-// id, and the error itself (name / message / stack) — and never the request body or headers. The
-// existing OpenFGA-store redaction (#619) keeps running first on the same error object.
+// ONE error-level log line, structured (request id, response status, the error with its stack),
+// never the request body or headers — and a deliberate 4xx answer is not an error-level line.
 //
-// Measured through the REAL app and the REAL handler: an `onRequest` hook swaps `req.log` for a
-// recorder, a probe route throws, and the recorder is read back — not a source pin, and not a spy on
-// `app.log`, which a per-request child logger never reaches.
+// ⚠️ Measured on the REAL log stream, not on a swapped `req.log`: the first cut of this pin replaced
+// `req.log` in an `onRequest` hook, saw zero error lines, and concluded nothing was logged. Fastify
+// logs the error through `reply.log` (the fallback handler that `reply.send(err)` re-enters), which
+// that swap never touched — so the "missing" line was a measurement artefact, and the extra line the
+// conclusion led to was a duplicate. `buildApp({ logStream })` hands pino a stream this pin can read.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { Writable } from 'node:stream'
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.js'
 
-type Call = { level: string; obj: unknown; msg: string | undefined }
-
-function recorder(calls: Call[]) {
-  const make = (level: string) => (obj: unknown, msg?: string) => { calls.push({ level, obj, msg: typeof obj === 'string' ? obj : msg }) }
-  const log: Record<string, unknown> = {}
-  for (const level of ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']) log[level] = make(level)
-  log.child = () => log
-  log.level = 'info'
-  return log
-}
+const lines: Record<string, unknown>[] = []
+const stream = new Writable({
+  write(chunk, _enc, cb) {
+    for (const l of String(chunk).split('\n')) if (l.trim()) { try { lines.push(JSON.parse(l)) } catch { /* not json */ } }
+    cb()
+  },
+})
 
 let app: FastifyInstance
-const calls: Call[] = []
 
 beforeAll(async () => {
-  app = await buildApp()
-  app.addHook('onRequest', async (req) => { (req as unknown as { log: unknown }).log = recorder(calls) })
+  app = await buildApp({ logStream: stream })
   app.get('/__1039_boom', async () => { throw new Error('kaboom-1039') })
-  app.get('/__1039_teapot', async () => { const e = Object.assign(new Error('short and stout'), { statusCode: 418 }); throw e })
+  app.get('/__1039_teapot', async () => { throw Object.assign(new Error('short and stout'), { statusCode: 418 }) })
   await app.ready()
 }, 60_000)
 
 afterAll(async () => { await app.close() })
 
-const H = { host: 'dev.localhost', authorization: 'Bearer dev-token' }
+const H = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'x-secret-header': 'do-not-log-me' }
+const errorLines = () => lines.filter((l) => l.level === 50)
 
 describe('#987 / ADR-270 §3.5: an unhandled route error is one structured error-level log line', () => {
-  it('a thrown 500 logs exactly one error line, with the stable shape', async () => {
-    calls.length = 0
-    const res = await app.inject({ method: 'GET', url: '/__1039_boom', headers: { ...H, 'x-secret-header': 'do-not-log-me' } })
+  it('a thrown 500 logs exactly one error line with the request id, the status and the stack', async () => {
+    lines.length = 0
+    const res = await app.inject({ method: 'GET', url: '/__1039_boom', headers: H })
     expect(res.statusCode).toBe(500)
-    const errors = calls.filter((c) => c.level === 'error')
-    expect(errors, JSON.stringify(calls)).toHaveLength(1)
-    const [line] = errors
-    const obj = line!.obj as Record<string, unknown>
-    expect(line!.msg).toBe('unhandled request error')
-    expect(obj.route).toBe('/__1039_boom')
-    expect(obj.method).toBe('GET')
-    expect(obj.status).toBe(500)
-    expect(typeof obj.reqId).toBe('string')
-    const err = obj.err as { name?: string; message?: string; stack?: string }
+    const errs = errorLines()
+    expect(errs, JSON.stringify(lines)).toHaveLength(1)
+    const line = errs[0]!
+    expect(typeof line.reqId).toBe('string')
+    expect((line.res as { statusCode?: number })?.statusCode).toBe(500)
+    const err = line.err as { message?: string; stack?: string }
     expect(err?.message).toBe('kaboom-1039')
     expect(err?.stack).toContain('kaboom-1039')
     // Never the request's headers or body (PII / secret risk, §3.5).
-    expect(JSON.stringify(obj)).not.toContain('do-not-log-me')
-    expect(obj).not.toHaveProperty('headers')
-    expect(obj).not.toHaveProperty('body')
+    const text = JSON.stringify(line)
+    expect(text).not.toContain('do-not-log-me')
+    expect(text).not.toContain('dev-token')
   })
 
-  it('a deliberate 4xx refusal is not an error log (it is an answer, not a failure)', async () => {
-    calls.length = 0
+  it('a deliberate 4xx refusal is not an error-level line (it is an answer, not a failure)', async () => {
+    lines.length = 0
     const res = await app.inject({ method: 'GET', url: '/__1039_teapot', headers: H })
     expect(res.statusCode).toBe(418)
-    expect(calls.filter((c) => c.level === 'error')).toHaveLength(0)
+    expect(errorLines()).toHaveLength(0)
   })
 })
