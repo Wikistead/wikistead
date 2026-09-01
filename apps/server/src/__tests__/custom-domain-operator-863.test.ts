@@ -108,7 +108,8 @@ describe('#863 / ADR-258: local-admin --domain', () => {
     // ADR-258 §5: "the fixture has to silence TWO constraints" — `custom_domains.domain UNIQUE`
     // (silenced by promoting the holder, below) AND `tenants.custom_domain UNIQUE` (the mirror). A
     // holder with only ONE verified domain leaves the mirror pointed at `host` too, so a target
-    // registering `host` would still 23505 when the MIRROR row is written even with the all-tenant walk deleted
+    // registering `host` would still 23505 when the MIRROR row is written even with the all-tenant walk
+    // deleted
     // — a constraint answering "for free" rather than the walk this pin claims to guard. The holder
     // therefore carries a SECOND, strictly newer verified domain, which `syncDomainMapping`'s
     // `ORDER BY verified_at DESC LIMIT 1` puts in the mirror instead, leaving `host` in no
