@@ -6,6 +6,9 @@ import tailwindcss from "@tailwindcss/vite";
 // answered 404 to every api call and sign-in could not start; dev never noticed because dev IS this
 // file. Now a row added for production is a row the dev browser gets too.
 import { PROXIED_ROUTES } from "../../infra/routes/origin-routes.mjs";
+// #990 / ADR-277: the app shell's CSP rides the built index.html as a meta tag (build only), and
+// Excalidraw's fonts are copied into the bundle so the policy needs no third-party font origin.
+import { cspMetaPlugin, excalidrawFontsPlugin } from "./csp-policy";
 
 const SERVER_TARGET = () => process.env.API_PROXY_TARGET ?? "http://localhost:4000";
 const COLLAB_TARGET = () => process.env.COLLAB_PROXY_TARGET ?? "http://localhost:4100";
@@ -26,7 +29,7 @@ const devProxy = Object.fromEntries(
 );
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), cspMetaPlugin(), excalidrawFontsPlugin()],
   resolve: {
     // `@/…` → src/… (shadcn convention). Existing relative imports keep working.
     alias: { "@": new URL("./src", import.meta.url).pathname },

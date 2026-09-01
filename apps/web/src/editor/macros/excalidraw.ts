@@ -18,8 +18,16 @@ let modP: Promise<typeof import("@excalidraw/excalidraw")> | null = null;
 // Load the component AND its stylesheet (0.17+ requires it — without it the UI renders
 // unstyled, e.g. a giant padlock/toolbar icon). Both are lazy so they stay out of the
 // main bundle. The CSS import is a side effect (Vite injects it).
-const loadExcalidraw = () =>
-  (modP ??= Promise.all([import("@excalidraw/excalidraw"), import("@excalidraw/excalidraw/index.css")]).then(([m]) => m));
+// #990 / ADR-277: the library resolves its fonts against `window.EXCALIDRAW_ASSET_PATH` FIRST and
+// only then against esm.sh. The build copies the package's fonts to `/excalidraw/fonts/` (see
+// `csp-policy.ts`), so pointing the path there before the module loads keeps every font fetch
+// same-origin — which is what lets the shell's CSP say `font-src 'self'` and nothing else. In dev the
+// path 404s and the library falls through to its CDN fallback (dev carries no CSP on purpose).
+const EXCALIDRAW_ASSET_PATH = "/excalidraw/";
+const loadExcalidraw = () => {
+  (window as unknown as { EXCALIDRAW_ASSET_PATH?: string }).EXCALIDRAW_ASSET_PATH ??= EXCALIDRAW_ASSET_PATH;
+  return (modP ??= Promise.all([import("@excalidraw/excalidraw"), import("@excalidraw/excalidraw/index.css")]).then(([m]) => m));
+};
 
 let reactP: Promise<{ React: typeof import("react"); createRoot: (typeof import("react-dom/client"))["createRoot"] }> | null = null;
 const loadReact = () =>
