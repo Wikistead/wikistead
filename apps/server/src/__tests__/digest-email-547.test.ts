@@ -1,9 +1,9 @@
-// #547 / ADR-196 §2 §4 §5 (S4): the digest. The ADR's anti-tests on the real stack:
-//   - a digest-opted watcher gets ONE rollup (event type + live title + link, never content); items
-//     stamped emailed_at are never re-sent; the producer is once-a-day idempotent;
-//   - PER-ITEM disposition: a not-ready item rides the next window while its confirmed siblings send;
-//     a suppressed item (private page) is consumed silently; empty-after-confirmation is not sent;
-//   - email_digest=false (the default) members get nothing despite watching.
+// #547 / ADR-196 §2 §4 §5 (S4): the digest. The ADR's anti-tests on the real stack
+// - a digest-opted watcher gets ONE rollup (event type + live title + link, never content); items
+// stamped emailed_at are never re-sent; the producer is once-a-day idempotent;
+// - PER-ITEM disposition: a not-ready item rides the next window while its confirmed siblings send;
+// a suppressed item (private page) is consumed silently; empty-after-confirmation is not sent;
+// - email_digest=false (the default) members get nothing despite watching.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -163,6 +163,33 @@ describe('#547 S4: digest', () => {
   // the body. ⚠️ The other cases in this file only ever create the six kinds the table names, so they
   // cannot see this branch at all: measured, restoring the identifier fallback left every one of them
   // green. The row is therefore written straight to the table, the way a legacy row exists.
+  // #1008 / ADR-260 §5: the digest a 'ja' recipient actually receives. ⚠️ Asserted as the ABSENCE of
+  // English rather than as the presence of one phrase: the failure this guards against is a word left
+  // behind in the builder's own markup (the `open` anchor), which every catalogue-level pin passed.
+  it("a recipient whose locale is 'ja' receives the whole digest in Japanese, markup included", async () => {
+    await adminPool`UPDATE members SET locale = 'ja' WHERE tenant_id = ${TENANT} AND sub = ${W1}`
+    try {
+      await emitPublished(pageA)
+      await resetDaily()
+      expect(await produceDigestJobs(), 'one job for the ja recipient').toBe(1)
+      await forceDue()
+      await drain()
+      expect(sent.length).toBe(1)
+      expect(sent[0]!.subject, 'the subject line').toContain('ダイジェスト')
+      expect(sent[0]!.text, 'the unsubscribe footer').toContain('このメールの配信を停止する')
+      // Everything that is deliberately not translated, removed: markup, links, the page titles this
+      // fixture wrote, and the deployment's product name.
+      const readerWords = (s: string): string[] =>
+        (s.replace(/<[^>]*>/g, ' ').replace(/https?:\/\/\S+/g, ' ')
+          .split(`Digest A ${STAMP}`).join(' ').split(`Digest B ${STAMP}`).join(' ')
+          .split('Wikistead').join(' ').match(/[A-Za-z]{3,}/g) ?? [])
+      expect(readerWords(sent[0]!.text), 'the text part').toEqual([])
+      expect(readerWords(sent[0]!.html ?? ''), 'the html part — where the anchor label lives').toEqual([])
+    } finally {
+      await adminPool`UPDATE members SET locale = NULL WHERE tenant_id = ${TENANT} AND sub = ${W1}`
+    }
+  }, 120_000)
+
   it('an event kind the table does not name still reaches the reader in words', async () => {
     const legacy = 'page.frobnicated'
     const [ev] = await adminPool<{ id: string }[]>`

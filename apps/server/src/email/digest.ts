@@ -27,10 +27,13 @@ import { pageEventDisposition } from '../page-disposition.js'
 // docs/api-reference.md, and this type has no HTTP surface of its own to document. Structurally the
 // SAME six-value union notifications.ts declares for fanOutFeedEvent's own parameter; TypeScript
 // would flag either side the day the two stop agreeing.
-import type { FeedEventType } from '@wikistead/i18n-shared'
+import { EVENT_TYPE_LABELS, type FeedEventType } from '@wikistead/i18n-shared'
 import { registerEmailBuilder, type EmailBuildResult, type EmailOutboxRow } from './outbox.js'
 import type { EmailBranding } from './outbox.js'
 import { startOutboxDrainWorker } from '../db/outbox-lease.js'
+import { esc } from './layout.js'
+import { digestSubject, openLabel, stopEmails, stopEmailsLabel, updatedFallback } from './catalog.js'
+import type { Lang } from '../locale.js'
 
 const DIGEST_PRODUCER_LOCK = 547_004
 
@@ -87,27 +90,19 @@ const DIGEST_ITEM_CAP = 100
 // here, so borrowing it would have produced words for events nobody sends and missed the six that
 // are sent.
 //
-// ⚠️ These are English, and the whole mail surface is: measured, there is no locale plumbing in
-// `email/` and no server-side i18n anywhere -- the digest's own subject line is a hard-coded English
-// template. Translating mail is a separate piece of work and a separate ticket; this change stops the
-// body naming internals, which is wrong for an English reader too.
-const SAID: Record<FeedEventType, string> = {
-  'page.published': 'Published',
-  'page.restored': 'Restored a previous version',
-  'page.made_public': 'Made public',
-  'page.made_non_public': 'No longer public',
-  'comment.created': 'New comment',
-  'attachment.confirmed': 'Attachment added',
-}
-
+// #1008 / ADR-260 §3.3: these six labels are the screens' OWN sentences, keyed on the same
+// `FeedEventType` and already translated in `apps/web/src/i18n/locales/{en,ja}.json` under
+// `eventTypes.*` — moved to `@wikistead/i18n-shared` (#1006) so both apps read one copy rather than
+// the mail surface growing an unguarded second one.
+//
 // Rows the digest query does not exclude but this table does not name -- a legacy value, or a kind
 // written by a path that bypasses `fanOutFeedEvent`. Says something true and general rather than
 // falling back to the identifier, which is the failure being fixed.
-function said(eventType: string): string {
-  return SAID[eventType as FeedEventType] ?? 'Updated'
+function said(eventType: string, lang: Lang): string {
+  return EVENT_TYPE_LABELS[lang][eventType as FeedEventType] ?? updatedFallback(lang)
 }
 
-export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding }): Promise<EmailBuildResult> {
+export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding; locale: Lang }): Promise<EmailBuildResult> {
   const memberSub = rows[0]!.member_sub
   const tenant = await registry.findById(ctx.tenantId)
   if (!tenant) return { kind: 'skip', reason: 'tenant gone' }
@@ -156,10 +151,9 @@ export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: 
     if (!ctx.baseUrl) return { kind: 'skip', reason: 'no address for this workspace — refusing to improvise links' }
 
     // minimal body: what happened + send-time-confirmed live title + deep link. Never content or diffs.
-    const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
     const lines = gated.map((g) => {
       const link = g.pageId ? `${ctx.baseUrl}/p/${g.pageId}` : `${ctx.baseUrl}/`
-      return { label: `${said(g.eventType)}: ${g.title ?? ''}`, link }
+      return { label: `${said(g.eventType, ctx.locale)}: ${g.title ?? ''}`, link }
     })
     // #575 slice B: the digest wears the same shell as the mention mail — and gains the unsubscribe it
     // never had. The token's ACTION is `digest`: minting an `immediate` one here (the shape a copy of
@@ -175,16 +169,19 @@ export async function buildDigestEmail(rows: EmailOutboxRow[], ctx: { tenantId: 
     return {
       kind: 'send',
       message: {
-        subject: `[${brandName(ctx.branding)}] Your digest: ${gated.length} update${gated.length === 1 ? '' : 's'}`,
+        subject: `[${brandName(ctx.branding)}] ${digestSubject(ctx.locale, gated.length)}`,
         text: renderBrandedText({
           branding: ctx.branding,
           body: lines.map((l) => `${l.label}\n${l.link}`).join('\n\n'),
-          footer: `Stop these emails: ${unsubUrl}`,
+          footer: stopEmails(ctx.locale, unsubUrl),
+          lang: ctx.locale,
         }),
         html: renderBrandedHtml({
           branding: ctx.branding, baseUrl: ctx.baseUrl,
-          body: `<ul>${lines.map((l) => `<li>${esc(l.label)}: <a href="${esc(l.link)}">open</a></li>`).join('')}</ul>`,
-          footer: `<a href="${esc(unsubUrl)}">Stop these emails</a>`,
+          // §3.3a: the catalogue holds the WORDS ("open"); the anchor around them is written here.
+          body: `<ul>${lines.map((l) => `<li>${esc(l.label)}: <a href="${esc(l.link)}">${esc(openLabel(ctx.locale))}</a></li>`).join('')}</ul>`,
+          footer: `<a href="${esc(unsubUrl)}">${esc(stopEmailsLabel(ctx.locale))}</a>`,
+          lang: ctx.locale,
         }),
         headers: {
           'List-Unsubscribe': `<${unsubUrl}>`,

@@ -83,7 +83,9 @@ describe('#575 slice D: the server reads the product name rather than writing it
 
   it('the surfaces slice B and D converted really interpolate it', () => {
     const read = (rel: string) => readFileSync(join(SERVER, rel), 'utf8')
-    expect(read('routes/members.ts'), 'the invite mail').toMatch(/\$\{productName\(\)\}/)
+    // #1008 / ADR-260 §7 item 4: the invite mail moved to the catalog, so `productName()` now reaches
+    // `inviteSubject`/`inviteBodyHtml` as an argument rather than sitting inside a `${}` interpolation.
+    expect(read('routes/members.ts'), 'the invite mail').toMatch(/productName\(\)/)
     expect(read('routes/mcp-oauth-flow.ts'), 'the MCP consent screen').toMatch(/productName\(\)/)
     expect(read('routes/mcp.ts'), 'the authoring-syntax reference').toMatch(/\$\{productName\(\)\}/)
     expect(read('email/layout.ts'), 'the mail shell takes it from the branding value').toMatch(/productName/)

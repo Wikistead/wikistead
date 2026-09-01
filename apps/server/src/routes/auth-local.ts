@@ -17,7 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import type IORedis from 'ioredis'
 import { emit } from '@wikistead/events'
 import { auditIfEntitled } from '../audit/sink.js'
-import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions } from '../auth/session.js'
+import { SESSION_COOKIE, destroyMemberSessions, establishMemberSession, sessionCookieOptions, tenantDefaultLang } from '../auth/session.js'
 import { FACTOR_COOKIE, createFactorSession, readFactorSession, destroyFactorSession, factorCookieOptions } from '../auth/factor-session.js' // #652 / ADR-219 §6
 import {
   passkeyAuthenticationOptions, verifyPasskeyAssertion, passkeyRegistrationOptions, verifyPasskeyRegistration,
@@ -39,6 +39,9 @@ import { productName } from '../product-name.js'
 import { spendRecoveryCode, recoveryCodesUsable } from '../auth/recovery-codes.js' // #650 / ADR-226 §4: the recovery door
 import { enqueueEmailOutbox } from '../email/outbox.js'
 import { RECOVERY_USED_CLASS } from '../email/security-builder.js'
+import { esc } from '../email/layout.js'
+import { resetBodyText, resetIgnore, resetIntro, resetLinkHint, resetLinkLabel, resetSubject } from '../email/catalog.js'
+import { resolveMailLocale } from '../locale.js'
 
 // ADR-198 §5, ruled on #568: an identifier is locked after 5 failures in 15 minutes, an IP after 30,
 // and a lock lasts 30 minutes. Env-overridable because the e2e and server suites hammer this path
@@ -219,6 +222,12 @@ export async function authLocalPlugin(app: FastifyInstance) {
     const minted = await mintPasswordReset(req.db, req.tenant, identifier)
     if (!minted) return silence()
 
+    // #1008 / ADR-260 §3.1/§6.3: resolved here (synchronously, on req.db) rather than inside the
+    // detached closure below — that closure outlives this handler's connection lifetime, so it
+    // captures a plain `Lang` value instead of touching `req.db` itself.
+    const memberRow = await req.db.sql<[{ locale: string | null }?]>`SELECT locale FROM members WHERE sub = ${minted.memberSub} LIMIT 1`
+    const lang = resolveMailLocale(memberRow[0]?.locale ?? null, await tenantDefaultLang(req.db))
+
     // Sent DIRECTLY, not through the notification outbox: that outbox stores a pointer rather than a
     // body, so a link could not be reconstructed from a queued row (ADR-198 §6 rev3). A send failure
     // is logged and still answers 204 — the caller must not learn that an address exists from a
@@ -232,9 +241,16 @@ export async function authLocalPlugin(app: FastifyInstance) {
       const { resolveTenantEmailDriver } = await import('@wikistead/hooks')
       await resolveTenantEmailDriver({ tenantId: req.tenant.id, plan: req.tenant.plan }, req.server.email).send({
         to: minted.email,
-        subject: `Reset your ${productName()} password`,
-        text: `Someone asked to reset the password for this address. Open this link within the hour:\n\n${link}\n\nIf it was not you, you can ignore this — nothing has changed.`,
-        html: `<p>Someone asked to reset the password for this address.</p><p><a href="${link}">Choose a new password</a> (the link works for one hour).</p><p>If it was not you, you can ignore this — nothing has changed.</p>`,
+        subject: resetSubject(lang, productName()),
+        text: resetBodyText(lang, link),
+        // #1008 / ADR-260 §3.3a: the catalogue entries are text, so the three paragraphs and the
+        // anchor are written here. `link` is host-derived (`req.headers.host`) and was interpolated
+        // unescaped before this change — a raw HTML slot taking an attacker-influenced Host header is
+        // exactly the boundary §3.3a exists to hold, so it now goes through the same `esc` every
+        // other mail-composing site uses.
+        html: `<p>${esc(resetIntro(lang))}</p>`
+          + `<p><a href="${esc(link)}">${esc(resetLinkLabel(lang))}</a> ${esc(resetLinkHint(lang))}</p>`
+          + `<p>${esc(resetIgnore(lang))}</p>`,
       })
     })().catch((err) => req.log.warn({ err }, 'password reset email failed to send'))
     // Audited by SUB, so the ledger records who a reset was requested for — the first thing an

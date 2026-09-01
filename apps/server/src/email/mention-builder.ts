@@ -16,10 +16,11 @@ import { acquireTenantDb, registry } from '../db/index.js'
 import { pageEventDisposition } from '../page-disposition.js'
 import { registerEmailBuilder, type EmailBuildResult, type EmailOutboxRow } from './outbox.js'
 import type { EmailBranding } from './outbox.js'
+import { esc } from './layout.js'
+import { andMore, mentionBodyText, mentionSentence, mentionSubject, openThePage, stopEmails, stopEmailsLabel, untitledPage } from './catalog.js'
+import type { Lang } from '../locale.js'
 
-const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
-export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding }): Promise<EmailBuildResult> {
+export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding; locale: Lang }): Promise<EmailBuildResult> {
   const ids = rows.map((r) => r.notification_id).filter((v): v is string => v != null)
   if (ids.length === 0) return { kind: 'skip', reason: 'no notification ids on mention rows' }
   const tenant = await registry.findById(ctx.tenantId)
@@ -51,9 +52,9 @@ export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId:
     // said once per drain by the drain itself, which is the only place that knows; repeating a guess
     // at it once per message is how the old string came to name the wrong one.
     if (!ctx.baseUrl) return { kind: 'skip', reason: 'no address for this workspace — refusing to improvise a link' }
-    const title = gated[0]!.title ?? 'a page'
+    const title = gated[0]!.title ?? untitledPage(ctx.locale)
     const link = `${ctx.baseUrl}/p/${pageId}`
-    const more = gated.length > 1 ? ` (and ${gated.length - 1} more)` : ''
+    const more = gated.length > 1 ? andMore(ctx.locale, gated.length - 1) : ''
     // #547 S3: the RFC 8058 unsubscribe — a tenant-bound unsub+jwt in the link; GET confirms, the
     // one-click POST (List-Unsubscribe-Post) flips exactly this member's email_immediate pref.
     const unsubToken = await mintUnsubToken(
@@ -68,16 +69,21 @@ export async function buildMentionEmail(rows: EmailOutboxRow[], ctx: { tenantId:
     return {
       kind: 'send',
       message: {
-        subject: `[${brandName(ctx.branding)}] You were mentioned in "${title}"${more}`,
+        subject: `[${brandName(ctx.branding)}] ${mentionSubject(ctx.locale, title, more)}`,
         text: renderBrandedText({
           branding: ctx.branding,
-          body: `You were mentioned in "${title}"${more}.\n\nOpen the page:\n${link}`,
-          footer: `Stop these emails: ${unsubUrl}`,
+          body: mentionBodyText(ctx.locale, title, more, link),
+          footer: stopEmails(ctx.locale, unsubUrl),
+          lang: ctx.locale,
         }),
         html: renderBrandedHtml({
           branding: ctx.branding, baseUrl: ctx.baseUrl,
-          body: `<p>You were mentioned in <strong>${esc(title)}</strong>${esc(more)}.</p><p><a href="${esc(link)}">Open the page</a></p>`,
-          footer: `<a href="${esc(unsubUrl)}">Stop these emails</a>`,
+          // §3.3a: the catalogue sentence is text; the <strong> and the anchor are written HERE,
+          // around values this builder has already escaped.
+          body: `<p>${mentionSentence(ctx.locale, `<strong>${esc(title)}</strong>`, esc(more))}</p>`
+            + `<p><a href="${esc(link)}">${esc(openThePage(ctx.locale))}</a></p>`,
+          footer: `<a href="${esc(unsubUrl)}">${esc(stopEmailsLabel(ctx.locale))}</a>`,
+          lang: ctx.locale,
         }),
         headers: {
           'List-Unsubscribe': `<${unsubUrl}>`,

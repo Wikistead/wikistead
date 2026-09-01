@@ -1,12 +1,12 @@
 // #547 / ADR-196 (S2): mention email rides the notification row through the outbox — and the legacy
-// direct send in comments.ts is gone. The ADR's anti-tests, driven end to end on the real stack:
-//   - one mention → exactly one outbox row per recipient → one mail, TITLE + LINK only (never the
-//     comment body — the Review ruling: an email is a permanent disclosure outside the fortress);
-//   - the #362 kill switch and the email_immediate pref silence it (today's bug, named and fixed);
-//   - a DRAFT mention stays in-app: suppress at build time, and publishing later does not
-//     retroactively send (deterministic, never timing-dependent — R2);
-//   - a recipient whose view was revoked between fan-out and send gets nothing (suppress, no retry);
-//   - K mentions inside the fold window → ONE message with a folded count.
+// direct send in comments.ts is gone. The ADR's anti-tests, driven end to end on the real stack
+// - one mention → exactly one outbox row per recipient → one mail, TITLE + LINK only (never the
+// comment body — the Review ruling: an email is a permanent disclosure outside the fortress);
+// - the #362 kill switch and the email_immediate pref silence it (today's bug, named and fixed);
+// - a DRAFT mention stays in-app: suppress at build time, and publishing later does not
+// retroactively send (deterministic, never timing-dependent — R2);
+// - a recipient whose view was revoked between fan-out and send gets nothing (suppress, no retry);
+// - K mentions inside the fold window → ONE message with a folded count.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -161,6 +161,29 @@ describe('#547 S2: mention email through the outbox', () => {
     expect(sent.length, 'one folded mail').toBe(1)
     expect(sent[0]!.subject).toContain('and 1 more')
     expect((await outboxOf(R1)).length).toBe(0)
+  }, 120_000)
+
+  // #1008 / ADR-260 §5: the mention mail a 'ja' recipient actually receives — subject, both parts and
+  // the shell's footer, judged as a reader would rather than entry by entry.
+  it("a recipient whose locale is 'ja' receives the whole mention mail in Japanese", async () => {
+    await adminPool`UPDATE members SET locale = 'ja' WHERE tenant_id = ${TENANT} AND sub = ${R1}`
+    try {
+      const res = await mention([R1])
+      expect(res.statusCode).toBeLessThan(300)
+      await forceDue(R1)
+      await drain()
+      expect(sent.length).toBe(1)
+      expect(sent[0]!.subject, 'the subject').toContain('メンションされました')
+      expect(sent[0]!.text, 'the link label').toContain('ページを開く')
+      const readerWords = (s: string): string[] =>
+        (s.replace(/<[^>]*>/g, ' ').replace(/https?:\/\/\S+/g, ' ')
+          .split(`Mention Target ${STAMP}`).join(' ').split('Wikistead').join(' ')
+          .match(/[A-Za-z]{3,}/g) ?? [])
+      expect(readerWords(sent[0]!.text), 'the text part').toEqual([])
+      expect(readerWords(sent[0]!.html ?? ''), 'the html part — where the builder writes its own markup').toEqual([])
+    } finally {
+      await adminPool`UPDATE members SET locale = NULL WHERE tenant_id = ${TENANT} AND sub = ${R1}`
+    }
   }, 120_000)
 
   it('lexical: the legacy direct send stays deleted from comments.ts', async () => {

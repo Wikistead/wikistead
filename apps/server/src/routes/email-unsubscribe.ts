@@ -10,6 +10,20 @@ import { verifyUnsubToken, type UnsubTokenClaims } from '@wikistead/auth'
 import { getTenantBranding } from './branding.js'
 import { esc } from '../email/layout.js'
 import { productName } from '../product-name.js'
+import { resolveMailLocale, type Lang } from '../locale.js'
+import { tenantDefaultLang } from '../auth/session.js'
+import {
+  unsubBody, unsubHeading, unsubKindDigest, unsubKindMention, unsubTitle,
+  unsubscribeButton, unsubscribedBody, unsubscribedTitle,
+} from '../email/catalog.js'
+
+/** #1008 / ADR-260 §3.1: the same three-step chain, resolved here rather than assumed English —
+ * this is a request handler, not the outbox drain, so it reads the member directly off `req.db`
+ * (already the correctly tenant-scoped connection every other read in this file uses). */
+async function resolveLocale(req: FastifyRequest, sub: string): Promise<Lang> {
+  const [row] = await req.db.sql<[{ locale: string | null }?]>`SELECT locale FROM members WHERE sub = ${sub} LIMIT 1`
+  return resolveMailLocale(row?.locale ?? null, await tenantDefaultLang(req.db))
+}
 
 /** The tenant's display name, else the product's. Branding failures never block an unsubscribe. */
 async function workspaceName(req: FastifyRequest): Promise<string> {
@@ -43,7 +57,9 @@ export async function emailUnsubscribePlugin(app: FastifyInstance) {
   app.get<{ Querystring: { token?: string } }>('/email/unsubscribe', { config: { public: true } }, async (req, reply) => {
     const claims = await claimsOf(req)
     if (!claims) return reply.code(404).send({ error: 'not found' })
-    const kind = claims.action === 'immediate' ? 'mention email' : 'digest email'
+    const lang = await resolveLocale(req, claims.sub)
+    // `kind` is one of two fixed catalog strings — never user input, no escaping needed.
+    const kind = claims.action === 'immediate' ? unsubKindMention(lang) : unsubKindDigest(lang)
     const action = `/email/unsubscribe?token=${encodeURIComponent((req.query as { token?: string }).token!)}`
     // #575 slice B: the page says WHICH workspace is being left. It is a raw template on the same
     // origin as the session cookie (ADR-016) and the display name is stored with only a trim and a
@@ -51,12 +67,12 @@ export async function emailUnsubscribePlugin(app: FastifyInstance) {
     // and the mails cannot drift apart on what escaping means.
     const brand = esc(await workspaceName(req))
     return reply.type('text/html').send(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Unsubscribe from ${brand}</title></head>
+<html><head><meta charset="utf-8"><title>${unsubTitle(lang, brand)}</title></head>
 <body style="font-family:sans-serif;max-width:32rem;margin:4rem auto">
 <p style="color:#666;font-size:0.9rem;margin:0 0 0.5rem">${brand}</p>
-<h1 style="font-size:1.2rem">Stop receiving ${esc(kind)}?</h1>
-<p>This turns off ${esc(kind)} from ${brand} for your account. You can turn it back on any time in your account settings.</p>
-<form method="post" action="${esc(action)}"><button type="submit">Unsubscribe</button></form>
+<h1 style="font-size:1.2rem">${unsubHeading(lang, kind)}</h1>
+<p>${unsubBody(lang, kind, brand)}</p>
+<form method="post" action="${esc(action)}"><button type="submit">${unsubscribeButton(lang)}</button></form>
 </body></html>`)
   })
 
@@ -68,7 +84,8 @@ export async function emailUnsubscribePlugin(app: FastifyInstance) {
     const col = claims.action === 'immediate' ? 'email_immediate' : 'email_digest'
     // RLS-scoped handle: the UPDATE can only ever touch this tenant's row for this sub
     await req.db.sql`UPDATE members SET ${req.db.sql(col)} = false WHERE sub = ${claims.sub}`
+    const lang = await resolveLocale(req, claims.sub)
     const brand = esc(await workspaceName(req))
-    return reply.type('text/html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Unsubscribed</title></head><body style="font-family:sans-serif;max-width:32rem;margin:4rem auto"><p style="color:#666;font-size:0.9rem;margin:0 0 0.5rem">${brand}</p><p>Unsubscribed. You can re-enable this email in your account settings.</p></body></html>`)
+    return reply.type('text/html').send(`<!doctype html><html><head><meta charset="utf-8"><title>${unsubscribedTitle(lang)}</title></head><body style="font-family:sans-serif;max-width:32rem;margin:4rem auto"><p style="color:#666;font-size:0.9rem;margin:0 0 0.5rem">${brand}</p><p>${unsubscribedBody(lang)}</p></body></html>`)
   })
 }

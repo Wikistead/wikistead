@@ -25,64 +25,64 @@
 // which notice this is into one of two fields that already mean something else.
 import { brandName, esc, renderBrandedHtml, renderBrandedText } from './layout.js'
 import { registerEmailBuilder, type EmailBuildResult, type EmailBranding, type EmailOutboxRow } from './outbox.js'
+import type { Lang } from '../locale.js'
+import {
+  recoveryFooter, recoveryMintedBody, recoveryMintedSubject, recoveryUsedBody, recoveryUsedSubject,
+} from './catalog.js'
+
+// §3.3a: the catalogue holds ONE text body per notice, its paragraphs separated by a blank line.
+// The HTML part is derived from that same text here, so the two parts cannot come to say different
+// things -- and every word of it goes through the one `esc` on the way into a raw HTML slot.
+const paragraphsHtml = (text: string): string =>
+  text.split('\n\n').map((p) => `<p>${esc(p)}</p>`).join('')
 
 /** Branded chrome when there is a base URL for the logo, plain prose when there is not. */
-function render(branding: EmailBranding, baseUrl: string | null, args: { body: string; html: string; footer: string }) {
+function render(branding: EmailBranding, baseUrl: string | null, lang: Lang, args: { body: string; html: string; footer: string }) {
   return {
-    text: renderBrandedText({ branding, body: args.body, footer: args.footer }),
+    text: renderBrandedText({ branding, body: args.body, footer: args.footer, lang }),
     html: baseUrl
-      ? renderBrandedHtml({ branding, baseUrl, body: args.html, footer: args.footer })
+      ? renderBrandedHtml({ branding, baseUrl, body: args.html, footer: args.footer, lang })
       : `<div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px">`
         + `<p style="margin:0 0 16px"><strong>${esc(brandName(branding))}</strong></p>${args.html}`
         + `<p style="font-size:12px;color:#666;margin-top:20px">${esc(args.footer)}</p></div>`,
   }
 }
 
-// The footer is advice, not a link: the recipient of a "this was not me" message must not be trained to
-// click their way back in from an email, which is the shape every credential-phishing message wears.
-const FOOTER = 'If this was not you, sign in and re-mint your recovery codes, then tell an administrator.'
-
 export async function buildRecoveryMintedEmail(
-  rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding },
+  rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding; locale: Lang },
 ): Promise<EmailBuildResult> {
   if (rows.length === 0) return { kind: 'skip', reason: 'no rows' }
   const name = brandName(ctx.branding)
+  const footer = recoveryFooter(ctx.locale)
   return {
     kind: 'send',
     message: {
-      subject: `[${name}] Recovery codes were created for your account`,
-      ...render(ctx.branding, ctx.baseUrl, {
-        body: 'A new set of recovery codes was created for your account. Any earlier set has stopped working.\n\n'
-          + 'Keep the codes somewhere you can reach without your phone. Each one works once, and using one '
-          + 'removes every second factor from your account.',
-        html: '<p>A new set of recovery codes was created for your account. Any earlier set has stopped working.</p>'
-          + '<p>Keep the codes somewhere you can reach without your phone. Each one works once, and using one '
-          + 'removes every second factor from your account.</p>',
-        footer: FOOTER,
+      subject: `[${name}] ${recoveryMintedSubject(ctx.locale)}`,
+      ...render(ctx.branding, ctx.baseUrl, ctx.locale, {
+        body: recoveryMintedBody(ctx.locale),
+        html: paragraphsHtml(recoveryMintedBody(ctx.locale)),
+        footer,
       }),
     },
   }
 }
 
 export async function buildRecoveryUsedEmail(
-  rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding },
+  rows: EmailOutboxRow[], ctx: { tenantId: string; baseUrl: string | null; branding: EmailBranding; locale: Lang },
 ): Promise<EmailBuildResult> {
   if (rows.length === 0) return { kind: 'skip', reason: 'no rows' }
   const name = brandName(ctx.branding)
+  const footer = recoveryFooter(ctx.locale)
   return {
     kind: 'send',
     message: {
       // The subject says what HAPPENED, not what the feature is called. Somebody scanning a phone's
       // lock screen has to be able to tell in one line whether to worry.
-      subject: `[${name}] A recovery code was used on your account`,
-      ...render(ctx.branding, ctx.baseUrl, {
-        body: 'A recovery code was used to get back into your account. Every second factor has been removed, '
-          + 'the rest of that set of codes no longer works, and every session was signed out.\n\n'
-          + 'If this was you, enrol a new authenticator and create a fresh set of codes.',
-        html: '<p>A recovery code was used to get back into your account. Every second factor has been removed, '
-          + 'the rest of that set of codes no longer works, and every session was signed out.</p>'
-          + '<p>If this was you, enrol a new authenticator and create a fresh set of codes.</p>',
-        footer: FOOTER,
+      subject: `[${name}] ${recoveryUsedSubject(ctx.locale)}`,
+      ...render(ctx.branding, ctx.baseUrl, ctx.locale, {
+        body: recoveryUsedBody(ctx.locale),
+        html: paragraphsHtml(recoveryUsedBody(ctx.locale)),
+        footer,
       }),
     },
   }

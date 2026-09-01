@@ -36,7 +36,7 @@ describe('#575: what a mail is branded with', () => {
 
   it('an unentitled tenant gets the bundled mark rather than no mark', () => {
     // getTenantBranding strips logoUrl when the plan is not entitled; the fallback must not be "nothing"
-    const html = renderBrandedHtml({ branding: { ...base, displayName: 'Acme', logoUrl: null }, baseUrl: 'https://x.test', body: '<p>b</p>', footer: 'f' })
+    const html = renderBrandedHtml({ branding: { ...base, displayName: 'Acme', logoUrl: null }, baseUrl: 'https://x.test', body: '<p>b</p>', footer: 'f', lang: 'en' })
     expect(html).toContain('icon-email.png')
   })
 })
@@ -94,13 +94,13 @@ describe('#575: the display name is escaped everywhere it is rendered', () => {
   const hostile = '<script>alert(1)</script>'
 
   it('in the HTML shell', () => {
-    const html = renderBrandedHtml({ branding: { ...base, displayName: hostile }, baseUrl: 'https://x.test', body: '<p>b</p>', footer: 'f' })
+    const html = renderBrandedHtml({ branding: { ...base, displayName: hostile }, baseUrl: 'https://x.test', body: '<p>b</p>', footer: 'f', lang: 'en' })
     expect(html, 'the name is text, not markup').not.toContain('<script>')
     expect(html).toContain(esc(hostile))
   })
 
   it('in the alt attribute, where a quote would break out', () => {
-    const html = renderBrandedHtml({ branding: { ...base, displayName: 'a" onerror="x' }, baseUrl: 'https://x.test', body: '', footer: '' })
+    const html = renderBrandedHtml({ branding: { ...base, displayName: 'a" onerror="x' }, baseUrl: 'https://x.test', body: '', footer: '', lang: 'en' })
     expect(html).not.toContain('onerror="x"')
     expect(html).toContain('&quot;')
   })
@@ -108,14 +108,14 @@ describe('#575: the display name is escaped everywhere it is rendered', () => {
 
 describe('#575: the Powered by line follows #430, not a rule of its own', () => {
   it('a free tenant shows it', () => {
-    expect(renderBrandedHtml({ branding: base, baseUrl: 'https://x.test', body: '', footer: '' })).toContain('Powered by Wikistead')
-    expect(renderBrandedText({ branding: base, body: '', footer: '' })).toContain('Powered by Wikistead')
+    expect(renderBrandedHtml({ branding: base, baseUrl: 'https://x.test', body: '', footer: '', lang: 'en' })).toContain('Powered by Wikistead')
+    expect(renderBrandedText({ branding: base, body: '', footer: '', lang: 'en' })).toContain('Powered by Wikistead')
   })
 
   it('a white-label tenant does not', () => {
     const b = { ...base, whitelabel: true }
-    expect(renderBrandedHtml({ branding: b, baseUrl: 'https://x.test', body: '', footer: '' })).not.toContain('Powered by')
-    expect(renderBrandedText({ branding: b, body: '', footer: '' })).not.toContain('Powered by')
+    expect(renderBrandedHtml({ branding: b, baseUrl: 'https://x.test', body: '', footer: '', lang: 'en' })).not.toContain('Powered by')
+    expect(renderBrandedText({ branding: b, body: '', footer: '', lang: 'en' })).not.toContain('Powered by')
   })
 })
 

@@ -15,7 +15,7 @@ import { enqueueTupleDeletes, flushTupleDeletes, type TupleIntent } from '../db/
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
 import { assertClosingIsSafe, assertNotLastExemptAdmin, anAdminHoldsAKey, memberHasAnotherWayIn, subsWithAnotherWayIn, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
-import { destroyMemberSessions } from '../auth/session.js'
+import { destroyMemberSessions, tenantDefaultLang } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
 import { revokeRecoveryCodes } from '../auth/recovery-codes.js' // #650 / ADR-226 §5: the set goes with them
 import { holdsAConfirmedFactor } from '../auth/factor-policy.js' // #644 / #675: the condition, named once
@@ -28,6 +28,9 @@ import { auditIfEntitled } from '../audit/sink.js'
 import { resolveEntitlements } from '@wikistead/entitlements' // #520: EE gate for the tenant analytics roll-up
 import { emit } from '@wikistead/events'
 import { productName } from '../product-name.js' // #575: the name is a deployment value
+import { esc } from '../email/layout.js'
+import { inviteAcceptLabel, inviteBodyText, inviteSentence, inviteSubject } from '../email/catalog.js'
+import { resolveMailLocale } from '../locale.js'
 
 const ROLES: InviteRole[] = ['admin', 'member']
 
@@ -750,15 +753,20 @@ export async function membersPlugin(app: FastifyInstance) {
     let emailed = false
     if (email) {
       try {
+        // #1008 / ADR-260 §6.3: an invite target has no member row yet, so the chain can only ever
+        // reach its second step — the tenant default, never a member locale (there is no member).
+        const lang = resolveMailLocale(null, await tenantDefaultLang(req.db))
         // #547 / ADR-196 §7: the REQUEST path resolves per tenant too — a resolver consulted only by
         // the outbox drain would silently drop a managed-sender tenant's invite mail onto the CE
         // fallback (rev2/N-a). The boot-time app.email stays the fallback.
         const { resolveTenantEmailDriver } = await import('@wikistead/hooks')
         await resolveTenantEmailDriver({ tenantId: req.tenant.id, plan: req.tenant.plan }, req.server.email).send({
           to: email,
-          subject: `You're invited to ${req.tenant.slug} on ${productName()}`,
-          text: `You've been invited to join ${req.tenant.slug}. Open this link to accept:\n\n${inviteUrl}`,
-          html: `<p>You've been invited to join <strong>${req.tenant.slug}</strong> on ${productName()}.</p><p><a href="${inviteUrl}">Accept your invitation</a></p>`,
+          subject: inviteSubject(lang, req.tenant.slug, productName()),
+          text: inviteBodyText(lang, req.tenant.slug, productName(), inviteUrl),
+          // §3.3a: the sentence is a text entry; this site writes the <strong> and the anchor.
+          html: `<p>${inviteSentence(lang, `<strong>${esc(req.tenant.slug)}</strong>`, esc(productName()))}</p>`
+            + `<p><a href="${esc(inviteUrl)}">${esc(inviteAcceptLabel(lang))}</a></p>`,
         })
         emailed = true
         // #638: the outcome used to be reported once, in this response, and then forgotten — the list of
@@ -795,12 +803,16 @@ export async function membersPlugin(app: FastifyInstance) {
     let emailed = false
     if (req.body?.email === true && reissued.email) {
       try {
+        // #1008 / ADR-260 §6.3: same reasoning as the create path — no member row exists yet.
+        const lang = resolveMailLocale(null, await tenantDefaultLang(req.db))
         const { resolveTenantEmailDriver } = await import('@wikistead/hooks')
         await resolveTenantEmailDriver({ tenantId: req.tenant.id, plan: req.tenant.plan }, req.server.email).send({
           to: reissued.email,
-          subject: `You're invited to ${req.tenant.slug} on ${productName()}`,
-          text: `You've been invited to join ${req.tenant.slug}. Open this link to accept:\n\n${inviteUrl}`,
-          html: `<p>You've been invited to join <strong>${req.tenant.slug}</strong> on ${productName()}.</p><p><a href="${inviteUrl}">Accept your invitation</a></p>`,
+          subject: inviteSubject(lang, req.tenant.slug, productName()),
+          text: inviteBodyText(lang, req.tenant.slug, productName(), inviteUrl),
+          // §3.3a: the sentence is a text entry; this site writes the <strong> and the anchor.
+          html: `<p>${inviteSentence(lang, `<strong>${esc(req.tenant.slug)}</strong>`, esc(productName()))}</p>`
+            + `<p><a href="${esc(inviteUrl)}">${esc(inviteAcceptLabel(lang))}</a></p>`,
         })
         emailed = true
         await req.db.sql`UPDATE invites SET last_emailed_at = now() WHERE id = ${req.params.id}`
