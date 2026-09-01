@@ -102,6 +102,7 @@ test("#317 guest VIEW link: checkbox stays disabled AND the server rejects a dir
 });
 
 test("#317 guest × Reading (edit link): the checkbox flips the draft (#314 parity for guests)", async ({ browser }) => {
+  test.skip(true, "#941: isolated again — 60s timeout in the #891 gate's 20-spec run while its siblings slowed 8s→35s; green standalone (2026-09-01)");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPageWithTask(member, "guest-cb-reading");
