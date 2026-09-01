@@ -75,15 +75,30 @@ describe("#978 the not-live toast is gated on edit capability", () => {
 // is true in isolation regardless of what routes.tsx actually passes it. Neither call site can be
 // rendered directly here — each sits inside a 1,400-line route component behind a live query client and
 // a collab socket, the same reason `publish-withheld-813.test.ts` reads this file as source rather than
-// mounting it — so this reads routes.tsx to pin that BOTH call sites actually gate their argument on
-// `canEdit`, closing the loop between "the hook behaves correctly when given null" and "the call site
-// ever gives it null".
-const ROUTES_SRC = readFileSync(resolve(import.meta.dirname, "routes.tsx"), "utf8");
-const GATED_CALL = /useNotLiveToast\(`notlive:(?:member|guest):\$\{pageId\}`,\s*canEdit \? liveness\.reason : null\)/g;
+// mounting it — so what remains is to pin that the value the call sites hand in is `null` for a
+// view-only reader, closing the loop between "the hook behaves correctly when given null" and "the
+// call site ever gives it null".
+//
+// #994 / ADR-276 moved that expression out of both call sites and into `toastReason`, so the gate is
+// now a function this can drive DIRECTLY rather than a shape it has to recognise in source — a
+// strictly better pin than the regex that used to stand here. The remaining source question ("do both
+// call sites actually reach `toastReason`") is pinned in `editor/unsynced-latch-994.test.ts` alongside
+// the rest of that ticket's call-site wiring, so it is not duplicated here.
+const { toastReason } = await import("../editor/useNotLiveToast");
 
-describe("#978 routes.tsx actually passes the gated value in", () => {
-  it("both call sites (member and guest) gate on canEdit, not just one of the two", () => {
-    const matches = [...ROUTES_SRC.matchAll(GATED_CALL)];
-    expect(matches.length, "one gated useNotLiveToast call per editing surface — a fix applied to only one call site is the exact bug class this repo keeps re-measuring").toBe(2);
+describe("#978 the gate the call sites use answers null for a view-only reader", () => {
+  it("view-only is silent even in the permanently-stuck state that produced the report", () => {
+    // View-only never joins the collab room, so `liveness` is stuck at its initial
+    // {live:false, reason:"connecting"} with no event that could ever clear a `duration: Infinity`
+    // toast. Both the unsent-edit and no-unsent-edit cases must stay silent — the #994 gate that now
+    // sits alongside this one must not have made view-only reachable again through its other branch.
+    expect(toastReason({ canEdit: false, reason: "connecting", unsynced: false })).toBeNull();
+    expect(toastReason({ canEdit: false, reason: "connecting", unsynced: true })).toBeNull();
+    expect(toastReason({ canEdit: false, reason: "read-only", unsynced: true })).toBeNull();
+  });
+
+  it("and an edit-capable reader with a real unsent edit is NOT silenced by that gate", () => {
+    // Otherwise the fix could be "always suppress", which is the failure mode in the other direction.
+    expect(toastReason({ canEdit: true, reason: "connecting", unsynced: true })).toBe("connecting");
   });
 });

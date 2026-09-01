@@ -18,8 +18,13 @@ vi.mock("react-i18next", () => ({
 }));
 vi.mock("../ui/toast", () => ({ notify: { persistent: vi.fn(), dismiss: vi.fn() } }));
 
-function Harness({ id, reason }: { id: string; reason: NotLiveReason | null }) {
-  useNotLiveToast(id, reason);
+// #994 / ADR-276 added a third argument. `live` is the CONNECTION's own answer, which the hook now
+// latches "has been live" on — it used to infer that from `reason === null`, and #994's gate can null
+// `reason` on a connection that was never live (nothing at risk to report), which would have set the
+// latch at mount and made this whole grace period unreachable. Each case below therefore says
+// explicitly whether the connection was live, where it used to say it by passing `null`.
+function Harness({ id, reason, live }: { id: string; reason: NotLiveReason | null; live: boolean }) {
+  useNotLiveToast(id, reason, live);
   return null;
 }
 
@@ -40,15 +45,15 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const render = (id: string, reason: NotLiveReason | null) =>
-  act(() => { root.render(createElement(Harness, { id, reason })); });
+const render = (id: string, reason: NotLiveReason | null, live = false) =>
+  act(() => { root.render(createElement(Harness, { id, reason, live })); });
 
 describe("#980: pre-live toast is delayed by a grace period, post-live is not", () => {
   it("a pre-live disconnect that resolves inside the handshake window never toasts", () => {
     render("notlive:p1", "connecting");
     act(() => { vi.advanceTimersByTime(GRACE_MS - 1); });
     expect(notify.persistent).not.toHaveBeenCalled();
-    render("notlive:p1", null); // synced before the grace period elapsed
+    render("notlive:p1", null, true); // synced before the grace period elapsed
     act(() => { vi.advanceTimersByTime(GRACE_MS); });
     expect(notify.persistent).not.toHaveBeenCalled();
   });
@@ -70,7 +75,7 @@ describe("#980: pre-live toast is delayed by a grace period, post-live is not", 
   });
 
   it("a disconnect after having been live shows immediately, with no grace", () => {
-    render("notlive:p4", null); // reaches live first
+    render("notlive:p4", null, true); // reaches live first
     render("notlive:p4", "syncing"); // then drops
     // asserted with ZERO timer advance: a mutation that re-applies grace universally leaves this
     // pending and turns this assertion red.
@@ -79,7 +84,7 @@ describe("#980: pre-live toast is delayed by a grace period, post-live is not", 
 
   it("going live dismisses any pending pre-live grace timer so it cannot fire late", () => {
     render("notlive:p5", "connecting");
-    render("notlive:p5", null);
+    render("notlive:p5", null, true);
     act(() => { vi.advanceTimersByTime(GRACE_MS * 2); });
     expect(notify.persistent).not.toHaveBeenCalled();
     expect(notify.dismiss).toHaveBeenCalledWith("notlive:p5");

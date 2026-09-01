@@ -78,9 +78,10 @@
     "guest": "Guest",
     "notSaving": {
       "title": "Your changes are not being saved.",
+      "readOnlyTitle": "You can no longer edit this page.",
       "connecting": "The connection dropped. What you type stays here and will be sent when it comes back.",
       "unauthenticated": "This editing session has ended. Open the link again to carry on.",
-      "readOnly": "You no longer have permission to edit this page.",
+      "readOnly": "Anything you type from here on will not be saved. Ask a workspace admin to give your edit access back.",
       "syncing": "Still syncing with the server."
     }
   },

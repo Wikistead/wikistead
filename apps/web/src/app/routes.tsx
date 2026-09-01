@@ -41,12 +41,13 @@ import { SetPasswordForm } from "./SetPasswordForm";
 
 
 import { Editor, type AnchorGetter } from "../editor/Editor";
-import { useNotLiveToast } from "../editor/useNotLiveToast";
+import { useNotLiveToast, toastReason } from "../editor/useNotLiveToast";
 import type { Liveness } from "../editor/collab";
 import { makeGuestSession, type GuestSession } from "../session/guest-session";
 import { isServerFault, isServerFaultError, HttpStatusError, loadVerdict } from "./serverFault"; // #886 / #681: one place decides "the server failed"
 import { setVimClipboardMode } from "../editor/live-preview/vim-clipboard";
 import { createDirtySignal } from "../editor/dirtySignal";
+import { createUnsyncedSignal, useUnsynced } from "../editor/unsyncedSignal";
 import { colorFromString } from "../ui/avatar";
 
 // Persisted vim-keymap preference for the single edit surface (Step I). Replaces the
@@ -451,6 +452,14 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   // External dirty store (instant Publish enable) — read only by PageToolbar, written
   // only by the editor's Y.Text observer; never re-renders PageRoute/Editor.
   const dirtySig = useRef(createDirtySignal()).current;
+  // #994 / ADR-276: the SECOND store — "an edit exists that never reached the collab server", which
+  // is a different question from `dirtySig`'s "the draft diverges from the published snapshot" (that
+  // one stays true for the whole life of an unpublished draft, so gating "not saved" on it would
+  // fire on every brief disconnect for any page with a draft). Written from `collab.ts` via the
+  // Editor; read here, where the toast already lives.
+  const unsyncedSig = useRef(createUnsyncedSignal()).current;
+  const unsynced = useUnsynced(unsyncedSig);
+  const onUnsyncedChanges = useCallback((v: boolean) => unsyncedSig.set(v), [unsyncedSig]);
   const { data: threads } = useComments(pageId ?? "");
   // ADR-102: useComments is now an infinite query — flatten the loaded pages to the thread list. (Inline
   // comments were removed in #214 part 1, so inlineComments is always empty now; openComments is a
@@ -558,7 +567,12 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const [editing, setEditing] = useState(autoEdit);
   // Navigating to another page opens it in READ mode (unless ?edit=1) — PageRoute is
   // not remounted on a param change, so reset editing when the page changes.
-  useEffect(() => { setEditing(autoEdit); dirtySig.set(false); }, [pageId, autoEdit, dirtySig]);
+  // #994 / ADR-276 owner ruling ③: `unsyncedSig` resets on the page switch in the SAME effect as
+  // `dirtySig`. The latch itself is rebuilt anyway (`<Editor key={docName}>` remounts and `connect()`
+  // makes a new one), but this route holds ONE store across every page, so without the reset the
+  // previous page's value would ring the next page's toast in the window before the new connection
+  // reports — including on a page the member can only VIEW, where nothing ever reports at all.
+  useEffect(() => { setEditing(autoEdit); dirtySig.set(false); unsyncedSig.set(false); }, [pageId, autoEdit, dirtySig, unsyncedSig]);
   // #464 / ADR-175: signal ONE genuine READ per page open in VIEW mode (not the polled /published fetch,
   // not an edit open) so analytics counts readers, not editor-openers. Fires once per pageId (PageRoute is
   // not remounted on a param change, so a ref keyed on pageId gates it); the server view-gates + dedups.
@@ -609,10 +623,9 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
   const livenessRef = useRef(liveness);
   livenessRef.current = liveness;
   // #978 / ADR-261: the band that used to sit above the surface is now this dismissible toast.
-  // #978 view-only never joins the collab room (Editor.tsx), so `liveness` stays stuck at
-  // its initial {live:false, reason:"connecting"} forever — gate on canEdit or every view-only
-  // reader gets a persistent false-positive toast that never clears.
-  useNotLiveToast(`notlive:member:${pageId}`, canEdit ? liveness.reason : null);
+  // #978 / #994 ADR-276: what the toast may say is decided in ONE place, `toastReason` —
+  // view-only is silent, read-only speaks at once, everything else waits for a real unsent edit.
+  useNotLiveToast(`notlive:member:${pageId}`, toastReason({ canEdit, reason: liveness.reason, unsynced }), liveness.live);
 
   // #911 user ruling: `:w` saves and stays in the edit surface; `:wq` and the toolbar Publish button
   // save and return to the rendered view. One publish path (still fire-and-forget, still #448-stable),
@@ -919,7 +932,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
               empty={!editing && !pageQ.isLoading && !publishedQ.isLoading && !(published?.publishedMd ?? "").trim()}
               canEdit={canEdit}
             />
-            <Editor key={docName} docName={docName} pageId={pageId} token={getCollabToken} onLiveness={onLiveness} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onPublishStay={publishPageStay} onToggleTask={canEdit ? onToggleTask : undefined} />
+            <Editor key={docName} docName={docName} pageId={pageId} token={getCollabToken} onLiveness={onLiveness} onUnsyncedChanges={onUnsyncedChanges} collabUrl={COLLAB_URL} user={user} capability={capability} apiToken={token} publishedMd={published?.publishedMd ?? null} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} inlineComments={inlineComments} anchorGetterRef={anchorGetterRef} docTextRef={docTextRef} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} dirtySignal={dirtySig} onExitEdit={exitEdit} onPublish={publishPage} onPublishStay={publishPageStay} onToggleTask={canEdit ? onToggleTask : undefined} />
             {/* #505 the paginating print surface (the live CM body is virtualised → prints one screenful).
                 #207: the SAME diagram seam the export gets — without it the browser's own File → Print drew
                 a plantuml block as its source while every other road drew the picture. */}
@@ -1428,10 +1441,15 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
   const onLiveness = useCallback((s: Liveness) => setLiveness(s), []);
   const livenessRef = useRef(liveness);
   livenessRef.current = liveness;
+  // #994 / ADR-276: member-surface parity. No page-switch reset here — `GuestPageContent` remounts
+  // per page (see `dirtySig` below), so the store is new on every page anyway.
+  const unsyncedSig = useRef(createUnsyncedSignal()).current;
+  const unsynced = useUnsynced(unsyncedSig);
+  const onUnsyncedChanges = useCallback((v: boolean) => unsyncedSig.set(v), [unsyncedSig]);
   // #978 / ADR-261: the band that used to sit above the surface is now this dismissible toast.
-  // #978 same view-only gate as the member surface — a view-only share-link visitor never
-  // joins the collab room, so `liveness` never leaves its initial "connecting" without this.
-  useNotLiveToast(`notlive:guest:${pageId}`, canEdit ? liveness.reason : null);
+  // #978 / #994 ADR-276: the same one place decides what the toast may say — see the member
+  // surface's call site.
+  useNotLiveToast(`notlive:guest:${pageId}`, toastReason({ canEdit, reason: liveness.reason, unsynced }), liveness.live);
   // #917: member-surface parity (routes.tsx's own `dirtySig`) — an external store the Editor's DOM
   // `input` listener flips optimistically, read by `PageActions`/`PageControlsMobile`'s `useDirty`.
   // `GuestPageContent` remounts fresh per page (`key={openId}` at its GuestSpace call site, or a whole
@@ -1559,7 +1577,7 @@ function GuestPageContent({ minted, getToken, apiBearer, registerReconnect, onBa
               empty={publishedLoaded && !editing && !(publishedMd ?? "").trim()}
               canEdit={canEdit}
             />
-            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onPublishStay={canEdit ? publishForEditorStay : undefined} onToggleTask={canEdit ? onToggleTask : undefined} dirtySignal={dirtySig} />
+            <Editor key={docName} docName={docName} pageId={pageId} guestSurface token={getToken} onLiveness={onLiveness} onUnsyncedChanges={onUnsyncedChanges} registerReconnect={registerReconnect} collabUrl={COLLAB_URL} user={guest} capability={capability} apiToken={token} publishedMd={publishedMd} editing={editing} vim={effectiveVim} displayMode={displayMode} onUploadImage={onUploadImage} onHeadings={onHeadings} onActiveHeading={onActiveHeading} onVisibleHeadings={onVisibleHeadings} onScrollActivity={onScrollActivity} tocJumpRef={tocJumpRef} onTaskProgress={onTaskProgress} onExitEdit={exitEdit} onPublish={canEdit ? publishForEditor : undefined} onPublishStay={canEdit ? publishForEditorStay : undefined} onToggleTask={canEdit ? onToggleTask : undefined} dirtySignal={dirtySig} />
             {/* #505 the paginating print surface (guest CM body is virtualised too).
                 #207: a guest holds a share token, which the diagram route accepts, so the picture prints
                 here as well. (The public route below has no token and passes none — its plantuml degrades

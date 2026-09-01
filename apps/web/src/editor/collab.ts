@@ -1,6 +1,7 @@
 import * as Y from "yjs";
 import { HocuspocusProvider, HocuspocusProviderWebsocket, WebSocketStatus } from "@hocuspocus/provider";
 import { isLive, notLiveReason, type AuthorizedScope, type LivenessInputs, type NotLiveReason } from "./liveness";
+import { createUnsyncedLatch } from "./unsyncedSignal";
 
 /** What a subscriber is told when the connection's state changes (#813 / ADR-248 §3.1). */
 export interface Liveness {
@@ -32,6 +33,14 @@ export function connect(opts: {
    */
   onLiveness?: (state: Liveness) => void;
   /**
+   * #994 / ADR-276 §Decision 1: called when "a local edit exists that is not reaching the server"
+   * flips — the CONTENT question the not-live toast should have been standing on, next to
+   * `onLiveness`'s CONNECTION question. Same shape, same rarity: it moves on connection events, not
+   * on keystrokes (see `unsyncedSignal.ts` for why the AND with liveness makes that a property
+   * rather than a hope).
+   */
+  onUnsyncedChanges?: (unsynced: boolean) => void;
+  /**
    * #875 / ADR-248 §3.6: hand the session the knock that re-attaches this document.
    *
    * Called with a function while the connection exists and with `null` when it is torn down. The
@@ -53,6 +62,9 @@ export function connect(opts: {
   const state: LivenessInputs = { connected: false, authenticated: false, authorizedScope: undefined, synced: false };
   let lastLive: boolean | null = null;
   let lastReason: NotLiveReason | null = null;
+  // #994 / ADR-276: the CONTENT half of the same seam. Built before the provider because the
+  // provider's constructor can fire `onStatus` synchronously, and `report()` feeds this.
+  const unsynced = createUnsyncedLatch((v) => opts.onUnsyncedChanges?.(v));
   const report = () => {
     const live = isLive(state);
     const reason = notLiveReason(state);
@@ -61,6 +73,7 @@ export function connect(opts: {
     if (live === lastLive && reason === lastReason) return;
     lastLive = live;
     lastReason = reason;
+    unsynced.noteLive(live);
     opts.onLiveness?.({ live, reason });
   };
 
@@ -118,6 +131,19 @@ export function connect(opts: {
       report();
     },
   });
+  // #994 / ADR-276 §Decision 1. SET from the DOC, not from the provider's counter: a document with
+  // no local edits never fires this, whatever `resetUnsyncedChanges()` put in that counter on the
+  // last socket open. `origin !== provider` is the provider's OWN predicate for "this update did not
+  // come off the wire" (`documentUpdateHandler` returns early on `origin === this`), so remote
+  // updates and broadcast-channel echoes are excluded by the same rule that excludes them there.
+  const onDocUpdate = (_update: Uint8Array, origin: unknown) => {
+    if (origin !== provider) unsynced.noteLocalUpdate();
+  };
+  doc.on("update", onDocUpdate);
+  // CLEAR on the provider's ACK. This is the one thing the provider's counter is authoritative
+  // about — that the server has taken the updates — and the only thing read from it.
+  const onUnsyncedCount = (n: number) => unsynced.noteAck(n);
+  provider.on("unsyncedChanges", onUnsyncedCount);
   // The starting answer, before any event: not live. A surface that renders before the first
   // callback must not begin by claiming the edits are safe.
   report();
@@ -132,6 +158,8 @@ export function connect(opts: {
     // Unregister FIRST: a scheduled knock that fires after teardown would reconnect a provider the
     // caller has just thrown away, and the socket below is about to be closed under it.
     opts.registerReconnect?.(null);
+    doc.off("update", onDocUpdate);
+    provider.off("unsyncedChanges", onUnsyncedCount);
     try {
       provider.awareness?.setLocalState(null);
     } catch {

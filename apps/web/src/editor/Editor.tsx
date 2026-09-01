@@ -142,6 +142,14 @@ export interface EditorProps {
    * `:w` entry point and the checkbox, so it withholds those itself. Both read the same signal.
    */
   onLiveness?: (state: Liveness) => void;
+  /**
+   * #994 / ADR-276: told whenever "a local edit exists that has not reached the server" flips.
+   *
+   * Threaded, not computed here: the write originates entirely in `collab.ts` (one layer further
+   * from the render tree than `dirtySignal`'s DOM listener below), so the editor adds no new
+   * listener of its own for it.
+   */
+  onUnsyncedChanges?: (unsynced: boolean) => void;
   /** #875 / ADR-248 §3.6: the guest session registers its reconnect knock through here. */
   registerReconnect?: (fn: (() => void) | null) => void;
   // vim ex-command entry points (Light-3): :q → onExitEdit, :wq → onPublish, :w → onPublishStay
@@ -191,7 +199,7 @@ function tint(color: string): string {
 // visible heading). All display-only. Returns a cleanup. Adds the headings listener via appendConfig so
 // the mount functions don't need to know about the TOC.
 
-export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "" as Bearer, publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, registerReconnect, onPublish, onPublishStay, onExitEdit, onToggleTask }: EditorProps) {
+export const Editor = memo(function Editor({ docName, pageId, guestSurface = false, token, collabUrl, user, capability = "view", apiToken = "" as Bearer, publishedMd = null, editing = false, vim = false, displayMode = "live", onUploadImage, inlineComments, anchorGetterRef, docTextRef, onHeadings, onActiveHeading, onVisibleHeadings, onScrollActivity, tocJumpRef, onTaskProgress, dirtySignal, onLiveness, onUnsyncedChanges, registerReconnect, onPublish, onPublishStay, onExitEdit, onToggleTask }: EditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme(); // #200: re-render macro widgets (Excalidraw etc.) on a light/dark switch
   const collabRef = useRef<ReturnType<typeof connect> | null>(null);
@@ -209,6 +217,10 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   // the collab effect's dependency list would let a host re-render destroy the Y.Doc.
   const onLivenessRef = useRef(onLiveness);
   onLivenessRef.current = onLiveness;
+  // #994 / ADR-276: same ref treatment, same reason — this callback must never enter the collab
+  // effect's dependency list.
+  const onUnsyncedChangesRef = useRef(onUnsyncedChanges);
+  onUnsyncedChangesRef.current = onUnsyncedChanges;
   const previewViewRef = useRef<EditorView | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
   // Owned here so the vim toggle reconfigures the SAME compartment in place.
@@ -445,6 +457,7 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
         liveRef.current = state.live;
         onLivenessRef.current?.(state);
       },
+      onUnsyncedChanges: (unsynced) => onUnsyncedChangesRef.current?.(unsynced),
     });
     collabRef.current = c;
     awarenessRef.current = c.provider.awareness ?? null;
