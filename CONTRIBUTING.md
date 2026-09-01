@@ -51,7 +51,7 @@ first-run-only: OpenFGA persists to Postgres, so a restart never needs it again 
 
 Then open **http://dev.localhost:5173/p/demo**. The API resolves the tenant from the `Host` header,
 and the web app calls a RELATIVE `/api` — the dev server proxies it (the proxy table is generated
-from `infra/routes/origin-routes.mjs`, #724). The host matters, not the port: `localhost:5173` and
+from `infra/routes/origin-routes.mjs`). The host matters, not the port: `localhost:5173` and
 `dev.localhost:5173` resolve to different tenants.
 
 To run the whole product in containers instead — web, server, collab and a reverse proxy on one

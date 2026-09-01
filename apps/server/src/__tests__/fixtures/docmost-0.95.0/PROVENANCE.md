@@ -1,7 +1,7 @@
 # Docmost export archives, as the product produced them
 
-Not hand-written. ADR-242 §"facts" says a slice confirms its facts against an archive the product
-actually produced, so these were exported from a real Docmost and committed unchanged.
+Not hand-written. A slice confirms its facts against an archive the product actually produced, so
+these were exported from a real Docmost and committed unchanged.
 
     product   docmost/docmost (Docker Hub `latest` on 2026-08-21) → 0.95.0 by its own package.json
     stack     docmost + postgres:16 + redis:7, empty database, single admin user
@@ -20,7 +20,7 @@ actually produced, so these were exported from a real Docmost and committed unch
               space-two-attachments-same-name.zip  a second image, SAME file name, different
                                          bytes, attached to a different page
 
-What they show that the source code did not (see #728 /): entry names are raw while links
+What they show that the source code did not: entry names are raw while links
 and manifest keys are percent-encoded; links and manifest keys use DIFFERENT encoders, so the same
 page is spelled two ways; `/` is deleted from a title rather than replaced; and an attachment's entry
 name carries an empty path segment (`Handbook//files/<id>/<name>`).

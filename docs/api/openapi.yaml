@@ -1,4 +1,4 @@
-# Wikistead member REST API — OpenAPI 3.1 (#407).
+# Wikistead member REST API — OpenAPI 3.1.
 #
 # HAND-MAINTAINED against the Fastify routes (which carry no JSON schemas to generate from); the
 # api-inventory-407 test extracts every route from source and fails the build when a member-API route is
@@ -168,7 +168,7 @@ paths:
       operationId: deletePagePermanent
       tags: [pages]
       summary: Permanently delete a LIVE page directly (no trash) — only when the space's delete_mode allows it
-      description: "The direct pathway of the delete_mode policy (ADR-167): available under 'both' / 'direct_only', 400 (static policy reason) under 'trash_only'. Requires the delete verb like the trash route; a trashed page stays purge-only (uniform 404 here)."
+      description: "The direct pathway of the delete_mode policy: available under 'both' / 'direct_only', 400 (static policy reason) under 'trash_only'. Requires the delete verb like the trash route; a trashed page stays purge-only (uniform 404 here)."
       parameters: [ { $ref: "#/components/parameters/pageId" } ]
       responses: { "204": { description: Permanently deleted }, "400": { description: Disabled by the delete_mode policy }, "404": { description: "Trashed or absent (uniform)" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, default: { $ref: "#/components/responses/Error" } }
   /pages/{pageId}/published:
@@ -361,7 +361,7 @@ paths:
       tags: [spaces]
       summary: The tree's first paint — the root branch plus the path to the open page
       description: >-
-        ADR-220 §5. Opening a page deep in a tree must not require walking down to it, so this answers
+        Opening a page deep in a tree must not require walking down to it, so this answers
         the root branch and each ancestor's own branch (the reader needs the siblings to see where they
         are). `open` is a HINT, never an argument: a page in another space, one that is gone, or one the
         reader cannot see all yield the root branch alone — never an error and never a different shape,
@@ -380,7 +380,7 @@ paths:
       tags: [spaces]
       summary: One branch of the page tree — the children of one parent, bounded and keyset-paged
       description: >-
-        ADR-220. The unit is a branch, not a window over the space: a cursor into a depth-first walk
+        The unit is a branch, not a window over the space: a cursor into a depth-first walk
         would mean something different once the reader opens a node. The caller names the parent, so
         `view` is confirmed on the parent itself and every refusal — absent, another tenant's, another
         space's, not viewable — answers one identical 404. Each row is confirmed on its own; a row the
@@ -401,7 +401,7 @@ paths:
       tags: [spaces]
       summary: Where a page's row sits in the tree — one level per ancestor, root-first
       description: >-
-        ADR-238. The paint fetches the branch of every ancestor, but each comes back as its FIRST
+        The paint fetches the branch of every ancestor, but each comes back as its FIRST
         window, so a page past the window's end is not in the tree at all when the reader lands on a
         link to it. Reading the branch until the row turns up would be unbounded, and the cost would
         fall on whoever was merely sent the link, so this answers WHICH WINDOW instead: for each
@@ -424,10 +424,10 @@ paths:
       tags: [spaces]
       summary: The tree's placeholder rows — where something granted sits under something invisible
       description: >-
-        ADR-220 §4. A member can hold `view` on a page whose ancestor they cannot see; the tree still
+        A member can hold `view` on a page whose ancestor they cannot see; the tree still
         has to offer a way down to it without naming what is denied. This answers placeholder rows —
         one fixed, unnamed label each, carrying an opaque token and the visible pages granted beneath
-        it — resolved OFF the first-paint path (#623 ②) so the sidebar never waits on it. The
+        it — resolved OFF the first-paint path so the sidebar never waits on it. The
         walk is budget-bounded; exhausting the budget shortens the answer, never fails it. Members
         only: a guest's share link scopes what they see by itself, so a caller without a member
         session is refused.
@@ -498,7 +498,7 @@ paths:
       tags: [spaces]
       summary: List spaces the caller can view (with their capability) — paged, filterable by name
       description: >-
-        #623/#705. A keyset page ({ spaces, nextCursor }); walk nextCursor for the roster, including
+        A keyset page ({ spaces, nextCursor }); walk nextCursor for the roster, including
         over empty pages (authorization filters after the SQL). `q` filters by name SERVER-side, so a
         picker's filter matches every space the caller may see; a cursor is bound to the q that minted
         it — a mismatched cursor restarts from the top and the response says so (`restarted`). No total
@@ -508,7 +508,7 @@ paths:
         - { name: q, in: query, required: false, schema: { type: string }, description: "Case-insensitive name substring filter." }
         - { name: cursor, in: query, required: false, schema: { type: string }, description: "The keyset cursor from the previous page (bound to its q AND order)." }
         - { name: limit, in: query, required: false, schema: { type: integer }, description: "Rows per page (clamped)." }
-        - { name: order, in: query, required: false, schema: { type: string, enum: [created, name] }, description: "#710: `name` walks a (lower(name), id) keyset — the browse order; default is created." }
+        - { name: order, in: query, required: false, schema: { type: string, enum: [created, name] }, description: "`name` walks a (lower(name), id) keyset — the browse order; default is created." }
       responses: { "200": { description: Spaces, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Space" } } } } }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
     post:
       operationId: createSpace
@@ -519,9 +519,9 @@ paths:
     post:
       operationId: resolveSpaces
       tags: [spaces]
-      summary: Resolve spaces by id, in one batch — the id-holding surfaces' path (#710)
+      summary: Resolve spaces by id, in one batch — the id-holding surfaces' path
       description: >-
-        #710. Body { ids } (1..100). Answers EVERY requested id, uniformly: a space the caller cannot
+        Body { ids } (1..100). Answers EVERY requested id, uniformly: a space the caller cannot
         view and a space that does not exist are both null — byte-identical, never an existence
         oracle. Resolved entries carry the same shape (capability, deleteMode, homePageId, icon) as
         the listing. An authorization-infrastructure error rejects the whole request rather than
@@ -545,7 +545,7 @@ paths:
     post:
       operationId: createSpaceHome
       tags: [spaces]
-      summary: Create the space HOME page and point the space at it (ADR-157)
+      summary: Create the space HOME page and point the space at it
       description: "Creates a regular page titled after the space and sets spaces.home_page_id atomically. Gate: space edit. 409 when a home already exists."
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
       responses: { "201": { description: "{ id }" }, "403": { description: Not edit-capable }, "409": { description: A home already exists }, "401": { description: Missing or invalid credentials }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
@@ -575,7 +575,7 @@ paths:
       operationId: setSpaceDeleteMode
       tags: [spaces]
       summary: Set the space's delete_mode override (null inherits the tenant default; manage-gated)
-      description: "The deletion-pathway policy (ADR-167). It only chooses reversibility (trash vs direct) — who may delete is unchanged in every mode."
+      description: "The deletion-pathway policy. It only chooses reversibility (trash vs direct) — who may delete is unchanged in every mode."
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
       responses: { "200": { description: "{ deleteMode }" }, "400": { description: Unknown mode }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/export:
@@ -589,14 +589,14 @@ paths:
     post:
       operationId: createSpaceImport
       tags: [spaces]
-      summary: "Import Markdown content into a space (ZIP / files). Publishes what it creates unless the body sets publish=false, which lands drafts instead (#746)"
+      summary: "Import Markdown content into a space (ZIP / files). Publishes what it creates unless the body sets publish=false, which lands drafts instead"
       parameters: [ { $ref: "#/components/parameters/spaceId" } ]
-      responses: { "200": { description: "Imported synchronously (small archive) — body is the fidelity report" }, "201": { description: Imported pages }, "202": { description: "Too large for one request (over IMPORT_SYNC_MAX_NODES nodes, ADR-227 §7) — queued as a job. Body: { importId, status, nodesTotal }; poll GET /spaces/{spaceId}/imports/{importId}" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, "409": { description: "An import is already running for this space (one at a time, ADR-227 §7)" }, "413": { description: Archive exceeds a size cap }, default: { $ref: "#/components/responses/Error" } }
+      responses: { "200": { description: "Imported synchronously (small archive) — body is the fidelity report" }, "201": { description: Imported pages }, "202": { description: "Too large for one request (over IMPORT_SYNC_MAX_NODES nodes, the import design §7) — queued as a job. Body: { importId, status, nodesTotal }; poll GET /spaces/{spaceId}/imports/{importId}" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, "409": { description: "An import is already running for this space (one at a time, the import design §7)" }, "413": { description: Archive exceeds a size cap }, default: { $ref: "#/components/responses/Error" } }
   /spaces/{spaceId}/imports/{importId}:
     get:
       operationId: getSpaceImport
       tags: [spaces]
-      summary: Progress and fidelity report of a queued import (ADR-227 §7)
+      summary: Progress and fidelity report of a queued import
       parameters: [ { $ref: "#/components/parameters/spaceId" }, { name: importId, in: path, required: true, schema: { type: string } } ]
       responses: { "200": { description: "Status. Body: { id, status: queued|running|done|failed, nodesTotal, nodesDone, report, error }" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, default: { $ref: "#/components/responses/Error" } }
   /export:
@@ -609,7 +609,7 @@ paths:
   /pages/{pageId}/access:
     get: { operationId: listPageAccess, tags: [pages], summary: List the page's grants, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Grants }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
     post: { operationId: createPageAccess, tags: [pages], summary: Grant a capability, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Granted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
-    delete: { operationId: deletePageAccess, tags: [pages], summary: Revoke a grant, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: "Revoked. Body: { removed, stillCovered: [{ capability, via? }] } — stillCovered lists capabilities another assignment still grants after this removal (#596); `via` names it only for a caller who may read role definitions (page manage)" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, "409": { description: "Nothing would change — another assignment grants the same capability. Body: { code: still_covered, coveredBy: [] } (#596)" } , default: { $ref: "#/components/responses/Error" } }  }
+    delete: { operationId: deletePageAccess, tags: [pages], summary: Revoke a grant, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: "Revoked. Body: { removed, stillCovered: [{ capability, via? }] } — stillCovered lists capabilities another assignment still grants after this removal; `via` names it only for a caller who may read role definitions (page manage)" }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) }, "409": { description: "Nothing would change — another assignment grants the same capability. Body: { code: still_covered, coveredBy: [] }" } , default: { $ref: "#/components/responses/Error" } }  }
   /pages/{pageId}/share-links:
     get: { operationId: listPageShareLinks, tags: [pages], summary: List share links, parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "200": { description: Links }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
     post: { operationId: createPageShareLink, tags: [pages], summary: Create a share link (view/comment/edit; optional expiry), parameters: [ { $ref: "#/components/parameters/pageId" } ], responses: { "201": { description: Created }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
@@ -630,7 +630,7 @@ paths:
     delete: { operationId: deleteTemplate, tags: [templates], summary: Delete a template, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], responses: { "204": { description: Deleted }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   # ── Personal state (watches, pins, notifications, feed) ─────────────────
   /members/identities:
-    # #379 / ADR-150: display-identity resolution — CUSTOMIZED members only (present ⟺ member AND
+    # Display-identity resolution — CUSTOMIZED members only (present ⟺ member AND
     # (override OR avatar)); absent is ambiguous (non-member / cross-tenant / un-customized — no
     # membership oracle). Member-only; never email/role.
     post:
@@ -692,7 +692,7 @@ paths:
   /members:
     get: { operationId: listMembers, tags: [members], summary: List tenant members, responses: { "200": { description: Members }, "401": { description: Missing or invalid credentials }, "403": { description: Permitted to see the resource but not to perform this action }, "404": { description: Not viewable or absent (uniform — existence hiding) } , default: { $ref: "#/components/responses/Error" } }  }
   /members/{sub}/password-setup:
-    # #606 / ADR-205 §2 (ruled A): an admin gives an EXISTING member a password entrance. It mints a
+    # An admin gives an EXISTING member a password entrance. It mints a
     # setup link; the member chooses the password. The credential binds to the sub they already have —
     # membership, seat and tuples are untouched, which is what tells this apart from a password invite.
     post:
@@ -709,11 +709,11 @@ paths:
         "404": { description: Not viewable or absent (uniform — existence hiding) }
         default: { $ref: "#/components/responses/Error" }
   /members/{sub}/factors:
-    # #644 ruling 2 / ADR-219 §10a: an admin clears a member's second factors so they can enrol
+    # An admin clears a member's second factors so they can enrol
     # again after losing the device. It HANDS NOTHING BACK — no link, no token — because a recovery URL
-    # minted for a second factor would be a way past the second factor, which is what ADR-210 §2(b)
-    # refused. The member signs in the ordinary way and meets the enrolment step (#652). Sessions end
-    # with the factors (#474): the device they were satisfied on may be in somebody else's hands.
+    # minted for a second factor would be a way past the second factor. The member signs in the
+    # ordinary way and meets the enrolment step. Sessions end with the factors: the device they were
+    # satisfied on may be in somebody else's hands.
     delete:
       operationId: resetMemberFactors
       tags: [members]
@@ -728,7 +728,7 @@ paths:
         "409": { description: "Aimed at yourself (`reset_self`) — your own factor proves itself first (§8)" }
         default: { $ref: "#/components/responses/Error" }
   /members/{sub}/suspend:
-    # #627 / ADR-213: an admin suspends a member. Sign-in is blocked, tenant and group grants are
+    # An admin suspends a member. Sign-in is blocked, tenant and group grants are
     # stripped, API keys are revoked and sessions end. The row, the external id and the SEAT stay
     # (ruling 1: a suspension is not a way to stop paying for somebody).
     post:

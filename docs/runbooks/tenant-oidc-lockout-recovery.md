@@ -1,6 +1,6 @@
 # Runbook: a tenant is locked out of its own IdP (break-glass)
 
-Recovery for #105 / ADR-060. Use this when a tenant configured its **own** OIDC IdP
+Use this when a tenant configured its **own** OIDC IdP
 (`tenant_oidc`, enabled) and that IdP later **broke** (issuer down, cert/secret expired,
 client deleted at the IdP). Symptom: **every** member of that one tenant fails to log in,
 and the fix (the admin OIDC settings page) itself needs a login → no in-app recovery.

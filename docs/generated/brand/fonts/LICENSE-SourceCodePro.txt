@@ -1,5 +1,5 @@
 Wikistead Mono is a subset of Adobe's Source Code Pro, delivered as a self-hosted woff2
-subset (ASCII + Latin-1 + common punctuation/symbols) for the code face (#190 / ADR-090).
+subset (ASCII + Latin-1 + common punctuation/symbols) for the code face.
 As a Modified Version under SIL OFL 1.1, the primary font name has been changed from the
 Reserved Font Name 'Source' to 'Wikistead Mono' (OFL 1.1 clause 3). Original: Source Code Pro,
 https://github.com/adobe-fonts/source-code-pro. Full license below.

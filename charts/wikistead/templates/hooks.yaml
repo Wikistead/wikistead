@@ -3,8 +3,8 @@
 {{/*
 Migrations, from the server image.
 
-#804 put the SQL in that image precisely so this could exist: before it, a cluster had to carry a
-hundred and thirty files in a ConfigMap to get a schema (#802 did exactly that, by hand).
+The SQL ships in that image precisely so this could exist: otherwise a cluster has to carry a
+hundred and thirty files in a ConfigMap to get a schema.
 */}}
 apiVersion: batch/v1
 kind: Job
@@ -39,9 +39,9 @@ spec:
 The authorization store and its model.
 
 ⚠️ This hook exists because the ids are decided by the store, not by the operator, and a chart cannot
-template a value that does not exist yet — the awkwardness #802 reported from a real cluster.
-ADR-250 §4 says plainly what replaces it: when the product resolves its own store by name at startup
-(#826), this Job and the `hooks.fgaBootstrap` value go away together. Written here so that removal is
+template a value that does not exist yet. What replaces it is stated plainly: when the product
+resolves its own store by name at startup, this Job and the `hooks.fgaBootstrap` value go away
+together. Written here so that removal is
 one deletion rather than an archaeology exercise.
 */}}
 apiVersion: batch/v1

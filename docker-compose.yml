@@ -1,6 +1,6 @@
 # Local development stack. Brings up all middleware so `pnpm dev` (or the app
 # containers) can run against real services. Production uses k8s (see deploy/).
-# #388: the middleware service definitions live in docker-compose.middleware.yml (shared with the
+# The middleware service definitions live in docker-compose.middleware.yml (shared with the
 # isolated e2e/server-test stacks); this file carries the dev diffs (default host ports, dev volumes,
 # the playground flag, the 5173 web origin for S3 CORS) plus the dev-only extras (apps profile, kroki).
 services:
@@ -18,7 +18,7 @@ services:
     extends: { file: docker-compose.middleware.yml, service: valkey }
     ports: ["6379:6379"]
 
-  # #338 / ADR-128: OpenFGA on the PERSISTENT postgres datastore (dev/prod parity) — state survives
+  # OpenFGA on the PERSISTENT postgres datastore (dev/prod parity) — state survives
   # `docker compose down` / reboot, so the pinned .env store/model IDs stop dangling and dev-setup is
   # genuinely first-run-only. One-shot migrate (idempotent) runs the schema before `run` starts.
   openfga-migrate:
@@ -44,17 +44,17 @@ services:
   seaweedfs:
     extends: { file: docker-compose.middleware.yml, service: seaweedfs }
     # Both origins: 5173 is the host-side `pnpm dev` loop, and the https one is the `apps` profile
-    # behind the proxy (#726). A presigned PUT from the browser is a CORS request either way.
+    # behind the proxy. A presigned PUT from the browser is a CORS request either way.
     command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5173,https://${SITE_HOST:-dev.localhost}"
     ports: ["9000:8333"]
     volumes:
       - seaweeddata:/data
 
-  # ── The `apps` profile: the whole product, on one origin (#726 / ADR-233) ───────────────────────
+  # ── The `apps` profile: the whole product, on one origin ───────────────────────
   #
   # For tight dev loops prefer `pnpm dev` on the host against the middleware above. This profile is
-  # the SELF-HOST path, and until #726 it could not serve the product at all: there was no web
-  # service, and the three claims in docs/self-hosting.md, README.md and CONTRIBUTING.md were false.
+  # the SELF-HOST path: it serves the product as a whole, which is what docs/self-hosting.md,
+  # README.md and CONTRIBUTING.md describe.
   #
   # Two things are deliberate here and are the whole of the fix:
   #
@@ -69,7 +69,7 @@ services:
   #     authentication bypass on their own data with nothing in the repo saying so.
   #
   # No app service publishes a port: the browser reaches everything through `proxy`, which is the
-  # topology the product assumes (ADR-016) rather than a production nicety — the SPA calls a relative
+  # topology the product assumes rather than a production nicety — the SPA calls a relative
   # /api, and nginx's SPA fallback answers that with 200 + index.html when there is no proxy in
   # front. A side benefit is that this profile no longer collides with a `pnpm dev` on the host.
   server:
@@ -85,7 +85,7 @@ services:
       VALKEY_URL: redis://valkey:6379
       OPENFGA_API_URL: http://openfga:8080
       # The server ASSERTS this at boot under NODE_ENV=production and refuses to start on `memory`
-      # (#338 / ADR-128: in-memory tuples vanish on restart, which collapses all access control). It
+      # (in-memory tuples vanish on restart, which collapses all access control). It
       # states what the openfga service above is actually configured with, and the two are checked
       # against each other by `lint:selfhost-profile` — a claim that drifted from the service would
       # be a server that either will not boot or boots trusting a lie.
@@ -97,12 +97,12 @@ services:
       # the public host below (SigV4 covers the Host header, so the two have to be stated apart).
       S3_ENDPOINT: http://seaweedfs:8333
       S3_PUBLIC_ENDPOINT: https://s3.${SITE_HOST:-dev.localhost}
-      # #828 / ADR-254 Decision 2: BLANK, not absent, and not the site host.
+      # BLANK, not absent, and not the site host.
       #
       # This used to be `https://${SITE_HOST}`, and the one thing that reads it prefixes a workspace
       # slug — so the profile composed `https://<slug>.<SITE_HOST>`, an address the Caddyfile beside
       # it does not serve (its site blocks are `{$SITE_HOST}` and `s3.{$SITE_HOST}`; the wildcard is
-      # commented out, waiting on #123). Every mention and digest carried a link that went nowhere,
+      # commented out). Every mention and digest carried a link that went nowhere,
       # and the RFC 8058 unsubscribe went with it — a mail nobody can unsubscribe from becomes a spam
       # report. Composing nothing drops those mails instead, which is what the k8s profile already
       # does; security mail carries no link and is unaffected.
@@ -122,7 +122,7 @@ services:
       # zone. If a second workspace exists its mail points somewhere nobody serves; if the zone is
       # shared, unsubscribe tokens are delivered to a stranger's host.
       WKS_PUBLIC_BASE_URL: ""
-      # #409 / ADR-154: without this the public HTML shell is OFF, and because the route table sends
+      # Without this the public HTML shell is OFF, and because the route table sends
       # /pub to the server, every published page in this stack answers 404 — the SPA never sees the
       # path. Same shape as the k8s initContainer (deploy/k8s/base/server.yaml).
       PUBLIC_SHELL_INDEX: /shell/index.html
@@ -149,8 +149,8 @@ services:
       MEILI_HOST: ""
       S3_ENDPOINT: ""
       SMTP_HOST: ""
-      # #726 follow-up: this one was missed by the list above, and `lint:selfhost-profile` was
-      # RED ON MASTER because of it — collab inherited the developer's own `.env` value
+      # This one was missed by the list above, and `lint:selfhost-profile` went red because of
+      # it — collab inherited the developer's own `.env` value
       # (`http://localhost:5173`), so what the profile advertised depended on whose machine built it.
       # Blanked rather than pointed at `https://${SITE_HOST}` for the same reason as its neighbours:
       # collab reads this variable nowhere (checked), and a value nothing consults is one more thing
@@ -174,11 +174,11 @@ services:
     profiles: ["apps"]
 
   # The one published port. `deploy/caddy/Caddyfile` is already the reverse-proxy reference and,
-  # since #724, is CHECKED against infra/routes/origin-routes.mjs — so this stack and the production
+  # is CHECKED against infra/routes/origin-routes.mjs — so this stack and the production
   # edge answer the same paths by construction. Its upstream defaults (server:4000, collab:4100,
   # web:80) already match these service names.
   #
-  # HTTPS, not plain HTTP, and that is a consequence rather than a preference (#726 ruling 1):
+  # HTTPS, not plain HTTP, and that is a consequence rather than a preference:
   # NODE_ENV=production makes the session cookie `secure`, so an http:// origin would drop it and
   # sign-in would fail with no error. Caddy issues an INTERNAL certificate for a .localhost host
   # without touching ACME, at the cost of a browser warning until `caddy trust` is run.
@@ -204,9 +204,9 @@ services:
     extends: { file: docker-compose.middleware.yml, service: mailpit }
     ports: ["1025:1025", "8025:8025"]
 
-  # #341 / ADR-074: self-hosted PlantUML rendering via a Kroki gateway. OPT-IN (`--profile diagrams`) and OFF by
+  # Self-hosted PlantUML rendering via a Kroki gateway. OPT-IN (`--profile diagrams`) and OFF by
   # default — with no PLANTUML_RENDER_URL set the app degrades a diagram to its source (zero external dependency,
-  # no broken embed). PlantUML is GPL (ADR-011/ADR-074), so it runs OUT-OF-PROCESS in THIS separate,
+  # no broken embed). PlantUML is GPL, so it runs OUT-OF-PROCESS in THIS separate,
   # operator-deployed container; Wikistead bundles only the HTTP client, never the GPL engine (the license
   # boundary holds because the operator opts into pulling this image — it is not part of the Wikistead
   # distribution). To enable: `docker compose --profile diagrams up -d` and set for the server
@@ -223,4 +223,4 @@ volumes:
   meilidata:
   seaweeddata:
   caddydata: # Caddy's internal CA and issued certs — losing it re-issues and re-warns the browser
-  web-shell: # the built index.html the server injects public head tags into (#409 / ADR-154)
+  web-shell: # the built index.html the server injects public head tags into

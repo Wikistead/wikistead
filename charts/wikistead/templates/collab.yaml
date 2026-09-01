@@ -20,7 +20,7 @@ spec:
           image: {{ include "wikistead.image" (list .Values.collab .) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports: [{ containerPort: 4100 }]
-          # ⚠️ CONFIG RIDES envFrom; SECRETS DO NOT. #850: this pod is the outermost thing an anonymous
+          # ⚠️ CONFIG RIDES envFrom; SECRETS DO NOT. This pod is the outermost thing an anonymous
           # guest touches — a share link's WebSocket — and it was being handed every credential the
           # secret holds, including the tenant-wide search key and both object-storage credentials. It
           # reads neither. A `secretRef` here would hand them all back, so the two it does read are

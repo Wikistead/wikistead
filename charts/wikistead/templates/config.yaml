@@ -1,8 +1,8 @@
 {{/*
 The environment every pod reads.
 
-#805: the production overlay once had none of this, and the first real cluster discovered one required
-key at a time. The set below is that overlay's, so the chart and the kustomize base answer alike.
+The production overlay once had none of this, and the first real cluster discovered one required key
+at a time. The set below is that overlay's, so the chart and the deployment base answer alike.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -11,7 +11,7 @@ metadata:
   labels: {{- include "wikistead.labels" . | nindent 4 }}
 data:
   NODE_ENV: production
-  # ⚠️ ADR-035 / #805: OpenFGA's in-memory engine loses every tuple on restart, so the API refuses to
+  # ⚠️ OpenFGA's in-memory engine loses every tuple on restart, so the API refuses to
   # boot in production unless the engine is stated. Unset is not "default" here, it is a failure.
   OPENFGA_DATASTORE_ENGINE: {{ .Values.openfga.datastoreEngine | quote }}
   VALKEY_URL: {{ include "wikistead.valkeyUrl" . | quote }}
@@ -20,18 +20,18 @@ data:
   S3_ENDPOINT: {{ include "wikistead.s3Endpoint" . | quote }}
   {{- $s3pub := include "wikistead.s3PublicHost" . }}
   {{- if $s3pub }}
-  # #912: presigned URLs are signed for the name the browser will open them under.
+  # Presigned URLs are signed for the name the browser will open them under.
   S3_PUBLIC_ENDPOINT: {{ printf "%s://%s" (ternary "https" "http" .Values.ingress.tls.enabled) $s3pub | quote }}
   {{- end }}
   S3_BUCKET: {{ .Values.seaweedfs.bucket | quote }}
   S3_FORCE_PATH_STYLE: {{ .Values.seaweedfs.forcePathStyle | quote }}
-  # #912: a browser presigned PUT carries no checksum; without this the SDK signs a URL that demands one.
+  # A browser presigned PUT carries no checksum; without this the SDK signs a URL that demands one.
   AWS_REQUEST_CHECKSUM_CALCULATION: "WHEN_REQUIRED"
   AWS_RESPONSE_CHECKSUM_VALIDATION: "WHEN_REQUIRED"
   SERVER_PORT: "4000"
   COLLAB_PORT: "4100"
   {{- if .Values.workspaceHostTemplate }}
-  # #806 / ADR-249: the shape of a workspace address, declared once rather than guessed. It has to
+  # The shape of a workspace address, declared once rather than guessed. It has to
   # match the wildcard the ingress serves, which is one label shallower than the application's host.
   WKS_TENANT_URL_TEMPLATE: {{ .Values.workspaceHostTemplate | quote }}
   {{- end }}

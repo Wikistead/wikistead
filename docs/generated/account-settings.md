@@ -2,7 +2,7 @@
   AUTO-GENERATED — DO NOT EDIT BY HAND.
   Source: apps/server/src/settings-catalog.ts.
   Regenerate: pnpm docs:gen   ·   Verify (CI): pnpm docs:check
-  The "code is truth" account-settings reference (ADR-080 doc↔code linkage).
+  The "code is truth" account-settings reference.
 -->
 
 # Account settings
@@ -31,14 +31,14 @@
 | `off` | Pure vim: registers and the OS clipboard stay separate; `"+y` / `"+p` are the only bridge (the default). |
 | `paste` | A plain `p` / `P` pastes the system clipboard (URLs auto-linkify like Ctrl+V); `y`/`d` never write it. |
 
-## Mail language (ADR-260 §3.1 — mail only, not the app UI)
+## Mail language (mail only, not the app UI)
 
 | Value | Meaning |
 |---|---|
 | `en` | Mail from this workspace is written in English. |
 | `ja` | Mail from this workspace is written in Japanese. |
 
-Unset falls back to the workspace default, then English (ADR-260 §3.1).
+Unset falls back to the workspace default, then English.
 
 ## Custom key bindings
 

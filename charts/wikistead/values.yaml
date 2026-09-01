@@ -1,13 +1,13 @@
-# Wikistead — values. ADR-250 §2: this chart TEMPLATES the kustomize base under deploy/k8s/base; it
-# does not redesign the nine-service shape. When the two disagree the base is the source of truth, and
+# Wikistead — values. This chart TEMPLATES the deployment base; it does not redesign the
+# nine-service shape. When the two disagree the base is the source of truth, and
 # `lint:origin-routes` compares the route list in both directions.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Images
 #
-# ADR-162 §2: a tag is pinnable and so is a digest. `digest` wins when both are set, which is what a
+# A tag is pinnable and so is a digest. `digest` wins when both are set, which is what a
 # production deployment should use — a tag is a moving name and a digest is the thing that ran.
-# The registry defaults to the placeholder the manifests carry until #414 arms publication; a chart
+# The registry defaults to the placeholder the manifests carry until images are published; a chart
 # installed with it fails to pull, which is the honest outcome before any image exists.
 image:
   registry: ghcr.io/CHANGE_ME
@@ -43,8 +43,8 @@ web:
 # Addresses
 #
 # `host` is where the application lives. `workspaceHostTemplate` is the SHAPE of a workspace address
-# (#806 / ADR-249) and it is NOT derived from `host`: gluing a slug onto the application's own host is
-# the defect that ticket was filed for. It has to match whatever wildcard the ingress serves.
+# and it is NOT derived from `host`: gluing a slug onto the application's own host produces addresses
+# that do not resolve. It has to match whatever wildcard the ingress serves.
 host: wikistead.example.com
 workspaceHostTemplate: ""   # e.g. https://{slug}.example.com — unset closes self-serve creation only
 
@@ -56,7 +56,7 @@ ingress:
   # This is not a style choice; measured it on a real cluster.
   #
   # `wildcardHost` adds the `*.host` rule the workspace addresses need. A single-host deployment
-  # leaves it off (#806: signup is closed there rather than pointing somewhere unreachable).
+  # leaves it off — signup is closed there rather than pointing somewhere unreachable.
   wildcardHost: false
   tls:
     enabled: true
@@ -72,9 +72,9 @@ ingress:
 # ─────────────────────────────────────────────────────────────────────────────
 # Secrets
 #
-# ⚠️ This chart never ships a literal credential (ADR-250 §2). The default is to reference a secret
-# that already exists, made by whatever the operator already trusts — SOPS+age through ksops is what
-# this project uses (ADR-042).
+# ⚠️ This chart never ships a literal credential. The default is to reference a secret that already
+# exists, made by whatever the operator already trusts — SOPS+age through ksops is what this project
+# uses.
 #
 # `generate: true` is the simple path for a first install: the chart mints random values ONCE and
 # `lookup` keeps them across upgrades. It is opt-in because a generated secret is invisible to the
@@ -93,8 +93,8 @@ postgres:
   enabled: true
   image: postgres:16-alpine
   storage: { size: 20Gi, storageClass: "" }
-  # When enabled=false: the URL the application uses. Both databases may live on one server (ADR-128
-  # separates by DATABASE, not by host); create the `openfga` database there once.
+  # When enabled=false: the URL the application uses. Both databases may live on one server — they
+  # are separated by DATABASE, not by host; create the `openfga` database there once.
   externalUrl: ""
 valkey:
   enabled: true
@@ -104,7 +104,7 @@ openfga:
   enabled: true
   image: openfga/openfga:latest
   # ⚠️ `memory` loses every tuple on restart, so the API refuses to boot in production without
-  # `postgres` (ADR-035 / #805). The chart states it rather than leaving it to a ConfigMap nobody wrote.
+  # `postgres`. The chart states it rather than leaving it to a ConfigMap nobody wrote.
   datastoreEngine: postgres
   datastoreUri: ""     # defaults to the bundled postgres
   externalApiUrl: ""
@@ -118,7 +118,7 @@ seaweedfs:
   image: chrislusf/seaweedfs:latest
   storage: { size: 50Gi, storageClass: "" }
   externalEndpoint: ""
-  # #912: the name the BROWSER reaches the in-chart store at. Uploads and downloads are presigned URLs
+  # The name the BROWSER reaches the in-chart store at. Uploads and downloads are presigned URLs
   # the browser opens itself, and the signature covers the host — so the store needs a public name of
   # its own, not a path on `host`. Empty renders `s3.<host>` and a third Ingress object for it; set it
   # when the public name must differ (a one-label host behind a proxy whose certificate covers only
@@ -128,15 +128,15 @@ seaweedfs:
   forcePathStyle: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Initialization (ADR-250 §4)
+# Initialization
 #
-# Two hooks, both from the server image (#804 put the migrations there).
+# Two hooks, both from the server image, which carries the migrations.
 hooks:
   # Runs the migration entrypoint post-install and post-upgrade.
   migrate: true
   # Creates the OpenFGA store and model and writes the ids where the application reads them.
-  # ⚠️ Deleted when the product resolves its own store by name at startup (#826) — ADR-250 §4 says so,
-  # and this value is where that removal will show.
+  # ⚠️ Deleted when the product resolves its own store by name at startup, and this value is where
+  # that removal will show.
   fgaBootstrap: true
   backoffLimit: 3
 

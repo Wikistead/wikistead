@@ -15,7 +15,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{/*
 One image reference.
 
-⚠️ A digest wins over a tag when both are given (ADR-162 §2). A tag is a name somebody can move; a
+⚠️ A digest wins over a tag when both are given. A tag is a name somebody can move; a
 digest is the thing that ran, and a production install should be pinning it. Written as one helper so
 the rule cannot differ between the three services — the kind of drift that shows up as "two of the
 three pods upgraded".
@@ -51,7 +51,7 @@ three pods upgraded".
 {{- end }}
 
 {{/*
-#912: the public name of the in-chart object store (empty when storage is external: managed S3/R2 is
+The public name of the in-chart object store (empty when storage is external: managed S3/R2 is
 reached by the browser at its own address, so the server signs with S3_ENDPOINT as before).
 */}}
 {{- define "wikistead.s3PublicHost" -}}

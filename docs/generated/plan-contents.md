@@ -2,7 +2,7 @@
   AUTO-GENERATED — DO NOT EDIT BY HAND.
   Source: packages/entitlements/src/catalog.ts (LEVER_CATALOG).
   Regenerate: pnpm docs:gen   ·   Verify (CI): pnpm docs:check
-  This is the "code is truth" levers reference fed to the docs SSG (ADR-080).
+  This is the "code is truth" levers reference fed to the docs SSG.
 -->
 
 # What each plan includes

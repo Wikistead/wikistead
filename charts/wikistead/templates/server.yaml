@@ -30,12 +30,12 @@ spec:
         - name: server
           image: {{ include "wikistead.image" (list .Values.server .) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # ADR-270: `metrics` is the Prometheus listener — a second port the ingress never publishes.
+          # `metrics` is the Prometheus listener — a second port the ingress never publishes.
           ports: [{ name: http, containerPort: 4000 }, { name: metrics, containerPort: 9464 }]
           envFrom:
             - configMapRef: { name: {{ include "wikistead.fullname" . }}-config }
             - secretRef: { name: {{ .Values.secrets.existingSecret }} }
-          # ⚠️ #815: envFrom names variables after the SECRET'S KEYS, and Kubernetes drops any key
+          # ⚠️ envFrom names variables after the SECRET'S KEYS, and Kubernetes drops any key
           # that is not a valid environment-variable name — silently. Four keys here are hyphenated,
           # so they arrive only because they are mapped explicitly, and the mapping is what makes the
           # wiring readable besides.
@@ -45,7 +45,7 @@ spec:
             - { name: S3_ACCESS_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: s3-access-key } } }
             - { name: S3_SECRET_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: s3-secret-key } } }
             - { name: GUEST_TOKEN_SECRET, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: guest-token-secret } } }
-            # ADR-270: optional — absent, the server boots with metrics off and logs that it did.
+            # Optional — absent, the server boots with metrics off and logs that it did.
             - { name: METRICS_TOKEN, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: metrics-token, optional: true } } }
             {{- with .Values.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
           volumeMounts:

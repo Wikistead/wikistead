@@ -75,7 +75,7 @@ const HEADER = `<!--
   AUTO-GENERATED — DO NOT EDIT BY HAND.
   Source: apps/server/src/settings-catalog.ts.
   Regenerate: pnpm docs:gen   ·   Verify (CI): pnpm docs:check
-  The "code is truth" account-settings reference (ADR-080 doc↔code linkage).
+  The "code is truth" account-settings reference.
 -->`
 
 // Deterministic Markdown for the account settings reference (cross-device startup preferences +
@@ -88,9 +88,9 @@ export function renderAccountSettingsMarkdown(): string {
   for (const m of DISPLAY_MODE_PREFS) lines.push(`| \`${m}\` | ${DISPLAY_DESC[m]} |`)
   lines.push('', '## Vim system clipboard (cross-device)', '', '| Value | Meaning |', '|---|---|')
   for (const m of VIM_CLIPBOARD_MODES) lines.push(`| \`${m}\` | ${VIM_CLIPBOARD_DESC[m]} |`)
-  lines.push('', '## Mail language (ADR-260 §3.1 — mail only, not the app UI)', '', '| Value | Meaning |', '|---|---|')
+  lines.push('', '## Mail language (mail only, not the app UI)', '', '| Value | Meaning |', '|---|---|')
   for (const l of LANGS) lines.push(`| \`${l}\` | ${LANG_DESC[l]} |`)
-  lines.push('', 'Unset falls back to the workspace default, then English (ADR-260 §3.1).')
+  lines.push('', 'Unset falls back to the workspace default, then English.')
   lines.push('', '## Custom key bindings', '')
   lines.push(`Rebindable commands: ${REMAPPABLE_COMMANDS.map((c) => `\`${c}\``).join(', ')}.`)
   lines.push('', `Reserved (never bindable — browser-owned): ${RESERVED_KEYS.map((k) => `\`${k}\``).join(', ')}.`)

@@ -1,4 +1,4 @@
-# #388: the SHARED middleware definitions the three stacks (dev / e2e / server-test) extend.
+# The SHARED middleware definitions the three stacks (dev / e2e / server-test) extend.
 # Each stack file overrides ONLY its per-stack diffs (host ports, named volumes, a couple of env/flag
 # tweaks) via `extends: { file: docker-compose.middleware.yml, service: … }` — so a middleware change
 # lands ONCE instead of being hand-copied three times (the drift this ticket started from: the e2e file
@@ -30,11 +30,11 @@ services:
     image: valkey/valkey:8
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
 
-  # #338 / ADR-128: OpenFGA on the postgres datastore (dev/prod parity). One-shot migrate (idempotent)
+  # OpenFGA on the postgres datastore (dev/prod parity). One-shot migrate (idempotent)
   # runs the schema before `run` starts. dev keeps state across restarts (persistent volume semantics of
   # its stack); e2e/server-test wipe on teardown (`down -v`) by design.
   openfga-migrate:
-    # Pinned (#293): CI pulls `latest` fresh while long-lived dev machines keep an old one — the two
+    # Pinned: CI pulls `latest` fresh while long-lived dev machines keep an old one — the two
     # worlds ran different servers for a day and the difference cost five CI runs to corner. Upgrades
     # are deliberate changes now, measured like any other. v1.18.3 carries the full local suite green.
     image: openfga/openfga:v1.18.3
@@ -45,7 +45,7 @@ services:
     restart: on-failure
 
   openfga:
-    # Pinned (#293): CI pulls `latest` fresh while long-lived dev machines keep an old one — the two
+    # Pinned: CI pulls `latest` fresh while long-lived dev machines keep an old one — the two
     # worlds ran different servers for a day and the difference cost five CI runs to corner. Upgrades
     # are deliberate changes now, measured like any other. v1.18.3 carries the full local suite green.
     image: openfga/openfga:v1.18.3
@@ -53,7 +53,7 @@ services:
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
       OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgres:5432/openfga?sslmode=disable
-      # #541: the FGA datastore shares the ONE dev postgres with the app DB. Uncapped (default 30
+      # The FGA datastore shares the ONE dev postgres with the app DB. Uncapped (default 30
       # conns), a 50-check batch saturated the instance and endpoints that never touch FGA measured
       # 2s. The cap bounds FGA's share of the shared instance so interactive queries keep breathing;
       # checks queue inside FGA instead of starving everything else. Dev/self-host topology only —
@@ -63,7 +63,7 @@ services:
   meilisearch:
     image: getmeili/meilisearch:v1.10
     environment:
-      # Taken from the environment, defaulting to the dev fixture (#726). Hardcoded, this key could
+      # Taken from the environment, defaulting to the dev fixture. Hardcoded, this key could
       # never agree with a self-hosted server: under NODE_ENV=production the server REFUSES TO BOOT
       # on a published fixture secret, so the guide's "set a real MEILI_MASTER_KEY" produced a search
       # service the server could not authenticate to — measured, and the reason the apps profile
@@ -73,7 +73,7 @@ services:
       MEILI_ENV: development
 
   # S3-compatible object storage: SeaweedFS (Apache-2.0, pure OSS, actively maintained). Replaces MinIO
-  # (community edition development stalled — ADR-014). Each stack overrides `command` only to set its
+  # (community edition development stalled). Each stack overrides `command` only to set its
   # web origin in -s3.allowedOrigins (browser presigned-PUT/GET CORS) and appends its data volume.
   seaweedfs:
     image: chrislusf/seaweedfs:latest

@@ -112,7 +112,7 @@ Postgres, a plain restart never needs re-bootstrapping; only `docker compose dow
 
 `deploy/caddy/Caddyfile` is the proxy the `apps` profile runs, and it is also the reference for
 running one yourself (`caddy run --config deploy/caddy/Caddyfile` with `SITE_HOST` / `*_UPSTREAM`
-set). Its routes are checked against `infra/routes/origin-routes.mjs` on every commit (#724), so this
+set). Its routes are checked against `infra/routes/origin-routes.mjs` on every commit, so this
 stack and a production edge answer the same paths by construction — including `s3.<SITE_HOST>`, which
 is how the browser reaches attachment uploads: a presigned URL's signature covers the host, so the
 object store needs a public name of its own rather than a path on the app.
@@ -194,7 +194,7 @@ A workspace reached on two hosts (for example after moving to a custom domain) n
 **both** registered at the IdP. The console shows the URI for the host you are on;
 that is the value to paste, and there is nothing to type back.
 
-**A second redirect URI is needed for account-settings linking** (ADR-259 §3.3): a
+**A second redirect URI is needed for account-settings linking**: a
 member adding this connection to an account they already have completes the round
 trip at `<scheme>://<host>/auth/link-callback`, not `/auth/callback` — register
 **both** on any IdP that allowlists redirect URIs (most do). Omitting the second one
@@ -218,7 +218,7 @@ a private network therefore needs the operator (not a tenant admin) to set
 |---|---|
 | `sub` | the member's identity (prefixed per connection — see the invite note below) |
 | `email` | the member's address; `email_verified` gates domain auto-enrolment |
-| `name` | the display name (ADR-190: the IdP is authoritative, the member may override it) |
+| `name` | the display name (the IdP is authoritative; the member may override it) |
 | `picture` | the avatar shown on the collab cursor and member list |
 | `groups` | group sync, when the connection trusts groups |
 
@@ -367,12 +367,12 @@ The override file is the mechanism because the compose file pins the value in th
   `OPENFGA_MODEL_ID` (model writes are additive; old model ids stay valid until
   you switch).
 - **Backups**: back up Postgres (app database AND the OpenFGA database) and the
-  object-storage bucket together. A step-by-step backup/restore runbook is
-  tracked in #403.
+  object-storage bucket together. A step-by-step backup/restore runbook is not
+  published yet.
 - **Health**: `server` exposes `healthz`/`readyz`; deep dependency-readiness
-  checks are tracked in #400 — keep infra-level probes on Postgres/OpenFGA/Meili
+  checks are not implemented yet — keep infra-level probes on Postgres/OpenFGA/Meili
   in the meantime.
-- **Metrics** (ADR-270): `server` exposes Prometheus text on **its own listener**,
+- **Metrics**: `server` exposes Prometheus text on **its own listener**,
   `:9464/metrics` (`METRICS_PORT`), bearer-gated by `METRICS_TOKEN`. It is a separate
   port on purpose: the ingress publishes only the API port, so the exposition is
   reachable from inside your cluster or network and nowhere else. Leave the token
@@ -402,5 +402,4 @@ The override file is the mechanism because the compose file pins the value in th
 This file is the CE-repo deployment guide. The end-user documentation site
 (getting started, editor guide, feature docs) is maintained in the private
 docs-site repository and published
-separately; see #180 for the bridge between generated reference material and
-that site.
+separately.

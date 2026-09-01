@@ -32,9 +32,9 @@ stack, so the task was invoked directly. The exporter is the product's; the butt
 Outline is licensed **BSL 1.1**. This archive contains no Outline source: the prose is written here,
 and what Outline contributed is the layout, the file names and the rewritten links — the observable
 behaviour this adapter has to interoperate with. Nothing is linked, bundled or distributed with the
-product (ADR-011 governs what enters a distributable, and no dependency was added).
+product (the licence policy governs what enters a distributable, and no dependency was added).
 
-⚠️ **Committing it was flagged for a ruling on #728 rather than assumed.** The precedent is the
+⚠️ **Committing it was raised for a ruling rather than assumed.** The precedent is the
 Docmost fixture beside this one, whose product is AGPL; BSL constrains use of the software rather than
 of an output, and the reasoning is recorded here so a reader can disagree with it cheaply — deleting
 this directory costs one `docker compose up` to recreate.

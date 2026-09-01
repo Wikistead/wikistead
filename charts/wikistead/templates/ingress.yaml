@@ -3,7 +3,8 @@
 ⚠️ TWO Ingress objects, and the split is load-bearing.
 
 The api object carries `rewrite-target: /$1`, and a rewrite annotation applies to the WHOLE Ingress —
-put `/api/(.*)` beside `/auth` and the rewrite eats `/auth` too. Measured on a real cluster (#802): folding them together breaks every route at once.
+put `/api/(.*)` beside `/auth` and the rewrite eats `/auth` too. Measured on a real cluster:
+folding them together breaks every route at once.
 
 The path list is the one in `infra/routes/origin-routes.mjs`, which is the canon for the edge, the
 dev proxy and this chart alike; `lint:origin-routes` compares them.
@@ -13,7 +14,7 @@ dev proxy and this chart alike; `lint:origin-routes` compares them.
 more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
 ` -}}
 {{- /*
-#880: state HSTS here rather than inheriting whatever the controller's ConfigMap happens to default
+State HSTS here rather than inheriting whatever the controller's ConfigMap happens to default
 to. The compose edge (deploy/caddy/Caddyfile) has always said it outright; leaving the Kubernetes edge
 to a default means an operator can switch the protection off in a file that is not in this chart, and
 nothing here would show it. ⚠️ Only when TLS is on: pinning a host that has no https locks every
@@ -113,7 +114,7 @@ spec:
 {{- if $s3pub }}
 ---
 {{/*
-#912: the attachment host, a third object on purpose. The browser opens presigned URLs here; the
+The attachment host, a third object on purpose. The browser opens presigned URLs here; the
 signature covers host and path, so this host cannot be a path on the app (a rewrite changes what was
 signed) and must not carry the api object's rewrite. SIBLING_HOSTS in infra/routes/origin-routes.mjs
 is the canon; lint:origin-routes compares.
