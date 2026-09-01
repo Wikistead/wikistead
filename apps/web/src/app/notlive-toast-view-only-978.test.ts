@@ -27,7 +27,7 @@ const persistent = vi.fn();
 const dismiss = vi.fn();
 vi.mock("../ui/toast", () => ({ notify: { persistent: (...a: unknown[]) => persistent(...a), dismiss: (...a: unknown[]) => dismiss(...a) } }));
 
-const { useNotLiveToast } = await import("../editor/useNotLiveToast");
+const { useNotLiveToast, GRACE_MS } = await import("../editor/useNotLiveToast");
 
 async function mount(id: string, reason: "connecting" | null) {
   const host = document.createElement("div");
@@ -46,11 +46,19 @@ describe("#978 the not-live toast is gated on edit capability", () => {
 
   it("an edit-capable caller stuck at reason=connecting still gets the toast", async () => {
     // The gate this test guards is `canEdit ? liveness.reason : null` in routes.tsx — simulated here
-    // by the caller passing the reason straight through, as the edit-capable branch does.
-    const { unmount } = await mount("notlive:member:p1", "connecting");
-    expect(persistent, "an edit-capable surface genuinely stuck connecting must still warn").toHaveBeenCalledTimes(1);
-    expect(persistent.mock.calls[0][0]).toBe("notlive:member:p1");
-    await unmount();
+    // by the caller passing the reason straight through, as the edit-capable branch does. This is a
+    // pre-live surface (never yet reached `reason: null`), so #980's grace period applies — the toast
+    // shows only once GRACE_MS has elapsed with no recovery, which "stuck" means it will.
+    vi.useFakeTimers();
+    try {
+      const { unmount } = await mount("notlive:member:p1", "connecting");
+      await act(async () => { vi.advanceTimersByTime(GRACE_MS); });
+      expect(persistent, "an edit-capable surface genuinely stuck connecting must still warn").toHaveBeenCalledTimes(1);
+      expect(persistent.mock.calls[0][0]).toBe("notlive:member:p1");
+      await unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("⚠️ a view-only caller, same stuck state, must NOT get the toast", async () => {
