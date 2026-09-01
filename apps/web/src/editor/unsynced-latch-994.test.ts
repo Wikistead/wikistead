@@ -164,4 +164,30 @@ describe("#994 the two editing surfaces both route through toastReason", () => {
     // can only view, where nothing ever reports and nothing would ever clear it.
     expect(ROUTES_SRC).toMatch(/dirtySig\.set\(false\); unsyncedSig\.set\(false\);/);
   });
+
+  // ⚠️ The two hops BETWEEN the seam and the reader. Review of this ticket deleted each of these
+  // lines in turn and the whole web suite stayed green (270 files / 2147 tests, both times): the
+  // prop is optional, so the types pass, and the failure is total silence — `unsynced` is false
+  // forever and a real unsent edit is never reported, which is the #813 accident itself. The rule,
+  // the seam and the reader were all pinned; the thread between them was not.
+  const EDITOR_SRC = readFileSync(resolve(import.meta.dirname, "Editor.tsx"), "utf8");
+
+  it("⚠️ both Editor tags hand the host's onUnsyncedChanges down (routes.tsx)", () => {
+    // Same shape as publish-withheld-813's `editorTags()`: a real tag has props, prose mentions of
+    // `<Editor>` do not, so the pattern requires `docName=`.
+    const tags = [...ROUTES_SRC.matchAll(/<Editor\s+[^>]*docName=[^>]*>/g)].map((m) => m[0]);
+    expect(tags.length, "the Editor call sites moved — re-read this file before trusting it").toBe(2);
+    for (const tag of tags) {
+      expect(tag, "an Editor that is not handed the callback can never report an unsent edit")
+        .toContain("onUnsyncedChanges={onUnsyncedChanges}");
+    }
+  });
+
+  it("⚠️ the Editor passes it through to connect() (Editor.tsx)", () => {
+    // Through the ref, not the prop: the collab effect's dependency list must not grow (a host
+    // re-render would otherwise tear the Y.Doc down), which is the same treatment `onLiveness` gets.
+    const connectCall = EDITOR_SRC.match(/connect\(\{[\s\S]*?\}\);/)?.[0] ?? "";
+    expect(connectCall, "connect() is called with an options object").not.toBe("");
+    expect(connectCall).toMatch(/onUnsyncedChanges:\s*\(unsynced\)\s*=>\s*onUnsyncedChangesRef\.current\?\.\(unsynced\)/);
+  });
 });

@@ -112,11 +112,17 @@ describe("#994 connect() drives the unsynced latch", () => {
 
   it("teardown detaches both listeners", () => {
     const { c, seen } = open();
+    // Arm the latch first, so that a listener left attached would have something to SAY after
+    // teardown. Asserting `seen` stays empty on an unarmed latch proves nothing (review found the
+    // first draft of this test did exactly that): the ack would clear a latch that was never set.
+    c.ytext.insert(0, "x");
+    expect(seen, "precondition: the doc listener is attached and armed").toEqual([true]);
     c.disconnect();
-    expect(handlers.get("unsyncedChanges")?.size ?? 0).toBe(0);
-    // The doc is destroyed by disconnect(), so drive a fresh one through the SAME registered handler
-    // set to prove nothing is left listening on the provider side either.
+    expect(handlers.get("unsyncedChanges")?.size ?? 0, "the provider listener is detached").toBe(0);
+    // The doc is destroyed by disconnect(), so there is no doc to write to; the provider side is
+    // driven through the SAME handler set the seam registered into. An ack reaching a still-attached
+    // listener would now flip the armed latch and push `false` — the assertion this exists for.
     emitUnsynced(0);
-    expect(seen).toEqual([]);
+    expect(seen, "an ack after teardown must reach nothing").toEqual([true]);
   });
 });

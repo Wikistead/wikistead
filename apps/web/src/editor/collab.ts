@@ -35,9 +35,13 @@ export function connect(opts: {
   /**
    * #994 / ADR-276 §Decision 1: called when "a local edit exists that is not reaching the server"
    * flips — the CONTENT question the not-live toast should have been standing on, next to
-   * `onLiveness`'s CONNECTION question. Same shape, same rarity: it moves on connection events, not
-   * on keystrokes (see `unsyncedSignal.ts` for why the AND with liveness makes that a property
-   * rather than a hope).
+   * `onLiveness`'s CONNECTION question. Same shape. What the AND with liveness guarantees is
+   * narrower than "never on a keystroke": WHILE LIVE it never fires at all (see `unsyncedSignal.ts`
+   * for why that is a property rather than a hope). In a window that is not live but still being
+   * acked — the handshake's `syncing`, the unauthenticated moment right after a reconnect — one
+   * local edit can flip it up and its ack flip it back down. Those windows are already covered by
+   * #980's pre-live grace, and a connection that is DOWN sends no acks, so nothing rings the host
+   * per keystroke in practice; but the claim this comment makes is the one the test measures.
    */
   onUnsyncedChanges?: (unsynced: boolean) => void;
   /**
