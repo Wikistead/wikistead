@@ -8,6 +8,7 @@ RUN corepack enable
 WORKDIR /repo
 COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY packages/macro-render ./packages/macro-render
+COPY packages/i18n-shared ./packages/i18n-shared
 COPY apps/web ./apps/web
 # #724: the dev proxy is GENERATED from the origin route table, so vite.config.ts imports it — and a
 # vite config is evaluated during `build`, not only during `dev`. Without this the image build dies

@@ -22,6 +22,7 @@ COPY packages/authz ./packages/authz
 COPY packages/entitlements ./packages/entitlements
 COPY packages/events ./packages/events
 COPY packages/macro-render ./packages/macro-render
+COPY packages/i18n-shared ./packages/i18n-shared
 COPY apps/server ./apps/server
 # Strip the test-only proprietary devDependency from the CE build context: entitlements-cloud is not
 # COPY'd (by design), and pnpm resolves workspace:^ references even for devDependencies. This line
