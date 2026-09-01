@@ -39,7 +39,7 @@ Two invariants shape every deployment:
 
 - Docker + Docker Compose (evaluation) or a Kubernetes cluster with an nginx
   ingress controller + cert-manager (production).
-- Node.js 20+ and pnpm only if you build images yourself. Running migrations does
+- Node.js 22+ and pnpm only if you build images yourself. Running migrations does
   not need them — the server image carries the schema and can apply it.
 - An OIDC identity provider for member login (anything spec-compliant: Authentik,
   Keycloak, Entra ID, Google, …). Guests via share links need no IdP.

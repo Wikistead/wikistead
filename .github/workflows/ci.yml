@@ -41,7 +41,7 @@ jobs:
       # cannot be exercised without an Actions run, and this repository had none until the push.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: pnpm }
+        with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm build
       - run: pnpm typecheck
@@ -85,7 +85,7 @@ jobs:
       # cannot be exercised without an Actions run, and this repository had none until the push.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: pnpm }
+        with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
       # Build BEFORE the seed: setup's seed imports workspace packages by their dist entrypoints,
       # and a fresh runner has none. Local machines carry stale dist from earlier builds, which is
@@ -127,7 +127,7 @@ jobs:
       # cannot be exercised without an Actions run, and this repository had none until the push.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: pnpm }
+        with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm license:check
   image-boundary:
