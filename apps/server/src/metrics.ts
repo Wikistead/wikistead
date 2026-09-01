@@ -32,8 +32,11 @@ collectDefaultMetrics({ register: metricsRegistry })
 // scanner's random paths cannot mint one series each.
 const REQUEST_LABELS = ['route', 'method', 'status_class'] as const
 
+// Metric names carry no product prefix: #575 keeps the product's name out of server source (it is a
+// deployment value, read through `productName()`), and Prometheus's own conventions name the
+// measured thing (`http_server_*`), not the program.
 export const httpRequestDuration = new Histogram({
-  name: 'wikistead_http_request_duration_seconds',
+  name: 'http_server_request_duration_seconds',
   help: 'Time to answer an HTTP request, by route template, method and status class.',
   labelNames: REQUEST_LABELS,
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
@@ -41,7 +44,7 @@ export const httpRequestDuration = new Histogram({
 })
 
 export const httpRequestsTotal = new Counter({
-  name: 'wikistead_http_requests_total',
+  name: 'http_server_requests_total',
   help: 'HTTP requests answered, by route template, method and status class.',
   labelNames: REQUEST_LABELS,
   registers: [metricsRegistry],

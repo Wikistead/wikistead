@@ -28,8 +28,8 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 describe('#987 / ADR-270 §3.4: request metrics are keyed by route template, never by identifier', () => {
   it('the exposition names the template and the status class for the id-carrying route', async () => {
     const text = await metricsRegistry.metrics()
-    expect(text).toMatch(/wikistead_http_requests_total\{[^}]*route="\/pages\/:pageId"[^}]*method="GET"[^}]*status_class="[2-5]xx"[^}]*\}/)
-    expect(text).toMatch(/wikistead_http_request_duration_seconds_bucket\{[^}]*route="\/pages\/:pageId"/)
+    expect(text).toMatch(/http_server_requests_total\{[^}]*route="\/pages\/:pageId"[^}]*method="GET"[^}]*status_class="[2-5]xx"[^}]*\}/)
+    expect(text).toMatch(/http_server_request_duration_seconds_bucket\{[^}]*route="\/pages\/:pageId"/)
     expect(text).toMatch(/route="\/healthz"/)
   })
 
