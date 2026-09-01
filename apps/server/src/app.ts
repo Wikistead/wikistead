@@ -197,7 +197,22 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.setErrorHandler((err, req, reply) => {
     const status = (err as { statusCode?: number }).statusCode ?? 500
     const speaksFga = /FGA API|openfga|tuple to be written|cannot delete a tuple|relation '[^']*' not found/i.test(String((err as Error | undefined)?.message ?? ''))
-    if (!speaksFga) return reply.code(status).send(err)
+    if (!speaksFga) {
+      // #987 / ADR-270 §3.5: a custom error handler REPLACES Fastify's default one, and the default
+      // was the only thing that logged a thrown 5xx — measured (#1039): with this handler in place, a
+      // route that threw produced no error-level line at all. One line, one stable shape: the route
+      // TEMPLATE (never the literal path — that carries ids), method, status, request id and the
+      // error with its stack. Never the headers or the body: a self-hosted product's logs are where
+      // secrets and personal data would leak first. A deliberate 4xx is an answer, not a failure,
+      // and stays out of the error level.
+      if (status >= 500) {
+        req.log.error(
+          { err, route: req.routeOptions?.url ?? null, method: req.method, status, reqId: req.id },
+          'unhandled request error',
+        )
+      }
+      return reply.code(status).send(err)
+    }
     req.log.error({ err }, 'the permission store refused a call; its text was withheld from the response')
     return reply.code(status >= 500 ? status : 500).send({
       statusCode: status >= 500 ? status : 500,
