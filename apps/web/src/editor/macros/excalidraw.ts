@@ -4,6 +4,7 @@ import { asMacroSource } from "./registry";
 import { writeLocalElements, readSceneElements, allElements, reconcile, elementsMap } from "./excalidraw-collab";
 import { excalidrawHtmlRender } from "@wikistead/macro-render"; // #85: export htmlRender is shared, single source
 import { macroPlaceholder, showPlaceholder } from "./placeholder"; // #600: one template for every "cannot show it" state
+import { EXCALIDRAW_ASSET_PATH } from "../../../excalidraw-asset-path"; // #990 / ADR-277: single source shared with csp-policy.ts's font-emit plugin (split out — that file is Node-only, this one must be browser-safe too)
 
 // ```excalidraw — body is an Excalidraw scene JSON. The PREVIEW (liveRender) uses
 // Excalidraw's NON-React exportToSvg, so no React enters CodeMirror (ADR-013). The
@@ -20,10 +21,10 @@ let modP: Promise<typeof import("@excalidraw/excalidraw")> | null = null;
 // main bundle. The CSS import is a side effect (Vite injects it).
 // #990 / ADR-277: the library resolves its fonts against `window.EXCALIDRAW_ASSET_PATH` FIRST and
 // only then against esm.sh. The build copies the package's fonts to `/excalidraw/fonts/` (see
-// `csp-policy.ts`), so pointing the path there before the module loads keeps every font fetch
-// same-origin — which is what lets the shell's CSP say `font-src 'self'` and nothing else. In dev the
-// path 404s and the library falls through to its CDN fallback (dev carries no CSP on purpose).
-const EXCALIDRAW_ASSET_PATH = "/excalidraw/";
+// `csp-policy.ts`, which is where EXCALIDRAW_ASSET_PATH is defined — imported here, not redeclared,
+// so the two can never drift apart), so pointing the path there before the module loads keeps every
+// font fetch same-origin — which is what lets the shell's CSP say `font-src 'self'` and nothing else.
+// In dev the path 404s and the library falls through to its CDN fallback (dev carries no CSP on purpose).
 const loadExcalidraw = () => {
   (window as unknown as { EXCALIDRAW_ASSET_PATH?: string }).EXCALIDRAW_ASSET_PATH ??= EXCALIDRAW_ASSET_PATH;
   return (modP ??= Promise.all([import("@excalidraw/excalidraw"), import("@excalidraw/excalidraw/index.css")]).then(([m]) => m));

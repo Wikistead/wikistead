@@ -22,13 +22,19 @@
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		# #990 / ADR-277: the one CSP directive a <meta> tag cannot carry. The rest of the policy is
-		# burned into the built index.html (apps/web/csp-policy.ts) and /pub/* adds its own
-		# per-tenant frame-src header — this line only refuses framing by other sites. When the
-		# per-page embedding design in README (#108, "public pages framed from registered domains")
-		# ships, this moves to the app layer; until then nothing this product serves is meant to be
-		# framed elsewhere.
-		Content-Security-Policy "frame-ancestors 'self'"
+		# #990 / ADR-277 rev4 (review, finding 1): `header` SETS the field, which on
+		# caddy:2-alpine v2.11.4 was measured to REPLACE — not merge with — any Content-Security-Policy
+		# the proxied response already carries. That silently erased four things: /pub/*'s per-tenant
+		# frame-src (public-shell.ts — this product's only real second CSP layer), the no-execute CSP on
+		# the attachments/public byte-serving routes (ADR-120/149), and the MCP OAuth consent page's
+		# `frame-ancestors 'none'` — which also downgrades that page's X-Frame-Options: DENY, since a CSP
+		# frame-ancestors present on a response makes browsers ignore X-Frame-Options entirely (ADR-148
+		# regression). `+Content-Security-Policy` APPENDS instead, and multiple CSP headers intersect
+		# (browsers AND them together), so `'none'` stays `'none'` and `'self'` stays `'self'` — this line
+		# only adds the "no other site may frame anything on this origin" floor. When the per-page
+		# embedding design in README (#108, "public pages framed from registered domains") ships, this
+		# moves to the app layer; until then nothing this product serves is meant to be framed elsewhere.
+		+Content-Security-Policy "frame-ancestors 'self'"
 		-Server
 	}
 

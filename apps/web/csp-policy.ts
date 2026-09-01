@@ -19,6 +19,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, sep } from "node:path";
 import type { Plugin } from "vite";
+import { EXCALIDRAW_ASSET_PATH } from "./excalidraw-asset-path";
 
 /**
  * ADR-277 §Decision item 1, directive by directive. Reasons live in the ADR; the short form:
@@ -31,8 +32,13 @@ import type { Plugin } from "vite";
  *   img/connect  `https:` because the attachment store is a deployment-configured sibling origin
  *                (`s3.<host>`, ADR-233) the build cannot name. This is also why the policy does NOT
  *                bound exfiltration — DOMPurify still does; the ADR says so in as many words.
- *   font-src     `'self'` only: Excalidraw's fonts are copied into the bundle (see the second plugin),
- *                so the esm.sh fallback it would otherwise reach for is never a fetch.
+ *   font-src     `'self' data:`. Excalidraw's fonts are copied into the bundle (see the second plugin),
+ *                so the esm.sh fallback it would otherwise reach for is never a fetch — `'self'` alone
+ *                would cover the editor. `data:` is for a DIFFERENT consumer: `printBrowserExport`
+ *                (exportBrowser.ts) prints through an `iframe.srcdoc`, which inherits the parent
+ *                document's CSP, and that document embeds the code face as a `data:font/woff2`
+ *                `@font-face` (ADR-194) — without `data:` here the print page silently falls back to a
+ *                generic monospace font with no error (review, finding 2).
  *   frame-src    `'self' https:` — for the editor surface this is close to zero protection (the embed
  *                allowlist is judged client-side); `/pub/*` gets a real per-tenant `frame-src` as an
  *                HTTP header from `public-shell.ts`, and header + meta apply as their intersection.
@@ -44,7 +50,7 @@ export const CSP_DIRECTIVES: ReadonlyArray<readonly [string, string]> = [
   ["worker-src", "'self' blob:"],
   ["style-src", "'self' 'unsafe-inline'"],
   ["img-src", "'self' data: blob: https:"],
-  ["font-src", "'self'"],
+  ["font-src", "'self' data:"],
   ["connect-src", "'self' wss: https:"],
   ["frame-src", "'self' https:"],
   ["object-src", "'none'"],
@@ -85,7 +91,10 @@ export function cspMetaPlugin(): Plugin {
 // otherwise depend on at runtime, and a `font-src` exception the policy above would otherwise need.
 // The package's own `dist/prod/fonts/` tree is copied verbatim into the bundle so the first candidate
 // resolves; the app sets the asset path before the module is loaded (`macros/excalidraw.ts`).
-export const EXCALIDRAW_ASSET_PATH = "/excalidraw/";
+// Declared in `./excalidraw-asset-path.ts` (re-exported here for callers of this module) because that
+// file must also be importable from BROWSER code, and this one pulls in `node:fs`/`node:module` for
+// its Vite plugins.
+export { EXCALIDRAW_ASSET_PATH };
 
 /** The package's production entry is `dist/prod/index.js`; its `fonts/` sibling is what ships. */
 export function excalidrawProdDir(): string {

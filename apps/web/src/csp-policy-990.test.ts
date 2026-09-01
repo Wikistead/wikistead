@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
-  CSP_DIRECTIVES, CSP_POLICY, injectCspMeta, cspMetaPlugin, excalidrawFontsDir, excalidrawProdDir, listFilesUnder, EXCALIDRAW_ASSET_PATH,
+  CSP_DIRECTIVES, CSP_POLICY, injectCspMeta, cspMetaPlugin, excalidrawFontsDir, excalidrawProdDir, excalidrawFontsPlugin, listFilesUnder, EXCALIDRAW_ASSET_PATH,
 } from "../csp-policy";
 
 const directive = (name: string): string => {
@@ -24,8 +24,9 @@ describe("#990: the policy says what ADR-277 decided", () => {
     expect(directive("worker-src")).not.toContain("data:");
   });
 
-  it("font-src is 'self' alone: the fonts ship in the bundle, esm.sh is never a source", () => {
-    expect(directive("font-src")).toBe("'self'");
+  it("font-src is 'self' plus data: — the fonts ship in the bundle (esm.sh is never a source), and " +
+    "data: is for printBrowserExport's srcdoc-inherited @font-face, not a reopened esm.sh escape hatch", () => {
+    expect(directive("font-src")).toBe("'self' data:");
     expect(CSP_POLICY).not.toContain("esm.sh");
   });
 
@@ -89,8 +90,38 @@ describe("#990: Excalidraw's fonts really are in the bundle's reach", () => {
 
   it("the asset path the app sets is the directory the plugin emits under", () => {
     expect(EXCALIDRAW_ASSET_PATH).toBe("/excalidraw/");
-    const src = readFileSync(join(dirname(new URL(import.meta.url).pathname), "editor", "macros", "excalidraw.ts"), "utf8");
-    expect(src, "set BEFORE the module is imported, or the first load resolves against esm.sh").toMatch(/EXCALIDRAW_ASSET_PATH[\s\S]*import\("@excalidraw\/excalidraw"\)/);
     expect(existsSync(excalidrawFontsDir())).toBe(true);
+  });
+
+  it("excalidraw.ts imports the ONE constant rather than redeclaring its own (finding 3: a second " +
+    "literal can drift from this file's without either test noticing)", () => {
+    const src = readFileSync(join(dirname(new URL(import.meta.url).pathname), "editor", "macros", "excalidraw.ts"), "utf8");
+    expect(src, "no local redeclaration").not.toMatch(/const\s+EXCALIDRAW_ASSET_PATH\s*=/);
+    expect(src, "imported from the shared browser-safe module").toMatch(/import\s*\{[^}]*EXCALIDRAW_ASSET_PATH[^}]*\}\s*from\s*["'].*excalidraw-asset-path["']/);
+    // Assignment must precede the dynamic import, or the library's first font fetch resolves against
+    // esm.sh instead of the self-hosted path.
+    const assignAt = src.indexOf("EXCALIDRAW_ASSET_PATH");
+    const importAt = src.indexOf('import("@excalidraw/excalidraw")');
+    expect(assignAt, "the constant is referenced somewhere").toBeGreaterThan(-1);
+    expect(importAt, "the dynamic import exists").toBeGreaterThan(-1);
+    expect(assignAt, "referenced before the dynamic import").toBeLessThan(importAt);
+  });
+
+  it("every file the plugin emits lands where Excalidraw's own URL-resolution algorithm will look for it " +
+    "(finding 3: the previous pin matched a comment, not the emitted paths — this drives the real " +
+    "generateBundle hook through a stub emitFile and recomputes the target with the WHATWG URL algorithm, " +
+    "independently of the template string the plugin uses to build fileName)", () => {
+    const emitted: string[] = [];
+    const ctx = { emitFile: (f: { fileName?: string }) => { if (f.fileName) emitted.push(f.fileName) } };
+    const plugin = excalidrawFontsPlugin();
+    (plugin.generateBundle as unknown as (this: typeof ctx) => void).call(ctx);
+    expect(emitted.length, "the stub actually captured emitted assets").toBeGreaterThan(50);
+    const origin = "https://shell.example";
+    for (const fileName of emitted) {
+      expect(fileName.startsWith(`${EXCALIDRAW_ASSET_PATH.slice(1)}fonts/`)).toBe(true);
+      const relFromFontsDir = fileName.slice(`${EXCALIDRAW_ASSET_PATH.slice(1)}fonts/`.length);
+      const resolved = new URL(`./fonts/${relFromFontsDir}`, `${origin}${EXCALIDRAW_ASSET_PATH}`);
+      expect(resolved.pathname).toBe(`/${fileName}`);
+    }
   });
 });
