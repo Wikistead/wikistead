@@ -5,6 +5,7 @@ import { join, dirname } from "node:path";
 import {
   CSP_DIRECTIVES, CSP_POLICY, injectCspMeta, cspMetaPlugin, excalidrawFontsDir, excalidrawProdDir, excalidrawFontsPlugin, listFilesUnder, EXCALIDRAW_ASSET_PATH,
 } from "../csp-policy";
+import viteConfig from "../vite.config";
 
 const directive = (name: string): string => {
   const hit = CSP_DIRECTIVES.find(([n]) => n === name);
@@ -40,6 +41,21 @@ describe("#990: the policy says what ADR-277 decided", () => {
   it("frame-ancestors is NOT here — a meta tag cannot carry it; Caddy does", () => {
     expect(CSP_POLICY).not.toContain("frame-ancestors");
     expect(CSP_POLICY).not.toContain("report-uri");
+  });
+});
+
+describe("#990: the plugins are actually wired into the build (not just correct if reached)", () => {
+  it("vite.config.ts's real plugins array carries both — an independent review pass " +
+    "found that removing them from the array leaves EVERY test above (and `tsc --noEmit`) green, " +
+    "while the shipped index.html silently loses its CSP and Excalidraw silently loses its fonts. " +
+    "This reads the actual resolved config object Vite builds with, not vite.config.ts's source text", async () => {
+    const resolved = typeof viteConfig === "function"
+      ? await (viteConfig as (env: { command: "build"; mode: string }) => unknown)({ command: "build", mode: "production" })
+      : viteConfig;
+    const plugins = (resolved as { plugins?: unknown[] }).plugins ?? [];
+    const names = plugins.flat(Infinity).filter((p): p is { name?: string } => !!p && typeof p === "object").map((p) => p.name);
+    expect(names, "cspMetaPlugin (the shell's whole CSP mechanism) is in the build's plugin list").toContain("wikistead:csp-meta");
+    expect(names, "excalidrawFontsPlugin (font-src 'self' depends on these files existing) is in the build's plugin list").toContain("wikistead:excalidraw-fonts");
   });
 });
 
@@ -98,13 +114,21 @@ describe("#990: Excalidraw's fonts really are in the bundle's reach", () => {
     const src = readFileSync(join(dirname(new URL(import.meta.url).pathname), "editor", "macros", "excalidraw.ts"), "utf8");
     expect(src, "no local redeclaration").not.toMatch(/const\s+EXCALIDRAW_ASSET_PATH\s*=/);
     expect(src, "imported from the shared browser-safe module").toMatch(/import\s*\{[^}]*EXCALIDRAW_ASSET_PATH[^}]*\}\s*from\s*["'].*excalidraw-asset-path["']/);
-    // Assignment must precede the dynamic import, or the library's first font fetch resolves against
-    // esm.sh instead of the self-hosted path.
-    const assignAt = src.indexOf("EXCALIDRAW_ASSET_PATH");
-    const importAt = src.indexOf('import("@excalidraw/excalidraw")');
-    expect(assignAt, "the constant is referenced somewhere").toBeGreaterThan(-1);
-    expect(importAt, "the dynamic import exists").toBeGreaterThan(-1);
-    expect(assignAt, "referenced before the dynamic import").toBeLessThan(importAt);
+    // The RUNTIME assignment (not just any mention of the identifier — an independent review
+    // pass found `indexOf("EXCALIDRAW_ASSET_PATH")` above matches the IMPORT statement first,
+    // so deleting the actual `window.EXCALIDRAW_ASSET_PATH ??= …` line, or moving it after the dynamic
+    // import, left this assertion green) must precede the dynamic import, or the library's first font
+    // fetch resolves against esm.sh instead of the self-hosted path.
+    const assignMatch = /\.EXCALIDRAW_ASSET_PATH\s*\?\?=\s*EXCALIDRAW_ASSET_PATH\s*;/.exec(src);
+    // NOT src.indexOf('import("@excalidraw/excalidraw")') alone — line 18's `Promise<typeof
+    // import("@excalidraw/excalidraw")>` type position matches that same substring, is erased at
+    // compile time (never actually fetches anything), and sits BEFORE the real runtime call, which
+    // made an earlier version of this assertion pass regardless of where the assignment moved. Anchor
+    // on `Promise.all([import(...` — the actual call `loadExcalidraw` awaits.
+    const importMatch = /Promise\.all\(\[\s*import\("@excalidraw\/excalidraw"\)/.exec(src);
+    expect(assignMatch, "the window.EXCALIDRAW_ASSET_PATH ??= assignment exists").not.toBeNull();
+    expect(importMatch, "the real (runtime) dynamic import call exists").not.toBeNull();
+    expect(assignMatch!.index, "the assignment runs before the dynamic import call").toBeLessThan(importMatch!.index);
   });
 
   it("every file the plugin emits lands where Excalidraw's own URL-resolution algorithm will look for it " +

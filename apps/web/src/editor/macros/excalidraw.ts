@@ -20,11 +20,12 @@ let modP: Promise<typeof import("@excalidraw/excalidraw")> | null = null;
 // unstyled, e.g. a giant padlock/toolbar icon). Both are lazy so they stay out of the
 // main bundle. The CSS import is a side effect (Vite injects it).
 // #990 / ADR-277: the library resolves its fonts against `window.EXCALIDRAW_ASSET_PATH` FIRST and
-// only then against esm.sh. The build copies the package's fonts to `/excalidraw/fonts/` (see
-// `csp-policy.ts`, which is where EXCALIDRAW_ASSET_PATH is defined — imported here, not redeclared,
-// so the two can never drift apart), so pointing the path there before the module loads keeps every
-// font fetch same-origin — which is what lets the shell's CSP say `font-src 'self'` and nothing else.
-// In dev the path 404s and the library falls through to its CDN fallback (dev carries no CSP on purpose).
+// only then against esm.sh. The build copies the package's fonts to `/excalidraw/fonts/` — the SAME
+// path this file's import above (from `excalidraw-asset-path.ts`) hands to `csp-policy.ts`'s
+// `excalidrawFontsPlugin`, so the two can never drift apart — so pointing the path there before the
+// module loads keeps every font fetch same-origin — which is what lets the shell's CSP say
+// `font-src 'self'` and nothing else. In dev the path 404s and the library falls through to its CDN
+// fallback (dev carries no CSP on purpose).
 const loadExcalidraw = () => {
   (window as unknown as { EXCALIDRAW_ASSET_PATH?: string }).EXCALIDRAW_ASSET_PATH ??= EXCALIDRAW_ASSET_PATH;
   return (modP ??= Promise.all([import("@excalidraw/excalidraw"), import("@excalidraw/excalidraw/index.css")]).then(([m]) => m));
