@@ -78,6 +78,12 @@ const LEDGER: Record<string, { kind: 'debt' | 'bounded' | 'internal'; why: strin
   } : {}),
 
   // ── bounded: the result cannot grow, and the reason is stated rather than assumed ──────────────
+  // #1054 / ADR-275 rev3 §4: the tenant-wide banner's own poll — SELECT EXISTS(...) answers exactly
+  // one boolean row, never a list. The scan reads the inner `SELECT 1 FROM members WHERE
+  // pending_scim_removal_at IS NOT NULL` as an unbounded per-tenant read (the same shape unread-count's
+  // derived-table COUNT gets misread as, one line down) because EXISTS is a wrapper the scan does not
+  // model, not because the response can grow.
+  'members.ts:/members/pending-notice': { kind: 'bounded', why: 'SELECT EXISTS(...) — one boolean, never a list. The scan cannot see through the EXISTS() wrapper around the inner SELECT.' },
   'attachments.ts:/attachments/:id/download': { kind: 'bounded', why: 'one attachment by id — a row, not a list.' },
   'attachments.ts:/attachments/:id/inline': { kind: 'bounded', why: 'one attachment by id — a row, not a list.' },
   'revisions.ts:/pages/:pageId/revisions/:revId/content': { kind: 'bounded', why: 'one revision by id — a row, not a list.' },

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IdCard, KeyRound, Ban } from "lucide-react"; // #544: icons, never text glyphs
+import { IdCard, KeyRound, Ban, Hourglass } from "lucide-react"; // #544: icons, never text glyphs
 import { Tooltip } from "../components/ui/tooltip"; // the RoleTip layer — not a second tooltip school
 import type { Member } from "../data/membersApi";
 
@@ -11,14 +11,18 @@ import type { Member } from "../data/membersApi";
 // the three real states — IdP-born (IdCard), IdP-born with a password added (IdCard + KeyRound),
 // password-born (KeyRound alone; a local user IS their password entrance, a second mark would say
 // the same thing twice). `deactivated` rides along for the row dim + the Ban mark.
-export type MemberStatusKey = "idp" | "password" | "local" | "deactivated";
+// #1054 / ADR-275 rev3 §4: "pending" rides beside the other marks, not in place of them — a pending
+// member is FULLY ACTIVE (ADR-275 §1, "not a new state"), so it can appear next to any combination the
+// other four keys already draw, never instead of one.
+export type MemberStatusKey = "idp" | "password" | "local" | "deactivated" | "pending";
 
-export function memberStatusKeys(m: Pick<Member, "identity_source" | "has_password" | "deactivated_at">): MemberStatusKey[] {
+export function memberStatusKeys(m: Pick<Member, "identity_source" | "has_password" | "deactivated_at" | "pending_scim_removal_at">): MemberStatusKey[] {
   const keys: MemberStatusKey[] = [];
   if (m.identity_source === "local") keys.push("local");
   else keys.push("idp"); // absent/oidc: every pre-083 member is IdP-born (the migration's default)
   if (m.has_password && m.identity_source !== "local") keys.push("password");
   if (m.deactivated_at != null) keys.push("deactivated");
+  if (m.pending_scim_removal_at != null) keys.push("pending");
   return keys;
 }
 
@@ -64,7 +68,7 @@ export function passwordAction(m: Pick<Member, "has_password">): "grant" | "reis
   return m.has_password ? "reissue" : "grant";
 }
 
-const ICON = { idp: IdCard, password: KeyRound, local: KeyRound, deactivated: Ban } as const;
+const ICON = { idp: IdCard, password: KeyRound, local: KeyRound, deactivated: Ban, pending: Hourglass } as const;
 
 /** One status mark: an icon whose meaning is a hover/focus/tap tooltip (the #586 school — desktop
  *  first, no always-on caption; the label doubles as the accessible name). */

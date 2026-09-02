@@ -9,6 +9,7 @@ import { UserMenu } from "./UserMenu";
 import { NotificationBell } from "../notifications/NotificationBell";
 import { TenantBrand } from "./BrandLockup";
 import { FirstRunOnboarding } from "./EditorOnboarding";
+import { ScimPendingBanner } from "./ScimPendingBanner";
 import { useMediaQuery } from "./PageControls";
 import { useBranding } from "../data/queries";
 import { assetUrl } from "../data/apiClient";
@@ -146,7 +147,15 @@ export function AppShell({
           </aside>
         </>
       )}
-      <main className="min-h-0 min-w-0 overflow-hidden [grid-area:main]">{children}</main>
+      {/* #1054: the pending-removal banner gets its OWN row inside main's flex column, so the page
+          content below keeps exactly the box it always had (min-h-0/overflow-hidden on the sibling,
+          not on main itself) — a page assuming it owns 100% of main's area sees no change when the
+          banner is absent (the common case; the query resolves to `undefined` before its first
+          answer, same as `pending` false), and shrinks by exactly the banner's own height when present. */}
+      <main className="flex min-h-0 min-w-0 flex-col [grid-area:main]">
+        {onLogout && <ScimPendingBanner />}
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
+      </main>
       {/* #289 / ADR-115: the first-run persona enrollment + existing-user banner. MEMBER-ONLY (#355):
           gate on the member-shell signal (onLogout — guest/share/loading shells pass none), NOT just the
           inner DATA gate. In dev/e2e VITE_DEV_TOKEN forces status="authed" even on a guest share route, so the

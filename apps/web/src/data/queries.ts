@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousData, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, assetUrl } from "./apiClient";
 import type { ImportStatusRow } from "./exportApi";
+import { fetchPendingRemovalNotice } from "./membersApi";
 import { useSession } from "../session/SessionProvider";
 import type { Lang } from "@wikistead/i18n-shared";
 
@@ -1637,6 +1638,17 @@ export function useBranding() {
   return useQuery({
     queryKey: ["branding"],
     queryFn: () => apiFetch<BrandingDTO>("/branding", token),
+    staleTime: 60_000,
+  });
+}
+// #1054 / ADR-275 rev3 §4: the tenant-wide banner's own poll. A minute is plenty for a standing
+// notice nobody needs to see the instant it appears (the out-of-band email, #1051, is the immediate
+// signal) — this is the in-product record for whoever eventually does get in.
+export function usePendingRemovalNotice() {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["members", "pending-notice"],
+    queryFn: () => fetchPendingRemovalNotice(token),
     staleTime: 60_000,
   });
 }

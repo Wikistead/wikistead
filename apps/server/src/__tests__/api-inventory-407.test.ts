@@ -71,6 +71,7 @@ const EXCLUDED_PATHS = new Set([
   // #652: the interstitial's own doors live under /auth/, which the prefix list above already excludes;
   // named here only so a reader looking for them finds them beside their siblings.
   '/me/settings', '/me/capabilities', '/me/avatar', '/members/:sub', '/members/:sub/avatar-image', '/members/invites', '/members/invites/:id', '/members/invites/:id/reissue', // account/invite UI plumbing (#638: handing a pending invitation over again is the same console surface)
+  '/members/pending-notice', // #1054 / ADR-275 rev3 §4: the tenant-wide banner's own poll — a single boolean, app-shell plumbing, not a stable integration surface an external caller would drive
   '/ai/ask', '/ai/capability',     // AI feature surface (own contract)
   '/pages/:pageId/mentionable',    // comment @-mention candidates (UI-shaped)
   '/pages/:pageId/member-candidates', // permissions-dialog member typeahead (UI-shaped; #416)

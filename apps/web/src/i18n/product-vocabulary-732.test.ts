@@ -60,6 +60,12 @@ const ALLOWED: Record<string, string> = {
   // same reason: an administrator copies this value out of a Microsoft screen that calls it a
   // tenant, and renaming it here would leave them hunting for something Entra does not have.
   "adminConnections.entraTenantId": "Entra's own term for the directory",
+  // #1054 / ADR-275 rev3 §4: the two shipped RECOVERY CLI COMMANDS the copy names verbatim
+  // (`pnpm tenant:login-methods`, `pnpm tenant:local-admin`) — an operator types these exact strings,
+  // and #1050/#1051's own copy (server-side catalog, out of this check's tree) already commits to the
+  // same literal names. Renaming the display word here would leave the sentence naming a command that
+  // does not exist.
+  "members.pendingBannerBody": "names the two shipped `tenant:*` CLI script names verbatim",
 };
 
 describe("#732: the product uses one name for a workspace", () => {

@@ -200,13 +200,17 @@ export async function membersPlugin(app: FastifyInstance) {
         sub: string; email: string | null; display_name: string | null; picture_url: string | null
         role: string; groups: string[] | null; created_at: Date
         identity_source: string; deactivated_at: Date | null; deactivation_reason: string | null; has_password: boolean
-        has_factor: boolean; cursor_at: string
+        has_factor: boolean; cursor_at: string; pending_scim_removal_at: Date | null
       }[]
     >`SELECT m.sub, m.email, m.display_name, m.picture_url, m.role, m.groups, m.created_at,
              -- the value the cursor is built from, carried out of SQL so no driver rounds it
              extract(epoch from m.created_at)::text AS cursor_at,
              -- #627: WHOSE suspension it is decides whether the console may offer to undo it
              m.identity_source, m.deactivated_at, m.deactivation_reason, (lc.member_sub IS NOT NULL) AS has_password,
+             -- #1054 / ADR-275 rev3 §4 (A8): the timestamp only, never the removal reason column —
+             -- the console's own non-disclosure line matches the out-of-band notice's (#1051): a member
+             -- row may say "pending", never which floor or how many administrators remain.
+             m.pending_scim_removal_at,
              -- #644 existence only, the same shape as has_password one line up — nothing about
              -- the factor itself rides this SELECT. It exists so the console does not offer to reset
              -- somebody who holds nothing: that call SUCCEEDS with a count of zero, which is worse than
@@ -249,6 +253,17 @@ export async function membersPlugin(app: FastifyInstance) {
     return listGroupNames(req.db, {
       ...(Number.isFinite(limit) ? { limit } : {}), ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
     })
+  })
+
+  // #1054 / ADR-275 rev3 §4 (A8): the tenant-wide banner's own signal — any SIGNED-IN member may call
+  // (not admin-only, deliberately: `last_admin` fires when the pending member IS the only administrator,
+  // so an admin-gated notice would be unreachable in exactly the moment it would need to fire — the same
+  // reasoning that put the out-of-band email on every member, #1051). A single boolean, never a count or
+  // a sub or the floor: the same non-disclosure line the email and the list projection above both hold.
+  app.get('/members/pending-notice', async (req) => {
+    const [row] = await req.db.sql<{ any: boolean }[]>`
+      SELECT EXISTS(SELECT 1 FROM members WHERE pending_scim_removal_at IS NOT NULL) AS any`
+    return { pending: row?.any ?? false }
   })
 
   // #379 / ADR-150: resolve a SPECIFIC set of author subs to display identity — any tenant MEMBER may

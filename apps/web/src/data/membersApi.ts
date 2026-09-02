@@ -30,6 +30,10 @@ export interface Member {
   deactivated_at?: string | null;
   /** #627: whose suspension this is — only an `admin` one is the console's to undo. */
   deactivation_reason?: "scim" | "admin" | "downgrade_freeze" | null;
+  /** #1054 / ADR-275 rev3 §4: a SCIM removal deferred rather than executed (ADR-275 §1 — the member
+   *  stays fully active). Timestamp only; the floor it crossed never rides this projection (the same
+   *  non-disclosure line the out-of-band notice, #1051, holds). */
+  pending_scim_removal_at?: string | null;
 }
 export interface Invite {
   id: string;
@@ -69,6 +73,13 @@ export async function listInvites(token: string): Promise<Invite[]> {
     cursor = r.nextCursor ?? null;
   } while (cursor);
   return all;
+}
+/** #1054: the tenant-wide banner's own signal — any signed-in member may call this (not admin-only),
+ *  because a pending `last_admin` removal means the tenant's only administrator IS the pending row,
+ *  and an admin-gated notice would be unreachable in exactly the moment it would need to fire. */
+export async function fetchPendingRemovalNotice(token: string): Promise<boolean> {
+  const r = await apiFetch<{ pending: boolean }>("/members/pending-notice", token);
+  return r?.pending ?? false;
 }
 export async function createInvite(token: string, body: { email: string; role: "admin" | "member"; roleId?: string | null }): Promise<{ inviteUrl: string; emailed: boolean }> {
   return (await apiFetch<{ inviteUrl: string; emailed: boolean }>("/members/invites", token, { method: "POST", body: JSON.stringify(body) }))!;
