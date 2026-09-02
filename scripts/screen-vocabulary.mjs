@@ -145,4 +145,14 @@ export const SCREEN_VOCABULARY = {
     ns: 'adminApi',
     keys: ['create', 'revoke'],
   },
+  // #1063, ninth surface of this slice. This namespace is the largest by far (70+ keys: OIDC config,
+  // SAML config, second-factor stance, SSO-required, exemptions...) and the page covers only a
+  // subset of it (doors + second-factor stance; SAML, SSO-required and the OIDC test-connection
+  // button are real gaps, not arming candidates today — forcing them in would be new content, not
+  // the "page already answers" bar this staged arming holds to). One key: the page's own "Turning
+  // the requirement on" already named the concept without the actual toggle label.
+  'admin-surface:auth': {
+    ns: 'adminAuth',
+    keys: ['secondFactorRequired'],
+  },
 }

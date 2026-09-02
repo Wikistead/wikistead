@@ -30,6 +30,12 @@
         "ja": "チェーンを検証"
       }
     },
+    "admin-surface:auth": {
+      "secondFactorRequired": {
+        "en": "Require two-factor authentication",
+        "ja": "2 要素認証を必須にする"
+      }
+    },
     "admin-surface:billing": {
       "manage": {
         "en": "Manage billing",
