@@ -1,5 +1,5 @@
-// ADR-259 §3.2/§3.4/§6.2 — the HTTP-level pins review's round-1 pass found missing (the tracker
-// #948, comment on the rejection). The unit-level tests in auto-enroll.test.ts call
+// ADR-259 §3.2/§3.4/§6.2 — the HTTP-level pins review's round-1 pass found missing (#948,
+// comment on the rejection). The unit-level tests in auto-enroll.test.ts call
 // `establishMemberSession` directly; this file drives the REAL `/auth/login` → IdP → `/auth/callback`
 // round trip, because the two things those unit tests cannot see are:
 //   - whether `routes/auth.ts` actually turns the thrown `address_taken` into
