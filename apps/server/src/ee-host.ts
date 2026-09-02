@@ -74,6 +74,10 @@ export type { SuspensionReason, SuspendOutcome, ReactivateOutcome } from './auth
 // §4's out-of-band notice) needs to ask "is THIS tenant's resolved driver the no-op one" — the CE class
 // itself, not a duplicated `instanceof`-unfriendly copy.
 export { NoopEmailDriver } from './email/index.js'
+// #1051 / ADR-275 rev3 §4: the out-of-band notice rides the existing outbox — SCIM enqueues into the
+// SAME queue every other transactional class uses, rather than a second send path.
+export { enqueueEmailOutbox } from './email/outbox.js'
+export { SCIM_OFFBOARDING_DEFERRED_CLASS } from './email/scim-offboarding-builder.js'
 // #637 / ADR-216 §2: the EE composition root declares the same request-path rule as the CE one.
 export { requireAuthzScope } from '@wikistead/authz'
 // #637 / ADR-216 §7: the EE composition root registers what a restriction MEANS; CE owns the refusal.

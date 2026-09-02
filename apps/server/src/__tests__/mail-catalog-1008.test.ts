@@ -45,12 +45,15 @@ describe('#1008: the chokepoint is found, not listed', () => {
   const builders = composing.filter((s) => /registerEmailBuilder\(/.test(s.text)).map((s) => s.rel)
   const inlineSenders = composing.filter((s) => /driver\.send\(|resolveTenantEmailDriver\([^)]*\)\.send\(/.test(s.text)).map((s) => s.rel)
 
-  it('discovers the three builder-registering files and the two inline senders', () => {
+  it('discovers the four builder-registering files and the two inline senders', () => {
     // A floor, not a ceiling (#623's own lesson: an empty walk must not read as "nothing to check").
     // If this count changes because a new mail class or send site was added, it belongs in the ADR's
-    // §1 table too, not just here.
+    // §1 table too, not just here. #1051 / ADR-275 rev3 §4 added the fourth: the SCIM deferral notice
+    // was written FROM THE START against the catalogue (no former literal to migrate), so it belongs
+    // here and in the discovery list but not in `FORMER_LITERALS`/`CHOKEPOINT_FILES` below, which are
+    // #1008's own historical migration scope.
     expect(builders.sort(), 'registerEmailBuilder(...) call sites').toEqual(
-      ['email/digest.ts', 'email/mention-builder.ts', 'email/security-builder.ts'].sort(),
+      ['email/digest.ts', 'email/mention-builder.ts', 'email/security-builder.ts', 'email/scim-offboarding-builder.ts'].sort(),
     )
     expect(inlineSenders.sort(), 'direct driver.send(...) call sites').toEqual(
       ['routes/auth-local.ts', 'routes/members.ts'].sort(),

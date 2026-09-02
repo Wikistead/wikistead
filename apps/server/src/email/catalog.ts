@@ -104,6 +104,26 @@ export const recoveryUsedBody = byLang(
     + '心当たりがある場合は、新しい認証アプリを登録し、新しいリカバリーコードを作成してください。',
 )
 
+// scim-offboarding-builder.ts — #1051 / ADR-275 rev3 §4, ruling ⑤/B5: the copy discloses NO state.
+// The recipient set includes people the directory just told to leave, so the words must not say
+// which floor, who is pending, or how many administrators remain — only that something needs an
+// administrator's attention, and the two SHIPPED tools ⑥/B8 named for acting on it.
+export const scimOffboardingDeferredSubject = byLang(
+  () => 'A directory change needs an administrator',
+  () => 'ディレクトリの変更に管理者の対応が必要です',
+)
+export const scimOffboardingDeferredBody = byLang(
+  () =>
+    'A change made through your identity provider could not be completed, because it needs an '
+    + 'administrator who can currently sign in to this workspace.\n\n'
+    + 'If nobody with administrator access can sign in right now, an operator can run '
+    + '`pnpm tenant:login-methods` or `pnpm tenant:local-admin` to restore access.',
+  () =>
+    'IDプロバイダー経由の変更が完了しませんでした。現在このワークスペースにサインインできる管理者の対応が必要です。\n\n'
+    + '管理者権限を持つ人が誰もサインインできない場合、運用担当者が `pnpm tenant:login-methods` '
+    + 'または `pnpm tenant:local-admin` を実行するとアクセスを復旧できます。',
+)
+
 // routes/email-unsubscribe.ts
 export const unsubKindMention = byLang(() => 'mention email', () => 'メンション通知メール')
 export const unsubKindDigest = byLang(() => 'digest email', () => 'ダイジェストメール')
