@@ -53,4 +53,14 @@ export const SCREEN_VOCABULARY = {
     ns: 'adminRoles',
     keys: ['builtIn', 'create', 'rename', 'delete'],
   },
+  // #1043, continuing #981's staged arming. `disabled` is the one state #981's own audit flagged as
+  // armable with a light wording change (the page said "disable" the verb; the badge says "Disabled"
+  // the state — the same drift `manage`/`manages` was armed for on the spaces surface). `create` /
+  // `delete` are declared `:none:` in the docs page's own frontmatter: the page describes registering
+  // an endpoint and never names the Add button, and never describes removing a webhook at all — both
+  // gaps the `:none:` reason puts where a reader of the page can see them, same as roles above.
+  'admin-surface:webhooks': {
+    ns: 'adminWebhooks',
+    keys: ['disabled', 'create', 'delete'],
+  },
 }

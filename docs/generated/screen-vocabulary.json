@@ -55,6 +55,20 @@
         "en": "Manage",
         "ja": "管理"
       }
+    },
+    "admin-surface:webhooks": {
+      "create": {
+        "en": "Add",
+        "ja": "追加"
+      },
+      "delete": {
+        "en": "Delete webhook",
+        "ja": "Webhook を削除"
+      },
+      "disabled": {
+        "en": "Disabled",
+        "ja": "無効"
+      }
     }
   }
 }
