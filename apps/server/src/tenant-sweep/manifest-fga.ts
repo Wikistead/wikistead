@@ -13,12 +13,14 @@
 // Scoped conservatively — only the two object types §1's own text leaves unambiguous:
 //   `space:<id>`   — DOOMED spaces only (kept spaces' space row, and its FGA object, survive)
 //   `page:<id>`    — EVERY page (kept space or not — §1: "it empties the pages inside")
-// NOT collected here, and deliberately left open rather than guessed at:
-//   `template:<id>` — templates.source_page_id is swept for every page, and templates.space_id is a
-//     non-cascading column (derive.ts), but whether a KEPT space's own templates should be swept along
-//     with its (also swept) pages is not a question §1's text answers — "empties the pages inside"
-//     names pages, not the templates that reference them. A future slice needs to decide this and
-//     amend the manifest with the answer, not have this file assume one.
+// NOT collected here:
+//   `template:<id>` — this WAS left open pending a design question ("does a kept space's template get
+//     swept along with its pages"), resolved by re-reading migration 051's own column comments while
+//     answering it (see derive.ts's NAMED_EXCLUSIONS): a template's `body_md` is a FROZEN SNAPSHOT and
+//     `source_page_id`/`space_id` are explicitly "no FK / no cascade — snapshot stays" by design. A
+//     template survives its source page or space regardless, the same way `api_keys.space_ids` is
+//     meant to go stale rather than be swept — not an open question any more, a "never" the schema
+//     itself already answers. No `template:` object is ever collected here.
 //   `group:<hash>` — reset does not touch member_connection_groups / group-sync data at all (members
 //     and their group claims survive reset unconditionally), so no group object is affected.
 //   `tenant:<id>`  — the tenant itself survives reset by definition; only §2 (full removal, not yet

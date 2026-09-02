@@ -32,22 +32,26 @@ describe('tenant-sweep schema derivation (ADR-252 §1, #810)', () => {
     console.log(`[derive] non-cascading columns: ${nonCascading.length}`)
     expect(nonCascading.length, 'zero non-cascading columns is a failure').toBeGreaterThan(0)
     for (const c of nonCascading) expect(c.deleteRule).toBe('no action')
-    // the exclusion actually excludes something real, not a name that never matched
+    // the exclusions actually exclude something real, not a name that never matched
     expect(nonCascading.find((c) => c.table === 'api_keys' && c.column === 'space_ids')).toBeUndefined()
-    // a genuine stray TEXT id with no FK is still found (proves the walk isn't only finding FK'd ones)
-    expect(nonCascading).toContainEqual(expect.objectContaining({ table: 'templates', column: 'space_id' }))
+    expect(nonCascading.find((c) => c.table === 'templates' && c.column === 'space_id')).toBeUndefined()
+    expect(nonCascading.find((c) => c.table === 'templates' && c.column === 'source_page_id')).toBeUndefined()
+    // a genuine stray TEXT id with no FK is still found (proves the walk isn't only finding FK'd ones,
+    // and isn't just excluding everything) — imports.space_id has no FK (migration 124: the column is
+    // plain TEXT, only tenant_id has one) and is not a named exclusion
+    expect(nonCascading).toContainEqual(expect.objectContaining({ table: 'imports', column: 'space_id' }))
   })
 
-  // ⚠️ break-check: prove the api_keys exclusion is removing a column that is actually there —
+  // ⚠️ break-check: prove every named exclusion is removing a column that is actually there —
   // without this, a typo'd exclusion (e.g. excluding a column name that no longer exists) would pass
   // the test above vacuously, the exact failure mode this project's memory calls "an exemption must
-  // name someone who actually has it".
-  it('⚠️ break-check: api_keys.space_ids exists in the raw column walk the exclusion is filtering', async () => {
+  // name someone who actually has it". Table-driven so templates' two entries get the same proof
+  // api_keys already had, not a one-off.
+  it.each(NAMED_EXCLUSIONS)('⚠️ break-check: $table.$column exists in the raw column walk the exclusion is filtering', async ({ table, column }) => {
     const raw = await admin<{ table_name: string; column_name: string }[]>`
       SELECT table_name, column_name FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'api_keys' AND column_name = 'space_ids'`
+      WHERE table_schema = 'public' AND table_name = ${table} AND column_name = ${column}`
     expect(raw.length, 'the excluded column must actually exist, or the exclusion excludes nothing').toBe(1)
-    expect(NAMED_EXCLUSIONS.some((e) => e.table === 'api_keys' && e.column === 'space_ids')).toBe(true)
   })
 
   it('finds all five (resource_type, resource_id) tables measured today — only 2 of which the ADR itself names', async () => {

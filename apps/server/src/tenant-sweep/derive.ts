@@ -109,11 +109,24 @@ export async function deriveCascadingColumns(sql: Sql): Promise<{ columns: Sweep
 //     draft excluded this by an inline `if (table === '...')` check instead of through this list — same
 //     effect, but not the "named constant with the reason next to it" shape ADR-252 asks for, and with
 //     no break-check proving the exclusion does anything (unlike the api_keys entry below).
+//   `templates.space_id` / `templates.source_page_id` — migration 051's own column comments settle
+//     the "does a kept space's template get swept along with its (also swept) pages" question this
+//     directory had left open (an earlier commit's manifest-fga.ts explicitly flagged it as
+//     unresolved): "`body_md` — frozen snapshot of the source page's published_md", "`source_page_id`
+//     — provenance ONLY: no FK / no cascade (source may be edited/deleted)", "`space_id` — no FK
+//     action (space delete degrades to owner/admin visibility, snapshot stays)". A template is a
+//     self-contained snapshot BY DESIGN, deliberately built to survive its source page or space being
+//     gone — the same "meant to go stale" shape as api_keys.space_ids, not a row this sweep should
+//     touch. Found by re-reading the schema while resolving the open question, not guessed at: the
+//     original (unreviewed) version of this file's own test asserted the OPPOSITE — that
+//     templates.space_id belonged in the swept set — which this correction also fixes.
 export const NAMED_EXCLUSIONS: readonly { table: string; column: string; reason: string }[] = [
   { table: 'api_keys', column: 'space_ids', reason: 'meant to go stale — migration 009: NULL = unconfined, removing an id widens the key' },
   { table: 'role_assignments', column: 'resource_id', reason: 'polymorphic — swept via resource_type, see POLYMORPHIC_TABLES' },
   { table: 'group_role_mappings', column: 'resource_id', reason: 'polymorphic — swept via resource_type, see POLYMORPHIC_TABLES' },
   { table: 'tenant_sweep_manifests', column: 'keep_space_ids', reason: "this walk's own infrastructure (migration 135) — names the keep-list, is not a row to sweep" },
+  { table: 'templates', column: 'space_id', reason: 'migration 051: "no FK action (space delete degrades to owner/admin visibility, snapshot stays)" — a template is a frozen, self-contained snapshot by design' },
+  { table: 'templates', column: 'source_page_id', reason: 'migration 051: "provenance ONLY: no FK / no cascade (source may be edited/deleted)" — same snapshot design as space_id above' },
 ]
 
 // Columns that NAME a space or page (by column-naming convention, `information_schema`-derived) but
