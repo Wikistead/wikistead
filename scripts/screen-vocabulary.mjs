@@ -73,4 +73,14 @@ export const SCREEN_VOCABULARY = {
     ns: 'tenantBranding',
     keys: ['logoUpload', 'logoRemove'],
   },
+  // #1063, continuing #1061's staged arming (10 surfaces remained with no owner). Public was chosen
+  // for the same reason branding was: its whole vocabulary is one control, and the page already named
+  // the section (**Admin → Public access**) without naming the toggle itself — a one-phrase addition,
+  // not a rewrite. `onHint`/`offHint` are excluded from this arming on purpose: they are the hint text
+  // under the switch, the "toasts and hints" category #741's own header names as out of scope, not an
+  // action or a state a reader hunts a button or badge for.
+  'admin-surface:public': {
+    ns: 'adminPublic',
+    keys: ['toggleTitle'],
+  },
 }

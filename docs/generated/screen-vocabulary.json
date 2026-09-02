@@ -42,6 +42,12 @@
         "ja": "削除"
       }
     },
+    "admin-surface:public": {
+      "toggleTitle": {
+        "en": "Allow public pages in this workspace",
+        "ja": "このワークスペースで公開ページを許可する"
+      }
+    },
     "admin-surface:roles": {
       "builtIn": {
         "en": "built-in",
