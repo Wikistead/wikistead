@@ -13,14 +13,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = join(here, "..");
 
 // Legitimate `title` that is NOT a tooltip. Each entry is a REVIEWED exception, matched on the source
-// line, so a new tooltip-shaped use in the same file still fails.
+// line, so a new tooltip-shaped use in the same file still fails. These cover the DOM-assignment forms
+// below, which stay a per-line check — an assignment statement cannot span a JSX tag opening the way an
+// attribute can, so the #1044 bug (below) does not apply to them.
 const ALLOWED_LINE = [
-  // A COMPONENT prop (capitalised tag on the same line): a panel/dialog heading, not a hover bubble.
-  // EXCEPT the interactive wrappers — an IconButton/Button/Trigger `title` IS a tooltip and must move
-  // to data-tip like any other (this is the case the pin exists to catch).
-  /<(?!(?:IconButton|Button|ToggleButton|DropdownMenuTrigger|TooltipTrigger)\b)[A-Z][\w.]*\b[^>]*\stitle=/,
-  // A component prop whose tag opened on an earlier line (the attribute sits alone on this one).
-  /^\s*title=\{?["'`<]?/,
   /^\s*\/\/|^\s*\*|^\s*\/\*/, //  comments (including this file's own prose and docs about `title=`)
   /\btitle:\s/, //                object literals (menu items, i18n payloads, macro descriptors)
   /<title\b/, //                  SVG <title> — an accessible name, not a tooltip
@@ -30,13 +26,26 @@ const ALLOWED_LINE = [
   /\binfo\.title\b/, //           fence info-string metadata (the filename in ```ts title="x")
 ];
 
-// A `title=` (JSX) or `.title =` / setAttribute("title" (DOM) that is a TOOLTIP.
-const TOOLTIP_SHAPED = [
+// `.title =` / setAttribute("title" (DOM) — a TOOLTIP, checked per physical line (see ALLOWED_LINE).
+const DOM_TITLE_ASSIGN = [
+  /\.title\s*=\s*[^=]/,
+  /setAttribute\(\s*["']title["']/,
+];
+
+// `title=` (JSX attribute) — a TOOLTIP shape, but which component owns it decides whether it is one
+// (see JSX_TAG_OFFENDER below). Checked against the whole OPENING TAG, not a single line: #1044 found
+// that a per-line check reads `title="…"` sitting alone on its own line as "some earlier tag's prop"
+// without ever learning which tag that was, so an IconButton/Button (banned — the interactive
+// wrappers below) escaped detection whenever its `title` did not share a line with `<IconButton`.
+const JSX_TITLE_ATTR = [
   /\stitle=\{(?!\s*<)/, //          JSX attribute holding a string expression
   /\stitle="[^"]/, //               JSX attribute holding a literal
-  /\.title\s*=\s*[^=]/, //          DOM assignment
-  /setAttribute\(\s*["']title["']/, // DOM setAttribute
 ];
+
+// Interactive wrappers — an IconButton/Button/Trigger `title` IS a tooltip and must move to data-tip
+// like any other. Every other capitalised component's `title` is a panel/dialog heading prop, not a
+// hover bubble, and a native (lowercase) element's `title` is never anything but the banned tooltip.
+const BANNED_TOOLTIP_TAGS = new Set(["IconButton", "Button", "ToggleButton", "DropdownMenuTrigger", "TooltipTrigger"]);
 
 function* walk(dir: string): Generator<string> {
   for (const e of readdirSync(dir)) {
@@ -45,6 +54,26 @@ function* walk(dir: string): Generator<string> {
     if (statSync(p).isDirectory()) yield* walk(p);
     else if (/\.(ts|tsx)$/.test(p) && !/\.(test|spec)\.tsx?$/.test(p)) yield p;
   }
+}
+
+// One JSX opening tag at a time (`<Comp ...>`, however many source lines its attributes span), so the
+// `title=` verdict is decided by the tag that actually owns it rather than by whichever line it lands
+// on. `[^>]` already matches newlines (character classes are unaffected by any flag), so this needs no
+// `s` flag to cross lines — the same pragmatic per-tag regex `releaseButtonTag()` (992) uses on rendered
+// markup, applied here to source text instead.
+const OPENING_TAG = /<([A-Za-z][\w.]*)\b[^>]*>/g;
+
+function jsxTagOffenders(content: string): { index: number; tag: string }[] {
+  const offenders: { index: number; tag: string }[] = [];
+  for (const m of content.matchAll(OPENING_TAG)) {
+    const tag = m[0];
+    if (!JSX_TITLE_ATTR.some((re) => re.test(tag))) continue;
+    const tagName = m[1];
+    const isBanned = BANNED_TOOLTIP_TAGS.has(tagName);
+    if (/^[A-Z]/.test(tagName) && !isBanned) continue; // heading-shaped prop on a non-interactive component
+    offenders.push({ index: m.index ?? 0, tag });
+  }
+  return offenders;
 }
 
 describe("#530: no native `title` tooltips in app code", () => {
@@ -60,16 +89,32 @@ describe("#530: no native `title` tooltips in app code", () => {
   it("every tooltip goes through the fast tooltip (Tooltip / data-tip), not the native title", () => {
     const offenders: string[] = [];
     for (const file of walk(srcRoot)) {
-      const lines = readFileSync(file, "utf8").split("\n");
-      lines.forEach((line, i) => {
-        if (!TOOLTIP_SHAPED.some((re) => re.test(line))) return;
+      const content = readFileSync(file, "utf8");
+      content.split("\n").forEach((line, i) => {
+        if (!DOM_TITLE_ASSIGN.some((re) => re.test(line))) return;
         if (ALLOWED_LINE.some((re) => re.test(line))) return;
         offenders.push(`${relative(srcRoot, file)}:${i + 1}: ${line.trim().slice(0, 120)}`);
       });
+      for (const { index, tag } of jsxTagOffenders(content)) {
+        const lineNo = content.slice(0, index).split("\n").length;
+        offenders.push(`${relative(srcRoot, file)}:${lineNo}: ${tag.replace(/\s+/g, " ").trim().slice(0, 120)}`);
+      }
     }
     expect(
       offenders,
       `native title tooltips found — use <Tooltip content=…> (React) or el.dataset.tip (DOM), or add a REVIEWED exception:\n${offenders.join("\n")}`,
     ).toEqual([]);
+  });
+
+  // #1044 break-check: an interactive wrapper's `title` on its OWN line — the exact shape that escaped
+  // the old per-line scan — must still be caught.
+  it("catches a banned component's title even when the attribute sits alone on its own line", () => {
+    const offenders = jsxTagOffenders('<IconButton\n  aria-label="x"\n  title="tooltip"\n  onClick={fn}\n>\n');
+    expect(offenders.length).toBe(1);
+  });
+
+  it("does not flag a non-interactive component's heading title, on its own line or the tag's", () => {
+    expect(jsxTagOffenders('<Dialog\n  title="Heading"\n>\n')).toEqual([]);
+    expect(jsxTagOffenders("<RelatedSection title={headingText}>\n")).toEqual([]);
   });
 });

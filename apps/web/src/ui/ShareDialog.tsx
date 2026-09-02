@@ -121,7 +121,7 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
                 <Input inputSize="sm" className="min-w-0 flex-1 text-xs" readOnly value={linkUrl(l.id)} aria-label={t("shareDialog.shareUrl")} />
                 <IconButton
                   aria-label={t("shareDialog.copyUrl")}
-                  title={t("shareDialog.copyUrl")}
+                  data-tip={t("shareDialog.copyUrl")}
                   onClick={() => {
                     navigator.clipboard?.writeText(linkUrl(l.id));
                     setCopied(l.id);
@@ -134,7 +134,7 @@ export function ShareDialog({ pageId, spaceId, onClose }: { pageId?: string | nu
                     confirm first. Red at rest via the shared danger variant. */}
                 <IconButton
                   aria-label={t("shareDialog.revoke")}
-                  title={t("shareDialog.revoke")}
+                  data-tip={t("shareDialog.revoke")}
                   data-testid="revoke-link"
                   variant="danger"
                   onClick={() => setRevokingId(l.id)}
