@@ -10,6 +10,16 @@
         "ja": "閲覧者"
       }
     },
+    "admin-surface:api": {
+      "create": {
+        "en": "Create",
+        "ja": "作成"
+      },
+      "revoke": {
+        "en": "Revoke",
+        "ja": "取り消し"
+      }
+    },
     "admin-surface:audit": {
       "export": {
         "en": "Export JSONL",

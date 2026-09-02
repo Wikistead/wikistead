@@ -137,4 +137,12 @@ export const SCREEN_VOCABULARY = {
     ns: 'spaceAnalytics',
     keys: ['viewerClass', 'unique'],
   },
+  // #1063, eighth surface of this slice. The namespace has 30+ keys (the resource/scope grant matrix
+  // alone is 18) — staying with the discipline of arming the few ACTIONS a reader hunts a button for,
+  // not the whole form. Both pages already discussed create/revoke conceptually without naming the
+  // buttons themselves.
+  'admin-surface:api': {
+    ns: 'adminApi',
+    keys: ['create', 'revoke'],
+  },
 }
