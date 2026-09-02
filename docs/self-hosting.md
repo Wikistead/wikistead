@@ -392,7 +392,7 @@ The override file is the mechanism because the compose file pins the value in th
   the k8s base, add the `metrics-token` key to `kb-secrets` (it is optional). The
   compose profile does not publish the port; add one to `docker-compose.override.yml`
   if your Prometheus is outside the compose network.
-- **Tracing** (ADR-270): `server` speaks OpenTelemetry, off by default. Set
+- **Tracing**: `server` speaks OpenTelemetry, off by default. Set
   `OTEL_EXPORTER_OTLP_ENDPOINT` (for example `http://tempo:4318`, any OTLP/HTTP
   collector — Jaeger, Tempo, or a vendor's OTLP ingest) and it exports one span
   per request with child spans for the tenant connection acquire, OpenFGA,
