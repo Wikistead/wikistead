@@ -159,13 +159,19 @@ for (const capability of ["view", "edit"] as const) {
     // create the home through the same button a writer uses, then publish it so a guest can read it
     await page.goto(`/spaces/${spaceId}`);
     await page.getByTestId("space-home-create").click();
-    await sleep(1500);
-    const homeId = await page.evaluate(async (sid: string) => {
-      const r = await fetch("/api/spaces", { headers: { authorization: "Bearer dev-token" } });
-      const body = (await r.json()) as { spaces?: { id: string; homePageId?: string | null }[] } | { id: string; homePageId?: string | null }[];
-    const spaces = Array.isArray(body) ? body : (body.spaces ?? []);
-      return spaces.find((s) => s.id === sid)?.homePageId ?? null;
-    }, spaceId);
+    // #1034: a fixed sleep raced the click on a slow/contended runner — the POST that creates and
+    // points the home can itself take longer than any fixed wait under load, so poll for the pointer
+    // rather than assume a delay covers it (same discipline as the title poll just below).
+    let homeId: string | null = null;
+    await expect.poll(async () => {
+      homeId = await page.evaluate(async (sid: string) => {
+        const r = await fetch("/api/spaces", { headers: { authorization: "Bearer dev-token" } });
+        const body = (await r.json()) as { spaces?: { id: string; homePageId?: string | null }[] } | { id: string; homePageId?: string | null }[];
+        const spaces = Array.isArray(body) ? body : (body.spaces ?? []);
+        return spaces.find((s) => s.id === sid)?.homePageId ?? null;
+      }, spaceId);
+      return homeId;
+    }, { timeout: 10000, message: "the space's home page pointer settles after creation" }).not.toBeNull();
     expect(homeId, "the space has a home page").toBeTruthy();
 
     // the home's title is written as part of creating it; wait for it to be there rather than racing it
