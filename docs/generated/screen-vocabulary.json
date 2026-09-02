@@ -1,5 +1,15 @@
 {
   "surfaces": {
+    "admin-surface:analytics": {
+      "unique": {
+        "en": "Unique viewers",
+        "ja": "ユニーク閲覧者"
+      },
+      "viewerClass": {
+        "en": "Viewer",
+        "ja": "閲覧者"
+      }
+    },
     "admin-surface:audit": {
       "export": {
         "en": "Export JSONL",

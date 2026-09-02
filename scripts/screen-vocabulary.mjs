@@ -128,4 +128,13 @@ export const SCREEN_VOCABULARY = {
     ns: 'adminAudit',
     keys: ['verify', 'export'],
   },
+  // #1063, seventh surface of this slice. `AdminAnalyticsTab.tsx` only owns `tenantAnalytics.title`/
+  // `.hint` (2 keys, no actions) — the actual controls (the viewer-class filter, the unique-viewers
+  // toggle) live in the shared `AnalyticsDashboard` component both the tenant and per-space tabs
+  // render, under the `spaceAnalytics` namespace it was built for first (checked: same two calls,
+  // `apps/web/src/settings/AnalyticsDashboard.tsx:71-87`, run for both tabs).
+  'admin-surface:analytics': {
+    ns: 'spaceAnalytics',
+    keys: ['viewerClass', 'unique'],
+  },
 }
