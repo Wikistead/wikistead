@@ -480,6 +480,14 @@ export const Editor = memo(function Editor({ docName, pageId, guestSurface = fal
   // (2) Surface — remount when the surface changes (same connection) or after a
   // reconnect. vim is NOT in the deps (a Compartment reconfigure, below).
   useLayoutEffect(() => {
+    // #1062: a SEPARATE probe from __editorRenders above — that one counts every render of this
+    // component's FUNCTION BODY (memo bail-outs aside), which a re-render whose deps this effect does
+    // not use cannot avoid. This one counts only when the CodeMirror EditorView is actually torn down
+    // and rebuilt (this effect re-running), the thing ADR-013's invariant is actually about.
+    if (import.meta.env.DEV) {
+      (window as unknown as { __editorViewRemounts?: number }).__editorViewRemounts =
+        ((window as unknown as { __editorViewRemounts?: number }).__editorViewRemounts ?? 0) + 1;
+    }
     const previewHost = previewRef.current!;
     const views: { destroy(): void }[] = [];
 

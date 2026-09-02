@@ -125,14 +125,16 @@ test("Phase 2d: the header toggle collapses the sidebar and the choice persists"
 });
 
 test("moving the open page via drag keeps the editor connected", async ({ page }) => {
-  // #1062: isolated — measured with the drag itself REMOVED (just opening the page and waiting
-  // 800ms) and the exact same +6 to `__editorRenders` still happened. So the render-count delta this
-  // test asserts on is unrelated to the drag it names; something re-renders the Editor component on
-  // its own roughly every 130ms. Whether that is a benign parent re-render or an actual CodeMirror
-  // view remount is not yet known — this test takes `{ page }`, not `{ browser }`, so no custom
-  // fixture is resolved first and an in-body skip is safe.
-  test.skip(true, "#1062: __editorRenders climbs on its own (~+6/800ms) with no drag at all");
-  // Two pages this test owns — the one it opens, and a sibling to drop it onto — so the drag
+  // #1062: `__editorRenders` (every render of the Editor component's function body) climbs on its
+  // own — measured with the drag itself REMOVED (just opening the page and waiting 800ms) and the
+  // same +6 still happened, so a render-count-exact assertion was never actually testing the drag.
+  // Diagnosed: `window.__editorViewRemounts` (Editor.tsx, incremented only when the surface-mount
+  // effect that constructs/destroys the CodeMirror EditorView actually re-runs — added for this
+  // ticket) stayed flat across the same drag+800ms window where renders climbed by 6, so the
+  // periodic re-renders are memo/effect-dependency churn that never reaches CodeMirror — benign.
+  // Break-checked: injecting a churning dependency into that effect's array reddened this exact
+  // assertion (6 → 9) in the same run, so it does catch a real remount. Two pages this test owns —
+  // the one it opens, and a sibling to drop it onto — so the drag
   // has a subject regardless of what else demo_space holds (no more "if the tree is too small,
   // make one more": the open page used to be /p/demo, which #364 excludes from the tree, so
   // `[data-testid=tree-page][data-selected]` could never match it at all).
@@ -159,15 +161,16 @@ test("moving the open page via drag keeps the editor connected", async ({ page }
   await src.waitFor({ state: "visible", timeout: 15000 });
   await dst.waitFor({ state: "visible", timeout: 15000 });
 
-  const rendersBefore = await page.evaluate(() => (window as any).__editorRenders ?? 0);
+  const remountsBefore = await page.evaluate(() => (window as any).__editorViewRemounts ?? 0);
   await src.dragTo(dst, { force: true }); // force: skip mid-drag stability wait (drop indicator re-renders)
   await sleep(800);
 
-  // the open page's editor (docName uses pageId) is NOT rebuilt by the move.
-  const rendersAfter = await page.evaluate(() => (window as any).__editorRenders ?? 0);
+  // the open page's editor (docName uses pageId) is NOT rebuilt by the move — measured as the
+  // CodeMirror view surviving, not as the component's render count (which churns on its own; #1062).
+  const remountsAfter = await page.evaluate(() => (window as any).__editorViewRemounts ?? 0);
   expect(page.url()).toMatch(new RegExp(`/p/${openId}$`));
   expect(await page.locator("[data-pane=preview] .cm-content").count()).toBe(1);
-  expect(rendersAfter).toBe(rendersBefore);
+  expect(remountsAfter).toBe(remountsBefore);
 });
 
 test("the page-actions … trigger stays laid out when unhovered (menu positioning regression)", async ({ page }) => {
