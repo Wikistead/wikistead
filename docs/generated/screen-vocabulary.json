@@ -116,6 +116,16 @@
         "ja": "禁止語"
       }
     },
+    "admin-surface:orphans": {
+      "claim": {
+        "en": "Claim",
+        "ja": "引き取る"
+      },
+      "reassign": {
+        "en": "Reassign",
+        "ja": "再割り当て"
+      }
+    },
     "admin-surface:public": {
       "toggleTitle": {
         "en": "Allow public pages in this workspace",

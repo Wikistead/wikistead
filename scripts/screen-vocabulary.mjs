@@ -155,4 +155,14 @@ export const SCREEN_VOCABULARY = {
     ns: 'adminAuth',
     keys: ['secondFactorRequired'],
   },
+  // #1063, tenth and final surface of this slice — closes the surface #1061 declared armable. Unlike
+  // the others, the page genuinely had no coverage of the operation this surface exists for (#1061's
+  // "). A "Rescuing a draft" section was added rather than a one-phrase patch, describing the real
+  // two-step flow (claim grants temporary read access; reassign hands the draft to its new owner and
+  // ends that access) as the product actually implements it (`AdminOrphanDraftsTab.tsx`,
+  // `routes/orphan-drafts.ts`).
+  'admin-surface:orphans': {
+    ns: 'adminOrphans',
+    keys: ['claim', 'reassign'],
+  },
 }

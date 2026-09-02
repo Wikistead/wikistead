@@ -76,8 +76,16 @@ describe('#741 / ADR-239: the screen vocabulary names things that exist', () => 
     // A floor, not a target. #790 cannot start until three surfaces exist to derive from, which is
     // why three is the number: it is somebody else's unlock condition, not a round figure.
     expect(armed.length, 'fewer surfaces armed than #790 needs to derive from').toBeGreaterThanOrEqual(3)
-    // And the other half of staged arming: an unarmed surface is COUNTED, never red.
-    expect(unarmed.length, 'every surface is armed — then this floor has outlived its purpose and should be raised').toBeGreaterThan(0)
+    // #1063: the staged-arming floor above (unarmed.length > 0) held from #837 through #1063's own
+    // slice — proof the count was not vacuous, since a bootstrap of pure zeros can't be told from a
+    // broken counter. #1063 armed the last of the 16 admin-surface entries the ledger had at the
+    // time, and that floor's own failure message said what to do: raise it. Flipped to a completion
+    // invariant instead of deleted, unlike the residue list #759's mechanism removed when it
+    // emptied — a NEW admin-surface can be added to SURFACE_DOCS at any point (the product keeps
+    // growing screens), and when one is, THIS assertion goes red for it immediately rather than
+    // letting it sit unarmed and uncounted the way the old floor tolerated. That is a stronger
+    // invariant than the one it replaces, not a weaker one.
+    expect(armed.length, 'a ledger surface exists that nothing has armed yet — see the console line above for which').toBe(armable.length)
   })
 
   it('every declared key resolves in every locale', () => {
