@@ -1,5 +1,15 @@
 {
   "surfaces": {
+    "admin-surface:branding": {
+      "logoRemove": {
+        "en": "Remove",
+        "ja": "削除"
+      },
+      "logoUpload": {
+        "en": "Upload logo",
+        "ja": "ロゴをアップロード"
+      }
+    },
     "admin-surface:domains": {
       "pending": {
         "en": "Pending",

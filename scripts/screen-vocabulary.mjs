@@ -63,4 +63,14 @@ export const SCREEN_VOCABULARY = {
     ns: 'adminWebhooks',
     keys: ['disabled', 'create', 'delete'],
   },
+  // #1061, continuing #1043's staged arming (11 surfaces remained with no owner). Branding was chosen
+  // because its whole vocabulary is two buttons and both were already answerable with a one-sentence
+  // addition — the staged-arming ruling (#741 ②) is about not reddening a page nobody has fixed,
+  // and a page needing one sentence is not that page. `logoRemove`'s English string is the bare word
+  // "Remove" — armed anyway, since the check only demands the word appear set off correctly once, not
+  // that it be unique to this surface.
+  'admin-surface:branding': {
+    ns: 'tenantBranding',
+    keys: ['logoUpload', 'logoRemove'],
+  },
 }
