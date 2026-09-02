@@ -78,12 +78,13 @@ export { NoopEmailDriver } from './email/index.js'
 // SAME queue every other transactional class uses, rather than a second send path.
 export { enqueueEmailOutbox } from './email/outbox.js'
 export { SCIM_OFFBOARDING_DEFERRED_CLASS } from './email/scim-offboarding-builder.js'
-// #1053 / ADR-275 rev3 §3: the fast-path hook seam (registration point) and the tenant registry the
-// sweep needs to turn a bare `tenant_id` (an admin-connection cross-tenant scan cannot see anything
-// else) into the full `Tenant` `acquireTenantDb` requires.
+// #1053 differ-back (finding A): the sweep's tenant DISCOVERY moved off an admin/BYPASSRLS connection
+// entirely — `tenants` carries no RLS (the global registry), so `listActiveTenantIds` on the ordinary
+// pool already answers "which tenants exist" with the SAME role every other request uses, and the
+// per-tenant pending check then runs through `acquireTenantDb`'s own RLS-scoped connection.
 export { registerScimReconcileHook } from './auth/scim-reconcile-seam.js'
 export type { ScimReconcileHook } from './auth/scim-reconcile-seam.js'
-export { registry } from './db/index.js'
+export { registry, listActiveTenantIds } from './db/index.js'
 // #1053 / ADR-275 rev3 §3 (B3/B7 corrected the same way #1036/#1037 corrected ADR-270's premise):
 // the ADR's own text analogises this endpoint's auth to `operator/app.ts`, but that console is the
 // Cloud-only break-glass plane (own header comment: "Cloud-only deployment... CE/self-host keeps the

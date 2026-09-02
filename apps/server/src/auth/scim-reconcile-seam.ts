@@ -28,10 +28,26 @@ export function registerScimReconcileHook(h: ScimReconcileHook): void {
  * WITHOUT it a fast-path-resolved removal deactivates but leaves the member's session alive — worse
  * than a missed hook site, because clearing the pending pair also removes the row the hourly sweep
  * would otherwise have found and finished the job for.
+ *
+ * #1053 differ-back (finding F.2, independent review): best-effort, on purpose. §3's own text says
+ * this fast path is "a LATENCY optimization only, not a correctness requirement" — but the first cut
+ * let a throw here (an FGA hiccup, a lost connection) propagate straight into the CALLER's own
+ * response, turning an otherwise-successful promotion, invite acceptance, or reactivation into a 500
+ * for a reason that has nothing to do with what the caller actually asked for. Caught and logged here,
+ * once, so all five call sites get the same protection without repeating a try/catch at each one; the
+ * hourly sweep is still there to finish the job this attempt could not.
  */
 export async function reconcilePendingScimRemovalsIfRegistered(
   deps: { db: TenantDb; fga: OpenFgaClient; valkey?: IORedis },
   tenant: { id: string; plan: string },
 ): Promise<void> {
-  if (hook) await hook(deps, tenant)
+  if (!hook) return
+  try {
+    await hook(deps, tenant)
+  } catch (e) {
+    console.error(JSON.stringify({
+      msg: 'scim reconcile: fast-path hook failed (best-effort — the hourly sweep is the correctness backstop)',
+      tenantId: tenant.id, error: e instanceof Error ? e.message : String(e),
+    }))
+  }
 }
