@@ -1,4 +1,11 @@
-import type { Sql } from 'postgres'
+import type { Sql, TransactionSql } from 'postgres'
+
+// Accepts a transaction handle too: the derive functions issue only read queries (the tag template /
+// .unsafe()), which both types support identically — TransactionSql merely lacks lifecycle methods
+// (.end() etc.) Sql has, which these functions never call. Needed so a caller can run a derive query
+// INSIDE a transaction it controls (e.g. a break-check that drops and rolls back a constraint) without
+// a separate, narrower signature for that one case.
+type Queryable = Sql | TransactionSql
 
 // ADR-252 §1 ("Empty a workspace — tenant:reset") / #810: which rows a reset (or, inheriting this
 // path, a removal) must touch when it empties a space or page. NOT the whole-tenant table set §"Both
@@ -53,7 +60,7 @@ export interface SweepColumn {
 // acceptance line exists to catch. No `assertNoExtraIdentifyingColumns` helper exists yet only because
 // no executor calls this function yet; whichever slice writes the executor must add that guard as part
 // of wiring this in, not treat the empty-array case as the only one that needs handling.
-export async function deriveCascadingColumns(sql: Sql): Promise<{ columns: SweepColumn[]; extraIdentifyingColumns: string[] }> {
+export async function deriveCascadingColumns(sql: Queryable): Promise<{ columns: SweepColumn[]; extraIdentifyingColumns: string[] }> {
   const rows = await sql<{
     constraint_name: string
     table_name: string
@@ -129,10 +136,23 @@ export const NAMED_EXCLUSIONS: readonly { table: string; column: string; reason:
   { table: 'templates', column: 'source_page_id', reason: 'migration 051: "provenance ONLY: no FK / no cascade (source may be edited/deleted)" — same snapshot design as space_id above' },
 ]
 
+// Tables this walk must NEVER treat a non-cascading column as "delete the row" for — they are the
+// entities the sweep exists to selectively PRESERVE (a kept space's own row; every page's own row is
+// handled by execute-database.ts's dedicated page-delete step, not this generic mechanism; a tenant
+// never goes under §1 at all). review c-af90ef9 found this gap by dropping
+// `spaces_home_page_fk` inside a rolled-back transaction and re-running this walk: with that one FK
+// gone, `spaces.home_page_id` would be picked up here and swept by ROW DELETION — an executor built on
+// the (until-now-untested) assumption "every non-cascading column means delete the row" would delete a
+// KEPT space outright the day that FK changed shape, with no test anywhere failing first.
+const SURVIVING_TABLES: ReadonlySet<string> = new Set(['spaces', 'pages', 'tenants'])
+
 // Columns that NAME a space or page (by column-naming convention, `information_schema`-derived) but
 // carry NO foreign key — a plain TEXT id to a row the sweep is about to make not-exist. These need an
-// EXPLICIT delete (`WHERE column = ANY(swept ids)`); nothing cascades them away.
-export async function deriveNonCascadingColumns(sql: Sql, cascading: readonly SweepColumn[]): Promise<SweepColumn[]> {
+// EXPLICIT delete (`WHERE column = ANY(swept ids)`); nothing cascades them away. A column found on one
+// of `SURVIVING_TABLES` is reported as `ambiguousColumns` instead of swept — this walk cannot safely
+// guess whether such a column means "delete this row" (wrong, for a table the sweep must preserve) or
+// something narrower a human needs to design.
+export async function deriveNonCascadingColumns(sql: Queryable, cascading: readonly SweepColumn[]): Promise<{ columns: SweepColumn[]; ambiguousColumns: string[] }> {
   // `s?$` (not just `$`): `api_keys.space_ids` is plural — the ADR names it explicitly as a column
   // this walk MUST find and then exclude by name, not as one the pattern should quietly miss. An
   // anchor without the plural would make NAMED_EXCLUSIONS' api_keys entry vacuous (nothing to exclude
@@ -144,11 +164,13 @@ export async function deriveNonCascadingColumns(sql: Sql, cascading: readonly Sw
 
   const cascadingKeys = new Set(cascading.map((c) => `${c.table}.${c.column}`))
   const excludedKeys = new Set(NAMED_EXCLUSIONS.map((e) => `${e.table}.${e.column}`))
-  const out: SweepColumn[] = []
+  const columns: SweepColumn[] = []
+  const ambiguousColumns: string[] = []
   for (const r of rows) {
     const key = `${r.table_name}.${r.column_name}`
     if (cascadingKeys.has(key) || excludedKeys.has(key)) continue
-    out.push({
+    if (SURVIVING_TABLES.has(r.table_name)) { ambiguousColumns.push(key); continue }
+    columns.push({
       table: r.table_name,
       column: r.column_name,
       target: /space_ids?$/.test(r.column_name) ? 'spaces' : 'pages',
@@ -156,7 +178,7 @@ export async function deriveNonCascadingColumns(sql: Sql, cascading: readonly Sw
       constraintName: '', // no FK — nothing to name
     })
   }
-  return out
+  return { columns, ambiguousColumns }
 }
 
 // Tables carrying a (`resource_type`, `resource_id`) column pair — polymorphic, no FK possible since
@@ -178,7 +200,7 @@ export async function deriveNonCascadingColumns(sql: Sql, cascading: readonly Sw
 // even though that space's pages are being swept. Any future consumer of this table list needs BOTH
 // the resource_type filter AND the correctly-scoped id set per type — the type filter alone protects
 // tenant-tier grants, not a kept space's own share link.
-export async function derivePolymorphicTables(sql: Sql): Promise<string[]> {
+export async function derivePolymorphicTables(sql: Queryable): Promise<string[]> {
   const rows = await sql<{ table_name: string }[]>`
     SELECT table_name FROM information_schema.columns
     WHERE table_schema = 'public' AND column_name = 'resource_type'
@@ -187,4 +209,47 @@ export async function derivePolymorphicTables(sql: Sql): Promise<string[]> {
         WHERE table_schema = 'public' AND column_name = 'resource_id')
     ORDER BY table_name`
   return rows.map((r) => r.table_name)
+}
+
+// review c-af90ef9: `execute-database.ts` originally hardcoded the two literals 'space' and
+// 'page' as the whole `resource_type` vocabulary for every polymorphic table — wrong for `watches`
+// (migration 067's own CHECK constraint: `resource_type IN ('page', 'space', 'subtree')`). A 'subtree'
+// watch's `resource_id` is a PAGE id (`routes/notifications.ts`'s own comments, twice: "a 'subtree'
+// watch targets a PAGE id (the ancestor)" and "subtree anchors are pages") — so it was silently never
+// swept, surviving reset as a ghost pointing at a page that no longer exists.
+//
+// Named, not derived from a CHECK constraint alone: `member_pins` restricts to {space, page} (a real
+// CHECK) but `role_assignments`, `group_role_mappings` and `share_links` carry NO CHECK at all — the
+// domain is enforced in application code, not the schema, so there is nothing to introspect for those
+// three. The map below is therefore the same shape as NAMED_EXCLUSIONS: named, with the reason next to
+// each entry, checked against what a TENANT'S ACTUAL ROWS use at sweep time (not what the schema
+// merely permits) — `deriveResourceTypeTargets` below queries live data and treats any value NOT in
+// this map as fatal, so a resource_type this table can hold but this map doesn't yet know about (a new
+// CHECK value, or free-text drift on the three unchecked tables) refuses the sweep instead of silently
+// leaving rows behind the way the hardcoded literals did.
+export const RESOURCE_TYPE_TARGETS: Readonly<Record<string, 'spaces' | 'pages' | 'tenant-exempt'>> = {
+  space: 'spaces',
+  page: 'pages',
+  subtree: 'pages', // notifications.ts: "subtree anchors are pages" — resource_id is the ancestor page's id
+  tenant: 'tenant-exempt', // role_assignments / group_role_mappings — the collateral-damage case §1 warns about
+}
+
+// For ONE polymorphic table, the resource_type values THIS TENANT'S rows actually use, each mapped to
+// its sweep target — plus any value not in `RESOURCE_TYPE_TARGETS` (fatal for the caller to check).
+// Per-tenant (not schema-wide) deliberately: a table with none of this tenant's rows in it needs no
+// vocabulary check at all, and a schema-wide `SELECT DISTINCT` would still miss a value only used by a
+// tenant nobody has swept yet — the guarantee this function gives is "every value THIS sweep is about
+// to act on is one it knows how to act on", not "every value this table could ever hold".
+export async function deriveResourceTypeTargets(sql: Queryable, table: string, tenantId: string): Promise<{ known: { type: string; target: 'spaces' | 'pages' | 'tenant-exempt' }[]; unknown: string[] }> {
+  const rows = await sql.unsafe<{ resource_type: string }[]>(
+    `SELECT DISTINCT resource_type FROM ${table} WHERE tenant_id = $1`, [tenantId],
+  )
+  const known: { type: string; target: 'spaces' | 'pages' | 'tenant-exempt' }[] = []
+  const unknown: string[] = []
+  for (const r of rows) {
+    const target = RESOURCE_TYPE_TARGETS[r.resource_type]
+    if (target) known.push({ type: r.resource_type, target })
+    else unknown.push(`${table}.resource_type = ${JSON.stringify(r.resource_type)}`)
+  }
+  return { known, unknown }
 }

@@ -43,21 +43,25 @@ export async function collectResetStorageKeys(sql: Sql, tenantId: string, doomed
       SELECT icon_image_key FROM space_settings
       WHERE tenant_id = ${tenantId} AND space_id = ANY(${doomed.spaceIds}) AND icon_image_key IS NOT NULL`
     keys.push(...icons.map((r) => r.icon_image_key))
+  }
 
-    // ⚠️ review c-a4180fb: `imports` names BOTH `space_id` (required) and `parent_page_id`
-    // (optional) — both non-cascading (see derive.ts). This query scopes archive_key by `space_id`
-    // only, i.e. by DOOMED spaces. Under the corrected kept-space semantics above, a kept space's OWN
-    // pages are also swept, so an in-flight import targeting a kept space's page (`parent_page_id` in
-    // `doomed.pageIds`, `space_id` NOT in `doomed.spaceIds`) is not caught here — if a future executor
-    // ever deletes `imports` rows by a page-scoped predicate instead of (or in addition to) a
-    // space-scoped one, this manifest would miss that row's archive_key. NOT fixed by guessing a
-    // broader query: which predicate actually deletes `imports` rows is an executor decision that does
-    // not exist yet, and widening this query without knowing it risks the opposite mistake (listing a
-    // key for a row that survives, orphaning a live import's staged archive). Whichever slice writes
-    // the imports-sweep predicate must make this query match it exactly, not assume it already does.
+  // ⚠️ review c-af90ef9 (independent review of execute-database.ts, 2026-09-02): the
+  // executor's non-cascading sweep deletes EVERY column derive.ts finds by its own column-level
+  // `target` — for `imports`, that is TWO separate DELETE statements (`space_id = ANY(doomed.spaceIds)`
+  // AND `parent_page_id = ANY(doomed.pageIds)`, since both columns are independently non-cascading).
+  // The version of this query gated on `doomed.spaceIds.length > 0` alone (and only ever read
+  // `space_id`) therefore missed archive_key for an import whose ONLY doomed reference was its
+  // `parent_page_id` — reproduced live: a queued import in a KEPT space targeting that space's (also
+  // swept) page was deleted with its archive_key never manifested, an unreachable S3 blob. The union
+  // below is not a guess — it matches execute-database.ts's own two DELETE predicates for this table
+  // exactly, which is the contract manifest-keys.ts already existed to keep (this file's whole job is
+  // "record every key a row the sweep is about to touch points at").
+  if (doomed.spaceIds.length > 0 || doomed.pageIds.length > 0) {
     const archives = await sql<{ archive_key: string }[]>`
       SELECT archive_key FROM imports
-      WHERE tenant_id = ${tenantId} AND space_id = ANY(${doomed.spaceIds}) AND archive_key IS NOT NULL`
+      WHERE tenant_id = ${tenantId}
+        AND (space_id = ANY(${[...doomed.spaceIds]}) OR parent_page_id = ANY(${[...doomed.pageIds]}))
+        AND archive_key IS NOT NULL`
     keys.push(...archives.map((r) => r.archive_key))
   }
 
