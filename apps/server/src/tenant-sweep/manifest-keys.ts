@@ -1,4 +1,5 @@
-import type { Sql } from 'postgres'
+import type { Queryable } from './derive.js'
+import { UnclassifiableSchemaError } from './execute-database.js'
 
 // ADR-252 §1 / "Both operations" / #810: the storage keys `tenant_sweep_manifests.storage_keys` must
 // hold before a reset destroys anything — "every S3 key a swept row points at", derived from the
@@ -24,7 +25,74 @@ export interface DoomedIds {
   pageIds: readonly string[]
 }
 
-export async function collectResetStorageKeys(sql: Sql, tenantId: string, doomed: DoomedIds): Promise<string[]> {
+// review c-af763a4 (4th pass, F4): ADR-252's own Acceptance requires storage keys be "derived
+// from the key-bearing COLUMNS... the count of columns is printed" — this file's four SELECTs below
+// were hand-authored against TODAY's schema, with no query anywhere confirming that hand-authored set
+// still matches what the schema actually holds. A ninth `_key` column landing in a future migration
+// would join neither this file's coverage nor any error — the exact silent-drop shape ADR-252's own
+// "zero tables found... is a failure" line exists to catch, just one layer up (columns, not tables).
+//
+// Not a bare `_key$` name match: measured live against this schema, that pattern also catches
+// `email_outbox.fold_key` (a dedup/collapse key, migration 089 §6), `member_passkeys.public_key` (a
+// WebAuthn COSE key, migration 119) and `space_settings`/`tenant_settings.accent_key` (a branding
+// color token, migrations 018/019) — none of them point at a storage object. Named, with the reason
+// next to each, the same shape as derive.ts's own `NAMED_EXCLUSIONS`.
+export const STORAGE_KEY_NAMED_EXCLUSIONS: readonly { table: string; column: string; reason: string }[] = [
+  { table: 'email_outbox', column: 'fold_key', reason: 'a dedup/collapse key for queued email (migration 089 §6), not a storage pointer' },
+  { table: 'member_passkeys', column: 'public_key', reason: 'a WebAuthn COSE public key (migration 119), not a storage pointer' },
+  { table: 'space_settings', column: 'accent_key', reason: 'a branding accent-color token (migration 018), not a storage pointer' },
+  { table: 'tenant_settings', column: 'accent_key', reason: 'a branding accent-color token (migration 019), not a storage pointer' },
+]
+
+// The four columns `collectResetStorageKeys` below actually queries today.
+const RESET_COVERED_STORAGE_KEY_COLUMNS: ReadonlySet<string> = new Set([
+  'attachments.s3_key',
+  'imports.archive_key',
+  'revisions.ydoc_key',
+  'space_settings.icon_image_key',
+])
+
+// The columns this file's own header comment already names as deliberately NOT queried by a reset —
+// `members.avatar_image_key` / `tenant_settings.logo_key` survive because §1 keeps members and tenant
+// settings; `revision_gc_candidates.ydoc_key` is excluded for the reasons the big comment below gives
+// (no tenant_id, no page linkage). Named here too so this derivation's `unknown` list stays empty for
+// columns this file already made a deliberate decision about, rather than flagging its own documented
+// exclusions as newly-unclassifiable.
+const RESET_DEFERRED_STORAGE_KEY_COLUMNS: ReadonlySet<string> = new Set([
+  'members.avatar_image_key',
+  'tenant_settings.logo_key',
+  'revision_gc_candidates.ydoc_key',
+])
+
+export async function deriveStorageKeyColumns(sql: Queryable): Promise<{ covered: string[]; deferred: string[]; unknown: string[] }> {
+  const rows = await sql<{ table_name: string; column_name: string }[]>`
+    SELECT table_name, column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND column_name ~ '_key$'
+    ORDER BY table_name, column_name`
+
+  const excludedKeys = new Set(STORAGE_KEY_NAMED_EXCLUSIONS.map((e) => `${e.table}.${e.column}`))
+  const covered: string[] = []
+  const deferred: string[] = []
+  const unknown: string[] = []
+  for (const r of rows) {
+    const key = `${r.table_name}.${r.column_name}`
+    if (excludedKeys.has(key)) continue
+    if (RESET_COVERED_STORAGE_KEY_COLUMNS.has(key)) { covered.push(key); continue }
+    if (RESET_DEFERRED_STORAGE_KEY_COLUMNS.has(key)) { deferred.push(key); continue }
+    unknown.push(key)
+  }
+  return { covered, deferred, unknown }
+}
+
+export async function collectResetStorageKeys(sql: Queryable, tenantId: string, doomed: DoomedIds): Promise<string[]> {
+  // Checked before any SELECT below runs: an unclassified `_key` column refuses the whole manifest
+  // write rather than silently shipping a manifest that is missing whatever that column points at.
+  const { covered, unknown } = await deriveStorageKeyColumns(sql)
+  if (unknown.length > 0) throw new UnclassifiableSchemaError(unknown)
+  if (covered.length !== RESET_COVERED_STORAGE_KEY_COLUMNS.size) {
+    throw new UnclassifiableSchemaError([`deriveStorageKeyColumns found ${covered.length} covered column(s), expected ${RESET_COVERED_STORAGE_KEY_COLUMNS.size} — the derivation query itself is likely broken`])
+  }
+
   const keys: string[] = []
 
   if (doomed.pageIds.length > 0) {

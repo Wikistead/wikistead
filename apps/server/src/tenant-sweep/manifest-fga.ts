@@ -49,3 +49,43 @@ export function collectResetFgaObjectIds(doomed: DoomedIds): string[] {
 export function resourceIdSetsForPolymorphicSweep(doomed: DoomedIds): { space: readonly string[]; page: readonly string[] } {
   return { space: doomed.spaceIds, page: doomed.pageIds }
 }
+
+// review c-af763a4 (4th pass, F2): the exact inverse of `collectResetFgaObjectIds` above — a
+// durable manifest's own `fga_object_ids` column is a lossless encoding of the `DoomedIds` that wrote
+// it (every entry is one of exactly the two prefixes that function ever emits), so RESUMING an
+// unfinished sweep never needs to recompute "what was doomed" against live rows a partially-completed
+// sweep may have already changed the shape of — it reads back the same set the original manifest
+// already committed to. `search_document_ids` (== `doomed.pageIds` unchanged, per write-manifest.ts's
+// own comment) would answer the same question for pages alone; this is preferred because it recovers
+// BOTH id sets from the one column, and because trusting it doubles as a structural check that
+// `fga_object_ids` still holds only the two shapes this file's own header comment documents.
+//
+// ⚠️ review c-af763a4 (5th pass, G3): "doubles as a structural check" was aspirational — the
+// original version silently DROPPED any entry that wasn't `space:`/`page:` prefixed instead of actually
+// checking anything. Migration 135's own column comment (`infra/db/migrations/135_...sql`) lists FIVE
+// object shapes this column could in principle hold (`tenant:`/`space:`/`page:`/`template:`/`group:`),
+// even though only §1's two are ever written today (this file's own header: no `template:`/`group:`/
+// `tenant:` object is ever collected for a reset) — every other unknown-classification point in this
+// directory (`UnclassifiableSchemaError`, `deriveResourceTypeTargets`'s `unknown`,
+// `deriveStorageKeyColumns`'s `unknown`) treats "found something this walk doesn't recognise" as fatal,
+// not as something to quietly skip. Now consistent with that: an unrecognised prefix refuses the resume
+// instead of silently resuming against an incomplete reconstruction of what was actually doomed.
+export class UnrecognisedFgaObjectError extends Error {
+  constructor(public readonly objects: readonly string[]) {
+    super(`reconstructDoomedIds: ${objects.length} fga_object_ids entr(y/ies) match neither 'space:' nor 'page:' — ${objects.join(', ')}`)
+    this.name = 'UnrecognisedFgaObjectError'
+  }
+}
+
+export function reconstructDoomedIds(fgaObjectIds: readonly string[]): DoomedIds {
+  const spaceIds: string[] = []
+  const pageIds: string[] = []
+  const unrecognised: string[] = []
+  for (const object of fgaObjectIds) {
+    if (object.startsWith('space:')) spaceIds.push(object.slice('space:'.length))
+    else if (object.startsWith('page:')) pageIds.push(object.slice('page:'.length))
+    else unrecognised.push(object)
+  }
+  if (unrecognised.length > 0) throw new UnrecognisedFgaObjectError(unrecognised)
+  return { spaceIds, pageIds }
+}

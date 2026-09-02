@@ -20,6 +20,18 @@ import type { DoomedIds } from './manifest-keys.js'
 // `tenant_sweep_progress` already marks done, so re-running after a crash does not redo real work —
 // not to make a single step repeated safer, which it already is.
 //
+// ⚠️ review c-af763a4 (5th pass, G4): "idempotent, so resumable" was measured for SEQUENTIAL
+// re-runs (one call finishes or crashes, then a LATER call resumes) — tenant-reset.ts's per-tenant lock
+// (`resetTenant`) guarantees at most one caller ever WRITES a manifest or newly resumes one at a time,
+// but the lock is released before this function runs, so two callers that both resumed the SAME
+// manifest (e.g. one held the lock and resumed, a second arrived after that resume committed and — with
+// a matching --keep — also resumed the same still-unfinished manifest) can call this function
+// CONCURRENTLY on it. Each individual step's idempotency still holds (no double-delete corruption), but
+// `packages/authz/src/tuples.ts`'s `deleteObjectTuples` (used by `executeFgaSweep`) is a read-then-
+// delete whose own #619 comment says a racing delete on the SAME object can make the loser's call fail
+// outright — so a concurrent resume of the same manifest is safe from data corruption but may SURFACE a
+// transient FGA error to whichever caller loses that particular race, not a smooth no-op.
+//
 // ⚠️ database MUST run first — review c-af763a4 found the original version of this comment
 // overclaimed "the order between the four steps never matters" from the fact that fga/search/storage
 // each read their OWN targets from the manifest (a fixed, pre-computed list — never affected by what

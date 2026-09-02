@@ -10,7 +10,8 @@
 // it would be testing "an untouched space", a scenario reset never has when a keep-list is given.
 import { describe, it, expect, afterAll } from 'vitest'
 import postgres from 'postgres'
-import { collectResetStorageKeys } from '../tenant-sweep/manifest-keys.js'
+import { collectResetStorageKeys, deriveStorageKeyColumns } from '../tenant-sweep/manifest-keys.js'
+import { UnclassifiableSchemaError } from '../tenant-sweep/execute-database.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_t810mk'
@@ -78,5 +79,44 @@ describe('collectResetStorageKeys (ADR-252 §1, #810)', () => {
   it('returns an empty list for an empty doomed set (nothing to sweep)', async () => {
     const keys = await collectResetStorageKeys(admin, TENANT, { spaceIds: [], pageIds: [] })
     expect(keys).toEqual([])
+  })
+
+  // review c-af763a4 (4th pass, F4): the four SELECTs above were hand-authored against
+  // today's schema with nothing confirming that set still matches what the schema actually holds — a
+  // ninth `_key` column landing in a future migration would join neither this file's coverage nor any
+  // error. `deriveStorageKeyColumns` closes that: schema-derived, not hand-listed, unknown-is-fatal.
+  it('deriveStorageKeyColumns finds today\'s 4 covered + 3 deferred storage-key columns, and zero unknown', async () => {
+    const { covered, deferred, unknown } = await deriveStorageKeyColumns(admin)
+    console.log(`[manifest-keys] storage-key columns: ${covered.length} covered, ${deferred.length} deferred, ${unknown.length} unknown`)
+    expect(unknown, 'a non-empty list here means a real _key column this derivation cannot classify — see the named exclusions/deferred lists').toEqual([])
+    expect(covered.sort()).toEqual(['attachments.s3_key', 'imports.archive_key', 'revisions.ydoc_key', 'space_settings.icon_image_key'].sort())
+    expect(deferred.sort()).toEqual(['members.avatar_image_key', 'tenant_settings.logo_key', 'revision_gc_candidates.ydoc_key'].sort())
+    // the exclusions actually exclude something real, not a name that never matched (same discipline
+    // derive.ts's own NAMED_EXCLUSIONS break-check applies)
+    expect(covered).not.toContain('email_outbox.fold_key')
+    expect(covered).not.toContain('member_passkeys.public_key')
+    expect(covered).not.toContain('space_settings.accent_key')
+    expect(covered).not.toContain('tenant_settings.accent_key')
+  })
+
+  // ⚠️ break-check: prove an unclassified `_key` column actually refuses the whole manifest write,
+  // rather than merely being test-observed. Adds a fake storage-key-shaped column inside a transaction
+  // that always ROLLS BACK — the schema is never actually changed — the same pattern
+  // tenant-sweep-derive-810.test.ts's own break-check uses for `SURVIVING_TABLES`.
+  it('⚠️ break-check: a future, unclassified _key column refuses collectResetStorageKeys instead of silently omitting it', async () => {
+    await admin.begin(async (tx) => {
+      await tx`ALTER TABLE pages ADD COLUMN totally_new_export_key TEXT`
+      const { unknown } = await deriveStorageKeyColumns(tx)
+      expect(unknown).toContain('pages.totally_new_export_key')
+      await expect(collectResetStorageKeys(tx, TENANT, { spaceIds: [], pageIds: [] }))
+        .rejects.toThrow(UnclassifiableSchemaError)
+      throw new Error('rollback — never commit the added column') // sql.begin rolls back on throw
+    }).catch((e: unknown) => {
+      if (!(e instanceof Error) || e.message !== 'rollback — never commit the added column') throw e
+    })
+    // confirm the schema is genuinely unchanged after the rollback
+    const [restored] = await admin<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns WHERE table_name = 'pages' AND column_name = 'totally_new_export_key'`
+    expect(restored, 'the column must not exist — this test must never leave the schema mutated').toBeUndefined()
   })
 })

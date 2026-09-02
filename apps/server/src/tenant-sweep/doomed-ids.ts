@@ -1,5 +1,5 @@
-import type { Sql } from 'postgres'
 import type { DoomedIds } from './manifest-keys.js'
+import type { Queryable } from './derive.js'
 
 // ADR-252 §1 / #810: the glue between an operator's keep-list and the `DoomedIds` every collection
 // function in this directory (`manifest-keys.ts`, `manifest-fga.ts`) consumes. "A keep-list is a
@@ -11,7 +11,7 @@ import type { DoomedIds } from './manifest-keys.js'
 // ADR-252's acceptance ("no rows, no tuples, no documents, no objects") does not carve out an
 // exception for pages already in trash — reset is meant to leave nothing, not "nothing the trash
 // sweep hadn't gotten to yet".
-export async function computeDoomedIds(sql: Sql, tenantId: string, keepSpaceIds: readonly string[]): Promise<DoomedIds> {
+export async function computeDoomedIds(sql: Queryable, tenantId: string, keepSpaceIds: readonly string[]): Promise<DoomedIds> {
   const spaces = await sql<{ id: string }[]>`
     SELECT id FROM spaces WHERE tenant_id = ${tenantId} AND id <> ALL(${keepSpaceIds})`
   const pages = await sql<{ id: string }[]>`

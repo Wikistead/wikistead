@@ -5,7 +5,7 @@ import type { Sql, TransactionSql } from 'postgres'
 // (.end() etc.) Sql has, which these functions never call. Needed so a caller can run a derive query
 // INSIDE a transaction it controls (e.g. a break-check that drops and rolls back a constraint) without
 // a separate, narrower signature for that one case.
-type Queryable = Sql | TransactionSql
+export type Queryable = Sql | TransactionSql
 
 // ADR-252 §1 ("Empty a workspace — tenant:reset") / #810: which rows a reset (or, inheriting this
 // path, a removal) must touch when it empties a space or page. NOT the whole-tenant table set §"Both
