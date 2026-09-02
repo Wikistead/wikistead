@@ -580,11 +580,18 @@ export async function memberHasAnotherWayIn(
   db: TenantDb,
   tenant: { id: string; plan: string },
   sub: string,
-  opts: { env?: string | undefined; excludeConnectionId?: string } = {},
+  // `excludeConnectionId` is #960's shape: the CONNECTION is going away, so it drops out of both the
+  // link check and the mint-derived check below. `excludeLinkOnly` is #1045's — unlinking removes only
+  // the STORED LINK; the connection itself (and whatever it would mint on the member's next sign-in)
+  // is untouched, so it must stay in the mint-derived half. Passing both for the same id would be a
+  // caller bug (the connection can't be simultaneously "gone" and "still there to mint from") — kept as
+  // two names rather than one so a caller cannot reach for the wrong one by accident.
+  opts: { env?: string | undefined; excludeConnectionId?: string; excludeLinkOnly?: string } = {},
 ): Promise<boolean> {
+  const excludeLink = opts.excludeConnectionId ?? opts.excludeLinkOnly
   const [link] = await db.sql<{ id: string }[]>`
     SELECT id FROM member_identities WHERE tenant_id = ${tenant.id} AND member_sub = ${sub}
-      ${opts.excludeConnectionId ? db.sql`AND connection_id <> ${opts.excludeConnectionId}` : db.sql``}
+      ${excludeLink ? db.sql`AND connection_id <> ${excludeLink}` : db.sql``}
     LIMIT 1`
   if (link) return true
 

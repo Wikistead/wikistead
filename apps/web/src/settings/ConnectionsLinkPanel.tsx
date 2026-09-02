@@ -6,8 +6,8 @@ import { notify } from "../ui/toast";
 import { ApiError } from "../data/apiClient";
 import { startAuthentication } from "@simplewebauthn/browser";
 import {
-  useMyConnections, useStartConnectionLink, useMyFactors, useMyRecoveryCodes, useRecoveryReauthChallenge,
-  type AccountConnection,
+  useMyConnections, useStartConnectionLink, useUnlinkConnection, useMyFactors, useMyRecoveryCodes,
+  useRecoveryReauthChallenge, type AccountConnection,
 } from "../data/queries";
 import { browserCanUseFactorKind, proofBeginsOnChoice } from "./factor-kind";
 import { ProviderMark } from "../app/ProviderMark";
@@ -46,7 +46,9 @@ function useLinkResult(): void {
   }, []);
 }
 
-function ConnectionRow({ conn, onLink, busy }: { conn: AccountConnection; onLink: () => void; busy: boolean }) {
+function ConnectionRow({ conn, onLink, onUnlink, busy }: {
+  conn: AccountConnection; onLink: () => void; onUnlink: () => void; busy: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-2 rounded-md border border-border p-2" data-testid={`connection-row-${conn.id}`}>
@@ -55,9 +57,14 @@ function ConnectionRow({ conn, onLink, busy }: { conn: AccountConnection; onLink
         <span>{connectionName(conn, t)}</span>
       </div>
       {conn.linked ? (
-        <span className="flex items-center gap-1 text-xs text-fg-dim" data-testid={`connection-linked-${conn.id}`}>
-          <Check size={14} aria-hidden />{t("account.connectionLinkedBadge")}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1 text-xs text-fg-dim" data-testid={`connection-linked-${conn.id}`}>
+            <Check size={14} aria-hidden />{t("account.connectionLinkedBadge")}
+          </span>
+          <Button variant="dangerGhost" size="sm" type="button" disabled={busy} data-testid={`connection-unlink-${conn.id}`} onClick={onUnlink}>
+            {t("account.connectionUnlinkButton")}
+          </Button>
+        </div>
       ) : (
         <Button variant="default" type="button" disabled={busy} data-testid={`connection-link-${conn.id}`} onClick={onLink}>
           {t("account.connectionLinkButton")}
@@ -74,11 +81,15 @@ export function ConnectionsLinkPanel() {
   const factors = useMyFactors();
   const recovery = useMyRecoveryCodes(); // shares its cache with RecoveryCodesPanel — no extra request
   const start = useStartConnectionLink();
+  const unlink = useUnlinkConnection();
   // Reuses recovery-code minting's passkey challenge: the primitive it mints (a WebAuthn assertion
   // challenge keyed to tenant+member, not to "recovery") is exactly what re-authenticating here needs.
   const challenge = useRecoveryReauthChallenge();
 
-  const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  // #1045: link and unlink share ONE re-auth form (same proof, same three methods) — the pending
+  // ACTION picks which mutation `submitProof`/`proveWithPasskey` finish into.
+  const [pendingAction, setPendingAction] = useState<"link" | "unlink" | null>(null);
   const [proving, setProving] = useState<null | { code: string; password: string }>(null);
   const [method, setMethod] = useState<ReauthMethod | null>(null);
 
@@ -89,17 +100,19 @@ export function ConnectionsLinkPanel() {
   });
   const onlyMethod = initialMethod(methods);
 
-  const beginLink = (id: string) => {
-    setLinkingId(id);
+  const beginAction = (action: "link" | "unlink", id: string) => {
+    setPendingId(id);
+    setPendingAction(action);
     setProving({ code: "", password: "" });
     setMethod(onlyMethod);
   };
-  const cancel = () => { setLinkingId(null); setProving(null); setMethod(null); };
+  const cancel = () => { setPendingId(null); setPendingAction(null); setProving(null); setMethod(null); };
 
   const failed = (e: unknown) => {
     if (e instanceof ApiError && e.code === "reauth_required") return notify.error(t("account.connectionReauthFailed"));
     if (e instanceof ApiError && e.code === "factor_locked") return notify.error(t("account.recoveryReauthFailed"));
-    notify.error(t("account.connectionLinkFailed"));
+    if (e instanceof ApiError && e.code === "last_way_in") return notify.error(t("account.connectionUnlinkLastWay"));
+    notify.error(pendingAction === "unlink" ? t("account.connectionUnlinkFailed") : t("account.connectionLinkFailed"));
   };
 
   const goToUrl = (res: { url: string } | null | undefined) => {
@@ -107,21 +120,29 @@ export function ConnectionsLinkPanel() {
     window.location.href = res.url; // full-page navigation to the IdP — never returns to this render
   };
 
+  const finishUnlink = async (connectionId: string, proof: { password?: string; code?: string; passkey?: unknown }) => {
+    await unlink.mutateAsync({ connectionId, proof });
+    notify.success(t("account.connectionUnlinked"));
+    cancel();
+  };
+
   const submitProof = async () => {
-    if (!proving || !linkingId) return;
+    if (!proving || !pendingId) return;
     try {
       const proof = method === "totp" ? { code: proving.code.trim() } : method === "password" ? { password: proving.password } : {};
-      goToUrl(await start.mutateAsync({ connectionId: linkingId, proof }));
+      if (pendingAction === "unlink") await finishUnlink(pendingId, proof);
+      else goToUrl(await start.mutateAsync({ connectionId: pendingId, proof }));
     } catch (e) { failed(e); }
   };
 
   const proveWithPasskey = async () => {
-    if (!linkingId) return;
+    if (!pendingId) return;
     try {
       const started = await challenge.mutateAsync();
       if (!started?.options) return notify.error(t("account.connectionReauthFailed"));
       const assertion = await startAuthentication({ optionsJSON: started.options as never });
-      goToUrl(await start.mutateAsync({ connectionId: linkingId, proof: { passkey: assertion } }));
+      if (pendingAction === "unlink") await finishUnlink(pendingId, { passkey: assertion });
+      else goToUrl(await start.mutateAsync({ connectionId: pendingId, proof: { passkey: assertion } }));
     } catch (e) {
       if (e instanceof ApiError) return failed(e);
       // A dismissed key prompt lands here too — the reader cancelled, not a refusal worth explaining.
@@ -155,19 +176,25 @@ export function ConnectionsLinkPanel() {
       <p className="mb-2 text-xs text-fg-dim" data-testid="connections-explainer">{t("account.connectionsExplainer")}</p>
       <div className="flex flex-col gap-2">
         {rows.map((conn) =>
-          linkingId === conn.id && proving ? (
+          pendingId === conn.id && proving ? (
             <RecoveryReauthForm key={conn.id} method={method} methods={methods} proving={proving} onChange={setProving}
               onPick={(m) => pickReauthMethod(m, {
                 setMethod, resetProof: () => setProving({ code: "", password: "" }), present: () => void proveWithPasskey(),
               })}
-              busy={start.isPending} passkeyBusy={challenge.isPending}
+              busy={start.isPending || unlink.isPending} passkeyBusy={challenge.isPending}
               onSubmit={() => void submitProof()} onPasskey={() => void proveWithPasskey()}
-              onCancel={cancel} />
+              onCancel={cancel}
+              prompt={pendingAction === "unlink" ? t("account.connectionUnlinkReauthPrompt") : t("account.connectionLinkReauthPrompt")}
+              passkeyLabel={pendingAction === "unlink" ? t("account.connectionUnlinkReauthPasskey") : t("account.connectionLinkReauthPasskey")}
+              submitLabel={pendingAction === "unlink" ? t("account.connectionUnlinkButton") : t("account.connectionLinkButton")} />
           ) : (
-            <ConnectionRow key={conn.id} conn={conn} busy={start.isPending}
+            <ConnectionRow key={conn.id} conn={conn} busy={start.isPending || unlink.isPending}
               onLink={() => (methods.length === 0
                 ? notify.error(t("account.connectionNoProof"))
-                : beginLink(conn.id))} />
+                : beginAction("link", conn.id))}
+              onUnlink={() => (methods.length === 0
+                ? notify.error(t("account.connectionNoProof"))
+                : beginAction("unlink", conn.id))} />
           ),
         )}
       </div>

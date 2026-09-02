@@ -352,7 +352,15 @@
     "connectionReauthFailed": "That did not confirm it was you. Try your authenticator code, your passkey, or your password.",
     "connectionLinked": "Connection linked. You can now sign in with it.",
     "connectionLinkTaken": "That sign-in is already linked to a different member of this workspace.",
-    "connectionLinkFailed": "The link could not be completed. Try again."
+    "connectionLinkFailed": "The link could not be completed. Try again.",
+    "connectionUnlinkButton": "Disconnect",
+    "connectionUnlinked": "Disconnected. You can link it again at any time.",
+    "connectionUnlinkFailed": "The connection could not be removed. Try again.",
+    "connectionUnlinkLastWay": "This is your only way to sign in. Add another sign-in method before removing it.",
+    "connectionLinkReauthPrompt": "Confirm it is you before linking.",
+    "connectionLinkReauthPasskey": "Link with your passkey",
+    "connectionUnlinkReauthPrompt": "Confirm it is you before removing this connection.",
+    "connectionUnlinkReauthPasskey": "Disconnect with your passkey"
   },
   "settings": {
     "back": "Back to app",

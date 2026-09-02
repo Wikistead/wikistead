@@ -110,6 +110,7 @@ export function initialMethod(methods: readonly ReauthMethod[]): ReauthMethod | 
 
 export function RecoveryReauthForm({
   method, methods, proving, onChange, onPick, busy, passkeyBusy, onSubmit, onPasskey, onCancel,
+  prompt, passkeyLabel, submitLabel,
 }: {
   /** the method being proved with, or null while the member is still choosing */
   method: ReauthMethod | null;
@@ -123,6 +124,16 @@ export function RecoveryReauthForm({
   onSubmit: () => void;
   onPasskey: () => void;
   onCancel: () => void;
+  /**
+   * #1045: this form is shared by every "confirm it is you first" flow, and its default copy names
+   * what RecoveryCodesPanel does with the proof ("create recovery codes"). A caller reusing it for a
+   * DIFFERENT action — one that DESTROYS something, here — must name its own verb, or the button a
+   * member commits with lies about what pressing it does (review c-aead6c7: reusing this
+   * form unlabelled put a "Disconnect" action behind a button that read "Create recovery codes").
+   */
+  prompt?: string;
+  passkeyLabel?: string;
+  submitLabel?: string;
 }) {
   const { t } = useTranslation();
   const NAME: Record<ReauthMethod, string> = {
@@ -136,7 +147,7 @@ export function RecoveryReauthForm({
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border p-3" data-testid="recovery-reauth">
-      <p className="m-0 text-xs text-fg-dim" data-testid="recovery-reauth-prompt">{t("account.recoveryReauthPrompt")}</p>
+      <p className="m-0 text-xs text-fg-dim" data-testid="recovery-reauth-prompt">{prompt ?? t("account.recoveryReauthPrompt")}</p>
 
       {method === null ? (
         // The chooser. Nothing is typed here — the point is that the reader picks one thing, and what
@@ -156,7 +167,7 @@ export function RecoveryReauthForm({
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" type="button" data-testid="recovery-reauth-passkey"
             disabled={busy || passkeyBusy} onClick={onPasskey}>
-            {t("account.recoveryReauthPasskey")}
+            {passkeyLabel ?? t("account.recoveryReauthPasskey")}
           </Button>
           {canGoBack && (
             <Button variant="ghost" type="button" data-testid="recovery-reauth-back"
@@ -186,7 +197,7 @@ export function RecoveryReauthForm({
           <div className="flex flex-wrap gap-2">
             <Button variant="primary" type="submit" data-testid="recovery-reauth-submit"
               disabled={busy || (method === "totp" ? !proving.code.trim() : !proving.password)}>
-              {t("account.recoveryMint")}
+              {submitLabel ?? t("account.recoveryMint")}
             </Button>
             {canGoBack && (
               <Button variant="ghost" type="button" data-testid="recovery-reauth-back"

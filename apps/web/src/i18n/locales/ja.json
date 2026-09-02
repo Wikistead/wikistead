@@ -351,7 +351,15 @@
     "connectionReauthFailed": "本人確認ができませんでした。認証アプリのコード・パスキー・パスワードのいずれかでお試しください。",
     "connectionLinked": "サインイン方法をリンクしました。これでこの方法でもサインインできます。",
     "connectionLinkTaken": "そのサインイン方法は、このワークスペースの別のメンバーに既にリンクされています。",
-    "connectionLinkFailed": "リンクを完了できませんでした。もう一度お試しください。"
+    "connectionLinkFailed": "リンクを完了できませんでした。もう一度お試しください。",
+    "connectionUnlinkButton": "解除",
+    "connectionUnlinked": "リンクを解除しました。いつでも再度リンクできます。",
+    "connectionUnlinkFailed": "リンクを解除できませんでした。もう一度お試しください。",
+    "connectionUnlinkLastWay": "これがサインインできる唯一の方法です。解除する前に、別のサインイン方法を追加してください。",
+    "connectionLinkReauthPrompt": "リンクの前に、本人であることを確認します。",
+    "connectionLinkReauthPasskey": "パスキーでリンク",
+    "connectionUnlinkReauthPrompt": "解除の前に、本人であることを確認します。",
+    "connectionUnlinkReauthPasskey": "パスキーで解除"
   },
   "settings": {
     "back": "アプリに戻る",

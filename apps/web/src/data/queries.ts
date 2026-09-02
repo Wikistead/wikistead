@@ -2982,6 +2982,24 @@ export function useStartConnectionLink() {
   });
 }
 
+/**
+ * Remove this member's own link (#1045 / ADR-259 §3.9) — the same re-authentication proof
+ * {@link useStartConnectionLink} asks for, since the server checks it before touching anything. A
+ * 409 `last_way_in` means this connection is the member's only door; the server has already refused
+ * the write, so there is nothing here to roll back.
+ */
+export function useUnlinkConnection() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { connectionId: string; proof: { password?: string; code?: string; passkey?: unknown } }) =>
+      apiFetch<void>(`/me/connections/${encodeURIComponent(args.connectionId)}/link`, token, {
+        method: "DELETE", body: JSON.stringify(args.proof),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me", "connections"] }),
+  });
+}
+
 /** #660: removing one needs a current code FROM it — possession, not a password (ADR-219 §8). */
 export function useRemoveFactor() {
   const { token } = useSession();

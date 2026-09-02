@@ -10,9 +10,11 @@ import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
 import { acceptInvite } from '../auth/invites.js'
-import { resolveAvailableLogin, resolveLoginConnections } from '../auth/login-methods.js'
-import { findMemberIdentityLink, linkMemberIdentity, listLinkedConnectionIds } from '../auth/member-identities.js'
+import { resolveAvailableLogin, resolveLoginConnections, memberHasAnotherWayIn, localLoginEnabled, loginMethodCeiling } from '../auth/login-methods.js'
+import { findMemberIdentityLink, linkMemberIdentity, listLinkedConnectionIds, unlinkMemberIdentity } from '../auth/member-identities.js'
 import { reauthenticated, locked, countFailure } from './second-factor.js'
+import { auditIfEntitled } from '../audit/sink.js'
+import { resolveSsoStance, isSsoExempt } from '../auth/sso-stance.js'
 
 async function resolveTenant(host: string | undefined): Promise<Tenant | null> {
   const { slug, domain } = resolveTenantFromHost(host ?? '')
@@ -428,6 +430,65 @@ export async function authPlugin(app: FastifyInstance) {
     },
   )
 
+  // #1045 / ADR-259 §3.9: a member removes their own link, re-authenticated (the same proof §3.3's
+  // link/start asks for) and refused if it would leave them with no way in. `memberHasAnotherWayIn`
+  // already reads exactly this counterfactual — it is the same predicate `DELETE
+  // /members/:sub/password-setup` (members.ts) asks before taking a credential away, reused rather
+  // than re-derived; the local-credential half of the OR is checked here because that function's own
+  // contract is deliberately narrower ("another way BESIDES a credential" — see its call sites).
+  app.delete<{ Params: { connectionId: string }; Body: { password?: unknown; code?: unknown; passkey?: unknown } }>(
+    '/me/connections/:connectionId/link',
+    async (req, reply) => {
+      if (await locked(app.valkey, req.tenant.id, req.user.sub)) {
+        return reply.code(429).send({ error: 'too many attempts — try again later', code: 'factor_locked' })
+      }
+      if (!(await reauthenticated(app, req as never, req.body ?? {}))) {
+        await countFailure(app.valkey, req.tenant.id, req.user.sub)
+        return reply.code(401).send({ error: 're-authenticate to remove a sign-in method', code: 'reauth_required' })
+      }
+      const linked = await listLinkedConnectionIds(req.db, req.tenant.id, req.user.sub)
+      if (!linked.includes(req.params.connectionId)) return reply.code(404).send({ error: 'not found' })
+
+      const [cred] = await req.db.sql<[{ member_sub: string }?]>`
+        SELECT member_sub FROM local_credentials WHERE tenant_id = ${req.tenant.id} AND member_sub = ${req.user.sub}`
+      // A credential row only counts as a door if it would actually OPEN one — the same four-way read
+      // `auth-local.ts`'s login handler does at its own top (the plan's ceiling even ADMITS local
+      // login; it is switched on; and, while the tenant's SSO stance bites, only an exempt member's
+      // password still works). A row that exists but is structurally unusable is not "another way
+      // in"; counting it would let a member unlink their real last door while believing a dead one
+      // covers them. review c-aead6c7: the first version of this check was missing the
+      // ceiling half and measurably fail-open under a plan/env that excludes 'local'.
+      const credentialWorks = cred && loginMethodCeiling().has('local')
+        ? await (async () => {
+            const enabled = await localLoginEnabled(req.db)
+            if (!enabled) return false
+            const stance = await resolveSsoStance(req.db, req.tenant)
+            return !stance.biting || (await isSsoExempt(req.db, req.user.sub))
+          })()
+        : false
+      if (!credentialWorks && !(await memberHasAnotherWayIn(req.db, req.tenant, req.user.sub, { excludeLinkOnly: req.params.connectionId }))) {
+        return reply.code(409).send({
+          error: 'this is your only way to sign in — add another sign-in method first',
+          code: 'last_way_in',
+        })
+      }
+
+      // Audit rides its OWN transaction, caught and logged rather than allowed to fail the request —
+      // the same shape every sibling security-audit call in this codebase uses (auth-local.ts,
+      // members.ts, second-factor.ts). review c-aead6c7: an earlier version tried to nest
+      // this inside the delete's own transaction for atomicity, and it does not do what it looks like
+      // — postgres.js re-raises a swallowed statement error at COMMIT regardless of an inner .catch,
+      // so that shape rolled the DELETE back too (a 500, not the graceful "delete still lands, audit
+      // best-effort" it read as).
+      const removed = await unlinkMemberIdentity(req.db.sql, req.tenant.id, req.params.connectionId, req.user.sub)
+      if (!removed) return reply.code(404).send({ error: 'not found' })
+      await req.db.tx((tx) => auditIfEntitled(tx, req.tenant, {
+        actor: `user:${req.user.sub}`, action: 'member.identity_unlinked', target: `member:${req.user.sub}`,
+      })).catch((err: unknown) => req.log.warn({ err }, 'identity-unlinked audit failed'))
+      return reply.code(204).send()
+    },
+  )
+
   // Where the IdP redirects back to complete a link (#947 / ADR-259 §3.3). PUBLIC in app.ts's hook
   // (skips the ordinary session resolution) because this handler must resolve the session ITSELF and
   // refuse unless it is the SAME member who started the link — the linking-CSRF defence a shared hook
@@ -477,10 +538,21 @@ export async function authPlugin(app: FastifyInstance) {
       } catch (e) {
         if ((e as { code?: string }).code === 'identity_taken') {
           req.log.info({ tenantId: tenant.id }, 'auth/link-callback: refused — identity already linked to a different member')
+          // #1045 / ADR-259 §3.9: the ledger is the only visibility this event has (webhooks are not
+          // added here — the ticket asks for audit, and a THIRD PARTY's endpoint learning that a
+          // member's link attempt collided with someone else's identity is more exposure than the
+          // ticket asked for). The MEMBER, not the connection, is the target: the ledger's question is
+          // "who tried to link and was refused", not which connection.
+          await db.tx((tx) => auditIfEntitled(tx, tenant, {
+            actor: `user:${st.linkMemberSub}`, action: 'member.identity_link_refused', target: `member:${st.linkMemberSub}`,
+          })).catch((err: unknown) => req.log.warn({ err }, 'identity-link-refused audit failed'))
           return reply.redirect(`${LINK_RETURN_PATH}?linkError=taken`)
         }
         throw e
       }
+      await db.tx((tx) => auditIfEntitled(tx, tenant, {
+        actor: `user:${st.linkMemberSub}`, action: 'member.identity_linked', target: `member:${st.linkMemberSub}`,
+      })).catch((err: unknown) => req.log.warn({ err }, 'identity-linked audit failed'))
       return reply.redirect(`${LINK_RETURN_PATH}?linked=1`)
     } finally {
       await db.release()

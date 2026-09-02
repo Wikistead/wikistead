@@ -2,6 +2,7 @@
 // second member being created. This module is the READ side that routes/auth.ts consults at login;
 // the WRITE side (linking from account settings, ADR-259 §3.3) landed as #947, below.
 import type { TenantDb } from '../db/index.js'
+import type { Sql } from 'postgres'
 
 /**
  * The stored link for (tenant, connection, external subject), if one exists.
@@ -96,4 +97,41 @@ export async function linkMemberIdentity(
     // Same member: the winner's transaction already inserted the row and cleared the override —
     // this call needed nothing further, the same harmless-replay outcome as the existing-row check.
   }
+}
+
+/**
+ * Remove a member's own link to a connection (#1045 / ADR-259 §3.9). The caller is responsible for
+ * everything §3.9 requires BEFORE calling this: re-authentication, and confirming the member has
+ * another way in (`memberHasAnotherWayIn` with `excludeLinkOnly` set to this connection, ORed with a
+ * `local_credentials` check) — this function only performs the write.
+ *
+ * Takes a `Sql` (not a `TenantDb`) so the caller can run it INSIDE the same transaction as the audit
+ * row `auditIfEntitled` writes — a member-initiated destructive write and the ledger's record of it
+ * should not be able to land as two separate facts (one committed, one lost) if the process dies
+ * between them.
+ *
+ * Scoped to `(tenantId, connectionId, memberSub)`, not by row id: the caller never learns a link's
+ * internal id (`GET /me/connections` reports linkage as a boolean, per connection), so there is no id
+ * to hand back. Returns whether a row actually existed to remove, for the caller's 404.
+ *
+ * ⚠️ KNOWN GAP, left open on purpose rather than guessed at (review c-a8af, #1045): this does
+ * NOT touch `member_connection_groups` or `members.groups`. `group-sync.ts`'s `revokeConnectionGroups`
+ * revokes a connection's trust-group-derived roles the moment the STANCE requires it (biting kicks a
+ * member who no longer satisfies it out immediately, not on their next sign-in) — whether an ordinary
+ * self-service unlink should revoke the SAME slice, or leave it to lapse on the next sign-in the way
+ * `identity_source` itself is documented as transitional (§3.9's own "judged by identity_source until
+ * they sign in again"), is a policy question ADR-259 §3.9 never asked. Filed as a follow-up rather than
+ * decided here.
+ */
+export async function unlinkMemberIdentity(
+  sql: Sql,
+  tenantId: string,
+  connectionId: string,
+  memberSub: string,
+): Promise<boolean> {
+  const [row] = await sql<{ id: string }[]>`
+    DELETE FROM member_identities
+    WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId} AND member_sub = ${memberSub}
+    RETURNING id`
+  return !!row
 }
