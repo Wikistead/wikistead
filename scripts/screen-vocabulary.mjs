@@ -96,4 +96,12 @@ export const SCREEN_VOCABULARY = {
     ns: 'adminModeration',
     keys: ['shrinkLabel', 'wordsLabel'],
   },
+  // #1063, third surface of this slice. The locale namespace here is `billing`, not
+  // `adminBilling` like the other admin surfaces — this tab predates the `admin*` naming
+  // convention and was never renamed (checked: `AdminBillingTab.tsx` reads `billing.*` throughout).
+  // Two buttons, mutually exclusive by plan state (free vs. already-billed), both worth arming.
+  'admin-surface:billing': {
+    ns: 'billing',
+    keys: ['upgradePro', 'manage'],
+  },
 }

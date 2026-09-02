@@ -1,5 +1,15 @@
 {
   "surfaces": {
+    "admin-surface:billing": {
+      "manage": {
+        "en": "Manage billing",
+        "ja": "課金を管理"
+      },
+      "upgradePro": {
+        "en": "Upgrade to Pro",
+        "ja": "Pro にアップグレード"
+      }
+    },
     "admin-surface:branding": {
       "logoRemove": {
         "en": "Remove",
