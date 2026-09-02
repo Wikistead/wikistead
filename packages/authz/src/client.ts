@@ -3,9 +3,11 @@ import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api'
 
 // #987 / ADR-270 §3.2 / §4: every OpenFGA round-trip in this tree goes through `fgaClient` below (the
 // server re-exports it and the collab process imports it), so THIS is the one place a span can cover
-// all of them. The SDK methods that actually leave the process are named here; a property not in the
-// set is handed back untouched. With no OpenTelemetry SDK registered (every deployment that has not
-// set OTEL_EXPORTER_OTLP_ENDPOINT) the API's tracer is a no-op proxy and the wrapper costs a closure.
+// all of them. The set names the SDK methods on the REQUEST path; the store/model management calls
+// (`createStore`, `writeAuthorizationModel`, …) also leave the process but only at boot and setup,
+// and are left out on purpose. A property not in the set is handed back untouched. With no
+// OpenTelemetry SDK registered (every deployment that has not set OTEL_EXPORTER_OTLP_ENDPOINT) the
+// API's tracer is a no-op proxy and the wrapper costs a closure.
 //
 // The span carries the METHOD only. ADR-270 §3.4 keeps tenant / user / object identifiers off every
 // metric label, and the two reasons (one deployment's operator reading another tenant's traffic;

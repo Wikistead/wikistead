@@ -1,6 +1,7 @@
 import { runInAuthzScope, SYSTEM_SCOPE } from '@wikistead/authz'
 import type { PendingQuery, Row } from 'postgres'
 import { pool } from './pool.js'
+import { withSpan } from '../telemetry/tracing.js' // #987 / ADR-270 §3.2
 
 // #432 (the #385 follow-up): THE outbox lease primitive. The reliable outboxes — search
 // (search_outbox), audit (audit_outbox), webhooks (webhook_outbox), email (email_outbox), imports
@@ -73,7 +74,6 @@ export async function claimOutboxBatch<T extends Row & { tenant_id: string }>(op
   return rows as unknown as T[]
 }
 
-import { withSpan } from '../telemetry/tracing.js' // #987 / ADR-270 §3.2
 
 // The shared periodic drain loop: one in-process `running` guard against self-overlap (SKIP LOCKED
 // already handles cross-instance), a capped backlog-clearing burst per tick, errors deferred to the

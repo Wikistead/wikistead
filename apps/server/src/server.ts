@@ -28,9 +28,13 @@ export async function startServer(): Promise<FastifyInstance> {
   // ⚠️ Registering ANY listener cancels Node's default (terminate on SIGTERM) — nothing else in this
   // process handles the signal, so the listener flushes and then RE-RAISES it: `once` has removed
   // itself by then, the default applies, and the container exits the way it did before this line.
+  // Bounded: a collector that is down would otherwise hold the exit for the exporter's own timeout
+  // (10s by default), and a rejected flush must not become an unhandled rejection on the way out.
   if (tracing) {
     process.once('SIGTERM', () => {
-      void tracing.shutdown().finally(() => process.kill(process.pid, 'SIGTERM'))
+      const flush = tracing.shutdown().catch(() => {})
+      const bound = new Promise<void>((r) => setTimeout(r, 3000).unref())
+      void Promise.race([flush, bound]).finally(() => process.kill(process.pid, 'SIGTERM'))
     })
   }
   // Fail fast: in production OpenFGA must be persistent (postgres), not in-memory (ADR-035).

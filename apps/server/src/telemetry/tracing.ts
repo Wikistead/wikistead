@@ -43,11 +43,20 @@ export const TRACER_NAME = 'server'
 
 /**
  * The default `service.name`: the product as this deployment calls itself (a rebranded self-host
- * keeps its own name in its own traces), suffixed by the component. OTEL_SERVICE_NAME, if an operator
- * sets it, wins inside the SDK.
+ * keeps its own name in its own traces), suffixed by the component.
+ *
+ * ⚠️ It is a default only when it is NOT handed to the SDK. `NodeSDK({ serviceName })` merges after
+ * the environment detectors, and a merge lets the incoming value win — so passing this
+ * unconditionally silently overrode an operator's OTEL_SERVICE_NAME (measured by review). The
+ * caller passes it only when that variable is empty.
  */
 export function defaultServiceName(): string {
   return `${productName().toLowerCase().replace(/\s+/g, '-')}-server`
+}
+
+/** What `service.name` will be for this environment: the operator's choice, else the default. */
+export function serviceNameFor(env: NodeJS.ProcessEnv): string {
+  return (env.OTEL_SERVICE_NAME ?? '').trim() || defaultServiceName()
 }
 
 /** What `startTracing` says at boot when it stays off — pinned, so a silent "off" cannot ship. */
@@ -105,10 +114,12 @@ export async function startTracing(
   // the OTLP spec: the traces-specific variable wins verbatim, otherwise the signal path is appended
   // to the general endpoint. Headers, timeout and OTEL_SERVICE_NAME stay the SDK's own reads.
   type Processors = NonNullable<ConstructorParameters<typeof NodeSDK>[0]>['spanProcessors']
+  // `serviceName` is handed over only when the operator has not chosen one — see `defaultServiceName`.
+  const named = (env.OTEL_SERVICE_NAME ?? '').trim() ? {} : { serviceName: defaultServiceName() }
   const sdk = new NodeSDK(
     opts.spanProcessors
-      ? { serviceName: defaultServiceName(), spanProcessors: opts.spanProcessors as Processors }
-      : { serviceName: defaultServiceName(), traceExporter: new OTLPTraceExporter({ url: otlpTracesUrl(env) }) },
+      ? { ...named, spanProcessors: opts.spanProcessors as Processors }
+      : { ...named, traceExporter: new OTLPTraceExporter({ url: otlpTracesUrl(env) }) },
   )
   sdk.start()
   log(`[tracing] enabled: exporting spans to ${opts.spanProcessors ? '(test processor)' : otlpTracesUrl(env)}`)

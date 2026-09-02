@@ -23,7 +23,15 @@ describe('#1038 a named collector receives the spans', () => {
     await new Promise((r) => collector.once('listening', r))
     const endpoint = `http://127.0.0.1:${(collector.address() as AddressInfo).port}`
     const lines: string[] = []
-    const handle = await startTracing({ [OTLP_ENDPOINT_ENV]: endpoint }, { log: (l) => lines.push(l) })
+    // OTEL_SERVICE_NAME is read by the SDK's own environment detector, i.e. from process.env — set
+    // there for the duration, so the exported resource is what an operator would get.
+    process.env.OTEL_SERVICE_NAME = 'operator-chosen-name'
+    let handle: Awaited<ReturnType<typeof startTracing>>
+    try {
+      handle = await startTracing({ [OTLP_ENDPOINT_ENV]: endpoint, OTEL_SERVICE_NAME: 'operator-chosen-name' }, { log: (l) => lines.push(l) })
+    } finally {
+      delete process.env.OTEL_SERVICE_NAME
+    }
     expect(handle).not.toBeNull()
     expect(lines.some((l) => l.includes(endpoint)), 'the boot line names where spans go').toBe(true)
     await withSpan('wikistead.export_probe', { 'probe': 'yes' }, async () => {})
@@ -37,5 +45,10 @@ describe('#1038 a named collector receives the spans', () => {
     expect(traces!.contentType).toMatch(/protobuf|json/)
     // The span name is a UTF-8 string inside the protobuf (or JSON) body either way.
     expect(traces!.body.includes(Buffer.from('wikistead.export_probe')), 'the exported payload does not contain the span').toBe(true)
+    // ⚠️ The operator's service name reached the wire — and the default did NOT replace it. The
+    // first draft handed `serviceName` to the SDK unconditionally, and the SDK's merge lets that
+    // override the environment detector (review measured `operator-chosen-name` → default).
+    expect(traces!.body.includes(Buffer.from('operator-chosen-name')), 'OTEL_SERVICE_NAME must be the exported service.name').toBe(true)
+    expect(traces!.body.includes(Buffer.from('-server')), 'the default must not be exported alongside the operator\'s choice').toBe(false)
   })
 })

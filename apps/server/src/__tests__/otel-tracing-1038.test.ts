@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../app.js'
-import { startTracing, withSpan, tracingEnabled, OTLP_ENDPOINT_ENV, TRACING_DISABLED_LINE } from '../telemetry/tracing.js'
+import { startTracing, withSpan, tracingEnabled, defaultServiceName, serviceNameFor, OTLP_ENDPOINT_ENV, TRACING_DISABLED_LINE } from '../telemetry/tracing.js'
 
 const HOST = 'dev.localhost'
 const OTLP_PORTS = new Set([4317, 4318])
@@ -39,7 +39,12 @@ async function recordingOutbound(fn: () => Promise<void>): Promise<string[]> {
   https.request = ((...args: unknown[]) => { const t = asTarget(args[0]); note(t.host, t.port); return origHttps.apply(https, args as never) }) as typeof https.request
   http2.connect = ((...args: unknown[]) => { const t = asTarget(args[0]); note(t.host, t.port); return origH2.apply(http2, args as never) }) as typeof http2.connect
   net.Socket.prototype.connect = function (this: net.Socket, ...args: unknown[]) {
-    const a = args[0]
+    // ⚠️ An http.Agent — which is how every OTLP/HTTP export leaves the process — calls this with
+    // its arguments already NORMALISED: `args[0]` is an ARRAY `[options]`, not the options object.
+    // The first draft of this recorder read `.host` off that array, saw `undefined:undefined` for
+    // every exporter connection, and stayed green against the exact defect it exists to catch
+    // (review measured it). Unwrap before reading.
+    const a = Array.isArray(args[0]) ? args[0][0] : args[0]
     if (typeof a === 'object' && a !== null) note((a as { host?: unknown }).host, (a as { port?: unknown }).port)
     else if (typeof a === 'number') note(args[1], a)
     return origNet.apply(this, args as never)
@@ -59,33 +64,71 @@ describe('#1038 tracing is off unless a collector is named', () => {
     expect(tracingEnabled({ [OTLP_ENDPOINT_ENV]: 'http://tempo:4318' })).toBe(true)
   })
 
+  it("an operator's OTEL_SERVICE_NAME is what the SDK is handed, not overridden by the default", () => {
+    // The SDK merges `serviceName` AFTER its environment detectors and lets it win, so the default
+    // must only be handed over when the operator has not chosen (measured by review: the first
+    // draft handed it over unconditionally and the operator's name lost). `serviceNameFor` is the
+    // rule; the export pin drives the real SDK with the variable set and reads the name back.
+    expect(serviceNameFor({ OTEL_SERVICE_NAME: 'operator-chosen-name' })).toBe('operator-chosen-name')
+    expect(serviceNameFor({ OTEL_SERVICE_NAME: '  ' })).toBe(defaultServiceName())
+    expect(serviceNameFor({})).toBe(defaultServiceName())
+  })
+
   it('⚠️ with the endpoint unset, nothing in the process reaches for an OTLP port — measured by connection, not config', async () => {
+    // A version of this that started the SDK regardless of the environment exports on the batch
+    // processor's schedule — 5 s by default — so a recorder that stopped listening after 300 ms
+    // would never have seen it (review measured: nothing at 300 ms, two connects at 6.3 s). The
+    // schedule is the SDK's own knob, read from the process environment; shortened here so the
+    // window this measures contains the export, and restored after.
+    const prevDelay = process.env.OTEL_BSP_SCHEDULE_DELAY
+    process.env.OTEL_BSP_SCHEDULE_DELAY = '50'
     const lines: string[] = []
     let app: FastifyInstance | null = null
-    const seen = await recordingOutbound(async () => {
-      const handle = await startTracing({}, { log: (l) => lines.push(l) })
-      expect(handle, 'the disabled branch hands back nothing to shut down').toBeNull()
-      app = await buildApp()
-      // A request through the whole hook chain, plus a span opened by hand: both are the paths a
-      // stray exporter would have been fed by.
-      const r = await app.inject({ method: 'GET', url: '/healthz', headers: { host: HOST } })
-      expect(r.statusCode).toBe(200)
-      await withSpan('wikistead.probe', {}, async () => {})
-      await new Promise((r) => setTimeout(r, 300))
-    })
+    let seen: string[]
+    try {
+      seen = await recordingOutbound(async () => {
+        // NOT asserted on: `startTracing`'s return value is the configuration-side answer, and the
+        // ADR says the configuration-side answer is not what this measures. The connection list is.
+        await startTracing({}, { log: (l) => lines.push(l) })
+        app = await buildApp()
+        // A request through the whole hook chain, plus a span opened by hand: both are the paths a
+        // stray exporter would have been fed by.
+        const r = await app.inject({ method: 'GET', url: '/healthz', headers: { host: HOST } })
+        expect(r.statusCode).toBe(200)
+        await withSpan('wikistead.probe', {}, async () => {})
+        await new Promise((r) => setTimeout(r, 600))
+      })
+    } finally {
+      if (prevDelay === undefined) delete process.env.OTEL_BSP_SCHEDULE_DELAY
+      else process.env.OTEL_BSP_SCHEDULE_DELAY = prevDelay
+    }
     await app!.close()
     const otlp = seen.filter((t) => OTLP_PORTS.has(Number(t.split(':').pop())))
     expect(otlp, `something tried to reach an OTLP port with tracing off: ${otlp.join(', ')}`).toEqual([])
-    // Not vacuous: the hooks DO see traffic. `/healthz` opens no outbound socket, so prove the
-    // recorder itself works with a connection we make on purpose.
+    // Not vacuous, and on the RIGHT path: an exporter leaves through an http.Agent, whose socket
+    // connect the recorder must be able to read. `/healthz` opens no outbound socket, so make one
+    // the same way an exporter would — a keep-alive Agent, against a port we own — and require the
+    // recorder to have read the host AND the port off it, not merely to have been called.
+    const srv = http.createServer((_q, s) => s.end('ok')).listen(0, '127.0.0.1')
+    await new Promise((r) => srv.once('listening', r))
+    const port = (srv.address() as net.AddressInfo).port
+    const agent = new http.Agent({ keepAlive: true })
     const probe = await recordingOutbound(async () => {
-      const srv = http.createServer((_q, s) => s.end('ok')).listen(0, '127.0.0.1')
-      await new Promise((r) => srv.once('listening', r))
-      const port = (srv.address() as net.AddressInfo).port
-      await new Promise<void>((done, fail) => http.get({ host: '127.0.0.1', port, path: '/' }, (res) => { res.resume(); res.on('end', done) }).on('error', fail))
-      await new Promise((r) => srv.close(r))
+      await new Promise<void>((done, fail) => http.get({ host: '127.0.0.1', port, path: '/', agent }, (res) => { res.resume(); res.on('end', done) }).on('error', fail))
     })
-    expect(probe.length, 'the outbound recorder must see a connection it is shown').toBeGreaterThan(0)
+    agent.destroy()
+    await new Promise((r) => srv.close(r))
+    expect(probe, 'the recorder must read host:port off an Agent-driven connect, the shape an exporter uses').toContain(`127.0.0.1:${port}`)
+  })
+
+  it('ships no static import of the SDK — the "not even loaded" claim, pinned where a connection cannot see it', () => {
+    // The connection pin above cannot tell "the SDK was loaded and stayed quiet" from "the SDK was
+    // never loaded". This can: the only mention of the SDK and exporter packages in shipped code is
+    // the dynamic import on the enabled branch of `startTracing`.
+    const src = readFileSync(resolve(import.meta.dirname, '../telemetry/tracing.ts'), 'utf8')
+    const staticImports = [...src.matchAll(/^import .*@opentelemetry\/(sdk-node|exporter-trace-otlp-http)/gm)]
+    expect(staticImports, 'the SDK must not be a static import').toEqual([])
+    expect(src, 'and IS loaded on the enabled branch').toMatch(/import\('@opentelemetry\/sdk-node'\)/)
   })
 
   it('⚠️ and says so once at boot — a silent "off" hides a mistyped variable name', async () => {
@@ -163,13 +206,35 @@ describe('#1038 with a collector named, one span per request and the codebase\'s
   it('⚠️ no span carries a tenant, user, page or space identifier (ADR-270 §3.4, applied to traces)', () => {
     const spans = exporter.getFinishedSpans()
     expect(spans.length).toBeGreaterThan(0)
-    const forbidden = /tenant_dev|dev-token|(^|[^a-z])demo($|[^a-z])|demo_space/i
+    // The seeded identifiers this traffic touched, AND any UUID — page and space ids are UUIDs, so a
+    // future `setAttribute('space.id', …)` must trip this without anyone re-reading the ADR.
+    const forbidden = /tenant_dev|dev-token|(^|[^a-z])demo($|[^a-z])|demo_space|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+    // Everything a span can carry text in: name, attributes, status message, and every event's
+    // attributes (`recordException` writes the message and stack there — review found the first
+    // draft looked at the first two only).
     for (const s of spans) {
       expect(s.name, `span name leaks an identifier`).not.toMatch(forbidden)
       for (const [k, v] of Object.entries(s.attributes)) {
         expect(`${k}=${String(v)}`, `span attribute leaks an identifier on ${s.name}`).not.toMatch(forbidden)
       }
+      expect(s.status.message ?? '', `status message leaks an identifier on ${s.name}`).not.toMatch(forbidden)
+      for (const ev of s.events) {
+        for (const [k, v] of Object.entries(ev.attributes ?? {})) {
+          expect(`${k}=${String(v)}`, `event ${ev.name} leaks an identifier on ${s.name}`).not.toMatch(forbidden)
+        }
+      }
     }
+    // The walk is not vacuous: the traffic DID involve identifiers (the tenant, the seeded space),
+    // which is what makes their absence from the spans a measurement.
+    expect(spans.some((s) => s.name === 'GET /spaces')).toBe(true)
+  })
+
+  it('service.name defaults to the product name, lower-cased, plus the component', () => {
+    const spans = exporter.getFinishedSpans()
+    expect(spans.length).toBeGreaterThan(0)
+    const names = new Set(spans.map((s) => String(s.resource.attributes['service.name'])))
+    expect([...names]).toEqual([defaultServiceName()])
+    expect(defaultServiceName()).toMatch(/-server$/)
   })
 
   it('a span records the failure it wrapped, and lets it through unchanged', async () => {
