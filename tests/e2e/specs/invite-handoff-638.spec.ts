@@ -138,36 +138,34 @@ test("#638: the pending list is a column of rows, and its controls line up", asy
   expect(m.scrolls, "three invitations do not need a scrollbar").toBe(false);
 });
 
-// #999: in a describe, not an in-body test.skip — a `{ page }` fixture is resolved by Playwright BEFORE
-// an in-body skip call is reached (the exact #973 trap this session already worked around once), and
-// this test's own `page.goto("/admin/members")` is precisely where it timed out under the 20-spec gate's
-// load. describe-scoped skip is evaluated at collection time, before the fixture is ever requested.
-test.describe(() => {
-  test.skip(true, "#999: isolated — page.goto('/admin/members') timed out under the 20-spec gate's shared load");
-  test("#638: …and twenty invitations scroll inside the box instead of growing the page", async ({ page }) => {
-    test.setTimeout(90_000);
-    await openDemo(page);
-    await page.route("**/api/members/invites", async (route) => {
-      if (route.request().method() !== "GET") return route.fallback();
-      await route.fulfill({
-        status: 200, contentType: "application/json",
-        body: JSON.stringify({ invites: Array.from({ length: 40 }, (_, i) => INVITE(i, `bulk${i}@e.test`)) }),
-      });
+// #891/#999/#926: was isolated from the merge gate (#823/#825 "shared stack gets heavy under a full
+// run" family — a permission-store connection-pool exhaustion under sustained load, not a defect in
+// this test). #926's fix (master 8036a916) landed and was confirmed with ~2050 clean specs showing no
+// recurrence of the symptom; this test itself passed multiple consecutive full #891 gate runs after
+// that fix, with no isolation needed. Unskipped.
+test("#638: …and twenty invitations scroll inside the box instead of growing the page", async ({ page }) => {
+  test.setTimeout(90_000);
+  await openDemo(page);
+  await page.route("**/api/members/invites", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({ invites: Array.from({ length: 40 }, (_, i) => INVITE(i, `bulk${i}@e.test`)) }),
     });
-    await page.goto("/admin/members");
-    await expect(page.getByTestId("invite-list")).toBeVisible({ timeout: 20_000 });
-    await sleep(500);
-
-    const m = await page.evaluate(() => {
-      const box = document.querySelector<HTMLElement>('[data-testid="invite-list"]')!;
-      return {
-        rows: document.querySelectorAll('[data-testid="invite-row"]').length,
-        scrolls: box.scrollHeight > box.clientHeight + 1,
-        boxHeight: Math.round(box.getBoundingClientRect().height),
-      };
-    });
-    expect(m.rows, "the stub filled the list").toBeGreaterThan(20);
-    expect(m.scrolls, "the box scrolls rather than the page growing").toBe(true);
-    expect(m.boxHeight, `the box stops growing (${m.boxHeight}px)`).toBeLessThan(500);
   });
+  await page.goto("/admin/members");
+  await expect(page.getByTestId("invite-list")).toBeVisible({ timeout: 20_000 });
+  await sleep(500);
+
+  const m = await page.evaluate(() => {
+    const box = document.querySelector<HTMLElement>('[data-testid="invite-list"]')!;
+    return {
+      rows: document.querySelectorAll('[data-testid="invite-row"]').length,
+      scrolls: box.scrollHeight > box.clientHeight + 1,
+      boxHeight: Math.round(box.getBoundingClientRect().height),
+    };
+  });
+  expect(m.rows, "the stub filled the list").toBeGreaterThan(20);
+  expect(m.scrolls, "the box scrolls rather than the page growing").toBe(true);
+  expect(m.boxHeight, `the box stops growing (${m.boxHeight}px)`).toBeLessThan(500);
 });
