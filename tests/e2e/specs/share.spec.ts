@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Browser } from "@playwright/test";
-import { openDemo, paneText, enterSplit, enterEdit, createScratchPage, API } from "../helpers";
+import { paneText, enterSplit, enterEdit, createScratchPage, createScratchSpace, API } from "../helpers";
 async function ensureExpanded(page: Page) {
   // Active space follows the open page, so its row is already in the sidebar
   // tree — just wait for it (no space-expand; that would open the switcher).
@@ -53,20 +53,17 @@ async function createLink(page: Page, pageTitle: string, capability: "view" | "e
 // regression. Every wait below is now a condition with its own budget and message, so the run is as
 // fast as the stack allows and a genuine failure names the step instead of expiring anonymously.
 test("anonymous share: create -> open -> co-edit -> read-only -> revoke denied", async ({ browser }: { browser: Browser }) => {
-  // #969: isolated — GREEN solo, RED in the 20-spec gate run, where `createLink`'s
-  // `[data-testid=tree-page]` row for this test's own freshly created scratch page never appears
-  // (`locator.hover` waits out the whole budget). The CORS half of this ticket is fixed below and
-  // holds solo; this half only shows once ~42 tests have created pages in `demo_space` ahead of it,
-  // so the suspect is the sidebar's windowed loading (#921) rather than this spec. Safe as an
-  // in-body skip: this test takes `{ browser }`, not `{ page }`, so no fixture is resolved first.
-  test.skip(true, "#969: tree row for the scratch page never appears in the 20-spec gate run");
   test.slow(); // triples the budget: three contexts + collab propagation is legitimately slow work
   const member = await (await browser.newContext()).newPage();
-  // #969: a scratch page this test owns (see createLink's comment) — not the shared "demo" page, and
-  // freshly created, so it needs no resetDoc.
-  await openDemo(member);
+  // #969: a scratch page in a scratch SPACE this test owns (see createLink's comment) — not the
+  // shared `demo_space`, whose tree accumulates a page per prior spec in the gate run. `createLink`'s
+  // `[data-testid=tree-page]` row lookup was timing out only in the 20-spec gate run, never solo,
+  // because the sidebar's windowed loading (#921) can leave a page created ~42 pages deep unreached.
+  // An isolated space's tree never holds more than this one page, so the row is always the first (and
+  // only) one rendered, regardless of how many other specs ran first.
+  const spaceId = await createScratchSpace(member, `share-969 ${Date.now().toString(36)}`);
   const title = `Share scratch ${Date.now().toString(36)}`;
-  const pageId = await createScratchPage(member, title);
+  const pageId = await createScratchPage(member, title, spaceId);
   await member.goto(`/p/${pageId}`);
   await member.waitForSelector("[data-pane=preview] .cm-content");
   // P3: editor defaults to read-only view; the member edits + reads the source

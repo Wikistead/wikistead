@@ -95,9 +95,9 @@ export async function openDemo(page: Page) {
 // #989: a plain NODE-side fetch (see publishAndWait above for why) — most callers invoke this before
 // `page` has navigated anywhere, which a browser-context fetch cannot survive at all now (CORS refuses
 // an opaque `about:blank` origin, and a relative URL has no base to resolve against either).
-export async function createScratchPage(page: Page, title = "Scratch"): Promise<string> {
+export async function createScratchPage(page: Page, title = "Scratch", spaceId = "demo_space"): Promise<string> {
   void page;
-  const r = await fetch(`${API}/spaces/demo_space/pages`, {
+  const r = await fetch(`${API}/spaces/${spaceId}/pages`, {
     method: "POST",
     headers: { Authorization: "Bearer dev-token", "content-type": "application/json" },
     body: JSON.stringify({ title }),
