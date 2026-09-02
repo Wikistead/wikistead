@@ -13,9 +13,14 @@ import type { Sql } from 'postgres'
 // wired" rather than silently omitting them keeps the gap visible.
 
 export interface DoomedIds {
-  /** spaces NOT on the keep-list — their `space_settings` row is swept */
+  // ⚠️ §1: "for a kept space it keeps the space, its settings, and its share links; it EMPTIES THE
+  // PAGES INSIDE" — a kept space's pages are swept too. `spaceIds` and `pageIds` are therefore NOT
+  // the same "which spaces are doomed" filter applied twice; they answer two different questions.
+  /** spaces NOT on the keep-list — the SPACE ROW (and `space_settings`, its icon key) is swept.
+   * A kept space's own id does not belong here even though its pages do belong in `pageIds` below. */
   spaceIds: readonly string[]
-  /** pages inside those spaces — everything cascading from a page is swept */
+  /** EVERY page reset empties — every space's pages, keep-listed or not. A kept space keeps its row
+   * and settings, never its pages. */
   pageIds: readonly string[]
 }
 

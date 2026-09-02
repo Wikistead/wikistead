@@ -1,9 +1,13 @@
 // ADR-252 §1 / #810: collectResetStorageKeys — every S3 key belonging to spaces/pages a reset is
 // about to empty. Integration (real Postgres): builds a tenant with ONE kept space and ONE doomed
-// space, each carrying an attachment, a revision blob and a space icon, plus a doomed import archive —
-// and asserts the kept space's keys are absent while the doomed space's are all present. The point of
-// this pin is exactly that boundary: a function that returned every key in the tenant would pass any
-// test that only checks presence, never absence.
+// space, each carrying an attachment, a revision blob and a space icon, plus an import archive.
+//
+// ⚠️ §1's own words: "for a kept space it keeps the space, its settings, and its share links; it
+// EMPTIES THE PAGES INSIDE" — a kept space's pages are swept too, only its space row/settings/share
+// links survive. So `kept.page`'s attachment/revision keys belong in the expected set (they ARE
+// swept); only `kept.space`'s icon key and import archive should be ABSENT (its settings survive).
+// A test that excluded the kept space from BOTH id sets would not be testing reset's real shape —
+// it would be testing "an untouched space", a scenario reset never has when a keep-list is given.
 import { describe, it, expect, afterAll } from 'vitest'
 import postgres from 'postgres'
 import { collectResetStorageKeys } from '../tenant-sweep/manifest-keys.js'
@@ -20,7 +24,7 @@ afterAll(async () => {
 })
 
 describe('collectResetStorageKeys (ADR-252 §1, #810)', () => {
-  it('collects the doomed space/page keys and none of the kept space/page keys', async () => {
+  it('collects a kept space\'s PAGE keys (pages are swept regardless) but not its SPACE-level keys (settings survive)', async () => {
     await admin`INSERT INTO tenants (id, slug, plan) VALUES (${TENANT}, 't810mk', 'business')
       ON CONFLICT (slug) DO UPDATE SET plan = EXCLUDED.plan`
 
@@ -50,18 +54,28 @@ describe('collectResetStorageKeys (ADR-252 §1, #810)', () => {
       VALUES (${'import_t810mk_kept'}, ${TENANT}, ${kept.space}, 'user:dev-user', ${kept.space + '/archive-key'})
       ON CONFLICT (id) DO NOTHING`
 
-    const keys = await collectResetStorageKeys(admin, TENANT, { spaceIds: [doomed.space], pageIds: [doomed.page] })
+    // reset's real shape: BOTH pages are emptied (kept.page included in pageIds); only the DOOMED
+    // space's own id is in spaceIds (kept.space's settings/icon/import-archive must survive)
+    const keys = await collectResetStorageKeys(admin, TENANT, {
+      spaceIds: [doomed.space],
+      pageIds: [doomed.page, kept.page],
+    })
 
     expect(keys.sort()).toEqual([
       `${doomed.space}/archive-key`,
       `${doomed.space}/att-key`,
       `${doomed.space}/icon-key`,
       `${doomed.space}/rev-key`,
+      `${kept.space}/att-key`,
+      `${kept.space}/rev-key`,
     ].sort())
-    for (const k of keys) expect(k.startsWith(kept.space), `leaked a kept-space key: ${k}`).toBe(false)
+    // the kept space's SETTINGS-level keys (icon, import archive) must never appear — those are the
+    // ones a kept space's survival actually protects
+    expect(keys).not.toContain(`${kept.space}/icon-key`)
+    expect(keys).not.toContain(`${kept.space}/archive-key`)
   })
 
-  it('returns an empty list for an empty doomed set (no keep-list means nothing to reset here)', async () => {
+  it('returns an empty list for an empty doomed set (nothing to sweep)', async () => {
     const keys = await collectResetStorageKeys(admin, TENANT, { spaceIds: [], pageIds: [] })
     expect(keys).toEqual([])
   })
