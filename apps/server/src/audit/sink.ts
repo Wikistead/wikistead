@@ -49,6 +49,11 @@ export type AuditChangeField =
   // happened. A tenant setting's boolean: it names the tenant's own configuration, so it is on §3's
   // permitted side without a judgement call.
   | 'sso_required'
+  // #1050 / ADR-275 rev3 §2: which UNCONDITIONAL floor (`last_admin` | `login_lockout`) deferred a
+  // SCIM removal — `member.scim_offboarding_deferred` names it, per the ADR's own text. A system-
+  // derived classification of the tenant's own authz state (which guard fired), never anything a
+  // member wrote about themselves, so it sits on §3's permitted side the same way `sso_required` does.
+  | 'pending_scim_removal_reason'
 
 export type AuditChanges = Partial<Record<AuditChangeField, { from: unknown; to: unknown }>>
 
