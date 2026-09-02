@@ -113,4 +113,13 @@ export const SCREEN_VOCABULARY = {
     ns: 'members',
     keys: ['suspend', 'reactivate', 'resetFactors', 'sendInvite'],
   },
+  // #1063, fifth surface of this slice. The ledger's `admin-surface:scim` entry (doc-code-map.mjs)
+  // points at `admin/scim.md`, which does not exist — the real page is `admin/scim-provisioning.md`
+  // (#759 already flagged this dangling ledger path as its own open point, not fixed here).
+  // Two token-lifecycle buttons; the rest of the page's vocabulary (endpoint, tokenName) is form-field
+  // prose rather than an action or a state a reader hunts for on the screen.
+  'admin-surface:scim': {
+    ns: 'adminScim',
+    keys: ['create', 'revoke'],
+  },
 }

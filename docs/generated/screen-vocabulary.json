@@ -104,6 +104,16 @@
         "ja": "名前を変更"
       }
     },
+    "admin-surface:scim": {
+      "create": {
+        "en": "Create token",
+        "ja": "トークンを作成"
+      },
+      "revoke": {
+        "en": "Revoke",
+        "ja": "取り消す"
+      }
+    },
     "admin-surface:spaces": {
       "manage": {
         "en": "Manage",
