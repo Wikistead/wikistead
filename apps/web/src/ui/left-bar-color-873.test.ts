@@ -21,6 +21,13 @@ import { join, relative, resolve } from "node:path";
 const SRC = resolve(import.meta.dirname, "..");
 const KNOWN_KINDS = ["danger", "info"]; // ui/NoticeBand.tsx's NoticeBandKind union — kept in sync manually, asserted below
 
+/** Extract the className a call site passes, when it does — null when the attribute is absent. */
+function customRadiusOrPadding(tag: string): string | null {
+  const m = /\bclassName=(["'])([^"']*)\1/.exec(tag);
+  if (!m) return null;
+  return m[2].split(/\s+/).find((c) => /^(rounded-|px-|py-)/.test(c)) ?? null;
+}
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
@@ -57,6 +64,17 @@ describe("#873 / #979 a notice band names its own kind", () => {
     expect(sites.length, "no <NoticeBand> element found — the walk is measuring nothing").toBeGreaterThan(0);
   });
 
+  // The line above KNOWN_KINDS claims it is "asserted below" — until now nothing did, so a kind added
+  // to NoticeBandKind (ui/NoticeBand.tsx) without a matching KNOWN_KINDS update would silently pass
+  // every call-site check above instead of surfacing the drift.
+  it("KNOWN_KINDS matches NoticeBand.tsx's NoticeBandKind union", () => {
+    const src = readFileSync(join(SRC, "ui/NoticeBand.tsx"), "utf8");
+    const m = /export type NoticeBandKind = ([^;]+);/.exec(src);
+    expect(m, "NoticeBandKind union not found — update this regex if the type moved").not.toBeNull();
+    const declared = m![1].split("|").map((s) => s.trim().replace(/^"|"$/g, "")).sort();
+    expect(declared, "KNOWN_KINDS above is stale against NoticeBand.tsx's actual union").toEqual([...KNOWN_KINDS].sort());
+  });
+
   it.each(sites.map((s) => [s.where, s.tag] as const))(
     "%s declares a known kind",
     (where, tag) => {
@@ -72,5 +90,24 @@ describe("#873 / #979 a notice band names its own kind", () => {
     const bare = '<NoticeBand title="x" testId="y">body</NoticeBand>';
     const m = /\bkind=(["'])(\w+)\1/.exec(bare);
     expect(m, "a tag missing kind= must not match — this is the #873 shape the scan exists to catch").toBeNull();
+  });
+
+  // ADR-268 §5's acceptance: a second call site writing its own radius/padding must go red. NoticeBand
+  // passes `className` straight through with no check of its own (ui/NoticeBand.tsx), so a caller can
+  // silently override the shared rounded-lg/px-3.5/py-3 shape ADR-268 asked every site to share — the
+  // same "unstated override" family #873's kind= check exists for, one prop over.
+  it.each(sites.map((s) => [s.where, s.tag] as const))(
+    "%s does not override the shared radius/padding",
+    (where, tag) => {
+      const bad = customRadiusOrPadding(tag);
+      expect(bad, `${where} passes className="${bad}" — radius/padding is NoticeBand's shared shape (ADR-268 §5), not a per-site choice`).toBeNull();
+    },
+  );
+
+  // ⚠️ break-check: prove the className scan actually rejects a site that overrides the shape, not just
+  // one missing kind=.
+  it("⚠️ break-check: a NoticeBand tag with its own rounded-/px-/py- class is refused, not silently passed", () => {
+    const overridden = '<NoticeBand kind="danger" title="x" testId="y" className="rounded-md">body</NoticeBand>';
+    expect(customRadiusOrPadding(overridden), "a className with rounded-/px-/py- must not pass — this is the ADR-268 §5 shape the scan exists to catch").not.toBeNull();
   });
 });

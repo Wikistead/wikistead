@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, openScratch, enterEdit, sleep } from "../helpers";
+import { openScratch, enterEdit, sleep } from "../helpers";
 import { HAS_LEFT_BAR } from "../left-bar";
 
 // #632 (review rejection): every coloured left strip goes through the shared part, and none of them
@@ -14,12 +14,13 @@ import { HAS_LEFT_BAR } from "../left-bar";
 //   background, not its absolutely-positioned children, so a square strip pokes OUT at the corners.
 //   Invisible in light, plain in dark against the warning yellow.
 //
+// #1042 / #979 (ADR-268 §3, ruling): this used to also walk /admin/auth, /admin/members and
+// /admin/roles — but #979 replaced `wks-left-bar` there with NoticeBand, a tinted panel with no left
+// strip at all, so that walk now finds nothing and the walk-found-something premise assertion is what
+// went red (correctly — the pin was never wrong, the admin screens just stopped having a subject). The
+// editor's callout panel is the only surface left that draws a bar, so this walks that surface alone.
+//
 // So this walks the real DOM, in the dark theme, and names no surface and no class.
-const SCREENS = [
-  { name: "auth", url: "/admin/auth" },
-  { name: "members", url: "/admin/members" },
-  { name: "roles", url: "/admin/roles" },
-];
 
 /** Every element wearing a coloured left bar, however it is drawn, with what it would take to be wrong.
  *
@@ -59,42 +60,10 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => { try { localStorage.setItem("wks.theme", "dark"); } catch { /* private */ } });
 });
 
-test("#632: no coloured left strip is drawn as a border on a rounded box", async ({ page }) => {
+test("#632: no coloured left strip is drawn as a border on a rounded box, and every strip follows the corners of the box it is drawn in", async ({ page }) => {
   test.setTimeout(180_000);
-  await openDemo(page);
-  const found: Record<string, unknown>[] = [];
-  for (const s of SCREENS) {
-    await page.goto(s.url);
-    await sleep(900);
-    found.push(...(await stripsOn(page)).map((f) => ({ ...f, where: s.name })));
-  }
-  expect(found.length, "the walk found strips at all (else nothing below is measured)").toBeGreaterThan(0);
-
-  // the original defect: a border strip cannot follow a corner, so on a rounded box it bends
-  const bent = found.filter((f) => f.kind === "border" && (f.radius as number) > 0);
-  expect(bent, `a coloured left border on a rounded box :: ${JSON.stringify(bent)}`).toEqual([]);
-});
-
-test("#632: every strip follows the corners of the box it is drawn in", async ({ page }) => {
-  test.setTimeout(180_000);
-  await openDemo(page);
-  const escaping: Record<string, unknown>[] = [];
-  for (const s of SCREENS) {
-    await page.goto(s.url);
-    await sleep(900);
-    // a strip on a rounded box must be rounded to match; on a square box there is nothing to follow
-    escaping.push(...(await stripsOn(page))
-      .filter((f) => (f.radius as number) > 0 && (f.stripRadius as number) <= 0)
-      .map((f) => ({ ...f, where: s.name })));
-  }
-  expect(escaping, `a square strip on a rounded box — it pokes out at the corners :: ${JSON.stringify(escaping)}`)
-    .toEqual([]);
-});
-
-test("#632: the same holds for the strips the editor draws", async ({ page }) => {
-  test.setTimeout(180_000);
-  // The editing surface is where the seventh kind of strip lives (a callout is a run of lines, not a
-  // box), and where the previous sweep could not reach — its walk never rendered a macro.
+  // The editing surface is where the strip lives now (a callout is a run of lines, not a box), and
+  // where the earlier admin-screen sweep could never reach — its walk never rendered a macro.
   await openScratch(page, `bar632-${Date.now()}`);
   await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
