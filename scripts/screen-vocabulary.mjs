@@ -104,4 +104,13 @@ export const SCREEN_VOCABULARY = {
     ns: 'billing',
     keys: ['upgradePro', 'manage'],
   },
+  // #1063, fourth surface of this slice. `resetFactors`'s ja value already matched the ja page
+  // exactly ("2 ") — only the en page had drifted, naming "reset a member's
+  // second factors" for a button labelled "Reset two-factor authentication". `suspend` and
+  // `sendInvite` were both discussed in prose on both pages but never set off as the button label
+  // itself; `reactivate` ("Bring back" / ) already matched on both pages untouched.
+  'admin-surface:members': {
+    ns: 'members',
+    keys: ['suspend', 'reactivate', 'resetFactors', 'sendInvite'],
+  },
 }

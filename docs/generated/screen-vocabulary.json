@@ -52,6 +52,24 @@
         "ja": "削除"
       }
     },
+    "admin-surface:members": {
+      "reactivate": {
+        "en": "Bring back",
+        "ja": "再開"
+      },
+      "resetFactors": {
+        "en": "Reset two-factor authentication",
+        "ja": "2 要素認証をリセット"
+      },
+      "sendInvite": {
+        "en": "Send invite",
+        "ja": "招待を送信"
+      },
+      "suspend": {
+        "en": "Suspend",
+        "ja": "停止"
+      }
+    },
     "admin-surface:moderation": {
       "shrinkLabel": {
         "en": "Mass-delete guard",
