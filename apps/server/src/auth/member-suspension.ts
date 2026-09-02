@@ -10,6 +10,7 @@ import { isLastAdmin } from './last-admin.js'
 import { assertClosingIsSafe, assertNotLastExemptAdmin } from './login-methods.js' // #925 / ADR-251 §3.8/§3.8a
 import { destroyMemberSessions } from './session.js'
 import { auditIfEntitled } from '../audit/sink.js'
+import { reconcilePendingScimRemovalsIfRegistered } from './scim-reconcile-seam.js'
 
 // #627 / ADR-213: SUSPENDING A MEMBER — one verb, in CE, for every caller.
 //
@@ -198,7 +199,10 @@ export type ReactivateOutcome = 'ok' | 'notMember' | 'notYours' | 'seatLimit'
  * they do not come back at all, which is why the UI has to SAY so rather than let it be discovered.
  */
 export async function reactivateMember(
-  deps: { db: TenantDb; fga: OpenFgaClient },
+  // #1053: `valkey` is optional and unused by THIS function's own write (reactivating never destroys
+  // a session) — it exists only to forward into the fast-path hook below, whose eventual write is
+  // `suspendMember`'s and DOES need it.
+  deps: { db: TenantDb; fga: OpenFgaClient; valkey?: IORedis },
   tenant: { id: string; plan: string },
   sub: string,
   opts: { allow: readonly SuspensionReason[]; actor: string },
@@ -230,6 +234,10 @@ export async function reactivateMember(
     emit(opts.actor === 'scim'
       ? { type: 'member.added', tenantId: tenant.id, targetSub: sub, role: restoredRole, via: 'provision' }
       : { type: 'member.reactivated', tenantId: tenant.id, actorId: opts.actor, targetSub: sub })
+    // #1053 / ADR-275 rev3 §3 fast-path: restoring a SUSPENDED ADMIN is one of the three trigger
+    // sites — a no-op on CE/self-host (no hook registered) and when nothing is pending in this
+    // tenant alike, so this call is unconditional rather than gated on `opts.actor`.
+    if (restoredRole === 'admin') await reconcilePendingScimRemovalsIfRegistered(deps, tenant)
   }
   return result
 }

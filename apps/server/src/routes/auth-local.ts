@@ -160,7 +160,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       const { acceptLocalInvite } = await import('../auth/invites.js')
       let outcome: Awaited<ReturnType<typeof acceptLocalInvite>>
       try {
-        outcome = await acceptLocalInvite({ db: req.db, fga: app.fga, log: req.log }, req.tenant, token, password, displayName)
+        outcome = await acceptLocalInvite({ db: req.db, fga: app.fga, log: req.log, valkey: app.valkey }, req.tenant, token, password, displayName)
       } catch (e) {
         // A seat-cap refusal is its own answer (402), as it is for every other acceptance path: it is
         // about the tenant's plan, not about whether the link is real.

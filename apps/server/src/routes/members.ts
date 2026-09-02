@@ -24,6 +24,7 @@ import { holdsAConfirmedFactor } from '../auth/factor-policy.js' // #644 / #675:
 // that a normal tenant is one request.
 export const MEMBERS_PAGE_LIMIT = 50
 import { suspendMember, reactivateMember, LastAdminSuspensionError } from '../auth/member-suspension.js' // #627: the shared suspension verb (CE)
+import { reconcilePendingScimRemovalsIfRegistered } from '../auth/scim-reconcile-seam.js' // #1053: fast-path — a promotion is one of the three trigger sites
 import { auditIfEntitled } from '../audit/sink.js'
 import { resolveEntitlements } from '@wikistead/entitlements' // #520: EE gate for the tenant analytics roll-up
 import { emit } from '@wikistead/events'
@@ -333,6 +334,9 @@ export async function membersPlugin(app: FastifyInstance) {
       await auditIfEntitled(tx, req.tenant, { actor: `user:${req.user.sub}`, action: 'member.role_changed', target: `user:${req.params.sub}` })
     })
     emit({ type: 'member.role_changed', tenantId: req.tenant.id, actorId: req.user.sub, targetSub: req.params.sub, role })
+    // #1053 / ADR-275 rev3 §3 fast-path: a promotion TO admin is one of the three trigger sites (a
+    // demotion cannot resolve anything — it only ever narrows who can administer).
+    if (role === 'admin') await reconcilePendingScimRemovalsIfRegistered({ db: req.db, fga: req.server.fga, valkey: req.server.valkey }, req.tenant)
     return { ok: true }
   })
 
@@ -382,7 +386,7 @@ export async function membersPlugin(app: FastifyInstance) {
     // to restore — a tenant whose IdP dropped somebody could otherwise put them back, admin grant and
     // all, from inside the product. A billing freeze is cleared by re-upgrading, not from here.
     const r = await reactivateMember(
-      { db: req.db, fga: app.fga }, req.tenant, req.params.sub,
+      { db: req.db, fga: app.fga, valkey: app.valkey }, req.tenant, req.params.sub,
       { allow: ['admin'], actor: `user:${req.user.sub}` },
     )
     if (r === 'notMember') return reply.code(404).send({ error: 'member not found' })

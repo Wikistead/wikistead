@@ -11,10 +11,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import type { OpenFgaClient } from '@openfga/sdk'
+import type IORedis from 'ioredis'
 import { writeTuples } from '@wikistead/authz'
 import { resolveEntitlements } from '@wikistead/entitlements'
 import { emit } from '@wikistead/events'
 import type { TenantDb } from '../db/index.js'
+import { reconcilePendingScimRemovalsIfRegistered } from './scim-reconcile-seam.js' // #1053: fast-path — an admin-role invite acceptance is one of the three trigger sites
 
 // Placeholder TTL (pre-launch; env-configurable later, like the session TTLs).
 const INVITE_TTL_MS = 7 * 24 * 3600 * 1000
@@ -251,7 +253,9 @@ function reportRefusal(log: InviteLog | undefined, tenantId: string, e: InviteRe
 // ADR-003: the invite flip + member INSERT happen in one tx; FGA is written LAST, so a FGA
 // failure rolls back the accept and the member row (no half member).
 export async function acceptInvite(
-  deps: { db: TenantDb; fga: OpenFgaClient; log?: InviteLog },
+  // #1053: `valkey` forwards into the fast-path hook only (see reactivateMember's own note) — this
+  // function's own writes never touch it.
+  deps: { db: TenantDb; fga: OpenFgaClient; log?: InviteLog; valkey?: IORedis },
   tenant: { id: string; plan: string },
   token: string,
   claims: { sub: string; email?: string | null; name?: string | null },
@@ -273,6 +277,7 @@ export async function acceptInvite(
     if (externalSubViolation(claims.sub)) return false
   }
   let accepted: boolean
+  let acceptedRole: InviteRole | null = null
   try {
     accepted = await deps.db.tx(async (tx) => {
     // Serialize seat decisions for this tenant for the rest of the tx (atomic cap check).
@@ -310,6 +315,7 @@ export async function acceptInvite(
       throw e
     }
     await applyInviteRole(tx, deps.fga, tenant, claims.sub, flipped[0]!, seated)
+    acceptedRole = flipped[0]!.role
     return true
     })
   } catch (e) {
@@ -317,6 +323,10 @@ export async function acceptInvite(
     reportRefusal(deps.log, tenant.id, e)
     return false
   }
+  // #1053 / ADR-275 rev3 §3 fast-path: an admin-role invite accepted is one of the three trigger
+  // sites (SCIM cannot itself grant admin — provisionScimUser hardcodes role:'member' — so this,
+  // acceptLocalInvite's own copy, and `pnpm tenant:local-admin`'s invite are the only ways in).
+  if (accepted && acceptedRole === 'admin') await reconcilePendingScimRemovalsIfRegistered(deps, tenant)
   return accepted
 }
 
@@ -334,7 +344,7 @@ export async function acceptInvite(
 // sentence to whoever is holding the link, and telling them apart would say something about the
 // tenant to someone who is not in it.
 export async function acceptLocalInvite(
-  deps: { db: TenantDb; fga: OpenFgaClient; log?: InviteLog },
+  deps: { db: TenantDb; fga: OpenFgaClient; log?: InviteLog; valkey?: IORedis },
   tenant: { id: string; plan: string },
   token: string,
   password: string,
@@ -373,9 +383,10 @@ export async function acceptLocalInvite(
   // business waiting for it (the share-link lesson).
   const passwordHash = await hashPassword(password)
   const sub = `wlocal_${randomUUID()}`
+  let acceptedRole: InviteRole | null = null
 
   try {
-    return await deps.db.tx(async (tx) => {
+    const result = await deps.db.tx(async (tx) => {
     await lockSeats(tx, tenant.id)
     const flipped = await tx<{ id: string; role: InviteRole; role_id: string | null; invited_by: string; email: string | null }[]>`
       UPDATE invites
@@ -420,6 +431,7 @@ export async function acceptLocalInvite(
     await tx`INSERT INTO local_credentials (tenant_id, member_sub, identifier, password_hash)
              VALUES (${tenant.id}, ${sub}, ${identifier}, ${passwordHash})`
     await applyInviteRole(tx, deps.fga, tenant, sub, invite, 'created')
+    acceptedRole = invite.role
     // #655 review reject: the caller needs to know WHICH door this was. An operator break-glass
     // invite is the one #616 exempted from the SSO stance, and ADR-219 §4 says the same exemption
     // crosses the second-factor requirement — otherwise the way back in when everything else is shut
@@ -427,6 +439,11 @@ export async function acceptLocalInvite(
     // this is one field on the way out rather than a second look at a single-use token.
     return { ok: true as const, sub, operatorIssued: operatorRow?.operator_issued === true }
     })
+    // #1053 / ADR-275 rev3 §3 fast-path: acceptInvite's own copy of this call, for the local-invite
+    // door (a break-glass operator invite included — #616's exemption is about the SSO stance, not
+    // about whether this door can seat an admin).
+    if (acceptedRole === 'admin') await reconcilePendingScimRemovalsIfRegistered(deps, tenant)
+    return result
   } catch (e) {
     if (!(e instanceof InviteRefused)) throw e
     reportRefusal(deps.log, tenant.id, e)

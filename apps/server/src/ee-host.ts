@@ -62,7 +62,7 @@ export { verifyApiKey } from './api-key-auth.js'
 // script uses appendOperatorEntry) — EE consumes it through the seam like the rest of the audit surface.
 export { coerceGroups } from './auth/oidc.js'
 export { encryptSecret, decryptSecret } from './auth/secret-crypto.js'
-export { SESSION_COOKIE, establishMemberSession, sessionCookieOptions, destroyMemberSessions, createSession } from './auth/session.js' // #477: SCIM deactivation drops the member's sessions too
+export { SESSION_COOKIE, establishMemberSession, sessionCookieOptions, destroyMemberSessions, createSession, readSession } from './auth/session.js' // #477: SCIM deactivation drops the member's sessions too; #1053: the sweep's own valkey pin reads a session back rather than reaching into the internal key format
 export { safeReturnTo } from './auth/return-to.js'
 export { appendOperatorEntry, OPERATOR_CHAIN_LOCK, type OperatorAction } from './audit/operator-ledger.js' // #688: transparency (EE) projects this CE ledger
 
@@ -78,6 +78,20 @@ export { NoopEmailDriver } from './email/index.js'
 // SAME queue every other transactional class uses, rather than a second send path.
 export { enqueueEmailOutbox } from './email/outbox.js'
 export { SCIM_OFFBOARDING_DEFERRED_CLASS } from './email/scim-offboarding-builder.js'
+// #1053 / ADR-275 rev3 §3: the fast-path hook seam (registration point) and the tenant registry the
+// sweep needs to turn a bare `tenant_id` (an admin-connection cross-tenant scan cannot see anything
+// else) into the full `Tenant` `acquireTenantDb` requires.
+export { registerScimReconcileHook } from './auth/scim-reconcile-seam.js'
+export type { ScimReconcileHook } from './auth/scim-reconcile-seam.js'
+export { registry } from './db/index.js'
+// #1053 / ADR-275 rev3 §3 (B3/B7 corrected the same way #1036/#1037 corrected ADR-270's premise):
+// the ADR's own text analogises this endpoint's auth to `operator/app.ts`, but that console is the
+// Cloud-only break-glass plane (own header comment: "Cloud-only deployment... CE/self-host keeps the
+// CLI") and reads over a READ-ONLY connection — wrong on both counts for a write-capable, EE-general
+// endpoint a self-hosted deployment's own cron must also be able to call. `bearerMatches` is the
+// shared-secret style `metrics.ts` already uses for exactly this shape (a second listener, off the
+// ingress, gated by an env token) — reused rather than re-implemented.
+export { bearerMatches } from './metrics.js'
 // #637 / ADR-216 §2: the EE composition root declares the same request-path rule as the CE one.
 export { requireAuthzScope } from '@wikistead/authz'
 // #637 / ADR-216 §7: the EE composition root registers what a restriction MEANS; CE owns the refusal.
