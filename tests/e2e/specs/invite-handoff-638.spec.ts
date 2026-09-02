@@ -10,88 +10,78 @@ import { openDemo, sleep, INVITE_EMAIL_LABEL } from "../helpers";
 //
 // Driven through the screen rather than the API, because the ruling is about reach: the act existing on
 // the server is not the same as an admin being able to perform it from where they are looking.
-// #891/#937: isolated from the merge gate. NOT for the reason first written here — that theory (an
-// onboarding popover overlapping the row's dialog) did not reproduce: standalone x7 and once in a
-// full 20-spec gate run, this test passed clean. A second full-gate run then failed it at a DIFFERENT
-// point (members-filter never appearing after /admin/members, before any invite work starts) — the
-// #823/#825 "shared stack gets heavy under a full run" family, same as #969/#972/#973, not a defect
-// this test or the popover theory can fix. Re-isolated under the correct reason rather than left
-// claiming a root cause that was not real.
 //
-// The skip is lifted to describe scope (the project design notes's own note on this file): this test requests `{
-// page }`, and Playwright resolves that fixture before an in-body `test.skip` ever runs — a slow
-// enough run can still time out fixture setup and fail the gate, with the isolation counter none the
-// wiser. Evaluated at collection time here, before any fixture is requested.
-test.describe(() => {
-  test.skip(true, "#937: isolated — #823/#825 family (shared stack under gate load), not the popover theory this ticket started with");
+// #891/#937/#926: was isolated from the merge gate (#823/#825 "shared stack gets heavy under a full
+// run" family — a permission-store connection-pool exhaustion under sustained load, not a defect in
+// this test). #926's fix (master 8036a916) landed and was confirmed with ~2050 clean specs showing no
+// recurrence of the symptom; this test itself passed 4 consecutive full #891 gate runs after that fix,
+// with no isolation needed. Unskipped.
+test("#638: a pending invitation can be handed over again from its own row", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openDemo(page);
+  await page.goto("/admin/members");
+  await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 20_000 });
 
-  test("#638: a pending invitation can be handed over again from its own row", async ({ page }) => {
-    test.setTimeout(120_000);
-    await openDemo(page);
-    await page.goto("/admin/members");
-    await expect(page.getByTestId("members-filter")).toBeVisible({ timeout: 20_000 });
+  // an invitation to work with, created the way an admin creates one
+  const addr = `handoff638-${Date.now().toString(36)}@e2e.test`;
+  await page.getByLabel(INVITE_EMAIL_LABEL).fill(addr);
+  await page.getByRole("button", { name: /send invite|招待を送/i }).first().click();
+  // #638 slice 2: the link arrives in a modal now, and it has to be dismissed before the list behind it
+  // can be used — which is the point of a modal for a secret shown once.
+  const link = page.getByTestId("invite-link-value");
+  await expect(link).toBeVisible({ timeout: 20_000 });
+  const before = (await link.textContent())!.trim();
+  expect(before, "the create flow produced a link").toMatch(/\/invite\?token=/);
+  await expect(page.getByTestId("invite-link-copy"), "…and it can be copied").toBeVisible();
+  await page.getByTestId("secret-dialog-done").click();
+  await expect(link).toBeHidden({ timeout: 10_000 });
 
-    // an invitation to work with, created the way an admin creates one
-    const addr = `handoff638-${Date.now().toString(36)}@e2e.test`;
-    await page.getByLabel(INVITE_EMAIL_LABEL).fill(addr);
-    await page.getByRole("button", { name: /send invite|招待を送/i }).first().click();
-    // #638 slice 2: the link arrives in a modal now, and it has to be dismissed before the list behind it
-    // can be used — which is the point of a modal for a secret shown once.
-    const link = page.getByTestId("invite-link-value");
-    await expect(link).toBeVisible({ timeout: 20_000 });
-    const before = (await link.textContent())!.trim();
-    expect(before, "the create flow produced a link").toMatch(/\/invite\?token=/);
-    await expect(page.getByTestId("invite-link-copy"), "…and it can be copied").toBeVisible();
-    await page.getByTestId("secret-dialog-done").click();
-    await expect(link).toBeHidden({ timeout: 10_000 });
+  const row = page.locator('[data-testid="invite-row"]').filter({ hasText: addr });
+  await expect(row, "the invitation is listed as pending").toBeVisible({ timeout: 20_000 });
 
-    const row = page.locator('[data-testid="invite-row"]').filter({ hasText: addr });
-    await expect(row, "the invitation is listed as pending").toBeVisible({ timeout: 20_000 });
+  // #638 the hand-off is a dialog opened from the row, and OPENING IT COSTS NOTHING. Two buttons
+  // used to sit here — "new link" and "resend" — calling the same endpoint, so a reader who pressed the
+  // one that sounded harmless invalidated the link its recipient was already holding.
+  await expect(row.getByTestId("invite-reissue"), "the two-button row is gone").toHaveCount(0);
+  await expect(row.getByTestId("invite-resend")).toHaveCount(0);
+  //
+  // Measured at the NETWORK, not by looking for the link. A first version asserted the link was hidden
+  // right after the dialog opened, and a build that minted ON OPEN still passed it — the request had not
+  // come back yet, so "not there" and "not asked for" looked identical. Counting calls cannot be early.
+  const minted: string[] = [];
+  page.on("request", (r) => { if (/\/invites\/[^/]+\/reissue/.test(r.url())) minted.push(r.url()); });
 
-    // #638 the hand-off is a dialog opened from the row, and OPENING IT COSTS NOTHING. Two buttons
-    // used to sit here — "new link" and "resend" — calling the same endpoint, so a reader who pressed the
-    // one that sounded harmless invalidated the link its recipient was already holding.
-    await expect(row.getByTestId("invite-reissue"), "the two-button row is gone").toHaveCount(0);
-    await expect(row.getByTestId("invite-resend")).toHaveCount(0);
-    //
-    // Measured at the NETWORK, not by looking for the link. A first version asserted the link was hidden
-    // right after the dialog opened, and a build that minted ON OPEN still passed it — the request had not
-    // come back yet, so "not there" and "not asked for" looked identical. Counting calls cannot be early.
-    const minted: string[] = [];
-    page.on("request", (r) => { if (/\/invites\/[^/]+\/reissue/.test(r.url())) minted.push(r.url()); });
+  await row.getByTestId("invite-link-open").click();
+  await expect(page.getByTestId("invite-link-dialog"), "the dialog opens").toBeVisible({ timeout: 10_000 });
+  await sleep(1200); // long enough for a mint-on-open to have travelled
+  expect(minted.length, `opening it issued a link :: ${JSON.stringify(minted)}`).toBe(0);
+  await expect(link, "…and there is nothing to copy yet").toBeHidden();
+  const warning = (await page.getByTestId("invite-link-warn").textContent()) ?? "";
+  expect(warning, `it says what issuing will cost: ${warning.slice(0, 200)}`)
+    .toMatch(/stops the previous one|使えなくなります/);
 
-    await row.getByTestId("invite-link-open").click();
-    await expect(page.getByTestId("invite-link-dialog"), "the dialog opens").toBeVisible({ timeout: 10_000 });
-    await sleep(1200); // long enough for a mint-on-open to have travelled
-    expect(minted.length, `opening it issued a link :: ${JSON.stringify(minted)}`).toBe(0);
-    await expect(link, "…and there is nothing to copy yet").toBeHidden();
-    const warning = (await page.getByTestId("invite-link-warn").textContent()) ?? "";
-    expect(warning, `it says what issuing will cost: ${warning.slice(0, 200)}`)
-      .toMatch(/stops the previous one|使えなくなります/);
+  // …and the invitation the recipient holds is still the one from before
+  await page.getByTestId("secret-dialog-done").click();
+  await sleep(400);
+  await row.getByTestId("invite-link-open").click();
+  await expect(page.getByTestId("invite-link-mint"), "the deliberate second press").toBeVisible();
+  await page.getByTestId("invite-link-mint").click();
 
-    // …and the invitation the recipient holds is still the one from before
-    await page.getByTestId("secret-dialog-done").click();
-    await sleep(400);
-    await row.getByTestId("invite-link-open").click();
-    await expect(page.getByTestId("invite-link-mint"), "the deliberate second press").toBeVisible();
-    await page.getByTestId("invite-link-mint").click();
+  await expect(link, "the new link arrives in the same modal").toBeVisible({ timeout: 20_000 });
+  expect(minted.length, "…and exactly one deliberate press produced it").toBe(1);
+  const after = (await link.textContent())!.trim();
+  expect(after, "a usable link, not a confirmation message").toMatch(/\/invite\?token=/);
+  expect(after, "and it is a DIFFERENT link — the old one has been replaced").not.toBe(before);
+  await page.getByTestId("secret-dialog-done").click();
 
-    await expect(link, "the new link arrives in the same modal").toBeVisible({ timeout: 20_000 });
-    expect(minted.length, "…and exactly one deliberate press produced it").toBe(1);
-    const after = (await link.textContent())!.trim();
-    expect(after, "a usable link, not a confirmation message").toMatch(/\/invite\?token=/);
-    expect(after, "and it is a DIFFERENT link — the old one has been replaced").not.toBe(before);
-    await page.getByTestId("secret-dialog-done").click();
+  // ONE invitation still — a second row is how #606 put one person on two seats
+  await expect(page.locator('[data-testid="invite-row"]').filter({ hasText: addr }), "still one invitation")
+    .toHaveCount(1);
 
-    // ONE invitation still — a second row is how #606 put one person on two seats
-    await expect(page.locator('[data-testid="invite-row"]').filter({ hasText: addr }), "still one invitation")
-      .toHaveCount(1);
-
-    // clean up: the invitation is this spec's, and leaving it pending would drown the next walk of this list
-    await row.getByTestId("invite-revoke").click();
-    await page.getByTestId("members-confirm").click();
-    await sleep(500);
-  });
+  // clean up: the invitation is this spec's, and leaving it pending would drown the next walk of this list
+  await row.getByTestId("invite-revoke").click();
+  await page.getByTestId("members-confirm").click();
+  await sleep(500);
 });
 
 // #638 ①③④⑤⑫ (slice 2): the same screen, measured for shape rather than for reach.
