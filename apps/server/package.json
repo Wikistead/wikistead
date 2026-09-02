@@ -35,6 +35,7 @@
     "tenant:saml-disable": "tsx --env-file=../../.env src/scripts/saml-disable.ts",
     "tenant:login-methods": "tsx --env-file=../../.env src/scripts/login-methods.ts",
     "tenant:local-admin": "tsx --env-file=../../.env src/scripts/local-admin.ts",
+    "tenant:reset": "tsx --env-file=../../.env src/scripts/tenant-reset.ts",
     "orphan:sweep": "tsx --env-file=../../.env src/scripts/orphan-claim-sweep.ts",
     "revisions:gc": "tsx --env-file=../../.env src/scripts/revisions-gc.ts",
     "revisions:backfill": "tsx --env-file=../../.env src/scripts/revisions-backfill.ts",
