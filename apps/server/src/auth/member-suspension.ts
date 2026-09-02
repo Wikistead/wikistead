@@ -133,7 +133,12 @@ export async function suspendMember(
     if (m.role === 'admin' && (await isLastAdmin(tx, sub))) throw new LastAdminSuspensionError()
 
     const prevGroups = m.groups ?? []
+    // ADR-275 §1 (#1049): a deferred SCIM removal (`pending_scim_removal_*`) is cleared by WHATEVER
+    // deactivates the member, in the same statement — the intent is fulfilled by this path, and the
+    // CHECK constraint (migration 134) would otherwise refuse the write. Every `deactivated_at = now()`
+    // writer must do this; a discovery pin (scim-pending-columns-1049) walks the tree for them.
     await tx`UPDATE members SET deactivated_at = now(), deactivation_reason = ${opts.reason},
+             pending_scim_removal_at = NULL, pending_scim_removal_reason = NULL,
              groups = ${deps.db.sql.array([])}, updated_at = now() WHERE sub = ${sub}`
     // #475: the keys go with the suspension. `verifyApiKey` reads only `revoked_at` — not
     // `deactivated_at`, not membership — so an un-revoked key kept authenticating a suspended sub.

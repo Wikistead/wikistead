@@ -32,7 +32,12 @@ async function freezeSeatOverage(sql: postgres.Sql, tenantId: string, newPlan: s
     // reason='downgrade_freeze' (#134): a frozen member STAYS billable (still counted by
     // billableMemberCount), distinguishing it from a SCIM deprovision (reason='scim') which frees
     // the seat. Restored on re-upgrade.
-    await sql`UPDATE members SET deactivated_at = now(), deactivation_reason = 'downgrade_freeze' WHERE id = ${m.id} AND deactivated_at IS NULL`
+    // ADR-275 §1 (#1049): clear a deferred SCIM removal in the same statement — the freeze fulfils
+    // what the push wanted, and migration 134's CHECK refuses a row that is both pending and
+    // deactivated (review A4 residual: this second writer would otherwise fail the billing batch).
+    await sql`UPDATE members SET deactivated_at = now(), deactivation_reason = 'downgrade_freeze',
+              pending_scim_removal_at = NULL, pending_scim_removal_reason = NULL
+              WHERE id = ${m.id} AND deactivated_at IS NULL`
   }
   return toFreeze.length
 }
