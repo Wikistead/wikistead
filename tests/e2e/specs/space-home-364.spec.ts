@@ -145,11 +145,6 @@ test("#364 a suffix-baked stored title never doubles in the H1 (band reads space
 // renaming it here would rename the wrong thing).
 for (const capability of ["view", "edit"] as const) {
   test(`#364 a ${capability} guest sees the home page labelled by its space`, async ({ browser }) => {
-    // Only the EDIT variant is isolated — one red, one ticket; the view variant stays measured.
-    if (capability === "edit") test.skip(true, "#1033: isolated — 60s timeout late in the #891 gate's 20-spec run; green standalone (2026-09-01)");
-    // #1041: the view variant went the same way in a later run the same night (green standalone,
-    // 3.9s) — its own ticket, paired with #1033, so the two are lifted together.
-    if (capability === "view") test.skip(true, "#1041: isolated — 60s timeout in the #891 gate's 20-spec run; green standalone (2026-09-01)");
     const page = await (await browser.newContext()).newPage();
     await page.goto("/p/demo");
     await page.waitForSelector("[data-pane=preview] .cm-content");
