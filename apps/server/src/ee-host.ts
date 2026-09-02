@@ -70,6 +70,10 @@ export { appendOperatorEntry, OPERATOR_CHAIN_LOCK, type OperatorAction } from '.
 // carrying its own copy, so there is one meaning of "suspended" for the console and the directory alike.
 export { suspendMember, reactivateMember, isScimSuspension, grantsShouldBeRebuilt, LastAdminSuspensionError } from './auth/member-suspension.js'
 export type { SuspensionReason, SuspendOutcome, ReactivateOutcome } from './auth/member-suspension.js'
+// #1050 / ADR-275 rev3 §2: SCIM's deferral decision (defer only when the tenant has somewhere to send
+// §4's out-of-band notice) needs to ask "is THIS tenant's resolved driver the no-op one" — the CE class
+// itself, not a duplicated `instanceof`-unfriendly copy.
+export { NoopEmailDriver } from './email/index.js'
 // #637 / ADR-216 §2: the EE composition root declares the same request-path rule as the CE one.
 export { requireAuthzScope } from '@wikistead/authz'
 // #637 / ADR-216 §7: the EE composition root registers what a restriction MEANS; CE owns the refusal.
