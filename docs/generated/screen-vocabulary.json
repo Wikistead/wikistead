@@ -1,5 +1,15 @@
 {
   "surfaces": {
+    "admin-surface:audit": {
+      "export": {
+        "en": "Export JSONL",
+        "ja": "JSONL エクスポート"
+      },
+      "verify": {
+        "en": "Verify chain",
+        "ja": "チェーンを検証"
+      }
+    },
     "admin-surface:billing": {
       "manage": {
         "en": "Manage billing",

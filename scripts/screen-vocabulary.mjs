@@ -122,4 +122,10 @@ export const SCREEN_VOCABULARY = {
     ns: 'adminScim',
     keys: ['create', 'revoke'],
   },
+  // #1063, sixth surface of this slice. Both pages already named the mechanism ("hash chain" /
+  // ) but not the two console actions that act on it.
+  'admin-surface:audit': {
+    ns: 'adminAudit',
+    keys: ['verify', 'export'],
+  },
 }
