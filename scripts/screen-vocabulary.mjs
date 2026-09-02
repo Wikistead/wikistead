@@ -83,4 +83,17 @@ export const SCREEN_VOCABULARY = {
     ns: 'adminPublic',
     keys: ['toggleTitle'],
   },
+  // #1063, second surface of this slice. Moderation was chosen because measuring it (not just
+  // reading it) found the drift #741's whole mechanism exists to catch: the English page said
+  // "Mass-delete detection" for the button labelled "Mass-delete guard", and the Japanese page said
+  // (detection) and (banned word) for a screen that says
+  // (guard) and — both pages fixed in the same change, not just armed against what they
+  // already said. `off` is left OUT of this vocabulary (not armed-then-excused): it names the
+  // placeholder shown inside an empty input, not a label or state a reader hunts for on the screen
+  // — the same judgement call `onHint`/`offHint` got on the public surface, for being hint prose
+  // rather than an action or a state.
+  'admin-surface:moderation': {
+    ns: 'adminModeration',
+    keys: ['shrinkLabel', 'wordsLabel'],
+  },
 }
