@@ -31,10 +31,6 @@ async function publishPage(pageId: string): Promise<void> {
 }
 
 test("#448: an EDIT-link guest publishes with :wq and exits with :q", async ({ browser }) => {
-  // #1040: isolated — `guest.goto(shareUrl)` misses its 60s load wait under the #891 gate's 20-spec
-  // run; green (14.1s) when this spec runs by itself, and green in three gate runs before the one
-  // that caught it. Same family as #973 (this file's :w case), a different test.
-  test.skip(true, "#1040: isolated — the share URL misses its load wait under the #891 gate's 20-spec run");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPage("guest vim ex page");
@@ -87,9 +83,6 @@ test("#448: an EDIT-link guest publishes with :wq and exits with :q", async ({ b
 
 // #911: on the guest edit surface too, :w must publish and STAY in the editor (only :wq exits).
 test("#911: a GUEST edit-link guest's :w publishes and stays in the editor", async ({ browser }) => {
-  // #891/#973: isolated from the merge gate — timed out waiting for the guest edit surface's
-  // initial paint under the full 20-spec gate run (not seen standalone). Remove once #973 lands.
-  test.skip(true, "#973: isolated — guest edit surface's initial paint times out under the gate's load");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPage("guest vim w page");
