@@ -161,10 +161,14 @@ describe('#890 assertDemoFixtureIntact actually fails closed on an unreadable st
   })
 
   it('still throws on a genuine deletion (an unreadable-only fix must not swallow this too)', async () => {
-    let call = 0
-    const fetchImpl = (async () => {
-      call += 1
-      const tuples = call === 1 ? [] : [{ key: {} }]
+    // #1022: coreFixtureIntegrity now asks a store-existence GET (no `/read` suffix) before the
+    // twelve reads — discriminate on that, not on call order, or the extra call shifts every
+    // subsequent count-based branch by one and this test starts measuring the wrong anchor.
+    let readCall = 0
+    const fetchImpl = (async (url: string) => {
+      if (!String(url).includes('/read')) return { ok: true, status: 200, text: async () => '' }
+      readCall += 1
+      const tuples = readCall === 1 ? [] : [{ key: {} }]
       return { ok: true, status: 200, json: async () => ({ tuples }), text: async () => '' }
     }) as unknown as typeof fetch
     const assertDemoFixtureIntact = await loadAssertReading(fetchImpl)

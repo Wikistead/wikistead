@@ -173,6 +173,29 @@ export interface FixtureIntegrity {
 export async function coreFixtureIntegrity(): Promise<FixtureIntegrity> {
   const { apiUrl, storeId } = fgaEnv();
   if (!storeId) return { missing: [], unreadable: [] };
+  // #1022: a store id that no longer EXISTS still answers `POST .../read` with 200 and an empty
+  // `tuples` array — the exact shape `classifyAnchorRead` reads as "the tuple is gone" (measured:
+  // `GET /stores/<dead>` → 404, `POST /stores/<dead>/read` → 200 `{"tuples":[]}`). This process
+  // pinned `storeId` at startup; an un-offset `teardown:e2e` from a neighbouring checkout tearing
+  // down the SHARED default stack mid-run makes every one of the twelve reads below answer that way
+  // at once, and #890's three-valued classification — built for "the store could not answer" — has
+  // no branch for "the store answered, but it is not the store this run means." Asked once, ahead of
+  // the twelve reads, so a confirmed-dead store refuses to blame any of them.
+  let storeGone = false;
+  try {
+    storeGone = (await fetch(`${apiUrl}/stores/${storeId}`)).status === 404;
+  } catch {
+    // Could not even ask — left to the per-anchor loop below, whose own network-failure branch
+    // (`res === null`) already reports `unreadable` without singling this out as "gone".
+  }
+  if (storeGone) {
+    return {
+      missing: [],
+      unreadable: CORE_FGA_TUPLES.map(
+        (t) => `${t.user}#${t.relation}@${t.object}: store ${storeId} does not exist (404) — a neighbour's un-offset teardown likely tore it down mid-run`,
+      ),
+    };
+  }
   const missing: string[] = [];
   const unreadable: string[] = [];
   for (const t of CORE_FGA_TUPLES) {
