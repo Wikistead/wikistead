@@ -116,7 +116,8 @@ removes the calling member's own link to that connection, re-authenticated (pass
 code, or a passkey — the same proof `/auth/link-callback` requires to add one). Refused `409
 last_way_in` when this would leave the member with no way to sign back in: the check excludes the LINK
 being removed but not the connection's ability to mint this member's sub again on a future sign-in
-(ADR-259 §3.9's mint-derived entrance), since unlinking does not sever that. Unlike the admin's
+(the connection itself can still hand this member back the same identity), since unlinking does not
+sever that. Unlike the admin's
 connection-wide delete (`DELETE /admin/connections/{id}`), this touches one member's one link.
 
 `GET /me/settings` (`/me/*` account-screen plumbing, not part of the OpenAPI-covered surface) carries a
