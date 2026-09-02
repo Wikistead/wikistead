@@ -18,7 +18,22 @@ import type { DoomedIds } from './manifest-keys.js'
 // search/storage's deletes are no-ops on an already-cleared object) and each already checks the
 // manifest/tenant/operation consistency itself. This function's only job is to SKIP a step
 // `tenant_sweep_progress` already marks done, so re-running after a crash does not redo real work —
-// not to make a single step safer to repeat, which it already is.
+// not to make a single step repeated safer, which it already is.
+//
+// ⚠️ database MUST run first — review c-af763a4 found the original version of this comment
+// overclaimed "the order between the four steps never matters" from the fact that fga/search/storage
+// each read their OWN targets from the manifest (a fixed, pre-computed list — never affected by what
+// order they run in relative to each other). That is true for THOSE three, but not for database-first
+// relative to the other three: manifest-keys.ts's storage-key collection and manifest-fga.ts's object
+// collection both read LIVE rows (attachments.s3_key, the FGA object ids implied by which pages/spaces
+// still exist) — but they run once, at manifest-write time, BEFORE any of these four steps. If the
+// database step ran AFTER fga/search/storage instead of before, a crash between them would not corrupt
+// data (each step is still independently correct against the manifest it already has), but a crash
+// mid-way would still leave whatever fga/search/storage already cleared without the database rows that
+// justified clearing them removed yet — recoverable, not silent data loss, but the wrong order to
+// prefer. `database_done` first, in `tenant_sweep_progress`'s own column order, is deliberate: it is
+// the store every other step's manifest was built by reading, so it goes first when nothing is
+// resuming and nothing here reorders it.
 //
 // ⚠️ Deliberately never deletes the manifest, unlike ADR-252's "the manifest is deleted when every
 // store has been verified" — because a fifth store (sessions) is proposed but not built (§6b), so

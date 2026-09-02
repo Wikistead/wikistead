@@ -79,4 +79,68 @@ describe('resetTenant (ADR-252 §1, #810)', () => {
       SELECT database_done, fga_done, search_done, storage_done FROM tenant_sweep_progress WHERE manifest_id = ${result.manifestId}`
     expect(progress).toEqual({ database_done: true, fga_done: true, search_done: true, storage_done: true })
   })
+
+  // review c-af763a4 (D2/D3): the original commit shipped with ZERO test coverage of the
+  // --keep argument through this entry point — a mutation deleting the wiring entirely left every
+  // test in this file and tenant-sweep-run-sweep-810.test.ts green. These two tests close that gap.
+  describe('--keep validation (D2/D3)', () => {
+    const kept = { space: 'space_t810cl_kept', page: 'page_t810cl_kept' }
+    const doomed2 = { space: 'space_t810cl_doomed2', page: 'page_t810cl_doomed2' }
+
+    it('a valid keep-list protects the named space\'s row while its page is still swept (corrected §1 semantics)', async () => {
+      await admin`INSERT INTO tenants (id, slug, plan, isolation) VALUES (${TENANT}, ${SLUG}, 'business', 'logical')
+        ON CONFLICT (slug) DO UPDATE SET isolation = 'logical'`
+      for (const s of [kept, doomed2]) {
+        await admin`INSERT INTO spaces (id, tenant_id, name) VALUES (${s.space}, ${TENANT}, ${s.space}) ON CONFLICT (id) DO NOTHING`
+        await admin`INSERT INTO pages (id, tenant_id, space_id, title, ydoc) VALUES (${s.page}, ${TENANT}, ${s.space}, 't', ${Buffer.from([])}) ON CONFLICT (id) DO NOTHING`
+      }
+
+      const result = await resetTenant(admin, { slug: SLUG, confirm: SLUG, keepSlugsOrIds: [kept.space], operator: 'test' })
+      expect(result.keptSpaceCount).toBe(1)
+
+      const remainingSpaces = await admin<{ id: string }[]>`SELECT id FROM spaces WHERE tenant_id = ${TENANT}`
+      expect(remainingSpaces.map((r) => r.id)).toEqual([kept.space])
+      const remainingPages = await admin<{ id: string }[]>`SELECT id FROM pages WHERE tenant_id = ${TENANT}`
+      expect(remainingPages, "the kept space's own page is still swept — only its row survives").toEqual([])
+    })
+
+    it('⚠️ break-check / D2: an invalid --keep id is refused BEFORE anything is written, not silently treated as protecting nothing', async () => {
+      await admin`INSERT INTO tenants (id, slug, plan, isolation) VALUES (${TENANT}, ${SLUG}, 'business', 'logical')
+        ON CONFLICT (slug) DO UPDATE SET isolation = 'logical'`
+      const real = { space: 'space_t810cl_realkeep', page: 'page_t810cl_realkeep' }
+      await admin`INSERT INTO spaces (id, tenant_id, name) VALUES (${real.space}, ${TENANT}, ${real.space}) ON CONFLICT (id) DO NOTHING`
+      await admin`INSERT INTO pages (id, tenant_id, space_id, title, ydoc) VALUES (${real.page}, ${TENANT}, ${real.space}, 't', ${Buffer.from([])}) ON CONFLICT (id) DO NOTHING`
+
+      // a one-character typo on the real space id — the exact shape review c-af763a4
+      // reproduced live, which without this check would have swept `real.space` anyway while
+      // reporting "1 space(s) kept"
+      const typo = real.space.slice(0, -1) + 'X'
+      await expect(resetTenant(admin, { slug: SLUG, confirm: SLUG, keepSlugsOrIds: [typo], operator: 'test' }))
+        .rejects.toMatchObject({ code: 'invalid_keep_id' })
+
+      const stillThere = await admin<{ id: string }[]>`SELECT id FROM spaces WHERE id = ${real.space}`
+      expect(stillThere, 'refused before touching anything — the real space (which the typo\'d id was meant to protect) is untouched').toHaveLength(1)
+    })
+  })
+
+  // review c-af763a4 (D1): a crash between the database step and the other three would
+  // otherwise let a second invocation compute an empty doomed set (the rows are already gone) and
+  // report false success while orphaning the first manifest's storage/FGA cleanup.
+  it('⚠️ D1: refuses to start a second sweep while a prior one for this tenant is unfinished', async () => {
+    await admin`INSERT INTO tenants (id, slug, plan, isolation) VALUES (${TENANT}, ${SLUG}, 'business', 'logical')
+      ON CONFLICT (slug) DO UPDATE SET isolation = 'logical'`
+    const before = await admin<{ id: string }[]>`SELECT id FROM tenant_sweep_manifests WHERE tenant_id = ${TENANT} AND operation = 'reset'`
+    const [m] = await admin<{ id: string }[]>`
+      INSERT INTO tenant_sweep_manifests (tenant_id, operation, fga_object_ids, storage_keys, search_document_ids)
+      VALUES (${TENANT}, 'reset', ${[]}, ${[]}, ${[]}) RETURNING id`
+    // simulate a crash right after the database step committed
+    await admin`INSERT INTO tenant_sweep_progress (manifest_id, database_done) VALUES (${m.id}, true)`
+
+    await expect(resetTenant(admin, { slug: SLUG, confirm: SLUG, operator: 'test' }))
+      .rejects.toMatchObject({ code: 'unfinished_sweep_exists' })
+
+    // no THIRD manifest was created by the refused call (before + the one we just inserted by hand)
+    const after = await admin<{ id: string }[]>`SELECT id FROM tenant_sweep_manifests WHERE tenant_id = ${TENANT} AND operation = 'reset'`
+    expect(after.length).toBe(before.length + 1)
+  })
 })

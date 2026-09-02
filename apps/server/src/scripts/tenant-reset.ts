@@ -21,6 +21,24 @@
 //     rows live in the shared logical-isolation tables — for isolation='namespace' they do not (that
 //     tenant's rows are physically elsewhere), so running this sweep against one would silently sweep
 //     nothing while reporting success. Refused, not attempted; namespace-isolated reset is unbuilt.
+//
+// Two more refusals review c-af763a4 found and reproduced live, neither named by the ADR
+// (both are correctness gaps this implementation must not have, not new Acceptance lines):
+//   - an unfinished prior sweep for this tenant: writeResetManifest always creates a NEW manifest, and
+//     computeDoomedIds re-derives its id sets from whatever rows are STILL LIVE. If a prior run's
+//     database step committed and then the process died before fga/search/storage ran, a second
+//     invocation would compute an EMPTY doomed set (the rows are already gone), report
+//     "0 page(s) emptied" — reading as "already clean" — and leave the first manifest's S3 keys and
+//     FGA tuples permanently unreachable (nothing ever reads a manifest this command didn't just
+//     create). Refusing to start a second sweep while an unfinished one exists is the cheap, safe
+//     fix; teaching this command to RESUME an old manifest (reconstructible in principle — its
+//     fga_object_ids already encode the doomed id sets, see manifest-fga.ts) is future work, not
+//     invented here under review pressure.
+//   - an invalid --keep id: without this check, a single mistyped space id silently computes an EMPTY
+//     doomed-exclusion for that id — computeDoomedIds's `<> ALL(keepSpaceIds)` matches every space
+//     when the id names nothing — so the space the operator meant to protect (the ENTIRE reason §1
+//     ships before §2: a demo's Hacker News URL is a kept space's share link) is swept anyway, while
+//     the output still reports it as "kept". Validated by existence before any write.
 import os from 'node:os'
 import postgres from 'postgres'
 import { fgaClient } from '@wikistead/authz'
@@ -32,6 +50,9 @@ import { runResetSweep } from '../tenant-sweep/run-sweep.js'
 
 export interface TenantResetResult {
   manifestId: string
+  /** The count of --keep ids, each independently verified (before any write) to name a real space in
+   * this tenant — never merely "the count requested" (review c-af763a4, D2/D5: an unverified
+   * count would have reported a typo'd, actually-swept space as "kept"). */
   keptSpaceCount: number
   doomedSpaceCount: number
   sweptPageCount: number
@@ -59,19 +80,62 @@ export async function resetTenant(
   }
   const keepSpaceIds = args.keepSlugsOrIds ?? []
 
+  // review c-af763a4 (D2, reproduced live): without this check, a mistyped --keep id
+  // computes an EMPTY exclusion for it (computeDoomedIds's `id <> ALL(keepSpaceIds)` matches every
+  // real space when the given id names nothing), so the space the operator meant to protect is swept
+  // anyway — while the output still reports it as kept. A keep-list is a decision an operator makes,
+  // not a shape the code guesses at (ADR-252 §1's own words); validated against real existence, in
+  // this tenant, before any write, not trusted.
+  if (keepSpaceIds.length > 0) {
+    const found = await sql<{ id: string }[]>`SELECT id FROM spaces WHERE tenant_id = ${tenant.id} AND id = ANY(${[...keepSpaceIds]})`
+    const foundIds = new Set(found.map((r) => r.id))
+    const invalid = keepSpaceIds.filter((id) => !foundIds.has(id))
+    if (invalid.length > 0) {
+      throw Object.assign(
+        new Error(`--keep names ${invalid.length} id(s) that are not a space in "${args.slug}": ${invalid.join(', ')} — refusing rather than silently sweeping what you meant to protect`),
+        { code: 'invalid_keep_id' },
+      )
+    }
+  }
+
+  // review c-af763a4 (D1, reproduced live): writeResetManifest always creates a NEW
+  // manifest, and computeDoomedIds re-derives its id sets from whatever rows are STILL LIVE — so if a
+  // prior run's database step committed and then the process died before fga/search/storage ran, a
+  // second invocation would compute an EMPTY doomed set (the rows are already gone), report
+  // "0 page(s) emptied" (reading as "already clean"), and leave that first manifest's S3 keys and FGA
+  // tuples permanently unreachable — nothing ever reads a manifest this command didn't just create.
+  // Refusing to start a second sweep while an unfinished one exists is the cheap, safe fix; teaching
+  // this command to RESUME an old manifest is future work, not invented here under review pressure.
+  const [unfinished] = await sql<{ id: string }[]>`
+    SELECT m.id FROM tenant_sweep_manifests m
+    JOIN tenant_sweep_progress p ON p.manifest_id = m.id
+    WHERE m.tenant_id = ${tenant.id} AND m.operation = 'reset'
+      AND NOT (p.database_done AND p.fga_done AND p.search_done AND p.storage_done)
+    LIMIT 1`
+  if (unfinished) {
+    throw Object.assign(
+      new Error(`tenant "${args.slug}" already has an unfinished reset (manifest ${unfinished.id}) — refusing to start a second sweep, which would compute an empty doomed set from the rows the first sweep already touched and leave its storage/FGA cleanup unreachable. Investigate manifest ${unfinished.id} and tenant_sweep_progress manually.`),
+      { code: 'unfinished_sweep_exists' },
+    )
+  }
+
   const { manifestId, doomed } = await writeResetManifest(sql, tenant.id, keepSpaceIds)
   const at = new Date().toISOString()
-  // ⚠️ `reason` is deliberately omitted: operator-ledger.ts's own doc comment says it is "a FIXED enum
-  // code... never free text" (ADR-169, the tenant-facing transparency projection normalizes anything
-  // else to 'unspecified') — the keep-list and manifest id are OPERATIONAL detail, not a disclosure
-  // reason, and the ledger's own design (ADR-089) is deliberately minimal: "actor / action / target /
-  // time — NEVER secrets/tokens/config", no descriptive payload slot at all. That detail lives in the
-  // manifest row itself (tenant_sweep_manifests.keep_space_ids), which the ledger's `target` names.
+  // `reason: 'maintenance'` — operator-ledger.ts's own doc comment says this field is "a FIXED enum
+  // code... never free text" (ADR-169; packages/ee-server/src/audit/transparency.ts's
+  // TRANSPARENCY_REASONS normalizes anything else to 'unspecified') — an earlier draft of this file
+  // put descriptive detail (keep-list, manifest id) here, which is not what the field is for; that
+  // detail lives in the manifest row itself. 'maintenance' matches the category
+  // migrate-comment-independence-553.ts and converge-role-duplicates-536.ts already use for the same
+  // shape of operator action — verified by grep, not guessed (login-methods.ts's own 'recovery' is
+  // NOT in TRANSPARENCY_REASONS and silently normalizes to 'unspecified', a pre-existing bug in that
+  // file, not a precedent to copy).
   await sql.begin((tx) => appendOperatorEntry(tx, {
     actor: `operator:${args.operator}`,
     action: 'tenant.reset_started',
     target: `tenant:${tenant.id}`,
     at,
+    reason: 'maintenance',
   }))
 
   await runResetSweep(sql, { fga: fgaClient, search: new LogicalSearchDriver(), storage: new LogicalStorageDriver() }, manifestId, tenant.id, doomed)
@@ -81,6 +145,7 @@ export async function resetTenant(
     action: 'tenant.reset_swept',
     target: `tenant:${tenant.id}`,
     at: new Date().toISOString(),
+    reason: 'maintenance',
   }))
 
   return {
