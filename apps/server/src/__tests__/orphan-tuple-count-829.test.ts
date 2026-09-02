@@ -13,7 +13,8 @@
 // because a third triple added tomorrow would defend nothing while looking like it did.
 import { describe, it, expect } from 'vitest'
 import { groupFgaId } from '@wikistead/authz'
-import { judge, GRACE_MS, RECONCILED_TYPES, type LiveSet, type ScannedTuple } from '../scripts/orphan-tuple-count.js'
+import { judge, verdict, scanStore, GRACE_MS, RECONCILED_TYPES, type LiveSet, type ScannedTuple } from '../scripts/orphan-tuple-count.js'
+import type { OpenFgaClient } from '@openfga/sdk'
 
 const TENANT = 'tenant_a'
 const OTHER = 'tenant_b'
@@ -150,5 +151,45 @@ describe('#829 an empty derivation is a broken read, not a clean store', () => {
     expect(r.orphans.page).toBe(1)
     expect(r.orphans.space).toBe(1)
     expect(r.tenantsTotal).toBe(0)
+  })
+})
+
+// #1018: the run's third refusal. `judge([], live)` is a report with tuplesRead=0, orphans {} and a
+// full derivation — it trips neither of the two refusals #829 shipped, so the CLI printed
+// `0 tuple(s) read … orphans none` and exited 0: a broken store read wearing a clean store's face.
+describe('#1018 an empty scan is a broken read, not a clean store', () => {
+  const live = (): LiveSet => ({
+    objects: new Map(RECONCILED_TYPES.map((t) => [t, new Set<string>()])),
+    groupHashToTenant: new Map(), membersByTenant: new Map(), derived: 1, total: 1,
+  })
+
+  it('a full derivation with zero tuples read is refused, and the message names both things it could mean', () => {
+    const v = verdict(judge([], live()))
+    expect(v.ok).toBe(false)
+    if (!v.ok) {
+      expect(v.reason).toMatch(/zero tuples/)
+      expect(v.reason, 'a broken read').toMatch(/broken/)
+      expect(v.reason, 'or a deployment with nothing written yet').toMatch(/never written/)
+    }
+  })
+
+  it('⚠️ break-check target: the shape that reaches the CLI when scanStore itself answers empty', async () => {
+    // Not a cut-off pagination (that would still read something) — the store answering an empty
+    // first page, which is what a wrong store id or an expired token looks like through the SDK.
+    const emptyStore = { read: async () => ({ tuples: [], continuation_token: '' }) } as unknown as OpenFgaClient
+    const tuples = await scanStore(emptyStore)
+    expect(tuples).toEqual([])
+    expect(verdict(judge(tuples, live())).ok).toBe(false)
+  })
+
+  it('the two older refusals still fire, in their own words', () => {
+    const one: ScannedTuple = { user: 'user:a', relation: 'member', object: 'tenant:t1' }
+    expect(verdict(judge([one], { ...live(), derived: 0, total: 1 }))).toMatchObject({ ok: false, reason: expect.stringMatching(/derived 0 of 1/) })
+    expect(verdict(judge([one], { ...live(), derived: 0, total: 0 }))).toMatchObject({ ok: false, reason: expect.stringMatching(/zero tenants/) })
+  })
+
+  it('a real scan against a full derivation is the one shape that passes', () => {
+    const one: ScannedTuple = { user: 'user:a', relation: 'member', object: 'tenant:t1' }
+    expect(verdict(judge([one], live()))).toEqual({ ok: true })
   })
 })

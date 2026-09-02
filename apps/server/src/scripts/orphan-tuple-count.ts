@@ -186,6 +186,38 @@ export function judge(tuples: ScannedTuple[], live: LiveSet, now = Date.now()): 
   return { tenantsDerived: live.derived, tenantsTotal: live.total, tuplesRead: tuples.length, liveObjects, orphans, inGrace, unreconciledTypes, orphanTuples }
 }
 
+/**
+ * #1018: the run's verdict as ONE pure function, so the CLI's exit code and a test agree on what
+ * "this run proved nothing" means. Three refusals, each in the #719 shape (count what was walked,
+ * treat zero as broken), and each phrased so an operator can tell them apart:
+ *   - the derivation covered fewer tenants than the registry holds;
+ *   - the registry answered zero tenants;
+ *   - the store read answered zero tuples — the one #829 shipped without. A read that fails open
+ *     (a wrong store id, an expired token, an API that answers an empty page) printed
+ *     `0 tuple(s) read … orphans none` and exited 0, indistinguishable from a clean store. This
+ *     command can be the evidence behind "your data is gone", so an empty scan is refused even on a
+ *     deployment that genuinely has no tuples yet: such a run proves nothing either way, and the
+ *     message says which of the two it might be rather than picking one.
+ */
+export type OrphanVerdict = { ok: true } | { ok: false; reason: string }
+export function verdict(report: OrphanReport): OrphanVerdict {
+  if (report.tenantsDerived !== report.tenantsTotal) {
+    return { ok: false, reason: `derived ${report.tenantsDerived} of ${report.tenantsTotal} tenants; the run covered less than the registry.` }
+  }
+  if (report.tenantsTotal === 0) {
+    return { ok: false, reason: 'the registry answered zero tenants, which is a broken read rather than an empty deployment.' }
+  }
+  if (report.tuplesRead === 0) {
+    return {
+      ok: false,
+      reason: 'the store read answered zero tuples. Either the read is broken (wrong store, expired token, an '
+        + 'empty first page) or this deployment has never written a tuple; a run that cannot tell the two apart '
+        + 'proves nothing about orphans and is not a clean result.',
+    }
+  }
+  return { ok: true }
+}
+
 export async function countOrphanTuples(sql: postgres.Sql, fga: OpenFgaClient): Promise<OrphanReport> {
   const tuples = await scanStore(fga) // store FIRST (Decision 3)
   const live = await deriveLiveSet(sql)
@@ -203,14 +235,11 @@ if (isMain) {
     console.log(`  orphans        ${fmt(report.orphans)}`)
     console.log(`  in grace       ${fmt(report.inGrace)}`)
     console.log(`  unreconciled   ${fmt(report.unreconciledTypes)}`)
-    // #719: an empty derivation is a broken read, not a clean store. Said by exit code as well as by
-    // a line, because a console.log alone can be swallowed by a later caller.
-    if (report.tenantsDerived !== report.tenantsTotal) {
-      console.error(`fga:orphans FAILED — derived ${report.tenantsDerived} of ${report.tenantsTotal} tenants; the run covered less than the registry.`)
-      process.exit(1)
-    }
-    if (report.tenantsTotal === 0) {
-      console.error('fga:orphans FAILED — the registry answered zero tenants, which is a broken read rather than an empty deployment.')
+    // #719 / #1018: an empty derivation OR an empty scan is a broken read, not a clean store. Said by
+    // exit code as well as by a line, because a console.log alone can be swallowed by a later caller.
+    const v = verdict(report)
+    if (!v.ok) {
+      console.error(`fga:orphans FAILED — ${v.reason}`)
       process.exit(1)
     }
   })
