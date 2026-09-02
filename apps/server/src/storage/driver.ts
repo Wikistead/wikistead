@@ -10,6 +10,9 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
+import { SpanKind } from '@opentelemetry/api'
+import { withSpan } from '../telemetry/tracing.js' // #987 / ADR-270 §3.2
+
 export interface StorageDriver {
   // Idempotent: create the bucket if it does not exist. Called at app startup.
   ensureBucket(): Promise<void>
@@ -108,8 +111,12 @@ export class LogicalStorageDriver implements StorageDriver {
     )
   }
 
+  // #987 / ADR-270 §3.2 / §4: one span per object-store round-trip. The presign* methods sign locally
+  // and leave the process only when the BROWSER uses the URL, so they are not spans. No key on the
+  // span (§3.4 — a key names a tenant and a page).
   async putObject(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
-    await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: bytes, ContentType: contentType }))
+    await withSpan('storage.put_object', { 'storage.bytes': bytes.byteLength }, () =>
+      this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: bytes, ContentType: contentType })), SpanKind.CLIENT)
   }
 
   async presignGet(key: string, opts: { ttlSeconds: number; disposition?: { type: 'attachment' | 'inline'; filename: string } }): Promise<string> {
@@ -128,23 +135,27 @@ export class LogicalStorageDriver implements StorageDriver {
 
   async deleteObject(key: string): Promise<void> {
     // DeleteObject is a no-op (not an error) for non-existent keys.
-    await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }))
+    await withSpan('storage.delete_object', {}, () => this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key })), SpanKind.CLIENT)
   }
 
   async headObject(key: string): Promise<{ sizeBytes: number }> {
-    const result = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }))
+    const result = await withSpan('storage.head_object', {}, () => this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key })), SpanKind.CLIENT)
     return { sizeBytes: result.ContentLength ?? 0 }
   }
 
   async getObjectHead(key: string, maxBytes: number): Promise<Uint8Array> {
-    const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key, Range: `bytes=0-${Math.max(0, maxBytes - 1)}` }))
-    return result.Body!.transformToByteArray()
+    return withSpan('storage.get_object_head', { 'storage.max_bytes': maxBytes }, async () => {
+      const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key, Range: `bytes=0-${Math.max(0, maxBytes - 1)}` }))
+      return result.Body!.transformToByteArray()
+    }, SpanKind.CLIENT)
   }
 
   // Auth-bypassing raw read — see the interface note. Callers own authorization.
   async getObject(key: string): Promise<Uint8Array> {
-    const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }))
-    return result.Body!.transformToByteArray()
+    return withSpan('storage.get_object', {}, async () => {
+      const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }))
+      return result.Body!.transformToByteArray()
+    }, SpanKind.CLIENT)
   }
 
   // List all keys under a prefix, following continuation tokens so large prefixes are

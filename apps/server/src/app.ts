@@ -108,6 +108,8 @@ import { aiPlugin } from './routes/ai.js'
 // #178 / ADR-084: SCIM (scim-tokens + scim router) is EE and now lives in @wikistead-ee/server; it is
 // mounted via the getEeFeatures() seam by the EE composition root, NOT imported here (CE stays EE-free).
 
+import { registerRequestSpans, withSpan } from './telemetry/tracing.js' // #987 / ADR-270 §3.2
+
 declare module 'fastify' {
   interface FastifyInstance {
     fga: typeof fgaClient
@@ -192,6 +194,12 @@ export async function buildApp(opts: BuildAppOpts = {}): Promise<FastifyInstance
   // registered, and the not-found context is sealed the same way — added at the end of this function
   // it never saw a 404 (measured).
   instrumentRequests(app)
+
+  // #987 / ADR-270 §3.2: the request span is opened by the FIRST onRequest hook so that everything
+  // below — tenant resolution, the DB acquire, authz, the handler — runs inside it. A no-op when no
+  // SDK is started (see telemetry/tracing.ts), which is every deployment that has not set
+  // OTEL_EXPORTER_OTLP_ENDPOINT.
+  registerRequestSpans(app)
 
   // #619: the LAST line before a response body leaves the process. #578 translated the two tuple
   // helpers, which covers what the product writes on purpose — but an FGA failure can also arrive
@@ -448,7 +456,9 @@ export async function buildApp(opts: BuildAppOpts = {}): Promise<FastifyInstance
       return
     }
     req.tenant = tenant
-    req.db = await acquireTenantDb(tenant)
+    // #987 / ADR-270 §3.2: the first of the child spans (§4: DB, OpenFGA, Meilisearch, S3, outbox).
+    // No tenant id on it — §3.4's rule, applied to traces for the same two reasons.
+    req.db = await withSpan('db.acquire_tenant', {}, () => acquireTenantDb(tenant))
 
     // Public-but-tenant-scoped routes (e.g. GET /branding) opt in via
     // `config: { public: true }`: the tenant is resolved from the Host (so the

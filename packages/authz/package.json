@@ -4,7 +4,12 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -b",
     "dev": "tsc -b -w",
@@ -15,12 +20,13 @@
   "dependencies": {
     "@openfga/sdk": "^0.8.1",
     "@openfga/syntax-transformer": "^0.2.1",
+    "@opentelemetry/api": "1.9.1",
     "@wikistead/hooks": "workspace:*",
     "@wikistead/types": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
     "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
     "vitest": "^3.2.6"
   }
 }

@@ -73,10 +73,16 @@ export async function claimOutboxBatch<T extends Row & { tenant_id: string }>(op
   return rows as unknown as T[]
 }
 
+import { withSpan } from '../telemetry/tracing.js' // #987 / ADR-270 §3.2
+
 // The shared periodic drain loop: one in-process `running` guard against self-overlap (SKIP LOCKED
 // already handles cross-instance), a capped backlog-clearing burst per tick, errors deferred to the
 // next tick. Call from the server ENTRY, not buildApp — tests drive the drain functions directly.
-export function startOutboxDrainWorker(drain: () => Promise<number>, intervalMs: number): () => void {
+//
+// #987 / ADR-270 §3.2 / §4: every outbox drain in the process passes through here, so this is where
+// a drain becomes a span — a ROOT span, since no request is behind it. `label` names the worker on
+// the span (`search`, `email`, …); a caller that passes none is still traced, just anonymously.
+export function startOutboxDrainWorker(drain: () => Promise<number>, intervalMs: number, label = 'outbox'): () => void {
   let running = false
   const timer = setInterval(async () => {
     if (running) return
@@ -86,7 +92,10 @@ export function startOutboxDrainWorker(drain: () => Promise<number>, intervalMs:
       // rather than arriving with none — which in a process that declared the requirement is a crash, and
       // in one that has not is indistinguishable from a request path where somebody forgot.
       await runInAuthzScope(SYSTEM_SCOPE, async () => {
-        for (let i = 0; i < 20 && (await drain()) > 0; i++) { /* clear backlog, capped */ }
+        // `() => drain()` rather than passing `drain` itself: authz-scope-637's discovery walk recognises a
+        // timer that reaches authorization by the `drain(` call shape, and a sweep it cannot see is a
+        // sweep it cannot hold to naming its scope.
+        for (let i = 0; i < 20 && (await withSpan('outbox.drain', { 'outbox.worker': label }, () => drain())) > 0; i++) { /* clear backlog, capped */ }
       })
     } catch {
       /* next tick retries */

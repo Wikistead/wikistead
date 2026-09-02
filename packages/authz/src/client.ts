@@ -1,4 +1,31 @@
 import { OpenFgaClient } from '@openfga/sdk'
+import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api'
+
+// #987 / ADR-270 §3.2 / §4: every OpenFGA round-trip in this tree goes through `fgaClient` below (the
+// server re-exports it and the collab process imports it), so THIS is the one place a span can cover
+// all of them. The SDK methods that actually leave the process are named here; a property not in the
+// set is handed back untouched. With no OpenTelemetry SDK registered (every deployment that has not
+// set OTEL_EXPORTER_OTLP_ENDPOINT) the API's tracer is a no-op proxy and the wrapper costs a closure.
+//
+// The span carries the METHOD only. ADR-270 §3.4 keeps tenant / user / object identifiers off every
+// metric label, and the two reasons (one deployment's operator reading another tenant's traffic;
+// unbounded cardinality) apply to a span attribute just as well — so `object`, `user` and the tuple
+// bodies are never copied onto it.
+const FGA_NETWORK_METHODS = new Set(['check', 'batchCheck', 'read', 'write', 'listObjects', 'listUsers', 'expand', 'readChanges'])
+
+function traced<F extends (...args: never[]) => unknown>(method: string, fn: F): F {
+  return ((...args: never[]) =>
+    trace.getTracer('authz').startActiveSpan(`fga.${method}`, { kind: SpanKind.CLIENT, attributes: { 'fga.method': method } }, async (span) => {
+      try {
+        return await fn(...args)
+      } catch (e) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: e instanceof Error ? e.message : String(e) })
+        throw e
+      } finally {
+        span.end()
+      }
+    })) as unknown as F
+}
 
 export function makeFga(): OpenFgaClient {
   return new OpenFgaClient({
@@ -66,7 +93,11 @@ export const fgaClient: Fga = new Proxy({} as Fga, {
   get(_target, prop, _receiver) {
     const client = currentBinding().client
     const value = Reflect.get(client, prop, client)
-    return typeof value === 'function' ? value.bind(client) : value
+    if (typeof value !== 'function') return value
+    const bound = value.bind(client)
+    // #987: a NEW wrapper per access, deliberately — memoising it here would pin the wrapper to the
+    // client instance a `vi.spyOn(fgaClient, 'check')` in a test later replaces the method on.
+    return typeof prop === 'string' && FGA_NETWORK_METHODS.has(prop) ? traced(prop, bound) : bound
   },
   set(_target, prop, value) {
     return Reflect.set(currentBinding().client, prop, value)

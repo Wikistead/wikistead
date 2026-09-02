@@ -88,6 +88,16 @@ export const ENV_DOCS = {
     what: 'Port the metrics listener binds. It is a separate listener from the API (`SERVER_PORT`) so the ingress never publishes it; scrape it from inside the cluster or network.',
   },
   WKS_BRAND_NAME: { group: 'Runtime', default: 'Wikistead', what: 'Product name shown in the interface and in outgoing mail, for a rebranded deployment.' },
+  OTEL_EXPORTER_OTLP_ENDPOINT: {
+    group: 'Runtime',
+    default: 'unset (tracing is off)',
+    what: 'OTLP/HTTP collector the API server exports OpenTelemetry traces to (Jaeger, Tempo, a vendor\'s OTLP ingest). Unset, no SDK is loaded and no span is recorded; the boot log says so. Spans carry route templates, never tenant, user or page identifiers.',
+  },
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {
+    group: 'Runtime',
+    default: 'unset (OTEL_EXPORTER_OTLP_ENDPOINT + /v1/traces)',
+    what: 'The traces URL verbatim, when the collector does not follow the OTLP path convention. Per the OpenTelemetry exporter specification it takes precedence over the general endpoint; it does not turn tracing on by itself.',
+  },
   WKS_PUBLIC_BASE_URL: {
     group: 'Runtime',
     default: 'unset (mail that needs a link is dropped)',

@@ -11,6 +11,7 @@ import { fgaClient } from '@wikistead/authz'
 import { assertProductionFgaPersistent, resolveFgaForBoot } from './openfga-guard.js'
 import { assertMigrationsApplied } from './db/migration-guard.js'
 import { startMetricsListener } from './metrics.js'
+import { startTracing } from './telemetry/tracing.js'
 
 // #178 / ADR-084: the server bootstrap, extracted from index.ts into a reusable function so BOTH
 // entrypoints share it — the CE entrypoint (apps/server/src/index.ts) and the EE composition root
@@ -18,6 +19,20 @@ import { startMetricsListener } from './metrics.js'
 // identical to the old top-level index.ts (build → listen → background workers). Nothing here imports
 // the EE namespace; the EE plugins mount through the getEeFeatures() seam inside buildApp.
 export async function startServer(): Promise<FastifyInstance> {
+  // #987 / ADR-270 §3.2: first, before anything that could open a span — off (and said so) unless
+  // OTEL_EXPORTER_OTLP_ENDPOINT names a collector. Both entrypoints reach this line, so the EE build
+  // gets the same switch without its own copy.
+  const tracing = await startTracing(process.env)
+  // A container is stopped with SIGTERM; the batch processor holds up to a few seconds of spans, and
+  // without a flush the last requests before every deploy would be the ones missing from the trace.
+  // ⚠️ Registering ANY listener cancels Node's default (terminate on SIGTERM) — nothing else in this
+  // process handles the signal, so the listener flushes and then RE-RAISES it: `once` has removed
+  // itself by then, the default applies, and the container exits the way it did before this line.
+  if (tracing) {
+    process.once('SIGTERM', () => {
+      void tracing.shutdown().finally(() => process.kill(process.pid, 'SIGTERM'))
+    })
+  }
   // Fail fast: in production OpenFGA must be persistent (postgres), not in-memory (ADR-035).
   assertProductionFgaPersistent()
   // Fail fast (#910): every migration this image ships must already be in the database's ledger.

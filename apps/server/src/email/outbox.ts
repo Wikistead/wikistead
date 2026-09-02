@@ -175,5 +175,5 @@ export async function drainEmailOutbox(deps: { fallback: EmailDriver; log?: (m: 
 
 // Called from the server ENTRY (not buildApp) — tests drive drainEmailOutbox directly (#432 rule).
 export function startEmailDrainWorker(deps: { fallback: EmailDriver; log?: (m: string) => void }, intervalMs: number): () => void {
-  return startOutboxDrainWorker(() => drainEmailOutbox(deps), intervalMs)
+  return startOutboxDrainWorker(() => drainEmailOutbox(deps), intervalMs, 'email')
 }

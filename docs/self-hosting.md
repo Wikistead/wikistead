@@ -392,6 +392,19 @@ The override file is the mechanism because the compose file pins the value in th
   the k8s base, add the `metrics-token` key to `kb-secrets` (it is optional). The
   compose profile does not publish the port; add one to `docker-compose.override.yml`
   if your Prometheus is outside the compose network.
+- **Tracing** (ADR-270): `server` speaks OpenTelemetry, off by default. Set
+  `OTEL_EXPORTER_OTLP_ENDPOINT` (for example `http://tempo:4318`, any OTLP/HTTP
+  collector — Jaeger, Tempo, or a vendor's OTLP ingest) and it exports one span
+  per request with child spans for the tenant connection acquire, OpenFGA,
+  Meilisearch, object storage and the outbox drains (individual SQL statements
+  are not spans yet). With the variable unset nothing is loaded and nothing is
+  recorded — the boot log says `[tracing] disabled` so a mistyped variable name
+  is visible. Spans carry route templates, never tenant, user or page
+  identifiers. `OTEL_SERVICE_NAME` (default: the product name plus `-server`)
+  and `OTEL_EXPORTER_OTLP_HEADERS` apply. The server honours an inbound W3C
+  `traceparent` header, the standard behaviour — which also means any client
+  can mark its own requests as not-sampled, or join a trace id of its choosing;
+  strip the header at your edge for traffic you do not trust.
 - **Pre-production gate**: before going live, walk the items that can only be
   verified in a real environment — cookie scoping across tenant subdomains,
   XFF trust, WS timeouts, noindex behaviour, and rate-limit fan-out across

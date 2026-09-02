@@ -148,7 +148,7 @@ async function dropOrphanedRows(claimed: ClaimedRow[]): Promise<Set<string>> {
 // drainOutbox directly, so no stray timer leaks into app.inject). The in-process
 // `running` guard prevents overlap within one instance; SKIP LOCKED handles across.
 export function startOutboxWorker(driver: SearchDriver, intervalMs = 2000): () => void {
-  return startOutboxDrainWorker(() => drainOutbox(driver), intervalMs) // #432: the shared loop
+  return startOutboxDrainWorker(() => drainOutbox(driver), intervalMs, 'search') // #432: the shared loop
 }
 
 export function processOutboxAsync(

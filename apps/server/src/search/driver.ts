@@ -6,6 +6,8 @@ import type { SearchDoc } from '@wikistead/types'
 import type { SearchDriver, SearchHit } from '@wikistead/hooks'
 import { groupFgaId } from '@wikistead/authz'
 import { SEARCH_CANDIDATE_LIMIT } from './paginate.js'
+import { SpanKind } from '@opentelemetry/api'
+import { withSpan } from '../telemetry/tracing.js' // #987 / ADR-270 §3.2
 
 export type { SearchDriver, SearchHit }
 
@@ -76,14 +78,18 @@ export class LogicalSearchDriver implements SearchDriver {
     // Crop a plain-text body excerpt around the match for the result snippet. No
     // attributesToHighlight → _formatted.body is cropped but NOT marked up, so the
     // UI renders it as text (no XSS). cropLength is a placeholder (tune later).
-    const result = await this.client.index(this.INDEX).search<SearchDoc>(q, {
-      filter: filters.join(' AND '),
-      limit: limit ?? SEARCH_CANDIDATE_LIMIT, // over-fetch candidates for stage-2 FGA paging (ADR-027)
-      offset: offset ?? 0,                    // #103/ADR-068: deep pagination resumes a ranked scan
-      attributesToRetrieve: ['id', 'tenantId', 'spaceId', 'title'],
-      attributesToCrop: ['body'],
-      cropLength: 30,
-    })
+    // #987 / ADR-270 §3.2 / §4: the stage-1 round-trip as a span. The query text and the filter (which
+    // names the tenant and the viewer) stay off it — §3.4's rule; the candidate limit is what tuning
+    // this stage needs to see.
+    const result = await withSpan('search.query', { 'search.limit': limit ?? SEARCH_CANDIDATE_LIMIT }, () =>
+      this.client.index(this.INDEX).search<SearchDoc>(q, {
+        filter: filters.join(' AND '),
+        limit: limit ?? SEARCH_CANDIDATE_LIMIT, // over-fetch candidates for stage-2 FGA paging (ADR-027)
+        offset: offset ?? 0,                    // #103/ADR-068: deep pagination resumes a ranked scan
+        attributesToRetrieve: ['id', 'tenantId', 'spaceId', 'title'],
+        attributesToCrop: ['body'],
+        cropLength: 30,
+      }), SpanKind.CLIENT)
     return result.hits.map((h) => {
       const snippet = (h as { _formatted?: { body?: string } })._formatted?.body?.trim()
       const hit: SearchHit = { id: h.id, tenantId: h.tenantId, spaceId: h.spaceId, title: h.title }
@@ -93,14 +99,20 @@ export class LogicalSearchDriver implements SearchDriver {
   }
 
   async upsertDoc(doc: SearchDoc): Promise<void> {
-    // primaryKey must be explicit: Meilisearch auto-detection fails when multiple
-    // fields end with 'id' (e.g. 'id' and 'tenantId').
-    const task = await this.client.index(this.INDEX).addDocuments([doc], { primaryKey: 'id' })
-    await this.client.waitForTask(task.taskUid)
+    // #987 / ADR-270 §3.2 / §4: one span per index round-trip (the wait for the task is part of it —
+    // that is where the time goes). No document id on it (§3.4).
+    await withSpan('search.upsert_doc', {}, async () => {
+      // primaryKey must be explicit: Meilisearch auto-detection fails when multiple
+      // fields end with 'id' (e.g. 'id' and 'tenantId').
+      const task = await this.client.index(this.INDEX).addDocuments([doc], { primaryKey: 'id' })
+      await this.client.waitForTask(task.taskUid)
+    }, SpanKind.CLIENT)
   }
 
   async deleteDoc(pageId: string): Promise<void> {
-    const task = await this.client.index(this.INDEX).deleteDocument(pageId)
-    await this.client.waitForTask(task.taskUid)
+    await withSpan('search.delete_doc', {}, async () => {
+      const task = await this.client.index(this.INDEX).deleteDocument(pageId)
+      await this.client.waitForTask(task.taskUid)
+    }, SpanKind.CLIENT)
   }
 }
