@@ -110,6 +110,15 @@ embed with a sentence. Verdicts are cached per full URL, not per host.
 with `?linked=1` or `?linkError=<reason>` — never JSON — and, unlike `/auth/callback`, is bound to the
 session that started it (refusing a link completed in any other session, the linking-CSRF defence).
 
+`DELETE /me/connections/{connectionId}/link` (`/me/*` account-screen plumbing, not part of the
+OpenAPI-covered surface, its sibling `/me/connections/{connectionId}/link/start` excluded the same way)
+removes the calling member's own link to that connection, re-authenticated (password, a confirmed TOTP
+code, or a passkey — the same proof `/auth/link-callback` requires to add one). Refused `409
+last_way_in` when this would leave the member with no way to sign back in: the check excludes the LINK
+being removed but not the connection's ability to mint this member's sub again on a future sign-in
+(ADR-259 §3.9's mint-derived entrance), since unlinking does not sever that. Unlike the admin's
+connection-wide delete (`DELETE /admin/connections/{id}`), this touches one member's one link.
+
 `GET /me/settings` (`/me/*` account-screen plumbing, not part of the OpenAPI-covered surface) carries a
 `canOverrideDisplayName` field — the restrictive union that gates the display-name
 override: `identitySource` alone answers a different, narrower question (which door a member's identity
