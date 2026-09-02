@@ -19,10 +19,28 @@
 // DOC_LINK_BASE (env) or `origin/main`, falling back to HEAD~1 for a local run.
 import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { evaluateDocLinks, docLinkCoverage } from './doc-code-map.mjs'
+import { evaluateDocLinks, docLinkCoverage, checkLedgerPathsExist } from './doc-code-map.mjs'
 
 const strict = process.argv.includes('--strict')
 const docsCheckoutPresent = existsSync('wikistead-docs')
+
+// #1067: the ledger's PATH side (does the page it names actually exist) has never been checked, only
+// its surface/id side. Gated on `docs-site` being present the same way the rest of this file gates on
+// `wikistead-docs` — the adapter tests (doc-code-links.test.ts) run this script against throwaway repos
+// with neither checkout, and the check must read as "not applicable here", not "everything is
+// dangling", the same asymmetry ADR-225 §4.1 already draws for the diff-based checks above.
+const docsSitePresent = existsSync('docs-site')
+if (docsSitePresent) {
+  const { scanned: pathsScanned, violations: danglingPaths } = checkLedgerPathsExist(existsSync)
+  if (danglingPaths.length > 0) {
+    for (const v of danglingPaths) console.error(`doc-links: ledger row "${v.where}" names "${v.doc}" (${v.path}) — ${v.why}`)
+    console.error(`\n${danglingPaths.length} dangling ledger path(s) of ${pathsScanned} scanned.`)
+    process.exit(1)
+  }
+  console.log(`doc-links: ${pathsScanned} ledger path(s) scanned, 0 dangling.`)
+} else {
+  console.log('doc-links: ledger path check skipped (no docs-site/ checkout here).')
+}
 
 function changedFiles() {
   const base = process.env.DOC_LINK_BASE || 'origin/main'

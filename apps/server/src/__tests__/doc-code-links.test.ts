@@ -10,7 +10,7 @@ import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
 // @ts-expect-error — .mjs script module, no types (pure JS CI helper)
-import { evaluateDocLinks, evaluateSurfaceDocs, matchesAny, globToRegExp, DOC_CODE_MAP } from '../../../../scripts/doc-code-map.mjs'
+import { evaluateDocLinks, evaluateSurfaceDocs, matchesAny, globToRegExp, DOC_CODE_MAP, checkLedgerPathsExist } from '../../../../scripts/doc-code-map.mjs'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
 
@@ -130,6 +130,57 @@ describe('surface-docs evaluator (#697 / ADR-225 §4.2)', () => {
   })
 })
 
+// #1067 / ADR-244 §7 open point 4: evaluateSurfaceDocs and evaluateDocLinks both verify the LEDGER'S
+// surface/id side against the registries — neither ever checks whether the PATH a row names actually
+// exists on disk. Found live: SURFACE_DOCS['admin-surface'].scim named 'admin/scim.md' (never existed
+// — the real file is 'admin/scim-provisioning.md'), and the DOC_CODE_MAP 'editor macros' entry named
+// 'editor/macros.md' (never existed — the real page is 'reference/macro-notation.md'). Both were fixed
+// alongside this check; these tests pin the NEW function with synthetic maps, not the real ledger (the
+// real ledger's existence is exercised at the bottom of this file, against the real docs-site tree).
+describe('checkLedgerPathsExist (#1067, ADR-244 §7 open point 4)', () => {
+  const exists = (real: Set<string>) => (p: string) => real.has(p)
+
+  it('a docCodeMap entry naming a page that does not exist is a violation', () => {
+    const map = [{ label: 'widget', kind: 'authored', code: ['x/**'], doc: 'wikistead-docs/src/content/docs/widget.md' }]
+    const { scanned, violations } = checkLedgerPathsExist(exists(new Set()), { docCodeMap: map, surfaceDocs: {} })
+    expect(scanned).toBe(1)
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toMatchObject({ where: 'widget', path: 'docs-site/src/content/docs/widget.md' })
+  })
+
+  it('a surfaceDocs row naming a page that DOES exist is not a violation', () => {
+    const surfaceDocs = { 'admin-surface': { widget: 'wikistead-docs/src/content/docs/widget.md' } }
+    const { scanned, violations } = checkLedgerPathsExist(exists(new Set(['docs-site/src/content/docs/widget.md'])), { docCodeMap: [], surfaceDocs })
+    expect(scanned).toBe(1)
+    expect(violations).toEqual([])
+  })
+
+  it('`none: <reason>` rows are not paths — never scanned, never a violation', () => {
+    const surfaceDocs = { 'admin-surface': { widget: 'none: no dedicated surface' } }
+    const { scanned, violations } = checkLedgerPathsExist(exists(new Set()), { docCodeMap: [], surfaceDocs })
+    expect(scanned).toBe(0)
+    expect(violations).toHaveLength(1)
+    expect(violations[0]!.why).toContain('walk itself is likely broken')
+  })
+
+  it('a path already relative to this repo (not wikistead-docs/-prefixed) is checked as-is, unmapped', () => {
+    const map = [{ label: 'levers', kind: 'generated', code: ['x/**'], doc: 'docs/generated/plan-contents.md' }]
+    const { violations } = checkLedgerPathsExist(exists(new Set(['docs/generated/plan-contents.md'])), { docCodeMap: map, surfaceDocs: {} })
+    expect(violations).toEqual([])
+  })
+
+  // ⚠️ break-check: prove the whole REAL ledger is clean now, not vacuously (an empty map would also
+  // report zero violations) — scanned must be a real, non-trivial count.
+  it('the REAL SURFACE_DOCS + DOC_CODE_MAP ledger has zero dangling paths against the real docs-site tree', () => {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
+    const { scanned, violations } = checkLedgerPathsExist((p: string) => {
+      try { statSync(join(repoRoot, p)); return true } catch { return false }
+    })
+    expect(scanned, 'zero scanned is a failure — the walk itself is broken').toBeGreaterThan(20)
+    expect(violations).toEqual([])
+  })
+})
+
 // ── #865: the git adapter, run as a process against a real repository ───────────────────────────
 //
 // Everything above measures the pure evaluator with synthetic file lists. The defect this section
@@ -231,5 +282,15 @@ describe('#865 the git adapter of check-doc-links', () => {
     expect(code).toBe(0)
     expect(out, 'it counts what it judged').toMatch(/\d+ of \d+ binding\(s\) judged/)
     expect(out, 'and does not claim the empty-diff shape').not.toContain('NOTHING MEASURED')
+  })
+
+  // #1067: these throwaway repos have neither `wikistead-docs/` nor `docs-site/` — the new ledger
+  // path-existence check must read as skipped here, not fail every real ledger row as "dangling"
+  // because the temp repo obviously does not contain any of them.
+  it('the ledger path check reads as skipped (not failed) when docs-site/ is absent, as in every temp repo here', () => {
+    const dir = repoWithChange({ 'README.md': 'a\n' }, { 'README.md': 'a\n', 'unrelated.txt': 'x\n' })
+    const { code, out } = runCheck(dir, ['--strict'])
+    expect(code).toBe(0)
+    expect(out, 'says skipped, not a scanned-and-clean claim it cannot back up here').toContain('skipped')
   })
 })

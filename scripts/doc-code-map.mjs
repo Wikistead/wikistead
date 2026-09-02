@@ -59,10 +59,14 @@ export const DOC_CODE_MAP = [
   // Authored pages live in the wikistead-docs repo (paths are docs-repo-relative). Seeded
   // for the designated regions; the check binds them in the combined CI checkout.
   {
+    // #1067: this pointed at 'editor/macros.md', a page that has never existed — the general macro
+    // reference lives at reference/macro-notation.md (editor/layout-macros.md is a narrower, already
+    // separately-bound page for the columns/tabs/details directives specifically, see SURFACE_DOCS's
+    // 'macro' section below).
     label: 'editor macros',
     kind: 'authored',
     code: ['apps/web/src/editor/macros/**'],
-    doc: 'wikistead-docs/src/content/docs/editor/macros.md',
+    doc: 'wikistead-docs/src/content/docs/reference/macro-notation.md',
   },
   {
     // #922: the plain-Markdown notation (not macros) this cheat sheet promises — highlight, footnotes
@@ -259,7 +263,7 @@ export const SURFACE_DOCS = {
     moderation: 'wikistead-docs/src/content/docs/admin/moderation.md',
     billing: 'wikistead-docs/src/content/docs/admin/billing.md',
     orphans: 'wikistead-docs/src/content/docs/admin/orphaned-drafts.md',
-    scim: 'wikistead-docs/src/content/docs/admin/scim.md', // EE-badged page (#723 / ADR-232)
+    scim: 'wikistead-docs/src/content/docs/admin/scim-provisioning.md', // EE-badged page (#723 / ADR-232)
     domains: 'wikistead-docs/src/content/docs/admin/custom-domains.md', // #721 / ADR-230
   },
   // Editor macros — registered fence languages and directive names (the registry walk imports
@@ -409,4 +413,44 @@ export function evaluateDocLinks(changedFiles, map = DOC_CODE_MAP) {
     violations.push({ label: entry.label, kind: entry.kind, doc: entry.doc, changedCode })
   }
   return violations
+}
+
+// #1067 / ADR-244 §7 open point 4: every OTHER check here (evaluateSurfaceDocs, evaluateDocLinks)
+// verifies a ledger row's SURFACE side (does the id still exist in the registry) but never its DOC
+// side (does the page it names still exist on disk) — a rename or a typo on the docs side is
+// invisible to both. Found live: SURFACE_DOCS['admin-surface'].scim named 'admin/scim.md', which has
+// never existed (the real file is 'admin/scim-provisioning.md'), and the 'editor macros' DOC_CODE_MAP
+// entry named 'editor/macros.md', also never real (the general macro reference is
+// 'reference/macro-notation.md'). Neither dangling row ever turned red, because both checks above
+// only ever read the LEDGER's key/id side, never the path it points at.
+//
+// Pure, like the rest of this file: `existsFn` is injected (a real `fs.existsSync` from the adapter
+// script, or a synthetic map in a test) rather than imported here, so this stays testable with no
+// filesystem at all. `wikistead-docs/` is the combined-checkout prefix authored pages carry in the
+// ledger; `docs-site/` is this repo's own pre-publish mirror of the identical `src/content/docs/**`
+// tree (same relative path under a different repo root), so a path can be checked here even where the
+// combined `wikistead-docs/` checkout itself is absent (every worktree carries `docs-site/`).
+const DOCS_REPO_PREFIX = 'wikistead-docs/'
+const DOCS_SITE_MIRROR_PREFIX = 'docs-site/'
+
+function resolveCheckablePath(doc) {
+  if (doc.startsWith('none:')) return null // an explicit non-binding, not a path
+  if (doc.startsWith(DOCS_REPO_PREFIX)) return DOCS_SITE_MIRROR_PREFIX + doc.slice(DOCS_REPO_PREFIX.length)
+  return doc // already relative to this repo (e.g. docs/generated/**)
+}
+
+export function checkLedgerPathsExist(existsFn, { docCodeMap = DOC_CODE_MAP, surfaceDocs = SURFACE_DOCS } = {}) {
+  const rows = [
+    ...docCodeMap.map((entry) => ({ where: entry.label, doc: entry.doc })),
+    ...Object.entries(surfaceDocs).flatMap(([registry, ids]) =>
+      Object.entries(ids).map(([id, doc]) => ({ where: `${registry}.${id}`, doc }))),
+  ]
+  const scanned = rows.filter((r) => resolveCheckablePath(r.doc) !== null)
+  if (scanned.length === 0) return { scanned: 0, violations: [{ where: null, doc: null, why: 'zero checkable ledger rows found — the walk itself is likely broken' }] }
+  const violations = []
+  for (const { where, doc } of scanned) {
+    const path = resolveCheckablePath(doc)
+    if (!existsFn(path)) violations.push({ where, doc, path, why: 'ledger names a page that does not exist on disk' })
+  }
+  return { scanned: scanned.length, violations }
 }
