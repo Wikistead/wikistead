@@ -16,20 +16,22 @@ describe('tenant-sweep schema derivation (ADR-252 §1, #810)', () => {
     expect(extraIdentifyingColumns, 'a constraint with >1 non-tenant_id column needs a human, not a guess').toEqual([])
     // spot-check a few well-known cascades rather than the whole list — the whole list is what the
     // count above already proves is non-empty and schema-derived
-    expect(columns).toContainEqual(expect.objectContaining({ table: 'pages', column: 'space_id', target: 'spaces', cascades: true }))
-    expect(columns).toContainEqual(expect.objectContaining({ table: 'attachments', column: 'page_id', target: 'pages', cascades: true }))
-    // spaces.home_page_id is a real FK to pages but explicitly NOT ON DELETE CASCADE (the space row
-    // survives a reset; only its pointer needs clearing, which is why this must read `cascades: false`
-    // rather than being silently absent from the set)
-    expect(columns).toContainEqual(expect.objectContaining({ table: 'spaces', column: 'home_page_id', cascades: false }))
+    expect(columns).toContainEqual(expect.objectContaining({ table: 'pages', column: 'space_id', target: 'spaces', deleteRule: 'cascade' }))
+    expect(columns).toContainEqual(expect.objectContaining({ table: 'attachments', column: 'page_id', target: 'pages', deleteRule: 'cascade' }))
+    // spaces.home_page_id is a real FK to pages that is ON DELETE SET NULL (migration 071) — the space
+    // row survives a reset and Postgres clears the pointer itself, which is neither 'cascade' (the row
+    // isn't gone) nor a shape needing an explicit sweep statement (the column isn't left dangling
+    // either) — review c-a4180fb found the original 'cascades: false' collapsed this into the
+    // same bucket as a column that genuinely does need an explicit DELETE.
+    expect(columns).toContainEqual(expect.objectContaining({ table: 'spaces', column: 'home_page_id', deleteRule: 'set null' }))
   })
 
-  it('finds a non-zero non-cascading set, excluding the two named exclusions and the cascading set', async () => {
+  it('finds a non-zero non-cascading set, excluding the named exclusions and the cascading set', async () => {
     const { columns: cascading } = await deriveCascadingColumns(admin)
     const nonCascading = await deriveNonCascadingColumns(admin, cascading)
     console.log(`[derive] non-cascading columns: ${nonCascading.length}`)
     expect(nonCascading.length, 'zero non-cascading columns is a failure').toBeGreaterThan(0)
-    for (const c of nonCascading) expect(c.cascades).toBe(false)
+    for (const c of nonCascading) expect(c.deleteRule).toBe('no action')
     // the exclusion actually excludes something real, not a name that never matched
     expect(nonCascading.find((c) => c.table === 'api_keys' && c.column === 'space_ids')).toBeUndefined()
     // a genuine stray TEXT id with no FK is still found (proves the walk isn't only finding FK'd ones)
@@ -48,10 +50,12 @@ describe('tenant-sweep schema derivation (ADR-252 §1, #810)', () => {
     expect(NAMED_EXCLUSIONS.some((e) => e.table === 'api_keys' && e.column === 'space_ids')).toBe(true)
   })
 
-  it('finds exactly the five polymorphic (resource_type, resource_id) tables ADR-252 §1 names', async () => {
+  it('finds all five (resource_type, resource_id) tables measured today — only 2 of which the ADR itself names', async () => {
     const tables = await derivePolymorphicTables(admin)
     console.log(`[derive] polymorphic tables: ${tables.length}`)
     expect(tables.length, 'zero polymorphic tables is a failure').toBeGreaterThan(0)
     expect(tables.sort()).toEqual(['group_role_mappings', 'member_pins', 'role_assignments', 'share_links', 'watches'])
+    // the two ADR-252 §1 names explicitly (the tenant-tier-grant collateral-damage warning)
+    expect(tables).toEqual(expect.arrayContaining(['role_assignments', 'group_role_mappings']))
   })
 })

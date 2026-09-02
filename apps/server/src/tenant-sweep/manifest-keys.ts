@@ -44,6 +44,17 @@ export async function collectResetStorageKeys(sql: Sql, tenantId: string, doomed
       WHERE tenant_id = ${tenantId} AND space_id = ANY(${doomed.spaceIds}) AND icon_image_key IS NOT NULL`
     keys.push(...icons.map((r) => r.icon_image_key))
 
+    // ⚠️ review c-a4180fb: `imports` names BOTH `space_id` (required) and `parent_page_id`
+    // (optional) — both non-cascading (see derive.ts). This query scopes archive_key by `space_id`
+    // only, i.e. by DOOMED spaces. Under the corrected kept-space semantics above, a kept space's OWN
+    // pages are also swept, so an in-flight import targeting a kept space's page (`parent_page_id` in
+    // `doomed.pageIds`, `space_id` NOT in `doomed.spaceIds`) is not caught here — if a future executor
+    // ever deletes `imports` rows by a page-scoped predicate instead of (or in addition to) a
+    // space-scoped one, this manifest would miss that row's archive_key. NOT fixed by guessing a
+    // broader query: which predicate actually deletes `imports` rows is an executor decision that does
+    // not exist yet, and widening this query without knowing it risks the opposite mistake (listing a
+    // key for a row that survives, orphaning a live import's staged archive). Whichever slice writes
+    // the imports-sweep predicate must make this query match it exactly, not assume it already does.
     const archives = await sql<{ archive_key: string }[]>`
       SELECT archive_key FROM imports
       WHERE tenant_id = ${tenantId} AND space_id = ANY(${doomed.spaceIds}) AND archive_key IS NOT NULL`
@@ -54,11 +65,16 @@ export async function collectResetStorageKeys(sql: Sql, tenantId: string, doomed
   // names its `ydoc_key` column. That table has no `tenant_id` column at all (it is admin/GC-internal
   // bookkeeping, keyed only by the storage key text — `revisions/${tenantId}/${uuid}`, revision-ydoc.ts)
   // and carries no page linkage — a row in it is, by construction, a blob whose live `revisions` row is
-  // ALREADY GONE. For a KEEP-LIST reset there is no way to tell whether an orphaned blob's original page
-  // was in a kept space or a doomed one — the linkage that would answer that was lost when it became a
-  // candidate. Sweeping it here would over-reach into a kept space's history; leaving it alone under-
-  // reaches, but not unsafely: `revisions-gc.ts` runs independently on its own schedule and will still
-  // delete it. A whole-tenant removal (§2, not yet built) has no such ambiguity — every row is doomed —
-  // and can safely prefix-match `revisions/${tenantId}/%` when it is implemented.
+  // ALREADY GONE, and that linkage is what a KEEP-LIST reset would need to tell a kept space's orphaned
+  // history apart from a doomed one's — lost the moment the row became a candidate. Sweeping it here
+  // would over-reach into a kept space's history.
+  // ⚠️ review c-a4180fb corrected the original "runs independently on its own schedule" claim
+  // here — measured against `deploy/k8s/**`: the only CronJobs in this tree are `scim-reconcile` and
+  // `backup`; `revisions:gc` (package.json) is a manual `pnpm revisions:gc`, run by nobody automatically.
+  // Leaving this table alone is still the right call — sweeping it here risks the over-reach above,
+  // where it stands it is merely UNCOLLECTED rather than unrecoverable (an operator can still run it) —
+  // but "not unsafely, because it runs on its own schedule" overstated what actually happens today.
+  // A whole-tenant removal (§2, not yet built) has no keep-list ambiguity — every row is doomed — and
+  // can safely prefix-match `revisions/${tenantId}/%` when it is implemented.
   return keys
 }
