@@ -46,7 +46,7 @@ services:
     # Both origins: 5173 is the host-side `pnpm dev` loop, and the https one is the `apps` profile
     # behind the proxy. A presigned PUT from the browser is a CORS request either way.
     #
-    # #1081: the S3 identity is WRITTEN FROM .env at container start, so the keys the guide tells a
+    # The S3 identity is WRITTEN FROM .env at container start, so the keys the guide tells a
     # self-hoster to change are the keys the object store actually accepts. The static
     # infra/seaweedfs/s3.json stays for the stacks that override this command (e2e / server-test);
     # here it is only the fallback default for the same wksadmin pair.
@@ -58,7 +58,7 @@ services:
     environment:
       S3K: ${S3_ACCESS_KEY:-wksadmin}
       S3S: ${S3_SECRET_KEY:-wksadmin}
-    # #1082: the S3 gateway takes ~15s to listen; without a readiness signal the server loses the
+    # The S3 gateway takes ~15s to listen; without a readiness signal the server loses the
     # race on a first `up` and dies at its bucket-ensure. Any HTTP answer on :8333 means "listening".
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333 || [ $$? -le 8 ]"]

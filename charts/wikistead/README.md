@@ -38,7 +38,8 @@ Two hooks run from the server image:
 - **`migrate`** — the schema. The SQL ships inside the image.
 The authorization store needs no hook: the server resolves — or, on a deployment that has never
 had one, creates — its own OpenFGA store and model at startup, from the `model.fga` baked into the
-image (ADR-253). The `fga-bootstrap` hook this chart used to carry is gone (#1085).
+image. The `fga-bootstrap` hook this chart used to carry is gone — the server does at boot what the
+hook used to do separately, so the hook only duplicated it and could race it.
 
 ## Generated credentials, honestly
 
