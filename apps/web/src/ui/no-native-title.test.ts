@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 // #530 anti-drift: the native `title` tooltip is BANNED in app code. It waits ~1–2s under browser
 // control, cannot be themed, and never shows on keyboard focus — which is why #530 replaced every use
@@ -32,16 +33,6 @@ const DOM_TITLE_ASSIGN = [
   /setAttribute\(\s*["']title["']/,
 ];
 
-// `title=` (JSX attribute) — a TOOLTIP shape, but which component owns it decides whether it is one
-// (see JSX_TAG_OFFENDER below). Checked against the whole OPENING TAG, not a single line: #1044 found
-// that a per-line check reads `title="…"` sitting alone on its own line as "some earlier tag's prop"
-// without ever learning which tag that was, so an IconButton/Button (banned — the interactive
-// wrappers below) escaped detection whenever its `title` did not share a line with `<IconButton`.
-const JSX_TITLE_ATTR = [
-  /\stitle=\{(?!\s*<)/, //          JSX attribute holding a string expression
-  /\stitle="[^"]/, //               JSX attribute holding a literal
-];
-
 // Interactive wrappers — an IconButton/Button/Trigger `title` IS a tooltip and must move to data-tip
 // like any other. Every other capitalised component's `title` is a panel/dialog heading prop, not a
 // hover bubble, and a native (lowercase) element's `title` is never anything but the banned tooltip.
@@ -62,56 +53,52 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-// One JSX opening tag at a time (`<Comp ...>`, however many source lines its attributes span), so the
-// `title=` verdict is decided by the tag that actually owns it rather than by whichever line it lands
-// on.
+// One JSX opening tag at a time, so the `title=` verdict is decided by the tag that actually owns it
+// rather than by whichever line it lands on.
 //
-// #1044 review round 2: a plain `[^>]*` stop-at-the-first-`>` scan reads a tag as ending at the
-// FIRST `>` in the source, including one that belongs to something nested inside an attribute
-// expression — an arrow function prop (`onClick={() => copy()}`, whose `=>` carries a bare `>`) truncates
-// the "tag" before a `title=` that comes after it. A regex cannot balance nested braces, so this walks
-// the text by hand: track brace depth (an attribute expression's `{…}`) and quote state (a string/
-// template literal), and only treat a `>` as the tag's own close when neither is open.
-const TAG_START = /<([A-Za-z][\w.]*)\b/g;
-
-function* jsxOpeningTags(content: string): Generator<{ index: number; tagName: string; tag: string }> {
-  TAG_START.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = TAG_START.exec(content))) {
-    const start = m.index;
-    let i = TAG_START.lastIndex;
-    let braceDepth = 0;
-    let quote: string | null = null;
-    while (i < content.length) {
-      const c = content[i];
-      if (quote) {
-        if (c === "\\") { i += 2; continue; }
-        if (c === quote) quote = null;
-      } else if (c === '"' || c === "'" || c === "`") {
-        quote = c;
-      } else if (c === "{") {
-        braceDepth++;
-      } else if (c === "}") {
-        braceDepth--;
-      } else if (c === ">" && braceDepth <= 0) {
-        break;
-      }
-      i++;
-    }
-    const end = Math.min(i + 1, content.length);
-    yield { index: start, tagName: m[1], tag: content.slice(start, end) };
-    TAG_START.lastIndex = end;
-  }
-}
-
-function jsxTagOffenders(content: string): { index: number; tag: string }[] {
+// #1044 review round 3: TWO hand-rolled scans in a row missed real offenders — round 1's
+// `[^>]*` regex stopped at the first `>` anywhere, including one inside an arrow-function prop
+// (`onClick={() => copy()}`); round 2's brace/quote-tracking scanner fixed that but then read an
+// APOSTROPHE inside a comment or JSX text ("a person's letters") as a string open, and ran to the next
+// one — one tag in `settings/AccountPage.tsx` swallowed 527 lines this way, silently skipping every
+// real tag nested inside it. A regex (or a hand-rolled quote-tracker) cannot tell a string from a
+// comment from JSX text without re-deriving a chunk of the grammar; the real parser already knows.
+// `typescript` is an existing devDependency (see `error-is-not-empty-888.test.ts`'s discovery walk for
+// the same pattern) — walk `JsxOpeningElement`/`JsxSelfClosingElement` nodes directly, no new
+// dependency, no guessing where a tag ends.
+function jsxTagOffenders(content: string, fileName: string): { index: number; tag: string }[] {
   const offenders: { index: number; tag: string }[] = [];
-  for (const { index, tagName, tag } of jsxOpeningTags(content)) {
-    if (!JSX_TITLE_ATTR.some((re) => re.test(tag))) continue;
-    const isBanned = BANNED_TOOLTIP_TAGS.has(tagName);
-    if (/^[A-Z]/.test(tagName) && !isBanned) continue; // heading-shaped prop on a non-interactive component
-    offenders.push({ index, tag });
-  }
+  const scriptKind = fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, true, scriptKind);
+
+  // A title prop counts as the banned tooltip shape the same way the old regex did: a non-empty string
+  // literal, or a `{expr}` whose expression is not itself a JSX element/fragment (title={<Icon/>} is not
+  // a shape this codebase uses, but the old pin excluded it explicitly — kept for parity).
+  const isTooltipShapedInitializer = (init: ts.JsxAttribute["initializer"]): boolean => {
+    if (!init) return false; // bare `title` (no value) — not valid JSX/DOM anyway
+    if (ts.isStringLiteral(init)) return init.text.length > 0;
+    if (ts.isJsxExpression(init) && init.expression) {
+      return !ts.isJsxElement(init.expression) && !ts.isJsxSelfClosingElement(init.expression) && !ts.isJsxFragment(init.expression);
+    }
+    return false;
+  };
+
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tagName = node.tagName.getText(source);
+      const titleAttr = node.attributes.properties.find(
+        (p): p is ts.JsxAttribute => ts.isJsxAttribute(p) && p.name.getText(source) === "title",
+      );
+      if (titleAttr && isTooltipShapedInitializer(titleAttr.initializer)) {
+        const isBanned = BANNED_TOOLTIP_TAGS.has(tagName);
+        if (!(/^[A-Z]/.test(tagName) && !isBanned)) { // exclude: heading-shaped prop on a non-interactive component
+          offenders.push({ index: node.getStart(source), tag: node.getText(source).replace(/\s+/g, " ").trim().slice(0, 120) });
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
   return offenders;
 }
 
@@ -134,7 +121,7 @@ describe("#530: no native `title` tooltips in app code", () => {
         if (ALLOWED_LINE.some((re) => re.test(line))) return;
         offenders.push(`${relative(srcRoot, file)}:${i + 1}: ${line.trim().slice(0, 120)}`);
       });
-      for (const { index, tag } of jsxTagOffenders(content)) {
+      for (const { index, tag } of jsxTagOffenders(content, file)) {
         const lineNo = content.slice(0, index).split("\n").length;
         offenders.push(`${relative(srcRoot, file)}:${lineNo}: ${tag.replace(/\s+/g, " ").trim().slice(0, 120)}`);
       }
@@ -148,22 +135,40 @@ describe("#530: no native `title` tooltips in app code", () => {
   // #1044 break-check: an interactive wrapper's `title` on its OWN line — the exact shape that escaped
   // the old per-line scan — must still be caught.
   it("catches a banned component's title even when the attribute sits alone on its own line", () => {
-    const offenders = jsxTagOffenders('<IconButton\n  aria-label="x"\n  title="tooltip"\n  onClick={fn}\n>\n');
+    const offenders = jsxTagOffenders('<IconButton\n  aria-label="x"\n  title="tooltip"\n  onClick={fn}\n>\n', "t.tsx");
     expect(offenders.length).toBe(1);
   });
 
   // #1044 review round 2 break-check: an arrow-function prop AHEAD of `title=` — the shape that
   // escaped the round-1 `[^>]*` scan, because its `=>` supplied the first `>` the old regex stopped at.
   it("catches title after an arrow-function prop, on a banned component and a native element alike", () => {
-    expect(jsxTagOffenders('<IconButton aria-label="x" onClick={() => copy()} title="Copy">\n').length).toBe(1);
-    expect(jsxTagOffenders('<button onClick={() => go()} title="native">\n').length).toBe(1);
+    expect(jsxTagOffenders('<IconButton aria-label="x" onClick={() => copy()} title="Copy">\n', "t.tsx").length).toBe(1);
+    expect(jsxTagOffenders('<button onClick={() => go()} title="native">\n', "t.tsx").length).toBe(1);
     // ...and the DropdownMenuItem shape the review found for real (OverflowMenu.tsx), same arrow-prop
     // truncation risk plus the newly-banned tag.
-    expect(jsxTagOffenders('<DropdownMenuItem onSelect={() => go()} title={it.hint}>\n').length).toBe(1);
+    expect(jsxTagOffenders('<DropdownMenuItem onSelect={() => go()} title={it.hint}>\n', "t.tsx").length).toBe(1);
+  });
+
+  // #1044 review round 3 break-check: the exact shape that broke the round-2 hand-scanner — an
+  // apostrophe inside a comment (or JSX text) BEFORE the offending tag, which the old quote-tracker read
+  // as a string open and ran past every real tag until the next apostrophe. A real parser is immune by
+  // construction; this pins that a comment's apostrophe never widens or swallows a tag boundary.
+  it("catches a native title after a comment containing an apostrophe (the scanner this replaced could not)", () => {
+    const src = [
+      "function C() {",
+      "  return (",
+      "    <div>",
+      "      {/* a person's letters, and another's too — plain JSX-text apostrophes, not a string */}",
+      '      <button onClick={() => go()} title="native">x</button>',
+      "    </div>",
+      "  );",
+      "}",
+    ].join("\n");
+    expect(jsxTagOffenders(src, "t.tsx").length).toBe(1);
   });
 
   it("does not flag a non-interactive component's heading title, on its own line or the tag's", () => {
-    expect(jsxTagOffenders('<Dialog\n  title="Heading"\n>\n')).toEqual([]);
-    expect(jsxTagOffenders("<RelatedSection title={headingText}>\n")).toEqual([]);
+    expect(jsxTagOffenders('<Dialog\n  title="Heading"\n>\n', "t.tsx")).toEqual([]);
+    expect(jsxTagOffenders("<RelatedSection title={headingText}>\n", "t.tsx")).toEqual([]);
   });
 });
