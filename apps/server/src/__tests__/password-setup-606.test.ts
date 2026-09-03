@@ -102,6 +102,8 @@ describe('#606: a password entrance is added to the person who is already here',
       await setLocalLogin(false)
       const off = await app.inject({ method: 'POST', url: `/members/${encodeURIComponent(other)}/password-setup`, headers: H })
       expect(off.statusCode, 'the same door the invite uses').toBe(400)
+      // #1075: its own code now, the same one the local-invite door already used for this fact.
+      expect(off.json().code).toBe('local_login_disabled')
       await setLocalLogin(true)
       const on = await app.inject({ method: 'POST', url: `/members/${encodeURIComponent(other)}/password-setup`, headers: H })
       expect(on.statusCode, 'and it opens again when the tenant turns passwords on').toBe(201)

@@ -15,6 +15,12 @@
 // the rest — and the uniform sentence, appearing for some people and not others, is exactly the
 // disclosure uniformity exists to prevent. The first test below is that pin: it goes red the moment
 // the two checks trade places.
+//
+// #1075 (condition 3's split-off, same day): a second nameable fact reached this door — "password
+// sign-in is off for this tenant" is a SETTING too, and the local-invite door already names it. It used
+// to fall into the uniform bucket by accident of never having been examined; the tests near the bottom
+// of this file pin it as its own code, checked before everything else including #1074's own address
+// check, for the identical ordering reason.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -115,22 +121,17 @@ describe('#1074 condition 1: the deployment fact short-circuits before any perso
 
 describe('#1074 condition 2: measured at the response, uniform side stays uniform', () => {
   it('the person-side causes are one answer: same status, same code, same body', async () => {
-    // (a) the tenant has password sign-in off — a CONFIGURATION fact, which #1074's line puts on the
-    // nameable side. It stays uniform HERE because the local-invite door already names it in its own
-    // words, and reconciling the two doors is its own ticket rather than a change smuggled in here.
-    await setLocalLogin(false)
-    const loginOff = await setup(OK)
-    await setLocalLogin(true)
-    // (b) the member has no address of their own, and (c) their address is somebody else's sign-in name
+    // #1075 split "sign-in off" out of this set (see the describe block below) — the two REMAINING
+    // causes are genuine person facts: (a) the member has no address of their own, and (b) their
+    // address is somebody else's sign-in name.
     const noOwnAddress = await setup(NO_EMAIL)
     const collision = await setup(CLASHED)
 
-    for (const [name, res] of [['sign-in off', loginOff], ['no address of their own', noOwnAddress], ['identifier collision', collision]] as const) {
+    for (const [name, res] of [['no address of their own', noOwnAddress], ['identifier collision', collision]] as const) {
       expect(res.statusCode, `${name}: status`).toBe(400)
       expect(res.json().code, `${name}: code`).toBe('password_setup_unavailable')
     }
-    expect(noOwnAddress.body, 'no-address and sign-in-off are indistinguishable').toBe(loginOff.body)
-    expect(collision.body, 'a collision and sign-in-off are indistinguishable').toBe(loginOff.body)
+    expect(collision.body, 'a collision and no-own-address are indistinguishable').toBe(noOwnAddress.body)
   })
 
   it('the deployment fact is a DIFFERENT code from the uniform one', async () => {
@@ -139,5 +140,53 @@ describe('#1074 condition 2: measured at the response, uniform side stays unifor
     expect(named.json().code).toBe('deployment_has_no_address')
     expect(uniform.json().code).toBe('password_setup_unavailable')
     expect(named.json().code, 'the split is the whole ruling — one code cannot serve both').not.toBe(uniform.json().code)
+  })
+})
+
+// #1075 (#1074's line, condition 3's split-off): "password sign-in is off for this tenant" is a
+// SETTING, not a person fact — every member of the tenant hits it identically, and the local-invite
+// door one screen over has always named it. It used to fall into the uniform `password_setup_unavailable`
+// bucket above (see #1074 condition 2's first test, now trimmed); this door now names it too, with the
+// same code the invite door uses (`local_login_disabled`), and checks it FIRST — before #1074's own
+// deployment-address check — for the same ordering reason: if it ran after either the address check or
+// a person check, a member some OTHER cause would refuse could be told the tenant setting instead,
+// and that split would itself be the disclosure the uniform sentence exists to prevent.
+describe('#1075: the tenant setting is named, and named before every other check', () => {
+  it('sign-in off gets its own code, distinct from both the uniform person answer and the deployment one', async () => {
+    await setLocalLogin(false)
+    try {
+      const loginOff = await setup(OK)
+      expect(loginOff.statusCode).toBe(400)
+      expect(loginOff.json().code, 'the same code the local-invite door uses for the same fact').toBe('local_login_disabled')
+      expect(loginOff.json().code).not.toBe('password_setup_unavailable')
+      expect(loginOff.json().code).not.toBe('deployment_has_no_address')
+    } finally {
+      await setLocalLogin(true)
+    }
+  })
+
+  it('runs before the deployment-address check: a mintable member and an address-less-deployment member get the SAME answer while sign-in is off', async () => {
+    await setLocalLogin(false)
+    try {
+      const [mintable, addressLess] = await withNoAddress(async () => [await setup(OK), await setup(OK)] as const)
+      expect(mintable.json().code).toBe('local_login_disabled')
+      expect(addressLess.json().code, 'the tenant-setting check runs first, so the missing address never gets asked').toBe('local_login_disabled')
+      expect(addressLess.body).toBe(mintable.body)
+    } finally {
+      await setLocalLogin(true)
+    }
+  })
+
+  it('runs before the person checks too: sign-in off answers the same for a mintable member and a person-refused one', async () => {
+    await setLocalLogin(false)
+    try {
+      const mintable = await setup(OK)
+      const personRefused = await setup(NO_EMAIL)
+      expect(mintable.json().code).toBe('local_login_disabled')
+      expect(personRefused.json().code, 'a member the mint would refuse must not be told so while sign-in is off').toBe('local_login_disabled')
+      expect(personRefused.body).toBe(mintable.body)
+    } finally {
+      await setLocalLogin(true)
+    }
   })
 })

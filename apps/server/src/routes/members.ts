@@ -13,7 +13,7 @@ import { reindexPublishedPages, listGroupNames } from './spaces.js'
 import { groupFgaId } from '../auth/group-sync.js'
 import { enqueueTupleDeletes, flushTupleDeletes, type TupleIntent } from '../db/tuple-outbox.js' // #896
 import { isLastAdmin, lastAdminRefusal } from '../auth/last-admin.js' // #573: ONE last-admin predicate; #603: the refusal says why
-import { assertClosingIsSafe, assertNotLastExemptAdmin, anAdminHoldsAKey, memberHasAnotherWayIn, subsWithAnotherWayIn, SSO_FLOOR_REFUSAL } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
+import { assertClosingIsSafe, assertNotLastExemptAdmin, anAdminHoldsAKey, memberHasAnotherWayIn, subsWithAnotherWayIn, SSO_FLOOR_REFUSAL, localLoginEnabled } from '../auth/login-methods.js' // #866 / ADR-251 §3.7: a write that takes the key away can close the last way in
 import { createInvite, revokeInvite, reissueInvite, hashInviteToken, type InviteRole } from '../auth/invites.js'
 import { destroyMemberSessions, tenantDefaultLang } from '../auth/session.js'
 import { deleteAllFactors } from '../auth/second-factors.js' // #644 the administrator reset (ADR-219 §4)
@@ -565,19 +565,29 @@ export async function membersPlugin(app: FastifyInstance) {
 
   app.post<{ Params: { sub: string } }>('/members/:sub/password-setup', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
+    // #1075 (#1074's line, condition 3's split-off): "password sign-in is off for this tenant" is a
+    // SETTING, not a fact about the person picked — the local-invite door one screen over has always
+    // named it (`invites.ts`'s `local_login_disabled`), and this door reuses its exact wording and code
+    // rather than inventing a second name for the same fact. Same reasoning and the same ordering
+    // requirement as #1074's deployment-address check: run it FIRST, before the person checks, or an
+    // admin who could otherwise mint sees the person-shaped uniform sentence while others see this one
+    // — that split IS the disclosure the uniform sentence exists to prevent.
+    if (!(await localLoginEnabled(req.db))) {
+      return reply.code(400).send({ error: 'password sign-in is off for this tenant — turn it on before setting one up', code: 'local_login_disabled' })
+    }
     // #1074 (ruled): the line is drawn between facts about the PERSON, which stay uniform, and facts
     // about the DEPLOYMENT, which are named. Having no address is the second kind — every member here
     // hits it identically, so it carries zero bits about the one the admin picked, and hiding it only
     // turns a settings mistake into a mystery about a colleague. The invite dialog one screen over has
     // always named it.
     //
-    // THE DEPLOYMENT CHECK RUNS FIRST, and that ordering is the ruling's condition, not a tidiness
-    // preference. Run the person check first and an address-less deployment answers `no address` for
-    // the members who could otherwise be minted and the uniform sentence for the rest — and the
-    // uniform sentence, appearing for some people and not others, is itself the disclosure the
-    // uniformity exists to prevent. Checking the deployment first collapses everyone onto one answer
-    // while the address is missing, so there is no difference left to read. Pinned behaviourally in
-    // password-setup-deployment-first-1074.test.ts.
+    // THE DEPLOYMENT CHECK RUNS FIRST (of the person checks — #1075's tenant-setting check above runs
+    // first of all), and that ordering is the ruling's condition, not a tidiness preference. Run the
+    // person check first and an address-less deployment answers `no address` for the members who could
+    // otherwise be minted and the uniform sentence for the rest — and the uniform sentence, appearing
+    // for some people and not others, is itself the disclosure the uniformity exists to prevent.
+    // Checking the deployment first collapses everyone onto one answer while the address is missing, so
+    // there is no difference left to read. Pinned behaviourally in password-setup-deployment-first-1074.test.ts.
     //
     // It also means no token is minted for a link that cannot be built — the old order minted one and
     // then threw the response away, leaving a live reset token behind for an errand that never ran.
@@ -595,9 +605,8 @@ export async function membersPlugin(app: FastifyInstance) {
     const { mintPasswordSetup } = await import('../auth/password-reset.js')
     const minted = await mintPasswordSetup(req.db, req.params.sub)
     // One answer for the refusals that are facts about this MEMBER: they have no address of their own,
-    // or their address is already somebody ELSE's sign-in name. Password sign-in being off for the
-    // tenant also lands here for now — under #1074's line that is a configuration fact and nameable,
-    // and the local-invite door already names it, but reconciling the two doors is its own ticket.
+    // or their address is already somebody ELSE's sign-in name. Both are genuine person facts under
+    // #1074's line, unlike the tenant setting split out above (#1075).
     //
     // #614 (review rejection): "they already have a password" is NOT among them any more. It used to be,
     // and that left the reset with one delivery route — email — for a product whose invite has always

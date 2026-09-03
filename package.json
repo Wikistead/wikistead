@@ -7,6 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "postinstall": "node scripts/wire-git-hooks.mjs",
     "dev": "turbo run dev --concurrency=15",
     "build": "turbo run build",
     "lint": "turbo run lint",
@@ -21,10 +22,17 @@
     "lint:no-css-modules": "node scripts/check-no-css-modules.mjs",
     "lint:no-control-bytes": "node scripts/check-no-control-bytes.mjs",
     "lint:doc-links": "node scripts/check-doc-links.mjs",
+    "lint:docs-publish-links": "node scripts/check-docs-publish-links.mjs",
     "lint:deploy-secrets": "node scripts/check-deploy-secrets.mjs",
     "lint:origin-routes": "node scripts/check-origin-routes.mjs",
     "lint:selfhost-profile": "node scripts/check-selfhost-profile.mjs",
+    "lint:overlay-sync": "node scripts/check-overlay-sync.mjs",
+    "lint:stranded-work": "node scripts/check-stranded-work.mjs",
+    "lint:no-japanese-comments": "node scripts/check-no-japanese-comments.mjs",
+    "lint:no-japanese-prose": "node scripts/check-no-japanese-prose.mjs",
     "lint:commit-types": "node scripts/check-commit-types.mjs",
+    "release": "semantic-release --no-ci --extends ./release.publish.config.mjs",
+    "release:dry": "semantic-release --dry-run --no-ci",
     "build:ee": "turbo run build",
     "search:sync": "pnpm --filter @wikistead/server search:sync",
     "preflight:deploy": "tsx apps/server/src/deploy/preflight-cli.ts",
@@ -36,7 +44,13 @@
     "test:e2e": "pnpm --filter @wikistead/e2e e2e",
     "teardown:e2e": "node tests/e2e/scripts/down.mjs",
     "setup:server-test": "node scripts/server-test-up.mjs",
-    "teardown:server-test": "node scripts/server-test-down.mjs"
+    "teardown:server-test": "node scripts/server-test-down.mjs",
+    "release:pr": "node scripts/release-pr.mjs",
+    "gate:acceptance": "node scripts/gate-acceptance-730.mjs",
+    "gate:master": "node scripts/master-gate.mjs",
+    "site:acceptance": "node scripts/site-acceptance-180.mjs",
+    "publish-site": "node scripts/publish-site.mjs",
+    "publish-gate": "node scripts/publish-gate.mjs"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^7.0.0",
