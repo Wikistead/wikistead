@@ -324,7 +324,7 @@ describe('#862 §N (#1068, ADR-278) — member.signed_in ships door unredacted, 
     expect(payload, 'the allow-list strips fields no row names, operator identity included').not.toHaveProperty('operator')
     expect(payload).not.toHaveProperty('operatorId')
     expect(payload).not.toHaveProperty('operatorSub')
-    expect(Object.keys(payload!).sort()).toEqual(['door', 'occurredAt', 'targetSub'])
+    expect(Object.keys(payload!).sort()).toEqual(['actorId', 'door', 'occurredAt', 'targetSub'])
   })
 
   // The pin the ruling asked for: the egress-VERDICT difference between the two events that both name
