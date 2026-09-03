@@ -460,22 +460,17 @@ export async function establishMemberSession(
   // product. Existing group-derived admins were converted to `manual` by migration 099 rather than
   // stripped, so nobody lost administration when this call went away.
   const role = row.role
+  const door = opts?.door ?? 'local'
   // #1068 / ADR-278 §N, ruled (2026-09-03): every production login shares this one chokepoint,
   // and until now none of them left a trace anywhere observable — neither the audit ledger nor the
   // webhook catalogue had ever named a sign-in. `door` defaults to `local` here for the same reason
   // `doorOf` does: an absent value is the unsatisfied end, not a caller that forgot.
   //
-  // Best-effort, same shape as every other self-triggered `member.*` write in this codebase
-  // (`second-factor.ts`'s `factor_enrolled`/`factors_reset`): the audit write is inside its own tx
-  // (never nested in the group-sync tx above, so an audit failure cannot roll back a login) and the
-  // webhook emit is a separate, un-awaited fire-and-forget call after it — a login must never fail, or
-  // even slow down, because the ledger or the bus is unavailable.
-  const door = opts?.door ?? 'local'
-  await deps.db.tx((tx) => auditIfEntitled(tx, tenant, {
-    actor: `user:${claims.sub}`, action: 'member.signed_in', target: `member:${claims.sub}`,
-  })).catch(() => { /* audit is best-effort; a login must never fail because the ledger did */ })
-  emit({ type: 'member.signed_in', tenantId: tenant.id, actorId: claims.sub, targetSub: claims.sub, door })
-  return createSession(deps.valkey, {
+  // AFTER `createSession` succeeds, not before: `member.signed_in` says a session was established, and
+  // review caught the first version of this claiming that before the session existed — a Valkey
+  // failure there would have recorded and delivered "signed in" for a login that had, in fact, just
+  // failed with a 500.
+  const sid = await createSession(deps.valkey, {
     tenantId: tenant.id,
     sub: claims.sub,
     email: claims.email ?? null,
@@ -483,4 +478,15 @@ export async function establishMemberSession(
     groups: row.groups,
     ...(opts?.door ? { door: opts.door } : {}),
   })
+  // Best-effort, same shape as every other self-triggered `member.*` write in this codebase
+  // (`second-factor.ts`'s `factor_enrolled`/`factors_reset`): the audit write is inside its own tx
+  // (never nested in the group-sync tx above, so an audit failure cannot roll back a login) and the
+  // webhook emit is a separate, fire-and-forget call after it. A login must never FAIL because the
+  // ledger or the bus is unavailable — it awaits the tx, so a ledger outage still adds real latency to
+  // every login, which `catch` cannot hide; only the fire-and-forget emit is free of that cost.
+  await deps.db.tx((tx) => auditIfEntitled(tx, tenant, {
+    actor: `user:${claims.sub}`, action: 'member.signed_in', target: `member:${claims.sub}`,
+  })).catch((err: unknown) => console.error('[member.signed_in] audit write failed', err))
+  emit({ type: 'member.signed_in', tenantId: tenant.id, actorId: claims.sub, targetSub: claims.sub, door })
+  return sid
 }
