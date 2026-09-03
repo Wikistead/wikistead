@@ -63,18 +63,25 @@ test("#449: a space-link guest can search their space and a hit opens in the gue
   // ruling withdrew the v1 guest-OFF state; the pane fetches the guest-gated /published route) …
   await expect(guest.getByTestId("search-preview"), "the guest gets the preview pane").toBeVisible();
   await expect(guest.getByTestId("search-preview-rendered"), "the published body renders in the pane").toBeVisible({ timeout: 10000 });
-  expect(
-    await guest.evaluate(() => document.querySelector('[data-testid="search-preview-rendered"]')?.textContent ?? ""),
+  // #1070: assert the TEXT, not a one-shot read taken once the element is up. `toBeVisible` answers
+  // "the pane mounted"; the body arrives over a later fetch, so a plain `evaluate` after it reads
+  // whatever happens to be there — on a slow runner, "".
+  await expect(
+    guest.getByTestId("search-preview-rendered"),
     "the preview shows the page's published body",
-  ).toContain(term.slice(0, 9));
+  ).toContainText(term.slice(0, 9), { timeout: 15000 });
   expect(memberMetaRequests, "the guest surface never called the member page-meta route").toEqual([]);
 
   // … and choosing a hit opens it INSIDE the guest shell (the tree's open handler), not /p/<id>.
   await item.click();
-  await guest.waitForSelector("[data-pane=preview] .cm-content", { timeout: 10000 });
-  await sleep(500);
+  // #1070: the guest shell already has a `.cm-content` mounted from the shared page, so waiting for
+  // the SELECTOR returns at once and the fixed sleep that followed was the only thing standing in
+  // for the document load. Wait for the hit's own text instead.
+  await expect(
+    guest.locator("[data-pane=preview] .cm-content"),
+    "the hit's body loads into the guest shell's editor",
+  ).toContainText(term.slice(0, 9), { timeout: 15000 });
   expect(guest.url(), "stays inside /share/… — never a dead member /p/ route").toContain("/share/");
-  expect(await guest.evaluate(() => document.querySelector("[data-pane=preview] .cm-content")?.textContent ?? "")).toContain(term.slice(0, 9));
 
   // no member chrome bled in with the search box.
   await expect(guest.getByTestId("user-menu"), "no member user menu on the guest shell").toHaveCount(0);
