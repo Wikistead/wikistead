@@ -48,17 +48,37 @@ async function createPasswordLink(page: Page, pageTitle: string, password: strin
   // it once the shared demo space holds more than one page's worth. Three sessions read the old
   // ten-second wait as "the row never appears" because it could not tell "the tree has not loaded"
   // from "the tree loaded without this page"; splitting the two produced "the tree rendered 20 page
-  // row(s) but not …", and the row is simply further down. Nothing is slow and nothing is missing.
+  // row(s) but not …", and the row is simply further down.
   //
-  // So walk the tree the way a reader would: press its own "load more" until the row is there.
+  // #939 root cause (/, confirmed via diagnoseMissingPage below + console tracing): the "20
+  // rows and no more-button" shape is NOT a fetch/pagination bug — `/pages/branch` already returns this
+  // page (confirmed by calling it directly) and react-query's cache already holds it. `[data-testid=
+  // page-tree]` is a react-arborist (react-window) VIRTUALIZED list: react-window renders its OWN
+  // scrollable div as a CHILD of our wrapper (see `ListOuterElement` in react-arborist's source), so
+  // rows past the initial viewport are simply not mounted in the DOM yet, and the "more" button (which
+  // only ever means "more DATA to fetch") is correctly absent once everything IS fetched — there is
+  // just more to virtualize into view. Walk the tree the way a reader would: press "load more" while
+  // there is a next page of DATA, then scroll (a real wheel event, since react-window's own scroll
+  // container isn't reachable by a plain CSS selector) while there is more to virtualize.
   const more = page.locator("[data-testid=tree-branch-more] button");
+  const treeBox = page.locator("[data-testid=page-tree]");
   for (let reveal = 0; ; reveal++) {
     if (await row.count()) break;
     if (!(await more.count())) {
+      const box = await treeBox.boundingBox();
+      if (box) {
+        for (let s = 0; s < 10; s++) {
+          await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+          await page.mouse.wheel(0, 400);
+          await sleep(150);
+          if (await row.count()) break;
+        }
+      }
+      if (await row.count()) break;
       const titles = await page.locator("[data-testid=tree-page]").allInnerTexts();
       const diagnosis = pageId ? await diagnoseMissingPage(pageId) : "no pageId passed — diagnosis skipped";
       throw new Error(
-        `the tree ended after ${titles.length} page row(s) without "${pageTitle}" — last few: ` +
+        `the tree ended after ${titles.length} page row(s) without "${pageTitle}" (wheel-scrolled the virtualized list first) — last few: ` +
           JSON.stringify(titles.slice(-8).map((t) => t.trim().slice(0, 40))) +
           ` — direct API diagnosis: ${diagnosis}`,
       );
@@ -104,12 +124,6 @@ async function createPasswordLink(page: Page, pageTitle: string, password: strin
 }
 
 test("#233: a password-protected link prompts, rejects a wrong password, unlocks with the right one", async ({ browser }) => {
-  // #939: isolated — confirmed root cause via diagnoseMissingPage. Under gate load the tree UI's
-  // own "load more" walk ends (nextCursor:null, 20 rows) WITHOUT this page, while a fresh direct call to
-  // the SAME /pages/branch endpoint finds it in the very first batch — "the server has it, the tree UI
-  // did not draw it". This is a client-side pagination-state bug (see the ticket for the mergePaintedWindow
-  // hypothesis), not a server completeness or authz-timing issue as earlier sessions suspected.
-  test.skip(true, "#939: isolated — client-side tree pagination bug, confirmed server-side via diagnoseMissingPage; see ticket for mergePaintedWindow hypothesis");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc ${Date.now().toString(36)}`;
@@ -147,8 +161,6 @@ test("#233: a password-protected link prompts, rejects a wrong password, unlocks
 // wrong-password budget — a user who mistypes a few times can still unlock. Before the fix, the
 // prompt-display 401 counted, so a single typo (plus a reload) locked the user out.
 test("#233 opening the link + several wrong tries never locks out the correct password", async ({ browser }) => {
-  // #939: isolated — same root cause as the case above; see that test's comment.
-  test.skip(true, "#939: isolated — client-side tree pagination bug, confirmed server-side via diagnoseMissingPage; see ticket for mergePaintedWindow hypothesis");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc 2 ${Date.now().toString(36)}`;
