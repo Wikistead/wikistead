@@ -17,16 +17,22 @@ import { ensurePersonalSpace } from '../routes/spaces.js'
 import type { SearchDriver } from '../search/index.js'
 import { isKnownLang, type Lang } from '../locale.js'
 import { auditIfEntitled } from '../audit/sink.js'
+import { isHttpsRequest } from './request-protocol.js'
+import type { FastifyRequest } from 'fastify'
 
 export const SESSION_COOKIE = 'wks_sess'
 
 // Cookie options. NO `domain` → host-only: a cookie set on acme.<host> is never
 // sent to other.<host>, so it cannot cross the tenant boundary at the browser.
 // (The server ALSO checks session.tenantId === resolved tenant — defence in depth.)
-export function sessionCookieOptions() {
+//
+// #1091: `secure` follows THIS REQUEST's actual protocol, not `NODE_ENV` — the chart's documented
+// TLS-off self-host mode sets `NODE_ENV=production` same as any other install, and a browser silently
+// drops a `Secure` cookie set over plain HTTP, which made sign-in return success and then never work.
+export function sessionCookieOptions(req: Pick<FastifyRequest, 'headers' | 'protocol'>) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isHttpsRequest(req),
     sameSite: 'lax' as const,
     path: '/',
     // domain intentionally omitted (host-only)

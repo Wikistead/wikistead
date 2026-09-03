@@ -60,7 +60,7 @@ export async function signupPlugin(app: FastifyInstance) {
     // Verified identity but NO tenant yet → a one-time, create-only signup session
     // (NOT a member session). The browser carries it only on /signup/* (Path).
     const sid = await createSignupSession(app.valkey, { sub: claims.sub, email: claims.email, name: claims.name })
-    reply.setCookie(SIGNUP_COOKIE, sid, signupCookieOptions())
+    reply.setCookie(SIGNUP_COOKIE, sid, signupCookieOptions(req))
     return reply.redirect(WORKSPACE_PAGE)
   })
 

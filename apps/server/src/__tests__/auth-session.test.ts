@@ -65,10 +65,22 @@ describe('establishMemberSession: membership gate', () => {
 // ── cookie is host-only (no Domain) → cannot cross the tenant boundary ───────
 describe('session cookie hardening', () => {
   it('cookie options are host-only (no domain), httpOnly, sameSite=lax', () => {
-    const o = sessionCookieOptions()
+    const o = sessionCookieOptions({ headers: {}, protocol: 'http' })
     expect(o).not.toHaveProperty('domain') // host-only: acme cookie never sent to other
     expect(o.httpOnly).toBe(true)
     expect(o.sameSite).toBe('lax')
+  })
+
+  // #1091: `secure` used to be `NODE_ENV === 'production'` — true in every shipped image, including
+  // the chart's documented TLS-off self-host mode, where a browser silently drops the cookie and
+  // sign-in never works despite a 200/201 response. It must track THIS REQUEST's protocol instead.
+  it('#1091: secure tracks the request protocol, not NODE_ENV', () => {
+    expect(sessionCookieOptions({ headers: {}, protocol: 'http' }).secure, 'plain HTTP must not get Secure').toBe(false)
+    expect(sessionCookieOptions({ headers: {}, protocol: 'https' }).secure).toBe(true)
+    // Behind a trusted reverse proxy the raw socket is often HTTP, and X-Forwarded-Proto carries the
+    // client-facing scheme — the same signal app.ts's HSTS header and the deploy preflight expect.
+    expect(sessionCookieOptions({ headers: { 'x-forwarded-proto': 'https' }, protocol: 'http' }).secure).toBe(true)
+    expect(sessionCookieOptions({ headers: { 'x-forwarded-proto': 'http' }, protocol: 'http' }).secure).toBe(false)
   })
 })
 

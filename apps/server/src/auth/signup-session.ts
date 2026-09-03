@@ -10,6 +10,8 @@
 // discipline as the host-only member cookie).
 import { randomBytes } from 'node:crypto'
 import type IORedis from 'ioredis'
+import type { FastifyRequest } from 'fastify'
+import { isHttpsRequest } from './request-protocol.js'
 
 export const SIGNUP_COOKIE = 'wks_signup'
 const TTL_S = 900 // 15 min to pick a workspace name
@@ -22,10 +24,11 @@ export interface SignupSession {
 }
 
 // Path=/signup confines the cookie to the signup flow at the browser level too.
-export function signupCookieOptions() {
+// #1091: `secure` follows the actual request protocol, not `NODE_ENV` — see session.ts.
+export function signupCookieOptions(req: Pick<FastifyRequest, 'headers' | 'protocol'>) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isHttpsRequest(req),
     sameSite: 'lax' as const,
     path: '/signup',
   }

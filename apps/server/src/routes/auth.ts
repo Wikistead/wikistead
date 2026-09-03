@@ -374,7 +374,7 @@ export async function authPlugin(app: FastifyInstance) {
         const errorParam = addressTaken ? 'address_taken' : seatFull ? 'seat_full' : emailRequired ? 'email_required' : 'access'
         return reply.redirect(`/login?error=${errorParam}`)
       }
-      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(req))
       return reply.redirect(st.returnTo)
     } finally {
       await db.release()

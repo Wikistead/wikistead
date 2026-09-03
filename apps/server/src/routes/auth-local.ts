@@ -182,7 +182,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
         // be the first lie the enforcement slice reads.
         { localIdentity: true, door: outcome.operatorIssued ? 'operator' : 'local' },
       )
-      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(req))
       return reply.code(201).send({ ok: true })
     },
   )
@@ -508,7 +508,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
         // The counters clear here for the same reason they clear below: the password was correct, and
         // a member who mistyped twice before getting it right must not be one failure from a lock.
         await app.valkey.del(idKey).catch(() => {})
-        reply.setCookie(FACTOR_COOKIE, fsid, factorCookieOptions())
+        reply.setCookie(FACTOR_COOKIE, fsid, factorCookieOptions(req))
         // Two different situations for the screen, not one: presenting a factor and installing one are
         // different things to be asked to do, and a single "factor required" would send somebody with
         // no authenticator to a code box they cannot fill.
@@ -581,7 +581,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       // legitimate user who mistyped twice is not one failure away from a lock, and a refusal that
       // happens after the password matched still counts (review B1).
       await app.valkey.del(idKey).catch(() => {})
-      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(req))
       return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
     },
   )
@@ -647,7 +647,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
       await app.valkey.del(idKey).catch(() => {})
       await markFactorUsed(req.db, proved.factorId)
-      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(req))
       emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: pending.sub, method: 'local' })
       return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
     }
@@ -696,7 +696,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
     reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
     await app.valkey.del(idKey).catch(() => {})
     await markFactorUsed(req.db, matched.id)
-    reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+    reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(req))
     emit({ type: 'auth.success', tenantId: req.tenant.id, actorId: pending.sub, method: 'local' })
     return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
   })
@@ -785,7 +785,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
     await destroyFactorSession(app.valkey, fsid)
     reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
     await app.valkey.del(idKey).catch(() => {})
-    reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+    reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(req))
     // Both halves of what happened, under the names ADR-226 §5 gives them: the factors are gone (the same
     // verb #644 emits, with `reason` naming who did it) and the set is spent.
     emit({
@@ -990,7 +990,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       await destroyFactorSession(app.valkey, held.sid)
       reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
       await app.valkey.del(idKey).catch(() => {})
-      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(req))
       return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
     },
   )
@@ -1047,7 +1047,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
       await destroyFactorSession(app.valkey, held.sid)
       reply.clearCookie(FACTOR_COOKIE, { path: '/api' })
       await app.valkey.del(idKey).catch(() => {})
-      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions())
+      reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(req))
       return { ok: true, returnTo: safeReturnTo(req.body?.returnTo) }
     },
   )

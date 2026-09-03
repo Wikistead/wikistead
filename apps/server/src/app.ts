@@ -66,6 +66,7 @@ import { assertLoginCeilingValid, loginMethodCeiling } from './auth/login-method
 import { readTenantUrlTemplate, TENANT_URL_TEMPLATE_ENV } from './auth/tenant-url-template.js' // #806
 import { loadPlatformOidc } from './auth/oidc.js' // #806: is signup live at all on this deployment?
 import { SESSION_COOKIE, readSession } from './auth/session.js'
+import { isHttpsRequest } from './auth/request-protocol.js'
 import { assertSecretKey, assertNoPublishedSecretsInProduction } from './auth/secret-crypto.js'
 import { spacesPlugin } from './routes/spaces.js'
 import { pagesPlugin } from './routes/pages.js'
@@ -398,8 +399,7 @@ export async function buildApp(opts: BuildAppOpts = {}): Promise<FastifyInstance
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff')
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin')
-    const xfp = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim()
-    if (xfp === 'https' || req.protocol === 'https') {
+    if (isHttpsRequest(req)) {
       reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     }
     // #878 / #148: a response with NO Cache-Control is not "do not cache" — HTTP lets an

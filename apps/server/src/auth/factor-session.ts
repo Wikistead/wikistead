@@ -11,6 +11,8 @@
 // receipt saying "this password was correct, and the account has one thing left to prove".
 import type IORedis from 'ioredis'
 import { randomBytes } from 'node:crypto'
+import type { FastifyRequest } from 'fastify'
+import { isHttpsRequest } from './request-protocol.js'
 
 export const FACTOR_COOKIE = 'wks_factor'
 // Long enough to fetch a phone from another room, short enough that an abandoned one is not a standing
@@ -29,12 +31,14 @@ export interface FactorSession {
  * `Path=/api` rather than `/`: it must reach the two routes that consume it and nothing else needs it.
  * A narrower path is not available — the enrolment and verification routes do not share a prefix
  * deeper than that — so the confinement that matters is the NAME: no other handler looks it up.
+ *
+ * #1091: `secure` follows the actual request protocol, not `NODE_ENV` — see session.ts.
  */
-export function factorCookieOptions() {
+export function factorCookieOptions(req: Pick<FastifyRequest, 'headers' | 'protocol'>) {
   return {
     httpOnly: true,
     sameSite: 'lax' as const,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isHttpsRequest(req),
     path: '/api',
     maxAge: TTL_S,
   }

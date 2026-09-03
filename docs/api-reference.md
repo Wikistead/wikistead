@@ -26,6 +26,10 @@ curl -H "Authorization: Bearer wk_..." https://team.example.com/api/search?q=roa
 - Browser sessions use a cookie (BFF) instead; this document describes the API-key surface. Share-link
   guests use short-lived app-signed tokens and can reach only the guest-enabled subset — API keys are the
   supported integration path.
+- The session cookie's `Secure` attribute follows the request's actual protocol (including
+  `X-Forwarded-Proto` behind a reverse proxy), not a build-time flag — so it is correctly absent on a
+  self-hosted deployment that intentionally runs without TLS (`ingress.tls.enabled: false` in the Helm
+  chart), and the browser can still send the cookie back on that deployment's own plain-HTTP connections.
 - A guest token expires in minutes, and a guest client renews it against the link it came from rather
   than asking the visitor to open the link again. A renewal is refused the moment the link is revoked or
   expires, and a single visit may keep renewing for at most twelve hours; after that the visitor meets
