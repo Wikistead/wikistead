@@ -165,6 +165,7 @@ function SidebarImpl() {
   const data = useMemo(() => buildLazyNodes({
     spaceId: current ?? "", byParent: lazyTree.byParent, pinnedPageIds,
     placeholderName: t("sidebar.placeholderPage"),
+    placeholdersExhaustedLabel: t("sidebar.placeholdersExhausted"),
   }), [current, lazyTree.byParent, pinnedPageIds, t]);
 
   // Active space capability gates management actions (UI only; the server is the

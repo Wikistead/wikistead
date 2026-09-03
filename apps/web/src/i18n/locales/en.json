@@ -940,6 +940,7 @@
     "loadFailed": "Failed to load.",
     "loadMorePages": "Load more pages",
     "placeholderPage": "(A page you can’t view)",
+    "placeholdersExhausted": "Some pages here couldn’t be shown — try search instead.",
     "retry": "Retry",
     "noSpaces": "No spaces yet. Create one above.",
     "noPages": "No pages yet. Add one above.",

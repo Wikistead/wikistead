@@ -250,6 +250,8 @@ export const UNLOADED_CHILD_PREFIX = "unloaded:";
 export const PLACEHOLDER_PREFIX = "ph:";
 /** The "more pages" row a branch grows when its cursor says so (§1). */
 export const MORE_PREFIX = "more:";
+/** #1079 / ADR-220 §4.3: the branch's placeholder budget ran out before every invisible chain was walked. */
+export const PLACEHOLDERS_EXHAUSTED_PREFIX = "ph-exhausted:";
 
 /**
  * Assemble react-arborist nodes from the loaded branches.
@@ -265,8 +267,9 @@ export function buildLazyNodes(args: {
   byParent: ReadonlyMap<string | null, BranchAnswer>;
   pinnedPageIds: ReadonlySet<string>;
   placeholderName: string;
+  placeholdersExhaustedLabel: string;
 }): PageTreeNode[] {
-  const { spaceId, byParent, pinnedPageIds, placeholderName } = args;
+  const { spaceId, byParent, pinnedPageIds, placeholderName, placeholdersExhaustedLabel } = args;
 
   const pageNode = (p: Page): PageTreeNode => ({
     id: `page:${p.id}`,
@@ -330,6 +333,16 @@ export function buildLazyNodes(args: {
       ...branch.pages.map(pageNode),
       ...placeholderNodes(branch, parentId),
     ];
+    if (branch.placeholdersExhausted) {
+      // #1079 / ADR-220 §4.3: "exhausting it is a visible state ... never a short answer that looks
+      // complete". The budget is spent per branch resolution (`tree-placeholders.ts`), so this row is
+      // per branch too — the same row shape as MORE_PREFIX, but there is nothing more to ask for; it
+      // only says the placement search gave up early and points the reader at search instead.
+      rows.push({
+        id: `${PLACEHOLDERS_EXHAUSTED_PREFIX}${parentId ?? ROOT}`, name: placeholdersExhaustedLabel, pageId: "", spaceId,
+        published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
+      });
+    }
     if (branch.nextCursor) {
       // #623 (the "more" row misfiring): the row's id CARRIES THE CURSOR. With a fixed id the
       // arborist row survives the append, its mount-once guard stays spent, and the next page never

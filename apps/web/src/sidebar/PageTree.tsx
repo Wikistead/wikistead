@@ -3,10 +3,10 @@ import { SELECTED_ROW } from "../ui/selected-row"; // #632: shared with the sett
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, FilePen, FilePlus, FileText, Info, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
-import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX } from "./lazy-tree"; // #623 §6.3
+import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX, PLACEHOLDERS_EXHAUSTED_PREFIX } from "./lazy-tree"; // #623 §6.3, #1079
 import { alignSelectedRow, decideScroll, NO_SCROLL_YET, type ScrollMemory } from "./scroll-to-selection"; // #899
 
 // The presentational page-tree — the ONE react-arborist tree + row renderer shared by every surface that
@@ -283,6 +283,20 @@ export function PageTree({
           enabled={pagingEnabled}
           onVisible={() => onLoadMoreRef.current?.(parentId === "root" ? null : parentId)}
         />
+      );
+    }
+    if (d.id.startsWith(PLACEHOLDERS_EXHAUSTED_PREFIX)) {
+      // #1079 / ADR-220 §4.3: the placeholder budget ran out for this branch. Not usable like the
+      // other synthetic rows (no open, no menu, no drag, no toggle — it has no children), and unlike
+      // MORE_PREFIX there is nothing more to request: the budget is spent, not paged.
+      return (
+        <div
+          className="flex h-full w-full min-w-0 items-center gap-1.5 px-1 text-fg-dim select-none"
+          data-testid="tree-placeholders-exhausted"
+        >
+          <Info size={13} className="flex-none" />
+          <span className="truncate text-xs">{d.name}</span>
+        </div>
       );
     }
     if (d.id.startsWith(PLACEHOLDER_PREFIX)) {
