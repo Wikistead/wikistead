@@ -22,11 +22,11 @@ import { createSession, SESSION_COOKIE } from '../auth/session.js'
 import { createSpace, deleteSpace, setSpacePublic, unsetSpacePublic, isSpacePublic } from '../routes/spaces.js'
 import { createPage, setPagePrivate, setPagePublic } from '../routes/pages.js'
 import type { Tenant } from '@wikistead/types'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6381')
 const driver = new LogicalSearchDriver()
-const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'team', isolation: 'logical' }) as Tenant // team → auditLog entitled
 const MEMBER = 'sp277-member'     // space viewer_member — can view, must NOT toggle
 const STRANGER = 'sp277-stranger' // no grants at all — the SAME 403
@@ -34,6 +34,7 @@ const TADMIN = 'sp277-admin'      // tenant admin — manager via `admin from te
 const GUEST_LINK = 'sp277-link'   // space share-link guest (the #244 pair-marker case)
 
 let app: FastifyInstance
+let pt: PrivateTenant
 let db: TenantDb, spaceId: string, pubPage: string, draftPage: string, privPage: string
 let templateId: string
 let acmeSpace: string
@@ -43,17 +44,21 @@ beforeAll(async () => {
   await driver.ensureIndex()
   app = await buildApp()
   await app.ready()
-  db = await acquireTenantDb(asTenant(TENANT))
-  spaceId = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'team', name: 'sp277-space' })).id
-  pubPage = (await createPage(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'SP Pub' })).id
-  draftPage = (await createPage(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'SP Draft' })).id
-  privPage = (await createPage(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'SP Priv' })).id
+  // #1090: a private tenant — 10 files were fighting over `tenant_dev`'s single tenant_settings row.
+  // `tenant_acme` below stays as-is: it is a DELIBERATE second, real tenant for the cross-tenant
+  // RLS-belt case (condition ④), not part of the race this ticket fixes.
+  pt = await privateTenant(admin, 't277', { plan: 'team' })
+  db = await acquireTenantDb(asTenant(pt.id))
+  spaceId = (await createSpace(db, fgaClient, { tenantId: pt.id, userId: 'dev-user', plan: 'team', name: 'sp277-space' })).id
+  pubPage = (await createPage(db, fgaClient, driver, { tenantId: pt.id, spaceId, userId: 'dev-user', title: 'SP Pub' })).id
+  draftPage = (await createPage(db, fgaClient, driver, { tenantId: pt.id, spaceId, userId: 'dev-user', title: 'SP Draft' })).id
+  privPage = (await createPage(db, fgaClient, driver, { tenantId: pt.id, spaceId, userId: 'dev-user', title: 'SP Priv' })).id
   await admin`UPDATE pages SET published_at = now(), published_md = 'body' WHERE id IN (${pubPage}, ${privPage})`
-  await setPagePrivate(db, fgaClient, driver, { pageId: privPage, tenantId: TENANT, userId: 'dev-user' }) // pair markers (#244)
+  await setPagePrivate(db, fgaClient, driver, { pageId: privPage, tenantId: pt.id, userId: 'dev-user' }) // pair markers (#244)
   // A space-scoped template (review condition ①: a public space must NOT expose it to anon/guests).
   const [tpl] = await admin<{ id: string }[]>`
     INSERT INTO templates (tenant_id, name, body_md, scope, space_id, created_by)
-    VALUES (${TENANT}, 'sp277-tpl', '# t', 'space', ${spaceId}, 'user:dev-user') RETURNING id`
+    VALUES (${pt.id}, 'sp277-tpl', '# t', 'space', ${spaceId}, 'user:dev-user') RETURNING id`
   templateId = tpl!.id
   // A cross-tenant space — dev-user gets a MANAGER GRANT on it, so only the RLS belt stands
   // between a passing FGA check and a global user:* wildcard write (review condition ④).
@@ -64,16 +69,16 @@ beforeAll(async () => {
     // publish wrote no FGA link here (published via SQL), so wire page#space explicitly (guest-test pattern).
     { user: `space:${spaceId}`, relation: 'space', object: `page:${pubPage}` },
     { user: `space:${spaceId}`, relation: 'space', object: `page:${privPage}` },
-    { user: `tenant:${TENANT}`, relation: 'tenant', object: `template:${templateId}` },
+    { user: `tenant:${pt.id}`, relation: 'tenant', object: `template:${templateId}` },
     { user: `space:${spaceId}`, relation: 'space', object: `template:${templateId}` },
     { user: `user:${MEMBER}`, relation: 'viewer_member', object: `space:${spaceId}` },
-    { user: `user:${TADMIN}`, relation: 'admin', object: `tenant:${TENANT}` },
+    { user: `user:${TADMIN}`, relation: 'admin', object: `tenant:${pt.id}` },
     { user: `share_link:${GUEST_LINK}`, relation: 'viewer', object: `space:${spaceId}` },
     { user: 'user:dev-user', relation: 'manager', object: `space:${acmeSpace}` },
   ]
   await writeTuples(fgaClient, extraTuples)
   // Parent switch ON for the toggle/route tests (individual tests flip it as needed).
-  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${TENANT}, true) ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = true`
+  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${pt.id}, true) ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = true`
 }, 60_000)
 
 afterAll(async () => {
@@ -85,9 +90,11 @@ afterAll(async () => {
     await admin`DELETE FROM search_outbox WHERE page_id = ${id}`.catch(() => {})
     await admin`DELETE FROM pages WHERE id = ${id}`.catch(() => {})
   }
-  await admin`DELETE FROM audit_log WHERE tenant_id = ${TENANT} AND target = ${`space:${spaceId}`}`.catch(() => {})
+  await admin`DELETE FROM audit_log WHERE tenant_id = ${pt.id} AND target = ${`space:${spaceId}`}`.catch(() => {})
   await admin`DELETE FROM spaces WHERE id = ${acmeSpace}`.catch(() => {})
-  await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user' }).catch(() => {})
+  await deleteSpace(db, fgaClient, driver, { tenantId: pt.id, spaceId, userId: 'dev-user' }).catch(() => {})
+  await admin`DELETE FROM tenant_settings WHERE tenant_id = ${pt.id}`.catch(() => {})
+  await pt.dispose()
   await db.release(); await admin.end(); await valkey.quit(); await pool.end()
 }, 60_000)
 
@@ -96,9 +103,9 @@ const anonSees = (type: 'page' | 'space', id: string) => checkRelation(fgaClient
 
 describe('#277 write gate (uniform 403, RLS belt)', () => {
   it('a viewer_member cannot toggle; a stranger gets the SAME 403', async () => {
-    await expect(setSpacePublic(db, fgaClient, driver, { spaceId, tenantId: TENANT, userId: MEMBER }))
+    await expect(setSpacePublic(db, fgaClient, driver, { spaceId, tenantId: pt.id, userId: MEMBER }))
       .rejects.toMatchObject({ statusCode: 403 })
-    await expect(setSpacePublic(db, fgaClient, driver, { spaceId, tenantId: TENANT, userId: STRANGER }))
+    await expect(setSpacePublic(db, fgaClient, driver, { spaceId, tenantId: pt.id, userId: STRANGER }))
       .rejects.toMatchObject({ statusCode: 403 })
     expect(await anonSees('space', spaceId)).toBe(false)
   })
@@ -106,17 +113,17 @@ describe('#277 write gate (uniform 403, RLS belt)', () => {
   it('cross-tenant: even WITH an FGA manager grant, the RLS belt rejects with the same 403 (condition ④)', async () => {
     // dev-user holds manager on the acme space (fixture), so requireSpaceManage passes — only the
     // in-tenant row check stands before the global wildcard write. It must fail closed.
-    await expect(setSpacePublic(db, fgaClient, driver, { spaceId: acmeSpace, tenantId: TENANT, userId: 'dev-user' }))
+    await expect(setSpacePublic(db, fgaClient, driver, { spaceId: acmeSpace, tenantId: pt.id, userId: 'dev-user' }))
       .rejects.toMatchObject({ statusCode: 403 })
     expect(await anonSees('space', acmeSpace)).toBe(false)
   })
 
   it('the route 403s while the tenant parent switch is OFF, and works when ON (manager session)', async () => {
-    const sid = await createSession(valkey, { tenantId: TENANT, sub: 'dev-user', role: 'admin' })
-    const H = { host: 'dev.localhost', cookie: `${SESSION_COOKIE}=${sid}` }
-    await admin`UPDATE tenant_settings SET public_enabled = false WHERE tenant_id = ${TENANT}`
+    const sid = await createSession(valkey, { tenantId: pt.id, sub: 'dev-user', role: 'admin' })
+    const H = { host: `${pt.slug}.localhost`, cookie: `${SESSION_COOKIE}=${sid}` }
+    await admin`UPDATE tenant_settings SET public_enabled = false WHERE tenant_id = ${pt.id}`
     expect((await app.inject({ method: 'POST', url: `/spaces/${spaceId}/public-access`, headers: H })).statusCode).toBe(403)
-    await admin`UPDATE tenant_settings SET public_enabled = true WHERE tenant_id = ${TENANT}`
+    await admin`UPDATE tenant_settings SET public_enabled = true WHERE tenant_id = ${pt.id}`
     expect((await app.inject({ method: 'POST', url: `/spaces/${spaceId}/public-access`, headers: H })).statusCode).toBe(204)
     expect((await app.inject({ method: 'GET', url: `/spaces/${spaceId}/public-access`, headers: H })).json()).toEqual({ public: true })
     // reset to non-public for the ordered tests below
@@ -132,7 +139,7 @@ describe('#277 exposure = public ∩ published ∩ not-private', () => {
     // survived on a busy stack and read as "the toggle enqueued a draft"). Clear the slate so the
     // SELECT measures the toggle alone.
     await admin`DELETE FROM search_outbox WHERE page_id IN (${pubPage}, ${draftPage}, ${privPage})`
-    await setSpacePublic(db, fgaClient, driver, { spaceId, tenantId: TENANT, userId: TADMIN, plan: 'team' })
+    await setSpacePublic(db, fgaClient, driver, { spaceId, tenantId: pt.id, userId: TADMIN, plan: 'team' })
     expect(await isSpacePublic(fgaClient, { spaceId, userId: 'dev-user' })).toBe(true)
     const [s] = await admin<{ noindex: boolean }[]>`SELECT noindex FROM spaces WHERE id = ${spaceId}`
     expect(s!.noindex).toBe(true) // guardrail 4, same tx
@@ -167,7 +174,7 @@ describe('#277 exposure = public ∩ published ∩ not-private', () => {
   })
 
   it('the public tree route serves the published page only, with X-Robots-Tag: noindex', async () => {
-    const res = await app.inject({ method: 'GET', url: `/public/spaces/${spaceId}/pages`, headers: { host: 'dev.localhost' } })
+    const res = await app.inject({ method: 'GET', url: `/public/spaces/${spaceId}/pages`, headers: { host: `${pt.slug}.localhost` } })
     expect(res.statusCode).toBe(200)
     expect(res.headers['x-robots-tag']).toBe('noindex') // net-new space-flag header
     const ids = JSON.stringify(res.json())
@@ -179,7 +186,7 @@ describe('#277 exposure = public ∩ published ∩ not-private', () => {
   it('the public PAGE route inherits the space noindex (page flag itself is false)', async () => {
     const [p] = await admin<{ noindex: boolean }[]>`SELECT noindex FROM pages WHERE id = ${pubPage}`
     expect(p!.noindex).toBe(false)
-    const res = await app.inject({ method: 'GET', url: `/public/pages/${pubPage}`, headers: { host: 'dev.localhost' } })
+    const res = await app.inject({ method: 'GET', url: `/public/pages/${pubPage}`, headers: { host: `${pt.slug}.localhost` } })
     expect(res.statusCode).toBe(200)
     expect(res.headers['x-robots-tag']).toBe('noindex') // OR'd with the space flag
   })
@@ -187,10 +194,10 @@ describe('#277 exposure = public ∩ published ∩ not-private', () => {
 
 describe('#277 unset (non-destructive, one tuple)', () => {
   it('unset hides the tree (404) but a page individually made public stays public', async () => {
-    await setPagePublic(db, fgaClient, driver, { pageId: pubPage, tenantId: TENANT, userId: 'dev-user' }) // ADR-113 per-page grant
-    await unsetSpacePublic(db, fgaClient, driver, { spaceId, tenantId: TENANT, userId: 'dev-user', plan: 'team' })
+    await setPagePublic(db, fgaClient, driver, { pageId: pubPage, tenantId: pt.id, userId: 'dev-user' }) // ADR-113 per-page grant
+    await unsetSpacePublic(db, fgaClient, driver, { spaceId, tenantId: pt.id, userId: 'dev-user', plan: 'team' })
     expect(await isSpacePublic(fgaClient, { spaceId, userId: 'dev-user' })).toBe(false)
-    const res = await app.inject({ method: 'GET', url: `/public/spaces/${spaceId}/pages`, headers: { host: 'dev.localhost' } })
+    const res = await app.inject({ method: 'GET', url: `/public/spaces/${spaceId}/pages`, headers: { host: `${pt.slug}.localhost` } })
     expect(res.statusCode).toBe(404) // the space is no longer public (existence-hidden)
     expect(await anonSees('page', pubPage)).toBe(true) // the per-page grant survived (non-destructive)
   })

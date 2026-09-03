@@ -12,7 +12,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
-import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
@@ -21,15 +20,17 @@ import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const driver = new LogicalSearchDriver()
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
+const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
 const STAMP = Date.now().toString(36)
 const N = 7
 const PAGE = 3
-const H = { host: 'dev.localhost' }
+let H: { host: string }
 
-let tenant: Tenant, db: TenantDb, app: FastifyInstance
+let pt: PrivateTenant, db: TenantDb, app: FastifyInstance
 let space: string, root: string, hiddenParent: string, deepChild: string, nonPublicKid: string
 const kids: string[] = []
 
@@ -37,16 +38,18 @@ const publish = (id: string) =>
   admin`UPDATE pages SET published_md = 'body', published_at = now() WHERE id = ${id}`
 
 beforeAll(async () => {
-  tenant = (await new TenantRegistry(pool).findBySlug('dev'))!
-  db = await acquireTenantDb(tenant)
+  // #1090: a private tenant — 10 files were fighting over `tenant_dev`'s single tenant_settings row.
+  pt = await privateTenant(admin, 't623')
+  H = { host: `${pt.slug}.localhost` }
+  db = await acquireTenantDb(asTenant(pt.id))
   app = await buildApp(); await app.ready()
-  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${tenant.id}, true)
+  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${pt.id}, true)
               ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = true`
   space = (await createSpace(db, fgaClient, {
-    tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: `pb623-${STAMP}`,
+    tenantId: pt.id, userId: 'dev-user', plan: 'business', name: `pb623-${STAMP}`,
   })).id
   const mk = async (parent: string | null, title: string) => (await createPage(db, fgaClient, driver, {
-    tenantId: tenant.id, spaceId: space, userId: 'dev-user', title, parentId: parent,
+    tenantId: pt.id, spaceId: space, userId: 'dev-user', title, parentId: parent,
   })).id
   root = await mk(null, `pb623-root-${STAMP}`)
   for (let i = 0; i < N; i++) kids.push(await mk(root, `pb623-k-${String(i).padStart(2, '0')}`))
@@ -73,7 +76,9 @@ afterAll(async () => {
     ...[root, ...kids, deepChild].map((id) => ({ user: `space:${space}`, relation: 'space', object: `page:${id}` })),
   ]).catch(() => {})
   await admin`DELETE FROM pages WHERE space_id = ${space}`.catch(() => {})
-  await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space, userId: 'dev-user' }).catch(() => {})
+  await deleteSpace(db, fgaClient, driver, { tenantId: pt.id, spaceId: space, userId: 'dev-user' }).catch(() => {})
+  await admin`DELETE FROM tenant_settings WHERE tenant_id = ${pt.id}`.catch(() => {})
+  await pt.dispose()
   await app.close(); await app.valkey.quit().catch(() => {})
   await db.release(); await pool.end({ timeout: 5 }); await admin.end()
 }, 300_000)
@@ -122,13 +127,13 @@ describe('#623 / ADR-220 §10: the public branch is bounded, and naming a parent
   it('every refusal is the SAME 404 — absent, another space, unpublished, not public', async () => {
     const shapes = new Set<string>()
     const other = (await createSpace(db, fgaClient, {
-      tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: `pb623-other-${STAMP}`,
+      tenantId: pt.id, userId: 'dev-user', plan: 'business', name: `pb623-other-${STAMP}`,
     })).id
     const elsewhere = (await createPage(db, fgaClient, driver, {
-      tenantId: tenant.id, spaceId: other, userId: 'dev-user', title: 'pb623-elsewhere', parentId: null,
+      tenantId: pt.id, spaceId: other, userId: 'dev-user', title: 'pb623-elsewhere', parentId: null,
     })).id
     const draft = (await createPage(db, fgaClient, driver, {
-      tenantId: tenant.id, spaceId: space, userId: 'dev-user', title: 'pb623-draft', parentId: root,
+      tenantId: pt.id, spaceId: space, userId: 'dev-user', title: 'pb623-draft', parentId: root,
     })).id
     try {
       for (const p of ['pb623-no-such-page', elsewhere, draft, hiddenParent]) {
@@ -139,7 +144,7 @@ describe('#623 / ADR-220 §10: the public branch is bounded, and naming a parent
       expect([...shapes][0]!.startsWith('404:')).toBe(true)
     } finally {
       await admin`DELETE FROM pages WHERE id IN (${elsewhere}, ${draft})`.catch(() => {})
-      await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: other, userId: 'dev-user' }).catch(() => {})
+      await deleteSpace(db, fgaClient, driver, { tenantId: pt.id, spaceId: other, userId: 'dev-user' }).catch(() => {})
     }
   }, 300_000)
 

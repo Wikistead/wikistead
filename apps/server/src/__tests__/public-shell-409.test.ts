@@ -10,7 +10,6 @@ import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
-import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
@@ -20,14 +19,16 @@ import { createPage, deletePage } from '../routes/pages.js'
 import { loadShellTemplate, injectShellHead, publicFrameSrc } from '../routes/public-shell.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const driver = new LogicalSearchDriver()
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
+const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
 
 const FIXTURE = `<!doctype html><html><head><meta charset="utf-8"><script type="module" src="/assets/main-TEST.js"></script></head><body><div id="root"></div></body></html>`
 
 let app: FastifyInstance
-let tenant: Tenant
+let pt: PrivateTenant
 let db: TenantDb
 let spaceId: string
 let publicPage: string   // public + published + indexable
@@ -36,7 +37,7 @@ let memberPage: string   // published, NOT public
 let unpubPage: string    // public grant but NEVER published
 let xssPage: string      // public + published, hostile title
 const grants: { user: string; relation: string; object: string }[] = []
-const H = { host: 'dev.localhost' }
+let H: { host: string }
 
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), 'shell409-'))
@@ -44,13 +45,15 @@ beforeAll(async () => {
   writeFileSync(indexPath, FIXTURE)
   process.env.PUBLIC_SHELL_INDEX = indexPath
 
-  tenant = (await new TenantRegistry(pool).findBySlug('dev'))!
-  db = await acquireTenantDb(tenant)
-  await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${tenant.id}`
-  spaceId = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'shell409' })).id
+  // #1090: a private tenant — 10 files were fighting over `tenant_dev`'s single tenant_settings row.
+  pt = await privateTenant(admin, 't409')
+  H = { host: `${pt.slug}.localhost` }
+  db = await acquireTenantDb(asTenant(pt.id))
+  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${pt.id}, TRUE) ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = TRUE`
+  spaceId = (await createSpace(db, fgaClient, { tenantId: pt.id, userId: 'dev-user', plan: 'business', name: 'shell409' })).id
 
   const mk = async (title: string, opts: { publish?: boolean; noindex?: boolean; pub?: boolean }) => {
-    const p = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user', title })
+    const p = await createPage(db, fgaClient, driver, { tenantId: pt.id, spaceId, userId: 'dev-user', title })
     if (opts.publish !== false) await admin`UPDATE pages SET published_md = 'body', published_at = now() WHERE id = ${p.id}`
     if (opts.noindex) await admin`UPDATE pages SET noindex = TRUE WHERE id = ${p.id}`
     if (opts.pub !== false) grants.push({ user: 'user:*', relation: 'view_base', object: `page:${p.id}` })
@@ -74,7 +77,9 @@ afterAll(async () => {
   for (const id of [publicPage, noindexPage, memberPage, unpubPage, xssPage]) {
     await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' }).catch(() => {})
   }
-  await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId, userId: 'dev-user' }).catch(() => {})
+  await deleteSpace(db, fgaClient, driver, { tenantId: pt.id, spaceId, userId: 'dev-user' }).catch(() => {})
+  await admin`DELETE FROM tenant_settings WHERE tenant_id = ${pt.id}`.catch(() => {})
+  await pt.dispose()
   await db.release()
   await pool.end()
   await admin.end()
@@ -105,7 +110,7 @@ describe('#990: /pub/* sends a per-tenant frame-src header', () => {
   })
 
   it('a public page answers with the tenant\'s own allowlist; the generic 404 answers with bare self', async () => {
-    await admin`UPDATE tenant_settings SET embed_providers = ${admin.array(['youtube.com'])} WHERE tenant_id = ${tenant.id}`
+    await admin`UPDATE tenant_settings SET embed_providers = ${admin.array(['youtube.com'])} WHERE tenant_id = ${pt.id}`
     try {
       const ok = await app.inject({ method: 'GET', url: `/pub/${publicPage}`, headers: H })
       expect(ok.statusCode).toBe(200)
@@ -116,7 +121,7 @@ describe('#990: /pub/* sends a per-tenant frame-src header', () => {
       const space = await app.inject({ method: 'GET', url: `/pub/space/${spaceId}`, headers: H })
       if (space.statusCode === 200) expect(space.headers['content-security-policy']).toContain('https://youtube.com')
     } finally {
-      await admin`UPDATE tenant_settings SET embed_providers = ${admin.array([])} WHERE tenant_id = ${tenant.id}`
+      await admin`UPDATE tenant_settings SET embed_providers = ${admin.array([])} WHERE tenant_id = ${pt.id}`
     }
   })
 })
@@ -182,13 +187,13 @@ describe('GET /pub/:id — the crawler shell (#409 / ADR-154)', () => {
     expect(on.statusCode).toBe(200)
     expect(on.body).toContain('Allow: /pub/')
     expect(on.body).toContain('Allow: /assets/')
-    expect(on.body).toContain('Sitemap: https://dev.localhost/sitemap.xml')
-    await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${tenant.id}`
+    expect(on.body).toContain(`Sitemap: https://${pt.slug}.localhost/sitemap.xml`)
+    await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${pt.id}`
     try {
       const off = await app.inject({ method: 'GET', url: '/robots.txt', headers: H })
       expect(off.body.trim()).toBe('User-agent: *\nDisallow: /')
     } finally {
-      await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${tenant.id}`
+      await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${pt.id}`
     }
   })
 
@@ -203,23 +208,23 @@ describe('GET /pub/:id — the crawler shell (#409 / ADR-154)', () => {
     expect(count).toBeGreaterThan(0)
     expect(r.body.includes(memberPage)).toBe(false)
     // Parent switch OFF → empty urlset (no URL list leak).
-    await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${tenant.id}`
+    await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${pt.id}`
     try {
       const off = await app.inject({ method: 'GET', url: '/sitemap.xml', headers: H })
       expect((off.body.match(/<url>/g) ?? []).length).toBe(0)
     } finally {
-      await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${tenant.id}`
+      await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${pt.id}`
     }
   })
 
   it('the #253 tenant parent switch OFF hides the whole shell surface (generic 404)', async () => {
-    await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${tenant.id}`
+    await admin`UPDATE tenant_settings SET public_enabled = FALSE WHERE tenant_id = ${pt.id}`
     try {
       const r = await app.inject({ method: 'GET', url: `/pub/${publicPage}`, headers: H })
       expect(r.statusCode).toBe(404)
       expect(r.body).not.toContain('<title>')
     } finally {
-      await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${tenant.id}`
+      await admin`UPDATE tenant_settings SET public_enabled = TRUE WHERE tenant_id = ${pt.id}`
     }
   })
 })

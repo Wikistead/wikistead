@@ -6,7 +6,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
 import { pool } from '../db/pool.js'
-import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
 import type { TenantDb } from '../db/index.js'
 import { fgaClient, writeTuples, deleteTuples } from '@wikistead/authz'
@@ -15,10 +14,13 @@ import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { createPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const driver = new LogicalSearchDriver()
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
-let tenant: Tenant, db: TenantDb, app: FastifyInstance
+const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
+let pt: PrivateTenant, db: TenantDb, app: FastifyInstance
+let H: { host: string }
 let pubSpace: string, otherSpace: string
 let pub: string, child: string, unpub: string, nonpub: string, priv: string
 
@@ -27,13 +29,15 @@ let pub: string, child: string, unpub: string, nonpub: string, priv: string
 async function publish(id: string) { await admin`UPDATE pages SET published_md = 'body', published_at = now() WHERE id = ${id}` }
 
 beforeAll(async () => {
-  tenant = (await new TenantRegistry(pool).findBySlug('dev'))!
-  db = await acquireTenantDb(tenant)
+  // #1090: a private tenant — 10 files were fighting over `tenant_dev`'s single tenant_settings row.
+  pt = await privateTenant(admin, 't227')
+  H = { host: `${pt.slug}.localhost` }
+  db = await acquireTenantDb(asTenant(pt.id))
   // #253 / ADR-113: the tenant parent switch must be ON for the public surface (default OFF).
-  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${tenant.id}, true) ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = true`
-  pubSpace = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'pub-space-227' })).id
-  otherSpace = (await createSpace(db, fgaClient, { tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: 'nonpub-space-227' })).id
-  const mk = async (space: string, parent: string | null, title: string) => (await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: space, userId: 'dev-user', title, parentId: parent })).id
+  await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${pt.id}, true) ON CONFLICT (tenant_id) DO UPDATE SET public_enabled = true`
+  pubSpace = (await createSpace(db, fgaClient, { tenantId: pt.id, userId: 'dev-user', plan: 'business', name: 'pub-space-227' })).id
+  otherSpace = (await createSpace(db, fgaClient, { tenantId: pt.id, userId: 'dev-user', plan: 'business', name: 'nonpub-space-227' })).id
+  const mk = async (space: string, parent: string | null, title: string) => (await createPage(db, fgaClient, driver, { tenantId: pt.id, spaceId: space, userId: 'dev-user', title, parentId: parent })).id
   pub = await mk(pubSpace, null, 'Public Root')
   child = await mk(pubSpace, pub, 'Public Child')
   unpub = await mk(pubSpace, null, 'Public but Unpublished')
@@ -66,8 +70,10 @@ afterAll(async () => {
     { user: 'user:*', relation: 'private', object: `page:${priv}` },
     { user: 'share_link:*', relation: 'private', object: `page:${priv}` },
   ]).catch(() => {})
-  await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: pubSpace, userId: 'dev-user' }).catch(() => {})
-  await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: otherSpace, userId: 'dev-user' }).catch(() => {})
+  await deleteSpace(db, fgaClient, driver, { tenantId: pt.id, spaceId: pubSpace, userId: 'dev-user' }).catch(() => {})
+  await deleteSpace(db, fgaClient, driver, { tenantId: pt.id, spaceId: otherSpace, userId: 'dev-user' }).catch(() => {})
+  await admin`DELETE FROM tenant_settings WHERE tenant_id = ${pt.id}`.catch(() => {})
+  await pt.dispose()
   await db.release(); await pool.end(); await admin.end()
 }, 60_000)
 
@@ -76,7 +82,7 @@ const flatIds = (tree: { id: string; children: unknown[] }[]): string[] =>
 
 describe('#227 space-level public tree', () => {
   it('lists the published+public root and its public child; omits unpublished / non-public / private', async () => {
-    const res = await app.inject({ method: 'GET', url: `/public/spaces/${pubSpace}/pages`, headers: { host: 'dev.localhost' } })
+    const res = await app.inject({ method: 'GET', url: `/public/spaces/${pubSpace}/pages`, headers: H })
     expect(res.statusCode).toBe(200)
     // #364 / ADR-157: the route now returns { home, tree } (the home rides beside the tree).
     const body = res.json() as { home: unknown; tree: { id: string; children: unknown[] }[] }
@@ -89,7 +95,7 @@ describe('#227 space-level public tree', () => {
   })
 
   it('a NON-public space is a uniform 404 (existence-hidden)', async () => {
-    const res = await app.inject({ method: 'GET', url: `/public/spaces/${otherSpace}/pages`, headers: { host: 'dev.localhost' } })
+    const res = await app.inject({ method: 'GET', url: `/public/spaces/${otherSpace}/pages`, headers: H })
     expect(res.statusCode).toBe(404)
   })
 })

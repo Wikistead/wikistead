@@ -19,16 +19,18 @@ import { createPage, publishPage } from '../routes/pages.js'
 import { extractPlantumlFences } from '../routes/public.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const driver = new LogicalSearchDriver()
 const storage = new LogicalStorageDriver()
-const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolation: 'logical' }) as Tenant
-const host = { host: 'dev.localhost' }
+let TENANT: string
+let host: { host: string }
 const UML = '@startuml\nA -> B\n@enduml'
 
 let app: FastifyInstance
+let pt: PrivateTenant
 let db: TenantDb
 let spaceId: string
 let pubPage: string      // published + public (ANON-viewable)
@@ -62,6 +64,12 @@ async function mkAttachment(tenantId: string, pageId: string, key: string): Prom
 }
 
 beforeAll(async () => {
+  // #1090: a private tenant — 10 files were fighting over `tenant_dev`'s single tenant_settings row.
+  // `tenant_acme` below (the foreign attachment) stays as-is — a deliberate second real tenant for
+  // the cross-tenant existence-hiding case, not part of the race this ticket fixes.
+  pt = await privateTenant(admin, 't376')
+  TENANT = pt.id
+  host = { host: `${pt.slug}.localhost` }
   app = await buildApp(); await app.ready()
   await driver.ensureIndex(); await storage.ensureBucket()
   await admin`INSERT INTO tenant_settings (tenant_id, public_enabled) VALUES (${TENANT}, true)
@@ -90,6 +98,8 @@ afterAll(async () => {
   }
   await admin`DELETE FROM attachments WHERE id LIKE 'att376-%'`.catch(() => {})
   await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user' }).catch(() => {})
+  await admin`DELETE FROM tenant_settings WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await pt.dispose()
   await db.release(); await app.close(); await admin.end(); await pool.end()
 }, 60_000)
 
