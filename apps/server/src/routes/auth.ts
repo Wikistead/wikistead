@@ -12,6 +12,7 @@ import { decryptSecret } from '../auth/secret-crypto.js'
 import { acceptInvite } from '../auth/invites.js'
 import { resolveAvailableLogin, resolveLoginConnections, memberHasAnotherWayIn, localLoginEnabled, loginMethodCeiling } from '../auth/login-methods.js'
 import { findMemberIdentityLink, linkMemberIdentity, listLinkedConnectionIds, unlinkMemberIdentity } from '../auth/member-identities.js'
+import { revokeMemberConnectionSlice } from '../auth/group-sync.js'
 import { reauthenticated, locked, countFailure } from './second-factor.js'
 import { auditIfEntitled } from '../audit/sink.js'
 import { resolveSsoStance, isSsoExempt } from '../auth/sso-stance.js'
@@ -473,18 +474,36 @@ export async function authPlugin(app: FastifyInstance) {
         })
       }
 
-      // Audit rides its OWN transaction, caught and logged rather than allowed to fail the request —
-      // the same shape every sibling security-audit call in this codebase uses (auth-local.ts,
-      // members.ts, second-factor.ts). review c-aead6c7: an earlier version tried to nest
-      // this inside the delete's own transaction for atomicity, and it does not do what it looks like
-      // — postgres.js re-raises a swallowed statement error at COMMIT regardless of an inner .catch,
-      // so that shape rolled the DELETE back too (a 500, not the graceful "delete still lands, audit
-      // best-effort" it read as).
-      const removed = await unlinkMemberIdentity(req.db.sql, req.tenant.id, req.params.connectionId, req.user.sub)
+      // #1064 / ADR-259 §3.10 (ruled): the link-row delete, the connection's group-slice revoke
+      // (if this connection is no longer an effective way in for this sub — checked below), and the
+      // audit write all land in ONE transaction. This intentionally departs from the "audit rides
+      // its own transaction, caught and logged" shape every other sibling security-audit call uses
+      // (auth-local.ts, members.ts, second-factor.ts) — that shape exists because an EARLIER version
+      // of this exact route nested the audit inside the delete's transaction and hit a postgres.js
+      // quirk (a swallowed statement error re-raised at COMMIT rolls the whole tx back, turning a
+      // graceful "delete lands, audit best-effort" into an opaque 500). §3.10 accepts that risk here
+      // specifically to keep the slice revoke atomic with the delete — see its closing note. If the
+      // COMMIT-time issue resurfaces, the audit call (not the slice revoke) is what should be pulled
+      // back out to its own transaction.
+      const removed = await req.db.tx(async (tx) => {
+        const removed = await unlinkMemberIdentity(tx, req.tenant.id, req.params.connectionId, req.user.sub)
+        if (!removed) return false
+        // Effective set only — a disabled tenant_oidc/tenant_saml row still carries its
+        // subject_prefix, so re-deriving this from the raw row (rather than reusing
+        // resolveLoginConnections's effective output) would wrongly treat a dead connection as
+        // still mint-derived and skip the revoke, reintroducing the bug this ticket exists to fix
+        // (review c-aead6c7, rev1 → rev2).
+        const effective = await resolveLoginConnections({ sql: tx } as never, req.tenant)
+        const stillEffective = effective.some((c) => c.id === req.params.connectionId)
+        if (!stillEffective) {
+          await revokeMemberConnectionSlice(tx, app.fga, req.tenant.id, req.params.connectionId, req.user.sub)
+        }
+        await auditIfEntitled(tx, req.tenant, {
+          actor: `user:${req.user.sub}`, action: 'member.identity_unlinked', target: `member:${req.user.sub}`,
+        })
+        return true
+      })
       if (!removed) return reply.code(404).send({ error: 'not found' })
-      await req.db.tx((tx) => auditIfEntitled(tx, req.tenant, {
-        actor: `user:${req.user.sub}`, action: 'member.identity_unlinked', target: `member:${req.user.sub}`,
-      })).catch((err: unknown) => req.log.warn({ err }, 'identity-unlinked audit failed'))
       return reply.code(204).send()
     },
   )

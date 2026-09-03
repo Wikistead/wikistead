@@ -163,3 +163,34 @@ export async function revokeConnectionGroups(
   }
   return subs
 }
+
+// #1064 / ADR-259 §3.10: the narrower sibling `revokeConnectionGroups` above does not fit self-
+// service unlink — that sweep clears EVERY member's slice for a connection, but unlinking removes
+// one member's link to it, not the connection itself. This deletes only the ONE (connection, sub)
+// row, so an unrelated member still linked to the same connection keeps their slice untouched.
+//
+// Caller contract (ADR-259 §3.10, ruled): call this ONLY when `connectionId` is no longer in
+// `resolveLoginConnections`'s effective list for `sub` (checked by the caller — the effective list
+// excludes a disabled tenant_oidc/tenant_saml row even though its subject_prefix column still
+// exists, which is why the caller must not re-derive the check from a raw row read). Run inside the
+// same transaction as the member_identities link-row delete and the audit write (ADR-259 §3.10).
+export async function revokeMemberConnectionSlice(
+  sql: Sql,
+  fga: OpenFgaClient,
+  tenantId: string,
+  connectionId: string,
+  memberSub: string,
+): Promise<void> {
+  const [row] = await sql<{ groups: string[] }[]>`
+    SELECT groups FROM member_connection_groups
+    WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId} AND member_sub = ${memberSub}`
+  if (!row) return
+  await sql`
+    DELETE FROM member_connection_groups
+    WHERE tenant_id = ${tenantId} AND connection_id = ${connectionId} AND member_sub = ${memberSub}`
+  const [prev] = await sql<{ groups: string[] }[]>`
+    SELECT groups FROM members WHERE tenant_id = ${tenantId} AND sub = ${memberSub}`
+  const next = await unionForMember(sql, tenantId, memberSub)
+  await sql`UPDATE members SET groups = ${sql.array(next)}, updated_at = now() WHERE tenant_id = ${tenantId} AND sub = ${memberSub}`
+  await syncMemberGroups(fga, tenantId, memberSub, prev?.groups ?? [], next)
+}
