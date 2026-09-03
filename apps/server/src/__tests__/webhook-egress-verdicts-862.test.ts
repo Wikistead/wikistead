@@ -72,7 +72,9 @@ describe('#862 every catalogued type has a verdict', () => {
     // Not a snapshot for its own sake: if a later change makes everything `send` again, this is where
     // it shows. The numbers are the rulings of 2026-08-22 and, for the last three, 2026-08-27 (§K).
     expect(by('drop'), 'the three operator events and both auth events').toBe(5)
-    expect(by('redact'), 'member.locked, the two password resets, and the orphan-draft trio').toBe(6)
+    // #1019 / ADR-108 §M (2026-09-03): the two password-reset events moved from `redact` to `send` —
+    // 6 → 4. member.locked and the orphan-draft trio are unchanged.
+    expect(by('redact'), 'member.locked and the orphan-draft trio').toBe(4)
     expect(by('send') + by('drop') + by('redact')).toBe(catalogued.length)
   })
 })
@@ -148,13 +150,28 @@ describe('#862 §K — the orphan-draft trio ships without the page id', () => {
   })
 })
 
-describe('#862 §E — the security events ship; two lose their subject', () => {
-  it('the reset events carry the window, not whose window it is', async () => {
+describe('#862 §M (#1019) — the reset events ship their subject like every sibling; the lockout still does not', () => {
+  it('the reset events carry the window AND whose window it is', async () => {
+    // §E's strip on these two is RETRACTED (ADR-108 §M, 2026-09-03) — the ruling that stripped them
+    // contradicted its own reasoning (member.factors_reset ships targetSub for the same "timing-sharp"
+    // class of fact). They now ship like `member.password_changed` / `member.factor_removed` / etc.
     for (const type of ['member.password_reset_requested', 'member.password_reset_completed'] as const) {
+      expect(egressVerdict(type).kind, type).toBe('send')
       const payload = await storedPayload(type, { targetSub: 'user-42', actorId: 'admin-1', occurredAt: '2026-01-01T00:00:00.000Z' })
       expect(payload, `${type}: the row is written`).not.toBeNull()
-      expect(payload, type).not.toHaveProperty('targetSub')
+      expect(payload, type).toHaveProperty('targetSub', 'user-42')
     }
+  })
+
+  // §L finding 2 (a conditional targetSub on member.locked when the identifier resolved) was REFUSED,
+  // not accepted — kept in the SAME describe block as the reset-events reversal above, on purpose: a
+  // future edit that fixes one by loosening the other fails here, not just in §D's own separate block.
+  it('⚠️ …and member.locked still withholds the identifier — fixing one must not loosen the other', async () => {
+    expect(egressVerdict('member.locked').kind).toBe('redact')
+    const payload = await storedPayload('member.locked', { identifier: 'victim@example.com', occurredAt: '2026-01-01T00:00:00.000Z' })
+    expect(payload, 'the row is written; only the field is withheld').not.toBeNull()
+    expect(payload).not.toHaveProperty('identifier')
+    expect(payload).not.toHaveProperty('targetSub')
   })
 
   it('⚠️ and the other security events are NOT dropped, because the ledger is not universal', () => {

@@ -5,7 +5,9 @@
 // authorization check — the twenty-five that carried a `pageId` were gated by `pageEventDisposition`
 // at delivery, and the rest were gated by nothing. Four of those payloads turned out to reverse or
 // stretch a decision this repository had already made, and the owner ruled on them on 2026-08-22.
-// A fifth ruling followed on 2026-08-27 (§K), which is why twenty-TWO carry a `pageId` today.
+// A fifth ruling followed on 2026-08-27 (§K), which is why twenty-TWO carry a `pageId` today. A sixth
+// followed on 2026-09-03 (§M, #1019): the 2026-08-22 ruling on the two password-reset events was
+// retracted as self-contradictory, so they ship `targetSub` again.
 //
 // ── Why a table, and why it is keyed on the union ───────────────────────────────────────────────
 //
@@ -51,13 +53,13 @@ const redact = (withheld: readonly string[], why: string, ...fields: string[]) =
  * ⚠️ Every type in the catalogue, with what it may carry. Keyed on the union so the compiler asks
  * about the next one.
  *
- * The four rulings of 2026-08-22 are the entries that are not `send`; the ADR carries the argument
- * behind each. Everything else ships because it names things the receiving tenant administers and can
- * already read in its own console — which is what an integration exists for.
+ * The entries that are not `send` are the rulings below; the ADR carries the argument behind each.
+ * Everything else ships because it names things the receiving tenant administers and can already read
+ * in its own console — which is what an integration exists for.
  */
 export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
-  // ⚠️ The entries that are not `send` are the four rulings of 2026-08-22; the ADR carries the argument
-  // behind each, and the reason is on the entry so a reader of this file does not have to go and find it.
+  // ⚠️ The entries that are not `send` are the rulings below; the ADR carries the argument behind
+  // each, and the reason is on the entry so a reader of this file does not have to go and find it.
   //
   //   §C  the three break-glass events name a member of Wikistead staff. `vendor.access`, in the same
   //       catalogue, is annotated "never the operator id" and ADR-169 says the same. Worse: Access
@@ -66,10 +68,9 @@ export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
   //   §D  `member.locked`'s identifier is whatever an unauthenticated caller typed at the login form.
   //       Delivering it relays attacker-supplied input to a tenant-controlled URL, and the type's own
   //       annotation names a webhook consumer as the threat — written when no consumer existed.
-  //   §E  the two password-reset events lose their subject. "A reset window is open" is the useful
-  //       fact; WHOSE window is the part that is sharp in time. The other security events ship: the
-  //       audit ledger is top-tier only while webhooks start at Personal, so this can be the tenant's
-  //       only copy.
+  //   §E  RETRACTED (§M, 2026-09-03) — do not read this section as current. It stripped the subject
+  //       from the two password-reset events; that ruling contradicted the reasoning it gave for
+  //       reaching it. See §M below.
   //   §F  both auth events come from the per-request principal resolver, and the bridge does not ask
   //       whether the tenant has a hook at all — so an unauthenticated caller can make this product
   //       write a row per request. Anonymous share-link editing is the product's centre, so every
@@ -79,6 +80,11 @@ export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
   //       and all three were dropped after six retries. They were in the catalogue and unreachable.
   //       Withholding the page id takes them out of the gate's reach, so the operational fact ("a
   //       claim expired") arrives while WHICH draft it was on stays inside the tenant.
+  //   §M  (#1019, 2026-09-03) the two password-reset events ship `targetSub` again — §E's strip is
+  //       retracted, not revised: it named `member.factors_reset` as an equally timing-sharp fact and
+  //       shipped it anyway, so its own reasoning never supported stripping only these two. A sibling
+  //       proposal to add a CONDITIONAL `targetSub` to `member.locked` (only when the typed identifier
+  //       happened to resolve) was considered and REFUSED — §D stands unchanged, in full, below.
   'page.created': send('pageId', 'spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
   'page.renamed': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
   'page.moved': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
@@ -149,8 +155,11 @@ export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
   'member.recovery_codes_minted': send('actorId', 'targetSub', 'count', 'actorKeyId', 'occurredAt'),
   'member.recovery_codes_revoked': send('actorId', 'targetSub', 'reason', 'actorKeyId', 'occurredAt'),
   'tenant.second_factor_policy_changed': send('actorId', 'required', 'kinds', 'actorKeyId', 'occurredAt'),
-  'member.password_reset_requested': redact(['targetSub'], '#862 / ADR-108 §E (2026-08-22): the window is reportable, the subject is not', 'targetSub', 'actorId', 'actorKeyId', 'occurredAt'),
-  'member.password_reset_completed': redact(['targetSub'], '#862 / ADR-108 §E (2026-08-22): the window is reportable, the subject is not', 'targetSub', 'occurredAt'),
+  // #1019 / ADR-108 §M (2026-09-03): §E's strip on these two is RETRACTED, not merely revised — the
+  // ruling that stripped them contradicted its own stated reasoning (§E's retraction note explains
+  // why). They ship `targetSub` like every other member.* security event now.
+  'member.password_reset_requested': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
+  'member.password_reset_completed': send('targetSub', 'occurredAt'),
   'invite.created': send('actorId', 'role', 'actorKeyId', 'occurredAt'),
   'invite.revoked': send('actorId', 'actorKeyId', 'occurredAt'),
   'invite.reissued': send('actorId', 'emailed', 'actorKeyId', 'occurredAt'),

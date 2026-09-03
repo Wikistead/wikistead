@@ -93,8 +93,8 @@ the page exists. So an event marked as sent can still be withheld for one page.
 | `member.recovery_codes_revoked` | A set of recovery codes stopped being usable — replaced by a fresh set (`re-mint`), spent to recover the account (`used`), or cleared with the factors by an admin (`admin_reset`). | Yes |
 | `tenant.second_factor_policy_changed` | A workspace changed which second factors it requires: off, any, passkeys only, or authenticator apps only. | Yes |
 | `member.password_removed` | An admin removed a member's password sign-in; their sessions were ended with it. | Yes |
-| `member.password_reset_requested` | A password reset link was requested for a member. | Yes, without `targetSub` |
-| `member.password_reset_completed` | A member completed a password reset (all their sessions were signed out). | Yes, without `targetSub` |
+| `member.password_reset_requested` | A password reset link was requested for a member. | Yes |
+| `member.password_reset_completed` | A member completed a password reset (all their sessions were signed out). | Yes |
 | `invite.created` | A member invite was created. | Yes |
 | `invite.revoked` | A member invite was revoked. | Yes |
 | `invite.reissued` | A pending invite was given a fresh link; the previous one stopped working. | Yes |
