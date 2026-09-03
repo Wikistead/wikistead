@@ -139,14 +139,15 @@ describe('#806 the retired name is gone', () => {
   // — the file the server actually loads — never appears in one, and a scan written the obvious way
   // would call the tree clean while the old name sat in it.
   // `.astro` is a build cache, not a source of documentation; everything else here is output.
-  // #1076: a dot-directory holds a nested checkout — full checkouts of the same tree. A walk
-  // that descends into them reads every shipped file a dozen times over and reports the copies as
-  // second definitions, so the pin goes red on any machine that has one and stays green on CI.
-  const SKIP = new Set(['node_modules', '.git', '.astro', 'dist', 'build', '.turbo', 'coverage', 'test-results', 'playwright-report'])
+  // #1076: a dot-directory can hold a NESTED CHECKOUT of this same repository, and a walk that
+  // descends into one reads every shipped file a second time and reports the copy as a second
+  // definition. The count then measures how many checkouts are lying around, not the code.
+  const SKIP = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-results', 'playwright-report'])
+  const skipped = (name: string) => name.startsWith('.') || SKIP.has(name)
 
   function walk(dir: string, out: string[]): string[] {
     for (const entry of readdirSync(dir)) {
-      if (SKIP.has(entry)) continue
+      if (skipped(entry)) continue
       const full = join(dir, entry)
       const st = statSync(full)
       if (st.isDirectory()) walk(full, out)
