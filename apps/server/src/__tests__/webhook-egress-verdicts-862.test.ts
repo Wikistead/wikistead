@@ -168,10 +168,17 @@ describe('#862 §M (#1019) — the reset events ship their subject like every si
   // future edit that fixes one by loosening the other fails here, not just in §D's own separate block.
   it('⚠️ …and member.locked still withholds the identifier — fixing one must not loosen the other', async () => {
     expect(egressVerdict('member.locked').kind).toBe('redact')
-    const payload = await storedPayload('member.locked', { identifier: 'victim@example.com', occurredAt: '2026-01-01T00:00:00.000Z' })
+    // review finding (independent verification of this ticket): §L finding 2 proposed sending
+    // `targetSub` from THIS type when the identifier happened to resolve — so the input here MUST
+    // supply one, or a landed finding-2-shaped change (egress row grows a `targetSub` entry, emit
+    // site starts passing it) would sail through this assertion having never been exercised.
+    const payload = await storedPayload('member.locked', { identifier: 'victim@example.com', targetSub: 'user-42', occurredAt: '2026-01-01T00:00:00.000Z' })
     expect(payload, 'the row is written; only the field is withheld').not.toBeNull()
     expect(payload).not.toHaveProperty('identifier')
     expect(payload).not.toHaveProperty('targetSub')
+    // The allow-list itself, not just the two fields this ticket cares about — catches any other
+    // field a future edit might add to this row without a matching ruling.
+    expect(Object.keys(payload!).sort()).toEqual(['occurredAt'])
   })
 
   it('⚠️ and the other security events are NOT dropped, because the ledger is not universal', () => {
