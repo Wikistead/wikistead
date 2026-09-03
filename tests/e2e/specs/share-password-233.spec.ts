@@ -13,7 +13,36 @@ import { openDemo, enterSplit, createScratchPage, sleep } from "../helpers";
 // by a title nothing else on the shared demo tenant collides with, immune to whatever "demo" becomes next.
 async function createPasswordLink(page: Page, pageTitle: string, password: string): Promise<string> {
   const row = page.locator("[data-testid=tree-page]", { hasText: pageTitle }).first();
-  await row.waitFor({ timeout: 10000 });
+  // #939: this was one 10s wait, so a tree that had not finished loading and a tree missing THIS page
+  // failed identically — which is all the two-core CI runner ever said. Split the two: wait for the
+  // tree to render at all on the app's own cold-start budget, then for our row inside it. A failure
+  // now names which of the two happened.
+  await expect(page.locator("[data-testid=tree-page]").first(), "the page tree renders at all").toBeVisible({ timeout: 45000 });
+  // #939 (measured): the tree is PAGED, and a page this spec just created is not in the first page of
+  // it once the shared demo space holds more than one page's worth. Three sessions read the old
+  // ten-second wait as "the row never appears" because it could not tell "the tree has not loaded"
+  // from "the tree loaded without this page"; splitting the two produced "the tree rendered 20 page
+  // row(s) but not …", and the row is simply further down. Nothing is slow and nothing is missing.
+  //
+  // So walk the tree the way a reader would: press its own "load more" until the row is there.
+  const more = page.locator("[data-testid=tree-branch-more] button");
+  for (let reveal = 0; ; reveal++) {
+    if (await row.count()) break;
+    if (!(await more.count())) {
+      const titles = await page.locator("[data-testid=tree-page]").allInnerTexts();
+      throw new Error(
+        `the tree ended after ${titles.length} page row(s) without "${pageTitle}" — last few: ` +
+          JSON.stringify(titles.slice(-8).map((t) => t.trim().slice(0, 40))),
+      );
+    }
+    expect(reveal, `"${pageTitle}" was not in the first ${reveal} pages of the tree`).toBeLessThan(20);
+    const before = await page.locator("[data-testid=tree-page]").count();
+    await more.first().click();
+    await expect
+      .poll(() => page.locator("[data-testid=tree-page]").count(), { timeout: 15000 })
+      .toBeGreaterThan(before);
+  }
+  await expect(row, `the tree carries the page this spec just created (${pageTitle})`).toBeVisible({ timeout: 20000 });
   // #939 (measured): on a row for the page just navigated to (freshly selected), the FIRST click on
   // `page-actions` reproducibly leaves `aria-expanded="false"` — verified across attempts including no
   // hover, an explicit settle wait, and reading the attribute in the same tick right after the click
@@ -47,7 +76,7 @@ async function createPasswordLink(page: Page, pageTitle: string, password: strin
 }
 
 test("#233: a password-protected link prompts, rejects a wrong password, unlocks with the right one", async ({ browser }) => {
-  test.skip(true, "#939: isolated — tree-page row for a freshly-created scratch page never appears (10s timeout) under the #891 gate's 20-spec run");
+  test.skip(true, "#939/#1077: isolated — under the gate the sidebar renders 20 tree-page rows and no more-row while demo_space holds 25 root pages, so the page this spec just created is not reachable in the tree");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc ${Date.now().toString(36)}`;
@@ -85,7 +114,7 @@ test("#233: a password-protected link prompts, rejects a wrong password, unlocks
 // wrong-password budget — a user who mistypes a few times can still unlock. Before the fix, the
 // prompt-display 401 counted, so a single typo (plus a reload) locked the user out.
 test("#233 opening the link + several wrong tries never locks out the correct password", async ({ browser }) => {
-  test.skip(true, "#939: isolated — same createPasswordLink tree-page timeout as the test above");
+  test.skip(true, "#939/#1077: isolated — under the gate the sidebar renders 20 tree-page rows and no more-row while demo_space holds 25 root pages, so the page this spec just created is not reachable in the tree");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc 2 ${Date.now().toString(36)}`;
