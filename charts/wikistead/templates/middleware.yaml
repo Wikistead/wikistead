@@ -166,6 +166,9 @@ spec:
           image: {{ .Values.meilisearch.image }}
           env:
             - { name: MEILI_ENV, value: production }
+            # Meilisearch's vendor telemetry defaults to ON; a self-hosted stack must not call out
+            # to anyone's collector (same switch as docker-compose.middleware.yml).
+            - { name: MEILI_NO_ANALYTICS, value: "true" }
             # ⚠️ The key is hyphenated, so it can only arrive through an explicit mapping.
             - { name: MEILI_MASTER_KEY, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: meili-master-key } } }
           ports: [{ containerPort: 7700 }]

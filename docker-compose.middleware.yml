@@ -71,6 +71,10 @@ services:
       # the fixture value in their own .env, so nothing changes for them.
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-dev_master_key_change_me}
       MEILI_ENV: development
+      # Meilisearch ships with vendor telemetry ON (its own boot log says `Anonymous telemetry:
+      # "Enabled"`, development env included). A stack this file starts must not call out to anyone's
+      # collector, so it is off here and in the chart — the two places that run the bundled engine.
+      MEILI_NO_ANALYTICS: "true"
 
   # S3-compatible object storage: SeaweedFS (Apache-2.0, pure OSS, actively maintained). Replaces MinIO
   # (community edition development stalled). Each stack overrides `command` only to set its
