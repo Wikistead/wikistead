@@ -1,15 +1,15 @@
 // #1008 review bounce: the escapes that commit ebeff920 introduced had no regression
-// pin. The reset link is built from `req.headers.host` and the invite mail interpolates the URL, the
-// tenant slug and the product name into raw HTML — all of them went through `esc` for the first time
-// in that commit, and removing any one of those `esc` calls left every suite green. This file holds
-// that boundary: it captures the three request-path sends (reset, invite create, invite re-issue)
-// through the hooks seam and asserts a HOSTILE Host header lands escaped in the wire message, and
-// that the Japanese rendering reaches the wire too (the catalogue being bilingual is pinned
-// elsewhere; a builder that never consults it would still pass those pins).
+// pin. #1056 replaced the underlying hole those escapes were papering over — the reset link and the
+// invite mail were built from `req.headers.host`, so a spoofed Host moved the link's ORIGIN, not just
+// its markup (a userinfo-form Host even let `new URL()` rewrite the origin outright, past every `esc`
+// call #1008 added). The three request-path sends (reset, invite create, invite re-issue) now build
+// their link from `tenantBaseUrl()` — the deployment's own declared address — and this file holds
+// THAT boundary: a hostile Host has no effect on where the link points, and a deployment with no
+// declared address degrades honestly (no link sent) instead of trusting the request to supply one.
 //
-// The hostile Host works because the tenant resolver reads `host.split(':')[0]` — everything after
-// the first colon stays out of tenant resolution but IS part of `req.headers.host`, which is exactly
-// the injection channel: the attacker controls the header, the product controls the parse.
+// The Japanese-rendering assertions carried over from the original file stay: the catalogue being
+// bilingual is pinned elsewhere, but a builder that never consulted it would still pass a pin that
+// only checked English, so each send is measured in both languages at least once across the suite.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import postgres from 'postgres'
@@ -29,11 +29,16 @@ const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
 const STAMP = Date.now().toString(36)
 
-// The payload rides BEHIND the colon: `split(':')[0]` still resolves tenant_dev, and the raw header
-// (payload included) is what the route interpolates into `<a href="...">`.
+// The payload rides BEHIND the colon: `split(':')[0]` still resolves tenant_dev, and (before #1056)
+// the raw header — payload included — was what the route interpolated into `<a href="...">`. Kept as
+// the attack input because it is still a real Host a client can send; what changed is that the route
+// no longer reads `req.headers.host` for the link at all, so this input now proves a NEGATIVE.
 const HOSTILE_HOST = 'dev.localhost:80"><script>alert(1)</script>'
 const RAW_MARKER = '"><script>'
-const ESCAPED_MARKER = '&quot;&gt;&lt;script&gt;'
+
+// The deployment's declared address for these tests (.env.server-test). tenantBaseUrl() prefixes the
+// tenant's slug onto its host, so 'dev' composes to this exact origin — never the HOSTILE_HOST above.
+const CONFIGURED_ORIGIN = 'http://dev.localhost:5173'
 
 let app: FastifyInstance
 let db: TenantDb
@@ -54,6 +59,14 @@ async function nextMessage(from: number): Promise<EmailMessage> {
     await new Promise((r) => setTimeout(r, 50))
   }
   throw new Error('no email was captured within 5s')
+}
+
+// A window where NO message arrives is itself the assertion (the "no address configured" cases) —
+// polling for an ABSENCE needs its own helper, not a shorter timeout on the presence one above (a
+// short timeout there would make a slow-but-real send look like a correctly-suppressed one).
+async function noMessageArrives(from: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, 300))
+  expect(sent.length, 'no message was sent while unaddressed').toBe(from)
 }
 
 const AUTH = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
@@ -92,8 +105,8 @@ afterAll(async () => {
   await db.release(); await app.close(); await adminPool.end(); await pool.end()
 }, 120_000)
 
-describe('#1008: what the three request-path mails put on the wire', () => {
-  it('the reset mail escapes a hostile Host in its href, and renders Japanese for a ja member', async () => {
+describe('#1056: mail links ignore a hostile Host and land on the configured address', () => {
+  it('the reset mail lands on the configured origin, never the hostile Host', async () => {
     const from = sent.length
     const res = await app.inject({
       method: 'POST', url: '/auth/local/reset-request',
@@ -103,21 +116,20 @@ describe('#1008: what the three request-path mails put on the wire', () => {
     expect(res.statusCode, 'the uniform answer').toBe(204)
     const msg = await nextMessage(from)
     expect(msg.to).toBe(localAddr)
-    // The boundary itself: the hostile fragment must land escaped and MUST NOT land raw. Both sides,
-    // because an implementation that drops the link entirely would pass the "no raw" half alone.
-    expect(msg.html, 'the payload never lands as markup').not.toContain(RAW_MARKER)
-    expect(msg.html, 'the payload lands escaped inside the href').toContain(ESCAPED_MARKER)
-    expect(msg.html, 'the link is still a link').toContain('href="http://dev.localhost:80')
-    expect(msg.html).toContain('/reset-password?token=')
+    // The boundary itself: the hostile fragment reaches the route (it is a valid Host header) but
+    // never reaches the link, because the link is no longer built from the Host at all.
+    expect(msg.html, 'the hostile Host never lands anywhere in the message').not.toContain(RAW_MARKER)
+    expect(msg.text, 'not even in the text part').not.toContain(RAW_MARKER)
+    expect(msg.html, 'the link lands on the configured origin').toContain(`href="${CONFIGURED_ORIGIN}/reset-password?token=`)
+    expect(msg.text, 'and so does the text-part copy of it').toContain(`${CONFIGURED_ORIGIN}/reset-password?token=`)
     // The Japanese face of THIS mail (the catalogue's own en≠ja is pinned elsewhere; this asserts
     // the builder consults it): subject and anchor label are the ja entries, not the en ones.
     expect(msg.subject).toBe(resetSubject('ja', productName()))
     expect(msg.html).toContain(resetLinkLabel('ja'))
     expect(msg.html, 'no English anchor label on a ja mail').not.toContain(resetLinkLabel('en'))
-    expect(msg.text, 'the text part carries the raw link (no entities)').toContain('http://dev.localhost:80"><script>')
   })
 
-  it('the invite-create mail escapes the hostile Host and wraps the slug in the builder-owned markup', async () => {
+  it('the invite-create mail and response both land on the configured origin', async () => {
     const from = sent.length
     const res = await app.inject({
       method: 'POST', url: '/members/invites',
@@ -125,20 +137,21 @@ describe('#1008: what the three request-path mails put on the wire', () => {
       payload: JSON.stringify({ email: inviteAddr('create'), role: 'member' }),
     })
     expect(res.statusCode).toBe(201)
-    expect(res.json().emailed, 'the route reports the send').toBe(true)
+    const body = res.json() as { inviteUrl: string | null; emailed: boolean }
+    expect(body.emailed, 'the route reports the send').toBe(true)
+    expect(body.inviteUrl, 'the response carries the configured origin too').toMatch(new RegExp(`^${CONFIGURED_ORIGIN}/invite\\?token=`))
     const msg = await nextMessage(from)
     expect(msg.to).toBe(inviteAddr('create'))
-    expect(msg.html, 'the payload never lands as markup').not.toContain(RAW_MARKER)
-    expect(msg.html, 'the payload lands escaped inside the href').toContain(ESCAPED_MARKER)
-    expect(msg.html).toContain('/invite?token=')
-    // The slug and product name pass through esc and land inside builder-owned tags (§3.3a: the
-    // catalogue entry is text; the builder writes the <strong> and the anchor around escaped values).
+    expect(msg.html, 'the hostile Host never lands anywhere in the message').not.toContain(RAW_MARKER)
+    expect(msg.html).toContain(`href="${CONFIGURED_ORIGIN}/invite?token=`)
+    // The slug and product name still pass through esc and land inside builder-owned tags (§3.3a:
+    // the catalogue entry is text; the builder writes the <strong> and the anchor around them).
     expect(msg.html).toContain(`<strong>${tenantSlug}</strong>`)
     expect(msg.subject).toBe(inviteSubject('en', tenantSlug, productName()))
     expect(msg.html).toContain(`>${inviteAcceptLabel('en')}</a>`)
   })
 
-  it('the re-issue mail renders Japanese when the tenant default says so (no member row exists yet)', async () => {
+  it('the re-issue mail lands on the configured origin and renders Japanese when the tenant default says so', async () => {
     const addr = inviteAddr('reissue')
     const { token } = await createInvite(db, { tenantId: TENANT, plan: 'business', invitedBy: 'dev-user', email: addr, role: 'member' })
     expect(token).toBeTruthy()
@@ -153,16 +166,53 @@ describe('#1008: what the three request-path mails put on the wire', () => {
       const from = sent.length
       const res = await app.inject({
         method: 'POST', url: `/members/invites/${row!.id}/reissue`,
-        headers: AUTH, payload: JSON.stringify({ email: true }),
+        headers: { ...AUTH, host: HOSTILE_HOST }, payload: JSON.stringify({ email: true }),
       })
       expect(res.statusCode).toBe(200)
+      const body = res.json() as { inviteUrl: string | null }
+      expect(body.inviteUrl).toMatch(new RegExp(`^${CONFIGURED_ORIGIN}/invite\\?token=`))
       const msg = await nextMessage(from)
       expect(msg.to).toBe(addr)
+      expect(msg.html, 'the hostile Host never lands anywhere in the message').not.toContain(RAW_MARKER)
+      expect(msg.html).toContain(`href="${CONFIGURED_ORIGIN}/invite?token=`)
       expect(msg.subject, 'the second step of the chain answers: tenant default').toBe(inviteSubject('ja', tenantSlug, productName()))
       expect(msg.html).toContain(`>${inviteAcceptLabel('ja')}</a>`)
       expect(msg.html, 'no English anchor label on a ja mail').not.toContain(inviteAcceptLabel('en'))
     } finally {
       await setDefaultLang(prior ? prior.default_lang : null)
     }
+  })
+})
+
+describe('#1056: an unaddressed deployment degrades honestly instead of trusting the request', () => {
+  // tenant_dev carries no verified custom_domains row by default (infra/db/seed.ts only inserts one
+  // when DEV_CUSTOM_DOMAIN is set, which .env.server-test does not set) — clearing the env var alone
+  // is enough to put tenantBaseUrl() into its null branch for the whole describe block.
+  let prior: string | undefined
+  beforeAll(() => { prior = process.env.WKS_PUBLIC_BASE_URL; delete process.env.WKS_PUBLIC_BASE_URL })
+  afterAll(() => { if (prior !== undefined) process.env.WKS_PUBLIC_BASE_URL = prior })
+
+  it('reset-request stays the same uniform 204, and sends nothing', async () => {
+    const from = sent.length
+    const res = await app.inject({
+      method: 'POST', url: '/auth/local/reset-request',
+      headers: { host: 'dev.localhost', 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      payload: JSON.stringify({ identifier: localAddr }),
+    })
+    expect(res.statusCode, 'still uniform — the caller learns nothing').toBe(204)
+    await noMessageArrives(from)
+  })
+
+  it('invite create still creates the invite, but reports no link and sends nothing', async () => {
+    const from = sent.length
+    const res = await app.inject({
+      method: 'POST', url: '/members/invites',
+      headers: AUTH, payload: JSON.stringify({ email: inviteAddr('unaddressed'), role: 'member' }),
+    })
+    expect(res.statusCode, 'the invite itself is not refused — only the link is unavailable').toBe(201)
+    const body = res.json() as { inviteUrl: string | null; emailed: boolean }
+    expect(body.inviteUrl, 'nothing to build a link from').toBeNull()
+    expect(body.emailed, 'nothing to email either').toBe(false)
+    await noMessageArrives(from)
   })
 })

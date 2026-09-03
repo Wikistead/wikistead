@@ -137,6 +137,10 @@ export function e2eStackEnv(p = e2ePorts()) {
     SERVER_PORT: String(p.server),
     COLLAB_PORT: String(p.collab),
     WEB_PORT: String(p.web),
+    // #1056: composeStep prefixes the tenant slug onto this host, so `dev` composes to
+    // `http://dev.localhost:${p.web}` — exactly this stack's own `E2E_WEB_ORIGIN` above. Without it
+    // tenantBaseUrl() is null for every e2e tenant and reset/invite links stop being sent at all.
+    WKS_PUBLIC_BASE_URL: `http://localhost:${p.web}`,
   };
 }
 

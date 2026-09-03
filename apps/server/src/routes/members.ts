@@ -32,6 +32,7 @@ import { productName } from '../product-name.js' // #575: the name is a deployme
 import { esc } from '../email/layout.js'
 import { inviteAcceptLabel, inviteBodyText, inviteSentence, inviteSubject } from '../email/catalog.js'
 import { resolveMailLocale } from '../locale.js'
+import { tenantBaseUrl, noAddressReason } from '../email/base-url.js'
 
 const ROLES: InviteRole[] = ['admin', 'member']
 
@@ -576,8 +577,15 @@ export async function membersPlugin(app: FastifyInstance) {
     // had a copy-link fallback. An admin could not help somebody who had forgotten their password and
     // could not read mail, which is precisely #605's break-glass member.
     if (!minted) return reply.code(400).send({ error: 'this member cannot be given a password entrance', code: 'password_setup_unavailable' })
-    const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
-    const setupUrl = `${scheme}://${req.headers.host}/reset-password?token=${minted.token}`
+    // #1056 / ADR-254 addendum: the same Host-spoofing hole as the mail links below — this is the
+    // #614 break-glass copy-link, so it gets the same fix, folded into the SAME refusal this handler
+    // already gives for "cannot mint" rather than a new response shape for "minted but unaddressable".
+    const address = await tenantBaseUrl(req.db.sql, { id: req.tenant.id, slug: req.tenant.slug })
+    if (!address.url) {
+      req.log.warn({ tenantId: req.tenant.id, ranOut: address.ranOut }, `password setup: ${noAddressReason(address)}`)
+      return reply.code(400).send({ error: 'this deployment has no address to build a link with', code: 'password_setup_unavailable' })
+    }
+    const setupUrl = `${address.url}/reset-password?token=${minted.token}`
     // Two different events, because they are two different things to anyone reading the ledger later:
     // granting a password entrance changes who may authenticate this account; re-issuing a link for one
     // that already exists does not. The catalog already had the second (`member.password_reset_requested`
@@ -766,11 +774,18 @@ export async function membersPlugin(app: FastifyInstance) {
       return reply.code(500).send({ error: 'could not create invite' })
     }
 
-    const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
-    const inviteUrl = `${scheme}://${req.headers.host}/invite?token=${token}`
+    // #1056 / ADR-254 addendum: built from the deployment's declared address, never the request's
+    // Host header (the same Host-spoofing hole #1008 escaped but did not close). Unlike reset-request
+    // this is a synchronous, admin-authenticated create — there is no uniform-silence contract to
+    // preserve — so an unaddressable deployment is reported explicitly: the invite row and token still
+    // exist (createInvite above already committed), only the link is missing until an operator sets
+    // WKS_PUBLIC_BASE_URL or a custom domain, after which `reissue` mints a working one.
+    const address = await tenantBaseUrl(req.db.sql, { id: req.tenant.id, slug: req.tenant.slug })
+    const inviteUrl = address.url ? `${address.url}/invite?token=${token}` : null
+    if (!address.url) req.log.warn({ tenantId: req.tenant.id, ranOut: address.ranOut }, `invite create: ${noAddressReason(address)}`)
 
     let emailed = false
-    if (email) {
+    if (email && inviteUrl) {
       try {
         // #1008 / ADR-260 §6.3: an invite target has no member row yet, so the chain can only ever
         // reach its second step — the tenant default, never a member locale (there is no member).
@@ -816,11 +831,14 @@ export async function membersPlugin(app: FastifyInstance) {
     const reissued = await reissueInvite(req.db, req.params.id)
     if (!reissued) return reply.code(404).send({ error: 'invite not found or not pending' })
 
-    const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
-    const inviteUrl = `${scheme}://${req.headers.host}/invite?token=${reissued.token}`
+    // #1056 / ADR-254 addendum: same reasoning as the create path — the deployment's declared address,
+    // never the request's Host header.
+    const address = await tenantBaseUrl(req.db.sql, { id: req.tenant.id, slug: req.tenant.slug })
+    const inviteUrl = address.url ? `${address.url}/invite?token=${reissued.token}` : null
+    if (!address.url) req.log.warn({ tenantId: req.tenant.id, ranOut: address.ranOut }, `invite reissue: ${noAddressReason(address)}`)
 
     let emailed = false
-    if (req.body?.email === true && reissued.email) {
+    if (req.body?.email === true && reissued.email && inviteUrl) {
       try {
         // #1008 / ADR-260 §6.3: same reasoning as the create path — no member row exists yet.
         const lang = resolveMailLocale(null, await tenantDefaultLang(req.db))

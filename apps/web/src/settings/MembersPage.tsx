@@ -153,7 +153,7 @@ export function MembersPage() {
         role: choice.kind === "tier" ? choice.role : "member",
         roleId: choice.kind === "custom" ? choice.roleId : null,
       });
-      setLastLink({ kind: "invite", url: res.inviteUrl, emailed: res.emailed });
+      setLastLink({ kind: "invite", url: res.inviteUrl ?? undefined, emailed: res.emailed });
       setEmail("");
       setInviteChoice("tier:member");
       await refresh();
@@ -637,20 +637,25 @@ export function MembersPage() {
           // handing it over is now their job. One sentence per state — the two used to be concatenated,
           // which put "if email is off" after "Emailed to recipient." (a condition that had already not
           // applied) and said "copy the link above" and "share it yourself" as if they were two steps.
-          : lastLink?.url ? t(lastLink.emailed ? "members.emailed" : "members.notEmailed") : undefined}
+          // #1056: an invite can now come back with no url at all — the deployment has no address to
+          // build a link with (WKS_PUBLIC_BASE_URL unset, no verified custom domain). That is its own
+          // sentence, not silence where "not emailed" used to be the only other state.
+          : lastLink && "emailed" in lastLink
+            ? (lastLink.url ? t(lastLink.emailed ? "members.emailed" : "members.notEmailed") : t("members.noAddressForLink"))
+            : undefined}
         warn={lastLink?.mint ? t("members.inviteLinkWarn") : undefined}
         actions={lastLink?.mint && (
           <>
             <Button variant="primary" size="sm" data-testid="invite-link-mint"
               onClick={() => void guarded(async () => {
                 const r = await reissueInvite(token, lastLink.mint!.id);
-                setLastLink((s) => (s ? { ...s, url: r.inviteUrl, emailed: r.emailed } : s));
+                setLastLink((s) => (s ? { ...s, url: r.inviteUrl ?? undefined, emailed: r.emailed } : s));
               })()}>{t("members.inviteLinkMint")}</Button>
             {lastLink.mint.email !== t("members.noEmail") && (
               <Button variant="ghost" size="sm" data-testid="invite-link-mint-mail"
                 onClick={() => void guarded(async () => {
                   const r = await reissueInvite(token, lastLink.mint!.id, { email: true });
-                  setLastLink((s) => (s ? { ...s, url: r.inviteUrl, emailed: r.emailed } : s));
+                  setLastLink((s) => (s ? { ...s, url: r.inviteUrl ?? undefined, emailed: r.emailed } : s));
                 })()}>{t("members.inviteLinkMintMail")}</Button>
             )}
           </>

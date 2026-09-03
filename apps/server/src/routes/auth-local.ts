@@ -39,6 +39,7 @@ import { productName } from '../product-name.js'
 import { spendRecoveryCode, recoveryCodesUsable } from '../auth/recovery-codes.js' // #650 / ADR-226 §4: the recovery door
 import { enqueueEmailOutbox } from '../email/outbox.js'
 import { RECOVERY_USED_CLASS } from '../email/security-builder.js'
+import { tenantBaseUrl, noAddressReason } from '../email/base-url.js'
 import { esc } from '../email/layout.js'
 import { resetBodyText, resetIgnore, resetIntro, resetLinkHint, resetLinkLabel, resetSubject } from '../email/catalog.js'
 import { resolveMailLocale } from '../locale.js'
@@ -222,6 +223,20 @@ export async function authLocalPlugin(app: FastifyInstance) {
     const minted = await mintPasswordReset(req.db, req.tenant, identifier)
     if (!minted) return silence()
 
+    // #1056 / ADR-254 addendum: the link is built from the deployment's OWN declared address, never
+    // from the request's Host header — a spoofed Host used to redirect the reset link's destination
+    // wholesale (`new URL()` even lets a userinfo-form Host move the origin outright, past the HTML
+    // escaping #1008 already added). No verified custom domain and no WKS_PUBLIC_BASE_URL is a real,
+    // documented self-host state (the WKS_PUBLIC_BASE_URL reference entry already said a mention or
+    // digest goes unsent then, and now names reset/invite too) — the honest answer is the same uniform
+    // silence as every other refusal this endpoint gives, with the reason logged once so an operator
+    // can find it.
+    const address = await tenantBaseUrl(req.db.sql, { id: req.tenant.id, slug: req.tenant.slug })
+    if (!address.url) {
+      req.log.warn({ tenantId: req.tenant.id, ranOut: address.ranOut }, `password reset: ${noAddressReason(address)}`)
+      return silence()
+    }
+
     // #1008 / ADR-260 §3.1/§6.3: resolved here (synchronously, on req.db) rather than inside the
     // detached closure below — that closure outlives this handler's connection lifetime, so it
     // captures a plain `Lang` value instead of touching `req.db` itself.
@@ -232,8 +247,7 @@ export async function authLocalPlugin(app: FastifyInstance) {
     // body, so a link could not be reconstructed from a queued row (ADR-198 §6 rev3). A send failure
     // is logged and still answers 204 — the caller must not learn that an address exists from a
     // delivery problem.
-    const scheme = process.env.NODE_ENV === 'production' ? 'https' : 'http'
-    const link = `${scheme}://${req.headers.host}/reset-password?token=${minted.token}`
+    const link = `${address.url}/reset-password?token=${minted.token}`
     // review R1, measured: AWAITING the send made this endpoint answer in ~60ms for an address that
     // exists and ~2ms for one that does not. The status was uniform and the CLOCK was not, which is
     // the same oracle by a slower channel. The send is fired and not waited on; a failure is logged.
@@ -244,10 +258,9 @@ export async function authLocalPlugin(app: FastifyInstance) {
         subject: resetSubject(lang, productName()),
         text: resetBodyText(lang, link),
         // #1008 / ADR-260 §3.3a: the catalogue entries are text, so the three paragraphs and the
-        // anchor are written here. `link` is host-derived (`req.headers.host`) and was interpolated
-        // unescaped before this change — a raw HTML slot taking an attacker-influenced Host header is
-        // exactly the boundary §3.3a exists to hold, so it now goes through the same `esc` every
-        // other mail-composing site uses.
+        // anchor are written here. `link` was interpolated unescaped before this change — a raw HTML
+        // slot is exactly the boundary §3.3a exists to hold, so it now goes through the same `esc`
+        // every other mail-composing site uses (#1056 moved the link itself off the request's Host).
         html: `<p>${esc(resetIntro(lang))}</p>`
           + `<p><a href="${esc(link)}">${esc(resetLinkLabel(lang))}</a> ${esc(resetLinkHint(lang))}</p>`
           + `<p>${esc(resetIgnore(lang))}</p>`,

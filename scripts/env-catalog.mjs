@@ -111,7 +111,11 @@ export const ENV_DOCS = {
     // row described sent every mention and digest to `<slug>.app.example.com` — outside the wildcard,
     // outside the certificate, resolving to nothing. The composition is spelled out now, because the
     // ambiguity was never in the code (`.env.example` has always said the zone) but in this sentence.
-    what: 'The parent zone whose subdomains are workspaces — background mail has no Host header to compose from. The workspace slug is prefixed onto it: `https://wikistead.com` produces `https://<slug>.wikistead.com`, so set the zone, not the application\'s own host. A workspace with a verified custom domain uses that instead. Unset means a message that needs a link is dropped with a logged reason rather than improvising one; on a single host, set it to the zone ABOVE your site host so the composed address is the site host itself.',
+    // #1056 / ADR-254 addendum: password reset and invite links used to be built from the REQUEST's
+    // Host header instead, which worked by accident and was also how a spoofed Host could move a
+    // reset link's destination. They now read this same variable, so "unset" now also means those
+    // two links are dropped, not only mentions and digests.
+    what: 'The parent zone whose subdomains are workspaces — background mail, password resets and invitations have no trustworthy Host header to compose a link from. The workspace slug is prefixed onto it: `https://wikistead.com` produces `https://<slug>.wikistead.com`, so set the zone, not the application\'s own host. A workspace with a verified custom domain uses that instead. Unset means any message that needs a link — a mention, a digest, a password reset, an invitation — is dropped with a logged reason rather than improvising one from the request; on a single host, set it to the zone ABOVE your site host so the composed address is the site host itself.',
   },
   WKS_TENANT_URL_TEMPLATE: {
     group: 'Runtime',

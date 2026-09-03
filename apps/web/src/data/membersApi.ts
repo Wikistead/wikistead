@@ -81,8 +81,10 @@ export async function fetchPendingRemovalNotice(token: string): Promise<boolean>
   const r = await apiFetch<{ pending: boolean }>("/members/pending-notice", token);
   return r?.pending ?? false;
 }
-export async function createInvite(token: string, body: { email: string; role: "admin" | "member"; roleId?: string | null }): Promise<{ inviteUrl: string; emailed: boolean }> {
-  return (await apiFetch<{ inviteUrl: string; emailed: boolean }>("/members/invites", token, { method: "POST", body: JSON.stringify(body) }))!;
+// #1056: `inviteUrl` is `null` when the deployment has no address to build a link with yet
+// (WKS_PUBLIC_BASE_URL unset, no verified custom domain) — the invite still exists, just unaddressed.
+export async function createInvite(token: string, body: { email: string; role: "admin" | "member"; roleId?: string | null }): Promise<{ inviteUrl: string | null; emailed: boolean }> {
+  return (await apiFetch<{ inviteUrl: string | null; emailed: boolean }>("/members/invites", token, { method: "POST", body: JSON.stringify(body) }))!;
 }
 /** #638: hand a pending invitation over again.
  *
@@ -90,8 +92,8 @@ export async function createInvite(token: string, body: { email: string; role: "
  *  previous one stops working, which is why the response says so and the screen has to repeat it. Passing
  *  `email` also mails the new link — the same act, a second delivery, and the link still comes back
  *  because sending is best-effort and an admin whose mail fails silently still needs their copy. */
-export async function reissueInvite(token: string, id: string, opts: { email?: boolean } = {}): Promise<{ inviteUrl: string; emailed: boolean; previousLinkRevoked: boolean }> {
-  return (await apiFetch<{ inviteUrl: string; emailed: boolean; previousLinkRevoked: boolean }>(
+export async function reissueInvite(token: string, id: string, opts: { email?: boolean } = {}): Promise<{ inviteUrl: string | null; emailed: boolean; previousLinkRevoked: boolean }> {
+  return (await apiFetch<{ inviteUrl: string | null; emailed: boolean; previousLinkRevoked: boolean }>(
     `/members/invites/${encodeURIComponent(id)}/reissue`, token,
     { method: "POST", body: JSON.stringify({ email: opts.email === true }) },
   ))!;
