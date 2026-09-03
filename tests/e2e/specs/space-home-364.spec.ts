@@ -149,13 +149,16 @@ test("#364 a suffix-baked stored title never doubles in the H1 (band reads space
 // renaming it here would rename the wrong thing).
 for (const capability of ["view", "edit"] as const) {
   test(`#364 a ${capability} guest sees the home page labelled by its space`, async ({ browser }) => {
-    // #1069: isolated — this test (either capability, at random) times out (60s, on guest.goto of a
-    // real /share/<id> URL) under the #891 gate's 20-spec run. Reproduced 4/6 initially, but that
-    // batch ran against a worktree whose .env.e2e.local predated #1056's WKS_PUBLIC_BASE_URL
-    // requirement (see #1066, which was fully explained by that and closed) — after re-seeding, a
-    // FRESH batch still reproduced 1/3, so a genuine (if less frequent than first measured) #823/#825
-    // shared-stack-under-load residual remains here, unlike #1066. Not yet root-caused.
-    test.skip(true, "#1069: isolated — times out under the #891 gate's 20-spec run");
+    // #1069: root-caused. The failure point moves between runs — guest.goto in the ticket's own first
+    // batch, page.getByTestId("space-home-create").click in one measured here, the title-settle poll
+    // in another — because this is not a bug in any one step. It is two independent budgets both being
+    // too tight for this test's workload (two real page loads plus four polled round trips) under the
+    // #891 gate's 20-worker shared-stack contention: the overall test timeout (widened below, same fix
+    // as `coedit-caret-kept-502.spec.ts` / `api-key-perm-columns-667.spec.ts`), AND each individual
+    // `expect.poll`/`toBeVisible` timeout, which fires independently of the test-level one no matter
+    // how much headroom that has. Widening only the first (the original attempt at this fix) still
+    // failed — on the second budget, a 10s poll — inside a single verification run.
+    test.setTimeout(120_000);
     const page = await (await browser.newContext()).newPage();
     await page.goto("/p/demo");
     await page.waitForSelector("[data-pane=preview] .cm-content");
@@ -177,14 +180,14 @@ for (const capability of ["view", "edit"] as const) {
         return spaces.find((s) => s.id === sid)?.homePageId ?? null;
       }, spaceId);
       return homeId;
-    }, { timeout: 10000, message: "the space's home page pointer settles after creation" }).not.toBeNull();
+    }, { timeout: 20000, message: "the space's home page pointer settles after creation" }).not.toBeNull();
     expect(homeId, "the space has a home page").toBeTruthy();
 
     // the home's title is written as part of creating it; wait for it to be there rather than racing it
     await expect.poll(async () => page.evaluate(async (id: string) => {
       const r = await fetch(`/api/pages/${id}`, { headers: { authorization: "Bearer dev-token" } });
       return ((await r.json()) as { title?: string }).title ?? "";
-    }, homeId!), { timeout: 10000, message: "the home page's stored title settles" }).not.toBe("");
+    }, homeId!), { timeout: 20000, message: "the home page's stored title settles" }).not.toBe("");
 
     const made = await page.evaluate(async ([id, cap]: string[]) => {
       const h = { authorization: "Bearer dev-token", "content-type": "application/json" };
@@ -202,10 +205,10 @@ for (const capability of ["view", "edit"] as const) {
     const guest = await (await browser.newContext()).newPage();
     await guest.goto(`/share/${linkId}`);
     const band = guest.getByTestId("guest-title-band");
-    await expect(band).toBeVisible({ timeout: 12000 });
+    await expect(band).toBeVisible({ timeout: 20000 });
     // the band renders its placeholder first and fills in when the fetch lands, so poll for the real
     // label rather than reading once — "Untitled" is non-empty and would satisfy a laxer wait
-    await expect.poll(async () => (await band.innerText()).trim(), { timeout: 12000, message: `the guest band resolves its title (member stored ${JSON.stringify(made.title)}, publish ${made.publish})` })
+    await expect.poll(async () => (await band.innerText()).trim(), { timeout: 20000, message: `the guest band resolves its title (member stored ${JSON.stringify(made.title)}, publish ${made.publish})` })
       .toContain(spaceName);
     const label = (await band.innerText()).trim();
     expect(label, `…and it carries the home suffix the other surfaces use (got "${label}")`).toMatch(/ Home$|のホーム$/);
