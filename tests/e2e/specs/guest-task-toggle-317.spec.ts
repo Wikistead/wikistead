@@ -43,9 +43,10 @@ const publishedMd = async (pageId: string): Promise<string | null> => {
 };
 
 test("#317 guest EDIT link: a view-mode checkbox click persists to published_md and survives reload", async ({ browser }) => {
-  // #865: isolated — 60s timeout in the #891 gate's 20-spec run; green standalone (8.6s, 2026-09-02).
-  // Same family as #941/#1025, this file's third case.
-  test.skip(true, "#865: isolated — times out under the #891 gate's 20-spec run");
+  // #1065: isolated — 60s timeout in the #891 gate's 20-spec run; green standalone (8.6s, 2026-09-02).
+  // Same family as #941/#1025, this file's third case. Measured on the private CI runner (2-core),
+  // not reproduced locally — reproducibility there, not #926, is the open question.
+  test.skip(true, "#1065: isolated — times out under the #891 gate's 20-spec run");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPageWithTask(member, "guest-cb-edit");
@@ -71,9 +72,6 @@ test("#317 guest EDIT link: a view-mode checkbox click persists to published_md 
 });
 
 test("#317 guest VIEW link: checkbox stays disabled AND the server rejects a direct toggle (two-layer)", async ({ browser }) => {
-  // #1025: isolated — times out (60s) under the #891 gate's 20-spec run; green when this spec runs
-  // by itself (measured 3/3). Same family as #941 (this file's Reading case), a different test.
-  test.skip(true, "#1025: isolated — times out under the #891 gate's 20-spec run");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPageWithTask(member, "guest-cb-view");
@@ -108,7 +106,6 @@ test("#317 guest VIEW link: checkbox stays disabled AND the server rejects a dir
 });
 
 test("#317 guest × Reading (edit link): the checkbox flips the draft (#314 parity for guests)", async ({ browser }) => {
-  test.skip(true, "#941: isolated again — 60s timeout in the #891 gate's 20-spec run while its siblings slowed 8s→35s; green standalone (2026-09-01)");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPageWithTask(member, "guest-cb-reading");
