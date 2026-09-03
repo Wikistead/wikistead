@@ -1,7 +1,8 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { randomBytes } from 'node:crypto'
 import { escapeHtml } from '@wikistead/macro-render'
 import { productName } from '../product-name.js' // #575: the consent screen names the deployment
+import { isHttpsRequest } from '../auth/request-protocol.js'
 import {
   savePendingAuthorize, consumePendingAuthorize, peekPendingAuthorize, saveAuthCode, redirectWithParams,
 } from '../auth/mcp-oauth-store.js'
@@ -31,7 +32,12 @@ const randomToken = () => randomBytes(32).toString('base64url')
 // nor sent on a cross-site sub-request. Path is broad enough to survive the /auth round-trip and return to
 // /mcp/oauth/complete. Short-lived (matches the pending TTL).
 const FLOW_COOKIE = 'mcp_flow'
-const flowCookieOptions = () => ({ httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/', maxAge: 600 })
+// #1091 review (ad2bda3): `secure: true` unconditionally — never gated by NODE_ENV even, unlike the
+// three session-family cookies this bug was originally found on — meant this cookie never round-tripped
+// over plain HTTP at all, breaking MCP OAuth on the chart's documented TLS-off self-host mode the same
+// way #1091 broke sign-in. Same fix: follow the actual request protocol.
+const flowCookieOptions = (req: Pick<FastifyRequest, 'headers' | 'protocol'>) =>
+  ({ httpOnly: true, secure: isHttpsRequest(req), sameSite: 'lax' as const, path: '/', maxAge: 600 })
 
 interface AuthorizeQuery {
   client_id?: string; redirect_uri?: string; response_type?: string
@@ -69,7 +75,7 @@ export async function mcpOAuthFlowPlugin(app: FastifyInstance) {
       clientId: validated.client.clientId, redirectUri: validated.redirectUri, codeChallenge: validated.codeChallenge,
       scopes: validated.scopes, state: validated.state, tenantId: req.tenant.id, flowNonce,
     })
-    reply.setCookie(FLOW_COOKIE, flowNonce, flowCookieOptions())
+    reply.setCookie(FLOW_COOKIE, flowNonce, flowCookieOptions(req))
     const returnTo = `/mcp/oauth/complete?req=${encodeURIComponent(reqId)}`
     return reply.redirect(`/auth/login?returnTo=${encodeURIComponent(returnTo)}`)
   })
