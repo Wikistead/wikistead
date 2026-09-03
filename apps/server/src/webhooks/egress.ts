@@ -8,6 +8,9 @@
 // A fifth ruling followed on 2026-08-27 (§K), which is why twenty-TWO carry a `pageId` today. A sixth
 // followed on 2026-09-03 (§M, #1019): the 2026-08-22 ruling on the two password-reset events was
 // retracted as self-contradictory, so they ship `targetSub` again.
+// A seventh followed the same day (§N, #1068, ADR-278): `member.signed_in` — the catalogue's
+// first delivered sign-in event — ships unredacted, including `door`, with the operator door
+// carrying no identity.
 //
 // ── Why a table, and why it is keyed on the union ───────────────────────────────────────────────
 //
@@ -85,6 +88,12 @@ export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
   //       shipped it anyway, so its own reasoning never supported stripping only these two. A sibling
   //       proposal to add a CONDITIONAL `targetSub` to `member.locked` (only when the typed identifier
   //       happened to resolve) was considered and REFUSED — §D stands unchanged, in full, below.
+  //   §N  (#1068, ADR-278, 2026-09-03) `member.signed_in` ships `door` unredacted: the "hide whether a
+  //       factor was presented" alternative does not survive measurement (`member.factor_enrolled` /
+  //       `member.factors_reset` already ship `targetSub`, so a consumer reconstructs the same fact
+  //       either way) and the disclosure ties to a real remedy (`tenant_login_prefs.second_factor_
+  //       required`). `remoteAddress` does NOT ship in v1 — deferred (reversibility + no DSAR/retention
+  //       machinery yet, #897), not refused.
   'page.created': send('pageId', 'spaceId', 'actorId', 'actorKeyId', 'occurredAt'),
   'page.renamed': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
   'page.moved': send('pageId', 'actorId', 'actorKeyId', 'occurredAt'),
@@ -160,6 +169,15 @@ export const EGRESS: Record<DomainEvent['type'], EgressVerdict> = {
   // why). They ship `targetSub` like every other member.* security event now.
   'member.password_reset_requested': send('actorId', 'targetSub', 'actorKeyId', 'occurredAt'),
   'member.password_reset_completed': send('targetSub', 'occurredAt'),
+  // #1068 / ADR-278 §N (ruled, 2026-09-03): ships unredacted — `member.factor_enrolled` and
+  // `member.factors_reset` already ship `targetSub`, so a consumer can reconstruct "who has 2FA" from
+  // the element lifecycle with or without `door`; withholding it would only kill the no-2FA-sign-in
+  // detection this event exists for, with no matching disclosure reduction. `door: 'operator'` is
+  // allowed through because it can only ever say a break-glass sign-in happened — no field on this
+  // event carries the operator's own identity (Condition 1; see `apps/server/src/auth/session.ts`'s
+  // `establishMemberSession`, whose `operatorIssued` branch never receives an operator identity as an
+  // argument in the first place).
+  'member.signed_in': send('actorId', 'targetSub', 'door', 'actorKeyId', 'occurredAt'),
   'invite.created': send('actorId', 'role', 'actorKeyId', 'occurredAt'),
   'invite.revoked': send('actorId', 'actorKeyId', 'occurredAt'),
   'invite.reissued': send('actorId', 'emailed', 'actorKeyId', 'occurredAt'),

@@ -295,3 +295,42 @@ describe('#862 the verdict is applied before the row is durable', () => {
     }
   })
 })
+
+describe('#862 §N (#1068, ADR-278) — member.signed_in ships door unredacted, the operator identity never does', () => {
+  it('ships targetSub AND door, for every door', async () => {
+    // Ruled rounding `door` off would not reduce disclosure — `member.factor_enrolled` and
+    // `member.factors_reset` already ship targetSub, so a consumer reconstructs the same "who has 2FA"
+    // fact either way — and it would kill the one thing this event adds: a no-2FA sign-in visible as
+    // it happens.
+    for (const door of ['local', 'local+factor', 'federated', 'operator'] as const) {
+      expect(egressVerdict('member.signed_in').kind).toBe('send')
+      const payload = await storedPayload('member.signed_in', { actorId: 'user-42', targetSub: 'user-42', door, occurredAt: '2026-01-01T00:00:00.000Z' })
+      expect(payload, 'the row is written').not.toBeNull()
+      expect(payload).toHaveProperty('targetSub', 'user-42')
+      expect(payload).toHaveProperty('door', door)
+    }
+  })
+
+  // Condition 1 of the ruling: `door: 'operator'` may say a break-glass sign-in happened; no field on
+  // this event may ever name WHICH operator. There is no `operatorId`/`operator` field in the union at
+  // all — this asserts the allow-list itself, so a future edit that adds one without a matching ruling
+  // is caught here rather than trusting the type to have stayed empty.
+  it('⚠️ …and the operator door carries no operator identity, even if a caller tried to add one', async () => {
+    const payload = await storedPayload('member.signed_in', {
+      actorId: 'user-42', targetSub: 'user-42', door: 'operator', occurredAt: '2026-01-01T00:00:00.000Z',
+      operator: 'alice', operatorId: 'alice', operatorSub: 'alice',
+    })
+    expect(payload, 'the row is written').not.toBeNull()
+    expect(payload, 'the allow-list strips fields no row names, operator identity included').not.toHaveProperty('operator')
+    expect(payload).not.toHaveProperty('operatorId')
+    expect(payload).not.toHaveProperty('operatorSub')
+    expect(Object.keys(payload!).sort()).toEqual(['door', 'occurredAt', 'targetSub'])
+  })
+
+  // The pin the ruling asked for: the egress-VERDICT difference between the two events that both name
+  // a sign-in, not their catalog.ts prose (prose can drift without a test noticing; the verdict cannot).
+  it('⚠️ and this is the field that actually separates it from auth.success — the verdict, not the description', () => {
+    expect(egressVerdict('auth.success').kind, 'per-request auth pass: undelivered, §F').toBe('drop')
+    expect(egressVerdict('member.signed_in').kind, 'session established: delivered').toBe('send')
+  })
+})

@@ -6,6 +6,7 @@
 import { randomBytes } from 'node:crypto'
 import type IORedis from 'ioredis'
 import type { OpenFgaClient } from '@openfga/sdk'
+import { emit } from '@wikistead/events'
 import type { TenantDb } from '../db/index.js'
 import { syncMemberGroups, recordConnectionGroups } from './group-sync.js'
 import { coerceGroups } from './oidc.js'
@@ -15,6 +16,7 @@ import { enrolUnderSeatCap } from './invites.js'
 import { ensurePersonalSpace } from '../routes/spaces.js'
 import type { SearchDriver } from '../search/index.js'
 import { isKnownLang, type Lang } from '../locale.js'
+import { auditIfEntitled } from '../audit/sink.js'
 
 export const SESSION_COOKIE = 'wks_sess'
 
@@ -458,6 +460,21 @@ export async function establishMemberSession(
   // product. Existing group-derived admins were converted to `manual` by migration 099 rather than
   // stripped, so nobody lost administration when this call went away.
   const role = row.role
+  // #1068 / ADR-278 §N, ruled (2026-09-03): every production login shares this one chokepoint,
+  // and until now none of them left a trace anywhere observable — neither the audit ledger nor the
+  // webhook catalogue had ever named a sign-in. `door` defaults to `local` here for the same reason
+  // `doorOf` does: an absent value is the unsatisfied end, not a caller that forgot.
+  //
+  // Best-effort, same shape as every other self-triggered `member.*` write in this codebase
+  // (`second-factor.ts`'s `factor_enrolled`/`factors_reset`): the audit write is inside its own tx
+  // (never nested in the group-sync tx above, so an audit failure cannot roll back a login) and the
+  // webhook emit is a separate, un-awaited fire-and-forget call after it — a login must never fail, or
+  // even slow down, because the ledger or the bus is unavailable.
+  const door = opts?.door ?? 'local'
+  await deps.db.tx((tx) => auditIfEntitled(tx, tenant, {
+    actor: `user:${claims.sub}`, action: 'member.signed_in', target: `member:${claims.sub}`,
+  })).catch(() => { /* audit is best-effort; a login must never fail because the ledger did */ })
+  emit({ type: 'member.signed_in', tenantId: tenant.id, actorId: claims.sub, targetSub: claims.sub, door })
   return createSession(deps.valkey, {
     tenantId: tenant.id,
     sub: claims.sub,

@@ -81,7 +81,10 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   // authorization.
   'api_key.revoked': 'An API key was revoked. The webhook payload includes the key owner id (ownerId, the member sub). The display name is not sent.',
   // Auth
-  'auth.success': 'Someone signed in successfully.',
+  // #1068 / ADR-278 (ruled, 2026-09-03): this fires once per authenticated REQUEST, not once per
+  // sign-in, and includes apikey/guest/dev alongside member logins — not delivered to webhooks (§F).
+  // For a member's session being established, see `member.signed_in` below.
+  'auth.success': 'A request satisfied authentication (including API-key, guest, and dev auth). Fires once per request, not once per sign-in. Not delivered to webhooks.',
   'auth.failed': 'A sign-in attempt failed.',
   // Members / invites
   'member.added': 'A member was added to the workspace.',
@@ -101,6 +104,7 @@ export const EVENT_CATALOG: Record<DomainEvent['type'], string> = {
   'member.password_removed': 'An admin removed a member\'s password sign-in; their sessions were ended with it.',
   'member.password_reset_requested': 'A password reset link was requested for a member.',
   'member.password_reset_completed': 'A member completed a password reset (all their sessions were signed out).',
+  'member.signed_in': "A member's session was established: local sign-in, local with a second factor, a federated (OIDC/SAML) sign-in, or an operator break-glass invite acceptance (`door`, never the operator's own identity). Delivered.",
   'invite.created': 'A member invite was created.',
   'invite.revoked': 'A member invite was revoked.',
   // #638: a re-issue is not a second invitation — the invitation, its seat and its role are unchanged,

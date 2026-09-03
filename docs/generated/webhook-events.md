@@ -76,7 +76,7 @@ the page exists. So an event marked as sent can still be withheld for one page.
 | `share_link.revoked` | An anonymous share link was revoked. | Yes |
 | `api_key.created` | An API key was issued. | Yes |
 | `api_key.revoked` | An API key was revoked. The webhook payload includes the key owner id (ownerId, the member sub). The display name is not sent. | Yes |
-| `auth.success` | Someone signed in successfully. | No |
+| `auth.success` | A request satisfied authentication (including API-key, guest, and dev auth). Fires once per request, not once per sign-in. Not delivered to webhooks. | No |
 | `auth.failed` | A sign-in attempt failed. | No |
 | `member.added` | A member was added to the workspace. | Yes |
 | `member.role_changed` | A member's role was changed. | Yes |
@@ -95,6 +95,7 @@ the page exists. So an event marked as sent can still be withheld for one page.
 | `member.password_removed` | An admin removed a member's password sign-in; their sessions were ended with it. | Yes |
 | `member.password_reset_requested` | A password reset link was requested for a member. | Yes |
 | `member.password_reset_completed` | A member completed a password reset (all their sessions were signed out). | Yes |
+| `member.signed_in` | A member's session was established: local sign-in, local with a second factor, a federated (OIDC/SAML) sign-in, or an operator break-glass invite acceptance (`door`, never the operator's own identity). Delivered. | Yes |
 | `invite.created` | A member invite was created. | Yes |
 | `invite.revoked` | A member invite was revoked. | Yes |
 | `invite.reissued` | A pending invite was given a fresh link; the previous one stopped working. | Yes |

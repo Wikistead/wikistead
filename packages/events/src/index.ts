@@ -201,6 +201,17 @@ type RawDomainEvent =
   // a password does, and a consumer investigating a takeover needs to tell those apart.
   | { type: 'member.password_reset_requested'; tenantId: string; targetSub: string; actorId?: string }
   | { type: 'member.password_reset_completed'; tenantId: string; targetSub: string }
+  // #1068 / ADR-278, ruled (2026-09-03): the chokepoint every production member login already
+  // shares (`establishMemberSession`) had no event at all — the catalogue could say a factor was
+  // enrolled or a password changed, never that someone signed in. Self-scope like `factor_enrolled`
+  // (actor and target are the same person by construction: nobody signs another member in). `door`
+  // reuses the session layer's own vocabulary rather than inventing a `method` field — its values must
+  // track `SessionDoor` in `apps/server/src/auth/session.ts` (not imported here: that module lives in
+  // the server app, this package does not depend on it). `door: 'operator'` may say a break-glass
+  // sign-in happened; nothing on this event may ever name WHICH operator (ADR-278's Condition 1, same
+  // line as `tenant.login_methods_recovered`'s drop, §C, ADR-169) — enforced by construction, since
+  // every emit site passes only the member's own sub, never an operator identity.
+  | { type: 'member.signed_in'; tenantId: string; actorId: string; targetSub: string; door: 'local' | 'local+factor' | 'federated' | 'operator' }
   | { type: 'invite.created';      tenantId: string; actorId: string; role: string }
   | { type: 'invite.revoked';      tenantId: string; actorId: string }
   | { type: 'invite.reissued';     tenantId: string; actorId: string; emailed: boolean }
