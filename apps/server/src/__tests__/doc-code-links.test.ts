@@ -171,13 +171,30 @@ describe('checkLedgerPathsExist (#1067, ADR-244 §7 open point 4)', () => {
 
   // ⚠️ break-check: prove the whole REAL ledger is clean now, not vacuously (an empty map would also
   // report zero violations) — scanned must be a real, non-trivial count.
-  it('the REAL SURFACE_DOCS + DOC_CODE_MAP ledger has zero dangling paths against the real docs-site tree', () => {
+  //
+  // ⚠️ Gated on the overlay being HERE, the same way check-no-japanese-prose's sibling
+  // `check-doc-links.mjs` gates its own copy of this check (`existsSync('docs-site')`, and it prints
+  // "skipped (no docs-site/ checkout here)"). `docs-site/` is a separate repository that lives beside
+  // SOME checkouts and not others, so a run that stats those paths in a checkout without it reports
+  // every docs-site row as dangling — 81 of them, measured on master 2026-09-03, red for everyone
+  // whose checkout is not the author's, CI and the publication's mirror suite included.
+  //
+  // The rows that live in THIS repository (`docs/generated/**`) are checked either way, so the
+  // check is never skipped whole: without the overlay it measures the half it can see, and says so.
+  it('the REAL SURFACE_DOCS + DOC_CODE_MAP ledger has zero dangling paths', () => {
     const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
-    const { scanned, violations } = checkLedgerPathsExist((p: string) => {
+    const overlayHere = (() => {
+      try { return statSync(join(repoRoot, 'docs-site')).isDirectory() } catch { return false }
+    })()
+    const exists = (p: string) => {
       try { statSync(join(repoRoot, p)); return true } catch { return false }
-    })
+    }
+    const { scanned, violations } = checkLedgerPathsExist(
+      (p: string) => (!overlayHere && p.startsWith('docs-site/') ? true : exists(p)))
     expect(scanned, 'zero scanned is a failure — the walk itself is broken').toBeGreaterThan(20)
-    expect(violations).toEqual([])
+    expect(violations, overlayHere
+      ? 'the whole ledger, overlay included'
+      : 'this checkout has no docs-site/ — only the rows inside this repository were checked').toEqual([])
   })
 })
 
