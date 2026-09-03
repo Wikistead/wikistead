@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, enterSplit, createScratchPage, sleep } from "../helpers";
+import { openDemo, enterSplit, createScratchPage, sleep, API } from "../helpers";
 
 // #233 / ADR-107: a password-protected share link. A guest opening it gets a password prompt; a wrong
 // password shows a generic error (wrong ≡ missing), the correct one unlocks the page. Real Chromium.
@@ -11,7 +11,33 @@ import { openDemo, enterSplit, createScratchPage, sleep } from "../helpers";
 // no longer find it and timed out before ever reaching the symptom this ticket was filed to describe.
 // Fixed the way `createScratchPage` exists to fix it: share a page this spec creates and owns, findable
 // by a title nothing else on the shared demo tenant collides with, immune to whatever "demo" becomes next.
-async function createPasswordLink(page: Page, pageTitle: string, password: string): Promise<string> {
+// #939 diagnostic: three sessions have measured "the tree ended without this page" under gate
+// load without ever being able to say WHERE it went missing — the server's /pages/branch response
+// (never reached the reader at all) or the client's render of it (reached, not drawn). Walk the same
+// endpoint the tree UI calls, directly, and report which page of the walk (if any) carried the id.
+async function diagnoseMissingPage(pageId: string, spaceId = "demo_space"): Promise<string> {
+  let cursor: string | undefined;
+  let pageNum = 0;
+  const seen: string[] = [];
+  for (;;) {
+    pageNum++;
+    const qs = new URLSearchParams({ limit: "30", ...(cursor ? { cursor } : {}) });
+    const r = await fetch(`${API}/spaces/${spaceId}/pages/branch?${qs}`, { headers: { Authorization: "Bearer dev-token" } });
+    if (!r.ok) return `/pages/branch page ${pageNum} answered ${r.status}, not walked further`;
+    const body = (await r.json()) as { pages: { id: string }[]; nextCursor: string | null };
+    seen.push(...body.pages.map((p) => p.id));
+    if (body.pages.some((p) => p.id === pageId)) {
+      return `FOUND via direct API on branch page ${pageNum} of ${seen.length} pages walked — the server has it, the tree UI did not draw it`;
+    }
+    if (!body.nextCursor) {
+      return `NOT FOUND via direct API after walking all ${pageNum} page(s) / ${seen.length} row(s) to nextCursor:null — the server itself never returns it`;
+    }
+    cursor = body.nextCursor;
+    if (pageNum > 20) return `gave up walking direct API after ${pageNum} pages (${seen.length} rows) — still going, more than the tree UI itself gives up at`;
+  }
+}
+
+async function createPasswordLink(page: Page, pageTitle: string, password: string, pageId?: string): Promise<string> {
   const row = page.locator("[data-testid=tree-page]", { hasText: pageTitle }).first();
   // #939: this was one 10s wait, so a tree that had not finished loading and a tree missing THIS page
   // failed identically — which is all the two-core CI runner ever said. Split the two: wait for the
@@ -30,9 +56,11 @@ async function createPasswordLink(page: Page, pageTitle: string, password: strin
     if (await row.count()) break;
     if (!(await more.count())) {
       const titles = await page.locator("[data-testid=tree-page]").allInnerTexts();
+      const diagnosis = pageId ? await diagnoseMissingPage(pageId) : "no pageId passed — diagnosis skipped";
       throw new Error(
         `the tree ended after ${titles.length} page row(s) without "${pageTitle}" — last few: ` +
-          JSON.stringify(titles.slice(-8).map((t) => t.trim().slice(0, 40))),
+          JSON.stringify(titles.slice(-8).map((t) => t.trim().slice(0, 40))) +
+          ` — direct API diagnosis: ${diagnosis}`,
       );
     }
     expect(reveal, `"${pageTitle}" was not in the first ${reveal} pages of the tree`).toBeLessThan(20);
@@ -76,7 +104,12 @@ async function createPasswordLink(page: Page, pageTitle: string, password: strin
 }
 
 test("#233: a password-protected link prompts, rejects a wrong password, unlocks with the right one", async ({ browser }) => {
-  test.skip(true, "#939: isolated (cause filed as #1077) — under the gate the sidebar renders 20 tree-page rows and no more-row while demo_space holds 25 root pages, so the page this spec just created is not reachable in the tree");
+  // #939: isolated — confirmed root cause via diagnoseMissingPage. Under gate load the tree UI's
+  // own "load more" walk ends (nextCursor:null, 20 rows) WITHOUT this page, while a fresh direct call to
+  // the SAME /pages/branch endpoint finds it in the very first batch — "the server has it, the tree UI
+  // did not draw it". This is a client-side pagination-state bug (see the ticket for the mergePaintedWindow
+  // hypothesis), not a server completeness or authz-timing issue as earlier sessions suspected.
+  test.skip(true, "#939: isolated — client-side tree pagination bug, confirmed server-side via diagnoseMissingPage; see ticket for mergePaintedWindow hypothesis");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc ${Date.now().toString(36)}`;
@@ -90,7 +123,7 @@ test("#233: a password-protected link prompts, rejects a wrong password, unlocks
   await member.getByTestId("publish-page").click().catch(() => {}); // publish if the button is present
   await sleep(500);
 
-  const url = await createPasswordLink(member, title, "hunter2");
+  const url = await createPasswordLink(member, title, "hunter2", pageId);
   expect(url).toMatch(/\/share\/[0-9a-f-]{36}$/);
 
   const guest = await (await browser.newContext()).newPage();
@@ -114,7 +147,8 @@ test("#233: a password-protected link prompts, rejects a wrong password, unlocks
 // wrong-password budget — a user who mistypes a few times can still unlock. Before the fix, the
 // prompt-display 401 counted, so a single typo (plus a reload) locked the user out.
 test("#233 opening the link + several wrong tries never locks out the correct password", async ({ browser }) => {
-  test.skip(true, "#939: isolated (cause filed as #1077) — under the gate the sidebar renders 20 tree-page rows and no more-row while demo_space holds 25 root pages, so the page this spec just created is not reachable in the tree");
+  // #939: isolated — same root cause as the case above; see that test's comment.
+  test.skip(true, "#939: isolated — client-side tree pagination bug, confirmed server-side via diagnoseMissingPage; see ticket for mergePaintedWindow hypothesis");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc 2 ${Date.now().toString(36)}`;
@@ -128,7 +162,7 @@ test("#233 opening the link + several wrong tries never locks out the correct pa
   await member.getByTestId("publish-page").click().catch(() => {});
   await sleep(500);
 
-  const url = await createPasswordLink(member, title, "hunter2");
+  const url = await createPasswordLink(member, title, "hunter2", pageId);
   const guest = await (await browser.newContext()).newPage();
   await guest.goto(url);
   await expect(guest.getByTestId("share-password-form")).toBeVisible({ timeout: 10000 });
