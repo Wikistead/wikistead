@@ -269,13 +269,21 @@ if (!existsSync(chartPath)) {
     // directions on purpose: an implementation that always emits the header passes the positive
     // half, and pinning a host that has no https locks every browser out of it irreversibly.
     const hstsCount = (text) => (text.match(/Strict-Transport-Security/g) ?? []).length
-    if (hstsCount(out) !== ingressDocs.length) {
+    // #1083 flipped ingress.securityHeaderSnippet to false by default (stock ingress-nginx rejects
+    // snippets), and with it off the chart emits NO security headers — the operator sets them in the
+    // controller, as the template and README say. Both halves below therefore render with the snippet
+    // ON: that is the path that carries the pin, and measuring the default would make the positive
+    // half fail for every install and the negative half pass without looking at anything.
+    const withSnippet = spawnSync('helm', ['template', 'routes-check', chartPath, '--set', 'ingress.wildcardHost=true,ingress.securityHeaderSnippet=true'], { encoding: 'utf8' })
+    if (withSnippet.status !== 0) {
+      problems.push(`chart: helm template with ingress.securityHeaderSnippet=true failed (exit ${withSnippet.status}) — the HSTS halves could not be measured.`)
+    } else if (hstsCount(withSnippet.stdout) !== ingressDocs.length) {
       problems.push(
-        `chart: ${hstsCount(out)} Strict-Transport-Security header(s) across ${ingressDocs.length} Ingress ` +
-        'object(s) — every object the browser can reach needs the pin, or which one it gets depends on the route.',
+        `chart: ${hstsCount(withSnippet.stdout)} Strict-Transport-Security header(s) across ${ingressDocs.length} Ingress ` +
+        'object(s) with the snippet on — every object the browser can reach needs the pin, or which one it gets depends on the route.',
       )
     }
-    const plaintext = spawnSync('helm', ['template', 'routes-check', chartPath, '--set', 'ingress.tls.enabled=false'], { encoding: 'utf8' })
+    const plaintext = spawnSync('helm', ['template', 'routes-check', chartPath, '--set', 'ingress.tls.enabled=false,ingress.securityHeaderSnippet=true'], { encoding: 'utf8' })
     if (plaintext.status !== 0) {
       problems.push(`chart: helm template with ingress.tls.enabled=false failed (exit ${plaintext.status}) — the negative half could not be measured.`)
     } else if (hstsCount(plaintext.stdout) !== 0) {
