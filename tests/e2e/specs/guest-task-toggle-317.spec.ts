@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { openDemo, sleep, API } from "../helpers";
+import { openDemo, enterEdit, sleep, API } from "../helpers";
 
 // #317: an EDIT-capability share-link guest can tick a view-mode task checkbox (ADR-019) — the
 // server route already accepted guest:'edit'; the client never passed onToggleTask on the guest
@@ -17,13 +17,40 @@ async function newPageWithTask(page: Page, title: string): Promise<string> {
     body: JSON.stringify({ title }),
   });
   const id = ((await r.json()) as { id: string }).id;
-  // author the task via the member surface (collab persists it), then publish
-  await page.goto(`/p/${id}?edit=1`);
+  // author the task via the member surface (collab persists it), then publish.
+  //
+  // #1032/#1065: this used `/p/<id>?edit=1` and then waited for `.cm-content`. That wait cannot tell
+  // the two surfaces apart — the editor opens RENDERED, and the rendered surface has a `.cm-content`
+  // too (it even keeps `contenteditable`, deliberately, so it stays focusable). So on a slow runner
+  // the click and the keystrokes went into the read-only surface and were swallowed, the publish
+  // below snapshotted an empty document, and every later assertion looked for a checkbox that was
+  // never authored. guest-search-449 authors through `enterEdit` and passes on the same two-core
+  // runner, so this walks the same path — and then says, at each step, whether that step happened.
+  await page.goto(`/p/${id}`);
   await page.waitForSelector("[data-pane=preview] .cm-content");
+  await sleep(400);
+  await enterEdit(page);
   await page.click("[data-pane=preview] .cm-content");
-  await page.keyboard.type("- [ ] guest ship it");
-  await sleep(2800); // collab persist debounce
-  await fetch(`${API}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+  await page.keyboard.insertText("- [ ] guest ship it");
+  await expect(
+    page.locator("[data-pane=preview] .cm-content"),
+    "the keystrokes reached the editor — a read-only surface swallows them silently",
+  ).toContainText("guest ship it", { timeout: 15000 });
+  // #1032/#1065: the collab persist is debounced, and `sleep(2800)` was the only thing standing
+  // between the keystrokes and the publish. Publishing before the persist lands snapshots an EMPTY
+  // document, and then no timeout downstream can ever find a checkbox — which is exactly what the
+  // two-core CI runner produced ("task-checkbox: element(s) not found"). Publish until the published
+  // body actually carries the task, so a fixture that failed to build says so here instead of
+  // surfacing as an unexplained timeout three assertions later.
+  await expect
+    .poll(
+      async () => {
+        await fetch(`${API}/pages/${id}/publish`, { method: "POST", headers: { Authorization: "Bearer dev-token" } });
+        return (await publishedMd(id)) ?? "";
+      },
+      { timeout: 45000, intervals: [800, 1200, 1500, 2000, 2000, 3000, 3000, 5000], message: "the authored task never reached published_md — the collab persist did not land" },
+    )
+    .toContain("guest ship it");
   return id;
 }
 
@@ -46,7 +73,6 @@ test("#317 guest EDIT link: a view-mode checkbox click persists to published_md 
   // #1065: isolated — 60s timeout in the #891 gate's 20-spec run; green standalone (8.6s, 2026-09-02).
   // Same family as #941/#1025, this file's third case. Measured on the private CI runner (2-core),
   // not reproduced locally — reproducibility there, not #926, is the open question.
-  test.skip(true, "#1065: isolated — times out under the #891 gate's 20-spec run");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPageWithTask(member, "guest-cb-edit");
@@ -54,11 +80,17 @@ test("#317 guest EDIT link: a view-mode checkbox click persists to published_md 
 
   const guest = await (await browser.newContext()).newPage();
   await guest.goto(url);
-  await guest.waitForSelector("[data-pane=preview] .cm-content");
-  await sleep(800);
+  // #1032/#1065: waiting for `.cm-content` answers "the editor mounted"; the document arrives after
+  // it, and the fixed sleep that followed was standing in for that load. Wait for the task's own
+  // text, then give the widget its own budget — so a slow load and a missing widget report as two
+  // different failures instead of one 5s "element(s) not found".
+  await expect(
+    guest.locator("[data-pane=preview] .cm-content"),
+    "the shared document loads into the guest surface",
+  ).toContainText("guest ship it", { timeout: 30000 });
 
   const box = guest.getByTestId("task-checkbox");
-  await expect(box).toBeVisible();
+  await expect(box, "the task line renders its checkbox widget").toBeVisible({ timeout: 15000 });
   await expect(box).toBeEnabled(); // the #317 bug: permanently disabled on the guest surface
   await box.click();
 
@@ -67,8 +99,10 @@ test("#317 guest EDIT link: a view-mode checkbox click persists to published_md 
 
   // the guest surface refetches + a reload still shows the ticked box
   await guest.reload();
-  await guest.waitForSelector("[data-pane=preview] .cm-content");
-  await expect(guest.getByTestId("task-checkbox")).toBeChecked();
+  // #1032/#1065: same shape as the first wait — the reload remounts the editor long before the
+  // document comes back, so give the reloaded surface the document's own budget too.
+  await expect(guest.locator("[data-pane=preview] .cm-content")).toContainText("guest ship it", { timeout: 30000 });
+  await expect(guest.getByTestId("task-checkbox")).toBeChecked({ timeout: 15000 });
 });
 
 test("#317 guest VIEW link: checkbox stays disabled AND the server rejects a direct toggle (two-layer)", async ({ browser }) => {
@@ -80,11 +114,17 @@ test("#317 guest VIEW link: checkbox stays disabled AND the server rejects a dir
 
   const guest = await (await browser.newContext()).newPage();
   await guest.goto(url);
-  await guest.waitForSelector("[data-pane=preview] .cm-content");
-  await sleep(800);
+  // #1032/#1065: waiting for `.cm-content` answers "the editor mounted"; the document arrives after
+  // it, and the fixed sleep that followed was standing in for that load. Wait for the task's own
+  // text, then give the widget its own budget — so a slow load and a missing widget report as two
+  // different failures instead of one 5s "element(s) not found".
+  await expect(
+    guest.locator("[data-pane=preview] .cm-content"),
+    "the shared document loads into the guest surface",
+  ).toContainText("guest ship it", { timeout: 30000 });
 
   const box = guest.getByTestId("task-checkbox");
-  await expect(box).toBeVisible();
+  await expect(box, "the task line renders its checkbox widget").toBeVisible({ timeout: 15000 });
   await expect(box).toBeDisabled(); // UI layer: view guests can't tick
 
   // Server bastion: exchange the link for a guest token and call the toggle directly → 403.
