@@ -26,12 +26,14 @@
     },
     "@wikistead/server#typecheck": {
       "dependsOn": [
-        "build"
+        "build",
+        "@wikistead-ee/server#build"
       ]
     },
     "@wikistead/server#test": {
       "dependsOn": [
-        "build"
+        "build",
+        "@wikistead-ee/server#build"
       ]
     }
   }
