@@ -45,7 +45,13 @@ const JSX_TITLE_ATTR = [
 // Interactive wrappers — an IconButton/Button/Trigger `title` IS a tooltip and must move to data-tip
 // like any other. Every other capitalised component's `title` is a panel/dialog heading prop, not a
 // hover bubble, and a native (lowercase) element's `title` is never anything but the banned tooltip.
-const BANNED_TOOLTIP_TAGS = new Set(["IconButton", "Button", "ToggleButton", "DropdownMenuTrigger", "TooltipTrigger"]);
+//
+// #1044 review: `DropdownMenuItem` added — it is a thin Radix wrapper that spreads unknown
+// props onto its underlying DOM node (`components/ui/dropdown-menu.tsx`), so a `title` prop reaches
+// the browser as the banned native tooltip exactly like IconButton's does; it is not a heading prop on
+// any DOM the reader can see. The review found a real instance (`OverflowMenu.tsx`'s `hint`), fixed in
+// the same change that added this entry — see that file's `data-tip` migration.
+const BANNED_TOOLTIP_TAGS = new Set(["IconButton", "Button", "ToggleButton", "DropdownMenuTrigger", "TooltipTrigger", "DropdownMenuItem"]);
 
 function* walk(dir: string): Generator<string> {
   for (const e of readdirSync(dir)) {
@@ -58,20 +64,53 @@ function* walk(dir: string): Generator<string> {
 
 // One JSX opening tag at a time (`<Comp ...>`, however many source lines its attributes span), so the
 // `title=` verdict is decided by the tag that actually owns it rather than by whichever line it lands
-// on. `[^>]` already matches newlines (character classes are unaffected by any flag), so this needs no
-// `s` flag to cross lines — the same pragmatic per-tag regex `releaseButtonTag()` (992) uses on rendered
-// markup, applied here to source text instead.
-const OPENING_TAG = /<([A-Za-z][\w.]*)\b[^>]*>/g;
+// on.
+//
+// #1044 review round 2: a plain `[^>]*` stop-at-the-first-`>` scan reads a tag as ending at the
+// FIRST `>` in the source, including one that belongs to something nested inside an attribute
+// expression — an arrow function prop (`onClick={() => copy()}`, whose `=>` carries a bare `>`) truncates
+// the "tag" before a `title=` that comes after it. A regex cannot balance nested braces, so this walks
+// the text by hand: track brace depth (an attribute expression's `{…}`) and quote state (a string/
+// template literal), and only treat a `>` as the tag's own close when neither is open.
+const TAG_START = /<([A-Za-z][\w.]*)\b/g;
+
+function* jsxOpeningTags(content: string): Generator<{ index: number; tagName: string; tag: string }> {
+  TAG_START.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TAG_START.exec(content))) {
+    const start = m.index;
+    let i = TAG_START.lastIndex;
+    let braceDepth = 0;
+    let quote: string | null = null;
+    while (i < content.length) {
+      const c = content[i];
+      if (quote) {
+        if (c === "\\") { i += 2; continue; }
+        if (c === quote) quote = null;
+      } else if (c === '"' || c === "'" || c === "`") {
+        quote = c;
+      } else if (c === "{") {
+        braceDepth++;
+      } else if (c === "}") {
+        braceDepth--;
+      } else if (c === ">" && braceDepth <= 0) {
+        break;
+      }
+      i++;
+    }
+    const end = Math.min(i + 1, content.length);
+    yield { index: start, tagName: m[1], tag: content.slice(start, end) };
+    TAG_START.lastIndex = end;
+  }
+}
 
 function jsxTagOffenders(content: string): { index: number; tag: string }[] {
   const offenders: { index: number; tag: string }[] = [];
-  for (const m of content.matchAll(OPENING_TAG)) {
-    const tag = m[0];
+  for (const { index, tagName, tag } of jsxOpeningTags(content)) {
     if (!JSX_TITLE_ATTR.some((re) => re.test(tag))) continue;
-    const tagName = m[1];
     const isBanned = BANNED_TOOLTIP_TAGS.has(tagName);
     if (/^[A-Z]/.test(tagName) && !isBanned) continue; // heading-shaped prop on a non-interactive component
-    offenders.push({ index: m.index ?? 0, tag });
+    offenders.push({ index, tag });
   }
   return offenders;
 }
@@ -111,6 +150,16 @@ describe("#530: no native `title` tooltips in app code", () => {
   it("catches a banned component's title even when the attribute sits alone on its own line", () => {
     const offenders = jsxTagOffenders('<IconButton\n  aria-label="x"\n  title="tooltip"\n  onClick={fn}\n>\n');
     expect(offenders.length).toBe(1);
+  });
+
+  // #1044 review round 2 break-check: an arrow-function prop AHEAD of `title=` — the shape that
+  // escaped the round-1 `[^>]*` scan, because its `=>` supplied the first `>` the old regex stopped at.
+  it("catches title after an arrow-function prop, on a banned component and a native element alike", () => {
+    expect(jsxTagOffenders('<IconButton aria-label="x" onClick={() => copy()} title="Copy">\n').length).toBe(1);
+    expect(jsxTagOffenders('<button onClick={() => go()} title="native">\n').length).toBe(1);
+    // ...and the DropdownMenuItem shape the review found for real (OverflowMenu.tsx), same arrow-prop
+    // truncation risk plus the newly-banned tag.
+    expect(jsxTagOffenders('<DropdownMenuItem onSelect={() => go()} title={it.hint}>\n').length).toBe(1);
   });
 
   it("does not flag a non-interactive component's heading title, on its own line or the tag's", () => {

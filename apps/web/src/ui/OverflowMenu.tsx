@@ -12,7 +12,7 @@ export interface OverflowItem {
   testId?: string;
   danger?: boolean;
   disabled?: boolean; // grayed out + not selectable (e.g. a temporarily-sealed action)
-  hint?: string; // tooltip (title) — e.g. why a disabled item is unavailable
+  hint?: string; // tooltip (#1044: data-tip, not the native title) — e.g. why a disabled item is unavailable
   checked?: boolean; // #212: a TOGGLE item (e.g. comments panel open/closed) — trailing ✓ when on
 }
 
@@ -44,7 +44,7 @@ export function OverflowMenu({
             key={it.value}
             onSelect={() => { if (!it.disabled) onSelect(it.value); }}
             disabled={it.disabled}
-            title={it.hint}
+            data-tip={it.hint}
             data-testid={it.testId}
             data-danger={it.danger ? "" : undefined}
             data-checked={it.checked ? "" : undefined}
