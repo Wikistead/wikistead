@@ -39,13 +39,36 @@ describe("#606: the password-setup path does not wear the invite's words", () =>
     for (const { l, bundle } of locales) {
       const msg = bundle.members.passwordSetupUnavailable as string;
       expect(msg, `${l}: the refusal has words`).toBeTruthy();
-      // deliberately uniform: the copy must not name WHICH precondition failed (passwords off / already
-      // has one / no address / identifier clash are indistinguishable by design)
+      // Deliberately uniform, and the list is what #1074 amended. This code now covers the refusals
+      // that are facts about the PERSON: they have no address of their own, or their address is
+      // already somebody ELSE's sign-in name. Password sign-in being off for the tenant lands here
+      // too for now (#1075 reconciles it with the local-invite door, which already names it).
+      //
+      // Two things are NOT on that list any more. "They already have a password" left it at #614
+      // it is the reissue case, not a refusal. And "the deployment has no address" left it at #1074
+      // that is a fact about the DEPLOYMENT, identical for every member, so naming it discloses
+      // nothing about the one the admin picked, while hiding it turned an operator's settings mistake
+      // into a mystery about a colleague. It has its own code and its own sentence now.
       expect(msg.toLowerCase(), `${l}: no reason branch leaks into the copy`).not.toMatch(/already|既に|switch|無効|off\b/);
     }
-    // and the handler maps the 400 to it rather than to the catch-all
+    // The handler maps the 400 to it rather than to the catch-all.
+    //
+    // This used to be one regex with two character budgets in it, and both of them went stale for
+    // reasons that had nothing to do with what the pin claims: a comment grew past the first, and
+    // #1074's branch pushed the sentence past the second. Widening the numbers would have made the
+    // pin agree with the amendment without saying so — the one thing it must not do. So the branch
+    // is cut out by its own boundaries and each claim is stated on its own.
     expect(src).toMatch(/passwordSetupUnavailable/);
-    expect(src, "the password action does not fall through guarded's English catch-all")
-      .toMatch(/if \(v === "password"\) \{[\s\S]{0,1200}?catch \(e\) \{[\s\S]{0,300}?passwordSetupUnavailable/);
+    const branchStart = src.indexOf('if (v === "password")');
+    expect(branchStart, "the password action is still a branch of the row menu").toBeGreaterThan(-1);
+    const catchStart = src.indexOf("catch (e) {", branchStart);
+    expect(catchStart, "the password action still has a catch of its own").toBeGreaterThan(-1);
+    // Up to the next menu branch, so the window is the branch itself rather than a number.
+    const nextBranch = src.indexOf('if (v === "', catchStart);
+    const passwordCatch = src.slice(catchStart, nextBranch > -1 ? nextBranch : catchStart + 800);
+    expect(passwordCatch, "…which names the deployment fact separately (#1074)")
+      .toMatch(/deployment_has_no_address[\s\S]*?noAddressForLink/);
+    expect(passwordCatch, "…and still answers every OTHER 400 with the one uniform sentence")
+      .toMatch(/passwordSetupUnavailable/);
   });
 });

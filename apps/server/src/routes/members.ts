@@ -565,31 +565,45 @@ export async function membersPlugin(app: FastifyInstance) {
 
   app.post<{ Params: { sub: string } }>('/members/:sub/password-setup', async (req, reply) => {
     if (!(await requireTenantAdmin(req, reply))) return
+    // #1074 (ruled): the line is drawn between facts about the PERSON, which stay uniform, and facts
+    // about the DEPLOYMENT, which are named. Having no address is the second kind — every member here
+    // hits it identically, so it carries zero bits about the one the admin picked, and hiding it only
+    // turns a settings mistake into a mystery about a colleague. The invite dialog one screen over has
+    // always named it.
+    //
+    // THE DEPLOYMENT CHECK RUNS FIRST, and that ordering is the ruling's condition, not a tidiness
+    // preference. Run the person check first and an address-less deployment answers `no address` for
+    // the members who could otherwise be minted and the uniform sentence for the rest — and the
+    // uniform sentence, appearing for some people and not others, is itself the disclosure the
+    // uniformity exists to prevent. Checking the deployment first collapses everyone onto one answer
+    // while the address is missing, so there is no difference left to read. Pinned behaviourally in
+    // password-setup-deployment-first-1074.test.ts.
+    //
+    // It also means no token is minted for a link that cannot be built — the old order minted one and
+    // then threw the response away, leaving a live reset token behind for an errand that never ran.
+    const address = await tenantBaseUrl(req.db.sql, { id: req.tenant.id, slug: req.tenant.slug })
+    if (!address.url) {
+      req.log.warn({ tenantId: req.tenant.id, ranOut: address.ranOut }, `password setup: ${noAddressReason(address)}`)
+      return reply.code(400).send({ error: 'this deployment has no address to build a link with', code: 'deployment_has_no_address' })
+    }
+    // The member lookup sits AFTER the deployment check, so "first" means first. The cost is that an
+    // admin who mistypes a sub on an address-less deployment is told about the address before the
+    // typo; they see the 404 once the address is set. Nothing is disclosed either way — a tenant admin
+    // reads the member list — so this is ordering discipline, not a second disclosure rule.
     const [member] = await req.db.sql<[{ sub: string }?]>`SELECT sub FROM members WHERE sub = ${req.params.sub}`
     if (!member) return reply.code(404).send({ error: 'member not found' })
     const { mintPasswordSetup } = await import('../auth/password-reset.js')
     const minted = await mintPasswordSetup(req.db, req.params.sub)
-    // One answer for every refusal a caller may not distinguish: password sign-in is off, they have no
-    // address, or the address belongs to somebody ELSE's credential.
+    // One answer for the refusals that are facts about this MEMBER: they have no address of their own,
+    // or their address is already somebody ELSE's sign-in name. Password sign-in being off for the
+    // tenant also lands here for now — under #1074's line that is a configuration fact and nameable,
+    // and the local-invite door already names it, but reconciling the two doors is its own ticket.
     //
     // #614 (review rejection): "they already have a password" is NOT among them any more. It used to be,
     // and that left the reset with one delivery route — email — for a product whose invite has always
     // had a copy-link fallback. An admin could not help somebody who had forgotten their password and
     // could not read mail, which is precisely #605's break-glass member.
     if (!minted) return reply.code(400).send({ error: 'this member cannot be given a password entrance', code: 'password_setup_unavailable' })
-    // #1056 / ADR-254 addendum: the same Host-spoofing hole as the mail links below — this is the
-    // #614 break-glass copy-link, so it gets the same fix, folded into the SAME 400 status this
-    // handler already gives for "cannot mint" — but NOT the same `code`. `password_setup_unavailable`
-    // is deliberately uniform across ITS causes because they are all facts about this MEMBER (password
-    // sign-in off, no address, already has one) that the client shows as one unreadable-reason
-    // sentence on purpose. This cause is not a fact about the member at all — every member on this
-    // deployment hits it identically — and collapsing it into the same code told the admin the member
-    // was the problem while the invite dialog, one screen over, correctly named the deployment.
-    const address = await tenantBaseUrl(req.db.sql, { id: req.tenant.id, slug: req.tenant.slug })
-    if (!address.url) {
-      req.log.warn({ tenantId: req.tenant.id, ranOut: address.ranOut }, `password setup: ${noAddressReason(address)}`)
-      return reply.code(400).send({ error: 'this deployment has no address to build a link with', code: 'deployment_has_no_address' })
-    }
     const setupUrl = `${address.url}/reset-password?token=${minted.token}`
     // Two different events, because they are two different things to anyone reading the ledger later:
     // granting a password entrance changes who may authenticate this account; re-issuing a link for one
