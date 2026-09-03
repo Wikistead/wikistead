@@ -40,7 +40,7 @@ import { TemplatePickerDialog } from "./TemplatePickerDialog";
 import { NewPageButton } from "./NewPageButton";
 import { downloadSpaceExport } from "../data/exportApi"; // #309 export
 
-import { useLazyPageTree, buildLazyNodes } from "./lazy-tree"; // #623 §6.3
+import { useLazyPageTree, buildLazyNodes, afterIdForMove } from "./lazy-tree"; // #623 §6.3
 
 // #538 the route holds the TOC's visibleHeadings state, so every CM-internal scroll tick
 // re-rendered the route — and this whole subtree with it. The profile named react-arborist's
@@ -125,6 +125,18 @@ function SidebarImpl() {
     return out;
   }, [lazyTree.byParent]);
   const pageById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
+  // #1080 (#1077 review): the server nulls a placeholder-child page's `parentId` (ADR-220 §4.2 — it
+  // must never carry its real, invisible parent's id), which makes it indistinguishable from a
+  // genuine ROOT page in the flat `pages` list above. It is not a root sibling — it renders nested
+  // under its placeholder row, never at root — so a root-level reorder must not count it among
+  // root's siblings, or a dragged row's `afterId` can point past one, landing one slot off.
+  const placeholderChildIds = useMemo(() => {
+    const out = new Set<string>();
+    for (const b of lazyTree.byParent.values()) {
+      for (const ph of b.placeholders ?? []) for (const p of ph.pages) out.add(p.id);
+    }
+    return out;
+  }, [lazyTree.byParent]);
 
   // #284 / ADR-119: the member's pins. The server list is view-confirmed (double gate
   // live resource row + FGA view), so rendering it verbatim can never leak a stale title.
@@ -250,8 +262,7 @@ function SidebarImpl() {
     if (!moved) return;
     const parentPageId = parentId == null ? null : parentId.startsWith("page:") ? parentId.slice(5) : undefined;
     if (parentPageId === undefined) return;
-    const siblings = pages.filter((p) => p.parentId === parentPageId && p.id !== moved.id).sort((a, b) => a.position - b.position);
-    const afterId = index > 0 ? siblings[index - 1]?.id ?? null : null;
+    const afterId = afterIdForMove({ pages, placeholderChildIds, parentPageId, movedId: moved.id, index });
     movePage.mutate({ pageId: moved.id, fromSpaceId: moved.spaceId, toSpaceId: current, parentId: parentPageId, afterId });
   };
 

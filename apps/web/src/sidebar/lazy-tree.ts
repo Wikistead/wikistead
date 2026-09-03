@@ -362,3 +362,28 @@ export function buildLazyNodes(args: {
   const root = byParent.get(null);
   return root ? assemble(root, null) : [];
 }
+
+/**
+ * #1080 (#1077 review): the server nulls a placeholder-child page's `parentId` (ADR-220 §4.2 — it
+ * must never carry its real, invisible parent's id), which makes it indistinguishable from a genuine
+ * ROOT page in a flat page list keyed only on `parentId`. It is not a root sibling — it renders
+ * nested under its placeholder row, never at root — so a root-level drag-reorder must exclude it from
+ * the sibling list, or the dragged row's `afterId` can point past one, landing one slot off from what
+ * the reader saw on screen.
+ *
+ * Pulled out of `Sidebar.tsx`'s `onMove` so the defect (and the fix) is pinned without a component
+ * harness — this is pure data filtering, not a rendering or drag-gesture timing question.
+ */
+export function afterIdForMove(args: {
+  pages: readonly Page[];
+  placeholderChildIds: ReadonlySet<string>;
+  parentPageId: string | null;
+  movedId: string;
+  index: number;
+}): string | null {
+  const { pages, placeholderChildIds, parentPageId, movedId, index } = args;
+  const siblings = pages
+    .filter((p) => p.parentId === parentPageId && p.id !== movedId && !placeholderChildIds.has(p.id))
+    .sort((a, b) => a.position - b.position);
+  return index > 0 ? siblings[index - 1]?.id ?? null : null;
+}
