@@ -77,13 +77,15 @@ const KNOWN_SAFE: Record<string, string> = {
   // `!isLoading && !isError && !publishedIsError && !changed`, and both `isError` (useRevisionContent)
   // and `publishedIsError` (usePublished, #1015) are destructured and read directly in that same gate
   // expression, ahead of and independent of whatever `changed` resolves to.
-  // #1056 landed a SECOND occurrence of this key: `notify.error(t("members.noAddressForLink"))` inside
-  // `catch (e)` on the enablePassword mutation, so the resolver walks back to `e` — the caught error
-  // and reports "declared with no initializer". There is no query behind it to guard: the toast fires
-  // only on that mutation's own rejection, which is the failure #933 asks a give-up to be tied to. The
-  // key is shared with the empty-state occurrence on purpose (an address-less deployment gets the same
-  // sentence the invite dialog gives), and that occurrence resolves on its own.
-  "settings/MembersPage.tsx::members.noAddressForLink": "the give-up occurrence is a mutation's error toast — `catch (e)` on `enablePassword`, where the identifier the resolver lands on is the caught error, not a query; it cannot render on a successful-but-empty read at all",
+  // #1056 review: the password-setup entrance's `catch (e)` on the enablePassword mutation used
+  // to reuse the invite dialog's `members.noAddressForLink` key, which read as "the invitation was
+  // created…reissue the link" on a path that never creates anything (the server 400s before minting).
+  // Split into its own key, `members.noAddressForPasswordLink`, so the two are told apart — but the
+  // shape this entry is about is unchanged: the resolver walks back to `e`, the caught error, not a
+  // query, and reports "declared with no initializer". The toast fires only on that mutation's own
+  // rejection, which is the failure #933 asks a give-up to be tied to; there is no query behind it to
+  // guard, and it cannot render on a successful-but-empty read at all.
+  "settings/MembersPage.tsx::members.noAddressForPasswordLink": "the give-up occurrence is a mutation's error toast — `catch (e)` on `enablePassword`, where the identifier the resolver lands on is the caught error, not a query; it cannot render on a successful-but-empty read at all",
   "history/DiffModal.tsx::history.noChanges": "the no-changes gate is `!isLoading && !isError && !publishedIsError && !changed` — `isError` and `publishedIsError` are read directly in the gate itself (#1015), so a failed fetch never reaches this branch regardless of what `changed` (the part the resolver cannot trace through `useMemo`) evaluates to",
 };
 

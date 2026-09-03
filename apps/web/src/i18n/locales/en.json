@@ -1203,6 +1203,7 @@
     "emailed": "Emailed to recipient.",
     "notEmailed": "Not emailed. Copy the link above and hand it over yourself.",
     "noAddressForLink": "The invitation was created, but this deployment has no address to build a link with yet. Ask your operator to set WKS_PUBLIC_BASE_URL or verify a custom domain, then reissue the link.",
+    "noAddressForPasswordLink": "This deployment has no address to build a link with yet. Ask your operator to set WKS_PUBLIC_BASE_URL or verify a custom domain, then try again.",
     "pendingTitle": "Pending invites",
     "noEmail": "(no email)",
     "revoke": "Revoke",

@@ -495,11 +495,14 @@ export function MembersPage() {
                       // server (`password_setup_unavailable` never says which precondition failed), and
                       // it stays uniform here — one readable sentence, no reason branch.
                       //
-                      // #1056: `deployment_has_no_address` is NOT one of those causes — it is a fact
-                      // about the DEPLOYMENT, identical for every member, not a fact this admin should
-                      // be left guessing was about the person they picked. Named separately so the same
-                      // guidance the invite dialog already gives (`members.noAddressForLink`) reaches
-                      // this surface too, instead of reading as "something is wrong with this member".
+                      // #1056/#1091-review: `deployment_has_no_address` is NOT one of those
+                      // causes — it is a fact about the DEPLOYMENT, identical for every member, not a
+                      // fact this admin should be left guessing was about the person they picked. Its
+                      // own copy (`members.noAddressForPasswordLink`), NOT the invite dialog's
+                      // `noAddressForLink` — this path never creates an invitation (the server answers
+                      // 400 before minting anything), so "the invitation was created… reissue the link"
+                      // is factually wrong here and re-introduces the "password-setup wears the invite's
+                      // words" shape #606 already ruled out.
                       void (async () => {
                         try {
                           const res = await enablePassword(token, m.sub);
@@ -507,7 +510,7 @@ export function MembersPage() {
                           notify.success(t(passwordAction(m) === "reissue" ? "members.reissuePasswordDone" : "members.enablePasswordDone"));
                         } catch (e) {
                           if (e instanceof ApiError && e.status === 400 && e.code === "deployment_has_no_address") {
-                            notify.error(t("members.noAddressForLink"));
+                            notify.error(t("members.noAddressForPasswordLink"));
                           } else {
                             notify.error(e instanceof ApiError && e.status === 400
                               ? t("members.passwordSetupUnavailable")

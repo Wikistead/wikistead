@@ -66,9 +66,26 @@ describe("#606: the password-setup path does not wear the invite's words", () =>
     // Up to the next menu branch, so the window is the branch itself rather than a number.
     const nextBranch = src.indexOf('if (v === "', catchStart);
     const passwordCatch = src.slice(catchStart, nextBranch > -1 ? nextBranch : catchStart + 800);
-    expect(passwordCatch, "…which names the deployment fact separately (#1074)")
-      .toMatch(/deployment_has_no_address[\s\S]*?noAddressForLink/);
+    expect(passwordCatch, "…which names the deployment fact separately (#1074), with its OWN copy key —")
+      .toMatch(/deployment_has_no_address[\s\S]*?noAddressForPasswordLink/);
+    expect(passwordCatch, "…not the invite dialog's key, which this path's #1056-review reuse bug had reached for")
+      .not.toMatch(/noAddressForLink/); // distinct from `noAddressForPasswordLink`, not a substring of it
     expect(passwordCatch, "…and still answers every OTHER 400 with the one uniform sentence")
       .toMatch(/passwordSetupUnavailable/);
+  });
+
+  // #1056 review (2026-09-03): the password-setup entrance never creates anything on this
+  // refusal — the server answers 400 before minting a link — so the invite dialog's "The invitation
+  // was created, but…reissue the link" wording is factually wrong here, and reusing it re-introduces
+  // the "password-setup wears the invite's words" shape #606 already ruled out once.
+  it("#1056: the deployment-address copy is its own sentence, and does not claim an invitation exists", () => {
+    for (const { l, bundle } of locales) {
+      const passwordMsg = bundle.members.noAddressForPasswordLink as string;
+      const inviteMsg = bundle.members.noAddressForLink as string;
+      expect(passwordMsg, `${l}: noAddressForPasswordLink exists`).toBeTruthy();
+      expect(passwordMsg, `${l}: distinct from the invite dialog's sentence`).not.toBe(inviteMsg);
+      expect(passwordMsg.toLowerCase(), `${l}: does not claim something was created`)
+        .not.toMatch(/invit|招待|reissue|再発行/);
+    }
   });
 });
