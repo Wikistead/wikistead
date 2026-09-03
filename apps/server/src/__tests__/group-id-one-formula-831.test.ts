@@ -27,6 +27,9 @@ const read = (p: string) => readFileSync(resolve(root, p), 'utf8')
 
 // #848: the discovery below walks the tree instead of reading a list of two files. What is skipped is
 // the machinery, never a source directory — a list of source paths is the thing this file is fixing.
+// #1076: a dot-directory holds a nested checkout — full checkouts of the same tree. A walk
+// that descends into them reads every shipped file a dozen times over and reports the copies as
+// second definitions, so the pin goes red on any machine that has one and stays green on CI.
 const SKIP = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'docs-site', 'lp'])
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

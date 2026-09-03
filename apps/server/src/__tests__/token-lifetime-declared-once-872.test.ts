@@ -14,6 +14,9 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
+// #1076: a dot-directory holds a nested checkout — full checkouts of the same tree. A walk
+// that descends into them reads every shipped file a dozen times over and reports the copies as
+// second definitions, so the pin goes red on any machine that has one and stays green on CI.
 const SKIP = new Set(['node_modules', '.git', '.astro', 'dist', 'build', '.turbo', 'coverage', 'test-results', 'playwright-report'])
 
 /** Every shipped and test source file, so a reader added anywhere is seen. */
