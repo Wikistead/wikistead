@@ -703,7 +703,7 @@ paths:
         - { name: sub, in: path, required: true, schema: { type: string } }
       responses:
         "201": { description: "{ setupUrl, email }" }
-        "400": { description: "`password_setup_unavailable` — password sign-in is off for this tenant, the member has no address, or already has a password. `deployment_has_no_address` — this deployment has no verified custom domain and no WKS_PUBLIC_BASE_URL configured, so no link can be built (#1056 / ADR-254 addendum); set one and retry." }
+        "400": { description: "`password_setup_unavailable` — password sign-in is off for this tenant, the member has no address, or already has a password. `deployment_has_no_address` — this deployment has no verified custom domain and no WKS_PUBLIC_BASE_URL configured, so no link can be built; set one and retry." }
         "401": { description: Missing or invalid credentials }
         "403": { description: Permitted to see the resource but not to perform this action }
         "404": { description: Not viewable or absent (uniform — existence hiding) }
