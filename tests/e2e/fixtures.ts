@@ -170,8 +170,15 @@ export interface FixtureIntegrity {
   unreadable: string[];
 }
 
-export async function coreFixtureIntegrity(): Promise<FixtureIntegrity> {
-  const { apiUrl, storeId } = fgaEnv();
+// `env` is injectable so the classification below can be measured without a live e2e stack. It
+// reads `.env.e2e.local`, which `setup:e2e` writes — a checkout that has never run it (a fresh
+// clone, CI, the publication's mirror) resolves an empty `storeId`, returns early, and any test
+// driving this through a mocked `fetch` measures the early return instead of the logic. Measured
+// 2026-09-03: the #1022 pins were red on master everywhere except a checkout with that file.
+export async function coreFixtureIntegrity(
+  env: { apiUrl: string; storeId: string } = fgaEnv(),
+): Promise<FixtureIntegrity> {
+  const { apiUrl, storeId } = env;
   if (!storeId) return { missing: [], unreadable: [] };
   // #1022: a store id that no longer EXISTS still answers `POST .../read` with 200 and an empty
   // `tuples` array — the exact shape `classifyAnchorRead` reads as "the tuple is gone" (measured:

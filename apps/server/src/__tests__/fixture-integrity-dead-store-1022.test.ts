@@ -17,7 +17,12 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 type FixtureIntegrity = { missing: string[]; unreadable: string[] }
-let coreFixtureIntegrity: () => Promise<FixtureIntegrity>
+// A store id is PASSED rather than read from `.env.e2e.local`: that file is written by `setup:e2e`
+// and absent in any checkout that has not run it, and without it the function returns before the
+// first fetch — so these pins would measure the early return, not the classification. (Measured:
+// red on master in every checkout but the author's, CI and the mirror suite included.)
+const ENV = { apiUrl: 'http://localhost:8081', storeId: '01TESTSTORE0000000000000000' }
+let coreFixtureIntegrity: (env?: { apiUrl: string; storeId: string }) => Promise<FixtureIntegrity>
 
 const ROOT = resolve(import.meta.dirname, '../../../..')
 
@@ -45,7 +50,7 @@ describe('#1022 a dead store refuses to blame a spec for tuples nobody deleted',
         throw new Error('coreFixtureIntegrity asked a read after the store answered 404 — it must not')
       }),
     )
-    const { missing, unreadable } = await coreFixtureIntegrity()
+    const { missing, unreadable } = await coreFixtureIntegrity(ENV)
     expect(missing, 'a confirmed-dead store must name nobody').toEqual([])
     expect(unreadable.length, 'every anchor must be reported, all as unreadable').toBeGreaterThanOrEqual(10)
     expect(unreadable.every((u) => u.includes('does not exist')), unreadable.join('\n')).toBe(true)
@@ -62,7 +67,7 @@ describe('#1022 a dead store refuses to blame a spec for tuples nobody deleted',
         return { ok: true, status: 200, json: async () => ({ tuples: [] }) } as unknown as Response
       }),
     )
-    const { missing, unreadable } = await coreFixtureIntegrity()
+    const { missing, unreadable } = await coreFixtureIntegrity(ENV)
     expect(unreadable, 'a live store must not be reported unreadable').toEqual([]);
     expect(missing.length, 'a live store answering empty must still name the missing anchors').toBeGreaterThanOrEqual(10)
   })
@@ -75,7 +80,7 @@ describe('#1022 a dead store refuses to blame a spec for tuples nobody deleted',
         return { ok: true, status: 200, json: async () => ({ tuples: [{ key: {} }] }) } as unknown as Response
       }),
     )
-    const { missing, unreadable } = await coreFixtureIntegrity()
+    const { missing, unreadable } = await coreFixtureIntegrity(ENV)
     expect({ missing, unreadable }).toEqual({ missing: [], unreadable: [] })
   })
 })
