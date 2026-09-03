@@ -568,12 +568,22 @@ export async function assertNotLastWayIn(
 // counterfactual "as if this connection (and any link through it) were already gone", asked BEFORE it
 // actually is. Reused rather than copied, because a second copy of this question is exactly the shape
 // #822 keeps repeating (three guards, one question, answered differently).
+// #1064 / ADR-259 §3.10 (review, revise pass on the first cut of #1064): the single-
+// connection half of the predicate below — "does THIS ONE connection admit THIS sub" — as opposed to
+// "does ANY connection in the effective set admit it". A caller asking about one specific connection
+// (the unlink route, auth.ts) must NOT substitute "is this connection in the tenant's effective set at
+// all" for this — a connection can be perfectly effective for the TENANT (enabled, in plan) while
+// admitting a completely different member's sub (a second door added on top of a DIFFERENT origin,
+// the ordinary case §3.3 exists for) and not this one at all.
+export function connectionAdmitsSubject(conn: LoginConnection, sub: string): boolean {
+  const prefix = RESERVED_SUB_RE.exec(sub)?.[0] ?? null
+  return prefix ? conn.subjectPrefix === prefix : conn.subjectPrefix === null && (conn.kind === 'oidc' || conn.kind === 'platform')
+}
+
 // Pure half of the mint-derived check, split out so a caller holding an already-resolved `effective`
 // list (one `resolveLoginConnections` call) can ask it for many subs — see `subsWithAnotherWayIn`.
 function subjectHasMintDerivedEntrance(sub: string, effective: readonly LoginConnection[]): boolean {
-  const prefix = RESERVED_SUB_RE.exec(sub)?.[0] ?? null
-  if (prefix) return effective.some((c) => c.subjectPrefix === prefix)
-  return effective.some((c) => c.subjectPrefix === null && (c.kind === 'oidc' || c.kind === 'platform'))
+  return effective.some((c) => connectionAdmitsSubject(c, sub))
 }
 
 export async function memberHasAnotherWayIn(

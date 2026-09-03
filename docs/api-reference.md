@@ -126,6 +126,14 @@ being removed but not the connection's ability to mint this member's sub again o
 sever that. Unlike the admin's
 connection-wide delete (`DELETE /admin/connections/{id}`), this touches one member's one link.
 
+If the removed connection no longer admits THIS member's sub — it's disabled, gone, or was never this
+member's own mint-derived origin to begin with, an ordinary second-door link — its per-connection group
+slice (`member_connection_groups`, the union mechanism behind a login's group-derived roles) is revoked
+in the same transaction as the link removal, and `members.groups`/the matching FGA membership tuples are
+recomputed immediately rather than left to lapse at a next sign-in that may never come. A connection
+that still mints this member's sub keeps its slice — removing the LINK row doesn't close that door, so
+revoking the slice too would look like a real access change without actually restricting anything.
+
 `GET /me/settings` (`/me/*` account-screen plumbing, not part of the OpenAPI-covered surface) carries a
 `canOverrideDisplayName` field — the restrictive union that gates the display-name
 override: `identitySource` alone answers a different, narrower question (which door a member's identity

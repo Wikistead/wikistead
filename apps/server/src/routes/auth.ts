@@ -10,7 +10,7 @@ import { saveState, consumeState } from '../auth/oidc-state.js'
 import { safeReturnTo } from '../auth/return-to.js'
 import { decryptSecret } from '../auth/secret-crypto.js'
 import { acceptInvite } from '../auth/invites.js'
-import { resolveAvailableLogin, resolveLoginConnections, memberHasAnotherWayIn, localLoginEnabled, loginMethodCeiling } from '../auth/login-methods.js'
+import { resolveAvailableLogin, resolveLoginConnections, memberHasAnotherWayIn, localLoginEnabled, loginMethodCeiling, connectionAdmitsSubject } from '../auth/login-methods.js'
 import { findMemberIdentityLink, linkMemberIdentity, listLinkedConnectionIds, unlinkMemberIdentity } from '../auth/member-identities.js'
 import { revokeMemberConnectionSlice } from '../auth/group-sync.js'
 import { reauthenticated, locked, countFailure } from './second-factor.js'
@@ -488,19 +488,29 @@ export async function authPlugin(app: FastifyInstance) {
       const removed = await req.db.tx(async (tx) => {
         const removed = await unlinkMemberIdentity(tx, req.tenant.id, req.params.connectionId, req.user.sub)
         if (!removed) return false
-        // Effective set only — a disabled tenant_oidc/tenant_saml row still carries its
-        // subject_prefix, so re-deriving this from the raw row (rather than reusing
-        // resolveLoginConnections's effective output) would wrongly treat a dead connection as
-        // still mint-derived and skip the revoke, reintroducing the bug this ticket exists to fix
-        // (review c-aead6c7, rev1 → rev2).
+        // review (revise pass on the first cut of #1064): "effective set contains this
+        // connection id" answers "is this connection effective FOR THE TENANT", not "does this
+        // connection still admit THIS sub" — a DIFFERENT member's still-live connection is
+        // tenant-effective too. The disabled-row bug this comment used to warn about (checking the
+        // raw subject_prefix column instead of the effective set) is a real, separate failure mode,
+        // but fixing THAT alone left this one: an enabled connection that mints someone else's sub
+        // (the ordinary "second door on a different origin" case §3.3 exists for) was wrongly read as
+        // still admitting THIS sub, and its slice never got revoked. `connectionAdmitsSubject` is the
+        // narrower, sub-scoped half of `resolveLoginConnections`'s own effective-list predicate
+        // (login-methods.ts) — reused, not re-derived, per §3.10's "a narrower question over the same
+        // list, not a new predicate".
         const effective = await resolveLoginConnections({ sql: tx } as never, req.tenant)
-        const stillEffective = effective.some((c) => c.id === req.params.connectionId)
-        if (!stillEffective) {
-          await revokeMemberConnectionSlice(tx, app.fga, req.tenant.id, req.params.connectionId, req.user.sub)
-        }
+        const conn = effective.find((c) => c.id === req.params.connectionId)
+        const stillAdmitsThisSub = conn ? connectionAdmitsSubject(conn, req.user.sub) : false
+        // Audit before the slice revoke: both are inside this one tx, so a later failure rolls the
+        // whole thing back regardless of order — but the slice revoke also calls out to FGA, a system
+        // outside the tx. Auditing first means a tx-aborting failure never reaches that external call.
         await auditIfEntitled(tx, req.tenant, {
           actor: `user:${req.user.sub}`, action: 'member.identity_unlinked', target: `member:${req.user.sub}`,
         })
+        if (!stillAdmitsThisSub) {
+          await revokeMemberConnectionSlice(tx, app.fga, req.tenant.id, req.params.connectionId, req.user.sub)
+        }
         return true
       })
       if (!removed) return reply.code(404).send({ error: 'not found' })
