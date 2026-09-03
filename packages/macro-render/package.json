@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@lezer/markdown": "1.6.4",
-    "katex": "0.16.11"
+    "katex": "0.16.21"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

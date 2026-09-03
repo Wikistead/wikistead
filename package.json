@@ -63,7 +63,10 @@
   },
   "pnpm": {
     "overrides": {
-      "fast-uri": "^3.1.5",
+      "@xmldom/xmldom": "^0.8.15",
+      "browserslist": "^4.28.7",
+      "dompurify": "^3.4.13",
+      "fast-uri": "^3.1.6",
       "find-my-way": "^9.7.0",
       "immutable": "^4.3.9",
       "js-yaml@4": "^4.3.1",
