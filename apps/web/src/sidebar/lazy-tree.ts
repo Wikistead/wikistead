@@ -124,14 +124,40 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
     })),
   });
 
+  // #623 / ADR-220 §4.5, ②: placeholders ride a branch's FIRST page, but no longer arrive INSIDE
+  // it — `listBranch`/`paintTree` stopped resolving them (the 728-tuple-per-open cost §4.3 measured),
+  // and the commit message describes a follow-up fetch that was never actually wired on this side.
+  // From that commit until this one, EVERY invisible-parent-with-a-visible-child page was unreachable
+  // from the member sidebar — the exact "accident, not decision" silent-drop §4.6 names as the bug
+  // ADR-220 existed to fix, reintroduced by an unrelated performance change. One request per branch
+  // (matching the branch query's own cardinality, never per `loadMore` page — §4.5), kept in its own
+  // cache entry rather than folded into the branch's, so an unrelated paint/branch refetch (staleTime 0
+  // on `paint`, so this happens on every navigation) can never clobber it the way `mergePaintedWindow`
+  // would if it lived inside the same `BranchAnswer` the server actually returns.
+  const placeholderQueries = useQueries({
+    queries: wanted.map((parentId) => ({
+      queryKey: ["pages", spaceId ?? "", "placeholders", parentId ?? ROOT],
+      enabled: !!spaceId,
+      staleTime: 30_000,
+      queryFn: async () => {
+        const qs = parentId ? `?parent=${encodeURIComponent(parentId)}` : "";
+        return apiFetch<{ placeholders: NonNullable<BranchAnswer["placeholders"]>; placeholdersExhausted: boolean }>(
+          `/spaces/${spaceId}/pages/tree-placeholders${qs}`, token,
+        );
+      },
+    })),
+  });
+
   const byParent = useMemo(() => {
     const m = new Map<string | null, BranchAnswer>();
     wanted.forEach((parentId, i) => {
       const d = branchQueries[i]?.data;
-      if (d) m.set(parentId, d);
+      if (!d) return;
+      const ph = placeholderQueries[i]?.data;
+      m.set(parentId, ph ? { ...d, placeholders: ph.placeholders, placeholdersExhausted: ph.placeholdersExhausted } : d);
     });
     return m;
-  }, [wanted, branchQueries]);
+  }, [wanted, branchQueries, placeholderQueries]);
 
   const expand = useCallback((pageId: string) => {
     setExpanded((s) => (s.has(pageId) ? s : new Set([...s, pageId])));

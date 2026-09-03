@@ -21,6 +21,10 @@ const P = (id: string, title: string, parentId: string | null = null, hasChildre
 
 async function openLazySpace(page: Page, opts: { branchDelayMs?: number } = {}) {
   const requested: string[] = [];
+  const placeholdersRequested: string[] = [];
+  // #1077: `placeholders` does NOT ride the paint/branch response — moved it behind
+  // `/pages/tree-placeholders` as a follow-up the SCREEN must ask for itself (below). The stub
+  // mirrors what the real server actually sends from these two routes now: no `placeholders` field.
   await page.route((u) => u.pathname.match(/\/api\/spaces\/demo_space\/pages\/paint$/) !== null, (route) =>
     route.fulfill({
       status: 200, contentType: "application/json",
@@ -29,9 +33,6 @@ async function openLazySpace(page: Page, opts: { branchDelayMs?: number } = {}) 
           parentId: null,
           pages: [P("p-top", "Top page", null, true), P("p-plain", "Plain leaf")],
           nextCursor: null,
-          placeholders: [
-            { token: "tok-1", under: null, parentToken: null, pages: [P("p-granted", "Granted child", null)] },
-          ],
         }],
       }),
     }));
@@ -49,9 +50,25 @@ async function openLazySpace(page: Page, opts: { branchDelayMs?: number } = {}) 
           // silently shrink it (the first draft returned [] here and hid a real hook defect behind a
           // fixture defect: the tree emptied and the spec could not say which side was wrong)
           : parent === "root"
-            ? { pages: [P("p-top", "Top page", null, true), P("p-plain", "Plain leaf")], nextCursor: null,
-                placeholders: [{ token: "tok-1", under: null, parentToken: null, pages: [P("p-granted", "Granted child", null)] }] }
+            ? { pages: [P("p-top", "Top page", null, true), P("p-plain", "Plain leaf")], nextCursor: null }
             : { pages: [], nextCursor: null },
+      ),
+    });
+  });
+  // #1077: the follow-up itself. Until this ticket nothing on the client ever called this route — the
+  // rendering side (below, test ②) was pinned entirely from placeholders the OLD stub handed straight
+  // to the paint/branch response, which is not what the real server has sent since (2026-08-13).
+  // That gap is exactly what let the wiring go missing for three weeks with this file staying green.
+  await page.route((u) => u.pathname.match(/\/api\/spaces\/demo_space\/pages\/tree-placeholders$/) !== null, async (route) => {
+    const url = new URL(route.request().url());
+    const parent = url.searchParams.get("parent") ?? "root";
+    placeholdersRequested.push(parent);
+    await route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify(
+        parent === "root"
+          ? { placeholders: [{ token: "tok-1", under: null, parentToken: null, pages: [P("p-granted", "Granted child", null)] }], placeholdersExhausted: false }
+          : { placeholders: [], placeholdersExhausted: false },
       ),
     });
   });
@@ -60,7 +77,7 @@ async function openLazySpace(page: Page, opts: { branchDelayMs?: number } = {}) 
   await openDemo(page);
   await expect(page.getByTestId("page-tree")).toBeVisible({ timeout: 20_000 });
   await sleep(400);
-  return { requested };
+  return { requested, placeholdersRequested };
 }
 
 test("#623 ①: a row with a visible child expands; a leaf draws no chevron at all", async ({ page }) => {
@@ -93,7 +110,15 @@ test("#623 ①: a row with a visible child expands; a leaf draws no chevron at a
 
 test("#623 ② (§4.2): a placeholder renders, opens from data in hand, and asks the server NOTHING", async ({ page }) => {
   test.setTimeout(120_000);
-  const { requested } = await openLazySpace(page);
+  const { requested, placeholdersRequested } = await openLazySpace(page);
+
+  // #1077: the load-bearing assertion this file was missing. Every assertion below proves the SCREEN
+  // renders placeholders correctly once it HAS them — none of them proves it ever asks for them. A
+  // client that never called `/pages/tree-placeholders` at all would still pass every one of them,
+  // because the old stub handed placeholders to the paint/branch response directly, which the real
+  // server has not done since. This is what actually would have caught that regression.
+  await expect.poll(() => placeholdersRequested, { timeout: 10_000 })
+    .toContain("root");
 
   const ph = page.getByTestId("tree-placeholder").first();
   await expect(ph, "the granted page was handed over and never arrived").toBeVisible();
