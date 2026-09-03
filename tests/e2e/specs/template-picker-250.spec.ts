@@ -1,12 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { enterEdit, openScratch, sleep } from "../helpers";
+import { TORTURE_PAGE as TORTURE } from "../fixtures/torture-page";
 
-// #267 the REAL standing QA torture-page body (fixtures/torture-page.md — copied from the
-// standing rendering-QA torture-page template). The synthetic heavy fixture below passed while THIS body
-// still burst the picker's two-pane row out of the dialog, so the geometry tests must use the real thing.
-const TORTURE = readFileSync(fileURLToPath(new URL("../fixtures/torture-page.md", import.meta.url)), "utf8");
+// #267: the REAL standing QA torture-page body. The synthetic heavy fixture below passed while THIS
+// body still burst the picker's two-pane row out of the dialog, so the geometry tests must use the
+// real thing.
 
 // #250 / ADR-110: create a page FROM a template via the sidebar split- ▾ picker. Save a page as a
 // personal template, open the picker, preview it, and create — the new draft opens in edit seeded with the

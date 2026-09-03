@@ -1,11 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { enterEdit, openScratch, sleep } from "../helpers";
+import { TORTURE_PAGE as TORTURE } from "../fixtures/torture-page";
 
 // The standing QA torture body — 4 mermaid diagrams among long content, the exact fixture the review
 // probe used.
-const TORTURE = readFileSync(fileURLToPath(new URL("../fixtures/torture-page.md", import.meta.url)), "utf8");
 
 // #352: CM6 virtualizes — it destroys a block widget that scrolls out of the viewport — so a re-entered
 // ```mermaid used to re-run the full mermaid.render (new SVG id each time), the scroll-jank the ticket measured.
