@@ -382,8 +382,23 @@ export function afterIdForMove(args: {
   index: number;
 }): string | null {
   const { pages, placeholderChildIds, parentPageId, movedId, index } = args;
-  const siblings = pages
-    .filter((p) => p.parentId === parentPageId && p.id !== movedId && !placeholderChildIds.has(p.id))
+  // #1080 rev2 (review): `index` is react-arborist's position in the RENDERED children
+  // array, which still holds the dragged row at its ORIGINAL slot (compute-drop.ts's `walkUpFrom` builds
+  // it from `indexOf(above) + 1` without splicing the drag source out first) and counts any synthetic
+  // rows after it (placeholder groups, #1079's exhausted row, the #623 "more" row) — but `assemble()`
+  // above always appends those AFTER every real page at a branch level, so they only ever extend the
+  // index range past the real siblings, never sit between them. Two corrections follow: (1) an index at
+  // or past the real sibling count means "after the last real page" (clamp — a drop past a synthetic row
+  // is not a request to nest among page rows), (2) since `siblings` below has `movedId` spliced out,
+  // every index AFTER its own original slot is off by one — a downward drag must subtract one, an
+  // upward drag (or a drop into a DIFFERENT parent, where `movedId` never appears in `withMoved` at all)
+  // must not.
+  const withMoved = pages
+    .filter((p) => p.parentId === parentPageId && !placeholderChildIds.has(p.id))
     .sort((a, b) => a.position - b.position);
-  return index > 0 ? siblings[index - 1]?.id ?? null : null;
+  const movedIndex = withMoved.findIndex((p) => p.id === movedId);
+  const clampedIndex = Math.min(index, withMoved.length);
+  const adjustedIndex = movedIndex >= 0 && clampedIndex > movedIndex ? clampedIndex - 1 : clampedIndex;
+  const siblings = withMoved.filter((p) => p.id !== movedId);
+  return adjustedIndex > 0 ? siblings[adjustedIndex - 1]?.id ?? null : null;
 }

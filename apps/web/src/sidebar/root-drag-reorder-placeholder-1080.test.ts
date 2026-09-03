@@ -52,3 +52,26 @@ describe("#1080: root drag-reorder does not count a placeholder-child page as a 
     expect(afterId).toBe("child1");
   });
 });
+
+// #1080 rev2 (review): the index/movedId mismatch reproduces with ZERO placeholders — a
+// bare root of three real pages already misplaces every downward drag. These pin the shipped code
+// against a plain root=[a,b,c], matching the three drags the review measured by hand.
+describe("#1080 rev2: root drag-reorder lands where the reader dropped it, no placeholders involved", () => {
+  const root3 = [page("a", null, 0), page("b", null, 1), page("c", null, 2)];
+  const noPlaceholders = new Set<string>();
+
+  it("drag the top row to the bottom (index 3) — lands after the last row, not at the top", () => {
+    const afterId = afterIdForMove({ pages: root3, placeholderChildIds: noPlaceholders, parentPageId: null, movedId: "a", index: 3 });
+    expect(afterId, "a dropped past c belongs after c, not thrown back to null/first").toBe("c");
+  });
+
+  it("drag the top row one slot down (index 2, between b and c) — lands after b, not after c", () => {
+    const afterId = afterIdForMove({ pages: root3, placeholderChildIds: noPlaceholders, parentPageId: null, movedId: "a", index: 2 });
+    expect(afterId, "a downward drag one slot short of the bottom must not overshoot to the last row").toBe("b");
+  });
+
+  it("drag the bottom row upward (index 1, between a and b) — lands after a (this direction was already correct)", () => {
+    const afterId = afterIdForMove({ pages: root3, placeholderChildIds: noPlaceholders, parentPageId: null, movedId: "c", index: 1 });
+    expect(afterId).toBe("a");
+  });
+});
