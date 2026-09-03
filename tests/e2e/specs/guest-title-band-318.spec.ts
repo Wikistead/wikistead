@@ -37,8 +37,9 @@ async function shareUrl(pageId: string, capability: "view" | "edit"): Promise<st
 
 const TITLE = "Guest Band Title 318";
 
+// #1020/#926: was isolated for the #823/#825 shared-stack-under-load family. #926's fix landed and
+// this test passed 3 consecutive full #891 gate runs after it, with no isolation needed. Unskipped.
 test("#318 view guest: the title band shows the page title; no rename affordance; band height published", async ({ browser }) => {
-  test.skip(true, "#1020: isolated — intermittent Target.createTarget failure late in the #891 gate's 20-spec run; green standalone (2026-09-01)");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPublishedPage(member, TITLE);
@@ -67,11 +68,9 @@ test("#318 view guest: the title band shows the page title; no rename affordance
 // #274 SUPERSEDES the original #318 rule for EDIT capability: guests can now create pages
 // ("Untitled"), so naming happens in the editor title band exactly like members — the title renders as
 // the click-to-rename button and a rename round-trips. VIEW capability keeps the read-only h1 (above).
+// #1031/#926: was isolated for the #823/#825 shared-stack-under-load family. #926's fix landed and
+// this test passed 3 consecutive full #891 gate runs after it, with no isolation needed. Unskipped.
 test("#318/#274 edit guest: the band title is click-to-rename (member parity) and persists", async ({ browser }) => {
-  // #1031: isolated — the guest surface's `.cm-content` misses its 60s wait under the #891 gate's
-  // 20-spec run; green (7.5s) when this spec runs by itself, and green in the two gate runs before
-  // the one that caught it. Same family as #1020 (this file's view-guest case), a different test.
-  test.skip(true, "#1031: isolated — the edit surface misses its mount wait under the #891 gate's 20-spec run");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPublishedPage(member, TITLE + " E");

@@ -75,12 +75,9 @@ test("#568: an invited member sets a password and signs in with it", async ({ pa
   }
 });
 
-// #1026: isolated — `login-card` misses its 10s toBeVisible under the #891 gate's 20-spec run; green
-// (636ms) when this spec runs by itself. The skip sits at describe scope on purpose: this test asks
-// for the `page` fixture, and Playwright resolves that BEFORE an in-body skip would run, so an
-// in-body skip here would still pay the fixture's setup (the invite-handoff-638 trap, the project design notes).
+// #1026/#926: was isolated for the #823/#825 shared-stack-under-load family. #926's fix landed and
+// this test passed 3 consecutive full #891 gate runs after it, with no isolation needed. Unskipped.
 test.describe(() => {
-  test.skip(true, "#1026: isolated — login-card misses toBeVisible under the #891 gate's 20-spec run");
   test("#568: with passwords switched off the form is not on the screen", async ({ page }) => {
     await setLocalLogin(false);
     await page.goto(`${REAL}/login`);

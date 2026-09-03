@@ -29,8 +29,9 @@ async function waitForStableBox(locator: Locator, timeoutMs = 8000): Promise<voi
 // same rect (the macro wrap, not the full content width), same radius/outline — differing only in
 // colour + avatar. Two real clients on one `:::children` atom; the observer holds BOTH frames at
 // once (its own atom-sel + the peer's presence box) so the comparison is same-viewport.
+// #972/#926: was isolated for the #823/#825 shared-stack-under-load family. #926's fix landed and
+// this test passed 3 consecutive full #891 gate runs after it, with no isolation needed. Unskipped.
 test("#453: remote presence box hugs the same rect/shape as the local atom-sel ring", async ({ browser }) => {
-  test.skip(true, "#972: isolated — times out under the #891 gate's 20-spec run");
   const ctxA = await browser.newContext();
   const ctxB = await browser.newContext();
   const A = await ctxA.newPage();
@@ -113,11 +114,10 @@ const KINDS: { name: string; source: string[]; box: string }[] = [
 ];
 
 for (const kind of KINDS) {
+  // #1024/#926: the callout case was isolated for the #823/#825 shared-stack-under-load family.
+  // #926's fix landed and it passed 3 consecutive full #891 gate runs after it, with no isolation
+  // needed. Unskipped.
   test(`#453 a peer's box hugs the same rect as the local ring — ${kind.name}`, async ({ browser }) => {
-    // #1024: isolated — the callout case alone times out (60s) under the #891 gate's 20-spec run,
-    // on master as well as on the branch that found it; green when the presence specs run by
-    // themselves. One red, one ticket (#891 ruling) — the other kinds keep running.
-    if (kind.name === "callout") test.skip(true, "#1024: isolated — times out under the #891 gate's 20-spec run");
     const ctxA = await browser.newContext();
     const ctxB = await browser.newContext();
     const A = await ctxA.newPage();

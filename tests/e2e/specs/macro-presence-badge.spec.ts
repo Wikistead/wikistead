@@ -12,8 +12,9 @@ import { enterEdit, createScratchPage, sleep } from "../helpers";
 // it twice). The MODAL source (a — macroEdit) is unit-covered (macro-presence.test / resolvePresenceBlocks)
 // and, together with the real Excalidraw multiplayer canvas, is a needs-human-check item. Real Chromium.
 
+// #1021/#926: was isolated for the #823/#825 shared-stack-under-load family. #926's fix landed and
+// this test passed 3 consecutive full #891 gate runs after it, with no isolation needed. Unskipped.
 test("#92 ②③: a peer's caret ON a macro atom draws an outline + avatar, and yCollab still syncs", async ({ browser }) => {
-  test.skip(true, "#1021: isolated — intermittent callout-panel-not-visible timeout late in the #891 gate's 20-spec run; green standalone (2026-09-01)");
   const ctxA = await browser.newContext();
   const ctxB = await browser.newContext();
   const A = await ctxA.newPage();
