@@ -37,7 +37,13 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+        // #1072/#939: NOT a close-animation on this layer. Radix's `Presence` waits for an
+        // `animationend` before unmounting, and if that event is ever missed (interrupted animation,
+        // React concurrent-render races), the `DismissableLayer` this overlay backs never unmounts —
+        // leaving its `document.body.style.pointerEvents = "none"` lock applied forever, silently
+        // swallowing the next click anywhere on the page. Dropping the exit animation makes the
+        // unmount synchronous, closing that whole class of stuck-lock bug at the root.
+        "fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0",
         className
       )}
       {...props}
@@ -76,7 +82,9 @@ function DialogContent({
           // only CAP (never widen) — so the effective width is min(100vw-4rem, that dialog's max), giving every
           // #406 S3 / ADR-159 §3: below `sm` the gutter narrows to 2rem total (phones can't spare 64px).
           // dialog the gutter at narrow/mid widths while the `sm:max-w-*` maxima still govern on wide screens.
-          "fixed left-[50%] z-50 grid w-[calc(100vw-2rem)] sm:w-[calc(100vw-4rem)] translate-x-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // #1072/#939: see DialogOverlay's comment — same reasoning, this is the layer
+          // `@radix-ui/react-dismissable-layer` actually gates on, so this is the one that matters.
+          "fixed left-[50%] z-50 grid w-[calc(100vw-2rem)] sm:w-[calc(100vw-4rem)] translate-x-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           position === "top" ? "top-[10%] translate-y-0" : "top-[50%] translate-y-[-50%]", // #344: top-pin vs center
           className
         )}
