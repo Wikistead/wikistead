@@ -51,6 +51,11 @@ export const GATE_SPECS = [
   "presence-geometry-453.spec.ts",
   "space-home-364.spec.ts",
   "brand-lockup-442.spec.ts",
+  // #1078 (from #1077's independent review): the sidebar's follow-up fetch for §4 placeholders went
+  // unwired for three weeks and nothing caught it — the only e2e coverage for that path was outside
+  // this gate and e2e does not run in CI at all. Cheap (~15s) and the sole automated defence against
+  // that regression class recurring silently.
+  "lazy-tree-623.spec.ts",
 ];
 
 function countIsolated() {
