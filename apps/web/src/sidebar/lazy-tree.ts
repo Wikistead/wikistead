@@ -79,10 +79,11 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       const branches: PaintAnswer["branches"] = r?.branches ?? [];
       for (const b of branches) {
         const key = branchKey(spaceId!, b.parentId);
-        const fresh = {
-          pages: b.pages, nextCursor: b.nextCursor,
-          placeholders: b.placeholders, placeholdersExhausted: b.placeholdersExhausted,
-        } satisfies BranchAnswer;
+        // #1077 review C5: this route never sends `placeholders` (§4 moved it behind its own
+        // follow-up, `placeholderQueries` below) — reading it here was the exact dead code that hid
+        // the 3-week regression this ticket fixed. Not read; left unset so a future reader does not
+        // reach for it here again.
+        const fresh = { pages: b.pages, nextCursor: b.nextCursor } satisfies BranchAnswer;
         // #899: KEEP what the reader loaded past this window. The paint always returns a branch's
         // FIRST window (`paintTree`'s `one()` passes no cursor) and its key carries the open page, so
         // seeding unconditionally threw away every `more:` a scrolling reader had asked for — on every
@@ -178,10 +179,11 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
     const r = await apiFetch<BranchAnswer>(`/spaces/${spaceId}/pages/branch?${qs}`, token);
     if (!r) return;
     // §8: a restarted read REPLACES what is held — appending would double what is already shown.
+    // #1077 review C5: no `placeholders` field to carry forward here either (see the paint queryFn's
+    // comment) — `byParent` supplies it at read time from `placeholderQueries`, not from this cache.
     qc.setQueryData<BranchAnswer>(key, r.restarted ? r : {
       ...r,
       pages: [...(have.pages ?? []), ...r.pages],
-      placeholders: r.placeholders ?? have.placeholders,
       reachedWindow: have.reachedWindow,
     });
   }, [spaceId, token, qc]);
