@@ -76,7 +76,7 @@ async function createPasswordLink(page: Page, pageTitle: string, password: strin
 }
 
 test("#233: a password-protected link prompts, rejects a wrong password, unlocks with the right one", async ({ browser }) => {
-  test.skip(true, "#939/#1077: isolated — under the gate the sidebar renders 20 tree-page rows and no more-row while demo_space holds 25 root pages, so the page this spec just created is not reachable in the tree");
+  test.skip(true, "#939: isolated (cause filed as #1077) — under the gate the sidebar renders 20 tree-page rows and no more-row while demo_space holds 25 root pages, so the page this spec just created is not reachable in the tree");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc ${Date.now().toString(36)}`;
@@ -114,7 +114,7 @@ test("#233: a password-protected link prompts, rejects a wrong password, unlocks
 // wrong-password budget — a user who mistypes a few times can still unlock. Before the fix, the
 // prompt-display 401 counted, so a single typo (plus a reload) locked the user out.
 test("#233 opening the link + several wrong tries never locks out the correct password", async ({ browser }) => {
-  test.skip(true, "#939/#1077: isolated — under the gate the sidebar renders 20 tree-page rows and no more-row while demo_space holds 25 root pages, so the page this spec just created is not reachable in the tree");
+  test.skip(true, "#939: isolated (cause filed as #1077) — under the gate the sidebar renders 20 tree-page rows and no more-row while demo_space holds 25 root pages, so the page this spec just created is not reachable in the tree");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc 2 ${Date.now().toString(36)}`;
