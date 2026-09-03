@@ -79,6 +79,10 @@ test("#364: empty state → write button → home renders at the space root; tre
   expect(second).toBe(409);
 });
 
+// #1066/#926: was isolated for the #823/#825 shared-stack-under-load family — the two reproductions
+// that filed this ticket, however, ran against a worktree whose .env.e2e.local predated #1056's
+// WKS_PUBLIC_BASE_URL requirement (a stale local e2e environment, not a gate-load defect): 3
+// consecutive full #891 gate runs against a re-seeded environment were clean. Unskipped.
 test("#364 §6a: switching spaces lands on the space root", async ({ browser }) => {
   const page = await (await browser.newContext()).newPage();
   await page.goto("/p/demo");
@@ -145,6 +149,13 @@ test("#364 a suffix-baked stored title never doubles in the H1 (band reads space
 // renaming it here would rename the wrong thing).
 for (const capability of ["view", "edit"] as const) {
   test(`#364 a ${capability} guest sees the home page labelled by its space`, async ({ browser }) => {
+    // #1069: isolated — this test (either capability, at random) times out (60s, on guest.goto of a
+    // real /share/<id> URL) under the #891 gate's 20-spec run. Reproduced 4/6 initially, but that
+    // batch ran against a worktree whose .env.e2e.local predated #1056's WKS_PUBLIC_BASE_URL
+    // requirement (see #1066, which was fully explained by that and closed) — after re-seeding, a
+    // FRESH batch still reproduced 1/3, so a genuine (if less frequent than first measured) #823/#825
+    // shared-stack-under-load residual remains here, unlike #1066. Not yet root-caused.
+    test.skip(true, "#1069: isolated — times out under the #891 gate's 20-spec run");
     const page = await (await browser.newContext()).newPage();
     await page.goto("/p/demo");
     await page.waitForSelector("[data-pane=preview] .cm-content");
