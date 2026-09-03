@@ -2,10 +2,13 @@
 // pin. #1056 replaced the underlying hole those escapes were papering over — the reset link and the
 // invite mail were built from `req.headers.host`, so a spoofed Host moved the link's ORIGIN, not just
 // its markup (a userinfo-form Host even let `new URL()` rewrite the origin outright, past every `esc`
-// call #1008 added). The three request-path sends (reset, invite create, invite re-issue) now build
-// their link from `tenantBaseUrl()` — the deployment's own declared address — and this file holds
-// THAT boundary: a hostile Host has no effect on where the link points, and a deployment with no
-// declared address degrades honestly (no link sent) instead of trusting the request to supply one.
+// call #1008 added). The three request-path sends (reset, invite create, invite re-issue), plus the
+// #614 break-glass `password-setup` route that carries the same link in its response body without
+// mailing it, now build their link from `tenantBaseUrl()` — the deployment's own declared address —
+// and this file holds THAT boundary: a hostile Host has no effect on where the link points (measured
+// against TWO independent fixtures — see HOSTILE_FIXTURES below), and a deployment with no declared
+// address degrades honestly (no link sent, or `deployment_has_no_address` for password-setup) instead
+// of trusting the request to supply one.
 //
 // The Japanese-rendering assertions carried over from the original file stay: the catalogue being
 // bilingual is pinned elsewhere, but a builder that never consulted it would still pass a pin that
@@ -29,16 +32,40 @@ const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'business', isolation: 'logical' }) as Tenant
 const STAMP = Date.now().toString(36)
 
-// The payload rides BEHIND the colon: `split(':')[0]` still resolves tenant_dev, and (before #1056)
-// the raw header — payload included — was what the route interpolated into `<a href="...">`. Kept as
-// the attack input because it is still a real Host a client can send; what changed is that the route
-// no longer reads `req.headers.host` for the link at all, so this input now proves a NEGATIVE.
+// Two INDEPENDENT hostile fixtures — ADR-254's addendum is explicit that an implementation must be
+// judged against both, because they defeat different defences and a fix for one does not imply the
+// other is closed:
+//
+// - HOSTILE_HOST: the payload rides BEHIND the colon. `split(':')[0]` still resolves tenant_dev
+//   (tenant resolution is unaffected), and before #1056 the raw header — payload included — was what
+//   the route interpolated into `<a href="...">`, which is what made #1008's `esc()` the relevant
+//   defence. A fix that filters HTML-special characters out of the Host and rebuilds from it would
+//   pass THIS fixture while still losing to the next one.
+// - USERINFO_HOST: `new URL('http://' + USERINFO_HOST + '/...')` parses `dev.localhost:80` as
+//   userinfo and `evil.example` as the ORIGIN — not markup, so `esc()` (which only touches
+//   `& < > "`) never sees it, and no amount of HTML-escaping the Host closes this one. It reaches
+//   `req.headers.host` unmodified (a real HTTP server accepts it) and `split(':')[0]` still yields
+//   `dev.localhost`, so tenant resolution is unaffected here too.
+//
+// Both fixtures are kept as a NEGATIVE proof now: the route no longer reads `req.headers.host` for
+// the link at all, so neither fragment should reach the link, the mail, or the response body.
 const HOSTILE_HOST = 'dev.localhost:80"><script>alert(1)</script>'
 const RAW_MARKER = '"><script>'
+const USERINFO_HOST = 'dev.localhost:80@evil.example'
+const HOSTILE_FIXTURES = [
+  { name: 'colon-suffix (markup)', host: HOSTILE_HOST },
+  { name: 'userinfo-@ (origin rewrite)', host: USERINFO_HOST },
+] as const
 
 // The deployment's declared address for these tests (.env.server-test). tenantBaseUrl() prefixes the
-// tenant's slug onto its host, so 'dev' composes to this exact origin — never the HOSTILE_HOST above.
+// tenant's slug onto its host, so 'dev' composes to this exact origin — never either fixture above.
 const CONFIGURED_ORIGIN = 'http://dev.localhost:5173'
+
+/** Neither hostile fixture's raw text may appear anywhere the link could have carried it. */
+function assertNeitherFixtureLeaked(haystack: string, where: string): void {
+  expect(haystack, `${where}: colon-suffix fixture did not leak`).not.toContain(RAW_MARKER)
+  expect(haystack, `${where}: userinfo fixture did not leak`).not.toContain('evil.example')
+}
 
 let app: FastifyInstance
 let db: TenantDb
@@ -106,22 +133,35 @@ afterAll(async () => {
 }, 120_000)
 
 describe('#1056: mail links ignore a hostile Host and land on the configured address', () => {
-  it('the reset mail lands on the configured origin, never the hostile Host', async () => {
+  for (const { name, host } of HOSTILE_FIXTURES) {
+    it(`the reset mail lands on the configured origin, never the hostile Host (${name})`, async () => {
+      const from = sent.length
+      const res = await app.inject({
+        method: 'POST', url: '/auth/local/reset-request',
+        headers: { host, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+        payload: JSON.stringify({ identifier: localAddr }),
+      })
+      expect(res.statusCode, 'the uniform answer').toBe(204)
+      const msg = await nextMessage(from)
+      expect(msg.to).toBe(localAddr)
+      // The boundary itself: the hostile fragment reaches the route (it is a valid Host header) but
+      // never reaches the link, because the link is no longer built from the Host at all.
+      assertNeitherFixtureLeaked(msg.html, 'reset html')
+      assertNeitherFixtureLeaked(msg.text, 'reset text')
+      expect(msg.html, 'the link lands on the configured origin').toContain(`href="${CONFIGURED_ORIGIN}/reset-password?token=`)
+      expect(msg.text, 'and so does the text-part copy of it').toContain(`${CONFIGURED_ORIGIN}/reset-password?token=`)
+    })
+  }
+
+  it('…and the reset mail renders Japanese (checked once — the fixture loop above is about the origin, not the catalogue)', async () => {
     const from = sent.length
     const res = await app.inject({
       method: 'POST', url: '/auth/local/reset-request',
-      headers: { host: HOSTILE_HOST, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      headers: { host: 'dev.localhost', 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
       payload: JSON.stringify({ identifier: localAddr }),
     })
-    expect(res.statusCode, 'the uniform answer').toBe(204)
+    expect(res.statusCode).toBe(204)
     const msg = await nextMessage(from)
-    expect(msg.to).toBe(localAddr)
-    // The boundary itself: the hostile fragment reaches the route (it is a valid Host header) but
-    // never reaches the link, because the link is no longer built from the Host at all.
-    expect(msg.html, 'the hostile Host never lands anywhere in the message').not.toContain(RAW_MARKER)
-    expect(msg.text, 'not even in the text part').not.toContain(RAW_MARKER)
-    expect(msg.html, 'the link lands on the configured origin').toContain(`href="${CONFIGURED_ORIGIN}/reset-password?token=`)
-    expect(msg.text, 'and so does the text-part copy of it').toContain(`${CONFIGURED_ORIGIN}/reset-password?token=`)
     // The Japanese face of THIS mail (the catalogue's own en≠ja is pinned elsewhere; this asserts
     // the builder consults it): subject and anchor label are the ja entries, not the en ones.
     expect(msg.subject).toBe(resetSubject('ja', productName()))
@@ -129,21 +169,32 @@ describe('#1056: mail links ignore a hostile Host and land on the configured add
     expect(msg.html, 'no English anchor label on a ja mail').not.toContain(resetLinkLabel('en'))
   })
 
-  it('the invite-create mail and response both land on the configured origin', async () => {
+  for (const { name, host } of HOSTILE_FIXTURES) {
+    it(`the invite-create mail and response both land on the configured origin (${name})`, async () => {
+      const from = sent.length
+      const res = await app.inject({
+        method: 'POST', url: '/members/invites',
+        headers: { ...AUTH, host },
+        payload: JSON.stringify({ email: inviteAddr(`create-${name.slice(0, 6)}`), role: 'member' }),
+      })
+      expect(res.statusCode).toBe(201)
+      const body = res.json() as { inviteUrl: string | null; emailed: boolean }
+      expect(body.emailed, 'the route reports the send').toBe(true)
+      expect(body.inviteUrl, 'the response carries the configured origin too').toMatch(new RegExp(`^${CONFIGURED_ORIGIN}/invite\\?token=`))
+      const msg = await nextMessage(from)
+      assertNeitherFixtureLeaked(msg.html, 'invite-create html')
+      expect(msg.html).toContain(`href="${CONFIGURED_ORIGIN}/invite?token=`)
+    })
+  }
+
+  it('…and the invite-create mail carries the tenant slug and product name through esc()', async () => {
     const from = sent.length
     const res = await app.inject({
       method: 'POST', url: '/members/invites',
-      headers: { ...AUTH, host: HOSTILE_HOST },
-      payload: JSON.stringify({ email: inviteAddr('create'), role: 'member' }),
+      headers: AUTH, payload: JSON.stringify({ email: inviteAddr('create-plain'), role: 'member' }),
     })
     expect(res.statusCode).toBe(201)
-    const body = res.json() as { inviteUrl: string | null; emailed: boolean }
-    expect(body.emailed, 'the route reports the send').toBe(true)
-    expect(body.inviteUrl, 'the response carries the configured origin too').toMatch(new RegExp(`^${CONFIGURED_ORIGIN}/invite\\?token=`))
     const msg = await nextMessage(from)
-    expect(msg.to).toBe(inviteAddr('create'))
-    expect(msg.html, 'the hostile Host never lands anywhere in the message').not.toContain(RAW_MARKER)
-    expect(msg.html).toContain(`href="${CONFIGURED_ORIGIN}/invite?token=`)
     // The slug and product name still pass through esc and land inside builder-owned tags (§3.3a:
     // the catalogue entry is text; the builder writes the <strong> and the anchor around them).
     expect(msg.html).toContain(`<strong>${tenantSlug}</strong>`)
@@ -151,8 +202,29 @@ describe('#1056: mail links ignore a hostile Host and land on the configured add
     expect(msg.html).toContain(`>${inviteAcceptLabel('en')}</a>`)
   })
 
-  it('the re-issue mail lands on the configured origin and renders Japanese when the tenant default says so', async () => {
-    const addr = inviteAddr('reissue')
+  for (const { name, host } of HOSTILE_FIXTURES) {
+    it(`the re-issue mail lands on the configured origin (${name})`, async () => {
+      const addr = inviteAddr(`reissue-${name.slice(0, 6)}`)
+      const { token } = await createInvite(db, { tenantId: TENANT, plan: 'business', invitedBy: 'dev-user', email: addr, role: 'member' })
+      expect(token).toBeTruthy()
+      const [row] = await adminPool<{ id: string }[]>`
+        SELECT id FROM invites WHERE tenant_id = ${TENANT} AND email = ${addr}`
+      const from = sent.length
+      const res = await app.inject({
+        method: 'POST', url: `/members/invites/${row!.id}/reissue`,
+        headers: { ...AUTH, host }, payload: JSON.stringify({ email: true }),
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as { inviteUrl: string | null }
+      expect(body.inviteUrl).toMatch(new RegExp(`^${CONFIGURED_ORIGIN}/invite\\?token=`))
+      const msg = await nextMessage(from)
+      assertNeitherFixtureLeaked(msg.html, 're-issue html')
+      expect(msg.html).toContain(`href="${CONFIGURED_ORIGIN}/invite?token=`)
+    })
+  }
+
+  it('…and the re-issue mail renders Japanese when the tenant default says so', async () => {
+    const addr = inviteAddr('reissue-ja')
     const { token } = await createInvite(db, { tenantId: TENANT, plan: 'business', invitedBy: 'dev-user', email: addr, role: 'member' })
     expect(token).toBeTruthy()
     const [row] = await adminPool<{ id: string }[]>`
@@ -166,15 +238,11 @@ describe('#1056: mail links ignore a hostile Host and land on the configured add
       const from = sent.length
       const res = await app.inject({
         method: 'POST', url: `/members/invites/${row!.id}/reissue`,
-        headers: { ...AUTH, host: HOSTILE_HOST }, payload: JSON.stringify({ email: true }),
+        headers: AUTH, payload: JSON.stringify({ email: true }),
       })
       expect(res.statusCode).toBe(200)
-      const body = res.json() as { inviteUrl: string | null }
-      expect(body.inviteUrl).toMatch(new RegExp(`^${CONFIGURED_ORIGIN}/invite\\?token=`))
       const msg = await nextMessage(from)
       expect(msg.to).toBe(addr)
-      expect(msg.html, 'the hostile Host never lands anywhere in the message').not.toContain(RAW_MARKER)
-      expect(msg.html).toContain(`href="${CONFIGURED_ORIGIN}/invite?token=`)
       expect(msg.subject, 'the second step of the chain answers: tenant default').toBe(inviteSubject('ja', tenantSlug, productName()))
       expect(msg.html).toContain(`>${inviteAcceptLabel('ja')}</a>`)
       expect(msg.html, 'no English anchor label on a ja mail').not.toContain(inviteAcceptLabel('en'))
@@ -182,6 +250,25 @@ describe('#1056: mail links ignore a hostile Host and land on the configured add
       await setDefaultLang(prior ? prior.default_lang : null)
     }
   })
+
+  // #1056 / ADR-254: "not one of the three, but not merely cosmetic either" — password-setup sends no
+  // mail (the only party who sees the link is the admin already looking at the screen), so its
+  // acceptance is response-body-only, not folded into the wire-message harness above.
+  for (const { name, host } of HOSTILE_FIXTURES) {
+    it(`password-setup's response body lands on the configured origin, never the hostile Host (${name})`, async () => {
+      // No `content-type`/payload here on purpose — this route takes no body, and a JSON content-type
+      // with an empty body is itself a 400 (FST_ERR_CTP_EMPTY_JSON_BODY) that would masquerade as
+      // the assertion below failing for the wrong reason.
+      const res = await app.inject({
+        method: 'POST', url: `/members/${localSub}/password-setup`,
+        headers: { host, authorization: AUTH.authorization },
+      })
+      expect(res.statusCode).toBe(201)
+      const body = res.json() as { setupUrl: string }
+      assertNeitherFixtureLeaked(body.setupUrl, 'password-setup response body')
+      expect(body.setupUrl).toMatch(new RegExp(`^${CONFIGURED_ORIGIN}/reset-password\\?token=`))
+    })
+  }
 })
 
 describe('#1056: an unaddressed deployment degrades honestly instead of trusting the request', () => {
@@ -214,5 +301,18 @@ describe('#1056: an unaddressed deployment degrades honestly instead of trusting
     expect(body.inviteUrl, 'nothing to build a link from').toBeNull()
     expect(body.emailed, 'nothing to email either').toBe(false)
     await noMessageArrives(from)
+  })
+
+  it('password-setup is refused with a code distinct from its member-specific refusals', async () => {
+    const res = await app.inject({
+      method: 'POST', url: `/members/${localSub}/password-setup`,
+      headers: { host: 'dev.localhost', authorization: AUTH.authorization },
+    })
+    expect(res.statusCode, 'a real 400, not a silent partial success').toBe(400)
+    const body = res.json() as { code: string }
+    // #1056 review finding D: this is a fact about the DEPLOYMENT, not about the member, and must not
+    // collapse into `password_setup_unavailable` (the code the client shows as one unreadable-reason
+    // sentence on purpose, for causes that ARE about the member).
+    expect(body.code).toBe('deployment_has_no_address')
   })
 })

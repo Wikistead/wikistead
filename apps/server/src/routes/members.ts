@@ -578,12 +578,17 @@ export async function membersPlugin(app: FastifyInstance) {
     // could not read mail, which is precisely #605's break-glass member.
     if (!minted) return reply.code(400).send({ error: 'this member cannot be given a password entrance', code: 'password_setup_unavailable' })
     // #1056 / ADR-254 addendum: the same Host-spoofing hole as the mail links below — this is the
-    // #614 break-glass copy-link, so it gets the same fix, folded into the SAME refusal this handler
-    // already gives for "cannot mint" rather than a new response shape for "minted but unaddressable".
+    // #614 break-glass copy-link, so it gets the same fix, folded into the SAME 400 status this
+    // handler already gives for "cannot mint" — but NOT the same `code`. `password_setup_unavailable`
+    // is deliberately uniform across ITS causes because they are all facts about this MEMBER (password
+    // sign-in off, no address, already has one) that the client shows as one unreadable-reason
+    // sentence on purpose. This cause is not a fact about the member at all — every member on this
+    // deployment hits it identically — and collapsing it into the same code told the admin the member
+    // was the problem while the invite dialog, one screen over, correctly named the deployment.
     const address = await tenantBaseUrl(req.db.sql, { id: req.tenant.id, slug: req.tenant.slug })
     if (!address.url) {
       req.log.warn({ tenantId: req.tenant.id, ranOut: address.ranOut }, `password setup: ${noAddressReason(address)}`)
-      return reply.code(400).send({ error: 'this deployment has no address to build a link with', code: 'password_setup_unavailable' })
+      return reply.code(400).send({ error: 'this deployment has no address to build a link with', code: 'deployment_has_no_address' })
     }
     const setupUrl = `${address.url}/reset-password?token=${minted.token}`
     // Two different events, because they are two different things to anyone reading the ledger later:

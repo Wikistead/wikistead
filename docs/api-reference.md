@@ -60,6 +60,12 @@ CRDT state and are not directly writable over REST (use the app or the MCP `edit
 Errors are JSON: `{ "message": "..." }` (some carry machine-readable extras, e.g. entitlement denials
 include `upgrade: true`). 5xx are safe to retry with backoff; 4xx are not.
 
+A link a route builds — `POST /members/{sub}/password-setup`'s `setupUrl` — is always addressed at the
+deployment's own declared public address (a verified custom domain, else `WKS_PUBLIC_BASE_URL`), never
+at the Host header the request arrived on. On a deployment with neither configured, that route refuses
+with `400 { code: "deployment_has_no_address" }` instead of building a link at an address nobody
+declared.
+
 ## Coverage
 
 The OpenAPI file documents the stable member integration surface. Deliberately NOT covered (each has its

@@ -494,15 +494,25 @@ export function MembersPage() {
                       // which is what the review saw. The refusal is deliberately UNIFORM on the
                       // server (`password_setup_unavailable` never says which precondition failed), and
                       // it stays uniform here — one readable sentence, no reason branch.
+                      //
+                      // #1056: `deployment_has_no_address` is NOT one of those causes — it is a fact
+                      // about the DEPLOYMENT, identical for every member, not a fact this admin should
+                      // be left guessing was about the person they picked. Named separately so the same
+                      // guidance the invite dialog already gives (`members.noAddressForLink`) reaches
+                      // this surface too, instead of reading as "something is wrong with this member".
                       void (async () => {
                         try {
                           const res = await enablePassword(token, m.sub);
                           setLastLink({ kind: "password", url: res.setupUrl });
                           notify.success(t(passwordAction(m) === "reissue" ? "members.reissuePasswordDone" : "members.enablePasswordDone"));
                         } catch (e) {
-                          notify.error(e instanceof ApiError && e.status === 400
-                            ? t("members.passwordSetupUnavailable")
-                            : t("toast.actionFailed"));
+                          if (e instanceof ApiError && e.status === 400 && e.code === "deployment_has_no_address") {
+                            notify.error(t("members.noAddressForLink"));
+                          } else {
+                            notify.error(e instanceof ApiError && e.status === 400
+                              ? t("members.passwordSetupUnavailable")
+                              : t("toast.actionFailed"));
+                          }
                         }
                       })();
                       return;
