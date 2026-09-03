@@ -70,7 +70,9 @@ openssl rand -base64 32                                                        #
 openssl rand -base64 24                                                        # → MEILI_MASTER_KEY
 ```
 
-Also set real values for `S3_ACCESS_KEY`/`S3_SECRET_KEY` and your IdP under the `OIDC_*` keys. `DATABASE_URL` is the restricted runtime role;
+Also set real values for `S3_ACCESS_KEY`/`S3_SECRET_KEY` (the compose file hands the same pair to
+the bundled SeaweedFS at startup, so changing them in `.env` is the whole move — and production
+refuses to boot on the published `wksadmin` fixture pair) and your IdP under the `OIDC_*` keys. `DATABASE_URL` is the restricted runtime role;
 `DATABASE_ADMIN_URL` is used only by the migration runner — keep it out of app
 processes.
 

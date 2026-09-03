@@ -45,7 +45,26 @@ services:
     extends: { file: docker-compose.middleware.yml, service: seaweedfs }
     # Both origins: 5173 is the host-side `pnpm dev` loop, and the https one is the `apps` profile
     # behind the proxy. A presigned PUT from the browser is a CORS request either way.
-    command: "server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=http://dev.localhost:5173,https://${SITE_HOST:-dev.localhost}"
+    #
+    # #1081: the S3 identity is WRITTEN FROM .env at container start, so the keys the guide tells a
+    # self-hoster to change are the keys the object store actually accepts. The static
+    # infra/seaweedfs/s3.json stays for the stacks that override this command (e2e / server-test);
+    # here it is only the fallback default for the same wksadmin pair.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        printf '{"identities":[{"name":"app","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' "$${S3K}" "$${S3S}" > /tmp/s3.json &&
+        exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -s3.allowedOrigins=http://dev.localhost:5173,https://${SITE_HOST:-dev.localhost}
+    environment:
+      S3K: ${S3_ACCESS_KEY:-wksadmin}
+      S3S: ${S3_SECRET_KEY:-wksadmin}
+    # #1082: the S3 gateway takes ~15s to listen; without a readiness signal the server loses the
+    # race on a first `up` and dies at its bucket-ensure. Any HTTP answer on :8333 means "listening".
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333 || [ $$? -le 8 ]"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
     ports: ["9000:8333"]
     volumes:
       - seaweeddata:/data
@@ -128,9 +147,11 @@ services:
       PUBLIC_SHELL_INDEX: /shell/index.html
     volumes:
       - web-shell:/shell:ro
+    restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
       openfga: { condition: service_started }
+      seaweedfs: { condition: service_healthy }
       web-shell: { condition: service_completed_successfully }
     profiles: ["apps"]
 
@@ -157,6 +178,7 @@ services:
       # that can be wrong without anything noticing.
       WKS_PUBLIC_BASE_URL: ""
     depends_on: { valkey: { condition: service_started } }
+    restart: unless-stopped
     profiles: ["apps"]
 
   web:

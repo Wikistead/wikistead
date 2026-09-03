@@ -41,6 +41,10 @@ export const PUBLISHED_FIXTURE_SECRETS: Readonly<Record<string, readonly string[
   OIDC_SECRET_ENC_KEY: ['7yMsXpBHk5/8edVzkeyWcjhYQTyj7EZDAd3Mz6KQHFo='],
   GUEST_TOKEN_SECRET: ['e2e_guest_secret', 'server_test_guest_secret', 'dev_guest_secret_change_me'],
   MEILI_MASTER_KEY: ['dev_master_key_change_me'],
+  // #1081: the S3 fixture identity ships in infra/seaweedfs/s3.json and .env.example — production
+  // booting on it would open the object store with a key the public repository publishes.
+  S3_ACCESS_KEY: ['wksadmin'],
+  S3_SECRET_KEY: ['wksadmin'],
 }
 
 // #690: refuse to BOOT production on a published secret (same safety-valve shape as the entitlements

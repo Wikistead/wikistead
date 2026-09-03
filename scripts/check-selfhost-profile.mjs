@@ -109,6 +109,33 @@ if (!shell) {
   problems.push(`server sets PUBLIC_SHELL_INDEX=${shell} but mounts nothing there — the server refuses to boot when it is set and unreadable`)
 }
 
+// ── The first `up` cannot lose the S3 race, and a lost race heals itself (#1081 / #1082) ─────
+// Measured on a fresh clone: the server reached bucket-ensure before the S3 gateway listened,
+// died unhandled, and STAYED dead — the UI came up over an API that did not exist.
+if (!services.seaweedfs?.healthcheck) {
+  problems.push('seaweedfs has no healthcheck — the server races its S3 gateway on a first `up` and dies at bucket-ensure (#1082)')
+}
+for (const name of ['server', 'collab']) {
+  if (services[name] && services[name].restart !== 'unless-stopped') {
+    problems.push(`\`${name}\` has no restart policy — one boot-time fatal leaves the stack half-dead forever (#1082)`)
+  }
+}
+const swDep = services.server?.depends_on?.seaweedfs
+if (swDep?.condition !== 'service_healthy') {
+  problems.push('server does not wait for a HEALTHY seaweedfs — the healthcheck exists to gate exactly this start (#1082)')
+}
+// ── The S3 identity is the .env identity (#1081) ─────────────────────────────────────────────
+// The guide says "set real S3 keys"; the store must actually accept them. The command writes its
+// identity file from the same variables at container start — a static fixture file here means the
+// server signs with keys the store has never heard of, and the first upload 403s.
+const swText = JSON.stringify(services.seaweedfs?.command ?? '') + JSON.stringify(services.seaweedfs?.entrypoint ?? '')
+if (!swText.includes('S3K') || swText.includes('/etc/seaweedfs/s3.json')) {
+  problems.push('seaweedfs does not derive its S3 identity from .env (S3_ACCESS_KEY/S3_SECRET_KEY) — the keys the guide tells a reader to change would not be the keys the store accepts (#1081)')
+}
+if (!('S3K' in (services.seaweedfs?.environment ?? {}))) {
+  problems.push('seaweedfs.environment carries no S3K — the identity template has nothing to interpolate (#1081)')
+}
+
 // ── The guide's command is the command ───────────────────────────────────────────────────────
 // #696 a printed command that had never been run. These three files carry the claim.
 const CMD = 'docker compose --profile apps up -d --build'
