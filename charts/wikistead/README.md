@@ -36,12 +36,9 @@ If your controller rejects `configuration-snippet` (many do, by policy), set
 Two hooks run from the server image:
 
 - **`migrate`** — the schema. The SQL ships inside the image.
-- **`fga-bootstrap`** — creates the authorization store and model and writes their ids back into your
-  secret. It exists because those ids are decided by the store rather than by you, so no value could
-  carry them. It gets a Role scoped to `get` and `patch` on that one secret by name, and nothing else.
-
-The second hook is temporary by design: when the product resolves its own store at startup,
-`hooks.fgaBootstrap` and the Job disappear together.
+The authorization store needs no hook: the server resolves — or, on a deployment that has never
+had one, creates — its own OpenFGA store and model at startup, from the `model.fga` baked into the
+image (ADR-253). The `fga-bootstrap` hook this chart used to carry is gone (#1085).
 
 ## Generated credentials, honestly
 

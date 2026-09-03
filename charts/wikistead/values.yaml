@@ -66,7 +66,7 @@ ingress:
     clusterIssuer: letsencrypt-prod
   # Some controllers refuse `configuration-snippet` outright and reject the whole Ingress with it.
   # Measured on a real cluster: the deployment there had to strip these to come up.
-  securityHeaderSnippet: true
+  securityHeaderSnippet: false
   annotations: {}
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -134,10 +134,9 @@ seaweedfs:
 hooks:
   # Runs the migration entrypoint post-install and post-upgrade.
   migrate: true
-  # Creates the OpenFGA store and model and writes the ids where the application reads them.
-  # ⚠️ Deleted when the product resolves its own store by name at startup, and this value is where
-  # that removal will show.
-  fgaBootstrap: true
+  # The fga-bootstrap hook is GONE (#1085): ADR-253 landed and the server resolves — or, on a
+  # deployment that has never had one, creates — its own OpenFGA store and model at startup, from
+  # the model.fga the image carries. Exactly the removal the old comment here predicted.
   backoffLimit: 3
 
 # Extra environment for the application pods, for anything this chart does not name.
