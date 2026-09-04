@@ -17,7 +17,7 @@ A Markdown-first collaborative knowledge base — real-time, and open to people 
 
 <br>
 
-<img src=".github/assets/screenshot-editor.png" alt="A page open in Wikistead: a Mermaid diagram, a callout and a table rendering in place on the editing surface, with the page tree alongside.">
+<img src=".github/assets/tour.gif" alt="Half a minute of Wikistead from a guest's seat: a share link opens straight into the page, a teammate's labelled cursor types alongside, a slash command drops in a table, a Mermaid diagram is typed and renders in place, two people draw on the same Excalidraw board, and vim mode is switched on without leaving the surface.">
 
 ## What makes it different
 
@@ -30,7 +30,7 @@ and callouts render where you type them while the source underneath stays plain 
 you export is what you wrote. Vim users get a real vim mode on that same surface — a keymap toggle,
 not a separate editor.
 
-<img src=".github/assets/screenshot-coedit.png" alt="The same page seen by a guest who followed a share link: no sidebar, no account, and a signed-in member's labelled cursor in the document beside their own.">
+<img src=".github/assets/screenshot-editor.png" alt="A page open in Wikistead: a Mermaid diagram, a callout and a table rendering in place on the editing surface, with the page tree alongside.">
 
 ## Features
 
