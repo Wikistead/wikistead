@@ -7,7 +7,7 @@ and open the invite link it prints:
     node dist/scripts/local-admin.js <workspace-slug> you@example.com --create{{ if not .Values.workspaceHostTemplate }} --origin={{ ternary "https" "http" .Values.ingress.tls.enabled }}://{{ .Values.host }}{{ end }}
 
 A workspace's slug is the FIRST LABEL of the host it answers on. With host {{ .Values.host }}, the
-slug `docs` means `docs.{{ .Values.host }}` — so the slug is chosen with DNS in mind, not afterwards.
+slug `team` means `team.{{ .Values.host }}` — so the slug is chosen with DNS in mind, not afterwards.
 {{- if .Values.workspaceHostTemplate }}
 No --origin above: with `workspaceHostTemplate` set, the command builds the invite link from it
 automatically (https://{slug}.{{ .Values.host }}) — passing --origin here would override that with
