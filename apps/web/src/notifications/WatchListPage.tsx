@@ -5,6 +5,8 @@ import { LoadFailed } from "../ui/LoadFailed";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Eye, BellOff, Bell, X, SlidersHorizontal } from "lucide-react";
 import { useWatchList, useUpdateWatch, useUnwatch, WATCH_EVENT_TYPES, type WatchRow } from "./useNotifications";
+import { AppShell } from "../app/AppShell";
+import { useSession } from "../session/SessionProvider";
 
 // #362 the watch-management list — reached from the notification bell ("the bell is the watch
 // entry point"). Rows come from GET /watches: the server resolves titles VIEW-FILTERED (a target the
@@ -51,6 +53,7 @@ function MaskEditor({ row }: { row: WatchRow }) {
 export function WatchListRoute() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { logout } = useSession();
   const { data, isLoading, isError, refetch } = useWatchList();
   const update = useUpdateWatch();
   const unwatch = useUnwatch();
@@ -58,6 +61,7 @@ export function WatchListRoute() {
   const rows = data ?? [];
 
   return (
+    <AppShell onLogout={logout}>
     <div className="mx-auto max-w-[46rem] px-4 py-8 text-[length:var(--text-ui)]" data-testid="watch-list-page">
       <Link to="/" className="mb-4 inline-flex items-center gap-1 text-fg-dim hover:text-foreground" data-testid="watch-list-back">
         <ArrowLeft size={14} /> {t("recentChanges.back")}
@@ -134,5 +138,6 @@ export function WatchListRoute() {
         </ul>
       </ListBox>
     </div>
+    </AppShell>
   );
 }

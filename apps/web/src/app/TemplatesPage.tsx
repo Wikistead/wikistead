@@ -8,6 +8,8 @@ import { TemplateBodyPreview } from "../editor/TemplateBodyPreview";
 import { useTemplates, useTemplateBody, useRenameTemplate, useDeleteTemplate, type TemplateSummary } from "../data/queries";
 import { RenameDialog, ConfirmDialog } from "../ui/dialogs";
 import { notify } from "../ui/toast";
+import { AppShell } from "./AppShell";
+import { useSession } from "../session/SessionProvider";
 
 // #249 / ADR-110: the /templates management page. Lists the templates the user can view (server
 // FGA-filtered — scope containment enforced server-side), with a scope badge, rename, and delete. Actions
@@ -16,6 +18,7 @@ import { notify } from "../ui/toast";
 // (client-side only — embed/transclude are not server-resolved).
 export function TemplatesRoute() {
   const { t } = useTranslation();
+  const { logout } = useSession();
   const { data, isLoading, isError, refetch } = useTemplates();
   const rename = useRenameTemplate();
   const del = useDeleteTemplate();
@@ -24,6 +27,7 @@ export function TemplatesRoute() {
   const [previewing, setPreviewing] = useState<TemplateSummary | null>(null);
 
   return (
+    <AppShell onLogout={logout}>
     <div className="mx-auto max-w-[46rem] px-4 py-8 text-[length:var(--text-ui)]" data-testid="templates-page">
       <Link to="/" className="mb-4 inline-flex items-center gap-1 text-fg-dim hover:text-foreground" data-testid="templates-back">
         <ArrowLeft size={14} /> {t("templates.back")}
@@ -101,6 +105,7 @@ export function TemplatesRoute() {
       />
       {previewing && <TemplatePreview tpl={previewing} onClose={() => setPreviewing(null)} />}
     </div>
+    </AppShell>
   );
 }
 

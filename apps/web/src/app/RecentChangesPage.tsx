@@ -5,6 +5,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Activity, Check, Filter } from "lucide-react";
 import { useFeed, useTogglePatrol, type FeedItem } from "../notifications/useNotifications";
 import { eventLabel } from "../notifications/feedLabels";
+import { AppShell } from "./AppShell";
+import { useSession } from "../session/SessionProvider";
 
 // #326 / ADR-142: the Recent Changes activity view — the cross-space feed of page changes, the surface the
 // #320 backend served but had no web consumer for. Member-only + the server view-filters every event (an
@@ -14,6 +16,7 @@ import { eventLabel } from "../notifications/feedLabels";
 export function RecentChangesRoute() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { logout } = useSession();
   const [unpatrolled, setUnpatrolled] = useState(false);
   const { data, isLoading, isError, refetch } = useFeed({ unpatrolled });
   const togglePatrol = useTogglePatrol();
@@ -22,6 +25,7 @@ export function RecentChangesRoute() {
   const open = (e: FeedItem) => { if (e.pageId) navigate(`/p/${e.pageId}`); };
 
   return (
+    <AppShell onLogout={logout}>
     <div className="mx-auto max-w-[46rem] px-4 py-8 text-[length:var(--text-ui)]" data-testid="recent-changes-page">
       <Link to="/" className="mb-4 inline-flex items-center gap-1 text-fg-dim hover:text-foreground" data-testid="recent-changes-back">
         <ArrowLeft size={14} /> {t("recentChanges.back")}
@@ -85,5 +89,6 @@ export function RecentChangesRoute() {
         </ul>
       )}
     </div>
+    </AppShell>
   );
 }
