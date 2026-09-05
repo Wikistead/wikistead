@@ -59,3 +59,19 @@ reached by the browser at its own address, so the server signs with S3_ENDPOINT 
 {{- else if .Values.seaweedfs.publicHost }}{{ .Values.seaweedfs.publicHost }}
 {{- else }}s3.{{ .Values.host }}{{ end }}
 {{- end }}
+
+{{/*
+The content of the shared ConfigMap and Secret, for a pod-template checksum annotation.
+
+⚠️ `envFrom` (and a `secretKeyRef` into either object) is read once, at container start.
+`helm upgrade` changing a value inside them changes the ConfigMap/Secret in place, reports
+"successfully rolled out", and leaves the pod running with the OLD value — there is nothing in the
+Deployment's own spec for Kubernetes to diff (#1102, measured on a kind cluster: `workspaceHostTemplate`
+changed, the pod's start time did not, and only a manual `rollout restart` picked it up). Hashing both
+rendered manifests into an annotation gives the pod template a field that actually changes when their
+content does, which is what triggers the rollout.
+*/}}
+{{- define "wikistead.envChecksum" -}}
+{{ include (print $.Template.BasePath "/config.yaml") . }}
+{{ include (print $.Template.BasePath "/secret.yaml") . }}
+{{- end }}

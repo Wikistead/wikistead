@@ -11,6 +11,8 @@ spec:
       labels:
         app: {{ include "wikistead.fullname" . }}-collab
         {{- include "wikistead.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "wikistead.envChecksum" . | sha256sum }}
     spec:
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
