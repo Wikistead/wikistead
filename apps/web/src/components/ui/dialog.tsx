@@ -37,12 +37,13 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        // #1072/#939: NOT a close-animation on this layer. Radix's `Presence` waits for an
-        // `animationend` before unmounting, and if that event is ever missed (interrupted animation,
-        // React concurrent-render races), the `DismissableLayer` this overlay backs never unmounts —
-        // leaving its `document.body.style.pointerEvents = "none"` lock applied forever, silently
-        // swallowing the next click anywhere on the page. Dropping the exit animation makes the
-        // unmount synchronous, closing that whole class of stuck-lock bug at the root.
+        // #1072/#939: NOT a close-animation on this layer. Radix's `Presence` keeps the
+        // `DismissableLayer` this overlay backs mounted until its exit `animationend` fires, and the
+        // layer's `document.body.style.pointerEvents = "none"` lock stays applied for that whole
+        // window — normal behavior, not a missed event, but it means exactly one click landing during
+        // the animation (duration-200) is swallowed instead of reaching the page underneath; the very
+        // next click always works, once the animation has actually finished and the layer unmounts.
+        // Dropping the exit animation makes the unmount synchronous, closing the window entirely.
         "fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0",
         className
       )}
