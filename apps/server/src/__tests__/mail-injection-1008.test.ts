@@ -316,3 +316,47 @@ describe('#1056: an unaddressed deployment degrades honestly instead of trusting
     expect(body.code).toBe('deployment_has_no_address')
   })
 })
+
+describe('#1114: WKS_TENANT_URL_TEMPLATE addresses mail too, and a hostile Host still has no effect', () => {
+  // ADR-249 slice 3: the same template that shapes a self-serve workspace address now precedes
+  // WKS_PUBLIC_BASE_URL in email/base-url.ts's chain. WKS_PUBLIC_BASE_URL is left SET here (to a
+  // third, distinct host) specifically so a passing test proves the template won, not merely that an
+  // address existed.
+  let priorTemplate: string | undefined
+  let priorBase: string | undefined
+  const TEMPLATE_HOST = 'tmpl-1114.localtest.me'
+  beforeAll(() => {
+    priorTemplate = process.env.WKS_TENANT_URL_TEMPLATE
+    priorBase = process.env.WKS_PUBLIC_BASE_URL
+    process.env.WKS_TENANT_URL_TEMPLATE = `http://{slug}.${TEMPLATE_HOST}`
+    process.env.WKS_PUBLIC_BASE_URL = 'http://should-not-win.localtest.me'
+  })
+  afterAll(() => {
+    if (priorTemplate === undefined) delete process.env.WKS_TENANT_URL_TEMPLATE; else process.env.WKS_TENANT_URL_TEMPLATE = priorTemplate
+    if (priorBase === undefined) delete process.env.WKS_PUBLIC_BASE_URL; else process.env.WKS_PUBLIC_BASE_URL = priorBase
+  })
+
+  for (const { name, host } of HOSTILE_FIXTURES) {
+    // Invite-create, not reset-request: reset-request is rate-limited per identifier (line ~197),
+    // and this file's other describes have already spent several resets against `localAddr` by the
+    // time this one runs. A fresh, unique invite address per fixture (like the #1056 blocks above)
+    // has no such shared budget.
+    it(`the invite-create mail lands on the template-composed origin, never the hostile Host or WKS_PUBLIC_BASE_URL (${name})`, async () => {
+      const from = sent.length
+      const res = await app.inject({
+        method: 'POST', url: '/members/invites',
+        headers: { ...AUTH, host },
+        payload: JSON.stringify({ email: inviteAddr(`tmpl-${name.slice(0, 6)}`), role: 'member' }),
+      })
+      expect(res.statusCode).toBe(201)
+      const templateOrigin = `http://${tenantSlug}.${TEMPLATE_HOST}`
+      const body = res.json() as { inviteUrl: string | null; emailed: boolean }
+      expect(body.emailed).toBe(true)
+      expect(body.inviteUrl, 'the response carries the template-composed origin').toMatch(new RegExp(`^${templateOrigin}/invite\\?token=`))
+      const msg = await nextMessage(from)
+      assertNeitherFixtureLeaked(msg.html, 'invite html (template-configured)')
+      expect(msg.html, 'the mail lands on the template-composed origin').toContain(`href="${templateOrigin}/invite?token=`)
+      expect(msg.html, 'WKS_PUBLIC_BASE_URL must not have won').not.toContain('should-not-win.localtest.me')
+    })
+  }
+})

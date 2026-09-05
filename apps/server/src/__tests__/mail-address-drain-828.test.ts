@@ -22,20 +22,27 @@ const noop = { send: async () => {} }
 // Registering our own keeps mention/digest internals out of it.
 registerEmailBuilder(CLASS, async () => ({ kind: 'skip', reason: 'this pin never sends' }))
 
-let saved: string | undefined
+let savedBase: string | undefined
+let savedTemplate: string | undefined
 let slug = ''
 
 beforeAll(async () => {
-  saved = process.env.WKS_PUBLIC_BASE_URL
+  savedBase = process.env.WKS_PUBLIC_BASE_URL
+  savedTemplate = process.env.WKS_TENANT_URL_TEMPLATE
   delete process.env.WKS_PUBLIC_BASE_URL // the state the ADR is about: no address can be composed
+  // #1114 / ADR-249 slice 3 added a step between the custom-domain check and this one — blank it too,
+  // or a runner whose environment happens to carry it would compose an address instead of exhausting.
+  delete process.env.WKS_TENANT_URL_TEMPLATE
   await admin`INSERT INTO members (tenant_id, sub, display_name, email) VALUES (${T}, ${SUB}, ${SUB}, ${`${SUB}@t.test`})`
   await admin`DELETE FROM custom_domains WHERE tenant_id = ${T}`.catch(() => {})
   slug = (await admin<{ slug: string }[]>`SELECT slug FROM tenants WHERE id = ${T}`)[0]!.slug
 })
 
 afterAll(async () => {
-  if (saved === undefined) delete process.env.WKS_PUBLIC_BASE_URL
-  else process.env.WKS_PUBLIC_BASE_URL = saved
+  if (savedBase === undefined) delete process.env.WKS_PUBLIC_BASE_URL
+  else process.env.WKS_PUBLIC_BASE_URL = savedBase
+  if (savedTemplate === undefined) delete process.env.WKS_TENANT_URL_TEMPLATE
+  else process.env.WKS_TENANT_URL_TEMPLATE = savedTemplate
   await admin`DELETE FROM email_outbox WHERE tenant_id = ${T} AND member_sub = ${SUB}`.catch(() => {})
   await admin`DELETE FROM members WHERE tenant_id = ${T} AND sub = ${SUB}`.catch(() => {})
   await admin.end()
@@ -58,7 +65,7 @@ describe('#828 the drain explains the address once', () => {
     const addressing = lines.filter((l) => l.includes('has no address for links'))
     expect(addressing.length, `the explanation repeated per message:\n${lines.join('\n')}`).toBe(1)
     expect(addressing[0], 'the line does not say WHICH step ran out')
-      .toContain('no verified custom domain, no WKS_PUBLIC_BASE_URL, so no link')
+      .toContain('no verified custom domain, WKS_TENANT_URL_TEMPLATE is not set, no WKS_PUBLIC_BASE_URL, so no link')
     // The SLUG, not the id: it is what an operator types and what the address would have been built
     // from. Read from the row rather than written here, so the pin cannot drift from the fixture.
     expect(addressing[0], 'the line does not say WHICH workspace').toContain(slug)

@@ -116,6 +116,18 @@ services:
       # the public host below (SigV4 covers the Host header, so the two have to be stated apart).
       S3_ENDPOINT: http://seaweedfs:8333
       S3_PUBLIC_ENDPOINT: https://s3.${SITE_HOST:-dev.localhost}
+      # BLANK, not absent, for the SAME reason as WKS_PUBLIC_BASE_URL below — the mail/invite/reset
+      # address builder tries this step BEFORE WKS_PUBLIC_BASE_URL. This service carries
+      # `env_file: [.env]`, and a developer's own `.env` commonly sets this for `pnpm dev` (e.g.
+      # `http://{slug}.localhost:5173`) — a value the Caddy-fronted apps profile does not serve
+      # (different scheme, different port, and the wildcard site block below is commented out). Left
+      # to leak through, the container would derive a workspace address from the developer's
+      # dev-server shape instead of degrading honestly.
+      #
+      # An operator who has set up their own wildcard certificate (a DNS-01 cert, and the
+      # commented-out `*.{$SITE_HOST}` block in deploy/caddy/Caddyfile) can set this to
+      # `http://{slug}.${SITE_HOST}` in docker-compose.override.yml instead of leaving it blank.
+      WKS_TENANT_URL_TEMPLATE: ""
       # BLANK, not absent, and not the site host.
       #
       # This used to be `https://${SITE_HOST}`, and the one thing that reads it prefixes a workspace

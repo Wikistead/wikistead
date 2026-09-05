@@ -115,15 +115,20 @@ export const ENV_DOCS = {
     // Host header instead, which worked by accident and was also how a spoofed Host could move a
     // reset link's destination. They now read this same variable, so "unset" now also means those
     // two links are dropped, not only mentions and digests.
-    what: 'The parent zone whose subdomains are workspaces — background mail, password resets and invitations have no trustworthy Host header to compose a link from. The workspace slug is prefixed onto it: `https://wikistead.com` produces `https://<slug>.wikistead.com`, so set the zone, not the application\'s own host. A workspace with a verified custom domain uses that instead. Unset means any message that needs a link — a mention, a digest, a password reset, an invitation — is dropped with a logged reason rather than improvising one from the request; on a single host, set it to the zone ABOVE your site host so the composed address is the site host itself.',
+    // #1114 / ADR-249 slice 3: this is now the LAST of three steps — a verified custom domain, then
+    // WKS_TENANT_URL_TEMPLATE, then this composition — not the only alternative to a custom domain.
+    what: 'The parent zone whose subdomains are workspaces — background mail, password resets and invitations have no trustworthy Host header to compose a link from. The workspace slug is prefixed onto it: `https://wikistead.com` produces `https://<slug>.wikistead.com`, so set the zone, not the application\'s own host. A workspace with a verified custom domain, or a deployment with WKS_TENANT_URL_TEMPLATE set, uses that instead. Unset means any message that needs a link — a mention, a digest, a password reset, an invitation — is dropped with a logged reason rather than improvising one from the request; on a single host with no template, set it to the zone ABOVE your site host so the composed address is the site host itself.',
   },
   WKS_TENANT_URL_TEMPLATE: {
     group: 'Runtime',
     default: 'unset (self-serve workspace creation is closed)',
-    // Read through a constant (`process.env[TENANT_URL_TEMPLATE_ENV]`) so the two callers and the
-    // boot line cannot drift on the spelling — invisible to the walk, visible as a string literal.
+    // Read through a constant (`process.env[TENANT_URL_TEMPLATE_ENV]`) so the callers and the boot
+    // line cannot drift on the spelling — invisible to the walk, visible as a string literal.
+    // #1114 / ADR-249 slice 3 added a second reader (email/base-url.ts): the same declared shape now
+    // also addresses mail, password resets and invitations, rather than composing a second answer
+    // from WKS_PUBLIC_BASE_URL for the exact fact this variable already states (ADR-260 §2).
     indirect: true,
-    what: 'The shape of a workspace address, with `{slug}` standing for the workspace name — for example `https://{slug}.example.com`. The placeholder must be the host\'s entire first label, because that label is what tenant resolution reads. Unset closes self-serve creation of new workspaces and nothing else: signing in, existing workspaces, and custom domains are unaffected. Serving one workspace on one host needs no template — name that workspace after the host\'s first label instead.',
+    what: 'The shape of a workspace address, with `{slug}` standing for the workspace name — for example `https://{slug}.example.com`. The placeholder must be the host\'s entire first label, because that label is what tenant resolution reads. Set, it is also the middle step (after a verified custom domain, before WKS_PUBLIC_BASE_URL) of the address used for mail, password resets and invitations — one declared shape, not two independently composed ones. Unset closes self-serve creation of new workspaces and leaves that address chain to skip to WKS_PUBLIC_BASE_URL; signing in, existing workspaces, and custom domains are unaffected either way. Serving one workspace on one host needs no template — name that workspace after the host\'s first label instead.',
   },
   PUBLIC_SHELL_INDEX: {
     group: 'Runtime',
