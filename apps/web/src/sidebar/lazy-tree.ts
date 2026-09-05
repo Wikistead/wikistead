@@ -25,7 +25,11 @@ export interface BranchAnswer {
   reachedWindow?: BranchAnswer;
   restarted?: boolean;
   placeholders?: { token: string; under: string | null; parentToken: string | null; pages: Page[] }[];
-  placeholdersExhausted?: boolean;
+  /** #1141: opaque, present while more of this branch's invisible territory remains unexplored — a
+   * follow-up request presenting it (and nothing else) continues the SAME walk. Superseded
+   * `placeholdersExhausted`: that flag told the reader something was missing and gave them no way to
+   * see the rest; this field IS the way to see the rest. */
+  placeholderCursor?: string;
 }
 
 interface PaintAnswer {
@@ -142,7 +146,7 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       staleTime: 30_000,
       queryFn: async () => {
         const qs = parentId ? `?parent=${encodeURIComponent(parentId)}` : "";
-        return apiFetch<{ placeholders: NonNullable<BranchAnswer["placeholders"]>; placeholdersExhausted: boolean }>(
+        return apiFetch<{ placeholders: NonNullable<BranchAnswer["placeholders"]>; placeholderCursor?: string }>(
           `/spaces/${spaceId}/pages/tree-placeholders${qs}`, token,
         );
       },
@@ -155,10 +159,32 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       const d = branchQueries[i]?.data;
       if (!d) return;
       const ph = placeholderQueries[i]?.data;
-      m.set(parentId, ph ? { ...d, placeholders: ph.placeholders, placeholdersExhausted: ph.placeholdersExhausted } : d);
+      m.set(parentId, ph ? { ...d, placeholders: ph.placeholders, placeholderCursor: ph.placeholderCursor } : d);
     });
     return m;
   }, [wanted, branchQueries, placeholderQueries]);
+
+  // #1141: the placeholder walk's own "load more" — mirrors `loadMore` below (the branch's OWN
+  // pagination) but targets the placeholder cache entry instead. Appending (not replacing) is always
+  // correct here: unlike a branch's `restarted` case (§8, a renumber can invalidate an anchor), the
+  // placeholder cursor is scope-bound and tamper-evident (ADR-220 §4.2 rev12) with no analogous
+  // "the anchor moved" failure mode — a cursor that fails to decode server-side simply restarts the
+  // WALK, which surfaces here as a fresh `placeholders` array from `parentId`'s next natural refetch,
+  // not as a signal this callback has to detect.
+  const loadMorePlaceholders = useCallback(async (parentId: string | null) => {
+    if (!spaceId) return;
+    const key = ["pages", spaceId, "placeholders", parentId ?? ROOT];
+    const have = qc.getQueryData<{ placeholders: NonNullable<BranchAnswer["placeholders"]>; placeholderCursor?: string }>(key);
+    if (!have?.placeholderCursor) return;
+    const qs = new URLSearchParams();
+    if (parentId) qs.set("parent", parentId);
+    qs.set("cursor", have.placeholderCursor);
+    const r = await apiFetch<{ placeholders: NonNullable<BranchAnswer["placeholders"]>; placeholderCursor?: string }>(
+      `/spaces/${spaceId}/pages/tree-placeholders?${qs}`, token,
+    );
+    if (!r) return;
+    qc.setQueryData(key, { placeholders: [...have.placeholders, ...r.placeholders], placeholderCursor: r.placeholderCursor });
+  }, [spaceId, token, qc]);
 
   const expand = useCallback((pageId: string) => {
     setExpanded((s) => (s.has(pageId) ? s : new Set([...s, pageId])));
@@ -241,7 +267,7 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
     })();
   }, [spaceId, openPageId, paint.data, byParent, token, qc]);
 
-  return { paint, byParent, expanded, expand, collapse, loadMore };
+  return { paint, byParent, expanded, expand, collapse, loadMore, loadMorePlaceholders };
 }
 
 /** The sentinel child that makes an UNLOADED row expandable (ruling ① (c): every row draws a chevron). */
@@ -250,8 +276,9 @@ export const UNLOADED_CHILD_PREFIX = "unloaded:";
 export const PLACEHOLDER_PREFIX = "ph:";
 /** The "more pages" row a branch grows when its cursor says so (§1). */
 export const MORE_PREFIX = "more:";
-/** #1079 / ADR-220 §4.3: the branch's placeholder budget ran out before every invisible chain was walked. */
-export const PLACEHOLDERS_EXHAUSTED_PREFIX = "ph-exhausted:";
+/** #1141 / ADR-220 §4.2 rev12: more of this branch's invisible territory remains — resumable, the same
+ * shape as `MORE_PREFIX`, not a dead end. Superseded `PLACEHOLDERS_EXHAUSTED_PREFIX` (#1079). */
+export const PLACEHOLDERS_MORE_PREFIX = "ph-more:";
 
 /**
  * Assemble react-arborist nodes from the loaded branches.
@@ -267,9 +294,8 @@ export function buildLazyNodes(args: {
   byParent: ReadonlyMap<string | null, BranchAnswer>;
   pinnedPageIds: ReadonlySet<string>;
   placeholderName: string;
-  placeholdersExhaustedLabel: string;
 }): PageTreeNode[] {
-  const { spaceId, byParent, pinnedPageIds, placeholderName, placeholdersExhaustedLabel } = args;
+  const { spaceId, byParent, pinnedPageIds, placeholderName } = args;
 
   const pageNode = (p: Page): PageTreeNode => ({
     id: `page:${p.id}`,
@@ -333,13 +359,13 @@ export function buildLazyNodes(args: {
       ...branch.pages.map(pageNode),
       ...placeholderNodes(branch, parentId),
     ];
-    if (branch.placeholdersExhausted) {
-      // #1079 / ADR-220 §4.3: "exhausting it is a visible state ... never a short answer that looks
-      // complete". The budget is spent per branch resolution (`tree-placeholders.ts`), so this row is
-      // per branch too — the same row shape as MORE_PREFIX, but there is nothing more to ask for; it
-      // only says the placement search gave up early and points the reader at search instead.
+    if (branch.placeholderCursor) {
+      // #1141 / ADR-220 §4.2 rev12: "exhausting it is a visible, RESUMABLE state ... never a short
+      // answer that looks complete, and never a dead end either." Exactly MORE_PREFIX's own shape and
+      // reason (the cursor rides the id, so a fixed id would survive the append and the next
+      // page would never load) — invisible to the reader until scrolled to, then it fetches more.
       rows.push({
-        id: `${PLACEHOLDERS_EXHAUSTED_PREFIX}${parentId ?? ROOT}`, name: placeholdersExhaustedLabel, pageId: "", spaceId,
+        id: `${PLACEHOLDERS_MORE_PREFIX}${parentId ?? ROOT}:${branch.placeholderCursor}`, name: "", pageId: "", spaceId,
         published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
       });
     }
@@ -412,7 +438,7 @@ export function afterIdForMove(args: {
   // a row here — a nested placeholder is a CHILD of one of those rows, not a sibling at this level, so
   // it must not inflate this count.
   const direct = (branch.placeholders ?? []).filter((ph) => ph.parentToken === null && ph.under === parentPageId).length;
-  const synthetic = direct + (branch.placeholdersExhausted ? 1 : 0) + (branch.nextCursor ? 1 : 0);
+  const synthetic = direct + (branch.placeholderCursor ? 1 : 0) + (branch.nextCursor ? 1 : 0);
 
   // #1080 rev2 (review): `index` is react-arborist's position in the RENDERED children
   // array, which still holds the dragged row at its ORIGINAL slot (compute-drop.ts's `walkUpFrom` builds

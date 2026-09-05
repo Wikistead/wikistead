@@ -91,25 +91,25 @@ describe("#1092: a branch with a reached window renders real … synthetic … r
   });
 
   it("dropping right after the synthetic block, before the reached window starts, clamps to the end of primary", () => {
-    // Render order: a, b, c · exhausted-row (synthetic) · d, e. Dropping between the exhausted row and
-    // "d" — "above" = the exhausted row at index 3 in [a,b,c,ex,d,e], so index = 3 + 1 = 4 — must not
+    // Render order: a, b, c · placeholder-more row (synthetic) · d, e. Dropping between that row and
+    // "d" — "above" = that row at index 3 in [a,b,c,ph-more,d,e], so index = 3 + 1 = 4 — must not
     // silently jump into the reached window; it lands after the last PRIMARY page, matching #1080
     // rev2's "not a request to nest among page rows" clamp.
     const b = branch([page("a", 0), page("b", 1), page("c", 2)], {
-      placeholdersExhausted: true,
+      placeholderCursor: "ph-cursor-1",
       reachedWindow: branch([page("d", 10), page("e", 11)]),
     });
     const afterId = afterIdForMove({ branch: b, parentPageId: null, movedId: "a", index: 4 });
     expect(afterId, "clamps to after c, the last primary row — not into the reached window").toBe("c");
   });
 
-  it("multiple synthetic rows (exhausted + more) between two real groups are all skipped, not just one", () => {
-    // Render order: a, b · exhausted-row, more-row (2 synthetic) · c, d (reached). Dragging "a" to land
-    // between "c" and "d" — "above" = c at index 4 in [a,b,ex,more,c,d], so index = 4 + 1 = 5. A version
-    // that skipped only ONE synthetic row (off by one) would land after "d" instead — clamping to
-    // `real.length` cannot rescue that mistake here, unlike a drop at the very end would.
+  it("multiple synthetic rows (placeholder-more + more) between two real groups are all skipped, not just one", () => {
+    // Render order: a, b · placeholder-more-row, more-row (2 synthetic) · c, d (reached). Dragging "a"
+    // to land between "c" and "d" — "above" = c at index 4 in [a,b,ph-more,more,c,d], so index = 4 + 1
+    // = 5. A version that skipped only ONE synthetic row (off by one) would land after "d" instead —
+    // clamping to `real.length` cannot rescue that mistake here, unlike a drop at the very end would.
     const b = branch([page("a", 0), page("b", 1)], {
-      placeholdersExhausted: true, nextCursor: "cursor-1",
+      placeholderCursor: "ph-cursor-1", nextCursor: "cursor-1",
       reachedWindow: branch([page("c", 10), page("d", 11)]),
     });
     const afterId = afterIdForMove({ branch: b, parentPageId: null, movedId: "a", index: 5 });

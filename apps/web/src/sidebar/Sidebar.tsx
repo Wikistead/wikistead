@@ -169,7 +169,6 @@ function SidebarImpl() {
   const data = useMemo(() => buildLazyNodes({
     spaceId: current ?? "", byParent: lazyTree.byParent, pinnedPageIds,
     placeholderName: t("sidebar.placeholderPage"),
-    placeholdersExhaustedLabel: t("sidebar.placeholdersExhausted"),
   }), [current, lazyTree.byParent, pinnedPageIds, t]);
 
   // Active space capability gates management actions (UI only; the server is the
@@ -447,6 +446,7 @@ function SidebarImpl() {
           deleteMode={currentSpace?.deleteMode ?? "trash_only"}
           onToggleBranch={(id, open) => (open ? lazyTree.expand(id) : lazyTree.collapse(id))}
           onLoadMore={(parentId) => lazyTree.loadMore(parentId)}
+          onLoadMorePlaceholders={(parentId) => lazyTree.loadMorePlaceholders(parentId)}
         />
       )}
 

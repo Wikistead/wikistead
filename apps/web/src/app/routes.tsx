@@ -1181,24 +1181,62 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
   const [space, setSpace] = useState<{ name: string; iconImageUrl: string | null; homePageId?: string | null } | null>(null);
   const landedHome = useRef(false); // #364 ①: default-land on the home ONCE (never re-hijack navigation)
   const [openId, setOpenId] = useState<string | null>(null);
-  const [pagesTruncated, setPagesTruncated] = useState(false);
+  // #1141 / ADR-220 §6.2 rev12: opaque, present while more of the closure is unexplored — a follow-up
+  // fetch presenting it (and nothing else) continues the SAME walk. Superseded the plain `truncated`
+  // boolean: that told the reader a fixed count existed and gave them no way to see the rest.
+  const [pagesNextCursor, setPagesNextCursor] = useState<string | undefined>(undefined);
+  const [loadingMorePages, setLoadingMorePages] = useState(false);
   // #903 / ADR-220 §14 (ruling 2026-09-05): the anchors for pages the guest may read under a parent they
   // may not. They arrive beside `pages` in the same response and are never fetched separately (§4.2).
   const [placeholders, setPlaceholders] = useState<GuestPlaceholder[]>([]);
 
   const refreshPages = useCallback(() => {
     setPagesError(false);
-    apiFetch<{ pages: Page[]; placeholders?: GuestPlaceholder[]; truncated: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+    apiFetch<{ pages: Page[]; placeholders?: GuestPlaceholder[]; truncated: boolean; nextCursor?: string }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
       .then((r) => {
         setPages(r?.pages ?? []);
         setPlaceholders(r?.placeholders ?? []);
-        // #623 / ADR-220 §6.2: the cap comes with a VISIBLE state. This shell draws the tree
-        // unvirtualised and fully expanded, so a link whose tree is too large has to SAY so — a quiet
-        // cut would look like a complete tree that is simply missing pages.
-        setPagesTruncated(Boolean(r?.truncated));
+        // #1141 / ADR-220 §6.2 rev12: the cap still comes with a VISIBLE state (this shell draws the
+        // tree unvirtualised and fully expanded, so a cut has to SAY so) — but it is resumable now, so
+        // what is tracked is the cursor to continue with, not a dead "too large" flag.
+        setPagesNextCursor(r?.nextCursor);
       })
       .catch(() => setPagesError(true));
   }, [spaceId, token]);
+
+  // #1141: the guest tree's own "load more" — the SAME closure walk `refreshPages` started, continued
+  // from `pagesNextCursor`, appending (never replacing) what comes back. Anchors merge by token: a
+  // still-open anchor from the first call may gain more of its own pages on a later one (the anchor
+  // resolution boundary `listPagesGuestBounded` documents — see its own comment for why that boundary
+  // accepts a bounded overshoot instead of a duplicate-free mid-anchor resume, which is the one case
+  // this append could double-count a page already shown; deduping by id below closes that gap here too).
+  const loadMoreGuestPages = useCallback(() => {
+    if (!pagesNextCursor || loadingMorePages) return;
+    setLoadingMorePages(true);
+    const qs = new URLSearchParams({ cursor: pagesNextCursor });
+    apiFetch<{ pages: Page[]; placeholders?: GuestPlaceholder[]; truncated: boolean; nextCursor?: string }>(
+      `/spaces/${encodeURIComponent(spaceId)}/pages?${qs}`, token,
+    )
+      .then((r) => {
+        if (!r) return;
+        setPages((prev) => {
+          const seen = new Set((prev ?? []).map((p) => p.id));
+          return [...(prev ?? []), ...r.pages.filter((p) => !seen.has(p.id))];
+        });
+        setPlaceholders((prev) => {
+          const byToken = new Map(prev.map((ph) => [ph.token, ph]));
+          for (const ph of r.placeholders ?? []) {
+            const had = byToken.get(ph.token);
+            if (!had) { byToken.set(ph.token, ph); continue; }
+            const seen = new Set(had.pages.map((p) => p.id));
+            byToken.set(ph.token, { ...had, pages: [...had.pages, ...ph.pages.filter((p) => !seen.has(p.id))] });
+          }
+          return [...byToken.values()];
+        });
+        setPagesNextCursor(r.nextCursor);
+      })
+      .finally(() => setLoadingMorePages(false));
+  }, [spaceId, token, pagesNextCursor, loadingMorePages]);
 
   // #274 / ADR-135 (review ruling): the guest "new page" affordance (edit links only) uses
   // the MEMBER operation model — click → a blank "Untitled" page immediately → open straight in edit
@@ -1220,8 +1258,8 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<{ pages: Page[]; placeholders?: GuestPlaceholder[]; truncated: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
-      .then((r) => { if (!cancelled) { setPages(r?.pages ?? []); setPlaceholders(r?.placeholders ?? []); setPagesTruncated(Boolean(r?.truncated)); } })
+    apiFetch<{ pages: Page[]; placeholders?: GuestPlaceholder[]; truncated: boolean; nextCursor?: string }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+      .then((r) => { if (!cancelled) { setPages(r?.pages ?? []); setPlaceholders(r?.placeholders ?? []); setPagesNextCursor(r?.nextCursor); } })
       .catch(() => { if (!cancelled) { setPages([]); setPlaceholders([]); setPagesError(true); } }); // #500: error ≠ empty
     // #270: the space header (name + public icon only) so the guest sidebar shows the real space, not a
     // fixed "Shared space" label. Best-effort — a failure just falls back to the label.
@@ -1248,7 +1286,7 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
 
   return (
     <AppShell
-      sidebar={<GuestSidebar pages={pages ?? []} placeholders={placeholders} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} truncated={pagesTruncated} />}
+      sidebar={<GuestSidebar pages={pages ?? []} placeholders={placeholders} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} onLoadMore={pagesNextCursor ? loadMoreGuestPages : undefined} loadingMore={loadingMorePages} />}
       // #449 / ADR-173: the guest gets the SAME search box (Ctrl-K + the header field), wired to their
       // own token and opening hits inside this shell via the tree's open handler. The server forces the
       // link's space scope and gates every hit on the share_link principal — no member chrome leaks here.

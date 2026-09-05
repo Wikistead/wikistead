@@ -127,7 +127,6 @@
     "edit": "Edit this sign-in method"
   },
   "toast": {
-    "treeTruncated": "This link’s tree is too large to show in full.",
     "pinLimit": "You can keep up to 200 pins of this kind. Unpin something to add another.",
     "published": "Published",
     "publishFailed": "Couldn't publish",
@@ -940,7 +939,6 @@
     "loadFailed": "Failed to load.",
     "loadMorePages": "Load more pages",
     "placeholderPage": "(A page you can’t view)",
-    "placeholdersExhausted": "Some pages here couldn’t be shown. Try search instead.",
     "retry": "Retry",
     "noSpaces": "No spaces yet. Create one above.",
     "noPages": "No pages yet. Add one above.",

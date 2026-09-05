@@ -38,9 +38,14 @@ describe("#1130: the tree's remaining two synthetic rows inherit 14px like a pag
     expect(body).not.toMatch(CLASS_HAS_SIZE_OVERRIDE);
   });
 
-  it('"some pages could not be shown" (tree-placeholders-exhausted) sets no font-size override on its label', () => {
-    const body = slice("d.id.startsWith(PLACEHOLDERS_EXHAUSTED_PREFIX)", "d.id.startsWith(PLACEHOLDER_PREFIX)");
-    expect(body).toContain("tree-placeholders-exhausted"); // sanity: this is the right block
+  // #1141 / ADR-220 §4.2 rev12: the "some pages could not be shown" dead-end row (tree-placeholders-
+  // exhausted) is retired — the placeholder walk's continuation row now renders through the SAME
+  // `MoreRow` component the branch's own "load more" row uses (checked above), so there is no second,
+  // independent block whose font size could drift from it; the invariant this test originally pinned
+  // holds by construction rather than by a separate assertion.
+  it('the placeholder-walk continuation row (ph-more:) renders through MoreRow, not a separate block', () => {
+    const body = slice("d.id.startsWith(PLACEHOLDERS_MORE_PREFIX)", "d.id.startsWith(PLACEHOLDER_PREFIX)");
+    expect(body).toContain("<MoreRow");
     expect(body).not.toMatch(CLASS_HAS_SIZE_OVERRIDE);
   });
 });

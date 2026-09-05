@@ -3,10 +3,10 @@ import { SELECTED_ROW } from "../ui/selected-row"; // #632: shared with the sett
 import { useTranslation } from "react-i18next";
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { ChevronRight, Copy, FilePen, FilePlus, FileText, Info, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
-import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX, PLACEHOLDERS_EXHAUSTED_PREFIX } from "./lazy-tree"; // #623 §6.3, #1079
+import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX, PLACEHOLDERS_MORE_PREFIX } from "./lazy-tree"; // #623 §6.3, #1141
 import { alignSelectedRow, decideScroll, NO_SCROLL_YET, type ScrollMemory } from "./scroll-to-selection"; // #899
 
 // The presentational page-tree — the ONE react-arborist tree + row renderer shared by every surface that
@@ -151,6 +151,7 @@ export function PageTree({
   onMove,
   onToggleBranch,
   onLoadMore,
+  onLoadMorePlaceholders,
   disableDrop,
   deleteMode = "trash_only",
 }: {
@@ -171,6 +172,8 @@ export function PageTree({
   onToggleBranch?: (pageId: string, open: boolean) => void;
   /** §1: the `more:` row asks for the branch's next page when it scrolls into view. */
   onLoadMore?: (parentId: string | null) => void | Promise<void>;
+  /** #1141 / ADR-220 §4.2 rev12: the `ph-more:` row asks for the branch's next placeholder walk step. */
+  onLoadMorePlaceholders?: (parentId: string | null) => void | Promise<void>;
   onMove?: (args: { dragIds: string[]; parentId: string | null; index: number }) => void;
   disableDrop?: (args: { parentNode: NodeApi<PageTreeNode> | null; dragNodes: NodeApi<PageTreeNode>[] }) => boolean;
 }) {
@@ -259,6 +262,8 @@ export function PageTree({
   // #623 §6.3: same ref contract — a fresh callback identity would remount every row (the Radix bug).
   const onLoadMoreRef = useRef(onLoadMore);
   onLoadMoreRef.current = onLoadMore;
+  const onLoadMorePlaceholdersRef = useRef(onLoadMorePlaceholders);
+  onLoadMorePlaceholdersRef.current = onLoadMorePlaceholders;
   const onToggleBranchRef = useRef(onToggleBranch);
   onToggleBranchRef.current = onToggleBranch;
   const markReaderInteraction = useCallback(() => {
@@ -288,20 +293,17 @@ export function PageTree({
         />
       );
     }
-    if (d.id.startsWith(PLACEHOLDERS_EXHAUSTED_PREFIX)) {
-      // #1079 / ADR-220 §4.3: the placeholder budget ran out for this branch. Not usable like the
-      // other synthetic rows (no open, no menu, no drag, no toggle — it has no children), and unlike
-      // MORE_PREFIX there is nothing more to request: the budget is spent, not paged.
+    if (d.id.startsWith(PLACEHOLDERS_MORE_PREFIX)) {
+      // #1141 / ADR-220 §4.2 rev12: more of this branch's invisible territory remains — exactly
+      // MORE_PREFIX's own row and cursor-in-id contract, targeting the placeholder walk
+      // instead of the branch's own pagination. Superseded the #1079 "budget ran out" dead-end row.
+      const parentId = d.id.slice(PLACEHOLDERS_MORE_PREFIX.length).split(":")[0]!;
       return (
-        <div
-          className="flex h-full w-full min-w-0 items-center gap-1.5 px-1 text-fg-dim select-none"
-          data-testid="tree-placeholders-exhausted"
-        >
-          <Info size={13} className="flex-none" />
-          {/* #1130: no size override, same trade #1123 made for the placeholder row above it —
-              this row tells the reader something (#1093), so it must not be smaller than a page name. */}
-          <span className="truncate">{d.name}</span>
-        </div>
+        <MoreRow
+          key={d.id}
+          enabled={pagingEnabled}
+          onVisible={() => onLoadMorePlaceholdersRef.current?.(parentId === "root" ? null : parentId)}
+        />
       );
     }
     if (d.id.startsWith(PLACEHOLDER_PREFIX)) {
