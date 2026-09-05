@@ -66,8 +66,9 @@ The content of the shared ConfigMap and Secret, for a pod-template checksum anno
 ⚠️ `envFrom` (and a `secretKeyRef` into either object) is read once, at container start.
 `helm upgrade` changing a value inside them changes the ConfigMap/Secret in place, reports
 "successfully rolled out", and leaves the pod running with the OLD value — there is nothing in the
-Deployment's own spec for Kubernetes to diff (#1102, measured on a kind cluster: `workspaceHostTemplate`
-changed, the pod's start time did not, and only a manual `rollout restart` picked it up). Hashing both
+Deployment's own spec for Kubernetes to diff (measured on a real cluster: changing
+`workspaceHostTemplate` left the pod's start time untouched, and only a manual `rollout restart`
+picked it up). Hashing both
 rendered manifests into an annotation gives the pod template a field that actually changes when their
 content does, which is what triggers the rollout.
 */}}
@@ -80,7 +81,7 @@ content does, which is what triggers the rollout.
 Fails the render, before any manifest is written, when `workspaceHostTemplate` does not match what
 `ingress.wildcardHost` actually serves.
 
-#1101, measured on a kind cluster: `values.yaml`'s own example (`https://{slug}.example.com`, one label
+Measured on a real cluster: `values.yaml`'s own example (`https://{slug}.example.com`, one label
 SHALLOWER than the default `host: wikistead.example.com`) resolved to nothing — only the deep
 `{slug}.<host>` form, the one the `*.<host>` wildcard rule (`templates/ingress.yaml`) actually routes,
 worked. Nothing compared the two, so the mismatch only surfaced as a 404 in the browser.
