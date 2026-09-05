@@ -37,14 +37,16 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        // #1072/#939: NOT a close-animation on this layer. Radix's `Presence` keeps the
-        // `DismissableLayer` this overlay backs mounted until its exit `animationend` fires, and the
-        // layer's `document.body.style.pointerEvents = "none"` lock stays applied for that whole
-        // window — normal behavior, not a missed event, but it means exactly one click landing during
-        // the animation (duration-200) is swallowed instead of reaching the page underneath; the very
-        // next click always works, once the animation has actually finished and the layer unmounts.
-        // Dropping the exit animation makes the unmount synchronous, closing the window entirely.
-        "fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+        // #1072/#939/#1120: Radix's `Presence` keeps the `DismissableLayer` this overlay backs
+        // mounted until its exit `animationend` fires, and the layer's
+        // `document.body.style.pointerEvents = "none"` lock stays applied for that whole window —
+        // normal behavior, not a missed event, but it means a click landing during the exit animation
+        // is swallowed instead of reaching the page underneath; the very next click always works,
+        // once the animation has actually finished and the layer unmounts. #1120 restores the exit
+        // fade traded away for that fix: the North Star's own writing-experience/motion stance ranks
+        // above trading it for a click-swallow window, and a short `--dur-fast` exit shrinks that
+        // window instead — see DialogContent's `duration-[var(--dur-fast)]` for the actual timing.
+        "fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
         className
       )}
       {...props}
@@ -83,9 +85,13 @@ function DialogContent({
           // only CAP (never widen) — so the effective width is min(100vw-4rem, that dialog's max), giving every
           // #406 S3 / ADR-159 §3: below `sm` the gutter narrows to 2rem total (phones can't spare 64px).
           // dialog the gutter at narrow/mid widths while the `sm:max-w-*` maxima still govern on wide screens.
-          // #1072/#939: see DialogOverlay's comment — same reasoning, this is the layer
-          // `@radix-ui/react-dismissable-layer` actually gates on, so this is the one that matters.
-          "fixed left-[50%] z-50 grid w-[calc(100vw-2rem)] sm:w-[calc(100vw-4rem)] translate-x-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // #1072/#939/#1120: see DialogOverlay's comment — same reasoning, this is the layer
+          // `@radix-ui/react-dismissable-layer` actually gates on, so this duration is the one that
+          // matters. `--dur-fast` (120ms, tokens.css) rather than the base 200ms used elsewhere in
+          // this file: the shorter the exit animation, the shorter the window a click can land in
+          // and be swallowed — a real (if now very small) window remains, since Presence still waits
+          // for this animation's `animationend` before unmounting.
+          "fixed left-[50%] z-50 grid w-[calc(100vw-2rem)] sm:w-[calc(100vw-4rem)] translate-x-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-[var(--dur-fast)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 sm:max-w-lg",
           position === "top" ? "top-[10%] translate-y-0" : "top-[50%] translate-y-[-50%]", // #344: top-pin vs center
           className
         )}
