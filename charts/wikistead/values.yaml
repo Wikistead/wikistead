@@ -7,10 +7,11 @@
 #
 # A tag is pinnable and so is a digest. `digest` wins when both are set, which is what a
 # production deployment should use — a tag is a moving name and a digest is the thing that ran.
-# The registry defaults to the placeholder the manifests carry until images are published; a chart
-# installed with it fails to pull, which is the honest outcome before any image exists.
+# #1138: the real publish org, matching release-images.yml's REGISTRY_ORG and the README's install
+# command — until the first tagged release actually pushes an image here, a chart installed with the
+# default fails to pull, which is the honest outcome before any image exists.
 image:
-  registry: ghcr.io/CHANGE_ME
+  registry: ghcr.io/wikistead
   # Applies to all three application images unless overridden per service below.
   tag: ""            # defaults to .Chart.AppVersion
   digest: ""         # e.g. sha256:… — takes precedence over tag
