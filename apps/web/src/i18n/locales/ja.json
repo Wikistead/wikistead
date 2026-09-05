@@ -356,9 +356,9 @@
     "connectionUnlinked": "リンクを解除しました。いつでも再度リンクできます。",
     "connectionUnlinkFailed": "リンクを解除できませんでした。もう一度お試しください。",
     "connectionUnlinkLastWay": "これがサインインできる唯一の方法です。解除する前に、別のサインイン方法を追加してください。",
-    "connectionLinkReauthPrompt": "リンクの前に、本人であることを確認します。",
+    "connectionLinkReauthPrompt": "「{{name}}」のリンクの前に、本人であることを確認します。",
     "connectionLinkReauthPasskey": "パスキーでリンク",
-    "connectionUnlinkReauthPrompt": "解除の前に、本人であることを確認します。",
+    "connectionUnlinkReauthPrompt": "「{{name}}」の解除の前に、本人であることを確認します。",
     "connectionUnlinkReauthPasskey": "パスキーで解除"
   },
   "settings": {

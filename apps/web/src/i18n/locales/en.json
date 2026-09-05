@@ -357,9 +357,9 @@
     "connectionUnlinked": "Disconnected. You can link it again at any time.",
     "connectionUnlinkFailed": "The connection could not be removed. Try again.",
     "connectionUnlinkLastWay": "This is your only way to sign in. Add another sign-in method before removing it.",
-    "connectionLinkReauthPrompt": "Confirm it is you before linking.",
+    "connectionLinkReauthPrompt": "Confirm it is you before linking \"{{name}}\".",
     "connectionLinkReauthPasskey": "Link with your passkey",
-    "connectionUnlinkReauthPrompt": "Confirm it is you before removing this connection.",
+    "connectionUnlinkReauthPrompt": "Confirm it is you before removing \"{{name}}\".",
     "connectionUnlinkReauthPasskey": "Disconnect with your passkey"
   },
   "settings": {

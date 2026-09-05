@@ -184,7 +184,9 @@ export function ConnectionsLinkPanel() {
               busy={start.isPending || unlink.isPending} passkeyBusy={challenge.isPending}
               onSubmit={() => void submitProof()} onPasskey={() => void proveWithPasskey()}
               onCancel={cancel}
-              prompt={pendingAction === "unlink" ? t("account.connectionUnlinkReauthPrompt") : t("account.connectionLinkReauthPrompt")}
+              prompt={pendingAction === "unlink"
+                ? t("account.connectionUnlinkReauthPrompt", { name: connectionName(conn, t) })
+                : t("account.connectionLinkReauthPrompt", { name: connectionName(conn, t) })}
               passkeyLabel={pendingAction === "unlink" ? t("account.connectionUnlinkReauthPasskey") : t("account.connectionLinkReauthPasskey")}
               submitLabel={pendingAction === "unlink" ? t("account.connectionUnlinkButton") : t("account.connectionLinkButton")} />
           ) : (
