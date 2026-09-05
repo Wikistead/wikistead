@@ -127,7 +127,10 @@ function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => vo
       ) : (
         <button
           type="button"
-          className="flex h-full w-full cursor-pointer items-center px-3 text-left text-xs text-fg-dim hover:text-foreground"
+          // #1130: no size override — inherits the tree's 14px like a page name/placeholder row
+          // does (#1123), instead of the 11px text-xs this row and tree-placeholders-exhausted
+          // below were left at, both worse than the 12px #1123 fixed.
+          className="flex h-full w-full cursor-pointer items-center px-3 text-left text-fg-dim hover:text-foreground"
           onClick={ask}
         >
           {t("sidebar.loadMorePages")}
@@ -295,7 +298,9 @@ export function PageTree({
           data-testid="tree-placeholders-exhausted"
         >
           <Info size={13} className="flex-none" />
-          <span className="truncate text-xs">{d.name}</span>
+          {/* #1130: no size override, same trade #1123 made for the placeholder row above it —
+              this row tells the reader something (#1093), so it must not be smaller than a page name. */}
+          <span className="truncate">{d.name}</span>
         </div>
       );
     }
