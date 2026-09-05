@@ -1055,7 +1055,11 @@
     "logoUpload": "Upload logo",
     "logoRemove": "Remove",
     "logoType": "Unsupported image type. Use PNG, JPEG or WebP.",
-    "logoSize": "Image too large (max 512 KB)."
+    "logoSize": "Image too large (max 512 KB).",
+    "defaultLang": "Workspace mail language",
+    "defaultLangHint": "The fallback language for mail this workspace sends, used for members who have not chosen their own (Settings → Notifications → Mail language).",
+    "defaultLang_en": "English",
+    "defaultLang_ja": "Japanese"
   },
   "accent": {
     "blue": "Blue",

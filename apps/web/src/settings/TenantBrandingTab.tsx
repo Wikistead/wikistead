@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useProductName } from "../app/product-name";
-import { useBranding, useEntitlements, useUpdateTenantBranding, useUploadTenantLogo, useRemoveTenantLogo } from "../data/queries";
+import { useBranding, useEntitlements, useUpdateTenantBranding, useUploadTenantLogo, useRemoveTenantLogo, useAdminDefaultLang, useSetAdminDefaultLang } from "../data/queries";
 import { Button } from "../ui/Button";
 import { FormRow } from "../ui/FormRow";
 import { Input } from "../ui/Input";
+import { RadioGroup } from "../ui/RadioGroup";
 import { notify } from "../ui/toast";
 import { AccentPicker } from "./AccentPicker";
 import { assetUrl } from "../data/apiClient";
@@ -30,6 +31,8 @@ export function TenantBrandingTab() {
   const update = useUpdateTenantBranding();
   const uploadLogo = useUploadTenantLogo();
   const removeLogo = useRemoveTenantLogo();
+  const defaultLang = useAdminDefaultLang();
+  const setDefaultLang = useSetAdminDefaultLang();
   const fileRef = useRef<HTMLInputElement>(null);
   // The branding entitlement gates ONLY the logo (name + colour are basic, all plans).
   const logoLocked = ent.data ? !ent.data.branding : false;
@@ -85,6 +88,23 @@ export function TenantBrandingTab() {
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", marginBottom: 10 }}>{t("accent.label")}</label>
       {/* #201: the tenant is the TOP of the accent cascade — always a concrete colour, no inherit chip. */}
       <AccentPicker value={accentKey} onChange={chooseAccent} disabled={update.isPending} inheritLabel={t("tenantBranding.default")} allowInherit={false} />
+
+      {/* #1095: a FALLBACK for members who have not chosen their own mail language (account.notifications.language
+          "workspace" option) — never an override; a member's own choice always wins. NULL reads as English. */}
+      <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", margin: "28px 0 6px" }}>{t("tenantBranding.defaultLang")}</label>
+      <p className="mt-0 mb-2 text-sm text-fg-dim" style={{ marginTop: 0 }}>{t("tenantBranding.defaultLangHint")}</p>
+      <RadioGroup
+        variant="segmented"
+        value={defaultLang.data?.defaultLang ?? "en"}
+        onChange={(v) => setDefaultLang.mutate(v, {
+          onSuccess: () => notify.success(t("toast.saved")),
+          onError: () => notify.error(t("toast.actionFailed")),
+        })}
+        disabled={defaultLang.isLoading || setDefaultLang.isPending}
+        ariaLabel={t("tenantBranding.defaultLang")}
+        testId="tenant-default-lang"
+        options={(["en", "ja"] as const).map((v) => ({ value: v, label: t(`tenantBranding.defaultLang_${v}`) }))}
+      />
 
       <label style={{ display: "block", fontSize: 13, color: "var(--fg-dim)", margin: "28px 0 6px" }}>{t("tenantBranding.logo")}</label>
       <p className="mt-0 text-sm text-fg-dim" style={{ marginTop: 0 }}>{t("tenantBranding.logoHint")}</p>

@@ -1760,6 +1760,25 @@ export function useRemoveTenantLogo() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["branding"] }),
   });
 }
+// #1095: the workspace-wide FALLBACK mail language (never an override — a member's own
+// account.notifications.language always wins over this). null = no admin choice yet.
+export function useAdminDefaultLang(enabled = true) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["admin-default-lang"],
+    queryFn: () => apiFetch<{ defaultLang: string | null }>(`/admin/default-lang`, token),
+    enabled,
+  });
+}
+export function useSetAdminDefaultLang() {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: string | null) =>
+      apiFetch<{ defaultLang: string | null }>(`/admin/default-lang`, token, { method: "PUT", body: JSON.stringify({ defaultLang: v }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-default-lang"] }),
+  });
+}
 
 // Tenant entitlements (plan feature flags). Used for UI gating (e.g. show an
 // upgrade state for branding on Cloud free); the server stays the fortress.

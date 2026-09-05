@@ -24,6 +24,7 @@ import { countTodoTasks } from '../task-progress.js' // #290: :::todo aggregate 
 import { evaluatePublishAbuse } from '../abuse-filter.js' // #328 / ADR-140: publish-boundary abuse filter
 import { getEffectiveAbusePolicyForSpace } from './abuse-config.js' // #509 / ADR-187: tenant floor ⊕ space layer
 import { recordAbuseFlag } from './notifications.js' // #326 / ADR-142 Addendum 2: patrol flags at the refusal boundaries
+import { LANGS, isKnownLang } from '../locale.js' // #1095: the workspace default-language knob
 
 // #326: a flag names its actor the same way every other feed row does — the guest's session pseudonym
 // when there is one, else the link. Using the link id alone would both break the join with that
@@ -5551,5 +5552,26 @@ export async function pagesPlugin(app: FastifyInstance) {
       INSERT INTO tenant_settings (tenant_id, delete_mode) VALUES (${req.tenant.id}, ${v})
       ON CONFLICT (tenant_id) DO UPDATE SET delete_mode = ${v}, updated_at = now()`
     return { deleteMode: v }
+  })
+
+  // #1095 / the workspace-wide FALLBACK language (never an override — a member's own
+  // account.notifications.language always wins; "workspace" there means "read this column").
+  // Reader: auth/session.ts tenantDefaultLang() (locale.ts resolveMailLocale's 2nd-priority slot,
+  // #1096's mail-locale resolution). NULL / unknown value there means "no admin choice yet" → 'en'.
+  app.get('/admin/default-lang', async (req) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    const [row] = await req.db.sql<[{ default_lang: string | null }?]>`SELECT default_lang FROM tenant_settings LIMIT 1`
+    return { defaultLang: isKnownLang(row?.default_lang) ? row!.default_lang : null }
+  })
+  app.put<{ Body: { defaultLang?: string | null } }>('/admin/default-lang', async (req, reply) => {
+    await requireTenantAdmin(app.fga, req.user.sub, req.tenant.id)
+    const v = req.body?.defaultLang ?? null
+    if (v !== null && !isKnownLang(v)) {
+      return reply.code(400).send({ error: `defaultLang (${LANGS.join(' | ')} | null) required` })
+    }
+    await req.db.sql`
+      INSERT INTO tenant_settings (tenant_id, default_lang) VALUES (${req.tenant.id}, ${v})
+      ON CONFLICT (tenant_id) DO UPDATE SET default_lang = ${v}, updated_at = now()`
+    return { defaultLang: v }
   })
 }

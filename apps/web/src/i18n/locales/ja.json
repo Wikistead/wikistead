@@ -1053,7 +1053,11 @@
     "logoUpload": "ロゴをアップロード",
     "logoRemove": "削除",
     "logoType": "対応していない画像形式です。PNG・JPEG・WebP を使ってください。",
-    "logoSize": "画像が大きすぎます（最大 512 KB）。"
+    "logoSize": "画像が大きすぎます（最大 512 KB）。",
+    "defaultLang": "ワークスペースのメール言語",
+    "defaultLangHint": "このワークスペースが送るメールの既定の言語です。メンバーが自分で選んでいない場合（設定 → 通知 → メールの言語）に使われます。",
+    "defaultLang_en": "English",
+    "defaultLang_ja": "日本語"
   },
   "accent": {
     "blue": "ブルー",
