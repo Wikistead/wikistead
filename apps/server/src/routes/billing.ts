@@ -3,10 +3,12 @@ import { requireTenantAdmin } from '@wikistead/authz' // #383
 import type { OpenFgaClient } from '@openfga/sdk'
 import Stripe from 'stripe'
 import { pool } from '../db/pool.js'
+import { withTenantTx } from '../db/with-tenant.js'
 import { isManagedDeployment, resolveEntitlements } from '@wikistead/entitlements'
 import { currentPeriodStart, getUsage } from '../usage.js' // #231 slice 1: read the counters back
 import { emit } from '@wikistead/events'
 import { isDowngrade } from '../plan.js'
+import { isKnownLang } from '../locale.js'
 
 // `||` not `??`: an explicitly-empty STRIPE_SECRET_KEY (CE/dev/test .env) must
 // fall back to the placeholder — `new Stripe('')` throws at module load and would
@@ -143,7 +145,20 @@ export async function createCheckoutSession(
   if (!t) throw Object.assign(new Error('tenant not found'), { statusCode: 404 })
   let customerId = t.stripe_customer_id
   if (!customerId) {
-    const customer = await stripe.customers.create({ name: t.slug, metadata: { tenantId: args.tenantId } })
+    // #1096: Stripe's own receipt/dunning emails otherwise default to English. The workspace
+    // default only — NEVER the requesting admin's own session locale: this customer is billed to
+    // the whole tenant, which multiple people (in different languages) may read (ADR-260 §3.1
+    // covers the per-member case; this is deliberately the tenant-only half of that resolution).
+    // tenant_settings is RLS-scoped (FORCE ROW LEVEL SECURITY) — `withTenantTx`, not a bare `pool`
+    // query, which would see zero rows (no `app.tenant_id` in this connection's session) and never
+    // actually surface the workspace default. A brand-new tenant has no tenant_settings row yet
+    // (#1126), which this correctly reads as "no default" rather than failing the checkout over it.
+    const [settings] = await withTenantTx(args.tenantId, (sql) =>
+      sql<{ default_lang: string | null }[]>`SELECT default_lang FROM tenant_settings LIMIT 1`)
+    const lang = isKnownLang(settings?.default_lang) ? settings.default_lang : 'en'
+    const customer = await stripe.customers.create({
+      name: t.slug, metadata: { tenantId: args.tenantId }, preferred_locales: [lang],
+    })
     customerId = customer.id
     await pool`UPDATE tenants SET stripe_customer_id = ${customerId} WHERE id = ${args.tenantId}`
   }
