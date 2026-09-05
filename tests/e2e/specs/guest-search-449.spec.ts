@@ -89,7 +89,6 @@ test("#449: a space-link guest can search their space and a hit opens in the gue
 
 // #449: Ctrl-K opens the same modal on the guest shell (keyboard parity with the member surface).
 test("#449: Ctrl-K opens guest search", async ({ browser }) => {
-  test.skip(true, "#1088: isolated — under the gate's full run openDemo's wait for the preview surface times out at 60s (same family as #973); the spec passes solo, re-measured twice");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   // #989: plain NODE-side fetch, not page.evaluate — see helpers.ts's createScratchPage for why.
