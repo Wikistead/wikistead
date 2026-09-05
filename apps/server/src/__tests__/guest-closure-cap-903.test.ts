@@ -109,7 +109,7 @@ const ctx = { current_time: new Date().toISOString() }
 
 describe('#903 / ADR-220 §13: closure-bounded guest tree', () => {
   it('under cap: every visible page returned, none truncated', async () => {
-    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, subject, context: ctx, cap: 50 })
+    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, tenantId: tenant.id, subject, context: ctx, cap: 50 })
     expect(out.truncated).toBe(false)
     expect(out.pages.map((p) => p.title)).toEqual([
       'root1', 'root1-child1', 'root1-child2', 'root2', 'root3', 'root4', 'root4-child-VISIBLE-4th',
@@ -117,14 +117,14 @@ describe('#903 / ADR-220 §13: closure-bounded guest tree', () => {
   })
 
   it('DFS pre-order: a root\'s whole subtree precedes the next root — not flat position order', async () => {
-    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, subject, context: ctx, cap: 50 })
+    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, tenantId: tenant.id, subject, context: ctx, cap: 50 })
     const order = out.pages.map((p) => p.title)
     expect(order.indexOf('root1-child2'), 'root1 subtree finishes before root2 starts')
       .toBeLessThan(order.indexOf('root2'))
   })
 
   it('an invisible child never appears and does not consume closure budget', async () => {
-    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, subject, context: ctx, cap: 50 })
+    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, tenantId: tenant.id, subject, context: ctx, cap: 50 })
     expect(out.pages.some((p) => p.title === 'root2-child-invisible')).toBe(false)
     // 7 visible pages total — the invisible children (under root2 and root4) are not among them and did
     // not eat a slot that would otherwise have shown a later root.
@@ -132,19 +132,19 @@ describe('#903 / ADR-220 §13: closure-bounded guest tree', () => {
   })
 
   it('exactly at the cap: NOT truncated (a flat length compare would get this wrong)', async () => {
-    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, subject, context: ctx, cap: 7 })
+    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, tenantId: tenant.id, subject, context: ctx, cap: 7 })
     expect(out.pages).toHaveLength(7)
     expect(out.truncated, 'nothing past the 7th visible page exists — this is not a cut').toBe(false)
   })
 
   it('#903 design-review regression: a visible 4th child beyond the CHEVRON_PROBE_CAP is not dropped', async () => {
-    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, subject, context: ctx, cap: 50 })
+    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, tenantId: tenant.id, subject, context: ctx, cap: 50 })
     expect(out.pages.some((p) => p.title === 'root4-child-VISIBLE-4th'), 'the 4th (visible) child was silently dropped').toBe(true)
     expect(out.truncated, 'nothing was cut for budget reasons here — this page was just never found').toBe(false)
   })
 
   it('one past the cap: truncated, and the ancestor-inclusion invariant holds', async () => {
-    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, subject, context: ctx, cap: 3 })
+    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, tenantId: tenant.id, subject, context: ctx, cap: 3 })
     expect(out.truncated).toBe(true)
     expect(out.pages.map((p) => p.title)).toEqual(['root1', 'root1-child1', 'root1-child2'])
     const byId = new Map(out.pages.map((p) => [p.id, p]))
@@ -156,7 +156,7 @@ describe('#903 / ADR-220 §13: closure-bounded guest tree', () => {
   it('truncation mid-subtree still emits the ancestors that were already found', async () => {
     // cap=1 stops right after root1 itself — root1's children never get pushed, so the closure never
     // claims to have shown a page without its parent.
-    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, subject, context: ctx, cap: 1 })
+    const out = await listPagesGuestBounded(db, fgaClient, { spaceId: space, tenantId: tenant.id, subject, context: ctx, cap: 1 })
     expect(out.truncated).toBe(true)
     expect(out.pages.map((p) => p.title)).toEqual(['root1'])
   })
@@ -208,7 +208,7 @@ describe('#903 / ADR-220 §13: the FGA cost itself is bounded by cap, not by spa
   it('view Checks and badge reads both stay near cap, nowhere near the 42 visible pages that exist', async () => {
     const { fga, checkedIds, readCalls } = countingFga(fgaClient)
     const out = await listPagesGuestBounded(db2, fga, {
-      spaceId: space2, subject: `share_link:${LINK2}`, context: { current_time: new Date().toISOString() }, cap: CAP,
+      spaceId: space2, tenantId: tenant2.id, subject: `share_link:${LINK2}`, context: { current_time: new Date().toISOString() }, cap: CAP,
     })
     expect(out.truncated, 'the budget really was exhausted inside firstRoot').toBe(true)
     expect(out.pages).toHaveLength(CAP)
@@ -286,7 +286,7 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
   // which is what the 2026-09-01 shipping form did (measured on a real share link: the page from inside
   // a hidden folder drew as a top-level row among the space's real roots).
   it('a visible child of an invisible ROOT arrives ANCHORED, not flattened into the root list', async () => {
-    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, tenantId: tenant3.id, subject: subject3, context: ctx3, cap: 50 })
     expect(out.pages.some((p) => p.title === 'draftRoot-child-VISIBLE'), 'never a top-level row').toBe(false)
     const anchor = out.placeholders.find((ph) => ph.pages.some((p) => p.title === 'draftRoot-child-VISIBLE'))
     expect(anchor, 'the page must appear under an anchor').toBeTruthy()
@@ -298,7 +298,7 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
   })
 
   it('an anchor carries no field of the invisible page it stands for', async () => {
-    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, tenantId: tenant3.id, subject: subject3, context: ctx3, cap: 50 })
     for (const ph of out.placeholders) {
       expect(Object.keys(ph).sort(), 'the anchor is a token, a placement and its pages — nothing else')
         .toEqual(['pages', 'parentToken', 'token', 'under'])
@@ -315,7 +315,7 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
   })
 
   it('a two-layer invisible chain nests as a CHAIN of anchors, and the surfaced page keeps its own child', async () => {
-    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, tenantId: tenant3.id, subject: subject3, context: ctx3, cap: 50 })
     const inner = out.placeholders.find((ph) => ph.pages.some((p) => p.title === 'deepC-VISIBLE'))
     expect(inner, 'the grandchild must be found').toBeTruthy()
     // Two invisible layers = two anchors, one inside the other — NOT one flattened anchor and not two
@@ -336,7 +336,7 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
     // The fixture has ONE ordinary visible root and three pages that only exist behind anchors. With
     // `visible.length` as the counter (the pre-anchor arithmetic) the anchored rows are free and the cap
     // never trips: the space could draw an unbounded tree while the counter read one.
-    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 2 })
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, tenantId: tenant3.id, subject: subject3, context: ctx3, cap: 2 })
     const shown = out.pages.length + out.placeholders.reduce((n, ph) => n + ph.pages.length, 0)
     expect(shown, 'exactly the cap, counting anchored rows').toBe(2)
     expect(out.truncated, 'and it says so').toBe(true)
@@ -346,7 +346,7 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
     // §4 ruling ②: a placeholder is drawn ONLY as an anchor. The cap above can cut a chain's pages away
     // after its anchors were minted; what is left must not announce a hidden node while showing nobody.
     for (const cap of [1, 2, 3, 50]) {
-      const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap })
+      const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, tenantId: tenant3.id, subject: subject3, context: ctx3, cap })
       for (const ph of out.placeholders) {
         const anchorsSomething = ph.pages.length > 0 || out.placeholders.some((x) => x.parentToken === ph.token)
         expect(anchorsSomething, `cap=${cap}: an empty anchor reached the wire`).toBe(true)
@@ -355,7 +355,7 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
   })
 
   it('an ordinary visible root is unaffected', async () => {
-    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, tenantId: tenant3.id, subject: subject3, context: ctx3, cap: 50 })
     expect(out.pages.some((p) => p.title === 'normalRoot')).toBe(true)
     expect(out.placeholders.some((ph) => ph.pages.some((p) => p.title === 'normalRoot')),
       'a normally-parented page is never anchored').toBe(false)
@@ -366,7 +366,7 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
     // deepA-invisible are both root-level invisible seeds) before running out — whichever one it does
     // NOT reach must not be silently absent from a response that also claims completeness.
     const out = await listPagesGuestBounded(db3, fgaClient, {
-      spaceId: space3, subject: subject3, context: ctx3, cap: 50, placeholderBudget: 1,
+      spaceId: space3, tenantId: tenant3.id, subject: subject3, context: ctx3, cap: 50, placeholderBudget: 1,
     })
     expect(out.truncated, 'the placeholder budget ran out — §6.2\'s loud-cap rule applies here too').toBe(true)
   })
@@ -374,7 +374,7 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
   it('view Checks stay bounded by the placeholder budget, not by how deep the invisible chain runs', async () => {
     const { fga, checkedIds } = countingFga(fgaClient)
     const out = await listPagesGuestBounded(db3, fga, {
-      spaceId: space3, subject: subject3, context: ctx3, cap: 50, placeholderBudget: 50,
+      spaceId: space3, tenantId: tenant3.id, subject: subject3, context: ctx3, cap: 50, placeholderBudget: 50,
     })
     expect(out.truncated).toBe(false)
     // 2 root-level branches (root, then normalRoot's siblings) + walking draftRoot-child-VISIBLE's own

@@ -17,6 +17,7 @@ import { resolveEntitlements } from '@wikistead/entitlements' // #464: EE gate f
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
 import { resolveTreePlaceholders, resolveGuestPlaceholders, PLACEHOLDER_NODE_MAX, type PlaceholderNode, type TreePage } from './tree-placeholders.js' // #623 / ADR-220 §4, §14
+import { encodePlaceholderCursor, decodePlaceholderCursor, type PlaceholderCursorScope } from './tree-placeholders-cursor.js' // #1141
 import type { TenantDb } from '../db/index.js'
 import { pool, registry, acquireTenantDb, listActiveTenantIds } from '../db/index.js' // #411: cross-tenant trash retention sweep
 import { flushDraft } from '../collab-flush.js'
@@ -2178,8 +2179,11 @@ export async function branchPlaceholders(
     tenantId: string
     groups: string[]
     context?: { current_time: string }
+    /** #1141: a prior call's `placeholderCursor`, to resume that same walk instead of starting a new
+     * one. Present only while a client keeps scrolling into still-unexplored invisible territory. */
+    cursor?: string
   },
-): Promise<{ placeholders: PlaceholderNode[]; placeholdersExhausted: boolean }> {
+): Promise<{ placeholders: PlaceholderNode[]; placeholderCursor?: string }> {
   const notFound = () => Object.assign(new Error('not found'), { statusCode: 404 })
   if (args.parentId === null) {
     if (!(await canOpenSpaceRoot(fga, args.subject, args.spaceId, args.context))) {
@@ -2211,7 +2215,7 @@ export async function branchPlaceholders(
   // path 1 (`grantsPath`) cannot possibly place anything relevant to THIS branch either, so running it
   // is pure waste — and its own cost is a Check-metered but UNSCOPED read of the reader's entire grant
   // roster across every tenant and space in the store, so on an account with a large one it can burn
-  // the whole budget before path 2 ever gets a look, reporting `placeholdersExhausted: true` against a
+  // the whole budget before path 2 ever gets a look, wrongly reporting more to explore against a
   // branch that has nothing missing (the reported symptom: a brand-new, fully-visible space).
   //
   // Proof this is safe: `nearestVisible === branchParentId` (the test grantsPath's candidates must
@@ -2221,9 +2225,13 @@ export async function branchPlaceholders(
   // such node exists among them — and only among them, since a chain can only enter the invisible run
   // through one of `branchParentId`'s own children. `rows.length < PLACEHOLDER_NODE_MAX` guards the one
   // case this doesn't hold: a branch with 200+ children, where children past the LIMIT were never
-  // read and could still be invisible.
-  if (invisibleChildIds.length === 0 && rows.length < PLACEHOLDER_NODE_MAX) {
-    return { placeholders: [], placeholdersExhausted: false }
+  // read and could still be invisible. Skipped entirely when RESUMING (`args.cursor` set): a resumed
+  // walk's own state (which candidates/frontier remain) already answers the question this shortcut
+  // exists to avoid asking, and this branch's CURRENT child shape may have moved on since the cursor
+  // was minted — #1141 does not attempt to reconcile that race, the same tolerance every other
+  // multi-call pagination in this codebase already has.
+  if (!args.cursor && invisibleChildIds.length === 0 && rows.length < PLACEHOLDER_NODE_MAX) {
+    return { placeholders: [] }
   }
 
   return resolveTreePlaceholders(db, fga, {
@@ -2232,6 +2240,7 @@ export async function branchPlaceholders(
     invisibleChildIds,
     budget,
     ...(args.context ? { context: args.context } : {}),
+    ...(args.cursor ? { cursor: args.cursor } : {}),
     toPage: (row) => toPage(row as unknown as PageRow) as unknown as { id: string },
   })
 }
@@ -2397,14 +2406,115 @@ export const GUEST_TREE_CAP = 500
  * compare cannot tell the two apart, which is the quiet lie this section exists to avoid. §14's own
  * placeholder-budget exhaustion (see `placeholderBudget` below) folds into this SAME flag.
  */
+/**
+ * #1141: one unit of pending work in the guest closure walk, in true DFS pre-order — a page is only
+ * REVEALED (added to the response, counted toward `cap`) at the moment its OWN `reveal` item is
+ * popped, never earlier merely because it was discovered as one of several siblings. Discovering a
+ * parent's children (`children`) and revealing one of them (`reveal`) are DELIBERATELY separate stack
+ * items: pushing every sibling's `reveal` the instant a `listBranch` batch returns (as an earlier
+ * version of this walk did) reveals a whole level before any of it is explored — level-order, not
+ * pre-order, which broke "a root's whole subtree precedes the next root" the instant a batch held more
+ * than one row. Interleaving `reveal` and `children` on ONE stack is what makes a `children` item that
+ * still has more of the SAME batch to reveal wait, correctly, behind whatever the row just revealed
+ * turns out to contain.
+ */
+type GuestWorkItem =
+  // Read (or resume reading, via `cursor`) this parent's OWN direct children. Once fully read,
+  // `childrenDone` items resolve (or resume, via `phCursor`) its invisible children into placeholder
+  // anchors — kept as a SEPARATE stack entry, pushed BELOW the parent's own children's `reveal` items,
+  // so anchor content for a parent always lands after that SAME parent's regular children (and their
+  // full subtrees) are done, matching the order the original recursive walk produced.
+  //
+  // Placeholder anchors themselves are resolved and revealed ATOMICALLY when a `childrenDone` item is
+  // processed (not lazily via `reveal`, unlike a plain child): the pages behind one invisible chain
+  // arrive as ONE `resolveGuestPlaceholders` result with no cheap, duplicate-free way to split
+  // "already revealed" from "still pending" WITHIN that one result if a resumed call re-entered it
+  // (the frontier lives inside that function's own opaque cursor, not here) — so if `cap` is reached
+  // partway through revealing one such result, the walk accepts a bounded overshoot (this ONE parent's
+  // placeholder budget, at most `PLACEHOLDER_NODE_MAX`) rather than resuming mid-result or dropping
+  // pages it already found. Each surfaced page's OWN children, once it IS revealed, are ordinary
+  // `children` items again — the simplification is scoped to this one boundary, not inherited by
+  // anything under it.
+  | { kind: 'children'; parentId: string | null; cursor?: string; childrenDone?: boolean; phCursor?: string }
+  // A page already confirmed visible (a plain, non-anchor child), awaiting its turn to be counted and
+  // added to `visible` — deferred so that revealing a whole batch of siblings does not happen before
+  // any of them is explored (see the function's own comment for why that broke DFS pre-order).
+  | { kind: 'reveal'; id: string }
+interface GuestWalkState { pending: GuestWorkItem[] }
+
+/**
+ * #903 / ADR-220 §13+§14: the guest whole-space read, bounded by TREE CLOSURE rather than a flat slice.
+ *
+ * The shipped cap (§6.2) sliced `listPages`'s output AFTER `listPages` had already run a `view` Check
+ * (and a badge read) on every non-deleted page in the space — a 5,000-page space paid 5,000 Checks to
+ * show 500 rows, on every load. A flat SQL `LIMIT` is not a safe fix: `dfsOrder` re-parents a row whose
+ * parent fell outside the cut to the ROOT, a wrong tree shown quietly — worse than a loud cap.
+ *
+ * This walks the tree in DFS pre-order (roots and their subtrees before later siblings, matching the
+ * client's layout) one BRANCH at a time via `listBranch` — reusing §1-3's already-reviewed shape
+ * (parent-confirm, per-node confirm, home-page exclusion) rather than inventing a new authz pattern —
+ * and stops the instant `GUEST_TREE_CAP` VISIBLE pages have been confirmed. A page is pushed to
+ * `visible` before its own children are ever fetched, so the ancestor-inclusion invariant ("a page's
+ * ancestors are included whenever the page is") holds structurally.
+ *
+ * ⚠️ NOT gated on `hasChildren`. That flag is `listBranch`'s CHEVRON probe (`CHEVRON_PROBE_CAP` = 3
+ * children) — a display hint whose false negative was acceptable for §623's original purpose (no expand
+ * arrow drawn) but would silently DROP a confirmed-visible page here if used to skip recursion (§903
+ * design-review found exactly this in an earlier version of this function). Every visible page's
+ * children are walked UNCONDITIONALLY; a subtree that turns out to have no visible descendant costs one
+ * more (typically empty) `listBranch` call, not a budget slot — the CAP counter (`cap`, below) is what
+ * "must not consume budget without producing a visible row" is about, not query count.
+ *
+ * §14 (rev10, ADR-220): a walk still cannot descend past an INVISIBLE page's own identity (`listBranch`'s
+ * §2 gate refuses a named parent the caller cannot view) — so a visible page whose PARENT is invisible
+ * (an unpublished folder holding one published child, an ordinary editing state) would otherwise be lost
+ * exactly like `hasChildren` used to lose one. Each branch read collects the invisible ids it rejected
+ * (`onInvisible`) and, once its own pages are exhausted, hands them to `resolveGuestPlaceholders` —
+ * ADR-220 §4's member placeholder mechanism (`/pages/tree-placeholders`), extended to share-link guests
+ * for its DESCEND path only (never the direct-grant path, which guests structurally have none of).
+ *
+ * §14 rev11 (owner ruling 2026-09-05, #903): what comes back is the member mechanism's own
+ * `PlaceholderNode` grouping, returned beside `pages` — NOT the pages flattened to `parentId: null`.
+ * The flat form (shipped 2026-09-01) leant on `GuestSidebar`'s re-rooting and therefore drew a page
+ * from inside a hidden folder as a TOP-LEVEL row, sorted among the space's real roots by an ordinal
+ * belonging to a parent nobody could see. It was measured on a real share link before this changed.
+ * Anchoring keeps the hierarchy the reader is actually looking at, and makes the guest tree answer this
+ * situation the same way the member tree has since #623 — one unnamed anchor, no field of the invisible
+ * page, not expandable through any route.
+ *
+ * A surfaced page is walked exactly like a branch row, so its own descendants arrive as ordinary
+ * visible-parented `pages` and nest under it on the client; only the FIRST hop out of invisible
+ * territory needs an anchor.
+ *
+ * #1141 / ADR-220 §6.2 rev (2026-09-06): hitting `cap` is no longer a dead end — the response carries a
+ * `nextCursor` (an opaque, signed token, the same trust shape as `tree-placeholders.ts`'s) and a
+ * follow-up call presenting it resumes the SAME closure walk for the next batch, instead of the reader
+ * being told a fixed number of pages exist and no more. Resumed at PARENT granularity (a whole parent's
+ * own direct-children pagination, or a whole placeholder-resolution result, is always finished or fully
+ * discarded before the walk pauses) rather than mid-page: the alternative — resuming inside a partially
+ * consumed batch — risks re-fetching and re-showing a page a PRIOR call already reported, and this
+ * walk's one hard rule is that no real page is ever examined or shown twice across a resumed sequence.
+ * The cost is a bounded, one-time overshoot of `cap` by up to one `listBranch` page (`BRANCH_PAGE_LIMIT`)
+ * or one placeholder resolution's worth of pages (`PLACEHOLDER_NODE_MAX`) at the exact moment the cap is
+ * crossed — an acceptable trade for a display cap that exists to bound response cost, not to be exact.
+ */
 export async function listPagesGuestBounded(
   db: TenantDb,
   fga: OpenFgaClient,
-  // `cap` defaults to the shipped GUEST_TREE_CAP; a caller (the pin) may override it to exercise the
-  // truncation arithmetic against a small, cheap-to-build fixture without changing the shipped constant.
-  // `placeholderBudget` defaults to the shipped PLACEHOLDER_NODE_MAX for the same reason (§14 below).
-  args: { spaceId: string; subject: string; context?: { current_time: string }; cap?: number; placeholderBudget?: number },
-): Promise<{ pages: Page[]; placeholders: PlaceholderNode[]; truncated: boolean }> {
+  args: {
+    spaceId: string
+    subject: string
+    tenantId: string
+    context?: { current_time: string }
+    // `cap` defaults to the shipped GUEST_TREE_CAP; a caller (the pin) may override it to exercise the
+    // truncation arithmetic against a small, cheap-to-build fixture without changing the shipped constant.
+    // `placeholderBudget` defaults to the shipped PLACEHOLDER_NODE_MAX for the same reason (§14 below).
+    cap?: number
+    placeholderBudget?: number
+    /** #1141: a prior call's `nextCursor`, verbatim, to resume the SAME closure walk. */
+    cursor?: string
+  },
+): Promise<{ pages: Page[]; placeholders: PlaceholderNode[]; truncated: boolean; nextCursor?: string }> {
   const cap = args.cap ?? GUEST_TREE_CAP
   const visible: Page[] = []
   // §14 (2026-09-05 ruling): the anchors for pages that live under something the guest cannot view.
@@ -2414,84 +2524,152 @@ export async function listPagesGuestBounded(
   // pages all sit under draft folders draw an unbounded tree while the counter read zero.
   const placeholders: PlaceholderNode[] = []
   let shown = 0
-  let truncated = false
-  // #903 / ADR-220 §14: a SEPARATE budget from `cap`. `cap` bounds what the tree DISPLAYS (confirmed
-  // VISIBLE rows); this bounds what the walk may EXAMINE while descending through invisible territory
-  // looking for more of them — the same two-dimension split §4.3 already draws for the member path.
-  // Conflating them would let one all-draft space with a deep visible leaf spend the whole display cap
-  // just walking invisible parents, before a single real row is shown.
-  const placeholderBudget = { left: args.placeholderBudget ?? PLACEHOLDER_NODE_MAX }
-  let placeholdersExhausted = false
   const toTreePage = (row: unknown) => toPage(row as PageRow) as unknown as { id: string; [k: string]: unknown }
 
-  const walk = async (parentId: string | null): Promise<void> => {
-    let cursor: string | undefined
-    const invisibleIds: string[] = []
-    for (;;) {
-      if (truncated) return
-      const branch = await listBranch(db, fga, {
-        spaceId: args.spaceId, parentId, subject: args.subject, context: args.context, cursor, limit: BRANCH_PAGE_LIMIT,
-        onInvisible: (ids) => invisibleIds.push(...ids),
-      })
-      for (const p of branch.pages) {
-        if (shown >= cap) { truncated = true; return }
-        visible.push(p)
-        shown++
-        // #903 design-review NOT gated on `hasChildren`. That flag is `listBranch`'s CHEVRON
-        // probe (CHEVRON_PROBE_CAP = 3 children) — a display hint whose false negative was accepted by
-        // #623 because the cost was "no expand arrow drawn". Using it to decide whether to
-        // recurse turns that same false negative into a dropped, CONFIRMED-VISIBLE page: a parent with
-        // 4+ children whose first 3 (by position) are all invisible reports `hasChildren: false` even
-        // when its 4th child is visible, and the old code never looked past that. Every visible page's
-        // children are walked unconditionally; a subtree that turns out to have no visible descendant
-        // costs one more (typically empty) `listBranch` call, not a budget slot — §13(a)'s own
-        // condition ("a page whose subtree is entirely invisible must not consume closure budget
-        // without producing a visible row") is about the CAP counter, not query count.
-        await walk(p.id)
-        if (truncated) return
-      }
-      if (!branch.nextCursor) break
-      cursor = branch.nextCursor
-    }
-    if (truncated || !invisibleIds.length) return
-    // #903 / ADR-220 §14: path 2 only, volunteered in THIS response — the defect ADR-220
-    // §4.4's "the guest tree still re-roots (#245)" promised and §13(a)'s closure walk broke, because it
-    // can never descend past a parent it is not allowed to view. `parentId` here is every invisible id
-    // this branch's own read just found (the seeds), never re-derived by a second query, and it is the
-    // anchors' `under` — the nearest ancestor this guest CAN see (§4.5).
-    if (placeholderBudget.left <= 0) { placeholdersExhausted = true; return }
-    const { placeholders: found, exhausted } = await resolveGuestPlaceholders(db, fga, {
-      spaceId: args.spaceId, branchParentId: parentId, subject: args.subject, context: args.context,
-      invisibleChildIds: invisibleIds, toPage: toTreePage, budget: placeholderBudget,
-    })
-    if (exhausted) placeholdersExhausted = true
-    // `found` is parent-before-child (`materialise` mints the anchor, then recurses), which is what the
-    // trim below and `anchoredPlaceholders` both rely on. A page surfaced here is walked exactly like
-    // one from a branch read: its own children are visible-parented, so they come back through
-    // `listBranch` as ordinary rows and nest under it — the anchor is needed for the FIRST hop only.
-    const reached = new Set<string>()
-    for (const node of found) {
-      reached.add(node.token)
-      const kept: TreePage[] = []
-      for (const pg of node.pages) {
-        if (shown >= cap) { truncated = true; break }
-        kept.push(pg)
-        shown++
-        node.pages = kept
-        await walk(pg.id as string)
-        if (truncated) break
-      }
-      node.pages = kept
-      if (truncated) break
-    }
-    // Anything the cap cut off is not merely undrawn — it must not reach the wire at all, or the
-    // response would carry rows nothing counted (and, one level down, anchors for them).
-    for (const node of found) if (!reached.has(node.token)) node.pages = []
-    placeholders.push(...anchoredPlaceholders(found))
+  const cursorScope: PlaceholderCursorScope = {
+    tenantId: args.tenantId, subject: args.subject, spaceId: args.spaceId, branchParentId: null,
+  }
+  const resumed = decodePlaceholderCursor<GuestWalkState>(args.cursor, cursorScope)
+  const pending: GuestWorkItem[] = resumed?.pending ?? [{ kind: 'children', parentId: null }] // seed: the root
+  let stopped: GuestWalkState | undefined
+
+  // rev12 (design-review N1): ONLY the 'reveal' items that survived an actual resume boundary — sitting
+  // in a PRIOR call's cursor, arbitrarily long ago — need a fresh visibility check before being
+  // revealed. Everything discovered and pushed within THIS SAME call was already Checked moments ago,
+  // by `listBranch` (children) or `resolveGuestPlaceholders` (anchors) — re-checking those too would
+  // re-run one `fga.check` per id, reintroducing the O(N) sequential fan-out #489/#500/ADR-183's
+  // BatchCheck rewrite eliminated (`filterAuthorized` batches 50 ids per round-trip; this walk visits at
+  // most as many ids as the RESUME carried, typically a handful, never `cap`-many). Captured once, from
+  // the cursor's OWN pending list, before the loop below starts mutating `pending`.
+  const staleIds = new Set(
+    resumed ? pending.filter((i): i is Extract<GuestWorkItem, { kind: 'reveal' }> => i.kind === 'reveal').map((i) => i.id) : [],
+  )
+
+  // #1141: reveals a page's OWN pages/children are learned about (via `listBranch`, or a placeholder
+  // resolution), never held onto across a call boundary — a `reveal` item only carries the id, so a
+  // resumed call re-fetches the row's own data here. Cheap (one row by primary key).
+  //
+  // rev12 (design-review B3): a STALE (resumed) reveal RE-CONFIRMS visibility rather than assuming the
+  // batch that discovered the id — which may be an EARLIER call, arbitrarily long ago now that the walk
+  // is resumable — still holds; the page may have been unpublished, made private, or moved out from
+  // under its grant in between. `check` is the same primitive `listBranch`'s own per-row authz already
+  // runs. A page that fails re-confirmation is dropped silently (never surfaced, never counted toward
+  // `shown`, its own children never queued) — the same shape an outright-absent id would take; a fresh
+  // (non-resumed) render of the tree remains the source of truth for what its former subtree looks like
+  // now.
+  const revealPage = async (id: string, recheck: boolean): Promise<Page | undefined> => {
+    if (recheck && !(await check(fga, args.subject, 'view', { type: 'page', id }, args.context))) return undefined
+    const [row] = await db.sql<PageRow[]>`
+      SELECT p.id, p.tenant_id, p.space_id, p.parent_id, p.title, p.position, p.created_at, p.updated_at,
+             p.has_unpublished_changes, (p.published_at IS NOT NULL) AS published, p.task_done, p.task_total
+      FROM pages p WHERE p.id = ${id}`
+    return row ? toPage(row) : undefined
   }
 
   try {
-    await walk(null)
+    outer: for (;;) {
+      const item = pending.pop()
+      if (!item) break // nothing left, anywhere — the whole closure has been walked
+
+      if (item.kind === 'reveal') {
+        // Proved, never inferred: this specific page existing and being about to be counted IS the
+        // proof more remains — put it back unresolved and stop, rather than dropping or re-deriving it.
+        if (shown >= cap) { pending.push(item); stopped = { pending }; break outer }
+        const revealed = await revealPage(item.id, staleIds.has(item.id))
+        if (!revealed) continue // no longer visible (or gone) since it was discovered — drop it, not a stop
+        visible.push(revealed); shown++
+        pending.push({ kind: 'children', parentId: item.id })
+        continue
+      }
+
+      if (!item.childrenDone) {
+        // #1141: read this parent's OWN direct children to completion before touching anything else —
+        // resuming mid-parent (via `item.cursor`) never re-fetches a page this SAME parent already
+        // reported, because `listBranch`'s cursor only ever moves forward (§8). Discovering a child
+        // here does NOT reveal it (that happens lazily, from its own `reveal` item — see the type's own
+        // comment for why revealing an entire batch immediately broke DFS pre-order).
+        let cursor = item.cursor
+        const invisibleIds: string[] = []
+        // Collected in true left-to-right order and pushed onto `pending` only ONCE, reversed, after
+        // this parent's own read is fully done — not batch by batch, which would interleave a LATER
+        // batch's children ABOVE an EARLIER batch's on the stack and pop them out of order.
+        const discovered: string[] = []
+        for (;;) {
+          const branch = await listBranch(db, fga, {
+            spaceId: args.spaceId, parentId: item.parentId, subject: args.subject, context: args.context,
+            cursor, limit: BRANCH_PAGE_LIMIT, onInvisible: (ids) => invisibleIds.push(...ids),
+          })
+          // #903 design-review NOT gated on `hasChildren`. That flag is `listBranch`'s CHEVRON
+          // probe (CHEVRON_PROBE_CAP = 3 children) — a display hint whose false negative was acceptable
+          // for #623 because the cost was "no expand arrow drawn". Using it to decide whether to
+          // recurse turns that same false negative into a dropped, CONFIRMED-VISIBLE page. Every
+          // visible page's children are queued unconditionally; a subtree that turns out to have no
+          // visible descendant costs one more (typically empty) `listBranch` call, not a budget slot.
+          for (const p of branch.pages) discovered.push(p.id)
+          cursor = branch.nextCursor ?? undefined
+          if (!cursor) break
+        }
+        for (let i = discovered.length - 1; i >= 0; i--) pending.push({ kind: 'reveal', id: discovered[i]! })
+        if (!invisibleIds.length) continue // this parent is fully settled; move to the next pending item
+
+        // #903 / ADR-220 §14: path 2 only, volunteered in THIS response — the defect ADR-220
+        // §4.4's "the guest tree still re-roots (#245)" promised and §13(a)'s closure walk broke,
+        // because it can never descend past a parent it is not allowed to view. `item.parentId` is the
+        // anchors' `under` — the nearest ancestor this guest CAN see (§4.5). Resolved and revealed
+        // ATOMICALLY (see the `children` case's own comment for why this one boundary accepts a
+        // bounded overshoot instead of a duplicate-free mid-result resume).
+        const { placeholders: found, placeholderCursor } = await resolveGuestPlaceholders(db, fga, {
+          spaceId: args.spaceId, branchParentId: item.parentId, subject: args.subject, context: args.context,
+          invisibleChildIds: invisibleIds, toPage: toTreePage,
+          budget: { left: args.placeholderBudget ?? PLACEHOLDER_NODE_MAX }, tenantId: args.tenantId,
+        })
+        const surfaced: string[] = [] // true left-to-right order, across every anchor
+        let phExtra = false
+        for (const node of found) {
+          const kept: TreePage[] = []
+          for (const pg of node.pages) {
+            if (shown >= cap) { phExtra = true; break }
+            kept.push(pg); shown++; surfaced.push(pg.id as string)
+          }
+          node.pages = kept
+        }
+        for (let i = surfaced.length - 1; i >= 0; i--) pending.push({ kind: 'children', parentId: surfaced[i]! })
+        placeholders.push(...anchoredPlaceholders(found))
+        if (placeholderCursor) {
+          stopped = { pending: [...pending, { kind: 'children', parentId: item.parentId, childrenDone: true, phCursor: placeholderCursor }] }
+          break outer
+        }
+        if (phExtra) { stopped = { pending }; break outer }
+        continue
+      }
+
+      // `item.childrenDone`: resumed mid-placeholder-resolution for this parent. Its own direct
+      // children were already fully read (and reported) in an earlier call — `resolveGuestPlaceholders`
+      // ignores `invisibleChildIds` whenever a `cursor` decodes, resuming purely from its own frontier.
+      const { placeholders: found, placeholderCursor } = await resolveGuestPlaceholders(db, fga, {
+        spaceId: args.spaceId, branchParentId: item.parentId, subject: args.subject, context: args.context,
+        invisibleChildIds: [], toPage: toTreePage,
+        budget: { left: args.placeholderBudget ?? PLACEHOLDER_NODE_MAX }, tenantId: args.tenantId,
+        cursor: item.phCursor,
+      })
+      const resumedSurfaced: string[] = []
+      let resumedPhExtra = false
+      for (const node of found) {
+        const kept: TreePage[] = []
+        for (const pg of node.pages) {
+          if (shown >= cap) { resumedPhExtra = true; break }
+          kept.push(pg); shown++; resumedSurfaced.push(pg.id as string)
+        }
+        node.pages = kept
+      }
+      for (let i = resumedSurfaced.length - 1; i >= 0; i--) pending.push({ kind: 'children', parentId: resumedSurfaced[i]! })
+      placeholders.push(...anchoredPlaceholders(found))
+      if (placeholderCursor) {
+        stopped = { pending: [...pending, { kind: 'children', parentId: item.parentId, childrenDone: true, phCursor: placeholderCursor }] }
+        break outer
+      }
+      if (resumedPhExtra) { stopped = { pending }; break outer }
+    }
   } catch (err) {
     // `listBranch`'s root check 404s for ITS OWN callers (§2's uniform-404 — a named branch id must not
     // become a membership oracle), but the whole-space route this feeds has always answered 200 with an
@@ -2509,10 +2687,11 @@ export async function listPagesGuestBounded(
     if ((err as { statusCode?: number }).statusCode !== 404 || shown > 0) throw err
     return { pages: visible, placeholders, truncated: false }
   }
-  // #903 / ADR-220 §14: placeholder-budget exhaustion folds into the SAME `truncated` flag — §6.2's
-  // "never a quiet cut" applies to this failure mode too, and the guest shell has exactly one signal
-  // for "this tree may be incomplete" already; a second wire field for the same idea is not warranted.
-  return { pages: visible, placeholders, truncated: truncated || placeholdersExhausted }
+
+  if (stopped) {
+    return { pages: visible, placeholders, truncated: true, nextCursor: encodePlaceholderCursor(stopped, cursorScope) }
+  }
+  return { pages: visible, placeholders, truncated: false }
 }
 
 /** #623 / ADR-220 §6.1: how many pages one FLAT listing may carry. */
@@ -4712,7 +4891,7 @@ export async function pagesPlugin(app: FastifyInstance) {
   // The space page tree — for a member, or a space-link guest (#104). A guest's token is
   // bound to THIS space (resource.type=space, id=spaceId), and listPages only returns the
   // published pages the guest may view (leak-safe). View is the floor (no comment/edit needed).
-  app.get<{ Params: { spaceId: string }; Querystring: { first?: string } }>('/spaces/:spaceId/pages', { config: { guest: 'view' } }, async (req, reply) => {
+  app.get<{ Params: { spaceId: string }; Querystring: { first?: string; cursor?: string } }>('/spaces/:spaceId/pages', { config: { guest: 'view' } }, async (req, reply) => {
     let subject: string
     let context: { current_time: string } | undefined
     if (req.user) {
@@ -4736,7 +4915,12 @@ export async function pagesPlugin(app: FastifyInstance) {
     // #541) is a member-only optimization the guest shell never asks for (§6.2: rendered fully expanded
     // in one response) — only read for the member arm.
     if (req.guest) {
-      return listPagesGuestBounded(req.db, app.fga, { spaceId: req.params.spaceId, subject, context })
+      return listPagesGuestBounded(req.db, app.fga, {
+        spaceId: req.params.spaceId, subject, tenantId: req.tenant.id,
+        ...(context ? { context } : {}),
+        // #1141: opaque, from a prior response's `nextCursor` — never a client-chosen position.
+        ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
+      })
     }
     const firstRaw = (req.query as { first?: string } | undefined)?.first
     const firstN = firstRaw != null ? Math.min(100, Math.max(1, Number.parseInt(firstRaw, 10) || 0)) || undefined : undefined
@@ -4832,7 +5016,7 @@ export async function pagesPlugin(app: FastifyInstance) {
 
   // #623 ②: the placeholder follow-up. Members only — §4.4 settles guests by principal type,
   // and a share_link asking gets an empty answer rather than a distinguishable refusal.
-  app.get<{ Params: { spaceId: string }; Querystring: { parent?: string } }>(
+  app.get<{ Params: { spaceId: string }; Querystring: { parent?: string; cursor?: string } }>(
     '/spaces/:spaceId/pages/tree-placeholders', async (req, reply) => {
       if (!req.user) return reply.code(401).send({ error: 'unauthorized' })
       const parentRaw = req.query.parent
@@ -4842,6 +5026,8 @@ export async function pagesPlugin(app: FastifyInstance) {
         subject: `user:${req.user.sub}`,
         tenantId: req.tenant.id,
         groups: req.user.groups,
+        // #1141: opaque, from a prior response's `placeholderCursor` — never a client-chosen position.
+        ...(req.query.cursor ? { cursor: req.query.cursor } : {}),
       })
     })
 
