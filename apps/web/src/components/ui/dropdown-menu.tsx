@@ -4,10 +4,19 @@ import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+// #1132: a menu instance's own trigger, so the exiting layer's outside-pointerdown handler can tell
+// a reopening click on THIS trigger apart from a real outside click (see DropdownMenuContent below).
+const DropdownMenuTriggerRefContext = React.createContext<React.RefObject<HTMLButtonElement | null> | null>(null)
+
 function DropdownMenu({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  return (
+    <DropdownMenuTriggerRefContext.Provider value={triggerRef}>
+      <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+    </DropdownMenuTriggerRefContext.Provider>
+  )
 }
 
 function DropdownMenuPortal({
@@ -19,11 +28,18 @@ function DropdownMenuPortal({
 }
 
 function DropdownMenuTrigger({
+  ref,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
+  const triggerRef = React.useContext(DropdownMenuTriggerRefContext)
   return (
     <DropdownMenuPrimitive.Trigger
       data-slot="dropdown-menu-trigger"
+      ref={(node: HTMLButtonElement | null) => {
+        if (triggerRef) triggerRef.current = node
+        if (typeof ref === "function") ref(node)
+        else if (ref) ref.current = node
+      }}
       {...props}
     />
   )
@@ -32,13 +48,35 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  onPointerDownOutside,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  const triggerRef = React.useContext(DropdownMenuTriggerRefContext)
   return (
-    <DropdownMenuPrimitive.Portal>
+    // forceMount forwarded to the Portal too — its own Presence otherwise gates on `open` alone,
+    // independent of Content's forceMount (@radix-ui/react-menu's MenuPortal has its own `present`
+    // check), so passing forceMount only to Content here would silently do nothing.
+    <DropdownMenuPrimitive.Portal forceMount={props.forceMount}>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
+        onPointerDownOutside={(event) => {
+          // #1132: while this content is exiting (data-state=closed, still mounted for the close
+          // animation — @radix-ui/react-presence keeps it and its DismissableLayer alive until
+          // animationend), a re-click on the SAME trigger lands correctly on the trigger, but this
+          // layer's still-live outside-pointerdown handler dismisses via a forced flushSync commit
+          // that lands after — and so clobbers — the trigger's own reopen toggle from that same
+          // click. Radix never registers a menu's trigger as a dismiss-exempt "branch", so ignoring
+          // outside-pointerdown here (Radix's own supported extension point for this exact class of
+          // false positive) is the fix, letting the toggle be the sole source of truth for its own
+          // trigger. Not an animation-timing workaround: this fires regardless of how long the close
+          // animation runs.
+          const target = event.target
+          if (triggerRef?.current && target instanceof Node && triggerRef.current.contains(target)) {
+            event.preventDefault()
+          }
+          onPointerDownOutside?.(event)
+        }}
         className={cn(
           "z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className
