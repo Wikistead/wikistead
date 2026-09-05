@@ -7,7 +7,7 @@
 #
 # A tag is pinnable and so is a digest. `digest` wins when both are set, which is what a
 # production deployment should use — a tag is a moving name and a digest is the thing that ran.
-# #1138: the real publish org, matching release-images.yml's REGISTRY_ORG and the README's install
+# The real publish org, matching release-images.yml's REGISTRY_ORG and the README's install
 # command — until the first tagged release actually pushes an image here, a chart installed with the
 # default fails to pull, which is the honest outcome before any image exists.
 image:
