@@ -76,7 +76,6 @@ test("#318 view guest: the title band shows the page title; no rename affordance
 // per the #891 one-red-one-ticket convention; `{ browser }` only, so the in-body skip is safe here
 // (the `{ page }` fixture-resolves-before-skip trap in the the project design notes e2e-gate note doesn't apply).
 test("#318/#274 edit guest: the band title is click-to-rename (member parity) and persists", async ({ browser }) => {
-  test.skip(true, "#1121: red under gate load, green 3/3 standalone — isolated, not a product regression");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPublishedPage(member, TITLE + " E");
