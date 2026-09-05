@@ -39,6 +39,24 @@ describe("#1054: the pending banner/status copy discloses no state", () => {
     });
   }
 
+  // #1124 (#1103's review): the earlier pins here are all ABSENCE checks (no floor name, no
+  // headcount, no lockout hint) — deleting #1103's whole point, the "here's what to do" sentence,
+  // passes every one of them. This is a PRESENCE check instead: names of the two intended readers
+  // must actually be in the body, not just an absence of forbidden words. Word-level, not the exact
+  // sentence — a future rewording of the same instruction should not go red for no reason.
+  for (const [locale, catalog] of Object.entries(LOCALES) as [string, typeof en][]) {
+    it(`(${locale}) names BOTH the general reader's instruction and the operator's conditional one`, () => {
+      const body = catalog.members.pendingBannerBody;
+      if (locale === "en") {
+        expect(body, "must tell an ordinary reader to contact an administrator").toMatch(/contact.*administrator/i);
+        expect(body, "must address the operator specifically, conditionally").toMatch(/if you operate/i);
+      } else {
+        expect(body, "must tell an ordinary reader to contact an administrator").toMatch(/管理者.*連絡/);
+        expect(body, "must address the operator specifically, conditionally").toContain("運用担当者");
+      }
+    });
+  }
+
   it("en and ja are actually different prose (the per-locale detector above is not vacuous)", () => {
     expect(en.members.pendingBannerBody).not.toBe(ja.members.pendingBannerBody);
     expect(en.members.status.pending).not.toBe(ja.members.status.pending);
