@@ -1181,7 +1181,7 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
   const [space, setSpace] = useState<{ name: string; iconImageUrl: string | null; homePageId?: string | null } | null>(null);
   const landedHome = useRef(false); // #364 ①: default-land on the home ONCE (never re-hijack navigation)
   const [openId, setOpenId] = useState<string | null>(null);
-  // #1141 / ADR-220 §6.2 rev12: opaque, present while more of the closure is unexplored — a follow-up
+  // #1141 / ADR-220 §6.2 rev13: opaque, present while more of the closure is unexplored — a follow-up
   // fetch presenting it (and nothing else) continues the SAME walk. Superseded the plain `truncated`
   // boolean: that told the reader a fixed count existed and gave them no way to see the rest.
   const [pagesNextCursor, setPagesNextCursor] = useState<string | undefined>(undefined);
@@ -1196,7 +1196,7 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
       .then((r) => {
         setPages(r?.pages ?? []);
         setPlaceholders(r?.placeholders ?? []);
-        // #1141 / ADR-220 §6.2 rev12: the cap still comes with a VISIBLE state (this shell draws the
+        // #1141 / ADR-220 §6.2 rev13: the cap still comes with a VISIBLE state (this shell draws the
         // tree unvirtualised and fully expanded, so a cut has to SAY so) — but it is resumable now, so
         // what is tracked is the cursor to continue with, not a dead "too large" flag.
         setPagesNextCursor(r?.nextCursor);

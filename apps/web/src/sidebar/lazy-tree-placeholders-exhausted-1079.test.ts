@@ -18,7 +18,7 @@ const page = (id: string) => ({
 
 // #1079 (#1077 review) first pinned that an exhausted placeholder budget must be a visible row, not a
 // silently short list — a server-reported "some pages could not be placed here" (ADR-220 §4.3) that
-// reached the client and had nothing reading it. #1141 (ADR-220 §4.2 rev12) supersedes the SHAPE of
+// reached the client and had nothing reading it. #1141 (ADR-220 §4.2 rev13) supersedes the SHAPE of
 // that row: what was a dead-end "some pages could not be shown" label is now a RESUMABLE `ph-more:`
 // row (the same contract `MORE_PREFIX` already has) carrying the continuation cursor the server sent,
 // so the underlying #1079 guarantee (the budget running out is a visible state, never a silent short

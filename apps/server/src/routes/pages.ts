@@ -2533,7 +2533,7 @@ export async function listPagesGuestBounded(
   const pending: GuestWorkItem[] = resumed?.pending ?? [{ kind: 'children', parentId: null }] // seed: the root
   let stopped: GuestWalkState | undefined
 
-  // rev12 (design-review N1): ONLY the 'reveal' items that survived an actual resume boundary — sitting
+  // rev13 (design-review N1): ONLY the 'reveal' items that survived an actual resume boundary — sitting
   // in a PRIOR call's cursor, arbitrarily long ago — need a fresh visibility check before being
   // revealed. Everything discovered and pushed within THIS SAME call was already Checked moments ago,
   // by `listBranch` (children) or `resolveGuestPlaceholders` (anchors) — re-checking those too would
@@ -2549,7 +2549,7 @@ export async function listPagesGuestBounded(
   // resolution), never held onto across a call boundary — a `reveal` item only carries the id, so a
   // resumed call re-fetches the row's own data here. Cheap (one row by primary key).
   //
-  // rev12 (design-review B3): a STALE (resumed) reveal RE-CONFIRMS visibility rather than assuming the
+  // rev13 (design-review B3): a STALE (resumed) reveal RE-CONFIRMS visibility rather than assuming the
   // batch that discovered the id — which may be an EARLIER call, arbitrarily long ago now that the walk
   // is resumable — still holds; the page may have been unpublished, made private, or moved out from
   // under its grant in between. `check` is the same primitive `listBranch`'s own per-row authz already

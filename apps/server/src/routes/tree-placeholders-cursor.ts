@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 
-// #1141 / ADR-220 §4.2 rev12: an opaque, ENCRYPTED continuation cursor for the placeholder walk.
+// #1141 / ADR-220 §4.2 rev13: an opaque, ENCRYPTED continuation cursor for the placeholder walk.
 //
-// rev12 (design-review): the first version of this module followed `search/cursor.ts`'s shape
+// rev13 (design-review): the first version of this module followed `search/cursor.ts`'s shape
 // (base64url the body, HMAC it) verbatim — correct for THAT cursor, whose body is a bare scan offset
 // with no authz-sensitive content, but wrong here: this module's body carries real invisible-page and
 // candidate ids (`Frontier.invisibleId`, `GrantsPathState`'s candidate list, the guest walk's
@@ -64,7 +64,7 @@ function unpad(buf: Buffer): Buffer {
 // ADR-068, carries no expiry at all — its body is a bare offset, not an authz-sensitive id).
 const CURSOR_TTL_MS = 15 * 60 * 1000
 
-// #1141 rev12 (design-review S1): FAIL-CLOSED, matching `auth/secret-crypto.ts`'s own discipline for
+// #1141 rev13 (design-review S1): FAIL-CLOSED, matching `auth/secret-crypto.ts`'s own discipline for
 // at-rest encryption — a placeholder cursor's plaintext is a set of real page ids, so signing (now
 // encrypting) it with an empty key would make it silently forgeable rather than merely refusing to
 // mint one. The previous `|| ''` fallback let both env vars be unset and still "work".

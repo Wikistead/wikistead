@@ -1,4 +1,4 @@
-// #1141 / ADR-220 §6.2 rev12: the guest whole-space closure walk (`listPagesGuestBounded`, #903)
+// #1141 / ADR-220 §6.2 rev13: the guest whole-space closure walk (`listPagesGuestBounded`, #903)
 // gets the SAME resumability the member-side placeholder walk got — hitting `GUEST_TREE_CAP` (or
 // `placeholderBudget`) now returns `nextCursor`, and a follow-up call presenting it picks the SAME
 // closure walk up where it stopped, never re-examining or re-reporting a page the first call already
@@ -128,7 +128,7 @@ describe('#1141: the guest placeholder-anchor resolution also resumes, independe
   }, 300_000)
 })
 
-describe('#1141 rev12 (design-review B3): a resumed reveal re-confirms visibility, not just re-fetches the row', () => {
+describe('#1141 rev13 (design-review B3): a resumed reveal re-confirms visibility, not just re-fetches the row', () => {
   it('a page that lost its grant BETWEEN the two calls is dropped from the resumed response, not replayed stale', async () => {
     // A DEDICATED space (not the file's shared one) — this test needs to control root-level DFS order
     // exactly (cap:1 must stop right after the FIRST page), which the shared space's own leftover
@@ -159,7 +159,7 @@ describe('#1141 rev12 (design-review B3): a resumed reveal re-confirms visibilit
       // "re-confirm visibility right before display, not just at discovery time" exists to close, now
       // that a resumed call can straddle it.
       //
-      // rev12 (design-review N2): without the `revealPage` recheck, this does NOT go red on the
+      // rev13 (design-review N2): without the `revealPage` recheck, this does NOT go red on the
       // disclosure assertion below — `b`'s promoted-to-'children' item hits `listBranch`'s own §2
       // uniform-404 gate on ITS parent-view check first, so the walk THROWS (see the mutated-code repro
       // in the ticket's design review) rather than silently returning `b`. This test is still a genuine,

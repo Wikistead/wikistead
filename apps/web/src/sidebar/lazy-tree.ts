@@ -167,7 +167,7 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
   // #1141: the placeholder walk's own "load more" — mirrors `loadMore` below (the branch's OWN
   // pagination) but targets the placeholder cache entry instead. Appending (not replacing) is always
   // correct here: unlike a branch's `restarted` case (§8, a renumber can invalidate an anchor), the
-  // placeholder cursor is scope-bound and tamper-evident (ADR-220 §4.2 rev12) with no analogous
+  // placeholder cursor is scope-bound and tamper-evident (ADR-220 §4.2 rev13) with no analogous
   // "the anchor moved" failure mode — a cursor that fails to decode server-side simply restarts the
   // WALK, which surfaces here as a fresh `placeholders` array from `parentId`'s next natural refetch,
   // not as a signal this callback has to detect.
@@ -276,7 +276,7 @@ export const UNLOADED_CHILD_PREFIX = "unloaded:";
 export const PLACEHOLDER_PREFIX = "ph:";
 /** The "more pages" row a branch grows when its cursor says so (§1). */
 export const MORE_PREFIX = "more:";
-/** #1141 / ADR-220 §4.2 rev12: more of this branch's invisible territory remains — resumable, the same
+/** #1141 / ADR-220 §4.2 rev13: more of this branch's invisible territory remains — resumable, the same
  * shape as `MORE_PREFIX`, not a dead end. Superseded `PLACEHOLDERS_EXHAUSTED_PREFIX` (#1079). */
 export const PLACEHOLDERS_MORE_PREFIX = "ph-more:";
 
@@ -360,7 +360,7 @@ export function buildLazyNodes(args: {
       ...placeholderNodes(branch, parentId),
     ];
     if (branch.placeholderCursor) {
-      // #1141 / ADR-220 §4.2 rev12: "exhausting it is a visible, RESUMABLE state ... never a short
+      // #1141 / ADR-220 §4.2 rev13: "exhausting it is a visible, RESUMABLE state ... never a short
       // answer that looks complete, and never a dead end either." Exactly MORE_PREFIX's own shape and
       // reason (the cursor rides the id, so a fixed id would survive the append and the next
       // page would never load) — invisible to the reader until scrolled to, then it fetches more.

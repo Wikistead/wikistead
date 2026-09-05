@@ -1,4 +1,4 @@
-// #1141 / ADR-220 §4.2 rev12: a placeholder walk whose budget runs out is now RESUMABLE — a call
+// #1141 / ADR-220 §4.2 rev13: a placeholder walk whose budget runs out is now RESUMABLE — a call
 // returns `placeholderCursor` alongside whatever it found, and a follow-up call presenting it picks
 // the SAME walk up, examining what the first call never reached without re-examining (or re-reporting)
 // anything it already settled. This file measures the guarantee itself, not the mechanism it wraps
@@ -233,7 +233,7 @@ describe('#1141: §4.4\'s restricted-scope refusal still applies on a resumed ca
 
     // Resume the SAME cursor, but this time inside a confined scope (ADR-216 / #637's own shape) that
     // does not include this space — §4.4 must refuse regardless of the cursor being genuine and valid.
-    // rev12 (design-review B2): budget deliberately kept TIGHT (matching call1's own budget of 1, which
+    // rev13 (design-review B2): budget deliberately kept TIGHT (matching call1's own budget of 1, which
     // this fixture's other assertion already proves is not enough to finish the chain) rather than
     // generous — a generous budget here made this test PASS even with the §4.4 guard deleted entirely
     // (the unguarded call would have finished the whole chain and legitimately returned no cursor,

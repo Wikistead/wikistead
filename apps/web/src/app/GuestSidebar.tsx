@@ -103,7 +103,7 @@ export function buildTree(pages: Page[], placeholders: GuestPlaceholder[]): Tree
 // skeleton is delay-gated so a fast tree fetch never flashes it.
 // `error` is required, not optional: the caller owns the fetch (#500), and an omitted prop here would
 // silently read as "not erroring" — the exact error-reads-as-empty shape #500 exists to prevent.
-export function GuestSidebar({ pages, placeholders = [], loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, onLoadMore, loadingMore = false }: { pages: Page[]; placeholders?: GuestPlaceholder[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error: boolean; onRetry?: () => void; /** #1141 / ADR-220 §6.2 rev12: present while more of the closure is unexplored; calling it continues the SAME walk. */ onLoadMore?: () => void | Promise<void>; loadingMore?: boolean }) {
+export function GuestSidebar({ pages, placeholders = [], loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, onLoadMore, loadingMore = false }: { pages: Page[]; placeholders?: GuestPlaceholder[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error: boolean; onRetry?: () => void; /** #1141 / ADR-220 §6.2 rev13: present while more of the closure is unexplored; calling it continues the SAME walk. */ onLoadMore?: () => void | Promise<void>; loadingMore?: boolean }) {
   const { t } = useTranslation();
   const showSkeleton = useDelayedFlag(loading);
   const tree = buildTree(pages, placeholders);
@@ -171,7 +171,7 @@ export function GuestSidebar({ pages, placeholders = [], loading = false, space,
       ) : (
         tree.map((n) => <GuestNode key={n.id} node={n} depth={0} openId={openId} onOpen={onOpen} />)
       )}
-      {/* #1141 / ADR-220 §6.2 rev12: the cap is still loud (this list is drawn unvirtualised and fully
+      {/* #1141 / ADR-220 §6.2 rev13: the cap is still loud (this list is drawn unvirtualised and fully
           expanded, so a cut tree has to say so), but no longer a dead end — `onLoadMore` continues the
           SAME closure walk instead of leaving the reader with a fixed count and no way to see the rest.
           Superseded the #623 static "too large to show" notice. */}

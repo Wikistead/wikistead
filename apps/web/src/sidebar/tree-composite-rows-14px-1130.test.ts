@@ -38,7 +38,7 @@ describe("#1130: the tree's remaining two synthetic rows inherit 14px like a pag
     expect(body).not.toMatch(CLASS_HAS_SIZE_OVERRIDE);
   });
 
-  // #1141 / ADR-220 §4.2 rev12: the "some pages could not be shown" dead-end row (tree-placeholders-
+  // #1141 / ADR-220 §4.2 rev13: the "some pages could not be shown" dead-end row (tree-placeholders-
   // exhausted) is retired — the placeholder walk's continuation row now renders through the SAME
   // `MoreRow` component the branch's own "load more" row uses (checked above), so there is no second,
   // independent block whose font size could drift from it; the invariant this test originally pinned

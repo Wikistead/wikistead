@@ -172,7 +172,7 @@ export function PageTree({
   onToggleBranch?: (pageId: string, open: boolean) => void;
   /** §1: the `more:` row asks for the branch's next page when it scrolls into view. */
   onLoadMore?: (parentId: string | null) => void | Promise<void>;
-  /** #1141 / ADR-220 §4.2 rev12: the `ph-more:` row asks for the branch's next placeholder walk step. */
+  /** #1141 / ADR-220 §4.2 rev13: the `ph-more:` row asks for the branch's next placeholder walk step. */
   onLoadMorePlaceholders?: (parentId: string | null) => void | Promise<void>;
   onMove?: (args: { dragIds: string[]; parentId: string | null; index: number }) => void;
   disableDrop?: (args: { parentNode: NodeApi<PageTreeNode> | null; dragNodes: NodeApi<PageTreeNode>[] }) => boolean;
@@ -294,7 +294,7 @@ export function PageTree({
       );
     }
     if (d.id.startsWith(PLACEHOLDERS_MORE_PREFIX)) {
-      // #1141 / ADR-220 §4.2 rev12: more of this branch's invisible territory remains — exactly
+      // #1141 / ADR-220 §4.2 rev13: more of this branch's invisible territory remains — exactly
       // MORE_PREFIX's own row and cursor-in-id contract, targeting the placeholder walk
       // instead of the branch's own pagination. Superseded the #1079 "budget ran out" dead-end row.
       const parentId = d.id.slice(PLACEHOLDERS_MORE_PREFIX.length).split(":")[0]!;
