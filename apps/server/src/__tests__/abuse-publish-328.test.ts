@@ -1,6 +1,12 @@
 // #328 / ADR-140: the abuse filter WIRED into publishPage — the tenant config is read and a trip is a 422 with a
-// static reason code, the content untouched. Real Postgres (tenant_dev). The config is set on the shared tenant
-// and ALWAYS reset in afterEach so no other publish test is affected.
+// static reason code, the content untouched. Real Postgres (tenant_dev).
+//
+// #1113: the policy this file exercises is applied on THIS FILE'S OWN space (space_settings), not the
+// shared tenant_settings row — abuse-config-491/space-abuse-policy-509/patrol-flags-326 all mutate
+// that same tenant_dev row too, and vitest runs these files as concurrent workers, so one file's
+// reset could always land between another's SET and its assertion (exactly the race #1097 hit).
+// resolveEffectiveAbusePolicy (abuse-config.ts) UNIONs/maxes tenant ⊕ space, so a space-level policy
+// trips publishPage's filter identically to a tenant-level one, without ever touching shared state.
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import postgres from 'postgres'
 import * as Y from 'yjs'
@@ -22,9 +28,11 @@ const ydoc = (t: string) => Buffer.from(Y.encodeStateAsUpdate((() => { const d =
 let db!: TenantDb, spaceId!: string
 const pageIds: string[] = []
 
-const setAbuse = (cfg: { shrinkRatio?: number | null; bannedWords?: string[] }) =>
-  admin`UPDATE tenant_settings SET abuse_shrink_ratio = ${cfg.shrinkRatio ?? null}, abuse_banned_words = ${cfg.bannedWords ?? []} WHERE tenant_id = ${TENANT}`
-const resetAbuse = () => admin`UPDATE tenant_settings SET abuse_shrink_ratio = NULL, abuse_banned_words = ${[] as string[]} WHERE tenant_id = ${TENANT}`
+const setAbuse = (cfg: { shrinkRatio?: number | null; bannedWords?: string[] }) => admin`
+  INSERT INTO space_settings (space_id, tenant_id, abuse_shrink_ratio, abuse_banned_words, updated_at)
+  VALUES (${spaceId}, ${TENANT}, ${cfg.shrinkRatio ?? null}, ${cfg.bannedWords ?? []}, now())
+  ON CONFLICT (space_id) DO UPDATE SET abuse_shrink_ratio = ${cfg.shrinkRatio ?? null}, abuse_banned_words = ${cfg.bannedWords ?? []}, updated_at = now()`
+const resetAbuse = () => admin`UPDATE space_settings SET abuse_shrink_ratio = NULL, abuse_banned_words = NULL WHERE space_id = ${spaceId}`.catch(() => {})
 
 // create + publish a page with `body` as the published text; returns its id.
 async function publishedPage(body: string): Promise<string> {

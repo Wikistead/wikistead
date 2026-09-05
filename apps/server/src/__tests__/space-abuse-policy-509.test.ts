@@ -18,6 +18,7 @@ import { LogicalStorageDriver } from '../storage/index.js'
 import { createPage, publishPage } from '../routes/pages.js'
 import { createSpace, deleteSpace } from '../routes/spaces.js'
 import { ensureMembers, memberTuples } from './helpers/membership.js'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 import { resolveEffectiveAbusePolicy } from '../routes/abuse-config.js'
 import type { Tenant } from '@wikistead/types'
 
@@ -55,8 +56,6 @@ const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const valkey = new IORedis(process.env.VALKEY_URL ?? 'redis://localhost:6379')
 const driver = new LogicalSearchDriver()
 const storage = new LogicalStorageDriver()
-const HOST = 'dev.localhost'
-const TENANT = 'tenant_dev'
 const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolation: 'logical' }) as Tenant
 const ydoc = (t: string) => Buffer.from(Y.encodeStateAsUpdate((() => { const d = new Y.Doc(); d.getText('content').insert(0, t); return d })()))
 const tag = Date.now().toString(36)
@@ -64,44 +63,58 @@ const tag = Date.now().toString(36)
 let app: FastifyInstance
 let db: TenantDb
 let spaceId: string
+// #1113: a PRIVATE tenant, not tenant_dev — the second describe block below writes the TENANT floor
+// directly (that IS what "a space cannot lower the tenant floor" tests), and tenant_dev's row is the
+// same one abuse-config-491/abuse-publish-328/patrol-flags-326 all mutate. vitest runs these files as
+// concurrent workers, so a concurrent reset could always land between this file's SET and its
+// assertion — the exact race that turned this file's own "GET effective shows the stricter (tenant)
+// value" assertion from 0.5 into a concurrently-reset 0.1 (measured, this ticket).
+let pt: PrivateTenant
 const pageIds: string[] = []
 const MOD = `mod509-${tag}`
 const MEMBER = `member509-${tag}`
 
 beforeAll(async () => {
   await driver.ensureIndex(); await storage.ensureBucket()
-  db = await acquireTenantDb(asTenant(TENANT))
+  pt = await privateTenant(admin, 't509')
+  // See #1113's note in abuse-config-491.test.ts: updateAbuseFilterConfig's write is a plain
+  // `UPDATE ... WHERE tenant_id` with no upsert, so the row must exist before the tenant-floor test
+  // below writes it directly.
+  await admin`INSERT INTO tenant_settings (tenant_id) VALUES (${pt.id}) ON CONFLICT (tenant_id) DO NOTHING`
+  db = await acquireTenantDb(asTenant(pt.id))
   app = await buildApp(); await app.ready()
-  spaceId = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: `space509-${tag}` })).id
-  await ensureMembers(TENANT, [MOD, MEMBER])
+  spaceId = (await createSpace(db, fgaClient, { tenantId: pt.id, userId: 'dev-user', plan: 'free', name: `space509-${tag}` })).id
+  await ensureMembers(pt.id, [MOD, MEMBER])
   // MOD is a space moderator (not a manager); MEMBER has no space grant.
   await writeTuples(fgaClient, [{ user: `user:${MOD}`, relation: 'moderator', object: `space:${spaceId}` }])
 }, 40_000)
 
 afterEach(async () => {
-  await admin`UPDATE tenant_settings SET abuse_shrink_ratio = NULL, abuse_banned_words = ${[] as string[]} WHERE tenant_id = ${TENANT}`.catch(() => {})
+  await admin`UPDATE tenant_settings SET abuse_shrink_ratio = NULL, abuse_banned_words = ${[] as string[]} WHERE tenant_id = ${pt.id}`.catch(() => {})
   await admin`UPDATE space_settings SET abuse_shrink_ratio = NULL, abuse_banned_words = NULL WHERE space_id = ${spaceId}`.catch(() => {})
 })
 
 afterAll(async () => {
   for (const id of pageIds) await deleteObjectTuples(fgaClient, `page:${id}`).catch(() => {})
   await deleteTuples(fgaClient, [{ user: `user:${MOD}`, relation: 'moderator', object: `space:${spaceId}` }]).catch(() => {})
-  await deleteTuples(fgaClient, memberTuples(TENANT, [MOD, MEMBER])).catch(() => {})
-  await deleteSpace(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user' }).catch(() => {})
-  await app.close(); await db.release(); await valkey.quit(); await admin.end(); await pool.end()
+  await deleteTuples(fgaClient, memberTuples(pt.id, [MOD, MEMBER])).catch(() => {})
+  await deleteSpace(db, fgaClient, driver, { tenantId: pt.id, spaceId, userId: 'dev-user' }).catch(() => {})
+  await app.close(); await db.release(); await valkey.quit()
+  await pt.dispose().catch(() => {})
+  await admin.end(); await pool.end()
 }, 40_000)
 
 const patchSpace = (body: unknown, auth: Record<string, string>) =>
-  app.inject({ method: 'PATCH', url: `/spaces/${spaceId}/abuse-filter`, headers: { host: HOST, 'content-type': 'application/json', ...auth }, payload: JSON.stringify(body) })
+  app.inject({ method: 'PATCH', url: `/spaces/${spaceId}/abuse-filter`, headers: { host: pt.H.host, 'content-type': 'application/json', ...auth }, payload: JSON.stringify(body) })
 const getSpace = (auth: Record<string, string>) =>
-  app.inject({ method: 'GET', url: `/spaces/${spaceId}/abuse-filter`, headers: { host: HOST, ...auth } })
+  app.inject({ method: 'GET', url: `/spaces/${spaceId}/abuse-filter`, headers: { host: pt.H.host, ...auth } })
 
 async function cookieFor(sub: string): Promise<Record<string, string>> {
-  const sid = await createSession(valkey, { tenantId: TENANT, sub })
+  const sid = await createSession(valkey, { tenantId: pt.id, sub })
   return { cookie: `${SESSION_COOKIE}=${sid}` }
 }
 const publishedPage = async (body: string): Promise<string> => {
-  const p = await createPage(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'sp509' })
+  const p = await createPage(db, fgaClient, driver, { tenantId: pt.id, spaceId, userId: 'dev-user', title: 'sp509' })
   pageIds.push(p.id)
   await admin`UPDATE pages SET ydoc = ${ydoc(body)} WHERE id = ${p.id}`
   await publishPage(db, fgaClient, driver, storage, { pageId: p.id, subject: 'user:dev-user', createdBy: 'user:dev-user' })
@@ -139,7 +152,7 @@ describe('#509 / ADR-187: the EFFECTIVE policy governs publish (floor can never 
       .rejects.toMatchObject({ statusCode: 422, reason: 'banned_content' })
   })
   it('a space CANNOT lower the tenant shrink floor: GET effective shows the stricter (tenant) value', async () => {
-    await admin`UPDATE tenant_settings SET abuse_shrink_ratio = 0.5 WHERE tenant_id = ${TENANT}`
+    await admin`UPDATE tenant_settings SET abuse_shrink_ratio = 0.5 WHERE tenant_id = ${pt.id}`
     await patchSpace({ shrinkRatio: 0.1 }, { authorization: 'Bearer dev-token' }) // try to weaken
     const eff = (await getSpace({ authorization: 'Bearer dev-token' })).json() as { effective: { shrinkRatio: number } }
     expect(eff.effective.shrinkRatio, 'the tenant floor holds').toBe(0.5)
