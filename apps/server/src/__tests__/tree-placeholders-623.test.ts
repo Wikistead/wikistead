@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import postgres from 'postgres'
+import type { OpenFgaClient } from '@openfga/sdk'
 import { pool } from '../db/pool.js'
 import { TenantRegistry } from '../db/registry.js'
 import { acquireTenantDb } from '../db/tenant-db.js'
@@ -318,4 +319,67 @@ describe('#623 §4: what a placeholder must NOT do', () => {
     expect(leaves, 'the model grew a viewing leaf the placeholder resolver does not read')
       .toEqual(new Set(TREE_VIEW_LEAVES))
   })
+})
+
+// #1093: a brand-new space where the reader can see every page showed `placeholdersExhausted: true`
+// with `placeholders: []` — the "sidebar.placeholdersExhausted" banner firing for no reason. Its own
+// space, so a leftover invisible page from an EARLIER test in this file (the shared `spaceId` above
+// carries plenty by now) cannot mask a regression here: `invisibleChildIds` must come out empty.
+describe('#1093: a branch with nothing invisible must not report exhausted', () => {
+  // Same delegating counter `guest-closure-cap-903.test.ts` uses (warning restated there: a pin
+  // that only checks the returned shape can stay green while the store still pays for a search that
+  // could never have found anything). What matters here is `reads()`: `grantsPath`'s own roster read
+  // is the only thing in this module that calls `fga.read` at all, so a nonzero count is direct
+  // evidence path 1 ran — regardless of whether this particular fixture happens to be small enough
+  // that its cost wouldn't have flipped `exhausted` on its own.
+  function countingFga(real: OpenFgaClient): { fga: OpenFgaClient; reads: () => number } {
+    let reads = 0
+    const fga = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'read') return (...args: Parameters<OpenFgaClient['read']>) => { reads += 1; return target.read(...args) }
+        const value = Reflect.get(target, prop, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    return { fga, reads: () => reads }
+  }
+
+  let ownSpace: string
+  const ownPages: string[] = []
+  const OWNER = `user:zz1093-owner-${STAMP}`
+
+  beforeAll(async () => {
+    const space = await createSpace(db, fgaClient, {
+      tenantId: tenant.id, userId: 'dev-user', plan: tenant.plan, name: `ph1093-${STAMP}`,
+    })
+    ownSpace = space.id
+    await writeTuples(fgaClient, [
+      { user: OWNER, relation: 'member', object: `tenant:${tenant.id}` },
+      { user: OWNER, relation: 'viewer', object: `space:${ownSpace}` },
+    ]).catch(() => {})
+    // Five plain published pages, none private/restricted/draft — every one of them reaches OWNER
+    // through the space#viewer cascade alone, matching #1093's repro (a fresh 5-page space, fully
+    // visible to its admin): the reader owns nothing directly (no view_direct/manage_direct of their
+    // own) and nothing here is invisible.
+    for (let i = 0; i < 5; i++) {
+      const p = await createPage(db, fgaClient, driver, { tenantId: tenant.id, spaceId: ownSpace, userId: 'dev-user', title: `1093-${i}-${STAMP}`, parentId: null })
+      ownPages.unshift(p.id)
+      await publishPage(db, fgaClient, driver, storage, { pageId: p.id, subject: 'user:dev-user', createdBy: 'user:dev-user' })
+    }
+  }, 300_000)
+
+  afterAll(async () => {
+    for (const id of ownPages) await deletePage(db, fgaClient, driver, { pageId: id, userId: 'dev-user' }).catch(() => {})
+    await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: ownSpace, userId: 'dev-user' }).catch(() => {})
+  }, 300_000)
+
+  it('0 invisible children ⇒ exhausted:false, and path 1 never touches the store', async () => {
+    const { fga, reads } = countingFga(fgaClient)
+    const res = await branchPlaceholders(db, fga, {
+      spaceId: ownSpace, parentId: null, subject: OWNER, tenantId: tenant.id, groups: [],
+    })
+    expect(res.placeholders, 'a fully-visible branch must anchor nothing').toEqual([])
+    expect(res.placeholdersExhausted, 'nothing is missing here — the banner has no reason to fire').toBe(false)
+    expect(reads(), 'grantsPath\'s roster read ran despite there being nothing it could place').toBe(0)
+  }, 300_000)
 })

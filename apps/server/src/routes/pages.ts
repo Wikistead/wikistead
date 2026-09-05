@@ -2204,10 +2204,31 @@ export async function branchPlaceholders(
     LIMIT ${PLACEHOLDER_NODE_MAX}`
   budget.left -= rows.length
   const seen = new Set(await filterAuthorized(fga, args.subject, 'view', rows.map((r) => r.id), args.context))
+  const invisibleChildIds = rows.filter((r) => !seen.has(r.id)).map((r) => r.id)
+
+  // #1093: when this branch's FULL child set (not truncated by the LIMIT above) has NOTHING invisible,
+  // path 1 (`grantsPath`) cannot possibly place anything relevant to THIS branch either, so running it
+  // is pure waste — and its own cost is a Check-metered but UNSCOPED read of the reader's entire grant
+  // roster across every tenant and space in the store, so on an account with a large one it can burn
+  // the whole budget before path 2 ever gets a look, reporting `placeholdersExhausted: true` against a
+  // branch that has nothing missing (the reported symptom: a brand-new, fully-visible space).
+  //
+  // Proof this is safe: `nearestVisible === branchParentId` (the test grantsPath's candidates must
+  // pass) requires the candidate's ancestor chain to have an INVISIBLE node immediately under
+  // `branchParentId` — otherwise the walk up from the candidate would stop at that nearer visible
+  // child instead. `invisibleChildIds` being empty means EVERY direct child we read is visible, so no
+  // such node exists among them — and only among them, since a chain can only enter the invisible run
+  // through one of `branchParentId`'s own children. `rows.length < PLACEHOLDER_NODE_MAX` guards the one
+  // case this doesn't hold: a branch with 200+ children, where children past the LIMIT were never
+  // read and could still be invisible.
+  if (invisibleChildIds.length === 0 && rows.length < PLACEHOLDER_NODE_MAX) {
+    return { placeholders: [], placeholdersExhausted: false }
+  }
+
   return resolveTreePlaceholders(db, fga, {
     spaceId: args.spaceId, tenantId: args.tenantId, branchParentId: args.parentId,
     subject: args.subject, groups: args.groups,
-    invisibleChildIds: rows.filter((r) => !seen.has(r.id)).map((r) => r.id),
+    invisibleChildIds,
     budget,
     ...(args.context ? { context: args.context } : {}),
     toPage: (row) => toPage(row as unknown as PageRow) as unknown as { id: string },
