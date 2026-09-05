@@ -70,7 +70,13 @@ test("#318 view guest: the title band shows the page title; no rename affordance
 // the click-to-rename button and a rename round-trips. VIEW capability keeps the read-only h1 (above).
 // #1031/#926: was isolated for the #823/#825 shared-stack-under-load family. #926's fix landed and
 // this test passed 3 consecutive full #891 gate runs after it, with no isolation needed. Unskipped.
+// #1121: red once in a full 21-spec gate run (29.2s) under load (avg 13.95-20.51 on a 16-core
+// machine with other sessions running concurrently), green 3/3 standalone (~7s each) right after —
+// the #823/#825 shared-stack-under-load family again, not a rename-feature regression. Isolated
+// per the #891 one-red-one-ticket convention; `{ browser }` only, so the in-body skip is safe here
+// (the `{ page }` fixture-resolves-before-skip trap in the the project design notes e2e-gate note doesn't apply).
 test("#318/#274 edit guest: the band title is click-to-rename (member parity) and persists", async ({ browser }) => {
+  test.skip(true, "#1121: red under gate load, green 3/3 standalone — isolated, not a product regression");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const pageId = await newPublishedPage(member, TITLE + " E");
