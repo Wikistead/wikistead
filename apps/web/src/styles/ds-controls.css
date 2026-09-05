@@ -80,3 +80,23 @@
    for a floating panel — — so `ui/Select` raises the same panel the
    row badges show, positioned beside the list and portalled above the select's own layer. Nothing here
    styles an option's insides any more: an option is its name. */
+
+/* #1120: a dialog that is CLOSING must not keep taking clicks.
+   Radix's `Presence` keeps the overlay and the content mounted until the exit animation's
+   `animationend` fires, and until then those layers sit over the page — so a click during the fade
+   lands on them instead of on what the reader aimed at (measured 2026-09-05, real Chromium: the page
+   became reachable again only ~175ms after the close, the whole exit animation, while `document.body`'s
+   own pointer-events lock had already cleared after ~10ms — the body lock was never the thing to fix).
+   #1072 traded the exit animation away to close that window; #1120's ruling restored the motion, and
+   this is the "other means" its title asks for: the exiting layers stop hit-testing immediately, the
+   fade still plays to the end, and the reader's next click goes where they aimed on the first frame.
+   ⚠️ `!important`, and it is load-bearing: Radix's `DismissableLayer` writes `pointer-events: auto`
+   INLINE on the overlay and the content while a modal dialog is open (its counterpart to the body
+   lock), and that inline declaration outranks every stylesheet rule. Measured while chasing this:
+   a Tailwind `data-[state=closed]:pointer-events-none` utility put the class on the element and the
+   computed value stayed `auto`; so did this rule without `!important`. The class was there and the
+   declaration never won. */
+[data-slot="dialog-overlay"][data-state="closed"],
+[data-slot="dialog-content"][data-state="closed"] {
+  pointer-events: none !important;
+}
