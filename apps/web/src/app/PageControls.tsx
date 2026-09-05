@@ -103,17 +103,23 @@ export function useMediaQuery(query: string): boolean {
 
 // A single round, frameless, floating icon button (translucent surface + soft shadow so
 // it reads over body text — but no group panel). Label is a hover tooltip (title/aria).
-const ROUND = "pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-foreground shadow-md backdrop-blur transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] disabled:opacity-50 disabled:cursor-default";
+// #1125: `aria-disabled` styling, not `disabled:` — a real disabled form control never dispatches
+// pointerover (a browser/form-control behaviour), so this button's own `data-tip` (its only label)
+// could never reach tooltip-host.ts's delegated listener while disabled. No pointer-events
+// suppression here either way, so the swap below is CSS-selector-only.
+const ROUND = "pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-foreground shadow-md backdrop-blur transition-colors duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] aria-disabled:opacity-50 aria-disabled:cursor-default";
 const ROUND_BG = "bg-[color-mix(in_srgb,var(--panel)_82%,transparent)] hover:bg-panel-2";
 const ROUND_PRIMARY = "bg-primary text-primary-foreground hover:bg-[color-mix(in_srgb,var(--accent)_88%,black)]";
 
-function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, active }: {
+// Exported so #1125's pin can render it directly (it has no hooks of its own — safe in isolation,
+// unlike PageActions/PageStatus which pull in useTranslation/useDirty/useWatchItem).
+export function RoundBtn({ label, icon, onClick, testId, primary, disabled, badge, active }: {
   label: string; icon: ReactNode; onClick?: () => void; testId: string; primary?: boolean; disabled?: boolean; badge?: ReactNode; active?: boolean;
 }) {
   return (
     // #192: `active` (e.g. TOC rail ON) shows the accent fill so the toggle state reads at a glance,
     // matching the display-mode segment's active style.
-    <button type="button" data-tip={label} aria-label={label} aria-pressed={active} data-testid={testId} data-active={active || undefined} disabled={disabled} onClick={onClick}
+    <button type="button" data-tip={label} aria-label={label} aria-pressed={active} data-testid={testId} data-active={active || undefined} aria-disabled={disabled} onClick={() => { if (!disabled) onClick?.(); }}
       className={`relative ${ROUND} ${active ? "bg-[var(--accent)] text-white" : primary ? ROUND_PRIMARY : ROUND_BG}`}>
       {icon}
       {badge}

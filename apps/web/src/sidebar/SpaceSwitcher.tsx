@@ -128,7 +128,11 @@ export function SpaceSwitcher({
                   // #284: hover-revealed pin controls (★ toggle; up/down while pinned). stopPropagation on
                   // pointerdown+click so a control click never selects/switches the space (cmdk item).
                   const guard = (e: { stopPropagation(): void; preventDefault(): void }) => { e.stopPropagation(); e.preventDefault(); };
-                  const ctlBtn = "flex flex-none cursor-pointer rounded-sm p-0.5 text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
+                  // #1125: `aria-disabled`, not the native `disabled` attribute, on movePinUp/Down below —
+                  // a real disabled form control never dispatches pointerover, so their own data-tip could
+                  // never reach tooltip-host.ts's delegated listener. `cursor-not-allowed` still reads as
+                  // disabled (no pointer-events suppression); the two onClick handlers below no-op instead.
+                  const ctlBtn = "flex flex-none cursor-pointer rounded-sm p-0.5 text-muted-foreground hover:text-foreground aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
                   return (
                     <CommandItem key={s.id} value={`space:${s.id}`} onSelect={() => select(s.id)} data-testid="space-option" className="group/space">
                       <SpaceIcon id={s.id} name={s.name} image={s.iconImageUrl} size={18} />
@@ -137,8 +141,8 @@ export function SpaceSwitcher({
                         <span className="ml-auto flex flex-none items-center gap-0.5">
                           {pinned && onMovePin && !query.trim() && !expanded && (
                             <span className={cn("flex gap-0.5 transition-opacity duration-[120ms] group-hover/space:opacity-100", "opacity-0")}>
-                              <button type="button" className={ctlBtn} disabled={pinIdx === 0} data-tip={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="space-pin-up" onPointerDown={guard} onClick={(e) => { guard(e); onMovePin(s.id, -1); }}><ChevronUp size={13} /></button>
-                              <button type="button" className={ctlBtn} disabled={pinIdx === pinnedSpaceIds.length - 1} data-tip={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="space-pin-down" onPointerDown={guard} onClick={(e) => { guard(e); onMovePin(s.id, 1); }}><ChevronDown size={13} /></button>
+                              <button type="button" className={ctlBtn} aria-disabled={pinIdx === 0} data-tip={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="space-pin-up" onPointerDown={guard} onClick={(e) => { guard(e); if (pinIdx !== 0) onMovePin(s.id, -1); }}><ChevronUp size={13} /></button>
+                              <button type="button" className={ctlBtn} aria-disabled={pinIdx === pinnedSpaceIds.length - 1} data-tip={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="space-pin-down" onPointerDown={guard} onClick={(e) => { guard(e); if (pinIdx !== pinnedSpaceIds.length - 1) onMovePin(s.id, 1); }}><ChevronDown size={13} /></button>
                             </span>
                           )}
                           <button

@@ -299,7 +299,13 @@ function SidebarImpl() {
     return false;
   };
 
-  const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
+  // #1125: `aria-disabled`, not the native `disabled` attribute — a real disabled form control never
+  // dispatches pointerover (a browser/form-control behaviour, unlike Radix's #1105 pointer-events:none,
+  // which is CSS), so tooltip-host.ts's delegated listener could never see the movePinUp/Down buttons'
+  // own data-tip at the ends of the list. `cursor-not-allowed` (no pointer-events suppression) still
+  // reads as disabled — same trade #1105 made — and callers passing a disabled state must no-op their
+  // onClick themselves (aria-disabled does not block activation).
+  const headerBtn = "flex cursor-pointer rounded-sm p-1 text-fg-dim transition-colors duration-[120ms] hover:bg-panel-2 hover:text-foreground aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
 
   // #193: drag the right edge to resize the sidebar. Width is the grid column --sidebar-w (AppShell),
   // clamped 180–480px and persisted to localStorage so it survives reloads. Restore on mount.
@@ -405,8 +411,8 @@ function SidebarImpl() {
                 className="flex flex-none gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[120ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
                 onClick={(e) => e.stopPropagation()}
               >
-                <button type="button" className={headerBtn} disabled={i === 0} data-tip={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="pin-up" onClick={() => movePin("page", pin.id, -1)}><ChevronUp size={13} /></button>
-                <button type="button" className={headerBtn} disabled={i === pagePins.length - 1} data-tip={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="pin-down" onClick={() => movePin("page", pin.id, 1)}><ChevronDown size={13} /></button>
+                <button type="button" className={headerBtn} aria-disabled={i === 0} data-tip={t("sidebar.movePinUp")} aria-label={t("sidebar.movePinUp")} data-testid="pin-up" onClick={() => i !== 0 && movePin("page", pin.id, -1)}><ChevronUp size={13} /></button>
+                <button type="button" className={headerBtn} aria-disabled={i === pagePins.length - 1} data-tip={t("sidebar.movePinDown")} aria-label={t("sidebar.movePinDown")} data-testid="pin-down" onClick={() => i !== pagePins.length - 1 && movePin("page", pin.id, 1)}><ChevronDown size={13} /></button>
                 <button type="button" className={headerBtn} data-tip={t("sidebar.unpin")} aria-label={t("sidebar.unpin")} data-testid="pin-remove" onClick={() => deletePin.mutate(pin.id)}><PinOff size={13} /></button>
               </span>
             </div>
