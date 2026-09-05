@@ -192,6 +192,10 @@ export const ENV_DOCS = {
     group: 'Database',
     internal: 'Starts the server even when migrations the image ships are missing from the database. Set it only to get a process up for diagnosis: every request that touches the missing schema fails with 42703.',
   },
+  WIKISTEAD_ALLOW_PROMOTION: {
+    group: 'Database',
+    internal: 'Overrides `pnpm tenant:promote`\'s refusal (#1108: the migration runner does not reach `ns_*` schemas, so a promoted tenant stops receiving schema changes the moment it is promoted). Set it only after reading #1108 and accepting ownership of the resulting drift by hand.',
+  },
 
   // ── Search ────────────────────────────────────────────────────────────────────────────────────
   MEILI_HOST: { group: 'Search', default: 'http://localhost:7700', what: 'Meilisearch endpoint.' },
