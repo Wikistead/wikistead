@@ -352,6 +352,11 @@ export function buildLazyNodes(args: {
         published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
       });
     }
+    // #1092: this is the reached-window group (#899), appended LAST — after every synthetic row above,
+    // not just after `branch.pages`. The render order for a branch with a reached window is therefore
+    // real (primary) … synthetic … real (reached), never a single unbroken block of real rows.
+    // `afterIdForMove` depends on this exact ordering to map a drop index back to a sibling position;
+    // change it here and that mapping must change with it.
     const primary = new Set(branch.pages.map((page) => page.id));
     rows.push(...visibleBranchPages(branch)
       .filter((page) => !primary.has(page.id))
@@ -371,34 +376,62 @@ export function buildLazyNodes(args: {
  * the sibling list, or the dragged row's `afterId` can point past one, landing one slot off from what
  * the reader saw on screen.
  *
+ * #1092: operating on ONE branch's own answer (rather than a flat, cross-branch page list keyed by
+ * `parentId`) sidesteps that whole class of defect AND fixes a second one in the same motion — the
+ * flat list this used to read (`Sidebar.tsx`'s old `pages`) held only `branch.pages` (the PRIMARY
+ * window), never `branch.reachedWindow`'s pages (#899: the extra window fetched to reach a page opened
+ * deep in the tree), so a reached-window row was invisible to this function even though `assemble()`
+ * renders it. Reading `branch` directly makes both real-page groups available to reconstruct the exact
+ * render order below.
+ *
  * Pulled out of `Sidebar.tsx`'s `onMove` so the defect (and the fix) is pinned without a component
- * harness — this is pure data filtering, not a rendering or drag-gesture timing question.
+ * harness — this is pure data arithmetic, not a rendering or drag-gesture timing question.
  */
 export function afterIdForMove(args: {
-  pages: readonly Page[];
-  placeholderChildIds: ReadonlySet<string>;
+  branch: BranchAnswer | undefined;
   parentPageId: string | null;
   movedId: string;
   index: number;
 }): string | null {
-  const { pages, placeholderChildIds, parentPageId, movedId, index } = args;
+  const { branch, parentPageId, movedId, index } = args;
+  if (!branch) return null; // the branch a drop targets is, by construction, already loaded — defensive only
+
+  // The two REAL-row groups `assemble()` renders for this branch, in its exact order. Between them sit
+  // the synthetic rows (placeholder groups, #1079's exhausted row, the #623 "more" row) — never real
+  // siblings, so `real` skips them, but `index` (below) still counts them.
+  const primary = branch.pages;
+  const primaryIds = new Set(primary.map((p) => p.id));
+  const reached = visibleBranchPages(branch).filter((p) => !primaryIds.has(p.id));
+  const real = [...primary, ...reached];
+
+  // #1092: `assemble()` places EVERY synthetic row after `primary` and before `reached` — never the
+  // reverse, and never interleaved among either group — so counting them is enough; where each one
+  // individually sits within that middle block does not matter for mapping `index` back to a real
+  // position. `direct` mirrors `placeholderNodes`'s own filter one screen up: only placeholders that
+  // are this exact branch's OWN top-level rows (`parentToken === null`, `under === parentPageId`) draw
+  // a row here — a nested placeholder is a CHILD of one of those rows, not a sibling at this level, so
+  // it must not inflate this count.
+  const direct = (branch.placeholders ?? []).filter((ph) => ph.parentToken === null && ph.under === parentPageId).length;
+  const synthetic = direct + (branch.placeholdersExhausted ? 1 : 0) + (branch.nextCursor ? 1 : 0);
+
   // #1080 rev2 (review): `index` is react-arborist's position in the RENDERED children
   // array, which still holds the dragged row at its ORIGINAL slot (compute-drop.ts's `walkUpFrom` builds
-  // it from `indexOf(above) + 1` without splicing the drag source out first) and counts any synthetic
-  // rows after it (placeholder groups, #1079's exhausted row, the #623 "more" row) — but `assemble()`
-  // above always appends those AFTER every real page at a branch level, so they only ever extend the
-  // index range past the real siblings, never sit between them. Two corrections follow: (1) an index at
-  // or past the real sibling count means "after the last real page" (clamp — a drop past a synthetic row
-  // is not a request to nest among page rows), (2) since `siblings` below has `movedId` spliced out,
-  // every index AFTER its own original slot is off by one — a downward drag must subtract one, an
-  // upward drag (or a drop into a DIFFERENT parent, where `movedId` never appears in `withMoved` at all)
-  // must not.
-  const withMoved = pages
-    .filter((p) => p.parentId === parentPageId && !placeholderChildIds.has(p.id))
-    .sort((a, b) => a.position - b.position);
-  const movedIndex = withMoved.findIndex((p) => p.id === movedId);
-  const clampedIndex = Math.min(index, withMoved.length);
-  const adjustedIndex = movedIndex >= 0 && clampedIndex > movedIndex ? clampedIndex - 1 : clampedIndex;
-  const siblings = withMoved.filter((p) => p.id !== movedId);
-  return adjustedIndex > 0 ? siblings[adjustedIndex - 1]?.id ?? null : null;
+  // it from `indexOf(above) + 1` without splicing the drag source out first). Map it into `real`'s index
+  // space: at or before the primary/synthetic boundary, `index` already counts only real rows so far, so
+  // it passes through unchanged; INSIDE the synthetic block, land after the last primary row — the same
+  // "not a request to nest among page rows" clamp #1080 rev2 established, just no longer also catching
+  // every reached-window row past it; PAST the synthetic block, shift back by its width to land in
+  // `reached`'s coordinates.
+  const rawPosition = index <= primary.length ? index
+    : index <= primary.length + synthetic ? primary.length
+    : index - synthetic;
+  const clampedPosition = Math.min(Math.max(rawPosition, 0), real.length);
+
+  // Since `siblings` below has `movedId` spliced out, every position AFTER its own original slot in
+  // `real` is off by one — a downward drag must subtract one, an upward drag (or a drop into a
+  // DIFFERENT parent, where `movedId` never appears in `real` at all) must not.
+  const movedIndex = real.findIndex((p) => p.id === movedId);
+  const adjustedPosition = movedIndex >= 0 && clampedPosition > movedIndex ? clampedPosition - 1 : clampedPosition;
+  const siblings = real.filter((p) => p.id !== movedId);
+  return adjustedPosition > 0 ? siblings[adjustedPosition - 1]?.id ?? null : null;
 }

@@ -5,16 +5,14 @@ import tailwindcss from "@tailwindcss/vite";
 // Three hand-kept copies of this mapping (here, Caddy, the ingress) drifted until a deployed stack
 // answered 404 to every api call and sign-in could not start; dev never noticed because dev IS this
 // file. Now a row added for production is a row the dev browser gets too.
-// Plain .mjs (with a JSDoc `@type`, not a `.d.ts`) so the checker/probe-generator scripts can import
-// it without a build step; this project's tsconfig has no `allowJs`, so the shape is repeated here —
-// this file was untyped-`any` until #990's test suite started importing THIS file (`vite.config.ts`)
-// for its own reasons and pulled it into `tsc --noEmit`'s graph for the first time.
-// @ts-expect-error - .mjs script without type declarations; the JSDoc `@type {OriginRoute[]}` shape
-// is repeated as the interface below and cast onto it immediately.
-import { PROXIED_ROUTES } from "../../infra/routes/origin-routes.mjs";
+// Plain .mjs (with a JSDoc `@type`, not hand-authored TypeScript) so the checker/probe-generator
+// scripts can import it without a build step. #1094 added a colocated `origin-routes.d.mts` (picked
+// up automatically under `moduleResolution: Bundler`) so this import — and the server-side test that
+// pulled `vite.config.ts` into `tsc --noEmit`'s graph in the first place (#990) — no longer needs a
+// suppression or a locally-repeated shape.
+import { PROXIED_ROUTES, type OriginRoute } from "../../infra/routes/origin-routes.mjs";
 
-interface OriginRoute { path: string; upstream: "server" | "collab" | "web"; strip: boolean; exact: boolean; ws: boolean }
-const proxiedRoutes = PROXIED_ROUTES as OriginRoute[];
+const proxiedRoutes: OriginRoute[] = PROXIED_ROUTES;
 // #990 / ADR-277: the app shell's CSP rides the built index.html as a meta tag (build only), and
 // Excalidraw's fonts are copied into the bundle so the policy needs no third-party font origin.
 import { cspMetaPlugin, excalidrawFontsPlugin } from "./csp-policy";

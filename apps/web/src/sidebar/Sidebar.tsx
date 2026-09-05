@@ -41,6 +41,7 @@ import { NewPageButton } from "./NewPageButton";
 import { downloadSpaceExport } from "../data/exportApi"; // #309 export
 
 import { useLazyPageTree, buildLazyNodes, afterIdForMove } from "./lazy-tree"; // #623 §6.3
+import { visibleBranchPages } from "./scroll-to-selection"; // #899
 
 // #538 the route holds the TOC's visibleHeadings state, so every CM-internal scroll tick
 // re-rendered the route — and this whole subtree with it. The profile named react-arborist's
@@ -116,27 +117,18 @@ function SidebarImpl() {
   // Every page currently LOADED, flat — the DnD guard and the move both read it. Deliberately partial
   // it holds what the reader can see on screen, and the server refuses what a partial view gets wrong
   // (§7: the cycle check is server-side; this walk is convenience).
+  // #1092: `visibleBranchPages` (not just `b.pages`) so a page that only arrived through a branch's
+  // reached window (#899 — the extra window fetched to reach a page opened deep in the tree) is found
+  // by `pageById` too; before this it existed on screen but not in this map.
   const pages = useMemo(() => {
     const out: Page[] = [];
     for (const b of lazyTree.byParent.values()) {
-      out.push(...b.pages);
+      out.push(...visibleBranchPages(b));
       for (const ph of b.placeholders ?? []) out.push(...ph.pages);
     }
     return out;
   }, [lazyTree.byParent]);
   const pageById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
-  // #1080 (#1077 review): the server nulls a placeholder-child page's `parentId` (ADR-220 §4.2 — it
-  // must never carry its real, invisible parent's id), which makes it indistinguishable from a
-  // genuine ROOT page in the flat `pages` list above. It is not a root sibling — it renders nested
-  // under its placeholder row, never at root — so a root-level reorder must not count it among
-  // root's siblings, or a dragged row's `afterId` can point past one, landing one slot off.
-  const placeholderChildIds = useMemo(() => {
-    const out = new Set<string>();
-    for (const b of lazyTree.byParent.values()) {
-      for (const ph of b.placeholders ?? []) for (const p of ph.pages) out.add(p.id);
-    }
-    return out;
-  }, [lazyTree.byParent]);
 
   // #284 / ADR-119: the member's pins. The server list is view-confirmed (double gate
   // live resource row + FGA view), so rendering it verbatim can never leak a stale title.
@@ -262,7 +254,7 @@ function SidebarImpl() {
     if (!moved) return;
     const parentPageId = parentId == null ? null : parentId.startsWith("page:") ? parentId.slice(5) : undefined;
     if (parentPageId === undefined) return;
-    const afterId = afterIdForMove({ pages, placeholderChildIds, parentPageId, movedId: moved.id, index });
+    const afterId = afterIdForMove({ branch: lazyTree.byParent.get(parentPageId), parentPageId, movedId: moved.id, index });
     movePage.mutate({ pageId: moved.id, fromSpaceId: moved.spaceId, toSpaceId: current, parentId: parentPageId, afterId });
   };
 
