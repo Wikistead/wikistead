@@ -17,12 +17,23 @@
 //   - workspaceHostTemplate=https://{slug}.<shorter-suffix>, wildcardHost=true → `helm template` fails
 //   - workspaceHostTemplate set, wildcardHost=false                           → `helm template` fails
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { join, resolve, dirname } from 'node:path'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, resolve, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
-const chart = (f: string) => readFileSync(join(root, 'charts/wikistead', f), 'utf8')
+const chartDir = join(root, 'charts/wikistead')
+const chart = (f: string) => readFileSync(join(chartDir, f), 'utf8')
+
+/** Every text file under the chart — a walk, not a list, so a file added later is covered the day it appears. */
+function walkChart(dir = chartDir, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name)
+    if (statSync(full).isDirectory()) walkChart(full, out)
+    else out.push(full)
+  }
+  return out
+}
 
 describe('#1101 the docs describe the shape the wildcard actually serves', () => {
   it("values.yaml's example is the deep form, matching its own default host", () => {
@@ -42,6 +53,13 @@ describe('#1101 the docs describe the shape the wildcard actually serves', () =>
     const config = chart('templates/config.yaml')
     expect(config).toContain('one label deeper than the application')
     expect(config).not.toMatch(/one label shallower than the application/)
+  })
+
+  it('no file under the chart calls a workspace address "shallower" than host — README.md said so too, missed in the first sweep', () => {
+    for (const file of walkChart()) {
+      const text = readFileSync(file, 'utf8')
+      expect(text, relative(root, file)).not.toMatch(/one label shallower/i)
+    }
   })
 })
 

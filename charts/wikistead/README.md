@@ -17,7 +17,7 @@ when the two disagree, the base is right and the chart has a bug.
 | Value | Why it is yours to set |
 |---|---|
 | `host` | Where the application answers. |
-| `workspaceHostTemplate` | The SHAPE of a workspace's address, e.g. `https://{slug}.example.com`. **Not derived from `host`** — a workspace lives one label shallower, and gluing a slug onto the application's own host produces addresses that do not resolve. Leave it empty on a single-host install: self-serve workspace creation closes, which is better than handing out an address that does not resolve. |
+| `workspaceHostTemplate` | The SHAPE of a workspace's address, e.g. `https://{slug}.wiki.example.com`. **Not derived from `host`** — a workspace lives one label deeper, and gluing a slug onto the application's own host produces addresses that do not resolve. Leave it empty on a single-host install: self-serve workspace creation closes, which is better than handing out an address that does not resolve. |
 | `secrets.existingSecret` | The chart ships no credential. Point this at a secret you made — SOPS+age through ksops is what this project uses. `secrets.generate=true` is a first-install convenience; read the caveat below before relying on it. |
 | `postgres.enabled` and friends | The five bundled middleware services are single replicas with no backup. A production install turns them off and points at managed ones. |
 
