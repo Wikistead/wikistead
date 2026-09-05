@@ -139,6 +139,19 @@ hooks:
   # carries, so the hook only duplicated that work and could race it.
   backoffLimit: 3
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SCIM pending-removal sweep (opt-in)
+#
+# The correctness backstop for a deferred SCIM removal — a periodic re-check so a hold does not
+# outlive its own reason forever if nothing else happens to trigger a re-evaluation first. Off by
+# default: it only does anything on a commercial-edition image with SCIM entitled, which this chart's
+# own default image is not. Turning it on against the default image costs nothing beyond a job that
+# 404s on its own schedule.
+scimReconcile:
+  enabled: false
+  schedule: "0 * * * *"
+  image: { repository: curlimages/curl, tag: "8.10.1" }
+
 # Extra environment for the application pods, for anything this chart does not name.
 extraEnv: []
 nameOverride: ""

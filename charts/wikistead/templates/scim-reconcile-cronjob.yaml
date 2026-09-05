@@ -1,0 +1,40 @@
+{{- if .Values.scimReconcile.enabled }}
+{{/*
+The correctness-backstop sweep for a deferred SCIM removal. Opt-in, default off, and meaningful only
+on a commercial-edition image with SCIM entitled — harmless on every other image beyond a job that
+404s on its own schedule. Mirrors deploy/k8s/scim-reconcile's own manifest: a curl, not a script with
+its own database credentials, so the floor (last admin / last usable sign-in) is judged inside the
+server process, with its own configuration, never by a cron pod whose environment could silently
+differ from it.
+*/}}
+{{- $full := include "wikistead.fullname" . -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $full }}-scim-reconcile
+  labels: {{- include "wikistead.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.scimReconcile.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata: { labels: { app: {{ $full }}-scim-reconcile } }
+        spec:
+          restartPolicy: Never
+          {{- with .Values.image.pullSecrets }}
+          imagePullSecrets: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: reconcile
+              image: "{{ .Values.scimReconcile.image.repository }}:{{ .Values.scimReconcile.image.tag }}"
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  curl -sS -f -X POST "http://{{ $full }}-server:9465/operator/scim/reconcile-pending" \
+                    -H "Authorization: Bearer $SCIM_RECONCILE_TOKEN"
+              env:
+                - { name: SCIM_RECONCILE_TOKEN, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: scim-reconcile-token } } }
+{{- end }}

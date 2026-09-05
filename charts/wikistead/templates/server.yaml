@@ -32,8 +32,9 @@ spec:
         - name: server
           image: {{ include "wikistead.image" (list .Values.server .) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # `metrics` is the Prometheus listener — a second port the ingress never publishes.
-          ports: [{ name: http, containerPort: 4000 }, { name: metrics, containerPort: 9464 }]
+          # `metrics` is the Prometheus listener and `scim-reconcile` the pending-removal sweep
+          # endpoint — both a second port the ingress never publishes, token-gated, in-cluster only.
+          ports: [{ name: http, containerPort: 4000 }, { name: metrics, containerPort: 9464 }, { name: scim-reconcile, containerPort: 9465 }]
           envFrom:
             - configMapRef: { name: {{ include "wikistead.fullname" . }}-config }
             - secretRef: { name: {{ .Values.secrets.existingSecret }} }
@@ -49,6 +50,10 @@ spec:
             - { name: GUEST_TOKEN_SECRET, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: guest-token-secret } } }
             # Optional — absent, the server boots with metrics off and logs that it did.
             - { name: METRICS_TOKEN, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: metrics-token, optional: true } } }
+            # Optional — absent, the pending-removal sweep endpoint does not listen and the (opt-in)
+            # scimReconcile CronJob's calls answer 404. Only meaningful on a commercial-edition image
+            # with SCIM entitled; harmless everywhere else.
+            - { name: SCIM_RECONCILE_TOKEN, valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: scim-reconcile-token, optional: true } } }
             {{- with .Values.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
           volumeMounts:
             - { name: web-index, mountPath: /shell, readOnly: true }
