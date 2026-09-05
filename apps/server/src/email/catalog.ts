@@ -114,14 +114,14 @@ export const scimOffboardingDeferredSubject = byLang(
 )
 export const scimOffboardingDeferredBody = byLang(
   () =>
-    'A change made through your identity provider could not be completed, because it needs an '
-    + 'administrator who can currently sign in to this workspace.\n\n'
-    + 'If nobody with administrator access can sign in right now, an operator can run '
-    + '`pnpm tenant:login-methods` or `pnpm tenant:local-admin` to restore access.',
+    'A change made through your identity provider could not be completed. Please contact an '
+    + 'administrator of this workspace.\n\n'
+    + 'If you operate this server, run `pnpm tenant:login-methods` or `pnpm tenant:local-admin` '
+    + 'to restore access.',
   () =>
-    'IDプロバイダー経由の変更が完了しませんでした。現在このワークスペースにサインインできる管理者の対応が必要です。\n\n'
-    + '管理者権限を持つ人が誰もサインインできない場合、運用担当者が `pnpm tenant:login-methods` '
-    + 'または `pnpm tenant:local-admin` を実行するとアクセスを復旧できます。',
+    'IDプロバイダー経由の変更が完了しませんでした。このワークスペースの管理者にご連絡ください。\n\n'
+    + 'サーバの運用担当者の方は、`pnpm tenant:login-methods` または `pnpm tenant:local-admin` '
+    + 'でアクセスを復旧できます。',
 )
 
 // routes/email-unsubscribe.ts

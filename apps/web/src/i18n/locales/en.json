@@ -1229,7 +1229,7 @@
       "pending": "A directory removal is pending"
     },
     "pendingBannerTitle": "A directory change needs an administrator",
-    "pendingBannerBody": "A change made through your identity provider could not be completed, because it needs an administrator who can currently sign in to this workspace. If nobody with administrator access can sign in right now, an operator can run pnpm tenant:login-methods or pnpm tenant:local-admin to restore access.",
+    "pendingBannerBody": "A change made through your identity provider could not be completed. Please contact an administrator of this workspace. If you operate this server, run pnpm tenant:login-methods or pnpm tenant:local-admin to restore access.",
     "lastAdmin": "Cannot change the last admin.",
     "lastDirectAdmin": "A group holds admin, but group-granted admins can be lost by an IdP-side change. At least one directly granted admin must remain.",
     "lockoutRefused": "That would leave nobody who can sign in and administer this workspace. Give another administrator a way in first.",

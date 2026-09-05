@@ -26,6 +26,17 @@ describe("#1054: the pending banner/status copy discloses no state", () => {
       expect(catalog.members.pendingBannerBody).toContain("pnpm tenant:login-methods");
       expect(catalog.members.pendingBannerBody).toContain("pnpm tenant:local-admin");
     });
+
+    // #1103: the old body's conditional clause ("if nobody with administrator access can sign in
+    // right now") read, to a departed admin, as a hint about whether the workspace was currently
+    // locked out. Non-disclosure is stronger with the condition gone entirely — never state which
+    // branch applies, just what each of the two possible readers should do.
+    it(`(${locale}) carries no conditional hinting at whether the workspace IS currently lockable`, () => {
+      const body = catalog.members.pendingBannerBody.toLowerCase();
+      for (const tell of ["if nobody", "誰もサインインできない場合", "right now", "currently sign in"]) {
+        expect(body, `"${tell}" would hint at the current lockout state`).not.toContain(tell.toLowerCase());
+      }
+    });
   }
 
   it("en and ja are actually different prose (the per-locale detector above is not vacuous)", () => {

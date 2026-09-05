@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { TriangleAlert, Info } from "lucide-react";
+import { TriangleAlert, Info, X } from "lucide-react";
 
 // #979 / ADR-268 §3, ruling (design B): the box that used to be `wks-left-bar` (a coloured left
 // rule on a bare frame) — replaced with a tinted panel + leading icon + heading/body, the same shape
@@ -33,6 +33,8 @@ export function NoticeBand({
   testId,
   role,
   className,
+  onDismiss,
+  dismissLabel,
 }: {
   kind: NoticeBandKind;
   title: ReactNode;
@@ -41,6 +43,12 @@ export function NoticeBand({
   /** #268 §3.1a: "alert" for something the reader must act on now, "status" for standing information. */
   role?: "alert" | "status";
   className?: string;
+  /** #1104: present only when the caller wants a close affordance — omitted, the band is un-dismissable
+   * exactly as every existing caller renders it today. */
+  onDismiss?: () => void;
+  /** Required alongside `onDismiss` (an icon-only button needs a name) — not a fallback string, so a
+   * caller cannot ship an unlabelled close button by forgetting it. */
+  dismissLabel?: string;
 }) {
   const Icon = ICON[kind];
   return (
@@ -52,10 +60,21 @@ export function NoticeBand({
       role={role}
     >
       <Icon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" style={{ color: ICON_COLOR[kind] }} />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold" style={{ color: ICON_COLOR[kind] }}>{title}</div>
         <div className="mt-0.5 text-xs text-fg-dim">{children}</div>
       </div>
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={dismissLabel}
+          data-testid={testId ? `${testId}-dismiss` : undefined}
+          className="shrink-0 rounded p-0.5 text-fg-dim hover:bg-black/5 dark:hover:bg-white/10"
+        >
+          <X aria-hidden className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
