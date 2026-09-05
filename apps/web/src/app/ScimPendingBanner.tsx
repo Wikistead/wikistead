@@ -28,7 +28,11 @@ export function ScimPendingBanner() {
     () => { try { return sessionStorage.getItem(DISMISSED_KEY) === "1"; } catch { return false; } },
   );
   useEffect(() => {
-    if (pending) return;
+    // #1104 review: `pending` is `undefined` while the query is still in flight, not
+    // yet "no pending removal" — clearing the dismissal record on every mount-before-the-answer wipe
+    // recorded before the fetch resolves, so a dismissed banner reappeared on reload once the query
+    // caught up. Only a CONFIRMED `false` means the removal is actually gone.
+    if (pending !== false) return;
     setDismissed(false);
     try { sessionStorage.removeItem(DISMISSED_KEY); } catch { /* private mode / storage disabled */ }
   }, [pending]);
