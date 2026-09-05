@@ -162,13 +162,13 @@ describe('#623 §4: what a placeholder must NOT do', () => {
     if (r) expect(r.placeholders ?? []).toEqual([])
   }, 300_000)
 
-  it('exhausting the budget is a visible state, not a short answer that looks complete', async () => {
+  it('exhausting the budget is a visible, RESUMABLE state (#1141), not a short answer that looks complete', async () => {
     const res = await resolveTreePlaceholders(db, fgaClient, {
       spaceId, tenantId: tenant.id, branchParentId: null, subject: READER, groups: [],
       invisibleChildIds: made.slice(0, 3), toPage: (r) => ({ id: r.id as string }),
       budget: { left: 1 },
     })
-    expect(res.placeholdersExhausted, 'the budget ran out silently').toBe(true)
+    expect(res.placeholderCursor, 'the budget ran out silently, with no way to see the rest').toBeTruthy()
   }, 300_000)
 
   it(' ②: the PAINT resolves no chains — a hidden grant is absent there and present in the follow-up', async () => {
@@ -373,13 +373,13 @@ describe('#1093: a branch with nothing invisible must not report exhausted', () 
     await deleteSpace(db, fgaClient, driver, { tenantId: tenant.id, spaceId: ownSpace, userId: 'dev-user' }).catch(() => {})
   }, 300_000)
 
-  it('0 invisible children ⇒ exhausted:false, and path 1 never touches the store', async () => {
+  it('0 invisible children ⇒ no continuation cursor, and path 1 never touches the store', async () => {
     const { fga, reads } = countingFga(fgaClient)
     const res = await branchPlaceholders(db, fga, {
       spaceId: ownSpace, parentId: null, subject: OWNER, tenantId: tenant.id, groups: [],
     })
     expect(res.placeholders, 'a fully-visible branch must anchor nothing').toEqual([])
-    expect(res.placeholdersExhausted, 'nothing is missing here — the banner has no reason to fire').toBe(false)
+    expect(res.placeholderCursor, 'nothing is missing here — there is nothing to resume').toBeUndefined()
     expect(reads(), 'grantsPath\'s roster read ran despite there being nothing it could place').toBe(0)
   }, 300_000)
 })

@@ -317,6 +317,11 @@ export const ENV_DOCS = {
     default: 'unset (required)',
     what: 'Signs the short-lived tokens anonymous share-link visitors carry. Production refuses to start on the value published in the public repository\'s fixtures.',
   },
+  PLACEHOLDER_CURSOR_SECRET: {
+    group: 'Guests and sharing',
+    default: 'falls back to GUEST_TOKEN_SECRET; refuses to mint a cursor (resume fails) if neither is set',
+    what: 'Encrypts (AES-256-GCM, not merely signs) the page tree\'s placeholder-walk continuation cursor (ADR-220 §4.2 rev12), so its contents are unreadable without the key and a resumed walk cannot be redirected to a different reader, tenant, space or branch than the one it was minted for.',
+  },
   GUEST_TOKEN_TTL_SECONDS: {
     group: 'Guests and sharing',
     default: '300',
