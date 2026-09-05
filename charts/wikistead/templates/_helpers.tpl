@@ -75,3 +75,29 @@ content does, which is what triggers the rollout.
 {{ include (print $.Template.BasePath "/config.yaml") . }}
 {{ include (print $.Template.BasePath "/secret.yaml") . }}
 {{- end }}
+
+{{/*
+Fails the render, before any manifest is written, when `workspaceHostTemplate` does not match what
+`ingress.wildcardHost` actually serves.
+
+#1101, measured on a kind cluster: `values.yaml`'s own example (`https://{slug}.example.com`, one label
+SHALLOWER than the default `host: wikistead.example.com`) resolved to nothing — only the deep
+`{slug}.<host>` form, the one the `*.<host>` wildcard rule (`templates/ingress.yaml`) actually routes,
+worked. Nothing compared the two, so the mismatch only surfaced as a 404 in the browser.
+*/}}
+{{- define "wikistead.validateWorkspaceHostTemplate" -}}
+{{- if .Values.workspaceHostTemplate }}
+{{- if not .Values.ingress.wildcardHost }}
+{{- fail (printf "workspaceHostTemplate is set to %q but ingress.wildcardHost is false, so nothing serves the wildcard a workspace address needs. Set ingress.wildcardHost: true, or unset workspaceHostTemplate to keep self-serve creation closed." .Values.workspaceHostTemplate) }}
+{{- end }}
+{{- $host := .Values.workspaceHostTemplate }}
+{{- $host = trimPrefix "https://" $host }}
+{{- $host = trimPrefix "http://" $host }}
+{{- $host = splitList "/" $host | first }}
+{{- $host = splitList ":" $host | first }}
+{{- $expected := printf "{slug}.%s" .Values.host }}
+{{- if ne $host $expected }}
+{{- fail (printf "workspaceHostTemplate's host (%s) does not match %s, which is the one shape ingress.wildcardHost's *.%s rule actually routes. Set workspaceHostTemplate to https://%s (keeping your own scheme/port)." $host $expected .Values.host $expected) }}
+{{- end }}
+{{- end }}
+{{- end }}

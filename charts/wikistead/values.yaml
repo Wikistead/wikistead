@@ -46,7 +46,7 @@ web:
 # and it is NOT derived from `host`: gluing a slug onto the application's own host produces addresses
 # that do not resolve. It has to match whatever wildcard the ingress serves.
 host: wikistead.example.com
-workspaceHostTemplate: ""   # e.g. https://{slug}.example.com — unset closes self-serve creation only
+workspaceHostTemplate: ""   # e.g. https://{slug}.wikistead.example.com — unset closes self-serve creation only
 
 ingress:
   enabled: true

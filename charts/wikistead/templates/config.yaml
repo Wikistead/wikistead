@@ -4,6 +4,7 @@ The environment every pod reads.
 The production overlay once had none of this, and the first real cluster discovered one required key
 at a time. The set below is that overlay's, so the chart and the deployment base answer alike.
 */}}
+{{- include "wikistead.validateWorkspaceHostTemplate" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -32,6 +33,6 @@ data:
   COLLAB_PORT: "4100"
   {{- if .Values.workspaceHostTemplate }}
   # The shape of a workspace address, declared once rather than guessed. It has to
-  # match the wildcard the ingress serves, which is one label shallower than the application's host.
+  # match the wildcard the ingress serves, which is one label deeper than the application's host.
   WKS_TENANT_URL_TEMPLATE: {{ .Values.workspaceHostTemplate | quote }}
   {{- end }}

@@ -13,8 +13,8 @@ slug `docs` means `docs.{{ .Values.host }}` — so the slug is chosen with DNS i
 
 Self-serve workspace creation is CLOSED on this install, because `workspaceHostTemplate` is unset.
 That is deliberate: without it the product would hand a new workspace an address nobody can
-reach. Set it to the shape your wildcard serves — for example https://{slug}.example.com — and turn
-`ingress.wildcardHost` on. Existing workspaces, sign-in and custom domains are unaffected.
+reach. Set it to the shape your wildcard serves — for this install, https://{slug}.{{ .Values.host }} — and
+turn `ingress.wildcardHost` on. Existing workspaces, sign-in and custom domains are unaffected.
 {{- end }}
 {{- if not .Values.ingress.tls.enabled }}
 
