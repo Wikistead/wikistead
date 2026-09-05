@@ -31,9 +31,10 @@ describe("#990: the policy says what ADR-277 decided", () => {
     expect(CSP_POLICY).not.toContain("esm.sh");
   });
 
-  it("the storage-origin directives are broad, and the hardening pair is present", () => {
-    expect(directive("img-src")).toBe("'self' data: blob: https:");
-    expect(directive("connect-src")).toBe("'self' wss: https:");
+  it("the storage-origin directives are broad — http: too (a TLS-less self-host must not " +
+    "silently lose attachment uploads) — and the hardening pair is present", () => {
+    expect(directive("img-src")).toBe("'self' data: blob: https: http:");
+    expect(directive("connect-src")).toBe("'self' wss: https: http:");
     expect(directive("object-src")).toBe("'none'");
     expect(directive("base-uri")).toBe("'self'");
   });
@@ -102,6 +103,44 @@ describe("#990: Excalidraw's fonts really are in the bundle's reach", () => {
     expect(referenced.size, "the build names its fonts (the detector is not vacuous)").toBeGreaterThan(10);
     const missing = [...referenced].filter((r) => !files.has(r));
     expect(missing, "a referenced font the copy would not carry").toEqual([]);
+  });
+
+  // review + ruling: the PREVIOUS version of this describe block only asserted that
+  // every referenced font FILE exists under the copied directory — it never looked at what the shipped
+  // library's own URL-resolution algorithm actually DOES with `window.EXCALIDRAW_ASSET_PATH`, so it
+  // stayed green while a real Chromium run showed 0/230 self-hosted font requests and 230/230 landing
+  // on esm.sh. Verified live (2026-09-05) against the REAL production nginx.conf + a real dist build in
+  // a real `nginx:alpine` container (not a hand-rolled test-harness static server, which is what the
+  // review's own probe used and where the fallback-masking bug actually lived): with the shipped
+  // files served correctly, 4/4 font fetches hit `/excalidraw/fonts/...` and esm.sh saw zero requests —
+  // the library's resolution order is correct. This test reads that SAME shipped algorithm's source
+  // text (not a self-computed `origin + ASSET_PATH`, the flaw named) and pins its actual order:
+  // `EXCALIDRAW_ASSET_PATH` is checked and a candidate URL is queued BEFORE `ASSETS_FALLBACK_URL` (the
+  // esm.sh constant) is ever referenced. A future version of the library that drops the self-host check,
+  // or reorders the fallback ahead of it, fails this without needing a browser at all.
+  it("the shipped library's own resolver checks EXCALIDRAW_ASSET_PATH and queues a candidate URL for it BEFORE it ever reaches for the esm.sh fallback constant", () => {
+    const prod = excalidrawProdDir();
+    const hits: { chunk: string; gap: number }[] = [];
+    for (const chunk of listFilesUnder(prod).filter((f) => f.endsWith(".js"))) {
+      const src = readFileSync(chunk, "utf8");
+      const fallbackDeclaredAt = src.indexOf("ASSETS_FALLBACK_URL");
+      if (fallbackDeclaredAt === -1) continue; // not the chunk with the resolver — most chunks aren't
+      const checksAssetPath = src.indexOf("typeof window.EXCALIDRAW_ASSET_PATH");
+      expect(checksAssetPath, `${chunk} names ASSETS_FALLBACK_URL but never checks EXCALIDRAW_ASSET_PATH — the self-host branch is gone`).toBeGreaterThan(-1);
+      // Both terms live in ONE small static method (~500 chars in the version this was written
+      // against) — a generous window rules out matching unrelated code that happens to mention either
+      // string somewhere else in a 1MB+ minified chunk.
+      const fallbackUsedAfterCheck = src.indexOf("ASSETS_FALLBACK_URL", checksAssetPath);
+      expect(fallbackUsedAfterCheck, "the fallback constant must appear (as code, not just declared) after the EXCALIDRAW_ASSET_PATH check — never before it").toBeGreaterThan(checksAssetPath);
+      const gap = fallbackUsedAfterCheck - checksAssetPath;
+      expect(gap, "the two must be part of the same small resolver method, not coincidentally far apart in the bundle").toBeLessThan(800);
+      // The self-hosted branch must actually QUEUE a URL (push to the candidate array), not merely
+      // reference the identifier in a comment or an unrelated branch.
+      const between = src.slice(checksAssetPath, fallbackUsedAfterCheck);
+      expect(between, "a URL must be constructed for the self-hosted candidate between the check and the fallback").toMatch(/push\(new URL\(/);
+      hits.push({ chunk, gap });
+    }
+    expect(hits.length, "exactly one shipped chunk should contain this resolver").toBe(1);
   });
 
   it("the asset path the app sets is the directory the plugin emits under", () => {

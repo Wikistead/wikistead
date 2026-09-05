@@ -30,8 +30,14 @@ import { EXCALIDRAW_ASSET_PATH } from "./excalidraw-asset-path";
  *                that degrades silently when blocked, and `data:` would be a post-XSS gadget.
  *   style-src    `'unsafe-inline'` for CodeMirror's runtime-positioned widgets (ADR-017).
  *   img/connect  `https:` because the attachment store is a deployment-configured sibling origin
- *                (`s3.<host>`, ADR-233) the build cannot name. This is also why the policy does NOT
- *                bound exfiltration — DOMPurify still does; the ADR says so in as many words.
+ *                (`s3.<host>`, ADR-233) the build cannot name. `http:` too (2026-09-05, closing
+ *                known gap F): a self-host with no TLS terminator in front of it (a plain `http://`
+ *                MinIO) presigns `http://` URLs, and `connect-src https:` alone silently killed every
+ *                attachment upload against one (measured: `fetch` refused with a CSP violation, no
+ *                on-screen error). `script-src`/`object-src`/`base-uri` are unchanged, and `https:` was
+ *                already wide open, so this is not a new exfiltration surface — see "what this CSP does
+ *                NOT bound" below. This is also why the policy does NOT bound exfiltration — DOMPurify
+ *                still does; the ADR says so in as many words.
  *   font-src     `'self' data:`. Excalidraw's fonts are copied into the bundle (see the second plugin),
  *                so the esm.sh fallback it would otherwise reach for is never a fetch — `'self'` alone
  *                would cover the editor. `data:` is for a DIFFERENT consumer: `printBrowserExport`
@@ -49,9 +55,9 @@ export const CSP_DIRECTIVES: ReadonlyArray<readonly [string, string]> = [
   ["script-src", "'self' 'wasm-unsafe-eval'"],
   ["worker-src", "'self' blob:"],
   ["style-src", "'self' 'unsafe-inline'"],
-  ["img-src", "'self' data: blob: https:"],
+  ["img-src", "'self' data: blob: https: http:"],
   ["font-src", "'self' data:"],
-  ["connect-src", "'self' wss: https:"],
+  ["connect-src", "'self' wss: https: http:"],
   ["frame-src", "'self' https:"],
   ["object-src", "'none'"],
   ["base-uri", "'self'"],
