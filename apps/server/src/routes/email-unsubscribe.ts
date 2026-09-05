@@ -60,7 +60,10 @@ export async function emailUnsubscribePlugin(app: FastifyInstance) {
     const lang = await resolveLocale(req, claims.sub)
     // `kind` is one of two fixed catalog strings — never user input, no escaping needed.
     const kind = claims.action === 'immediate' ? unsubKindMention(lang) : unsubKindDigest(lang)
-    const action = `/email/unsubscribe?token=${encodeURIComponent((req.query as { token?: string }).token!)}`
+    // The route table (infra/routes/origin-routes.mjs, ADR-231) only forwards `/api/*` to the server —
+    // a bare `/email/unsubscribe` falls through to the `/` catch-all and hits the SPA. Same mistake as
+    // the logo URL in email/layout.ts, same fix: the `/api` prefix here is load-bearing, not decorative.
+    const action = `/api/email/unsubscribe?token=${encodeURIComponent((req.query as { token?: string }).token!)}`
     // #575 slice B: the page says WHICH workspace is being left. It is a raw template on the same
     // origin as the session cookie (ADR-016) and the display name is stored with only a trim and a
     // length cap, so every interpolation of it here goes through `esc` — the shared one, so this page
