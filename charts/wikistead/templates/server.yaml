@@ -79,4 +79,4 @@ metadata:
   labels: {{- include "wikistead.labels" . | nindent 4 }}
 spec:
   selector: { app: {{ include "wikistead.fullname" . }}-server }
-  ports: [{ name: http, port: 4000, targetPort: 4000 }, { name: metrics, port: 9464, targetPort: 9464 }]
+  ports: [{ name: http, port: 4000, targetPort: 4000 }, { name: metrics, port: 9464, targetPort: 9464 }, { name: scim-reconcile, port: 9465, targetPort: 9465 }]
