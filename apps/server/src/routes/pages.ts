@@ -16,7 +16,7 @@ import { collectPageViewEvent } from '../analytics/sink.js' // #464 / ADR-175, b
 import { resolveEntitlements } from '@wikistead/entitlements' // #464: EE gate for the analytics dashboard
 import type { StorageDriver } from '../storage/index.js'
 import { storeRevisionYdoc } from './revision-ydoc.js'
-import { resolveTreePlaceholders, resolveGuestPlaceholders, PLACEHOLDER_NODE_MAX, type PlaceholderNode } from './tree-placeholders.js' // #623 / ADR-220 §4, §14
+import { resolveTreePlaceholders, resolveGuestPlaceholders, PLACEHOLDER_NODE_MAX, type PlaceholderNode, type TreePage } from './tree-placeholders.js' // #623 / ADR-220 §4, §14
 import type { TenantDb } from '../db/index.js'
 import { pool, registry, acquireTenantDb, listActiveTenantIds } from '../db/index.js' // #411: cross-tenant trash retention sweep
 import { flushDraft } from '../collab-flush.js'
@@ -2297,6 +2297,26 @@ export async function paintTree(
 }
 
 /**
+ * Drop the anchors that ended up anchoring nothing (#903 / ADR-220 §4 ruling ②: a placeholder is drawn
+ * ONLY as an anchor, so an entirely invisible subtree leaves no trace — an anchor with no page under it
+ * and no anchored descendant would announce a hidden node while showing nobody anything, which is the
+ * one thing existence-hiding cares about here).
+ *
+ * `nodes` must be parent-before-child (`materialise` mints that order); walking it backwards therefore
+ * sees every child before its parent, so one pass propagates "anchors something" up the chain.
+ */
+function anchoredPlaceholders(nodes: PlaceholderNode[]): PlaceholderNode[] {
+  const anchors = new Set<string>()
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i]!
+    if (!n.pages.length && !anchors.has(n.token)) continue
+    anchors.add(n.token)
+    if (n.parentToken) anchors.add(n.parentToken)
+  }
+  return nodes.filter((n) => anchors.has(n.token))
+}
+
+/**
  * #623 / ADR-220 §6.2: how many rows a GUEST's whole-space tree may show.
  *
  * The guest shell draws this list unvirtualised and fully expanded, so it is the surface where an
@@ -2334,10 +2354,20 @@ export const GUEST_TREE_CAP = 500
  * exactly like `hasChildren` used to lose one. Each branch read collects the invisible ids it rejected
  * (`onInvisible`) and, once its own pages are exhausted, hands them to `resolveGuestPlaceholders` —
  * ADR-220 §4's member placeholder mechanism (`/pages/tree-placeholders`), extended to share-link guests
- * for its DESCEND path only (never the direct-grant path, which guests structurally have none of). Any
- * page it confirms visible is pushed flat (`parentId: null`) into `visible` and walked like any other —
- * `GuestSidebar.tsx`'s client-side re-rooting (the promise §4.4 makes: "a permitted page is never
- * orphaned out of the tree") receives it exactly as it already handles a parentless row.
+ * for its DESCEND path only (never the direct-grant path, which guests structurally have none of).
+ *
+ * §14 rev11 (owner ruling 2026-09-05, #903): what comes back is the member mechanism's own
+ * `PlaceholderNode` grouping, returned beside `pages` — NOT the pages flattened to `parentId: null`.
+ * The flat form (shipped 2026-09-01) leant on `GuestSidebar`'s re-rooting and therefore drew a page
+ * from inside a hidden folder as a TOP-LEVEL row, sorted among the space's real roots by an ordinal
+ * belonging to a parent nobody could see. It was measured on a real share link before this changed.
+ * Anchoring keeps the hierarchy the reader is actually looking at, and makes the guest tree answer this
+ * situation the same way the member tree has since #623 — one unnamed anchor, no field of the invisible
+ * page, not expandable through any route.
+ *
+ * A surfaced page is walked exactly like a branch row, so its own descendants arrive as ordinary
+ * visible-parented `pages` and nest under it on the client; only the FIRST hop out of invisible
+ * territory needs an anchor.
  *
  * `truncated` is computed from the closure exhausting its budget — the walk keeps looking for exactly
  * one more CONFIRMED-VISIBLE page after the cap-th, and only reports truncation if it finds one. A tree
@@ -2352,9 +2382,16 @@ export async function listPagesGuestBounded(
   // truncation arithmetic against a small, cheap-to-build fixture without changing the shipped constant.
   // `placeholderBudget` defaults to the shipped PLACEHOLDER_NODE_MAX for the same reason (§14 below).
   args: { spaceId: string; subject: string; context?: { current_time: string }; cap?: number; placeholderBudget?: number },
-): Promise<{ pages: Page[]; truncated: boolean }> {
+): Promise<{ pages: Page[]; placeholders: PlaceholderNode[]; truncated: boolean }> {
   const cap = args.cap ?? GUEST_TREE_CAP
   const visible: Page[] = []
+  // §14 (2026-09-05 ruling): the anchors for pages that live under something the guest cannot view.
+  // They are the tree's rows too, so they are NOT what `cap` counts — `shown` below counts CONFIRMED
+  // VISIBLE pages wherever they end up (in `visible` or under an anchor), which is what a reader sees
+  // and what §6.2's cap was written about. Counting `visible.length` alone would let a space whose
+  // pages all sit under draft folders draw an unbounded tree while the counter read zero.
+  const placeholders: PlaceholderNode[] = []
+  let shown = 0
   let truncated = false
   // #903 / ADR-220 §14: a SEPARATE budget from `cap`. `cap` bounds what the tree DISPLAYS (confirmed
   // VISIBLE rows); this bounds what the walk may EXAMINE while descending through invisible territory
@@ -2375,8 +2412,9 @@ export async function listPagesGuestBounded(
         onInvisible: (ids) => invisibleIds.push(...ids),
       })
       for (const p of branch.pages) {
-        if (visible.length >= cap) { truncated = true; return }
+        if (shown >= cap) { truncated = true; return }
         visible.push(p)
+        shown++
         // #903 design-review NOT gated on `hasChildren`. That flag is `listBranch`'s CHEVRON
         // probe (CHEVRON_PROBE_CAP = 3 children) — a display hint whose false negative was accepted by
         // #623 because the cost was "no expand arrow drawn". Using it to decide whether to
@@ -2394,22 +2432,40 @@ export async function listPagesGuestBounded(
       cursor = branch.nextCursor
     }
     if (truncated || !invisibleIds.length) return
-    // #903 / ADR-220 §14: path 2 only, volunteered flat in THIS response — the defect ADR-220
+    // #903 / ADR-220 §14: path 2 only, volunteered in THIS response — the defect ADR-220
     // §4.4's "the guest tree still re-roots (#245)" promised and §13(a)'s closure walk broke, because it
     // can never descend past a parent it is not allowed to view. `parentId` here is every invisible id
-    // this branch's own read just found (the seeds), never re-derived by a second query.
+    // this branch's own read just found (the seeds), never re-derived by a second query, and it is the
+    // anchors' `under` — the nearest ancestor this guest CAN see (§4.5).
     if (placeholderBudget.left <= 0) { placeholdersExhausted = true; return }
-    const { pages: found, exhausted } = await resolveGuestPlaceholders(db, fga, {
-      spaceId: args.spaceId, subject: args.subject, context: args.context,
+    const { placeholders: found, exhausted } = await resolveGuestPlaceholders(db, fga, {
+      spaceId: args.spaceId, branchParentId: parentId, subject: args.subject, context: args.context,
       invisibleChildIds: invisibleIds, toPage: toTreePage, budget: placeholderBudget,
     })
     if (exhausted) placeholdersExhausted = true
-    for (const pg of found) {
-      if (visible.length >= cap) { truncated = true; return }
-      visible.push(pg as unknown as Page)
-      await walk(pg.id as string)
-      if (truncated) return
+    // `found` is parent-before-child (`materialise` mints the anchor, then recurses), which is what the
+    // trim below and `anchoredPlaceholders` both rely on. A page surfaced here is walked exactly like
+    // one from a branch read: its own children are visible-parented, so they come back through
+    // `listBranch` as ordinary rows and nest under it — the anchor is needed for the FIRST hop only.
+    const reached = new Set<string>()
+    for (const node of found) {
+      reached.add(node.token)
+      const kept: TreePage[] = []
+      for (const pg of node.pages) {
+        if (shown >= cap) { truncated = true; break }
+        kept.push(pg)
+        shown++
+        node.pages = kept
+        await walk(pg.id as string)
+        if (truncated) break
+      }
+      node.pages = kept
+      if (truncated) break
     }
+    // Anything the cap cut off is not merely undrawn — it must not reach the wire at all, or the
+    // response would carry rows nothing counted (and, one level down, anchors for them).
+    for (const node of found) if (!reached.has(node.token)) node.pages = []
+    placeholders.push(...anchoredPlaceholders(found))
   }
 
   try {
@@ -2424,13 +2480,17 @@ export async function listPagesGuestBounded(
     // Scoped to the ROOT specifically (nothing fetched yet) — a 404 reached after some pages were
     // already found is a genuine anomaly (e.g. a page deleted mid-walk) and propagates as one, the same
     // as it would from a direct `listBranch` caller.
-    if ((err as { statusCode?: number }).statusCode !== 404 || visible.length > 0) throw err
-    return { pages: visible, truncated: false }
+    // §14 rev11: the guard counts `shown`, not `visible.length` — a page surfaced under an anchor is a
+    // page already found, and after the split it does not appear in `visible`. Reading the array alone
+    // would re-classify a genuine mid-walk 404 (raised while descending a SURFACED page) as "this guest
+    // sees nothing" and answer 200 with a half-built tree.
+    if ((err as { statusCode?: number }).statusCode !== 404 || shown > 0) throw err
+    return { pages: visible, placeholders, truncated: false }
   }
   // #903 / ADR-220 §14: placeholder-budget exhaustion folds into the SAME `truncated` flag — §6.2's
   // "never a quiet cut" applies to this failure mode too, and the guest shell has exactly one signal
   // for "this tree may be incomplete" already; a second wire field for the same idea is not warranted.
-  return { pages: visible, truncated: truncated || placeholdersExhausted }
+  return { pages: visible, placeholders, truncated: truncated || placeholdersExhausted }
 }
 
 /** #623 / ADR-220 §6.1: how many pages one FLAT listing may carry. */

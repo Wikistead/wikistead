@@ -14,29 +14,83 @@ import { SidebarTreeSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457 lo
 // principal, so restricted / unpublished / (post-#244) private pages appear in neither the tree nor as
 // titles. The component is fed a page list synthesised from the share token's single space — it never
 // calls the member-only GET /spaces (Decision 0).
-interface TreeNode {
+export interface TreeNode {
   id: string;
   title: string;
   children: TreeNode[];
+  /** #903 / ADR-220 §14: an unnamed anchor for a page the guest may read under a parent they may not */
+  placeholder?: boolean;
 }
 
-function subtree(pages: Page[], parentId: string): TreeNode[] {
-  return pages
-    .filter((p) => (p.parentId ?? null) === parentId)
-    .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: p.id, title: p.title, children: subtree(pages, p.id) }));
+// #903 / ADR-220 §4 + §14 (owner ruling 2026-09-05): the anchors the server volunteers beside `pages`.
+// Same wire shape the member tree consumes (`lazy-tree.ts`); it carries no field of the invisible page.
+export interface GuestPlaceholder {
+  token: string;
+  under: string | null;
+  parentToken: string | null;
+  pages: Page[];
 }
 
-// Build the guest tree from the FGA-filtered page set. A page is a ROOT when it has no parent OR its
-// parent is NOT in the visible set — the latter re-roots a viewable child whose parent the guest cannot
-// see, so a permitted page is never orphaned out of the tree (the parent was already existence-hidden
-// server-side; this is a UX completeness fix, not an authz change — the set is authoritative).
-function buildTree(pages: Page[]): TreeNode[] {
-  const present = new Set(pages.map((p) => p.id));
-  return pages
-    .filter((p) => p.parentId == null || !present.has(p.parentId))
-    .sort((a, b) => a.position - b.position)
-    .map((p) => ({ id: p.id, title: p.title, children: subtree(pages, p.id) }));
+const byPosition = (a: Page, b: Page) => a.position - b.position;
+
+interface TreeCtx { pages: Page[]; placeholders: GuestPlaceholder[]; anchored: Set<string> }
+
+function pageNode(p: Page, ctx: TreeCtx): TreeNode {
+  return { id: p.id, title: p.title, children: childrenOf(p.id, ctx) };
+}
+
+// One anchor row: the pages the server placed directly under it, then any deeper anchor in the same
+// invisible chain — the member tree's own order (`lazy-tree.ts` placeholderNodes), so the two shells
+// answer this situation identically.
+function placeholderNode(ph: GuestPlaceholder, ctx: TreeCtx): TreeNode {
+  return {
+    id: `ph:${ph.token}`,
+    title: "",
+    placeholder: true,
+    children: [
+      ...[...ph.pages].sort(byPosition).map((p) => pageNode(p, ctx)),
+      ...ctx.placeholders.filter((x) => x.parentToken === ph.token).map((x) => placeholderNode(x, ctx)),
+    ],
+  };
+}
+
+// A page's children: its ordinary visible-parented rows, then the anchors hanging under it. A page
+// surfaced under an anchor keeps its real children here — they carry its id as `parentId`, so only the
+// first hop out of invisible territory ever needs an anchor.
+function childrenOf(parentId: string | null, ctx: TreeCtx): TreeNode[] {
+  return [
+    ...ctx.pages
+      .filter((p) => (p.parentId ?? null) === parentId && !ctx.anchored.has(p.id))
+      .sort(byPosition)
+      .map((p) => pageNode(p, ctx)),
+    ...ctx.placeholders
+      .filter((ph) => ph.parentToken === null && ph.under === parentId)
+      .map((ph) => placeholderNode(ph, ctx)),
+  ];
+}
+
+// Build the guest tree from the FGA-filtered page set plus the anchors placed beside it.
+//
+// A page whose parent the guest cannot see arrives under an ANCHOR (§14) and keeps its depth: the
+// hierarchy the reader is looking at is not flattened, and the anchor says only that a node they cannot
+// view sits there — no id, title, position or child count of it. The older re-rooting rule (a page whose
+// parent is absent becomes a root) stays as the floor for any row the server did not anchor: a permitted
+// page is never orphaned out of the tree (#245).
+export function buildTree(pages: Page[], placeholders: GuestPlaceholder[]): TreeNode[] {
+  const anchored = new Set(placeholders.flatMap((ph) => ph.pages.map((p) => p.id)));
+  const ctx: TreeCtx = { pages, placeholders, anchored };
+  // Anchored pages are `present` too: their own children carry their id, and without this every one of
+  // them would be re-rooted to the top level — the exact flattening the anchors exist to end.
+  const present = new Set([...pages.map((p) => p.id), ...anchored]);
+  return [
+    ...pages
+      .filter((p) => !anchored.has(p.id) && (p.parentId == null || !present.has(p.parentId)))
+      .sort(byPosition)
+      .map((p) => pageNode(p, ctx)),
+    ...placeholders
+      .filter((ph) => ph.parentToken === null && ph.under === null)
+      .map((ph) => placeholderNode(ph, ctx)),
+  ];
 }
 
 // onCreate (#274 / ADR-135): present ONLY for an EDIT-capability space link — the one write
@@ -49,10 +103,10 @@ function buildTree(pages: Page[]): TreeNode[] {
 // skeleton is delay-gated so a fast tree fetch never flashes it.
 // `error` is required, not optional: the caller owns the fetch (#500), and an omitted prop here would
 // silently read as "not erroring" — the exact error-reads-as-empty shape #500 exists to prevent.
-export function GuestSidebar({ pages, loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, truncated = false }: { pages: Page[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error: boolean; onRetry?: () => void; truncated?: boolean }) {
+export function GuestSidebar({ pages, placeholders = [], loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, truncated = false }: { pages: Page[]; placeholders?: GuestPlaceholder[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error: boolean; onRetry?: () => void; truncated?: boolean }) {
   const { t } = useTranslation();
   const showSkeleton = useDelayedFlag(loading);
-  const tree = buildTree(pages);
+  const tree = buildTree(pages, placeholders);
   const [busy, setBusy] = useState(false);
   // #274 (3): keep the ACTIVE row visible — after creates a page the shell navigates to it,
   // but in a long tree the new row (which only renders after the pages refetch — hence `pages` in the
@@ -133,6 +187,27 @@ function GuestNode({ node, depth, openId, onOpen }: { node: TreeNode; depth: num
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const hasChildren = node.children.length > 0;
+  if (node.placeholder) {
+    // §4 ruling ②: ONE fixed, unnamed label for every cause — draft, private and restricted are
+    // indistinguishable here on purpose, and it is the same label the member tree uses. Expandable
+    // only: there is nothing to open, and expanding issues no request (§4.2 — its children are in hand).
+    return (
+      <div>
+        <div className="flex items-center gap-1" style={{ paddingLeft: `${depth * 12 + 4}px` }} data-testid="guest-tree-placeholder">
+          <button
+            type="button"
+            className="flex-none rounded p-0.5 text-fg-dim hover:text-foreground"
+            onClick={() => setExpanded((e) => !e)}
+            aria-label={expanded ? t("sidebar.collapse") : t("sidebar.expand")}
+          >
+            <ChevronRight size={12} className={expanded ? "rotate-90 transition-transform" : "transition-transform"} />
+          </button>
+          <span className="truncate py-1 pr-1 italic text-fg-dim">{t("sidebar.placeholderPage")}</span>
+        </div>
+        {expanded && node.children.map((c) => <GuestNode key={c.id} node={c} depth={depth + 1} openId={openId} onOpen={onOpen} />)}
+      </div>
+    );
+  }
   return (
     <div>
       {/* #274 (2): the SELECTED row uses the member accent-mix highlight (PageTree.tsx),

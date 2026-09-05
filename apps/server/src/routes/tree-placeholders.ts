@@ -275,11 +275,6 @@ export async function resolveTreePlaceholders(
   return { placeholders: ctx.out, placeholdersExhausted: ctx.exhausted }
 }
 
-function collectPages(draft: Draft, out: TreePage[], ctx: Ctx): void {
-  for (const r of draft.pages) out.push(placedPage(ctx, r))
-  for (const c of draft.children) collectPages(c, out, ctx)
-}
-
 /**
  * Path 2 ONLY, for a guest's whole-space closure walk (#903 / ADR-220 §14). `resolveTreePlaceholders`
  * refuses any subject that is not `user:`-prefixed (§4.4) — deliberately, since path 1 (`grantsPath`)
@@ -288,36 +283,48 @@ function collectPages(draft: Draft, out: TreePage[], ctx: Ctx): void {
  * `filterAuthorized(subject, 'view', …)`, so it is subject-shape-independent; this calls it directly,
  * skipping both the gate and path 1.
  *
- * Returns FLAT pages with `parentId` nulled (§4.1: a descended page must never carry its real —
- * invisible — parent id), never the `PlaceholderNode` grouping: the guest tree has no placeholder-anchor
- * UI, and `GuestSidebar`'s `buildTree` already re-roots any page whose parent is absent from the flat
- * set to the top level (the pre-#903 behaviour this restores) — which is exactly this shape.
+ * Returns §4's `PlaceholderNode` grouping — the same shape the member tree already gets (owner ruling
+ * 2026-09-05, #903 the hierarchy is not flattened for a guest). The earlier form returned the
+ * descended pages FLAT with `parentId` nulled and let `GuestSidebar` re-root them among the space's
+ * real roots; that put a page from inside a hidden folder on the top level, sorted by an ordinal
+ * nobody could see the meaning of, and it made the guest surface the only one in the product that
+ * answers this situation by discarding the tree.
+ *
+ * The disclosure the anchor makes — "there is a node here you cannot view" — was ruled acceptable for
+ * a share-link principal on the same grounds §4 ruling ② accepted it for members: the node carries no
+ * field of the invisible page (§4.1 — not its id, title, position or child count), one unnamed label
+ * covers every cause, and it is not expandable through any route (§4.2: the chain is volunteered in
+ * this same response, and expanding it issues no request). What uniform-404 protects is asking about a
+ * NAMED id; a volunteered anchor cannot be aimed at anything.
  */
 export async function resolveGuestPlaceholders(
   db: TenantDb,
   fga: OpenFgaClient,
   args: {
     spaceId: string
+    /** the visible parent whose branch read produced these seeds — the anchors' `under` (§4.5) */
+    branchParentId: string | null
     subject: string
     invisibleChildIds: string[]
     context?: { current_time: string } | undefined
     toPage: (row: Record<string, unknown>) => TreePage
     budget: { left: number }
   },
-): Promise<{ pages: TreePage[]; exhausted: boolean }> {
+): Promise<{ placeholders: PlaceholderNode[]; exhausted: boolean }> {
   // Same defence as §4.4's scope check, kept for a confined caller even though guest requests never
   // carry a restriction today (only an API-key-scoped request does — `setAuthzRestriction` in app.ts).
   const scope = currentAuthzScope()
-  if (scope?.restriction) return { pages: [], exhausted: false }
+  if (scope?.restriction) return { placeholders: [], exhausted: false }
   const ctx: Ctx = {
     db, fga, spaceId: args.spaceId, subject: args.subject, context: args.context, toPage: args.toPage,
     budget: args.budget, byInvisibleId: new Map(), out: [], exhausted: false,
   }
-  const pages: TreePage[] = []
   for (const seed of args.invisibleChildIds) {
     if (ctx.budget.left <= 0) { ctx.exhausted = true; break }
     const draft = await descend(ctx, seed)
-    if (draft) collectPages(draft, pages, ctx)
+    // `materialise` is path 1 and path 2's shared tail — the same anchors, minted the same way, so the
+    // guest tree cannot drift into a second placeholder dialect.
+    if (draft) materialise(ctx, draft, args.branchParentId, null)
   }
-  return { pages, exhausted: ctx.exhausted }
+  return { placeholders: ctx.out, exhausted: ctx.exhausted }
 }

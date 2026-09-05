@@ -281,36 +281,84 @@ describe('#903 / ADR-220 §14: a visible page behind an invisible ancestor is st
   const subject3 = `share_link:${LINK3}`
   const ctx3 = { current_time: new Date().toISOString() }
 
-  it('a visible child of an invisible ROOT is found, with its real (invisible) parent id nulled', async () => {
+  // §14 rev11 (owner ruling 2026-09-05): the surfaced page keeps its DEPTH. It arrives under an unnamed
+  // anchor — the member mechanism's own `PlaceholderNode` — instead of flattened into the root list,
+  // which is what the 2026-09-01 shipping form did (measured on a real share link: the page from inside
+  // a hidden folder drew as a top-level row among the space's real roots).
+  it('a visible child of an invisible ROOT arrives ANCHORED, not flattened into the root list', async () => {
     const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
-    const found = out.pages.find((p) => p.title === 'draftRoot-child-VISIBLE')
-    expect(found, 'the page must appear').toBeTruthy()
+    expect(out.pages.some((p) => p.title === 'draftRoot-child-VISIBLE'), 'never a top-level row').toBe(false)
+    const anchor = out.placeholders.find((ph) => ph.pages.some((p) => p.title === 'draftRoot-child-VISIBLE'))
+    expect(anchor, 'the page must appear under an anchor').toBeTruthy()
+    // §4.5: the anchor is placed by the nearest VISIBLE ancestor — here the space root itself.
+    expect(anchor!.under).toBeNull()
+    expect(anchor!.parentToken).toBeNull()
     // §4.1: never the real (invisible) parent id — that IS the invisible page's id.
-    expect(found!.parentId).toBeNull()
+    expect((anchor!.pages.find((p) => p.title === 'draftRoot-child-VISIBLE') as { parentId?: unknown }).parentId).toBeNull()
   })
 
-  it('the invisible ancestor itself is never named anywhere in the response', async () => {
+  it('an anchor carries no field of the invisible page it stands for', async () => {
     const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
-    const draftRootId = ids3['draftRoot']!
-    expect(out.pages.some((p) => p.id === draftRootId), 'the invisible page must not appear as a row').toBe(false)
-    expect(out.pages.some((p) => p.parentId === draftRootId), 'no row may point at it as a parent').toBe(false)
+    for (const ph of out.placeholders) {
+      expect(Object.keys(ph).sort(), 'the anchor is a token, a placement and its pages — nothing else')
+        .toEqual(['pages', 'parentToken', 'token', 'under'])
+    }
+    // The whole wire answer, not just the row arrays: an id reaching ANY field of it is a leak.
+    const wire = JSON.stringify(out)
+    const rows = [...out.pages, ...out.placeholders.flatMap((ph) => ph.pages)]
+    for (const title of ['draftRoot', 'deepA-invisible', 'deepB-invisible']) {
+      expect(wire.includes(ids3[title]!), `${title}'s id must not reach the wire`).toBe(false)
+      // Titles are compared EXACTLY, not by substring: 'draftRoot' is a prefix of the visible child's
+      // own title ('draftRoot-child-VISIBLE'), and a substring test reads that legitimate row as a leak.
+      expect(rows.some((p) => p.title === title), `${title}'s title must not reach the wire`).toBe(false)
+    }
   })
 
-  it('a two-layer invisible chain still surfaces the visible grandchild, and its own visible child too', async () => {
+  it('a two-layer invisible chain nests as a CHAIN of anchors, and the surfaced page keeps its own child', async () => {
     const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
-    const titles = out.pages.map((p) => p.title)
-    expect(titles).toContain('deepC-VISIBLE')
-    expect(titles, 'the surfaced page re-enters the normal walk for its OWN children').toContain('deepC-child-VISIBLE')
-    const grandchild = out.pages.find((p) => p.title === 'deepC-child-VISIBLE')!
-    const surfaced = out.pages.find((p) => p.title === 'deepC-VISIBLE')!
-    // the grandchild is an ORDINARY page — its real parent id is the surfaced (now-known) page's id,
-    // which IS present in this response (the ancestor-inclusion invariant, §13's own condition).
-    expect(grandchild.parentId).toBe(surfaced.id)
+    const inner = out.placeholders.find((ph) => ph.pages.some((p) => p.title === 'deepC-VISIBLE'))
+    expect(inner, 'the grandchild must be found').toBeTruthy()
+    // Two invisible layers = two anchors, one inside the other — NOT one flattened anchor and not two
+    // siblings, so the depth the reader sees matches the depth that is really there.
+    expect(inner!.parentToken, 'the inner anchor hangs off the outer one').toBeTruthy()
+    const outer = out.placeholders.find((ph) => ph.token === inner!.parentToken)
+    expect(outer, 'the outer anchor rides the same response').toBeTruthy()
+    expect(outer!.under, 'the outer anchor sits at the space root').toBeNull()
+    expect(outer!.pages, 'the outer layer anchors nothing directly — it is a link in the chain').toHaveLength(0)
+    // The surfaced page re-enters the NORMAL walk, so its own child is an ordinary visible-parented row
+    // and needs no anchor of its own (§14: only the first hop out of invisible territory needs one).
+    const grandchild = out.pages.find((p) => p.title === 'deepC-child-VISIBLE')
+    expect(grandchild, 'the surfaced page re-enters the normal walk for its OWN children').toBeTruthy()
+    expect(grandchild!.parentId).toBe(inner!.pages.find((p) => p.title === 'deepC-VISIBLE')!.id)
+  })
+
+  it('the cap counts pages surfaced under an anchor, not only top-level rows', async () => {
+    // The fixture has ONE ordinary visible root and three pages that only exist behind anchors. With
+    // `visible.length` as the counter (the pre-anchor arithmetic) the anchored rows are free and the cap
+    // never trips: the space could draw an unbounded tree while the counter read one.
+    const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 2 })
+    const shown = out.pages.length + out.placeholders.reduce((n, ph) => n + ph.pages.length, 0)
+    expect(shown, 'exactly the cap, counting anchored rows').toBe(2)
+    expect(out.truncated, 'and it says so').toBe(true)
+  })
+
+  it('an anchor that ends up anchoring nothing is never emitted', async () => {
+    // §4 ruling ②: a placeholder is drawn ONLY as an anchor. The cap above can cut a chain's pages away
+    // after its anchors were minted; what is left must not announce a hidden node while showing nobody.
+    for (const cap of [1, 2, 3, 50]) {
+      const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap })
+      for (const ph of out.placeholders) {
+        const anchorsSomething = ph.pages.length > 0 || out.placeholders.some((x) => x.parentToken === ph.token)
+        expect(anchorsSomething, `cap=${cap}: an empty anchor reached the wire`).toBe(true)
+      }
+    }
   })
 
   it('an ordinary visible root is unaffected', async () => {
     const out = await listPagesGuestBounded(db3, fgaClient, { spaceId: space3, subject: subject3, context: ctx3, cap: 50 })
     expect(out.pages.some((p) => p.title === 'normalRoot')).toBe(true)
+    expect(out.placeholders.some((ph) => ph.pages.some((p) => p.title === 'normalRoot')),
+      'a normally-parented page is never anchored').toBe(false)
   })
 
   it('a placeholder budget too small to reach a deep chain truncates loudly, not silently', async () => {

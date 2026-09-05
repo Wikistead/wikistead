@@ -243,7 +243,7 @@ import { FALLBACK_PRODUCT_NAME, useProductName } from "./product-name";
 import { usePage, usePublished, usePublish, useRenamePage, useToggleTask, useAccountSettings, useDeletePage, useDirectDeletePage, useCreatePage, useEntitlements, useSpacesPage, useResolvedSpace, useResolvedSpaceState, useBranding, invalidateSpaces, type Page } from "../data/queries";
 import { TenantBrand } from "./BrandLockup"; // #430 the public header uses the shared two-slot lockup
 import { Avatar } from "../ui/Avatar"; // #430 the public header's space chip (shared primitive)
-import { GuestSidebar } from "./GuestSidebar";
+import { GuestSidebar, type GuestPlaceholder } from "./GuestSidebar";
 import { ConfirmDialog } from "../ui/dialogs";
 import { DeleteBacklinkWarning } from "./DeleteBacklinkWarning";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
@@ -1182,12 +1182,16 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
   const landedHome = useRef(false); // #364 ①: default-land on the home ONCE (never re-hijack navigation)
   const [openId, setOpenId] = useState<string | null>(null);
   const [pagesTruncated, setPagesTruncated] = useState(false);
+  // #903 / ADR-220 §14 (ruling 2026-09-05): the anchors for pages the guest may read under a parent they
+  // may not. They arrive beside `pages` in the same response and are never fetched separately (§4.2).
+  const [placeholders, setPlaceholders] = useState<GuestPlaceholder[]>([]);
 
   const refreshPages = useCallback(() => {
     setPagesError(false);
-    apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+    apiFetch<{ pages: Page[]; placeholders?: GuestPlaceholder[]; truncated: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
       .then((r) => {
         setPages(r?.pages ?? []);
+        setPlaceholders(r?.placeholders ?? []);
         // #623 / ADR-220 §6.2: the cap comes with a VISIBLE state. This shell draws the tree
         // unvirtualised and fully expanded, so a link whose tree is too large has to SAY so — a quiet
         // cut would look like a complete tree that is simply missing pages.
@@ -1216,9 +1220,9 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<{ pages: Page[]; truncated: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
-      .then((r) => { if (!cancelled) { setPages(r?.pages ?? []); setPagesTruncated(Boolean(r?.truncated)); } })
-      .catch(() => { if (!cancelled) { setPages([]); setPagesError(true); } }); // #500: error ≠ empty
+    apiFetch<{ pages: Page[]; placeholders?: GuestPlaceholder[]; truncated: boolean }>(`/spaces/${encodeURIComponent(spaceId)}/pages`, token)
+      .then((r) => { if (!cancelled) { setPages(r?.pages ?? []); setPlaceholders(r?.placeholders ?? []); setPagesTruncated(Boolean(r?.truncated)); } })
+      .catch(() => { if (!cancelled) { setPages([]); setPlaceholders([]); setPagesError(true); } }); // #500: error ≠ empty
     // #270: the space header (name + public icon only) so the guest sidebar shows the real space, not a
     // fixed "Shared space" label. Best-effort — a failure just falls back to the label.
     apiFetch<{ name: string; iconImageUrl: string | null; homePageId?: string | null }>(`/spaces/${encodeURIComponent(spaceId)}/info`, token)
@@ -1244,7 +1248,7 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
 
   return (
     <AppShell
-      sidebar={<GuestSidebar pages={pages ?? []} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} truncated={pagesTruncated} />}
+      sidebar={<GuestSidebar pages={pages ?? []} placeholders={placeholders} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} truncated={pagesTruncated} />}
       // #449 / ADR-173: the guest gets the SAME search box (Ctrl-K + the header field), wired to their
       // own token and opening hits inside this shell via the tree's open handler. The server forces the
       // link's space scope and gates every hit on the share_link principal — no member chrome leaks here.
