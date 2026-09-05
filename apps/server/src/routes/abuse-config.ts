@@ -95,7 +95,15 @@ export async function updateAbuseFilterConfig(
   await requireTenantAdmin(fga, args.userId, args.tenantId)
   const shrinkRatio = normalizeShrinkRatio(args.shrinkRatio)
   const bannedWords = normalizeBannedWords(args.bannedWords)
-  await db.sql`UPDATE tenant_settings SET abuse_shrink_ratio = ${shrinkRatio}, abuse_banned_words = ${bannedWords}, updated_at = now() WHERE tenant_id = ${args.tenantId}`
+  // #1126: provisionTenant never creates a tenant_settings row, so a bare UPDATE silently no-ops on a
+  // fresh tenant (0 rows affected, unreported) — the save looks like it worked (200, normalized values
+  // echoed back) but nothing persisted. Upsert like every other tenant_settings writer in this codebase
+  // (branding.ts, api-keys.ts, pages.ts, ai.ts, enroll-domains.ts).
+  await db.sql`
+    INSERT INTO tenant_settings (tenant_id, abuse_shrink_ratio, abuse_banned_words, updated_at)
+    VALUES (${args.tenantId}, ${shrinkRatio}, ${bannedWords}, now())
+    ON CONFLICT (tenant_id) DO UPDATE SET abuse_shrink_ratio = ${shrinkRatio}, abuse_banned_words = ${bannedWords}, updated_at = now()
+  `
   return { shrinkRatio, bannedWords }
 }
 

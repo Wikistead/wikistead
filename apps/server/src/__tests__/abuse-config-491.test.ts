@@ -31,14 +31,13 @@ let pt: PrivateTenant
 
 beforeAll(async () => {
   pt = await privateTenant(admin, 't491')
-  // #1113: `privateTenant` seeds tenants/members/tenant_login_prefs, never tenant_settings — real
-  // tenant creation does elsewhere, but this helper is deliberately minimal for the auth/session
-  // suites it was built for. `updateAbuseFilterConfig`'s write is a plain `UPDATE ... WHERE
-  // tenant_id = X` with no upsert, so without a row here it silently updates zero rows while still
-  // returning the normalized values it WAS ASKED to write (echoed straight back, never re-read) —
-  // the PATCH assertions below would pass regardless, and only the follow-up GET (a real SELECT)
-  // would ever notice nothing was persisted. Row must exist before any PATCH runs.
-  await admin`INSERT INTO tenant_settings (tenant_id) VALUES (${pt.id}) ON CONFLICT (tenant_id) DO NOTHING`
+  // #1113/#1126: `privateTenant` seeds tenants/members/tenant_login_prefs, never tenant_settings —
+  // real tenant creation does elsewhere. This used to require inserting the row here by hand,
+  // because `updateAbuseFilterConfig` was a plain `UPDATE ... WHERE tenant_id = X` with no upsert:
+  // without a pre-existing row it silently updated zero rows while still echoing back the
+  // normalized values it was ASKED to write, so only a follow-up GET (a real SELECT) would ever
+  // notice nothing was persisted. #1126 made the write an upsert, so no row needs to exist first —
+  // see the "persists on a tenant with no tenant_settings row at all" test below for the pin.
   db = await acquireTenantDb(asTenant(pt.id))
   app = await buildApp(); await app.ready()
 }, 30_000)
@@ -87,5 +86,50 @@ describe('GET/PATCH /tenant/abuse-filter (#491)', () => {
     expect((await get(cookie)).statusCode).toBe(403)
     expect((await patch({ shrinkRatio: 0.5, bannedWords: ['x'] }, cookie)).statusCode).toBe(403)
     await deleteTuples(fgaClient, memberTuples(pt.id, ['abuse491-nonadmin'])).catch(() => {})
+  })
+})
+
+describe('#1126 the save persists on a tenant with no tenant_settings row at all', () => {
+  // A fresh tenant made only via `provisionTenant` (mirrored here via `privateTenant`, which is
+  // just as minimal) never gets a tenant_settings row — real provisioning doesn't create one either.
+  // Before #1126, PATCH was a bare `UPDATE ... WHERE tenant_id = X`: on zero existing rows it
+  // silently updated nothing while still returning the normalized values as if they had been
+  // written, so the admin's first save (often exactly when they'd reach for this screen) looked
+  // like it worked and vanished on the next read.
+  let ft: PrivateTenant
+
+  it('PATCH creates the row (upsert), and the value survives a fresh read', async () => {
+    ft = await privateTenant(admin, 't1126')
+    const [before] = await admin<{ n: string }[]>`SELECT count(*)::text AS n FROM tenant_settings WHERE tenant_id = ${ft.id}`
+    expect(before!.n, 'a freshly-provisioned tenant already has a tenant_settings row').toBe('0')
+
+    const fdb = await acquireTenantDb(asTenant(ft.id))
+    try {
+      const fapp = await buildApp()
+      await fapp.ready()
+      try {
+        const fget = () => fapp.inject({ method: 'GET', url: '/tenant/abuse-filter', headers: ft.AUTH })
+        const fpatch = (body: unknown) =>
+          fapp.inject({ method: 'PATCH', url: '/tenant/abuse-filter', headers: { ...ft.H }, payload: JSON.stringify(body) })
+
+        expect((await fpatch({ shrinkRatio: 0.4, bannedWords: ['spam'] })).json()).toEqual({ shrinkRatio: 0.4, bannedWords: ['spam'] })
+        // The real regression: re-reading through a SEPARATE request (not the PATCH's own echo) is
+        // the only way #1126's defect (0 rows updated, value never actually stored) would surface.
+        expect((await fget()).json(), 'the value did not survive a fresh read').toEqual({ shrinkRatio: 0.4, bannedWords: ['spam'] })
+
+        const [after] = await admin<{ n: string }[]>`SELECT count(*)::text AS n FROM tenant_settings WHERE tenant_id = ${ft.id}`
+        expect(after!.n, 'PATCH did not create the tenant_settings row').toBe('1')
+      } finally {
+        await fapp.close()
+      }
+    } finally {
+      await fdb.release()
+    }
+  })
+
+  afterAll(async () => {
+    if (!ft) return
+    await admin`DELETE FROM tenant_settings WHERE tenant_id = ${ft.id}`.catch(() => {})
+    await ft.dispose().catch(() => {})
   })
 })
