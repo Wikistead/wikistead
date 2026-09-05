@@ -140,3 +140,27 @@ test("#623 ② (§4.2): a placeholder renders, opens from data in hand, and asks
   await sleep(400);
   expect(page.url(), "clicking a placeholder navigated somewhere").toBe(url);
 });
+
+test("#1123: the placeholder's label is the same size as a page name, in a row of the same height", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openLazySpace(page);
+  const ph = page.getByTestId("tree-placeholder").first();
+  await expect(ph).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("tree-placeholder-chevron").first().click();
+  await expect(page.locator('[data-testid="tree-page"]', { hasText: "Granted child" }))
+    .toBeVisible({ timeout: 10_000 });
+
+  // Measured in the browser, not asserted from class names: the label used to carry its own `text-sm`
+  // (12px in tokens.css) while a page name inherits the row's 14px, so the one row a reader cannot open
+  // was the smallest text in the tree. Italic and the dim colour still separate it; only the SIZE is shared.
+  const m = await page.evaluate(() => {
+    const label = document.querySelector("[data-testid=tree-placeholder] span:last-child");
+    const name = document.querySelector("[data-testid=tree-page-name]");
+    const slot = (el: Element | null) => el?.closest("[role=treeitem]") ?? null;
+    const px = (el: Element | null) => (el ? getComputedStyle(el).fontSize : null);
+    const h = (el: Element | null) => (el ? Math.round(el.getBoundingClientRect().height) : null);
+    return { labelPx: px(label), namePx: px(name), phRow: h(slot(label)), pageRow: h(slot(name)) };
+  });
+  expect(m.labelPx, "the placeholder label sets its own font size").toBe(m.namePx);
+  expect(m.phRow, "the placeholder row is not the same height as a page row").toBe(m.pageRow);
+});

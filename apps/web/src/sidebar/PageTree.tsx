@@ -311,7 +311,10 @@ export function PageTree({
           >
             <ChevronRight size={13} className={cn("text-fg-dim transition-transform duration-[120ms]", node.isOpen && "rotate-90")} />
           </span>
-          <span className="truncate text-sm italic text-fg-dim">{d.name}</span>
+          {/* #1123: the label inherits the row's size (14px) like a page name does — its own `text-sm`
+              (12px in tokens.css) made the one row a reader cannot open the smallest row in the tree.
+              Italic + dim still separate it from a real page; only the SIZE is shared. */}
+          <span className="truncate italic text-fg-dim">{d.name}</span>
         </div>
       );
     }
