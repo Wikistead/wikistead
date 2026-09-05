@@ -226,12 +226,22 @@ describe('the patrol route and the 422 wiring, over HTTP', () => {
 
   it('a 422-rejected publish leaves a flag — recorded before the response, not after it', async () => {
     // dev-user owns the demo fixtures; give them a page in this space and a policy that refuses it.
+    // #1097: the banned word goes on THIS TEST'S OWN space (space_settings), never the shared
+    // tenant_settings row — abuse-config-491/abuse-publish-328/space-abuse-policy-509 all mutate that
+    // same tenant_dev row too, and a concurrent file's own reset racing this one's SET/publish/assert
+    // window is exactly what let this test intermittently see its banned word cleared before the
+    // publish call landed (a publish that should 422 quietly 200s instead — the symptom this ticket
+    // reported). resolveEffectiveAbusePolicy (abuse-config.ts) UNIONs tenant ⊕ space, so a space-level
+    // addition rejects the publish identically without ever touching shared tenant state.
     const page = (await createPage(db, fgaClient, driver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: `PF 422 ${RUN}` })).id
     pageIds.push(page)
     await admin`UPDATE pages SET ydoc = ${ydoc('clean starting text')} WHERE id = ${page}`
     await publishPage(db, fgaClient, driver, storage, { pageId: page, subject: 'user:dev-user', createdBy: 'user:dev-user' })
     await admin`UPDATE pages SET ydoc = ${ydoc('clean starting text plus pfspamword326')} WHERE id = ${page}`
-    await admin`UPDATE tenant_settings SET abuse_banned_words = ${['pfspamword326']} WHERE tenant_id = ${TENANT}`
+    await admin`
+      INSERT INTO space_settings (space_id, tenant_id, abuse_banned_words, updated_at)
+      VALUES (${spaceId}, ${TENANT}, ${['pfspamword326']}, now())
+      ON CONFLICT (space_id) DO UPDATE SET abuse_banned_words = ${['pfspamword326']}, updated_at = now()`
     try {
       const r = await app.inject({ method: 'POST', url: `/pages/${page}/publish`, headers: devHeaders })
       expect(r.statusCode, r.body).toBe(422)
@@ -241,7 +251,7 @@ describe('the patrol route and the 422 wiring, over HTTP', () => {
       expect(rows[0]!.event_type).toBe('abuse.publish_rejected_banned')
       expect(rows[0]!.actor).toBe('user:dev-user')
     } finally {
-      await admin`UPDATE tenant_settings SET abuse_banned_words = '{}' WHERE tenant_id = ${TENANT}`
+      await admin`UPDATE space_settings SET abuse_banned_words = NULL WHERE space_id = ${spaceId}`.catch(() => {})
     }
   })
 
