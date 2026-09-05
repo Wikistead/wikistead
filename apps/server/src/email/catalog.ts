@@ -169,7 +169,7 @@ export const resetLinkHint = byLang(
 )
 export const resetIgnore = byLang(
   () => 'If it was not you, you can ignore this — nothing has changed.',
-  () => '心当たりがない場合はこのメールを無視してください。何も変更されていません。',
+  () => '心当たりがない場合は、このメールを無視してください。パスワードは変更されません。',
 )
 export const resetBodyText = (lang: Lang, link: string): string =>
   `${joinSentences(lang, resetIntro(lang), resetOpenWithinHour(lang))}\n\n${link}\n\n${resetIgnore(lang)}`
