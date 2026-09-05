@@ -25,14 +25,17 @@ import { createSpace } from '../routes/spaces.js'
 import { GUEST_SESSION_CEILING_SECONDS } from '../routes/share-links.js'
 import { registerFunnelCollector, resetFunnelCollector } from '../funnel/sink.js'
 import { buildApp } from '../app.js'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
-const TENANT = 'tenant_dev'
 const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 300 }
-const dev = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
 
 let app: FastifyInstance
 let db: TenantDb
+let pt: PrivateTenant
+let TENANT: string
+let HOST: string
+let dev: { host: string; authorization: string; 'content-type': string }
 let spaceId: string
 const createdPages: string[] = []
 
@@ -61,19 +64,19 @@ const claimsOf = (token: string) => decodeJwt(token) as unknown as { anonId?: st
 const refresh = (linkId: string, token: string, payload: Record<string, unknown> = {}) =>
   app.inject({
     method: 'POST', url: `/public/share-links/${linkId}/token/refresh`,
-    headers: { host: 'dev.localhost', 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: { host: HOST, 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
     payload,
   })
 
 const exchange = (linkId: string, opts: { token?: string; payload?: Record<string, unknown> } = {}) =>
   app.inject({
     method: 'POST', url: `/public/share-links/${linkId}/token`,
-    headers: { host: 'dev.localhost', 'content-type': 'application/json', ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
+    headers: { host: HOST, 'content-type': 'application/json', ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
     payload: opts.payload ?? {},
   })
 
 const createAsGuest = (token: string, title: string) =>
-  app.inject({ method: 'POST', url: `/spaces/${spaceId}/pages`, headers: { host: 'dev.localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' }, payload: { title } })
+  app.inject({ method: 'POST', url: `/spaces/${spaceId}/pages`, headers: { host: HOST, authorization: `Bearer ${token}`, 'content-type': 'application/json' }, payload: { title } })
 
 const now = () => Math.floor(Date.now() / 1000)
 let seq = 0
@@ -82,9 +85,18 @@ const anon = () => `anon:${(Date.now() + seq++).toString(16).slice(-12).padStart
 beforeAll(async () => {
   app = await buildApp()
   await app.ready()
+  // #1127: a PRIVATE tenant, not tenant_dev — this file's abuse-cap fixture (`resetCaps`/case below)
+  // writes the SAME two tenant_settings columns guest-create-publish-274.test.ts does, and vitest runs
+  // both as concurrent workers, so one file's reset can land between another's SET and its assertion.
+  pt = await privateTenant(admin, 'gtr874')
+  TENANT = pt.id
+  HOST = pt.H.host
+  dev = pt.H
+  // #1126: privateTenant seeds tenants/members/tenant_login_prefs, never tenant_settings — without a
+  // row here, resetCaps()'s UPDATE (and the cap-setting UPDATE below) would silently touch zero rows.
   await admin`INSERT INTO tenant_settings (tenant_id) VALUES (${TENANT}) ON CONFLICT (tenant_id) DO NOTHING`
   await resetCaps()
-  db = await acquireTenantDb({ id: TENANT, slug: 'dev', plan: 'free', isolation: 'logical' } as never)
+  db = await acquireTenantDb({ id: TENANT, slug: pt.slug, plan: 'free', isolation: 'logical' } as never)
   spaceId = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: `gtr874-${Date.now().toString(36)}` })).id
 }, 120_000)
 
@@ -101,7 +113,9 @@ afterAll(async () => {
   }
   await deleteObjectTuples(fgaClient, `space:${spaceId}`).catch(() => {})
   await admin`DELETE FROM spaces WHERE id = ${spaceId}`.catch(() => {})
-  await db.release(); await pool.end(); await admin.end()
+  await db.release()
+  await pt.dispose().catch(() => {})
+  await pool.end(); await admin.end()
 }, 120_000)
 
 describe('#874 the session continues, and nothing else does', () => {
@@ -214,7 +228,7 @@ describe('#874 what a refresh may not get around', () => {
     expect((await refresh(link, tok)).statusCode).toBe(200)
 
     // No `content-type` on a bodyless write: Fastify answers 400 to a declared JSON body that is not there.
-    const revoked = await app.inject({ method: 'DELETE', url: `/share-links/${link}`, headers: { host: 'dev.localhost', authorization: 'Bearer dev-token' } })
+    const revoked = await app.inject({ method: 'DELETE', url: `/share-links/${link}`, headers: { host: HOST, authorization: 'Bearer dev-token' } })
     expect(revoked.statusCode, revoked.body).toBe(204)
     expect((await refresh(link, tok)).statusCode, 'the refresh must not be a way around #100').toBe(404)
   })

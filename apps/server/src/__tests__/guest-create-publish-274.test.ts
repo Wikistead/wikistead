@@ -23,15 +23,18 @@ import { createSpace } from '../routes/spaces.js'
 import { createPage, publishPage } from '../routes/pages.js'
 import { buildApp } from '../app.js'
 import type { Tenant } from '@wikistead/types'
+import { privateTenant, type PrivateTenant } from './helpers/private-tenant.js'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
-const TENANT = 'tenant_dev'
-const asTenant = (id: string): Tenant => ({ id, slug: id, plan: 'free', isolation: 'logical' }) as Tenant
+const asTenant = (id: string, slug: string): Tenant => ({ id, slug, plan: 'free', isolation: 'logical' }) as Tenant
 const guestCfg = { secret: process.env.GUEST_TOKEN_SECRET!, ttlSeconds: 3600 }
-const dev = { host: 'dev.localhost', authorization: 'Bearer dev-token', 'content-type': 'application/json' }
 
 let app: FastifyInstance
 let db: TenantDb
+let pt: PrivateTenant
+let TENANT: string
+let HOST: string
+let dev: { host: string; authorization: string; 'content-type': string }
 let spaceId: string
 let seedPageId: string // a published member page (the page-link anti-test target)
 const createdPages: string[] = []
@@ -50,16 +53,26 @@ const mkSpaceTok = (linkId: string, capability: 'view' | 'edit', anonId: string)
   mintGuestToken(guestCfg, { tenantId: TENANT, shareLinkId: linkId, resource: { type: 'space', id: spaceId }, capability, anonId })
 let seq = 0
 const anon = () => `anon:${(Date.now() + seq++).toString(16).slice(-12).padStart(12, '0')}`
-const guestHeaders = (token: string) => ({ host: 'dev.localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' })
+const guestHeaders = (token: string) => ({ host: HOST, authorization: `Bearer ${token}`, 'content-type': 'application/json' })
 const createAsGuest = (token: string, body: Record<string, unknown> = {}) =>
   app.inject({ method: 'POST', url: `/spaces/${spaceId}/pages`, headers: guestHeaders(token), payload: { title: 'guest page', ...body } })
 
 beforeAll(async () => {
   app = await buildApp()
   await app.ready()
+  // #1127: a PRIVATE tenant, not tenant_dev — this file's abuse-cap fixture (`resetCaps`/cap-setting
+  // cases below) writes the SAME two tenant_settings columns guest-token-refresh-874.test.ts does, and
+  // vitest runs both as concurrent workers, so one file's reset can land between another's SET and its
+  // assertion.
+  pt = await privateTenant(admin, 'gcp274')
+  TENANT = pt.id
+  HOST = pt.H.host
+  dev = pt.H
+  // #1126: privateTenant seeds tenants/members/tenant_login_prefs, never tenant_settings — without a
+  // row here, resetCaps()'s UPDATE (and the cap-setting UPDATEs below) would silently touch zero rows.
   await admin`INSERT INTO tenant_settings (tenant_id) VALUES (${TENANT}) ON CONFLICT (tenant_id) DO NOTHING`
   await resetCaps()
-  db = await acquireTenantDb(asTenant(TENANT))
+  db = await acquireTenantDb(asTenant(TENANT, pt.slug))
   spaceId = (await createSpace(db, fgaClient, { tenantId: TENANT, userId: 'dev-user', plan: 'free', name: `gcp274-${Date.now().toString(36)}` })).id
   seedPageId = (await createPage(db, fgaClient, app.searchDriver, { tenantId: TENANT, spaceId, userId: 'dev-user', title: 'seed' })).id
   await publishPage(db, fgaClient, app.searchDriver, app.storageDriver, { pageId: seedPageId, subject: 'user:dev-user', createdBy: 'user:dev-user' })
@@ -83,6 +96,7 @@ afterAll(async () => {
   await deleteObjectTuples(fgaClient, `space:${spaceId}`).catch(() => {})
   await admin`DELETE FROM spaces WHERE id = ${spaceId}`.catch(() => {})
   await db.release()
+  await pt.dispose().catch(() => {})
   await app.close()
   await admin.end()
   await pool.end()
@@ -115,7 +129,7 @@ describe('#274 guest create-publish (ADR-135 §3)', () => {
     expect(has('manage_direct', anonId)).toBe(false) // a guest owns nothing — no manage path
 
     // The creating link EDITS the new page via edit_from_space; a fresh publish round-trips (200).
-    const pub = await app.inject({ method: 'POST', url: `/pages/${page.id}/publish`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+    const pub = await app.inject({ method: 'POST', url: `/pages/${page.id}/publish`, headers: { host: HOST, authorization: `Bearer ${tok}` } })
     expect(pub.statusCode, pub.body).toBe(200)
     // And the page is in the guest tree (published → listPages includes it for the link principal).
     const list = await app.inject({ method: 'GET', url: `/spaces/${spaceId}/pages`, headers: guestHeaders(tok) })
@@ -233,7 +247,7 @@ describe('#274 guest attachments (ADR-135 §4)', () => {
     expect(pre.statusCode, pre.body).toBe(201)
     const { attachmentId, uploadUrl } = pre.json() as { attachmentId: string; uploadUrl: string }
     expect((await fetch(uploadUrl, { method: 'PUT', body: 'guest bytes', headers: { 'Content-Type': 'text/plain' } })).ok).toBe(true)
-    const conf = await app.inject({ method: 'POST', url: `/attachments/${attachmentId}/confirm`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+    const conf = await app.inject({ method: 'POST', url: `/attachments/${attachmentId}/confirm`, headers: { host: HOST, authorization: `Bearer ${tok}` } })
     expect(conf.statusCode, conf.body).toBe(200)
     expect((conf.json() as { sizeBytes: number }).sizeBytes).toBe(Buffer.byteLength('guest bytes'))
   })
@@ -275,7 +289,7 @@ describe('#274 guest attachments (ADR-135 §4)', () => {
     expect(pre.statusCode).toBe(201)
     const { attachmentId, uploadUrl } = pre.json() as { attachmentId: string; uploadUrl: string }
     expect((await fetch(uploadUrl, { method: 'PUT', body: 'way more than four bytes', headers: { 'Content-Type': 'text/plain' } })).ok).toBe(true)
-    const conf = await app.inject({ method: 'POST', url: `/attachments/${attachmentId}/confirm`, headers: { host: 'dev.localhost', authorization: `Bearer ${tok}` } })
+    const conf = await app.inject({ method: 'POST', url: `/attachments/${attachmentId}/confirm`, headers: { host: HOST, authorization: `Bearer ${tok}` } })
     expect(conf.statusCode).toBe(413)
     const rows = await admin`SELECT 1 FROM attachments WHERE id = ${attachmentId}`
     expect(rows.length).toBe(0) // rejected upload leaves no row
@@ -285,7 +299,7 @@ describe('#274 guest attachments (ADR-135 §4)', () => {
     expect(mp.statusCode, mp.body).toBe(201)
     const m = mp.json() as { attachmentId: string; uploadUrl: string }
     expect((await fetch(m.uploadUrl, { method: 'PUT', body: 'way more than four bytes', headers: { 'Content-Type': 'text/plain' } })).ok).toBe(true)
-    const mconf = await app.inject({ method: 'POST', url: `/attachments/${m.attachmentId}/confirm`, headers: { host: 'dev.localhost', authorization: 'Bearer dev-token' } })
+    const mconf = await app.inject({ method: 'POST', url: `/attachments/${m.attachmentId}/confirm`, headers: { host: HOST, authorization: 'Bearer dev-token' } })
     expect(mconf.statusCode, mconf.body).toBe(200)
     await admin`DELETE FROM attachments WHERE id = ${m.attachmentId}`.catch(() => {})
   })
