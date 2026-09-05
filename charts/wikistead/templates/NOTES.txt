@@ -4,10 +4,15 @@ Your first administrator is NOT the first person to sign in. Nobody can sign in 
 and open the invite link it prints:
 
   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "wikistead.fullname" . }}-server -- \
-    node dist/scripts/local-admin.js <workspace-slug> you@example.com --create --origin=https://{{ .Values.host }}
+    node dist/scripts/local-admin.js <workspace-slug> you@example.com --create{{ if not .Values.workspaceHostTemplate }} --origin={{ ternary "https" "http" .Values.ingress.tls.enabled }}://{{ .Values.host }}{{ end }}
 
 A workspace's slug is the FIRST LABEL of the host it answers on. With host {{ .Values.host }}, the
 slug `docs` means `docs.{{ .Values.host }}` — so the slug is chosen with DNS in mind, not afterwards.
+{{- if .Values.workspaceHostTemplate }}
+No --origin above: with `workspaceHostTemplate` set, the command builds the invite link from it
+automatically (https://{slug}.{{ .Values.host }}) — passing --origin here would override that with
+THIS deployment's own host, which no workspace answers on, and the invite 404s.
+{{- end }}
 
 {{- if not .Values.workspaceHostTemplate }}
 

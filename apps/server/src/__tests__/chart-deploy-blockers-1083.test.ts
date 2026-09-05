@@ -62,6 +62,8 @@ describe('#1087 the NOTES first-admin command can actually run', () => {
     const notes = chart('templates/NOTES.txt')
     const line = notes.split('\n').find((l) => l.includes('local-admin.js'))
     expect(line, 'the first-admin command exists').toBeTruthy()
-    expect(line).toContain('--origin=https://{{ .Values.host }}')
+    // #1100: on the chart's default config (workspaceHostTemplate unset), --origin is still printed —
+    // its scheme now follows ingress.tls.enabled instead of being fixed to https.
+    expect(line).toContain('--origin={{ ternary "https" "http" .Values.ingress.tls.enabled }}://{{ .Values.host }}')
   })
 })
