@@ -43,12 +43,39 @@ export async function privateTenant(admin: Sql, slug: string, opts?: { plan?: st
     AUTH: { host: `${slug}.localhost`, authorization: 'Bearer dev-token' },
     dispose: async () => {
       for (const t of TUPLES(id)) await deleteTuples(fgaClient, [t]).catch(() => {})
-      // Dependents first; the ledger tables are cleaned too — a private tenant's history has no
-      // other reader, so the hash-chain caveat that protects tenant_dev's ledger does not apply.
-      for (const tbl of ['member_factors', 'audit_outbox', 'audit_log', 'local_credentials', 'password_resets', 'sso_exemptions', 'tenant_oidc', 'tenant_saml', 'tenant_login_prefs', 'role_assignments', 'roles', 'members']) {
-        await admin.unsafe(`DELETE FROM ${tbl} WHERE tenant_id = '${id}'`).catch(() => {})
+      // #1140: the previous hand-kept table list left out spaces/pages/share_links/tenant_settings/
+      // member_identities (among others) — a `DELETE FROM tenants` blocked on one of those FKs was
+      // swallowed by a bare `.catch(() => {})`, so the tenant silently survived and the NEXT run's
+      // `ON CONFLICT (slug) DO UPDATE` reused it with whatever state the failed run left behind.
+      // Fixed the way `infra/db/prune-test-tenants.ts` (#788) fixes the same class of bug: the table
+      // set is ASKED OF THE DATABASE, not listed, so a table added next month (or one nobody thought
+      // to hand-list, the way this file never had) joins the sweep on its own. A plain `tenant_id`
+      // column catches both the FK-constrained tables (spaces, members, ...) and the ones with no FK
+      // at all (audit_outbox, analytics_outbox, ...) — a `confrelid = tenants` query alone would miss
+      // the latter.
+      const tables = (await admin<{ table_name: string }[]>`
+        SELECT DISTINCT table_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND column_name = 'tenant_id' AND table_name <> 'tenants'`
+      ).map((r) => r.table_name)
+      // Multi-pass, same as #788: the FKs are NO ACTION, so a table whose rows reference another
+      // table in this same set (pages -> spaces, revisions -> pages, ...) may refuse on an early pass
+      // and succeed once that one is empty. A table with no FK at all just succeeds on pass one.
+      for (let pass = 0; pass < 6 && tables.length; pass++) {
+        for (const table of [...tables]) {
+          try {
+            await admin.unsafe(`DELETE FROM ${table} WHERE tenant_id = $1`, [id])
+            tables.splice(tables.indexOf(table), 1)
+          } catch { /* still referenced — try again next pass */ }
+        }
       }
-      await admin`DELETE FROM tenants WHERE id = ${id}`.catch(() => {})
+      if (tables.length > 0) {
+        // Do not swallow this: a private tenant that fails to dispose is reused, with its old rows
+        // and settings still attached, by the very next run that picks the same slug (#1140's bug).
+        throw new Error(
+          `privateTenant(${slug}) dispose: ${tables.length} table(s) still reference tenant_id after 6 passes: ${tables.join(', ')}`,
+        )
+      }
+      await admin`DELETE FROM tenants WHERE id = ${id}`
     },
   }
 }
