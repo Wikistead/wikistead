@@ -23,6 +23,18 @@ browser out of it, and that is not undoable from the server side.
 {{- if .Values.ingress.tls.enabled }}
 {{- $snippet = printf "%smore_set_headers \"Strict-Transport-Security: max-age=31536000; includeSubDomains\";\n" $snippet -}}
 {{- end }}
+{{- /*
+ADR-277: `add_header`, NOT `more_set_headers` — this snippet is shared by all three objects below
+(the api one included), and `/pub` (public.ts) and `/attachments/:id/inline` (reached through the
+api object, stripped from `/api`) each set their OWN, stricter, path-specific
+`Content-Security-Policy`. `more_set_headers` REPLACES a header of the same name a proxied response
+already carries; `add_header` ADDS a second one instead, and multiple CSP headers intersect — a
+route's own narrower policy (e.g. `/mcp/oauth`'s `frame-ancestors 'none'`) still wins, this can only
+narrow what a route already sends, never loosen it. The self-hosted-with-Caddy topology ships the
+same `frame-ancestors 'self'` centrally via Caddy's `+Content-Security-Policy` (also append, same
+reason); the REST of the policy ships as a `<meta>` tag baked into the built `index.html`.
+*/ -}}
+{{- $snippet = printf "%sadd_header \"Content-Security-Policy\" \"frame-ancestors 'self'\" always;\n" $snippet -}}
 {{- $hosts := list .Values.host -}}
 {{- if .Values.ingress.wildcardHost }}{{- $hosts = append $hosts (printf "*.%s" .Values.host) }}{{- end }}
 apiVersion: networking.k8s.io/v1

@@ -84,4 +84,31 @@ describe('edge security headers are stated, not inherited (#880)', () => {
       }
     },
   )
+
+  // #990 / ADR-277: `frame-ancestors` cannot be carried by the app shell's `<meta>` tag (browsers
+  // ignore it there), so it is this file's job — the one directive the app-layer CSP structurally
+  // cannot enforce, same reasoning as nosniff/Referrer-Policy/HSTS above.
+  it.each(files.map((f) => [f.path, f.text] as const))(
+    '%s states frame-ancestors alongside nosniff',
+    (path, text) => {
+      expect(text, `${path} sets nosniff but never names frame-ancestors`).toMatch(/frame-ancestors/i)
+    },
+  )
+
+  // #990 / ADR-277/ nginx's `more_set_headers` REPLACES, not merges, a header of the
+  // same name a proxied response already carries — `/pub` and `/attachments/:id/inline` each set
+  // their own, stricter, path-specific Content-Security-Policy, so setting the edge's
+  // `frame-ancestors` via `more_set_headers` would silently erase those. `add_header` ADDS a second
+  // CSP header instead (multiple CSP headers intersect — a route's own narrower policy still wins).
+  // This guards the MECHANISM, not just the VALUE, since a future edit that "simplifies" this back
+  // to more_set_headers would keep every assertion above green while reintroducing exactly the
+  // regression this ADR's own review rounds found and fixed for Caddy.
+  it.each(
+    files.filter((f) => /more_set_headers/i.test(f.text)).map((f) => [f.path, f.text] as const),
+  )('%s never SETs Content-Security-Policy (must ADD, not replace, a route\'s own policy)', (path, text) => {
+    // The DIRECTIVE call, not prose that merely discusses it — `more_set_headers "Content-Security-
+    // Policy: …"` (raw base file) or `more_set_headers \"Content-Security-Policy: …\"` (Helm's quoted
+    // Go-template string).
+    expect(text).not.toMatch(/more_set_headers\s*\\?["'“]content-security-policy/i)
+  })
 })
