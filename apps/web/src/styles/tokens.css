@@ -154,7 +154,7 @@
   --accent-fg: #ffffff; /* text/icon on an accent fill */
   --danger: #cf222e;    /* destructive actions (delete / remove / revoke) */
   --danger-fg: #ffffff;
-  /* #464 page-views chart series (dataviz: fixed categorical order; validated on the light surface —
+  /* #464 page-views chart series (dataviz: fixed categorical order; validated on the light surface
      lightness/chroma/contrast PASS, adjacent CVD in the 6–8 floor legalised by the legend's direct labels). */
   --views-member: #2563eb;
   --views-guest: #d97706;
@@ -168,7 +168,7 @@
   --callout-tip: #2ea043;    /* green — success/tip */
   --callout-warning: #d29922;/* yellow — caution */
   --callout-danger: var(--danger); /* red — danger (a fixed semantic token, not the accent) */
-  /* Syntax highlight (#158-C2 / ADR-052): Everforest LIGHT (medium) hues as semantic tokens —
+  /* Syntax highlight (#158-C2 / ADR-052): Everforest LIGHT (medium) hues as semantic tokens
      code-fence highlighting consumes these so the palette is themeable (Neovim-consistent). */
   --hl-keyword: #f85552;   /* red */
   --hl-string: #8da101;    /* green */
@@ -276,7 +276,7 @@
   --space-6: 32px;
   --header-h: 40px;
   --sidebar-w: 260px;
-  /* #158-C1 / #190 (ADR-090) fonts, REVISED by #633 / ADR-217 (ruling 2026-08-06):
+  /* #158-C1 / #190 (ADR-090) fonts, REVISED by #633 / ADR-217 (ruling 2026-08-06)
        --font-ui   : chrome/labels — Inter (Latin) + Noto Sans JP (JP), self-hosted woff2 (OFL).
        --font-body : editor/reading PROSE. Now the SAME proportional chain as the UI, so one screen
                      no longer shows two Japanese faces (body was BIZ UDGothic via UDEV Gothic, chrome
@@ -293,7 +293,7 @@
      No language -> face TABLE: the chain lets the browser resolve per glyph, so adding a language is
      adding one family to the chain rather than a branch to maintain (ADR-217).
      Font (glyph) is ORTHOGONAL to #158-C2 code highlight (colour). */
-  /* #713-S3: "this product grows those languages" (above) has arrived for the PROPORTIONAL chain —
+  /* #713-S3: "this product grows those languages" (above) has arrived for the PROPORTIONAL chain
      Noto Sans SC (simplified Chinese) and Noto Sans KR (Korean) added the same way Noto Sans JP was,
      one family in the chain, no per-language branch. --font-body-vim is UNCHANGED and is a KNOWN GAP:
      UDEV Gothic has no zh-Hans/ko coverage, so vim's column grid still degrades to the fallback chain's
@@ -351,6 +351,21 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);     /* entrances (decelerate) */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);   /* general state changes */
   --ease-in: cubic-bezier(0.4, 0, 1, 1);         /* exits (accelerate) */
+}
+
+/* #1159 / ADR-217 rev (user ruling, 2026-09-06): the chain still resolves per glyph — this is
+   NOT a language → face table — but when more than one CJK family shares a codepoint (Noto Sans JP,
+   SC and KR all declare /, per ADR-217's own measurement), the chain's fixed order always hands
+   the shared glyph to whichever family sits first, and that is JP for every reader regardless of
+   their own script. `:lang()` moves the reader's own family to the front of the SAME chain; every
+   other family is still there as fallback, so a codepoint the front family lacks still resolves.
+   This is the minimal extension the ruling asked for: "reorder the chain by locale", not "look up a
+   face by language" — the base (ja and every other locale) --font declaration above is untouched. */
+:root:lang(zh-Hans) {
+  --font: "Inter", "Noto Sans SC", "Noto Sans JP", "Noto Sans KR", system-ui, sans-serif;
+}
+:root:lang(ko) {
+  --font: "Inter", "Noto Sans KR", "Noto Sans JP", "Noto Sans SC", system-ui, sans-serif;
 }
 
 /* #633 / ADR-217: the per-locale body face is GONE, and so is the per-user font choice it competed

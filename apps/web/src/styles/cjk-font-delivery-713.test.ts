@@ -103,3 +103,46 @@ describe("#1159 / #713-S3: CJK font delivery is lazy, by locale", () => {
     }
   });
 });
+
+// #1159 review bounce (user ruling, 2026-09-06): "show the right font per language" — the
+// base chain's fixed order (Inter, JP, SC, KR) always hands a codepoint shared by JP and SC/KR to JP,
+// so a zh-Hans or ko reader saw Japanese glyph forms for characters their own family also draws. This
+// pins the ADR-217 rev (§2 exception) that moves the reader's own family to the front via `:lang()`,
+// still as a chain (every other family stays as fallback) rather than a per-language face table.
+describe("#1159: the CJK reader's own family leads the chain, in their own locale", () => {
+  const CSS_STRIPPED = TOKENS.replace(/\/\*[\s\S]*?\*\//g, ""); // comments quote the retired form
+  const chainOf = (selector: string) => {
+    const at = CSS_STRIPPED.indexOf(selector);
+    expect(at, `${selector} rule not found in tokens.css`).toBeGreaterThanOrEqual(0);
+    const block = CSS_STRIPPED.slice(at, CSS_STRIPPED.indexOf("}", at));
+    return block.match(/--font:\s*([^;]+);/)?.[1] ?? "";
+  };
+
+  it("a zh-Hans reader gets Noto Sans SC before Noto Sans JP", () => {
+    const chain = chainOf(':root:lang(zh-Hans)');
+    expect(chain, `:root:lang(zh-Hans) does not override --font: ${chain}`).not.toBe("");
+    expect(chain.indexOf("Noto Sans SC"), `SC not before JP in: ${chain}`)
+      .toBeLessThan(chain.indexOf("Noto Sans JP"));
+  });
+
+  it("a ko reader gets Noto Sans KR before Noto Sans JP", () => {
+    const chain = chainOf(':root:lang(ko)');
+    expect(chain, `:root:lang(ko) does not override --font: ${chain}`).not.toBe("");
+    expect(chain.indexOf("Noto Sans KR"), `KR not before JP in: ${chain}`)
+      .toBeLessThan(chain.indexOf("Noto Sans JP"));
+  });
+
+  it("every family stays in each override — reordering, not narrowing, the chain", () => {
+    for (const selector of [':root:lang(zh-Hans)', ':root:lang(ko)']) {
+      const chain = chainOf(selector);
+      for (const family of ["Inter", "Noto Sans JP", "Noto Sans SC", "Noto Sans KR"]) {
+        expect(chain, `${selector}: missing "${family}" — fallback narrowed, not reordered`).toContain(family);
+      }
+    }
+  });
+
+  it("ja and every other locale are untouched — no override rule names them", () => {
+    expect(CSS_STRIPPED).not.toMatch(/:root:lang\(ja\)\s*\{[^}]*--font:/);
+    expect(CSS_STRIPPED).not.toMatch(/:root:lang\(en\)\s*\{[^}]*--font:/);
+  });
+});
