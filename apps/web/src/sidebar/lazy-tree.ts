@@ -81,22 +81,27 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
   const paint = useQuery({
-    queryKey: ["pages", spaceId, "paint", openPageId ?? ""],
+    // #1168 / ADR-220 §17 (rev16, owner-ruled 2026-09-06): NOT keyed on `openPageId` any more. The key
+    // used to change on every navigation, so react-query treated each one as a request it had never
+    // seen — and `paintTree` re-walked every ancestor's branch (a `listBranch` call, per-row view
+    // check included, per ancestor) on every single page open, even ones already fresh in
+    // `branchQueries`' own cache. The root branch this query still fetches is genuinely space-scoped,
+    // not page-scoped, so it now says so. Revealing the OPEN page's ancestors is the reach effect's
+    // job below (already `pathToPage`-backed and view-checked); this query no longer asks for them.
+    queryKey: ["pages", spaceId, "paint"],
     enabled: !!spaceId,
     staleTime: 0,
     // #492: the tree is boot-critical — a transient failure used to stick as an empty sidebar until a
     // manual reload. The headroom moved here with the read itself (the whole-space query carried it).
     retry: 3,
-    // The key carries the OPEN page, so every navigation is a new key — and without this the previous
-    // answer vanishes for the fetch's duration and the whole tree unmounts on every page open
-    // (measured: a freshly created page's row failed a 5s visibility wait because the tree was
-    // rebuilding from nothing). The stale paint stays up; the new one replaces it when it lands.
+    // A stable key across navigations means this query does not remount on every page open any more —
+    // kept anyway as the space itself can still trigger a genuine remount (a fresh mount always starts
+    // without an answer for one render).
     placeholderData: (prev: { paintedParents: (string | null)[] } | undefined) => prev,
     queryFn: async () => {
       // #623 ③: confirm what the screen can SHOW (~20 rows visible; 30 leaves headroom), not
       // the whole branch. The rest arrives by scrolling through the `more:` row.
       const qs = new URLSearchParams({ limit: String(PAINT_LIMIT) });
-      if (openPageId) qs.set("open", openPageId);
       const r = await apiFetch<PaintAnswer>(`/spaces/${spaceId}/pages/paint?${qs}`, token);
       const branches: PaintAnswer["branches"] = r?.branches ?? [];
       for (const b of branches) {
@@ -225,25 +230,25 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
     qc.setQueryData<BranchAnswer>(key, mergeLoadMoreAppend(have, r));
   }, [spaceId, token, qc]);
 
-  // ADR-238 / #739: REACH the open row when the paint did not already hold it.
+  // ADR-238 / #739, promoted by #1168 / ADR-220 §17 (rev16): REACH the open row and, since the paint
+  // no longer walks ancestors at all (see the paint query above), this is now the ONLY thing that
+  // reveals them — not a correction applied when the paint "got a window wrong".
   //
-  // The paint fetches the branch of every ancestor, but each comes back as its FIRST window — so a page
-  // past row 30 of its branch is simply not in the tree, and the reader who was sent a link lands on a
-  // sidebar that does not show where they are. Measured on a 60-page space: the row never appeared.
+  // A branch's first window (30 rows) may not contain the open page at all, so the reader who was sent
+  // a link could land on a sidebar that does not show where they are. Measured on a 60-page space: the
+  // row never appeared. What this is NOT is a loop over `more:` until the row turns up — that is
+  // unbounded in exactly the shape #705 / #710 ruled against. The server knows the ordering, so it
+  // answers WHICH WINDOW in one round trip (`pathToPage`, view-checked per level), and this fetches
+  // only the levels whose window isn't already the first one — usually one, never more than the depth
+  // of the page.
   //
-  // What this is NOT is a loop over `more:` until the row turns up. That is unbounded in exactly the
-  // shape #705 / #710 ruled against, and the cost falls on the reader who did the least to deserve it.
-  // The server knows the ordering, so it answers WHICH WINDOW in one round trip, and this fetches only
-  // the levels whose window the paint got wrong — usually one, never more than the depth of the page.
-  //
-  // ⚠️ It runs only when the row is ABSENT. Nothing happens for a page in the first window of its
-  // branch, which is nearly every page: the common navigation costs no extra request at all.
+  // ⚠️ It runs on every navigation now (the `held` check below is what keeps that cheap): a page whose
+  // ancestors are already expanded and fresh from a previous visit skips the network call entirely,
+  // and only a genuinely new chain pays for the `path` request — never a `paint`-wide re-walk.
   const reachedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!spaceId || !openPageId) return;
     if (reachedFor.current === openPageId) return;
-    // Wait for the paint. Acting before it lands would ask for a path the paint is about to deliver.
-    if (!paint.data) return;
     const held = [...byParent.values()].some((branch) =>
       visibleBranchPages(branch).some((page) => page.id === openPageId));
     reachedFor.current = openPageId;
@@ -257,7 +262,8 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       // to try: the row is not theirs to see, and the sidebar simply stays as the paint drew it.
       if (!r) return;
       for (const level of r.levels) {
-        // No cursor means the target is in the branch's first window, which the paint already fetched.
+        // No cursor means the target is in the branch's first window — the chain-expansion below adds
+        // this level to `expanded`, and `branchQueries` (not this effect) fetches that first window.
         if (!level.cursor) continue;
         const qs = new URLSearchParams();
         if (level.parentId) qs.set("parent", level.parentId);
@@ -276,7 +282,7 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
       const chain = r.levels.map((l) => l.parentId).filter((id): id is string => !!id);
       if (chain.length) setExpanded((prev) => new Set([...prev, ...chain]));
     })();
-  }, [spaceId, openPageId, paint.data, byParent, token, qc]);
+  }, [spaceId, openPageId, byParent, token, qc]);
 
   // #1141 a placeholder-walk failure (including a continuation cursor too large to survive the
   // trip — `PlaceholderCursorTooLargeError`) must converge on the SAME read-failure surface a broken

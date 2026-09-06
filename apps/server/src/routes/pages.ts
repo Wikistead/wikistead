@@ -2267,6 +2267,15 @@ export interface PaintedBranch { parentId: string | null; pages: Page[]; nextCur
  *
  * Every branch here is the same bounded, individually-confirmed read as §1's, so the response grows with
  * the DEPTH of the open page (bounded by MAX_PAGE_DEPTH) rather than with the size of the space.
+ *
+ * #1168 / ADR-220 §17 (rev16): the member sidebar (`useLazyPageTree`, the only caller of the client
+ * route this backs) no longer sends `open` — its OWN query key used to carry the open page, so every
+ * navigation looked like a request react-query had never seen, and this function re-walked every
+ * ancestor's branch (a `listBranch` call, per-row view check included, per ancestor) on every single
+ * page open. Revealing the open page's ancestors is now the client's own `pathToPage`-backed reach
+ * effect's job, unconditionally, and it already carries the same per-level view check this function's
+ * `open` branch does. `open` stays supported here rather than removed — this route is CE-reachable by
+ * an issued API key, not only by the sidebar — so a caller with a real use for it still has one.
  */
 export async function paintTree(
   db: TenantDb,
@@ -4928,7 +4937,8 @@ export async function pagesPlugin(app: FastifyInstance) {
     return { pages, truncated: false }
   })
 
-  // #623 / ADR-220 §5: the first paint — the root branch plus the path to the open page.
+  // #623 / ADR-220 §5: the first paint — the root branch (plus, historically, the path to the open
+  // page — see the `open` note on `paintTree` below; #1168 stopped the member sidebar from sending it).
   app.get<{ Params: { spaceId: string }; Querystring: { open?: string; limit?: string } }>(
     '/spaces/:spaceId/pages/paint', { config: { guest: 'view' } }, async (req, reply) => {
       let subject: string
