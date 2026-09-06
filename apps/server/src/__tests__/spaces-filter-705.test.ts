@@ -54,8 +54,13 @@ afterAll(async () => {
 
 describe('#705: the server-side name filter', () => {
   it('matches beyond the first unfiltered page (the reason the filter moved server-side)', async () => {
+    // #1171: don't lean on the dev tenant's ambient space count for the premise below — an isolated
+    // stack's tenant_dev may hold far fewer than the "hundreds" the shared interactive stack has
+    // accumulated. Create enough of our own, all strictly OLDER than the needles below (`listSpaces`
+    // orders `created_at, id` ascending), to fill the page-1 window regardless of ambient content.
+    for (let i = 0; i < 5; i++) await mk(`f705 filler ${i} ${STAMP}`)
     // Two needles that share a marker no other space carries; the walk between them is long enough
-    // that a first-page-only client filter would miss the second one on the dev tenant.
+    // that a first-page-only client filter would miss the second one.
     await mk(`f705 alpha needle ${STAMP}`)
     await mk(`f705 beta needle ${STAMP}`)
     const hit = await listSpaces(db, app.fga, OWNER, { q: `needle ${STAMP}` })
@@ -64,7 +69,7 @@ describe('#705: the server-side name filter', () => {
       `f705 beta needle ${STAMP}`,
     ])
     // …and an unfiltered FIRST PAGE does not contain them both by accident (premise, not vacuous):
-    // the dev tenant carries hundreds of earlier spaces, so a fresh pair lands beyond page one.
+    // the filler above (plus whatever the tenant already carried) fills page one before the needles.
     const firstPage = await listSpaces(db, app.fga, OWNER, { limit: 5 })
     const onFirst = firstPage.spaces.filter((s) => s.name.includes(`needle ${STAMP}`)).length
     expect(onFirst, 'the premise: page one alone would not have found both').toBeLessThan(2)

@@ -49,9 +49,16 @@ afterAll(async () => {
 
 describe('#623: the space listing is a page, and the walk reaches the end', () => {
   it('one request carries at most the page limit, and says whether there is more', async () => {
+    // #1171: do not lean on the dev tenant's AMBIENT space count to clear the >2 premise below — the
+    // shared interactive dev stack has hundreds from months of use, but an isolated stack's tenant_dev
+    // starts near-empty and drifts unpredictably as its own fixtures accumulate. Create enough of our
+    // own so the premise holds regardless of what else is already there.
+    for (let i = 0; i < 3; i++) {
+      const sp = await createSpace(db, app.fga, { tenantId: T, plan: 'business', userId: OWNER, name: `paged623-premise-${i}-${STAMP}` })
+      made.push(sp.id)
+    }
     const first = await listSpaces(db, app.fga, OWNER, { limit: 2 })
     expect(first.spaces.length, 'never more than asked for').toBeLessThanOrEqual(2)
-    // the dev tenant has plenty; if it ever did not, this would be vacuous, so assert the premise
     const all = await listAllSpaces(db, app.fga, OWNER)
     expect(all.length, 'the tenant has more spaces than one small page').toBeGreaterThan(2)
     expect(first.nextCursor, 'and the caller is told where to resume').not.toBeNull()
