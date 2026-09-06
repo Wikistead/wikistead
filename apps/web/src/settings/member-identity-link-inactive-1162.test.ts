@@ -21,6 +21,9 @@ const links = {
 let queryResult: { data: { primaryIdentitySource: string; links: (typeof links)[keyof typeof links][] } | undefined; isLoading: boolean; isError: boolean };
 vi.mock("../data/queries", () => ({
   useMemberIdentityLinks: () => queryResult,
+  // #1163: MemberIdentityLinksSection also calls this now — a no-op stub is enough for this file's
+  // own concern (connectionEffective's rendering), which never exercises the unlink flow.
+  useAdminUnlinkMemberIdentity: () => ({ mutate: () => {}, isPending: false }),
 }));
 
 const { MemberIdentityLinksSection } = await import("./MemberIdentityLinksSection");
@@ -29,7 +32,7 @@ async function render(linkRows: (typeof links)[keyof typeof links][]) {
   queryResult = { data: { primaryIdentitySource: "oidc", links: linkRows }, isLoading: false, isError: false };
   const container = document.createElement("div");
   const root = createRoot(container);
-  await act(async () => { root.render(createElement(MemberIdentityLinksSection, { sub: "s1" })); });
+  await act(async () => { root.render(createElement(MemberIdentityLinksSection, { sub: "s1", name: "Test Member" })); });
   return { container, root };
 }
 
