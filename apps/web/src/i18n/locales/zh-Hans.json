@@ -241,7 +241,7 @@
     "theme_system": "跟随系统",
     "cmd_cycleDisplayMode": "循环切换显示模式",
     "displayMode": "显示模式",
-    "displayModeHint": "编辑器如何展开语法：实时模式会在光标下方显示语法，源码模式始终显示。与 Vim 正交。本地设置跟随此设备。",
+    "displayModeHint": "编辑器如何展开语法：实时预览会在光标下方显示语法，源码始终显示。与 Vim 正交。本地设置跟随此设备。",
     "displayMode_local": "此设备（跟随工具栏）",
     "displayMode_live": "始终实时预览",
     "displayMode_source": "始终源码",

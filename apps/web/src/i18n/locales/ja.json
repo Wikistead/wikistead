@@ -1553,7 +1553,7 @@
     "changedStartLive": "初期モードを Live プレビューにしました",
     "changedStartWysiwyg": "初期モードを WYSIWYG にしました",
     "changedHidWysiwyg": "モード切替から WYSIWYG を非表示にしました",
-    "changedHidMarkdownModes": "モード切替から Live / Source を非表示にしました",
+    "changedHidMarkdownModes": "モード切替からライブ / ソースを非表示にしました",
     "changedBalancedModes": "Live / Reading / WYSIWYG を表示（Source は設定から追加できます）",
     "bannerText": "書き方に合わせてエディタを最適化できます。",
     "bannerCta": "設定する",
