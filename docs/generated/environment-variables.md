@@ -131,7 +131,7 @@ A blank value is not the same as a missing one: unless a row says otherwise, uns
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `GUEST_TOKEN_SECRET` | unset (required) | Signs the short-lived tokens anonymous share-link visitors carry. Production refuses to start on the value published in the public repository's fixtures. |
-| `PLACEHOLDER_CURSOR_SECRET` | falls back to GUEST_TOKEN_SECRET; refuses to mint a cursor (resume fails) if neither is set | Encrypts (AES-256-GCM, not merely signs) the page tree's placeholder-walk continuation cursor (ADR-220 §4.2 rev12), so its contents are unreadable without the key and a resumed walk cannot be redirected to a different reader, tenant, space or branch than the one it was minted for. |
+| `PLACEHOLDER_CURSOR_SECRET` | falls back to GUEST_TOKEN_SECRET; refuses to mint a cursor (resume fails) if neither is set | Encrypts (AES-256-GCM, not merely signs) the page tree's placeholder-walk continuation cursor, so its contents are unreadable without the key and a resumed walk cannot be redirected to a different reader, tenant, space or branch than the one it was minted for. |
 | `GUEST_TOKEN_TTL_SECONDS` | 300 | How long a guest token lives. Keep it short: revoking a link disconnects the guests it can still reach at once, and this is how long access lasts for one it could not. The value is also clamped to the link's own remaining life, so a link expiring in a minute never mints an hour-long token. |
 | `EXCHANGE_RL_IP_MAX` | 30 | Share-link token exchanges accepted per source address per minute. |
 | `EXCHANGE_RL_LINK_MAX` | 10 | Token exchanges accepted per share link per minute, which bounds one leaked link rather than one visitor. |
@@ -211,7 +211,7 @@ These exist so the product and its test harness can talk to themselves. Each one
 | --- | --- |
 | `WIKISTEAD_SKIP_FGA_MODEL_GUARD` | Test harnesses set this to bring a server up against a store whose model is deliberately mismatched. A deployment that sets it turns off the check that its authorization model is the one it thinks it is. |
 | `WIKISTEAD_SKIP_MIGRATION_GUARD` | Starts the server even when migrations the image ships are missing from the database. Set it only to get a process up for diagnosis: every request that touches the missing schema fails with 42703. |
-| `WIKISTEAD_ALLOW_PROMOTION` | Overrides `pnpm tenant:promote`'s refusal (#1108: the migration runner does not reach `ns_*` schemas, so a promoted tenant stops receiving schema changes the moment it is promoted). Set it only after reading #1108 and accepting ownership of the resulting drift by hand. |
+| `WIKISTEAD_ALLOW_PROMOTION` | Overrides `pnpm tenant:promote`'s refusal (the migration runner does not reach `ns_*` schemas, so a promoted tenant stops receiving schema changes the moment it is promoted). Set it only after understanding that gap and accepting ownership of the resulting drift by hand. |
 | `WIKISTEAD_TEST_STACK` | The test runner sets this to prove a suite is pointed at the isolated stack rather than a development database. Setting it by hand tells that guard a lie. |
 | `POOL_END_QUIESCE_MS` | How long a shutdown waits for tenant connections that are on their way back before it forces the close. It exists so a machine slow enough to miss the default can be given room; a deployment has no shutdown path to tune, and setting it high enough to matter would trade a reported hang for a silent one. |
 

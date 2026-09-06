@@ -194,7 +194,7 @@ export const ENV_DOCS = {
   },
   WIKISTEAD_ALLOW_PROMOTION: {
     group: 'Database',
-    internal: 'Overrides `pnpm tenant:promote`\'s refusal (#1108: the migration runner does not reach `ns_*` schemas, so a promoted tenant stops receiving schema changes the moment it is promoted). Set it only after reading #1108 and accepting ownership of the resulting drift by hand.',
+    internal: 'Overrides `pnpm tenant:promote`\'s refusal (the migration runner does not reach `ns_*` schemas, so a promoted tenant stops receiving schema changes the moment it is promoted). Set it only after understanding that gap and accepting ownership of the resulting drift by hand.',
   },
 
   // ── Search ────────────────────────────────────────────────────────────────────────────────────
@@ -320,7 +320,7 @@ export const ENV_DOCS = {
   PLACEHOLDER_CURSOR_SECRET: {
     group: 'Guests and sharing',
     default: 'falls back to GUEST_TOKEN_SECRET; refuses to mint a cursor (resume fails) if neither is set',
-    what: 'Encrypts (AES-256-GCM, not merely signs) the page tree\'s placeholder-walk continuation cursor (ADR-220 §4.2 rev12), so its contents are unreadable without the key and a resumed walk cannot be redirected to a different reader, tenant, space or branch than the one it was minted for.',
+    what: 'Encrypts (AES-256-GCM, not merely signs) the page tree\'s placeholder-walk continuation cursor, so its contents are unreadable without the key and a resumed walk cannot be redirected to a different reader, tenant, space or branch than the one it was minted for.',
   },
   GUEST_TOKEN_TTL_SECONDS: {
     group: 'Guests and sharing',
