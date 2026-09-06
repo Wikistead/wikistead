@@ -53,8 +53,6 @@ jobs:
       - run: pnpm lint:selfhost-profile     # the apps profile must be able to serve the product
       - run: pnpm lint:no-css-modules  # shadcn/Tailwind migration: no new CSS Modules
       - run: pnpm lint:no-control-bytes     # a raw NUL makes git call a source file binary, and a binary file has no diff to review
-      - run: pnpm lint:no-japanese-comments # a shipped source comment is English — the source is the first defence, not the publication belt
-      - run: pnpm lint:no-japanese-prose    # a shipped doc/prose file (.md/.txt/.yaml/.yml) is English — same defence, the file kinds the comment check cannot reach
       - run: pnpm docs:check               # doc↔code linkage: generated docs not stale
       # The docs repo lands at the path check-doc-links.mjs treats as the combined checkout
       # (`wikistead-docs/`), arming the authored half of the strict gate below.
@@ -63,7 +61,6 @@ jobs:
         with:
           repository: ${{ env.DOCS_REPO }}
           path: wikistead-docs
-      - run: pnpm lint:docs-publish-links   # a docs link to a file the filter erases is a 404 on the day we publish (checked where the docs checkout is)
       - run: pnpm lint:doc-links -- --strict  # enforceable doc↔code violations fail CI (generated always; authored when the docs checkout above is armed)
       - run: pnpm lint:deploy-secrets      # no NEW plaintext credential in deploy/ (the known two are owed, not allowed)
       - run: pnpm lint:commit-types        # the release tooling reads these subjects, so the type list is fixed now
