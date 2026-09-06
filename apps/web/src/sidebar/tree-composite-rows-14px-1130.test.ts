@@ -32,9 +32,15 @@ describe("#1130: the tree's remaining two synthetic rows inherit 14px like a pag
   // block would flag the comment describing the fix as if it were the bug).
   const CLASS_HAS_SIZE_OVERRIDE = /className="[^"]*\btext-(?:xs|sm)\b/;
 
-  it('"load more pages" (tree-branch-more, MoreRow) sets no font-size override on its button', () => {
+  // #1149 (ruling): this row's own visible label is gone (idle: nothing at all; fetching: a
+  // textless skeleton), so the original concern here — a font-size override on ITS text — no longer
+  // has anything to apply to. What still matters is that the label stays gone: no button, and no
+  // reference to the retired locale key, so a future edit can't quietly bring the text back undersized
+  // (or at all) without this test noticing.
+  it('"load more" (tree-branch-more, MoreRow) has no button and no label — idle renders nothing', () => {
     const body = slice("function MoreRow(", "\nexport function PageTree(");
-    expect(body).toContain("sidebar.loadMorePages"); // sanity: this is the right block
+    expect(body).not.toContain("sidebar.loadMorePages");
+    expect(body).not.toMatch(/<button/);
     expect(body).not.toMatch(CLASS_HAS_SIZE_OVERRIDE);
   });
 

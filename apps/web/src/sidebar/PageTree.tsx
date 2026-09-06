@@ -88,7 +88,11 @@ function TreeLoadingRow() {
   );
 }
 
-function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => void | Promise<void> }) {
+// #1149 (ruling): shared by the member tree (PageTree, below) and the guest tree (GuestSidebar) —
+// #903's "the guest surface must not fork the house mechanism" applies to auto-loading a continuation
+// row exactly as much as it does to authz. `hostTestId` is the only thing that differs between the two
+// callers: the ancestor container carrying the scroll/keyboard interactions this row eavesdrops on.
+export function MoreRow({ enabled, onVisible, hostTestId = "page-tree" }: { enabled: boolean; onVisible: () => void | Promise<void>; hostTestId?: string }) {
   const { t } = useTranslation();
   const asked = useRef(false);
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -104,7 +108,7 @@ function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => vo
       ask();
       return;
     }
-    const host = rowRef.current?.closest<HTMLElement>("[data-testid=page-tree]");
+    const host = rowRef.current?.closest<HTMLElement>(`[data-testid=${hostTestId}]`);
     if (!host) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)) ask();
@@ -119,7 +123,7 @@ function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => vo
       host.removeEventListener("pointerdown", ask, { capture: true });
       host.removeEventListener("keydown", onKeyDown, { capture: true });
     };
-  }, [enabled, ask]);
+  }, [enabled, ask, hostTestId]);
   return (
     <div ref={rowRef} className="h-full" data-testid="tree-branch-more" data-loading={loading || undefined}>
       {loading ? (
@@ -132,16 +136,10 @@ function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => vo
           <span className="h-2.5 w-2/3 animate-pulse rounded-full bg-border motion-reduce:animate-none" />
         </div>
       ) : (
-        <button
-          type="button"
-          // #1130: no size override — inherits the tree's 14px like a page name/placeholder row
-          // does (#1123), instead of the 11px text-xs this row and tree-placeholders-exhausted
-          // below were left at, both worse than the 12px #1123 fixed.
-          className="flex h-full w-full cursor-pointer items-center px-3 text-left text-fg-dim hover:text-foreground"
-          onClick={ask}
-        >
-          {t("sidebar.loadMorePages")}
-        </button>
+        // #1149 (ruling): the reader's own words were "not needed" — no button, no label. The
+        // row eavesdrops on the tree's own scroll/keyboard/pointer traffic (above) and fetches once it
+        // hears any, so there is nothing to press; idle, it draws nothing at all.
+        null
       )}
     </div>
   );

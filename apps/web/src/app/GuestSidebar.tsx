@@ -4,6 +4,7 @@ import { ChevronRight, FileText, Home } from "lucide-react";
 import type { Page } from "../data/queries";
 import { SpaceIcon } from "../ui/SpaceIcon";
 import { NewPageButton } from "../sidebar/NewPageButton";
+import { MoreRow } from "../sidebar/PageTree"; // #1149 (ruling/#903): shared with the member tree's own auto-loading continuation row, not a forked mechanism
 import { SidebarTreeSkeleton, useDelayedFlag } from "../ui/Skeleton"; // #457 loading vs empty
 
 // #245 / ADR-112: the guest reader-chrome sidebar. A space share-link guest browses the linked space's
@@ -103,7 +104,7 @@ export function buildTree(pages: Page[], placeholders: GuestPlaceholder[]): Tree
 // skeleton is delay-gated so a fast tree fetch never flashes it.
 // `error` is required, not optional: the caller owns the fetch (#500), and an omitted prop here would
 // silently read as "not erroring" — the exact error-reads-as-empty shape #500 exists to prevent.
-export function GuestSidebar({ pages, placeholders = [], loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, onLoadMore, loadingMore = false }: { pages: Page[]; placeholders?: GuestPlaceholder[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error: boolean; onRetry?: () => void; /** #1141 / ADR-220 §6.2 rev13: present while more of the closure is unexplored; calling it continues the SAME walk. */ onLoadMore?: () => void | Promise<void>; loadingMore?: boolean }) {
+export function GuestSidebar({ pages, placeholders = [], loading = false, space, openId, onOpen, onCreate, homePageId, error, onRetry, onLoadMore }: { pages: Page[]; placeholders?: GuestPlaceholder[]; loading?: boolean; space?: { name: string; iconImageUrl: string | null }; openId: string | null; onOpen: (id: string) => void; onCreate?: () => Promise<void>; homePageId?: string | null; error: boolean; onRetry?: () => void; /** #1141 / ADR-220 §6.2 rev13: present while more of the closure is unexplored; calling it continues the SAME walk. */ onLoadMore?: () => void | Promise<void> }) {
   const { t } = useTranslation();
   const showSkeleton = useDelayedFlag(loading);
   const tree = buildTree(pages, placeholders);
@@ -174,18 +175,12 @@ export function GuestSidebar({ pages, placeholders = [], loading = false, space,
       {/* #1141 / ADR-220 §6.2 rev13: the cap is still loud (this list is drawn unvirtualised and fully
           expanded, so a cut tree has to say so), but no longer a dead end — `onLoadMore` continues the
           SAME closure walk instead of leaving the reader with a fixed count and no way to see the rest.
-          Superseded the #623 static "too large to show" notice. */}
-      {onLoadMore && (
-        <button
-          type="button"
-          className="mt-2 cursor-pointer rounded-md px-1 py-1 text-left text-[0.85em] text-fg-dim hover:text-foreground disabled:cursor-default"
-          data-testid="guest-tree-load-more"
-          disabled={loadingMore}
-          onClick={() => void onLoadMore()}
-        >
-          {t("sidebar.loadMorePages")}
-        </button>
-      )}
+          Superseded the #623 static "too large to show" notice.
+          #1149 (ruling/#903): auto-loads via the SAME `MoreRow` the member tree uses, rather than a
+          guest-only manual button — this shell has no per-branch virtualization signal to feed `enabled`,
+          so it relies entirely on MoreRow's own scroll/keyboard/pointer eavesdropping on the ancestor
+          `guest-sidebar` container (`hostTestId`, below). */}
+      {onLoadMore && <MoreRow enabled={false} onVisible={onLoadMore} hostTestId="guest-sidebar" />}
     </nav>
   );
 }

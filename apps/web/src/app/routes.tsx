@@ -1287,7 +1287,7 @@ function GuestSpace({ minted, getToken, apiBearer, registerReconnect }: { minted
 
   return (
     <AppShell
-      sidebar={<GuestSidebar pages={pages ?? []} placeholders={placeholders} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} onLoadMore={pagesNextCursor ? loadMoreGuestPages : undefined} loadingMore={loadingMorePages} />}
+      sidebar={<GuestSidebar pages={pages ?? []} placeholders={placeholders} loading={pages == null && !pagesError} space={space ?? undefined} openId={openId} onOpen={setOpenId} onCreate={capability === "edit" ? createGuestPage : undefined} homePageId={space?.homePageId ?? null} error={pagesError} onRetry={refreshPages} onLoadMore={pagesNextCursor ? loadMoreGuestPages : undefined} />}
       // #449 / ADR-173: the guest gets the SAME search box (Ctrl-K + the header field), wired to their
       // own token and opening hits inside this shell via the tree's open handler. The server forces the
       // link's space scope and gates every hit on the share_link principal — no member chrome leaks here.
