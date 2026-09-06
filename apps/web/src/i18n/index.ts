@@ -13,6 +13,7 @@ import uk from "./locales/uk.json";
 import zhHans from "./locales/zh-Hans.json";
 import ko from "./locales/ko.json";
 import { LANGS, isKnownLang, type Lang } from "@wikistead/i18n-shared";
+import { loadCjkFont } from "./cjk-fonts";
 
 // i18n foundation (Phase 3b-1). Default locale is English; Japanese is available.
 // The active language is resolved once at startup (persisted choice ▷ browser
@@ -46,6 +47,7 @@ export function detectLang(): Lang {
 
 const initial = detectLang();
 if (typeof document !== "undefined") document.documentElement.lang = initial;
+loadCjkFont(initial);
 
 void i18n.use(initReactI18next).init({
   resources: {
@@ -63,6 +65,7 @@ export function setLang(lng: Lang): void {
   void i18n.changeLanguage(lng);
   try { localStorage.setItem(KEY, lng); } catch { /* private mode */ }
   if (typeof document !== "undefined") document.documentElement.lang = lng;
+  loadCjkFont(lng);
 }
 
 export default i18n;

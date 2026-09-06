@@ -13,18 +13,12 @@ import "@fontsource/inter/700.css";
 import "@fontsource/noto-sans-jp/400.css";
 import "@fontsource/noto-sans-jp/500.css";
 import "@fontsource/noto-sans-jp/700.css";
-// #713-S3 (OFL, self-hosted woff2): Noto Sans SC (simplified Chinese) + Noto Sans KR (Korean), same
-// pattern as Noto Sans JP above — every fontsource package here ships unicode-range-subsetted @font-
-// face rules (verified: `apps/web/node_modules/@fontsource/*/400.css`), so importing the CSS
-// unconditionally does not cost a non-CJK visitor a download; the browser only fetches the subset
-// file whose unicode-range actually matches a glyph on the page. Latin readers (de/fr/es/it/nl/pt-BR)
-// need no new font: Inter's own Latin Extended-A/B coverage already carries their diacritics.
-import "@fontsource/noto-sans-sc/400.css";
-import "@fontsource/noto-sans-sc/500.css";
-import "@fontsource/noto-sans-sc/700.css";
-import "@fontsource/noto-sans-kr/400.css";
-import "@fontsource/noto-sans-kr/500.css";
-import "@fontsource/noto-sans-kr/700.css";
+// #1159 / #713-S3: Noto Sans SC (simplified Chinese) and Noto Sans KR (Korean) are NOT imported here.
+// Unlike Noto Sans JP above, their @font-face declarations alone (not the unicode-range-subsetted
+// woff2 files behind them) were measured to add +226KB gzip to this entry CSS every visitor
+// downloads before first paint — see apps/web/src/i18n/cjk-fonts.ts, loaded on demand by locale via
+// "./i18n" above. Latin readers (de/fr/es/it/nl/pt-BR) need no new font: Inter's own Latin
+// Extended-A/B coverage already carries their diacritics.
 // #173 / #158-C1: editor monospace font (OFL, self-hosted woff2 subset). Loads "UDEV Gothic" so the
 // editor's --font-mono renders it (full-width = 2×half-width → vim columns stay exact for Japanese).
 import "./assets/fonts/udev-gothic.css";
