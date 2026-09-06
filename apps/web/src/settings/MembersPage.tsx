@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
@@ -86,6 +86,19 @@ export function MembersPage() {
   const [lastLink, setLastLink] = useState<
     { kind: "invite" | "password"; url?: string; emailed?: boolean; mint?: { id: string; email: string } } | null
   >(null);
+  // #1072: closing this dialog and opening it again for a DIFFERENT reason right after (the row's own
+  // "invite-link-open", right after the create-flow's dialog just closed) races Radix's own
+  // DismissableLayer — its outside-pointerdown detection for the OLD, still-closing instance is
+  // asynchronous, and fires (calling this SAME onClose below) after the click has already opened the
+  // NEW session, wiping the state it just set. A `key` that changes on every fresh open forces React to
+  // fully unmount the old Dialog root (cancelling its pending listener in its own effect cleanup)
+  // rather than reusing it — never bumped by an in-place UPDATE of an already-open session (the mint /
+  // reissue call sites below), only by a transition INTO an open state.
+  const lastLinkSessionRef = useRef(0);
+  const openLastLink = useCallback((value: NonNullable<typeof lastLink>) => {
+    lastLinkSessionRef.current += 1;
+    setLastLink(value);
+  }, []);
   // #504: every irreversible action here goes through one ConfirmDialog — removal (access + keys +
   // sessions die), DSAR erasure (the reading history is gone for good), invite revoke (the sent link
   // stops working). The pending action carries its own message + handler.
@@ -158,7 +171,7 @@ export function MembersPage() {
         role: choice.kind === "tier" ? choice.role : "member",
         roleId: choice.kind === "custom" ? choice.roleId : null,
       });
-      setLastLink({ kind: "invite", url: res.inviteUrl ?? undefined, emailed: res.emailed });
+      openLastLink({ kind: "invite", url: res.inviteUrl ?? undefined, emailed: res.emailed });
       setEmail("");
       setInviteChoice("tier:member");
       await refresh();
@@ -528,7 +541,7 @@ export function MembersPage() {
                       void (async () => {
                         try {
                           const res = await enablePassword(token, m.sub);
-                          setLastLink({ kind: "password", url: res.setupUrl });
+                          openLastLink({ kind: "password", url: res.setupUrl });
                           notify.success(t(passwordAction(m) === "reissue" ? "members.reissuePasswordDone" : "members.enablePasswordDone"));
                         } catch (e) {
                           if (e instanceof ApiError && e.status === 400 && e.code === "deployment_has_no_address") {
@@ -667,6 +680,7 @@ export function MembersPage() {
           different notes. What the reader sees is decided HERE, from `kind` and `emailed`, and there is
           no second place for it to be decided differently. */}
       <SecretDialog
+        key={lastLinkSessionRef.current}
         open={lastLink !== null}
         onClose={() => setLastLink(null)}
         testId={lastLink?.kind === "password" ? "password-setup-link" : "invite-link"}
@@ -727,7 +741,7 @@ export function MembersPage() {
                     the screen; `last_emailed_at` stays in the table so a future "this one failed" mark
                     has something to read, and NOTHING reads it today.) */}
                 <Button variant="ghost" size="sm" className="flex-none" data-testid="invite-link-open"
-                  onClick={() => setLastLink({ kind: "invite", mint: { id: i.id, email: i.email || t("members.noEmail") } })}>
+                  onClick={() => openLastLink({ kind: "invite", mint: { id: i.id, email: i.email || t("members.noEmail") } })}>
                   {t("members.inviteLinkOpen")}
                 </Button>
                 {/* #504: revoking kills the sent link for good — confirm first. */}

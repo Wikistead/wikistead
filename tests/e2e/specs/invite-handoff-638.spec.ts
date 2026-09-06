@@ -59,21 +59,16 @@ test("#638: a pending invitation can be handed over again from its own row", asy
   // the two it is instead of leaving both possible.
   const openBtn = row.getByTestId("invite-link-open");
   const dialog = page.getByTestId("invite-link-dialog");
-  let opens = 0;
-  for (;;) {
-    opens++;
-    await openBtn.click();
-    try {
-      await dialog.waitFor({ timeout: 4000 });
-      break;
-    } catch {
-      if (opens >= 4) throw new Error(`the hand-off dialog never opened after ${opens} clicks on invite-link-open`);
-    }
-  }
-  // Reported, not asserted: one click is the expected path, and a run that needed more is the signal
-  // this ticket exists to capture. Asserting it would only re-hide the thing behind a red.
-  // eslint-disable-next-line no-console
-  if (opens > 1) console.log(`#1072: the hand-off dialog needed ${opens} clicks to open`);
+  // #1072 root-caused: the swallow was Radix's own `DismissableLayer` — this SecretDialog instance's
+  // outside-pointerdown detection from the JUST-CLOSED create-flow session fires ASYNCHRONOUSLY
+  // (measured ~250ms after the click) and calls the SAME `onClose` the new session's `openLastLink`
+  // just set, wiping it. Fixed by keying `<SecretDialog>` on a session counter bumped only on a fresh
+  // open (never on an in-place update of an already-open one) — MembersPage.tsx forces a full
+  // remount, so the old instance's pending listener is cancelled in its own effect cleanup rather
+  // than surviving to race the new one. A single click is now the real contract, asserted directly
+  // rather than absorbed by a bounded retry.
+  await openBtn.click();
+  await expect(dialog, "the hand-off dialog opens on the FIRST click (#1072)").toBeVisible({ timeout: 4000 });
   await sleep(1200); // long enough for a mint-on-open to have travelled
   expect(minted.length, `opening it issued a link :: ${JSON.stringify(minted)}`).toBe(0);
   await expect(link, "…and there is nothing to copy yet").toBeHidden();
