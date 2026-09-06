@@ -6,7 +6,12 @@
 FROM node:22-slim AS build
 RUN corepack enable
 WORKDIR /repo
-COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
+# The LOCKFILE travels too (see apps/server/Dockerfile for the measured drift this prevents: without
+# it every dependency re-resolves to the newest match of its range on every build, not just the ones
+# whose range actually widened). `--frozen-lockfile=false` stays (no post-copy package.json edit here
+# to require it, but it matches this repo's other two image builds byte-for-byte rather than having a
+# third, subtly different install invocation to reason about).
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/macro-render ./packages/macro-render
 COPY packages/i18n-shared ./packages/i18n-shared
 COPY apps/web ./apps/web
