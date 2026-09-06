@@ -25,7 +25,7 @@ export function MemberIdentityLinksSection({ sub }: { sub: string }) {
   // (every value but 'local' reads as IdP-born, the migration's own default for pre-083 members).
   const primarySourceLabel = primaryIdentitySource === "local" ? t("members.identitiesSourceLocal") : t("members.identitiesSourceIdp");
   return (
-    <div className="flex flex-col gap-1 rounded-md bg-[var(--surface-2,#161616)] p-2 text-xs" data-testid="member-identities-section">
+    <div className="flex flex-col gap-1 rounded-md bg-panel-2 p-2 text-xs" data-testid="member-identities-section">
       <div className="text-fg-dim">{t("members.identitiesPrimarySource", { source: primarySourceLabel })}</div>
       {links.length === 0 ? (
         <div className="text-fg-dim">{t("members.identitiesEmpty")}</div>
