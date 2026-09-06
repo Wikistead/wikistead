@@ -12,7 +12,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 // Header user menu (member chrome only — rendered when onLogout is provided).
 // Hosts the tenant-admin entry and Sign out.
 //
-// #604-B: the entry used to be `isAdmin`, which meant the carve-out verbs were unreachable
+// #604-B: the entry used to be `isAdmin`, which meant the carve-out verbs were unreachable —
 // somebody handed `manage_connections` had the power on every route and no door to walk through. The
 // condition is now "the server says at least one admin surface is open to you", so an admin (who
 // answers true to every relation) is unchanged, and a new verb reaches this menu with no edit here.
@@ -56,8 +56,11 @@ export function UserMenu({ onLogout }: { onLogout: () => void }) {
         <DropdownMenuItem className="md:hidden" onSelect={() => setTheme(nextTheme)} data-testid="user-menu-theme">
           <NextThemeIcon size={14} /> {t(`theme.${theme}`)}
         </DropdownMenuItem>
+        {/* #713-S1: language.<code> is the same self-name convention LanguageToggle.tsx uses — a
+            2-value ternary here would show "English" for a German reader on a 3rd registered
+            language. */}
         <DropdownMenuItem className="md:hidden" onSelect={() => setLang(nextLang)} data-testid="user-menu-language">
-          <Languages size={14} /> {currentLang === "ja" ? "日本語" : "English"}
+          <Languages size={14} /> {t(`language.${currentLang}`)}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => navigate("/settings/account")} data-testid="user-menu-account">
           <Settings size={14} /> {t("userMenu.accountSettings")}

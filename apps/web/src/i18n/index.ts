@@ -2,7 +2,7 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
-import { LANGS, type Lang } from "@wikistead/i18n-shared";
+import { LANGS, isKnownLang, type Lang } from "@wikistead/i18n-shared";
 
 // i18n foundation (Phase 3b-1). Default locale is English; Japanese is available.
 // The active language is resolved once at startup (persisted choice ▷ browser
@@ -15,14 +15,23 @@ export { LANGS };
 export type { Lang };
 const KEY = "wks.lang";
 
-function detectLang(): Lang {
+// #713-S1: reads LANGS rather than naming 'en'/'ja' directly, so a language added to LANGS (S2) is
+// detected here without a second find-and-fix pass — the whole point of a registry.
+export function detectLang(): Lang {
   try {
     const stored = localStorage.getItem(KEY);
-    if (stored === "en" || stored === "ja") return stored;
+    if (isKnownLang(stored)) return stored;
   } catch { /* private mode → fall through */ }
-  // First visit: follow the browser, else the product default (English).
-  const nav = typeof navigator !== "undefined" ? navigator.language : "";
-  return nav.toLowerCase().startsWith("ja") ? "ja" : "en";
+  // First visit: follow the browser, matched against every registered language (not just Japanese),
+  // else the product default (English). Two passes: an exact tag match first (so a registered
+  // region-qualified code like "pt-BR" is preferred over a bare-subtag guess), then a primary-subtag
+  // match (before any region, e.g. browser "de-AT" or registered "pt-BR" → "de"/"pt") so a browser or
+  // a registered code carrying a region we don't otherwise distinguish still resolves.
+  const nav = (typeof navigator !== "undefined" ? navigator.language : "").toLowerCase();
+  const subtag = (s: string) => s.toLowerCase().split("-")[0];
+  const list = LANGS as readonly string[];
+  return (list.find((l) => l.toLowerCase() === nav) ??
+    list.find((l) => subtag(l) === subtag(nav))) as Lang | undefined ?? "en";
 }
 
 const initial = detectLang();

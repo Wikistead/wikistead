@@ -113,11 +113,21 @@ export async function tenantDefaultLang(db: TenantDb): Promise<Lang> {
   }
 }
 
-// #419: the localized personal-space initial name. An empty display name falls back to a
-// language-appropriate generic ("Personal Space", or its Japanese counterpart).
+// #419 / #713-S1: the localized personal-space initial name. A `Record<Lang, ...>` rather than the
+// former `lang === 'ja'` ternary — LANGS growing a language (#713-S2) makes this a compile error
+// until that language's phrasing is filled in here, the same forcing-function shape
+// EVENT_TYPE_LABELS (packages/i18n-shared) already uses, rather than a silent English fallback for
+// every reader of an unhandled language.
+const PERSONAL_SPACE_PHRASING: Record<Lang, { generic: string; possessive: (name: string) => string }> = {
+  en: { generic: 'Personal Space', possessive: (name) => `${name}'s Space` },
+  ja: { generic: 'マイスペース', possessive: (name) => `${name}のスペース` },
+}
+
+// An empty display name falls back to the language-appropriate generic.
 export function personalSpaceName(displayName: string, lang: Lang): string {
-  if (!displayName) return lang === 'ja' ? 'マイスペース' : 'Personal Space'
-  return lang === 'ja' ? `${displayName}のスペース` : `${displayName}'s Space`
+  const phrasing = PERSONAL_SPACE_PHRASING[lang]
+  if (!displayName) return phrasing.generic
+  return phrasing.possessive(displayName)
 }
 
 function newSid(): string {
