@@ -99,6 +99,16 @@ today.
 bump — e.g. `GET /admin/sso-exemptions` carries an `isAdmin` field so that screen can answer the one
 question its own refusal tells an operator to act on. Not part of the OpenAPI-covered surface above.
 
+`GET /spaces/{spaceId}/pages/tree-placeholders` (ADR-220 §4.2, resumable per #1141) resolves the
+sidebar tree's invisible-page placeholder walk for one branch, returning `{ placeholders,
+placeholderCursor? }` — a present `placeholderCursor` means more of the walk remains and a follow-up
+call presenting it (`?cursor=`) continues from where the first left off, examined once, never
+re-examined or re-reported. The cursor is an opaque, encrypted (AES-256-GCM), scope-bound
+(tenant/subject/space/branch), TTL-limited (15 min) token — never a raw offset or page id a client
+could read anything out of. It carries a fixed byte budget (~4KB, `tree-placeholders-cursor.ts`'s
+`CURSOR_BYTE_BUDGET`) so it survives the smallest deployed proxy header limit measured in this repo;
+minting one that would exceed it throws rather than silently truncating the walk.
+
 `POST /admin/connections/{id}/supersede` declares that `{id}` (a live connection)
 supersedes another connection given as `oldConnectionId` in the body — the recreate-an-IdP-connection
 rescue: it links every member the retiring connection minted to the same subject under the new
