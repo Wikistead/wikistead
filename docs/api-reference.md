@@ -109,6 +109,19 @@ could read anything out of. It carries a fixed byte budget (~4KB, `tree-placehol
 `CURSOR_BYTE_BUDGET`) so it survives the smallest deployed proxy header limit measured in this repo;
 minting one that would exceed it throws rather than silently truncating the walk.
 
+`GET /admin/surfaces` carries a `memberIdentitiesEnabled` boolean (#1107 / ADR-280) alongside its
+existing `surfaces` list — true only where this build has composed the EE member-identity-links route
+AND the caller is a tenant admin, so the member-row expand section (never a popover — see below) knows
+whether to offer its toggle without ever calling a route that would 404 on a CE build.
+
+`GET /admin/members/{sub}/identities` (EE, `requireTenantAdmin`) resolves one member's linked sign-in
+identities — `{ primaryIdentitySource, links: [{linkId, connectionId, connectionName, linkedAt}] }`.
+Two fields disclosed per link only (`connectionName`, `linkedAt`; `linkId` is an opaque list key, not
+a disclosure): never `external_subject` (the raw upstream identifier), never a live-effectiveness flag
+(deferred to a follow-up ticket once a correct display predicate exists — the ADR's own rev3/rev4 found
+the obvious one wrong). An unknown or cross-tenant `sub` 404s identically to every other admin member
+route (existence-hiding).
+
 `POST /admin/connections/{id}/supersede` declares that `{id}` (a live connection)
 supersedes another connection given as `oldConnectionId` in the body — the recreate-an-IdP-connection
 rescue: it links every member the retiring connection minted to the same subject under the new

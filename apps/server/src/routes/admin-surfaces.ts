@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import type { OpenFgaClient, ClientBatchCheckSingleResponse } from '@openfga/sdk'
-import { fgaModelId } from '@wikistead/authz'
+import { fgaModelId, isTenantAdmin } from '@wikistead/authz'
 import { auditLedgerRegistered } from '../audit/sink.js' // #688: EE-composed features only surface when composed
 import { analyticsRegistered } from '../analytics/sink.js'
 import { scimRegistered } from '../scim-sink.js' // #723: SCIM is EE-composed too
+import { memberIdentitiesRegistered } from '../member-identities-sink.js' // #1107 / ADR-280 §2: EE-composed too
 
 // #604 / ADR-208 (ruling B): WHICH admin surfaces may this caller enter?
 //
@@ -79,5 +80,11 @@ export async function adminSurfacesPlugin(app: FastifyInstance) {
   // ask whether their verb opens anything). It names surfaces, never other people's powers.
   app.get('/admin/surfaces', async (req) => ({
     surfaces: await readableAdminSurfaces(app.fga, req.user.sub, req.tenant.id),
+    // #1107 / ADR-280 §2 (rev5/rev6): not an ADMIN_SURFACES entry — this affordance is a member-row
+    // section, never a tab or a route, so it does not belong in the `surfaces` list above (that list
+    // answers "which whole SCREENS may this caller enter"). A second, small check beside
+    // `readableAdminSurfaces`'s own batch; folding it in is a reasonable future optimization, not
+    // load-bearing here.
+    memberIdentitiesEnabled: memberIdentitiesRegistered() && await isTenantAdmin(app.fga, req.user.sub, req.tenant.id),
   }))
 }

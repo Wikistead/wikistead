@@ -2411,14 +2411,63 @@ export function useTenantSaml(enabled = true) {
 // surface→relation registry and answers; the client never infers a surface from a tier flag or a
 // hand-kept verb list, so a verb added server-side reaches the menu and the tabs with no client edit.
 // Any member may ask (it describes only your own powers); an empty list means no console at all.
+// #1107 / ADR-280 §2 (rev5): the queryFn's body is UNCHANGED from before — still fetches the whole
+// `{ surfaces, memberIdentitiesEnabled }` body and defaults to `{ surfaces: [] }` on a failed fetch —
+// only the return TYPE widens. `select` projects back to today's `string[]`, so every existing caller
+// of `useAdminSurfaces().data` keeps reading exactly the same shape, byte-for-byte, as before this
+// change (verified: none of the four existing call sites needed to change).
+function adminSurfacesQuery(token: string) {
+  return {
+    queryKey: ["admin-surfaces"],
+    queryFn: () => apiFetch<{ surfaces: string[]; memberIdentitiesEnabled: boolean }>("/admin/surfaces", token)
+      .then((r) => r ?? { surfaces: [], memberIdentitiesEnabled: false }),
+    staleTime: 60_000,
+    retry: false,
+  } as const;
+}
+
 export function useAdminSurfaces() {
   const { token, status } = useSession();
   return useQuery({
-    queryKey: ["admin-surfaces"],
-    queryFn: () => apiFetch<{ surfaces: string[] }>("/admin/surfaces", token).then((r) => r?.surfaces ?? []),
+    ...adminSurfacesQuery(token),
     enabled: status === "authed",
-    staleTime: 60_000,
-    retry: false,
+    select: (r) => r.surfaces,
+  });
+}
+
+// #1107 / ADR-280 §2 (rev5/rev6): a second, new hook sharing the SAME queryKey/queryFn as
+// `useAdminSurfaces()` — TanStack Query dedupes by key regardless of `select`, so this costs zero
+// extra network requests. Gates the member-row identity-links expand section (never a popover, per
+// rev6's placement ruling): false in a CE build (the route this answers for does not exist there),
+// or for a caller without `requireTenantAdmin` (the server includes the FGA check in the same field).
+export function useMemberIdentitiesEnabled() {
+  const { token, status } = useSession();
+  return useQuery({
+    ...adminSurfacesQuery(token),
+    enabled: status === "authed",
+    select: (r) => r.memberIdentitiesEnabled,
+  });
+}
+
+// #1107 / ADR-280 §1 (rev6): one member's linked sign-in identities — two fields per link
+// (`connectionName`, `linkedAt`), plus `primaryIdentitySource` restating the roster's own fact so an
+// empty link list is never misread as "no way in". On-demand only (`enabled`): a per-row expand
+// section, not fetched for every roster row on every page load.
+export interface MemberIdentityLink {
+  linkId: string; // #1107 review D: the stable list key — connectionId alone can collide
+  connectionId: string;
+  connectionName: { kind: "oidc" | "platform"; label: string | null; brand: string | null } | null;
+  linkedAt: string;
+}
+export interface MemberIdentityLinksDTO { primaryIdentitySource: string; links: MemberIdentityLink[] }
+
+export function useMemberIdentityLinks(sub: string, enabled: boolean) {
+  const { token } = useSession();
+  return useQuery({
+    queryKey: ["admin-member-identities", sub],
+    queryFn: () => apiFetch<MemberIdentityLinksDTO>(`/admin/members/${encodeURIComponent(sub)}/identities`, token),
+    enabled,
+    staleTime: 30_000,
   });
 }
 

@@ -38,6 +38,57 @@ export async function listLinkedConnectionIds(db: TenantDb, tenantId: string, me
 }
 
 /**
+ * #1107 / ADR-280 §1: an ADMIN's view of one member's links — connection id + when it was linked, no
+ * more. Disclosure (which fields the caller may see) is the route's job, not this read's; this just
+ * returns what the table holds for the member, oldest link first (a stable, human-readable order).
+ *
+ * `id` is the row's own opaque primary key (migration 129) — carries no upstream meaning (unlike
+ * `external_subject`, which this ADR never discloses), included ONLY so a caller has a stable key for
+ * a link: the UNIQUE constraint is `(tenant_id, connection_id, external_subject)`, not
+ * `(tenant_id, connection_id)`, so a member CAN hold two links to the SAME connection (two upstream
+ * subjects, e.g. via the supersede path) — `connectionId` alone is not a safe list key.
+ */
+export interface MemberIdentityLinkRow {
+  id: string
+  connectionId: string
+  linkedAt: Date
+}
+
+export async function listMemberIdentityLinksForAdmin(
+  db: TenantDb, tenantId: string, memberSub: string,
+): Promise<MemberIdentityLinkRow[]> {
+  const rows = await db.sql<{ id: string; connection_id: string; created_at: Date }[]>`
+    SELECT id, connection_id, created_at FROM member_identities
+    WHERE tenant_id = ${tenantId} AND member_sub = ${memberSub}
+    ORDER BY created_at ASC`
+  return rows.map((r) => ({ id: r.id, connectionId: r.connection_id, linkedAt: r.created_at }))
+}
+
+/**
+ * #1107 / ADR-280 §1 (rev6): name a connection by id for display, UNFILTERED by `enabled`/plan/stance —
+ * naming a disabled or masked connection is not the fact this ticket's dropped `connectionEffective`
+ * question would have protected (that question is deferred to its own follow-up). Deliberately NOT
+ * `resolveLoginConnections`'s tenant-wide, filtered list: `member_identities.connection_id` is only
+ * ever written for `kind === 'oidc'` or the fixed `'platform'` id (auth.ts's link-callback guard; the
+ * supersede path writes a `tenant_oidc` id) — `local` and `saml` never appear here. Returns `null` only
+ * when the id resolves to nothing at all (the connection was fully deleted, not merely disabled) — the
+ * same absent-key shape `external_subject`'s omission uses elsewhere in this response.
+ */
+export interface NamedConnection {
+  kind: 'oidc' | 'platform'
+  label: string | null
+  brand: string | null
+}
+
+export async function nameConnectionForAdmin(db: TenantDb, connectionId: string): Promise<NamedConnection | null> {
+  if (connectionId === 'platform') return { kind: 'platform', label: null, brand: null }
+  const [row] = await db.sql<{ label: string | null; preset: string | null }[]>`
+    SELECT label, preset FROM tenant_oidc WHERE id = ${connectionId} LIMIT 1`
+  if (!row) return null
+  return { kind: 'oidc', label: row.preset ? null : row.label, brand: row.preset }
+}
+
+/**
  * Write a link (#947 / ADR-259 §3.3). Both `externalSubject` and `memberSub` MUST come from
  * server-verified sources — the callback-verified upstream subject and the `OidcLoginState`'s
  * `linkMemberSub` — never from anything a client supplied; §5 pins that the write cannot be reached

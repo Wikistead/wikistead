@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { ListRow, ListBox } from "../ui/list-rows";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../session/SessionProvider";
@@ -15,11 +15,12 @@ import {
   suspendMember, reactivateMember,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
-import { User, Users, KeyRound, Eraser, UserMinus, Ban, Undo2, ShieldOff } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
+import { User, Users, KeyRound, Eraser, UserMinus, Ban, Undo2, ShieldOff, ChevronRight } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
 import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
-import { useRoles, useRoleAssignments, useAssignRole, useAssignTenantTier, useUnassignRole, useTenantGroupNames, useTenantRoleDefaults } from "../data/queries";
+import { useRoles, useRoleAssignments, useAssignRole, useAssignTenantTier, useUnassignRole, useTenantGroupNames, useTenantRoleDefaults, useMemberIdentitiesEnabled } from "../data/queries";
+import { MemberIdentityLinksSection } from "./MemberIdentityLinksSection"; // #1107 / ADR-280: EE-composed, expand-in-place — never a popover
 import { notify } from "../ui/toast";
 import { notifyRevokeOutcome, notifyRevokeError } from "./revoke-feedback";
 import { buildTenantRoleRows, buildGroupRoleRows, buildUnifiedRows, filterMembers, roleOptions, currentRoleValue, groupRoleValue, revocableGroupGrants, groupConferredRoles, resolveRoleChoice, BUILT_IN_TIERS } from "./tenant-role-rows";
@@ -45,6 +46,10 @@ export function MembersPage() {
     memberLabel(m.sub, m.display_name || m.email, unknownMember);
   const { token, sub: me, tenantId } = useSession();
   const [members, setMembers] = useState<Member[]>([]);
+  // #1107 / ADR-280 §2 (rev6): expand-in-place, never a popover — a plain toggle state naming which
+  // member's row is expanded, at most one at a time (the same reason a details panel is not a set).
+  const [expandedIdentities, setExpandedIdentities] = useState<string | null>(null);
+  const memberIdentitiesEnabled = useMemberIdentitiesEnabled().data === true;
   // #578 bounce ④, then the 2026-08-04 ruling (why not let the form switch between user and group
   // like it used to?): the tenant screen runs the WHOLE shared add-flow — user or group, then who, then which
   // role — the same shape the space screen has. The groups-only round pinned "a person's tenant role is
@@ -406,7 +411,8 @@ export function MembersPage() {
               // evidence hard to see.
               const dimmed = m.deactivated_at != null;
               return (
-            <tr key={m.sub} data-testid={dimmed ? "member-row-deactivated" : undefined}
+            <Fragment key={m.sub}>
+            <tr data-testid={dimmed ? "member-row-deactivated" : undefined}
               style={{ borderBottom: "1px solid var(--border, #222)" }}>
               <td style={{ padding: "8px 4px" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -418,6 +424,22 @@ export function MembersPage() {
                   {/* #614: the status marks — origin (IdP / password-born), an added password entrance,
                       suspended. Hover explains each (the #586 school); nothing is spelled beside the name. */}
                   <MemberStatusIcons member={m} />
+                  {/* #1107 / ADR-280 §2 (rev6): a plain, focusable toggle — never a hover-only affordance
+                      (the ruling's own point: a face reachable only by hover cannot be linked, shared, or
+                      reached by keyboard). Absent entirely in a CE build (the route it expands does not
+                      exist there) or for a caller without requireTenantAdmin. */}
+                  {memberIdentitiesEnabled && (
+                    <button
+                      type="button"
+                      data-testid="member-identities-toggle"
+                      aria-expanded={expandedIdentities === m.sub}
+                      aria-label={t("members.identitiesToggle", { name: nameOf(m) })}
+                      className="inline-flex cursor-pointer items-center text-fg-dim hover:text-foreground"
+                      onClick={() => setExpandedIdentities((cur) => (cur === m.sub ? null : m.sub))}
+                    >
+                      <ChevronRight size={13} className={expandedIdentities === m.sub ? "rotate-90" : undefined} />
+                    </button>
+                  )}
                 </span>
               </td>
               {/* #579 (user ruling, 2026-08-03): there is no "add a role" — roles cannot stack.
@@ -587,6 +609,14 @@ export function MembersPage() {
                 />
               </td>
             </tr>
+              {expandedIdentities === m.sub && (
+                <tr data-testid="member-identities-row" style={{ borderBottom: "1px solid var(--border, #222)" }}>
+                  <td colSpan={3} style={{ padding: "0 4px 8px" }}>
+                    <MemberIdentityLinksSection sub={m.sub} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
               );
             })()
           ))}

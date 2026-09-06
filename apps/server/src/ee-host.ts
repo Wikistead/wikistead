@@ -50,6 +50,13 @@ export { entitlementDenied } from './entitlement-ux.js'
 // #723 / ADR-232: the EE composition root registers SCIM's presence the way it registers the
 // audit ledger — the CE marker lives in apps/server, the decision to light it lives in ee/.
 export { registerScim } from './scim-sink.js'
+// #1107 / ADR-280 §2: same shape, for admin visibility of member identity links. The reader
+// (`memberIdentitiesRegistered`) and reset stay CE-internal, read only by `/admin/surfaces` and CE's
+// own tests — this hop is writer-only, mirroring `registerScim`'s.
+export { registerMemberIdentities } from './member-identities-sink.js'
+// #1107 / ADR-280 §1: ordinary CE data-access utilities the EE route needs — additive re-exports, no
+// EE dependency added, the same shape the SCIM/analytics re-exports above already use.
+export { listMemberIdentityLinksForAdmin, nameConnectionForAdmin } from './auth/member-identities.js'
 // #715 / ADR-229: the funnel collector seam. The report calls stay in CE; only the recording is EE.
 export { registerFunnelCollector, funnelRegistered, resetFunnelCollector, reportLinkVisit, reportWorkspaceCreated } from './funnel/sink.js'
 export { createApiKey } from './routes/api-keys.js'
