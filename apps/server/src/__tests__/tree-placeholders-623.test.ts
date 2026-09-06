@@ -209,14 +209,18 @@ describe('#623 §4: what a placeholder must NOT do', () => {
     // covers both (undefined or false). ADR-183 §3 by design: a saturated store's ITEM error denies
     // that id — fewer visible rows, never a 500. On the 2-core public runner the first heavy batch
     // over these fresh pages hits exactly that (measured: the same pinned batch answers true moments
-    // later), so one re-ask separates the DESIGNED degradation from a real deny. It is safe against the
-    // OTHER rows: B's and C's false are CORRECT (invisible-only child / leaf), and a re-ask leaves a
-    // genuine false false — every break-check in this file keeps its bite.
-    // Drain the store: re-ask up to a dozen times, half a second apart (~6s, well inside the 300s
-    // budget), giving the 2-core public runner room to answer. B and C are unaffected — their false is
-    // the CORRECT answer (invisible-only child / leaf) and a starved store returns exactly that — so
-    // this waits out only the ONE shape starvation gets wrong: A, which definitively has a visible child.
-    for (let tries = 0; flag.get(a) !== true && tries < 12; tries++) {
+    // later), so one re-ask separates the DESIGNED degradation from a real deny.
+    // #1144: B and C are NOT unaffected — a starved store can deny THEIR OWN view check too, which
+    // drops their row from `rows.pages` entirely (flag.get returns undefined, not false). B's and C's
+    // eventual `false` is correct (invisible-only child / leaf), but "row absent" is a THIRD shape of
+    // the same starvation, not a stand-in for it — so the loop must drain until all three rows are
+    // PRESENT (not just until A reads true), or a transient absence for B/C reads as a permanent
+    // "hasChildren field vanished" defect below.
+    for (
+      let tries = 0;
+      (flag.get(a) !== true || !flag.has(b0) || !flag.has(c0)) && tries < 12;
+      tries++
+    ) {
       await new Promise((r) => setTimeout(r, 500))
       rows = await listBranch(db, fgaClient, { spaceId, parentId: null, subject: READER })
       flag = new Map(rows.pages.map((p) => [p.id, (p as { hasChildren?: boolean }).hasChildren]))
