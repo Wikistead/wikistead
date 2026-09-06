@@ -161,12 +161,6 @@ test("#233: a password-protected link prompts, rejects a wrong password, unlocks
 // wrong-password budget — a user who mistypes a few times can still unlock. Before the fix, the
 // prompt-display 401 counted, so a single typo (plus a reload) locked the user out.
 test("#233 opening the link + several wrong tries never locks out the correct password", async ({ browser }) => {
-  // #1146: red once in a full 21-spec gate run under load (createPasswordLink's fixed 5000ms
-  // waitForFunction budget wasn't enough for the round trip under CPU contention — #1147 found 14
-  // sibling timeouts on the SAME run, same shape), green standalone right after (11.9s) — the same
-  // #823/#825 shared-stack-under-load family as #1088/#1065/#1032/#1106/#1121/#1142/#1143/#1145, not
-  // a regression of e1e04011's own fix.
-  test.skip(true, "#1146: red under gate load, green standalone — isolated, not a product regression");
   const member = await (await browser.newContext()).newPage();
   await openDemo(member);
   const title = `Secret doc 2 ${Date.now().toString(36)}`;
