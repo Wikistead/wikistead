@@ -30,7 +30,7 @@ const RelatedPanel = lazy(() => import("./RelatedPanel").then((m) => ({ default:
 // cache; this only shows on the very first navigation to that area).
 function LazyFallback() {
   const { t } = useTranslation();
-  return <div style={{ padding: 24, color: "var(--fg-dim)" }}>{t("common.loading")}</div>;
+  return <FullPageLoader />;
 }
 import { HomeEmpty } from "./HomeEmpty";
 import { AppShell } from "./AppShell";
@@ -49,6 +49,7 @@ import { setVimClipboardMode } from "../editor/live-preview/vim-clipboard";
 import { createDirtySignal } from "../editor/dirtySignal";
 import { createUnsyncedSignal, useUnsynced } from "../editor/unsyncedSignal";
 import { colorFromString } from "../ui/avatar";
+import { FullPageLoader } from "../ui/FullPageLoader"; // #1169
 
 // Persisted vim-keymap preference for the single edit surface (Step I). Replaces the
 // old single/split layout preference; vim is now a keymap toggle on the one surface.
@@ -749,7 +750,7 @@ function PageRoute({ pageIdOverride, homeSpaceName }: { pageIdOverride?: string;
     return () => window.removeEventListener("keydown", onKey);
   }, [pageId, token, exportSource, page?.title]);
 
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "loading") return <AppShell><FullPageLoader /></AppShell>;
   if (status === "anon") return <LoginScreen />;
   // A page that doesn't exist or isn't accessible must NOT present an editable phantom surface (it would
   // have no space → unpublishable). #262: the server now returns a uniform 404 for both "no such page" and
@@ -2290,7 +2291,7 @@ export function SpaceHomeRoute() {
   // the sidebar on the previous space. Sync from the RESOLVED space (not the raw param) so a bogus id
   // (the not-found branch) can't hijack the sidebar.
   useEffect(() => { if (space?.id) setActiveSpaceId(space.id); }, [space?.id, setActiveSpaceId]);
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "loading") return <AppShell><FullPageLoader /></AppShell>;
   if (status === "anon") return <LoginScreen />;
   // #1014: an exhausted retry on /spaces/resolve used to collapse to the same `undefined` as an
   // in-flight fetch, so it fell all the way through to the space-home-empty panel below — a silent,
@@ -2368,7 +2369,7 @@ export function SpaceHomeRoute() {
 function HomeLanding() {
   const { t } = useTranslation();
   const spaces = useSpacesPage();
-  if (spaces.isPending) return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (spaces.isPending) return <AppShell><FullPageLoader /></AppShell>;
   // #895: a failed fetch is not zero spaces — without this guard a 500/network failure fell through to
   // HomeEmpty's "no spaces yet, ask an administrator", telling a member their workspace is empty when
   // nothing of the sort was established. Measured on the most-visible surface in the product.
@@ -2399,7 +2400,7 @@ function HomeLanding() {
 function RequireMember({ children }: { children: React.ReactNode }) {
   const { status } = useSession();
   const { t } = useTranslation();
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "loading") return <AppShell><FullPageLoader /></AppShell>;
   if (status === "anon") return <LoginScreen />;
   return <>{children}</>;
 }

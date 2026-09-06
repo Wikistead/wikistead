@@ -78,7 +78,11 @@ describe("#575: the product name comes from the deployment, not from the source"
       if (LITERAL_FILES.includes(rel)) continue;
       const body = withoutComments(readFileSync(file, "utf8"));
       // the package scope is an identifier, not a name on screen
-      const stripped = body.replace(/@wikistead\/[a-z-]+/g, "").replace(/Wikistead Mono/g, "");
+      // #1169: `WikisteadMark` is the mark component's IDENTIFIER — the same class as the package
+      // scope and the typeface name above, not a product name rendered on screen. Its own accessible
+      // name still lives in BrandLockup.tsx, which this pin still reads (it is in LITERAL_FILES for
+      // exactly that). Stripping the identifier keeps every real literal in this file's reach.
+      const stripped = body.replace(/@wikistead\/[a-z-]+/g, "").replace(/Wikistead Mono/g, "").replace(/WikisteadMark/g, "");
       if (NAME.test(stripped)) offenders.push(rel);
     }
     expect(offenders, "read it from useProductName() / useBrandName()").toEqual([]);

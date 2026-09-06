@@ -21,6 +21,7 @@ import { AdminOrphanDraftsTab } from "./AdminOrphanDraftsTab";
 import { AdminModerationTab } from "./AdminModerationTab"; // #491
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
 import { useAdminSurfaces } from "../data/queries";
+import { FullPageLoader } from "../ui/FullPageLoader"; // #1169
 
 // Tenant admin console (Phase 5a). The admin-screen leak rule is 403 (not 404): a tenant having an
 // admin area is not a secret, somebody without the power simply can't enter (every action re-checks
@@ -60,11 +61,11 @@ function AdminLayout() {
   const tabs = useAdminTabs();
   const surfaces = useAdminSurfaces();
 
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "loading") return <AppShell><FullPageLoader /></AppShell>;
   if (status === "anon") return <LoginScreen />;
   // The answer is still loading: show the shell's spinner rather than flashing "no access" at
   // somebody who has it (the console is behind a lazy chunk already — one more tick is invisible).
-  if (surfaces.isLoading) return <AppShell onLogout={logout}><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (surfaces.isLoading) return <AppShell onLogout={logout}><FullPageLoader /></AppShell>;
   const open = surfaces.data ?? [];
   // Nothing is open to you — the same refusal as before, now for the same reason the routes give.
   if (open.length === 0) return <AppShell onLogout={logout}><SettingsDenied kind="forbidden" /></AppShell>;
@@ -84,7 +85,7 @@ function AdminLayout() {
 function Surface({ name, children }: { name: string; children: React.ReactNode }) {
   const { t } = useTranslation();
   const surfaces = useAdminSurfaces();
-  if (surfaces.isLoading) return <div style={{ padding: 16 }}>{t("common.loading")}</div>;
+  if (surfaces.isLoading) return <FullPageLoader />;
   if (!(surfaces.data ?? []).includes(name)) return <SettingsDenied kind="forbidden" />;
   return <>{children}</>;
 }
@@ -95,7 +96,7 @@ function AdminIndexRedirect() {
   const tabs = useAdminTabs();
   const surfaces = useAdminSurfaces();
   const { t } = useTranslation();
-  if (surfaces.isLoading) return <div style={{ padding: 16 }}>{t("common.loading")}</div>;
+  if (surfaces.isLoading) return <FullPageLoader />;
   const open = surfaces.data ?? [];
   const first = tabs.find((tab) => open.includes(tab.key));
   if (!first) return <SettingsDenied kind="forbidden" />;

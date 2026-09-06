@@ -30,6 +30,7 @@ import { COMMANDS, resolveKey, chordFromEvent, displayChord, validateAssignment,
 import { SettingsShell, SettingsPane, type SettingsTab } from "./SettingsShell";
 import { factorKindsPhrase, acceptedFactorKinds } from "./factor-kind"; // #686
 import { useMyFactors } from "../data/queries"; // #686: the stance rides along on this query
+import { FullPageLoader } from "../ui/FullPageLoader"; // #1169
 
 // Personal account settings (ADR-020, Design-6). Self-scope: the server keys every
 // read/write to the authenticated member (WHERE sub = req.user.sub) — not an FGA ACL.
@@ -665,7 +666,7 @@ function AccountLayout() {
   const { t } = useTranslation();
   const { status, logout } = useSession();
   const tabs = useAccountTabs();
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "loading") return <AppShell><FullPageLoader /></AppShell>;
   if (status === "anon") return <LoginScreen />;
   return (
     <AppShell onLogout={logout}>

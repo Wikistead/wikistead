@@ -414,6 +414,31 @@
   animation: wks-slide-in-up var(--dur-slow) var(--ease-out);
 }
 
+/* #1169: the full-page loading mark draws itself. `pathLength="1"` on the mark's own paths
+   normalises every path to a length of 1, so one dash length covers the whole stroke no matter
+   how the logo's geometry changes later — the animation does not carry a copy of the artwork's
+   measurements. Draws in, holds, then erases off the far end, which reads as a loop without a
+   hard cut back to blank.
+
+   Reduced motion needs no branch here: the global rule below shortens this to one ~0-length
+   iteration, and with the default `animation-fill-mode: none` the paths then fall back to their
+   BASE values — no dash offset at all, i.e. the finished logo, held still. The static case is the
+   absence of the animation rather than a second hand-written state. */
+@keyframes wks-logo-draw {
+  0%   { stroke-dashoffset: 1; }
+  50%  { stroke-dashoffset: 0; }
+  75%  { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -1; }
+}
+.wks-logo-draw path {
+  stroke-dasharray: 1;
+  animation: wks-logo-draw 1800ms var(--ease-standard) infinite;
+}
+/* The inner rule lines follow the outline rather than racing it. */
+.wks-logo-draw path + path {
+  animation-delay: 220ms;
+}
+
 /* Accessibility: honour reduced-motion globally. Anyone who asks for less motion gets
    effectively-instant transitions/animations across the whole app. */
 @media (prefers-reduced-motion: reduce) {

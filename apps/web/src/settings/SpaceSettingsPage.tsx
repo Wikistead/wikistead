@@ -22,6 +22,7 @@ import { SpaceImportTab } from "./SpaceImportTab";
 import { SpaceTrashTab } from "./SpaceTrashTab";
 import { SpaceModerationTab } from "./SpaceModerationTab";
 import { SpaceAnalyticsTab } from "./SpaceAnalyticsTab";
+import { FullPageLoader } from "../ui/FullPageLoader"; // #1169
 
 interface SpaceCtx { spaceId: string; name: string; accentKey: string | null; iconImageUrl: string | null }
 
@@ -69,9 +70,9 @@ function SpaceSettingsLayout() {
   // (BrandingApplier) previews this space's accent live as it's edited on the Theme tab.
   useEffect(() => { if (spaceId) setActiveSpaceId(spaceId); }, [spaceId, setActiveSpaceId]);
 
-  if (status === "loading") return <AppShell><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (status === "loading") return <AppShell><FullPageLoader /></AppShell>;
   if (status === "anon") return <LoginScreen />;
-  if (resolvedSpace === undefined) return <AppShell onLogout={logout}><div style={{ padding: 16 }}>{t("common.loading")}</div></AppShell>;
+  if (resolvedSpace === undefined) return <AppShell onLogout={logout}><FullPageLoader /></AppShell>;
 
   // Resolution is FGA-filtered exactly like the listing was: a space the user cannot VIEW answers
   // null, byte-identical to one that does not exist (#710 kept the leak rule: not viewable → 404
