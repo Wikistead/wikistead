@@ -99,8 +99,8 @@ today.
 bump — e.g. `GET /admin/sso-exemptions` carries an `isAdmin` field so that screen can answer the one
 question its own refusal tells an operator to act on. Not part of the OpenAPI-covered surface above.
 
-`GET /spaces/{spaceId}/pages/tree-placeholders` (ADR-220 §4.2, resumable per #1141) resolves the
-sidebar tree's invisible-page placeholder walk for one branch, returning `{ placeholders,
+`GET /spaces/{spaceId}/pages/tree-placeholders` resolves the sidebar tree's invisible-page placeholder
+walk for one branch, resumable across calls, returning `{ placeholders,
 placeholderCursor? }` — a present `placeholderCursor` means more of the walk remains and a follow-up
 call presenting it (`?cursor=`) continues from where the first left off, examined once, never
 re-examined or re-reported. The cursor is an opaque, encrypted (AES-256-GCM), scope-bound
@@ -109,7 +109,7 @@ could read anything out of. It carries a fixed byte budget (~4KB, `tree-placehol
 `CURSOR_BYTE_BUDGET`) so it survives the smallest deployed proxy header limit measured in this repo;
 minting one that would exceed it throws rather than silently truncating the walk.
 
-`GET /admin/surfaces` carries a `memberIdentitiesEnabled` boolean (#1107 / ADR-280) alongside its
+`GET /admin/surfaces` carries a `memberIdentitiesEnabled` boolean alongside its
 existing `surfaces` list — true only where this build has composed the EE member-identity-links route
 AND the caller is a tenant admin, so the member-row expand section (never a popover — see below) knows
 whether to offer its toggle without ever calling a route that would 404 on a CE build.
