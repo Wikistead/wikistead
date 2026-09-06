@@ -192,34 +192,42 @@ export async function createPortalSession(
 }
 
 export async function billingPlugin(app: FastifyInstance) {
-  // Stripe webhook requires the raw request body for signature verification.
-  // Register a string content type parser scoped to this plugin so the body
-  // is preserved before JSON parsing — this does not affect other routes.
-  app.addContentTypeParser(
-    'application/json',
-    { parseAs: 'string' },
-    (_req, body, done) => done(null, body as string),
-  )
+  // #1186: the webhook's raw-body parser MUST be scoped to its own nested `app.register()` —
+  // registering it directly on `app` (this function's own top level) put it in the SAME
+  // encapsulation as `/billing/checkout` and `/billing/portal` below, so they silently inherited a
+  // raw STRING body instead of a parsed object. `req.body?.plan` was therefore always `undefined`,
+  // and checkout always 400'd with "unknown or non-self-serve plan" regardless of what was posted —
+  // caught by a route-level test (`billing.test.ts`), since every prior test called
+  // `createCheckoutSession` directly and never exercised the route's own body parsing.
+  await app.register(async (webhookApp) => {
+    // Stripe webhook requires the raw request body for signature verification. Scoped to THIS
+    // nested plugin only — `/billing/checkout` and `/billing/portal` stay on the default JSON parser.
+    webhookApp.addContentTypeParser(
+      'application/json',
+      { parseAs: 'string' },
+      (_req, body, done) => done(null, body as string),
+    )
 
-  // POST /webhooks/stripe
-  // Security boundary: signature verification must NOT be skipped or stubbed.
-  // A missing or invalid signature means the event could be forged (e.g. fake
-  // plan upgrades). If STRIPE_WEBHOOK_SECRET is unset, return 503 rather than
-  // accepting unsigned events.
-  app.post<{ Body: string }>('/webhooks/stripe', async (req, reply) => {
-    const secret = process.env.STRIPE_WEBHOOK_SECRET
-    if (!secret) return reply.code(503).send({ error: 'webhook not configured' })
+    // POST /webhooks/stripe
+    // Security boundary: signature verification must NOT be skipped or stubbed.
+    // A missing or invalid signature means the event could be forged (e.g. fake
+    // plan upgrades). If STRIPE_WEBHOOK_SECRET is unset, return 503 rather than
+    // accepting unsigned events.
+    webhookApp.post<{ Body: string }>('/webhooks/stripe', async (req, reply) => {
+      const secret = process.env.STRIPE_WEBHOOK_SECRET
+      if (!secret) return reply.code(503).send({ error: 'webhook not configured' })
 
-    const sig = req.headers['stripe-signature'] as string
-    let event: Stripe.Event
-    try {
-      event = stripe.webhooks.constructEvent(req.body, sig, secret)
-    } catch {
-      return reply.code(400).send({ error: 'webhook signature invalid' })
-    }
+      const sig = req.headers['stripe-signature'] as string
+      let event: Stripe.Event
+      try {
+        event = stripe.webhooks.constructEvent(req.body, sig, secret)
+      } catch {
+        return reply.code(400).send({ error: 'webhook signature invalid' })
+      }
 
-    await processWebhookEvent(event)
-    return reply.code(200).send({ received: true })
+      await processWebhookEvent(event)
+      return reply.code(200).send({ received: true })
+    })
   })
 
   // GET /entitlements
