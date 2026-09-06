@@ -13,6 +13,7 @@ import { buildApp } from '../app.js'
 import { getAccountSettings, updateAccountSettings, setAvatar, clearAvatar } from '../routes/account.js'
 import { linkMemberIdentity } from '../auth/member-identities.js'
 import type { Tenant } from '@wikistead/types'
+import { LANGS } from '@wikistead/i18n-shared'
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!)
 const TENANT = 'tenant_dev'
@@ -145,14 +146,16 @@ describe('account settings (ADR-020)', () => {
   // #1007 / ADR-260 §3.1/§3.2/§6.2: the member's mail-language override — validated against the
   // shared LANGS (#1006), stored on members.locale (#1005). Unset (null) is the default; an explicit
   // null CLEARS it back to that default, same shape as displayNameOverride above.
-  it('language round-trips (en/ja), defaults to null (unset), rejects an unknown code, and null clears it', async () => {
+  it('language round-trips (every registered language), defaults to null (unset), rejects an unknown code, and null clears it', async () => {
     expect((await getAccountSettings(db, { subject: SUB_B })).language, 'unset by default').toBeNull()
-    for (const l of ['ja', 'en'] as const) {
+    // #713-S2: reads LANGS rather than naming 'en'/'ja' directly, so a language added to the registry is
+    // covered here without a second find-and-fix pass — the same reason detectLang() (apps/web) does.
+    for (const l of LANGS) {
       expect((await updateAccountSettings(db, { subject: SUB_A, language: l })).language).toBe(l)
       const [row] = await admin<{ locale: string | null }[]>`SELECT locale FROM members WHERE tenant_id = ${TENANT} AND sub = ${SUB_A}`
       expect(row!.locale, 'the column agrees — not just the response').toBe(l)
     }
-    await expect(updateAccountSettings(db, { subject: SUB_A, language: 'fr' })).rejects.toMatchObject({ statusCode: 400 })
+    await expect(updateAccountSettings(db, { subject: SUB_A, language: 'xx' })).rejects.toMatchObject({ statusCode: 400 })
     expect((await updateAccountSettings(db, { subject: SUB_A, language: null })).language, 'explicit null clears it').toBeNull()
     // self-scope: B untouched throughout
     expect((await getAccountSettings(db, { subject: SUB_B })).language).toBeNull()

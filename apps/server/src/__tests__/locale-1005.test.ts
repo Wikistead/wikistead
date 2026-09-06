@@ -5,7 +5,7 @@ describe('#1005 isKnownLang / resolveMailLocale', () => {
   it('accepts only the known set', () => {
     expect(isKnownLang('en')).toBe(true)
     expect(isKnownLang('ja')).toBe(true)
-    expect(isKnownLang('fr')).toBe(false)
+    expect(isKnownLang('xx')).toBe(false)
     expect(isKnownLang(null)).toBe(false)
     expect(isKnownLang(undefined)).toBe(false)
     expect(isKnownLang('')).toBe(false)

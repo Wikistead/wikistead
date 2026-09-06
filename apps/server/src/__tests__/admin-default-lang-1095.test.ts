@@ -50,7 +50,7 @@ describe('GET/PUT /admin/default-lang (#1095)', () => {
   })
 
   it('rejects an unknown language and leaves the stored value unchanged', async () => {
-    const r = await put({ defaultLang: 'fr' }, dev())
+    const r = await put({ defaultLang: 'xx' }, dev())
     expect(r.statusCode).toBe(400)
     expect((await get(dev())).json()).toEqual({ defaultLang: null })
   })

@@ -55,7 +55,7 @@ describe('tenantDefaultLang + first-login naming (#419 — real PG)', () => {
     expect(await tenantDefaultLang(db)).toBe('en')
     await admin`UPDATE tenant_settings SET default_lang = 'ja' WHERE tenant_id = ${tenant.id}`
     expect(await tenantDefaultLang(db)).toBe('ja')
-    await admin`UPDATE tenant_settings SET default_lang = 'fr' WHERE tenant_id = ${tenant.id}`
+    await admin`UPDATE tenant_settings SET default_lang = 'xx' WHERE tenant_id = ${tenant.id}`
     expect(await tenantDefaultLang(db)).toBe('en')
   })
 
