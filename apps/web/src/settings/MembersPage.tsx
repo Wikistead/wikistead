@@ -631,7 +631,7 @@ export function MembersPage() {
             </tr>
               {expandedIdentities === m.sub && (
                 <tr data-testid="member-identities-row" style={{ borderBottom: "1px solid var(--border, #222)" }}>
-                  <td colSpan={3} style={{ padding: "0 4px 8px" }}>
+                  <td colSpan={3} style={{ padding: "8px 4px" }}>
                     <MemberIdentityLinksSection sub={m.sub} name={nameOf(m)} />
                   </td>
                 </tr>
