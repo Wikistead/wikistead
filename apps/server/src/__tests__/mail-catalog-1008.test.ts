@@ -12,6 +12,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import * as catalog from '../email/catalog.js'
 import { buildRecoveryMintedEmail, buildRecoveryUsedEmail } from '../email/security-builder.js'
+import { LANGS } from '../locale.js'
 
 const SERVER = resolve(import.meta.dirname, '..')
 
@@ -140,7 +141,9 @@ describe('#1008 / §3.3a: no catalogue entry carries markup', () => {
   for (const [name, fn] of Object.entries(catalog)) {
     if (typeof fn !== 'function') continue
     it(`${name} returns text, not HTML`, () => {
-      for (const lang of ['en', 'ja'] as const) {
+      // #1160 / #713-S6: every registered language, not just en/ja — a new arm holding a stray
+      // `<a href>` (e.g. copied from a different mail system's template) would only be caught here.
+      for (const lang of LANGS) {
         const out = (fn as (...a: unknown[]) => string)(lang, 'x', 1, 'y', 'z')
         expect(out, `${name} must hold words only — the builder writes the markup around them`)
           .not.toMatch(/<\/?[a-z][^>]*>/i)
@@ -183,18 +186,27 @@ describe('#1008 / §5: a shipped builder, not the catalogue functions', () => {
 
 describe('#1008 / §3.3a: each entry is genuinely translated', () => {
   // Every export is a (lang, ...args) => string function (the `byLang` shape). Calling each with
-  // dummy args for both langs proves neither branch is empty and the two differ — a stub that
-  // returned the English string for 'ja' too would pass every literal-absence check above and still
-  // ship English mail, which is the failure this ADR exists to prevent.
+  // dummy args for every registered language proves no branch is empty and every non-English one
+  // differs from English — a stub that returned the English string for another language too would pass
+  // every literal-absence check above and still ship English mail, which is the failure this ADR
+  // exists to prevent.
+  //
+  // #1160 / #713-S6: widened from 'ja' only to every language in LANGS. `byLang`'s `Record<Lang, ...>`
+  // shape already makes a MISSING language a compile error (TypeScript's own exhaustiveness check)
+  // this pin catches the narrower, compile-invisible mistake: an entry present for every language but
+  // with the wrong CONTENT (e.g. the English string copy-pasted into a non-English slot).
   const DUMMY = ['x', 1, 'y', 'z']
+  const NON_ENGLISH = LANGS.filter((l) => l !== 'en')
   for (const [name, fn] of Object.entries(catalog)) {
     if (typeof fn !== 'function') continue
-    it(`${name}: 'ja' output is non-empty and differs from 'en'`, () => {
+    it(`${name}: every non-English language is non-empty and differs from 'en'`, () => {
       const en = (fn as (...a: unknown[]) => string)('en', ...DUMMY)
-      const ja = (fn as (...a: unknown[]) => string)('ja', ...DUMMY)
       expect(typeof en).toBe('string')
-      expect(ja.length).toBeGreaterThan(0)
-      expect(ja, `${name} must not fall back to English prose for 'ja'`).not.toBe(en)
+      for (const lang of NON_ENGLISH) {
+        const out = (fn as (...a: unknown[]) => string)(lang, ...DUMMY)
+        expect(out.length, `${name}(${lang}) must not be empty`).toBeGreaterThan(0)
+        expect(out, `${name} must not fall back to English prose for '${lang}'`).not.toBe(en)
+      }
     })
   }
 
