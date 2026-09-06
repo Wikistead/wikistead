@@ -30,6 +30,16 @@ export interface BranchAnswer {
    * `placeholdersExhausted`: that flag told the reader something was missing and gave them no way to
    * see the rest; this field IS the way to see the rest. */
   placeholderCursor?: string;
+  /** #1149 (rev2): client-side only, never sent by the server — true once THIS branch has actually
+   * appended a `loadMore()` continuation (a real second round trip the reader watched a loading row
+   * for). Rev1 inferred the same fact from `pages.length > PAINT_LIMIT`, which conflated "the reader
+   * scrolled" with "the server happened to return more than 30 rows in ONE fetch" — the branch expand
+   * and `loadMore` requests never send `limit`, so the server's own default (`BRANCH_PAGE_LIMIT`, 100)
+   * governs a plain single-shot fetch, and any branch with 31-100 children got a terminal row after a
+   * reader who never saw a `more:` row at all (review). Set only by `loadMore`'s own
+   * cursor-continuation merge, never by a first-window fetch, however many rows it returns.
+   */
+  pagedPastFirstWindow?: boolean;
 }
 
 interface PaintAnswer {
@@ -53,13 +63,45 @@ export const PAINT_LIMIT = 30;
  * as "still going" (the report this ticket exists to fix). A branch that fit in its first window never
  * showed that ambiguity, so it gets no terminal row. One function so `assemble()` and `afterIdForMove()`
  * (below) can't drift apart on the condition.
+ *
+ * rev2 (review): reads the explicit `pagedPastFirstWindow` flag rather than inferring
+ * from `pages.length > PAINT_LIMIT` — the count alone cannot tell "the reader scrolled through several
+ * fetches" apart from "the server's default page size happened to exceed 30 in a single fetch" (branch
+ * expand and `loadMore` never send `limit`, so `BRANCH_PAGE_LIMIT`=100 governs, not `PAINT_LIMIT`=30).
  */
 function branchJustFinishedPaging(branch: BranchAnswer): boolean {
-  return !branch.nextCursor && branch.pages.length > PAINT_LIMIT;
+  return !branch.nextCursor && !!branch.pagedPastFirstWindow;
 }
 
 export function branchKey(spaceId: string, parentId: string | null): (string | null)[] {
   return ["pages", spaceId, "branch", parentId ?? ROOT];
+}
+
+/**
+ * #1149 rev2: `loadMore`'s merge, pulled out so a test can exercise it with a `BranchAnswer` shaped the
+ * way the real, limit-less `/pages/branch?cursor=…` fetch actually returns one (up to
+ * `BRANCH_PAGE_LIMIT` rows, not `PAINT_LIMIT`) — a caller building `BranchAnswer` fixtures directly for
+ * `buildLazyNodes` cannot exercise the count-vs-limit mismatch this ticket's rev1 shipped with
+ * (review). Exported for that test; `useLazyPageTree`'s `loadMore` is the only
+ * production caller.
+ *
+ * §8: a restarted read REPLACES what is held — appending would double what is already shown, and a
+ * restart discards the accumulated view along with it, so `pagedPastFirstWindow` resets too: a reader
+ * whose walk restarted and now completes in one fresh fetch never watched multiple loading rows for
+ * THIS pass, whatever they saw before the restart.
+ * #1077 review C5: no `placeholders` field to carry forward here either (see the paint queryFn's
+ * comment) — `byParent` supplies it at read time from `placeholderQueries`, not from this cache.
+ */
+export function mergeLoadMoreAppend(have: BranchAnswer, fresh: BranchAnswer): BranchAnswer {
+  if (fresh.restarted) return fresh;
+  return {
+    ...fresh,
+    pages: [...(have.pages ?? []), ...fresh.pages],
+    reachedWindow: have.reachedWindow,
+    // THIS function is the only place a reader's own `more:` click lands — the one real signal that
+    // they watched a loading row for a continuation, independent of row counts.
+    pagedPastFirstWindow: true,
+  };
 }
 
 /**
@@ -215,14 +257,7 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
     qs.set("cursor", have.nextCursor);
     const r = await apiFetch<BranchAnswer>(`/spaces/${spaceId}/pages/branch?${qs}`, token);
     if (!r) return;
-    // §8: a restarted read REPLACES what is held — appending would double what is already shown.
-    // #1077 review C5: no `placeholders` field to carry forward here either (see the paint queryFn's
-    // comment) — `byParent` supplies it at read time from `placeholderQueries`, not from this cache.
-    qc.setQueryData<BranchAnswer>(key, r.restarted ? r : {
-      ...r,
-      pages: [...(have.pages ?? []), ...r.pages],
-      reachedWindow: have.reachedWindow,
-    });
+    qc.setQueryData<BranchAnswer>(key, mergeLoadMoreAppend(have, r));
   }, [spaceId, token, qc]);
 
   // ADR-238 / #739: REACH the open row when the paint did not already hold it.
