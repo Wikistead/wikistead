@@ -12,7 +12,16 @@ import { LEVER_CATALOG, type LeverDoc } from './catalog.js'
 
 // Render the Community (UNLIMITED) value of a lever per its unit. Kept simple and
 // deterministic — no locale/Date dependence (the generator must be reproducible).
+//
+// #1174: `UNLIMITED[key]` answers "would the plan resolver refuse this lever on self-host" — true
+// (unrestricted) for every lever, `edition: 'ee'` ones included. It does NOT answer "does a self-host
+// build have the code to run this at all" — the five `edition: 'ee'` levers have no enforcement bytes
+// outside the private overlay (`packages/ee-server`), so printing their UNLIMITED value as "Enabled"
+// told a self-hoster they could use SSO/SCIM/the audit log/Access Transparency/analytics when the
+// route simply is not compiled in. This must short-circuit BEFORE the unit switch below, since an
+// EE lever can be any unit in principle even though today's five all happen to be boolean.
 function renderCommunityValue(key: string, lever: LeverDoc): string {
+  if (lever.edition === 'ee') return 'Not on self-host (EE-only)'
   const v = (UNLIMITED as unknown as Record<string, unknown>)[key]
   switch (lever.unit) {
     case 'boolean':

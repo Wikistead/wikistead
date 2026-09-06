@@ -46,4 +46,21 @@ describe('entitlement levers doc (#139 / ADR-080 doc↔code linkage)', () => {
     const committed = readFileSync(generatedPath, 'utf8')
     expect(committed).toBe(renderEntitlementsMarkdown())
   })
+
+  // #1174: `UNLIMITED[key] === true` says the PLAN would not restrict a lever on self-host — it does
+  // not say self-host has the code to run it. An `edition: 'ee'` lever has none at all outside the
+  // private overlay, so the doc must never print its self-host cell as though it were available.
+  it('an EE-edition lever is never marked available in the self-host column (#1174)', () => {
+    const rendered = renderEntitlementsMarkdown()
+    const eeKeys = Object.entries(LEVER_CATALOG)
+      .filter(([, doc]) => doc.edition === 'ee')
+      .map(([key]) => key)
+    expect(eeKeys.length).toBeGreaterThan(0) // the pin is vacuous if this catalog ever loses its EE rows
+    for (const key of eeKeys) {
+      const row = rendered.split('\n').find((line) => line.includes(`\`${key}\``))
+      expect(row, key).toBeTruthy()
+      expect(row, key).not.toMatch(/\|\s*Enabled\s*\|/)
+      expect(row, key).toContain('Not on self-host (EE-only)')
+    }
+  })
 })
