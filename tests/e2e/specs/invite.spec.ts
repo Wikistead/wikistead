@@ -45,12 +45,6 @@ async function mailpitReceived(api: APIRequestContext, to: string): Promise<bool
 const INVITE_EMAIL_LABEL = "Email address";
 
 test("admin invites a member; a fresh identity accepts in the browser and is seated", async ({ browser, request }) => {
-  // #1142: red once in a full 21-spec gate run (1.1m timeout) while another gate run and a server
-  // suite shared the machine, green 2/2 standalone right after (4.2s) — the #823/#825
-  // shared-stack-under-load family, not an invite regression. Isolated per #891's
-  // one-red-one-ticket convention. `{ browser, request }` only, so the in-body skip is
-  // evaluated before any heavy fixture (the `{ page }` trap in the project design notes's e2e note).
-  test.skip(true, "#1142: red under gate load, green 2/2 standalone — isolated, not a product regression");
   // #1001: this used to fail on EVERY stack — same root cause as #1000's login.spec.ts failure (the
   // admin's own real OIDC login never resolved to the seeded member; fixed in infra/db/seed.ts). Once
   // that was fixed, the invitee's own accept-flow assertion below also needed updating: a fresh
