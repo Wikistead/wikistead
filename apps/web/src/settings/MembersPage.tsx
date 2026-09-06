@@ -15,7 +15,7 @@ import {
   suspendMember, reactivateMember,
   ApiError, type Member, type Invite,
 } from "../data/membersApi";
-import { User, Users, KeyRound, Eraser, UserMinus, Ban, Undo2, ShieldOff, ChevronRight } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
+import { User, Users, KeyRound, Eraser, UserMinus, Ban, Undo2, ShieldOff, ChevronRight, IdCard } from "lucide-react"; // #579 ①: the row says which KIND of principal it is; ②: its actions wear icons in the ⋯ menu
 import { withRoleTips } from "./role-option-tips"; // #586: role names explain themselves on hover, in one place
 import { IconButton } from "../ui/Button";
 import { X } from "lucide-react"; // #544: icon component, not a text glyph
@@ -437,21 +437,14 @@ export function MembersPage() {
                   {/* #614: the status marks — origin (IdP / password-born), an added password entrance,
                       suspended. Hover explains each (the #586 school); nothing is spelled beside the name. */}
                   <MemberStatusIcons member={m} />
-                  {/* #1107 / ADR-280 §2 (rev6): a plain, focusable toggle — never a hover-only affordance
-                      (the ruling's own point: a face reachable only by hover cannot be linked, shared, or
-                      reached by keyboard). Absent entirely in a CE build (the route it expands does not
-                      exist there) or for a caller without requireTenantAdmin. */}
-                  {memberIdentitiesEnabled && (
-                    <button
-                      type="button"
-                      data-testid="member-identities-toggle"
-                      aria-expanded={expandedIdentities === m.sub}
-                      aria-label={t("members.identitiesToggle", { name: nameOf(m) })}
-                      className="inline-flex cursor-pointer items-center text-fg-dim hover:text-foreground"
-                      onClick={() => setExpandedIdentities((cur) => (cur === m.sub ? null : m.sub))}
-                    >
-                      <ChevronRight size={13} className={expandedIdentities === m.sub ? "rotate-90" : undefined} />
-                    </button>
+                  {/* #1107 review (#579 regression): the toggle moved into the row's own ⋯ menu below
+                      — #579's own ruling is "one affordance beyond the role control, everything else
+                      folds into the ⋯ menu", and a second bare button here violated it (measured:
+                      one-role-control-579.spec.ts's own "≤2 visible buttons per row" pin). A menu item
+                      is still a plain, focusable, keyboard-reachable control (ADR-280 rev6's actual
+                      requirement) — it was never about avoiding this specific existing pattern. */}
+                  {expandedIdentities === m.sub && (
+                    <ChevronRight size={13} className="rotate-90 text-fg-dim" aria-hidden />
                   )}
                 </span>
               </td>
@@ -522,8 +515,22 @@ export function MembersPage() {
                     { value: "reactivate", label: t("members.reactivate"), icon: <Undo2 size={14} />, testId: "member-reactivate" },
                     { value: "erase", label: t("members.eraseAnalytics"), icon: <Eraser size={14} />, testId: "member-erase-analytics", danger: true },
                     { value: "remove", label: t("members.remove"), icon: <UserMinus size={14} />, testId: "member-remove", danger: true },
-                  ].filter((i) => memberMenuValues(m).includes(i.value as MemberMenuValue))}
+                  ].filter((i) => memberMenuValues(m).includes(i.value as MemberMenuValue))
+                    // #1107 / ADR-280 §2 (rev6), #579 regression fix: the identity-links toggle folds
+                    // into this SAME menu rather than a second row button — gated on the composition
+                    // marker (memberIdentitiesEnabled), not on memberMenuValues (a per-member,
+                    // capability-derived list this is not part of).
+                    .concat(memberIdentitiesEnabled ? [{
+                      value: "identities",
+                      label: expandedIdentities === m.sub ? t("members.identitiesHide") : t("members.identitiesShow"),
+                      icon: <IdCard size={14} />,
+                      testId: "member-identities-toggle",
+                    }] : [])}
                   onSelect={(v) => {
+                    if (v === "identities") {
+                      setExpandedIdentities((cur) => (cur === m.sub ? null : m.sub));
+                      return;
+                    }
                     if (v === "password") {
                       // NOT through `guarded`: its catch-all is a hard-coded English "Action failed",
                       // which is what the review saw. The refusal is deliberately UNIFORM on the
