@@ -236,7 +236,11 @@ export function PageTree({
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
     void alignSelectedRow({
-      scroll: async () => { await treeRef.current?.scrollTo(`page:${selectedId}`, "center"); },
+      // #1190: "smart" (react-window) does the minimal move needed to bring a partially- or fully-
+      // off-screen row fully into view, rather than always recentering it — `alignSelectedRow`'s own
+      // `isVisible()` pre-check already skips this call entirely for an already-visible row, so this
+      // only ever runs for a row that genuinely needs to move.
+      scroll: async () => { await treeRef.current?.scrollTo(`page:${selectedId}`, "smart"); },
       afterLayout,
       isCancelled: () => cancelled,
       isVisible: () => {

@@ -36,11 +36,18 @@ export type SelectionAlignment = {
   isCancelled?: () => boolean;
 };
 
-/** Retry across tree reconstruction; a scroll request is not evidence that its row became visible. */
+/**
+ * Retry across tree reconstruction; a scroll request is not evidence that its row became visible.
+ *
+ * #1190: a row already on screen when it is selected (the ordinary "click a visible row" case) must
+ * not move at all — checked BEFORE the first scroll, not just as this loop's exit condition, which
+ * otherwise unconditionally scrolls-to-center once before ever asking whether that was necessary.
+ */
 export async function alignSelectedRow(
   alignment: SelectionAlignment,
   attempts = 4,
 ): Promise<boolean> {
+  if (alignment.isVisible()) return true;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (alignment.isCancelled?.()) return false;
     await alignment.scroll();

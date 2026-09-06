@@ -106,6 +106,30 @@ describe('#899 the sidebar scrolls to the open row', () => {
   })
 })
 
+describe('#1190: a row already on screen is never scrolled', () => {
+  it('clicking a visible row does not call scroll at all', async () => {
+    let scrolls = 0
+    const aligned = await alignSelectedRow({
+      scroll: () => { scrolls += 1 },
+      afterLayout: async () => {},
+      isVisible: () => true,
+    })
+    expect(aligned).toBe(true)
+    expect(scrolls).toBe(0)
+  })
+
+  it('an off-screen row still scrolls (break-check: removing the pre-check makes this call scroll twice)', async () => {
+    let scrolls = 0
+    const aligned = await alignSelectedRow({
+      scroll: () => { scrolls += 1 },
+      afterLayout: async () => {},
+      isVisible: () => scrolls >= 1,
+    })
+    expect(aligned).toBe(true)
+    expect(scrolls).toBe(1)
+  })
+})
+
 describe('#899 alignment finishes only when the selected row is visible', () => {
   it('retries after a tree rebuild ignores the first scroll request', async () => {
     let scrolls = 0
