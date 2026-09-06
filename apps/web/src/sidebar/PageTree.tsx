@@ -6,7 +6,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { ChevronRight, Copy, FilePen, FilePlus, FileText, Lock, MoreHorizontal, Pencil, Pin, Share2, Snowflake, Trash2 } from "lucide-react";
 import { ProgressRing } from "../app/ProgressRing"; // #290: sidebar :::todo progress ring
 import { cn } from "../lib/utils";
-import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX, PLACEHOLDERS_MORE_PREFIX } from "./lazy-tree"; // #623 §6.3, #1141
+import { UNLOADED_CHILD_PREFIX, PLACEHOLDER_PREFIX, MORE_PREFIX, PLACEHOLDERS_MORE_PREFIX, PAGING_DONE_PREFIX } from "./lazy-tree"; // #623 §6.3, #1141, #1149
 import { alignSelectedRow, decideScroll, NO_SCROLL_YET, type ScrollMemory } from "./scroll-to-selection"; // #899
 
 // The presentational page-tree — the ONE react-arborist tree + row renderer shared by every surface that
@@ -123,7 +123,15 @@ function MoreRow({ enabled, onVisible }: { enabled: boolean; onVisible: () => vo
   return (
     <div ref={rowRef} className="h-full" data-testid="tree-branch-more" data-loading={loading || undefined}>
       {loading ? (
-        <TreeLoadingRow />
+        // #1149: NOT `<TreeLoadingRow />` — that generic skeleton is also what an about-to-expand branch
+        // draws (UNLOADED_CHILD_PREFIX), and the two looking identical is half of what this ticket was
+        // filed to fix. Same pulse, but named, so a reader mid-scroll can tell "still fetching more of
+        // this list" from "a branch is opening".
+        <div className="flex h-full items-center gap-2 px-3" data-testid="tree-branch-more-loading" role="status">
+          <span className="size-3.5 flex-none animate-pulse rounded-sm bg-border motion-reduce:animate-none" />
+          {/* #1130: no size override — inherits the tree's 14px like everything else here does. */}
+          <span className="truncate text-fg-dim">{t("sidebar.loadingMorePages")}</span>
+        </div>
       ) : (
         <button
           type="button"
@@ -291,6 +299,17 @@ export function PageTree({
           enabled={pagingEnabled}
           onVisible={() => onLoadMoreRef.current?.(parentId === "root" ? null : parentId)}
         />
+      );
+    }
+    if (d.id.startsWith(PAGING_DONE_PREFIX)) {
+      // #1149: the branch's own MORE_PREFIX row above just disappeared for good. Without this, the
+      // last thing a scrolling reader saw was a loading skeleton that then vanished — indistinguishable
+      // from "still going" (the report this ticket exists to fix). Not usable (no open, no menu, no
+      // drag, no toggle), just a terminal statement. #1130: no size override — inherits the 14px.
+      return (
+        <div className="flex h-full w-full min-w-0 items-center gap-1.5 px-1 text-fg-dim select-none" data-testid="tree-paging-done">
+          <span className="truncate">{d.name}</span>
+        </div>
       );
     }
     if (d.id.startsWith(PLACEHOLDERS_MORE_PREFIX)) {

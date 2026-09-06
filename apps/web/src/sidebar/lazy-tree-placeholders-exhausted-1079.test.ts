@@ -37,6 +37,7 @@ describe("#1141: a placeholder walk that has more to explore is a visible, resum
       byParent: new Map([[null, root]]),
       pinnedPageIds: new Set(),
       placeholderName: "Hidden",
+      pagingDoneLabel: "No more pages",
     });
 
     expect(nodes.map((n) => n.id)).toEqual(["page:a", "ph:t1", `${PLACEHOLDERS_MORE_PREFIX}root:cursor-xyz`]);
@@ -59,6 +60,7 @@ describe("#1141: a placeholder walk that has more to explore is a visible, resum
       byParent: new Map([[null, root]]),
       pinnedPageIds: new Set(),
       placeholderName: "Hidden",
+      pagingDoneLabel: "No more pages",
     });
 
     expect(nodes.some((n) => n.id.startsWith(PLACEHOLDERS_MORE_PREFIX)), "an absent cursor must not draw the row either").toBe(false);
@@ -78,6 +80,7 @@ describe("#1141: a placeholder walk that has more to explore is a visible, resum
       byParent: new Map([[null, root], ["a", child]]),
       pinnedPageIds: new Set(),
       placeholderName: "Hidden",
+      pagingDoneLabel: "No more pages",
     });
 
     expect(nodes.map((n) => n.id), "the root's own row list carries no continuation row").toEqual(["page:a"]);
@@ -93,7 +96,7 @@ describe("#1141: a placeholder walk that has more to explore is a visible, resum
     const first: BranchAnswer = { pages: [], nextCursor: null, placeholderCursor: "cursor-1" };
     const second: BranchAnswer = { pages: [], nextCursor: null, placeholderCursor: "cursor-2" };
     const idFor = (b: BranchAnswer) => buildLazyNodes({
-      spaceId: "space", byParent: new Map([[null, b]]), pinnedPageIds: new Set(), placeholderName: "Hidden",
+      spaceId: "space", byParent: new Map([[null, b]]), pinnedPageIds: new Set(), placeholderName: "Hidden", pagingDoneLabel: "No more pages",
     }).find((n) => n.id.startsWith(PLACEHOLDERS_MORE_PREFIX))!.id;
     expect(idFor(first)).not.toBe(idFor(second));
   });

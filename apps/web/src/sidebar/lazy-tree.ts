@@ -47,6 +47,17 @@ const ROOT = "root";
 /** #623 ③: how many rows the first paint confirms per branch. */
 export const PAINT_LIMIT = 30;
 
+/**
+ * #1149: has this branch paged past its first window and just run out of cursor? A reader who scrolled
+ * through more than one `more:` fetch watched a loading row go by more than once — ending silently reads
+ * as "still going" (the report this ticket exists to fix). A branch that fit in its first window never
+ * showed that ambiguity, so it gets no terminal row. One function so `assemble()` and `afterIdForMove()`
+ * (below) can't drift apart on the condition.
+ */
+function branchJustFinishedPaging(branch: BranchAnswer): boolean {
+  return !branch.nextCursor && branch.pages.length > PAINT_LIMIT;
+}
+
 export function branchKey(spaceId: string, parentId: string | null): (string | null)[] {
   return ["pages", spaceId, "branch", parentId ?? ROOT];
 }
@@ -279,6 +290,8 @@ export const MORE_PREFIX = "more:";
 /** #1141 / ADR-220 §4.2 rev13: more of this branch's invisible territory remains — resumable, the same
  * shape as `MORE_PREFIX`, not a dead end. Superseded `PLACEHOLDERS_EXHAUSTED_PREFIX` (#1079). */
 export const PLACEHOLDERS_MORE_PREFIX = "ph-more:";
+/** #1149: a branch that paged past its first window has just run out of cursor — say so once. */
+export const PAGING_DONE_PREFIX = "paging-done:";
 
 /**
  * Assemble react-arborist nodes from the loaded branches.
@@ -294,8 +307,9 @@ export function buildLazyNodes(args: {
   byParent: ReadonlyMap<string | null, BranchAnswer>;
   pinnedPageIds: ReadonlySet<string>;
   placeholderName: string;
+  pagingDoneLabel: string;
 }): PageTreeNode[] {
-  const { spaceId, byParent, pinnedPageIds, placeholderName } = args;
+  const { spaceId, byParent, pinnedPageIds, placeholderName, pagingDoneLabel } = args;
 
   const pageNode = (p: Page): PageTreeNode => ({
     id: `page:${p.id}`,
@@ -377,6 +391,13 @@ export function buildLazyNodes(args: {
         id: `${MORE_PREFIX}${parentId ?? ROOT}:${branch.nextCursor}`, name: "", pageId: "", spaceId,
         published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
       });
+    } else if (branchJustFinishedPaging(branch)) {
+      // #1149: the "more" row above just disappeared for good — the same row shape, but there is
+      // nothing left to ask for. Rendered only for a branch that actually paged (see the function).
+      rows.push({
+        id: `${PAGING_DONE_PREFIX}${parentId ?? ROOT}`, name: pagingDoneLabel, pageId: "", spaceId,
+        published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
+      });
     }
     // #1092: this is the reached-window group (#899), appended LAST — after every synthetic row above,
     // not just after `branch.pages`. The render order for a branch with a reached window is therefore
@@ -438,7 +459,8 @@ export function afterIdForMove(args: {
   // a row here — a nested placeholder is a CHILD of one of those rows, not a sibling at this level, so
   // it must not inflate this count.
   const direct = (branch.placeholders ?? []).filter((ph) => ph.parentToken === null && ph.under === parentPageId).length;
-  const synthetic = direct + (branch.placeholderCursor ? 1 : 0) + (branch.nextCursor ? 1 : 0);
+  const synthetic = direct + (branch.placeholderCursor ? 1 : 0)
+    + (branch.nextCursor ? 1 : 0) + (branchJustFinishedPaging(branch) ? 1 : 0);
 
   // #1080 rev2 (review): `index` is react-arborist's position in the RENDERED children
   // array, which still holds the dragged row at its ORIGINAL slot (compute-drop.ts's `walkUpFrom` builds
