@@ -215,6 +215,51 @@ describe('#1141: the continuation cursor is opaque, tamper-evident and scope-bou
     const found = new Set(result.placeholders.flatMap((n) => n.pages.map((p) => p.id as string)))
     expect(found.has(child), 'a bad cursor restarts the walk from the top instead of refusing to run').toBe(true)
   }, 300_000)
+
+  const uuid = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`
+
+  it('a real Frontier-shaped state (nested uuids, repeated ancestors) round-trips exactly', () => {
+    const s = scope()
+    const state = {
+      frontier: [
+        { invisibleId: uuid(1), path: [uuid(0)] },
+        { invisibleId: uuid(2), path: [uuid(0)] }, // shares uuid(0) with the entry above
+        { invisibleId: uuid(3), path: [] },
+      ],
+    }
+    const token = encodePlaceholderCursor(state, s)
+    expect(decodePlaceholderCursor(token, s)).toEqual(state)
+  })
+
+  it('#1141 a repeated ancestor id costs one dictionary slot, not one per occurrence', () => {
+    const s = scope()
+    // 15 frontier entries all sharing the SAME single ancestor — one distinct uuid, 15 occurrences.
+    const shared = { frontier: Array.from({ length: 15 }, (_, i) => ({ invisibleId: uuid(i + 1), path: [uuid(0)] })) }
+    // 15 frontier entries with 15 DISTINCT ancestors — the same occurrence count, no sharing to collapse.
+    const distinct = { frontier: Array.from({ length: 15 }, (_, i) => ({ invisibleId: uuid(i + 1), path: [uuid(1000 + i)] })) }
+    const sharedLen = encodePlaceholderCursor(shared, s).length
+    const distinctLen = encodePlaceholderCursor(distinct, s).length
+    expect(sharedLen, 'interning must make the shared-ancestor cursor smaller than the all-distinct one').toBeLessThan(distinctLen)
+  })
+
+  it('#1141 a cursor too large even after interning throws, rather than silently minting an oversized one', () => {
+    const s = scope()
+    // 400 frontier entries, each with a UNIQUE 8-ancestor path — interning cannot collapse any of it
+    // (every uuid distinct), so the dictionary alone is ~400*9*16 = 57,600 bytes, well past the budget.
+    const huge = {
+      frontier: Array.from({ length: 400 }, (_, i) => ({
+        invisibleId: uuid(i),
+        path: Array.from({ length: 8 }, (_, j) => uuid(100_000 + i * 8 + j)),
+      })),
+    }
+    expect(() => encodePlaceholderCursor(huge, s)).toThrow(/over the .*-byte budget/)
+  })
+
+  it('#1141 a state that FITS the budget mints successfully (the guard is not overzealous)', () => {
+    const s = scope()
+    const small = { frontier: [{ invisibleId: uuid(1), path: [uuid(0)] }] }
+    expect(() => encodePlaceholderCursor(small, s)).not.toThrow()
+  })
 })
 
 describe('#1141: §4.4\'s restricted-scope refusal still applies on a resumed call', () => {

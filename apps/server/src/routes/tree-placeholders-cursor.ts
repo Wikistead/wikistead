@@ -64,6 +64,74 @@ function unpad(buf: Buffer): Buffer {
 // ADR-068, carries no expiry at all — its body is a bare offset, not an authz-sensitive id).
 const CURSOR_TTL_MS = 15 * 60 * 1000
 
+// #1141 (interim, pending #1148's positional redesign): the plaintext's real cost is UUIDs — a
+// `Frontier`'s `invisibleId` plus its whole ancestor `path`, or a `GrantsPathState`'s candidate lists —
+// each a 36-character hyphenated string repeated verbatim in a plain `JSON.stringify`. A deep or wide
+// frontier can carry hundreds of them (measured: ~16KB for a 120-entry frontier), and this cursor rides
+// a GET query string, where `deploy/k8s`'s and the chart's ingress both leave `large_client_header_
+// buffers` at its default 8k — well under Node's own 16,384-byte `maxHeaderSize`, so nginx 4xxs first.
+// Interning collapses every DISTINCT uuid to one 16-byte slot in a shared dictionary (36 chars → 16
+// raw bytes, ~2.2x before this payload's own base64url step) instead of repeating it in place —a chain's
+// shared ancestors (the common case: many frontier entries fanning out from the same few invisible
+// parents) collapse to ONE dictionary entry, not one per occurrence.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function uuidToBytes(uuid: string): Buffer {
+  return Buffer.from(uuid.replace(/-/g, ''), 'hex')
+}
+
+function bytesToUuid(buf: Buffer, offset: number): string {
+  const hex = buf.subarray(offset, offset + 16).toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
+
+/** A uuid-shaped string becomes `{ $u: <dictionary index> }`; every other value passes through
+ * unchanged (structure-preserving, so the caller's `T` round-trips exactly). */
+function internUuids(value: unknown, dict: string[], seen: Map<string, number>): unknown {
+  if (typeof value === 'string' && UUID_RE.test(value)) {
+    let index = seen.get(value)
+    if (index === undefined) {
+      index = dict.length
+      dict.push(value)
+      seen.set(value, index)
+    }
+    return { $u: index }
+  }
+  if (Array.isArray(value)) return value.map((v) => internUuids(v, dict, seen))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, internUuids(v, dict, seen)]))
+  }
+  return value
+}
+
+function resolveUuids(value: unknown, dict: string[]): unknown {
+  if (value && typeof value === 'object' && '$u' in value) {
+    const index = (value as { $u: unknown }).$u
+    if (typeof index === 'number') return dict[index]
+  }
+  if (Array.isArray(value)) return value.map((v) => resolveUuids(v, dict))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolveUuids(v, dict)]))
+  }
+  return value
+}
+
+/** #1141 never truncate silently — a cursor too large to survive the trip is a FAILURE, never a
+ * silently shortened frontier (the reader would read a truncated walk as "everything was found"). The
+ * caller lets this reach the route's default error handler, converging on the same read-failure surface
+ * #500 already gives a broken branch fetch — no new concept for this to be the first thing to need. */
+export class PlaceholderCursorTooLargeError extends Error {
+  constructor(byteLength: number) {
+    super(`placeholder-walk continuation cursor is ${byteLength} bytes, over the ${CURSOR_BYTE_BUDGET}-byte budget`)
+    this.name = 'PlaceholderCursorTooLargeError'
+  }
+}
+
+// ~4KB, leaving headroom in the two real deployments' 8k `large_client_header_buffers` (chart and
+// `deploy/k8s` both leave it at nginx's default) for the rest of the URL, the other query params, and
+// the surrounding request line — measured by the reviewer, not assumed.
+const CURSOR_BYTE_BUDGET = 4096
+
 // #1141 rev13 (design-review S1): FAIL-CLOSED, matching `auth/secret-crypto.ts`'s own discipline for
 // at-rest encryption — a placeholder cursor's plaintext is a set of real page ids, so signing (now
 // encrypting) it with an empty key would make it silently forgeable rather than merely refusing to
@@ -95,10 +163,15 @@ export function encodePlaceholderCursor<T>(state: T, ctx: PlaceholderCursorScope
   const iv = randomBytes(IV_LEN)
   const cipher = createCipheriv('aes-256-gcm', key, iv)
   cipher.setAAD(scopeAad(ctx))
-  const payload = pad(Buffer.from(JSON.stringify({ exp: Date.now() + CURSOR_TTL_MS, state }), 'utf8'))
+  const dict: string[] = []
+  const interned = internUuids(state, dict, new Map())
+  const uuids = Buffer.concat(dict.map(uuidToBytes)).toString('base64url')
+  const payload = pad(Buffer.from(JSON.stringify({ exp: Date.now() + CURSOR_TTL_MS, uuids, state: interned }), 'utf8'))
   const ct = Buffer.concat([cipher.update(payload), cipher.final()])
   const tag = cipher.getAuthTag()
-  return Buffer.concat([iv, ct, tag]).toString('base64url')
+  const cursor = Buffer.concat([iv, ct, tag]).toString('base64url')
+  if (cursor.length > CURSOR_BYTE_BUDGET) throw new PlaceholderCursorTooLargeError(cursor.length)
+  return cursor
 }
 
 /** Returns the decoded state, or `undefined` for an absent / malformed / tampered / cross-scope /
@@ -117,9 +190,12 @@ export function decodePlaceholderCursor<T>(cursor: string | undefined, ctx: Plac
     decipher.setAAD(scopeAad(ctx))
     decipher.setAuthTag(tag)
     const plaintext = unpad(Buffer.concat([decipher.update(ct), decipher.final()])).toString('utf8')
-    const { exp, state } = JSON.parse(plaintext) as { exp: number; state: T }
+    const { exp, uuids, state } = JSON.parse(plaintext) as { exp: number; uuids: string; state: unknown }
     if (typeof exp !== 'number' || Date.now() > exp) return undefined
-    return state
+    const dictBuf = Buffer.from(uuids, 'base64url')
+    const dict: string[] = []
+    for (let offset = 0; offset < dictBuf.length; offset += 16) dict.push(bytesToUuid(dictBuf, offset))
+    return resolveUuids(state, dict) as T
   } catch {
     // Wrong key, wrong scope (AAD mismatch), tampered ciphertext/tag, or malformed base64/JSON — all
     // indistinguishable from the caller's point of view, and all restart the walk, never throw.

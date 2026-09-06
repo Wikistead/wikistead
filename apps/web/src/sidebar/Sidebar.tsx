@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NodeApi } from "react-arborist";
 import { ChevronDown, ChevronUp, FileText, Home, PinOff, Settings } from "lucide-react";
 import { PageTree, type PageTreeNode } from "./PageTree";
@@ -51,6 +51,7 @@ import { visibleBranchPages } from "./scroll-to-selection"; // #899
 export const Sidebar = memo(SidebarImpl);
 function SidebarImpl() {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const { token } = useSession();
   const navigate = useNavigate();
   const { pageId } = useParams<{ pageId: string }>();
@@ -426,10 +427,13 @@ function SidebarImpl() {
         <div className="p-3 text-fg-dim">{t("sidebar.loadFailed")} <button type="button" className="cursor-pointer text-[var(--accent)]" onClick={() => spacesQ.refetch()}>{t("sidebar.retry")}</button></div>
       ) : spaces.length === 0 ? (
         <div className="p-3 text-fg-dim">{t("sidebar.noSpaces")}</div>
-      ) : pagesQ.isError ? (
+      ) : pagesQ.isError || lazyTree.placeholdersError ? (
         /* #492: a failed page-tree fetch shows a retry affordance, NOT the "No pages yet" empty state
-           the two are different truths and conflating them hides the failure until a manual reload. */
-        <div className="p-3 text-fg-dim" data-testid="sidebar-pages-error">{t("sidebar.loadFailed")} <button type="button" className="cursor-pointer text-[var(--accent)]" onClick={() => pagesQ.refetch()}>{t("sidebar.retry")}</button></div>
+           the two are different truths and conflating them hides the failure until a manual reload.
+           #1141 a placeholder-walk failure (e.g. a continuation cursor too large to survive the
+           trip) converges on this SAME surface — retrying re-fetches every wanted branch AND placeholder
+           query, since react-query's `refetch` on the paint query does not touch the placeholder ones. */
+        <div className="p-3 text-fg-dim" data-testid="sidebar-pages-error">{t("sidebar.loadFailed")} <button type="button" className="cursor-pointer text-[var(--accent)]" onClick={() => { pagesQ.refetch(); qc.invalidateQueries({ queryKey: ["pages", current ?? ""] }); }}>{t("sidebar.retry")}</button></div>
       ) : pagesLoading && pages.length === 0 ? (
         <SidebarTreeSkeleton />
       ) : pages.length === 0 ? (

@@ -278,7 +278,17 @@ export function useLazyPageTree(spaceId: string | null, openPageId: string | nul
     })();
   }, [spaceId, openPageId, paint.data, byParent, token, qc]);
 
-  return { paint, byParent, expanded, expand, collapse, loadMore, loadMorePlaceholders };
+  // #1141 a placeholder-walk failure (including a continuation cursor too large to survive the
+  // trip — `PlaceholderCursorTooLargeError`) must converge on the SAME read-failure surface a broken
+  // branch fetch already gets (`pagesQ.isError` in Sidebar.tsx), never sit silent — `byParent`'s merge
+  // above falls back to the branch's OWN data with no placeholders when `placeholderQueries[i]` has no
+  // `.data`, which is indistinguishable, to a reader, from "nothing was hidden here" (#500's own bug,
+  // reintroduced in this one spot). Exposed as one flag rather than per-branch: a hidden section failing
+  // to resolve is not something a branch row has any way to show on its own (§4.2 — no separate row for
+  // it exists), so it merges into the tree-wide error the same way ruling ④ names.
+  const placeholdersError = placeholderQueries.some((q) => q.isError);
+
+  return { paint, byParent, expanded, expand, collapse, loadMore, loadMorePlaceholders, placeholdersError };
 }
 
 /** The sentinel child that makes an UNLOADED row expandable (ruling ① (c): every row draws a chevron). */

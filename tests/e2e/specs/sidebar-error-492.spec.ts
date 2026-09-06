@@ -44,3 +44,19 @@ test("#492: once the fetch recovers, Retry loads the tree (no manual reload need
   await retry.click();
   await expect(page.getByTestId("sidebar-pages-error")).toHaveCount(0, { timeout: 15000 });
 });
+
+// #1141 a placeholder-walk failure (e.g. `PlaceholderCursorTooLargeError` — a continuation
+// cursor too large to survive the trip) must converge on this SAME surface, never sit silent. Before
+// this, `useLazyPageTree`'s `byParent` merge fell back to the branch's own data whenever the
+// placeholder query had no `.data` — indistinguishable, to a reader, from "nothing was hidden here".
+test("#1141: a FAILED tree-placeholders fetch shows the same retry affordance, not silence", async ({ browser }) => {
+  const page = await (await browser.newContext()).newPage();
+  await openDemo(page);
+
+  await page.route(/\/spaces\/[^/]+\/pages\/tree-placeholders(\?|$)/, (r) =>
+    r.fulfill({ status: 500, contentType: "application/json", body: '{"error":"boom"}' }));
+  await page.reload();
+  await page.waitForSelector("[data-testid=sidebar], [data-testid=sidebar-toggle]");
+
+  await expect(page.getByTestId("sidebar-pages-error")).toBeVisible({ timeout: 25000 });
+});
