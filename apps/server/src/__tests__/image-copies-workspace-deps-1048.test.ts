@@ -65,5 +65,17 @@ describe('#1048: an image COPYs every workspace package its app depends on', () 
         .filter((name) => !copied.has(dirOf(name)) && !dockerfile.includes(name))
       expect(unaccounted, `${app}/Dockerfile neither COPYs nor strips these — the image's install cannot resolve them`).toEqual([])
     })
+
+    // #1182: apps/web and apps/collab shipped without COPYing pnpm-lock.yaml at all, so `pnpm install`
+    // inside those images re-resolved every dependency to the newest match of its range on every build
+    // — the same drift class the server image's own frozen-lockfile comment already measures for
+    // stripe. The fix landed without a pin, and this family has already drifted once (server was fixed
+    // first, web and collab were left behind) — so this asserts the lockfile COPY across all three
+    // Dockerfiles the discovery loop above already walks, not just the two that regressed.
+    it(`${app}/Dockerfile COPYs pnpm-lock.yaml`, () => {
+      const dockerfile = readFileSync(join(repoRoot, `${app}/Dockerfile`), 'utf8')
+      const copiesLockfile = dockerfile.split('\n').some((line) => /^COPY\b.*\bpnpm-lock\.yaml\b/.test(line))
+      expect(copiesLockfile, `${app}/Dockerfile has no COPY line naming pnpm-lock.yaml — installs inside the image re-resolve every dependency instead of using the pinned versions`).toBe(true)
+    })
   }
 })
