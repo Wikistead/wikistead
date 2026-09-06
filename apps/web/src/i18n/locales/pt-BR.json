@@ -1291,7 +1291,14 @@
     "resetFactors": "Redefinir autenticação de dois fatores",
     "resetFactorsConfirm": "Isso apaga os segundos fatores de {{name}}. Eles configurarão um novo no próximo login.",
     "resetFactorsDone": "Autenticação de dois fatores redefinida.",
-    "resetFactorsSelf": "Remova seus próprios fatores nas configurações da sua conta, onde o fator solicita seu código."
+    "resetFactorsSelf": "Remova seus próprios fatores nas configurações da sua conta, onde o fator solicita seu código.",
+    "identitiesToggle": "Identidades de login vinculadas para {{name}}",
+    "identitiesPrimarySource": "Entra via {{source}}",
+    "identitiesSourceIdp": "login único",
+    "identitiesSourceLocal": "senha",
+    "identitiesEmpty": "Nenhuma identidade vinculada adicional.",
+    "identitiesLoadFailed": "Falha ao carregar identidades vinculadas.",
+    "identitiesConnectionGone": "(conexão removida)"
   },
   "commentsPanel": {
     "readOnlyReason": "Comentar está desativado para você nesta página.",

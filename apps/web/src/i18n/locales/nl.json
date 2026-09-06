@@ -1291,7 +1291,14 @@
     "resetFactors": "Tweefactorauthenticatie resetten",
     "resetFactorsConfirm": "Dit wist de tweede factoren van {{name}}. Ze configureren een nieuwe bij hun volgende aanmelding.",
     "resetFactorsDone": "Tweefactorauthenticatie gereset.",
-    "resetFactorsSelf": "Verwijder uw eigen factoren vanuit uw accountinstellingen, waar de factor om zijn code vraagt."
+    "resetFactorsSelf": "Verwijder uw eigen factoren vanuit uw accountinstellingen, waar de factor om zijn code vraagt.",
+    "identitiesToggle": "Gekoppelde inlogidentiteiten voor {{name}}",
+    "identitiesPrimarySource": "Logt in via {{source}}",
+    "identitiesSourceIdp": "single sign-on",
+    "identitiesSourceLocal": "wachtwoord",
+    "identitiesEmpty": "Geen extra gekoppelde identiteiten.",
+    "identitiesLoadFailed": "Kon gekoppelde identiteiten niet laden.",
+    "identitiesConnectionGone": "(verbinding verwijderd)"
   },
   "commentsPanel": {
     "readOnlyReason": "Opmerken is uitgeschakeld voor u op deze pagina.",

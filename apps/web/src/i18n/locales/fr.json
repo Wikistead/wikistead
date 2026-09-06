@@ -1291,7 +1291,14 @@
     "resetFactors": "Réinitialiser l'authentification à deux facteurs",
     "resetFactorsConfirm": "Ceci efface les seconds facteurs de {{name}}. Il/elle en configurera un nouveau à sa prochaine connexion.",
     "resetFactorsDone": "Authentification à deux facteurs réinitialisée.",
-    "resetFactorsSelf": "Retirez vos propres facteurs depuis les paramètres de votre compte, où le facteur demande son code."
+    "resetFactorsSelf": "Retirez vos propres facteurs depuis les paramètres de votre compte, où le facteur demande son code.",
+    "identitiesToggle": "Identités de connexion liées pour {{name}}",
+    "identitiesPrimarySource": "Se connecte via {{source}}",
+    "identitiesSourceIdp": "authentification unique",
+    "identitiesSourceLocal": "mot de passe",
+    "identitiesEmpty": "Aucune autre identité liée.",
+    "identitiesLoadFailed": "Échec du chargement des identités liées.",
+    "identitiesConnectionGone": "(connexion supprimée)"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenter est désactivé pour vous sur cette page.",

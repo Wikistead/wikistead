@@ -166,7 +166,16 @@
     "label": "Sprache",
     "en": "English",
     "ja": "日本語",
-    "de": "Deutsch"
+    "de": "Deutsch",
+    "fr": "Français",
+    "es": "Español",
+    "it": "Italiano",
+    "nl": "Nederlands",
+    "pt-BR": "Português (Brasil)",
+    "ru": "Русский",
+    "uk": "Українська",
+    "zh-Hans": "简体中文",
+    "ko": "한국어"
   },
   "nav": {
     "toggleSidebar": "Seitenleiste umschalten",
@@ -273,6 +282,15 @@
       "language_en": "Englisch",
       "language_ja": "Japanisch",
       "language_de": "Deutsch",
+      "language_fr": "Französisch",
+      "language_es": "Spanisch",
+      "language_it": "Italienisch",
+      "language_nl": "Niederländisch",
+      "language_pt-BR": "Portugiesisch (Brasilien)",
+      "language_ru": "Russisch",
+      "language_uk": "Ukrainisch",
+      "language_zh-Hans": "Chinesisch (vereinfacht)",
+      "language_ko": "Koreanisch",
       "defaultMask": "Standard-Ereignistypen",
       "defaultMaskHint": "Wird auf Beobachtungen ohne eigenen Typfilter angewendet. Standardmäßig sind alle Typen aktiv."
     },
@@ -1061,7 +1079,16 @@
     "defaultLangHint": "Die Ausweichsprache für Mails dieses Arbeitsbereichs, verwendet für Mitglieder, die keine eigene gewählt haben (Einstellungen → Benachrichtigungen → Mail-Sprache).",
     "defaultLang_en": "Englisch",
     "defaultLang_ja": "Japanisch",
-    "defaultLang_de": "Deutsch"
+    "defaultLang_de": "Deutsch",
+    "defaultLang_fr": "Französisch",
+    "defaultLang_es": "Spanisch",
+    "defaultLang_it": "Italienisch",
+    "defaultLang_nl": "Niederländisch",
+    "defaultLang_pt-BR": "Portugiesisch (Brasilien)",
+    "defaultLang_ru": "Russisch",
+    "defaultLang_uk": "Ukrainisch",
+    "defaultLang_zh-Hans": "Chinesisch (vereinfacht)",
+    "defaultLang_ko": "Koreanisch"
   },
   "accent": {
     "blue": "Blau",

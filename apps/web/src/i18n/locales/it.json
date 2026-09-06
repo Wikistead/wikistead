@@ -1291,7 +1291,14 @@
     "resetFactors": "Reimposta autenticazione a due fattori",
     "resetFactorsConfirm": "Questo cancella i secondi fattori di {{name}}. Ne configurerà uno nuovo al prossimo accesso.",
     "resetFactorsDone": "Autenticazione a due fattori reimpostata.",
-    "resetFactorsSelf": "Rimuovi i tuoi stessi fattori dalle impostazioni del tuo account, dove il fattore richiede il suo codice."
+    "resetFactorsSelf": "Rimuovi i tuoi stessi fattori dalle impostazioni del tuo account, dove il fattore richiede il suo codice.",
+    "identitiesToggle": "Identità di accesso collegate per {{name}}",
+    "identitiesPrimarySource": "Accede tramite {{source}}",
+    "identitiesSourceIdp": "accesso unico",
+    "identitiesSourceLocal": "password",
+    "identitiesEmpty": "Nessun'altra identità collegata.",
+    "identitiesLoadFailed": "Impossibile caricare le identità collegate.",
+    "identitiesConnectionGone": "(connessione rimossa)"
   },
   "commentsPanel": {
     "readOnlyReason": "Commentare è disattivato per te su questa pagina.",

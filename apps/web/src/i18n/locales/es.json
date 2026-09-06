@@ -1291,7 +1291,14 @@
     "resetFactors": "Restablecer autenticación de dos factores",
     "resetFactorsConfirm": "Esto borra los segundos factores de {{name}}. Configurará uno nuevo en su próximo inicio de sesión.",
     "resetFactorsDone": "Autenticación de dos factores restablecida.",
-    "resetFactorsSelf": "Quite sus propios factores desde la configuración de su cuenta, donde el factor solicita su código."
+    "resetFactorsSelf": "Quite sus propios factores desde la configuración de su cuenta, donde el factor solicita su código.",
+    "identitiesToggle": "Identidades de inicio de sesión vinculadas para {{name}}",
+    "identitiesPrimarySource": "Inicia sesión mediante {{source}}",
+    "identitiesSourceIdp": "inicio de sesión único",
+    "identitiesSourceLocal": "contraseña",
+    "identitiesEmpty": "No hay identidades vinculadas adicionales.",
+    "identitiesLoadFailed": "No se pudieron cargar las identidades vinculadas.",
+    "identitiesConnectionGone": "(conexión eliminada)"
   },
   "commentsPanel": {
     "readOnlyReason": "Comentar está desactivado para usted en esta página.",
