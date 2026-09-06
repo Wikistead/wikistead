@@ -30,16 +30,6 @@ export interface BranchAnswer {
    * `placeholdersExhausted`: that flag told the reader something was missing and gave them no way to
    * see the rest; this field IS the way to see the rest. */
   placeholderCursor?: string;
-  /** #1149 (rev2): client-side only, never sent by the server — true once THIS branch has actually
-   * appended a `loadMore()` continuation (a real second round trip the reader watched a loading row
-   * for). Rev1 inferred the same fact from `pages.length > PAINT_LIMIT`, which conflated "the reader
-   * scrolled" with "the server happened to return more than 30 rows in ONE fetch" — the branch expand
-   * and `loadMore` requests never send `limit`, so the server's own default (`BRANCH_PAGE_LIMIT`, 100)
-   * governs a plain single-shot fetch, and any branch with 31-100 children got a terminal row after a
-   * reader who never saw a `more:` row at all (review). Set only by `loadMore`'s own
-   * cursor-continuation merge, never by a first-window fetch, however many rows it returns.
-   */
-  pagedPastFirstWindow?: boolean;
 }
 
 interface PaintAnswer {
@@ -57,38 +47,16 @@ const ROOT = "root";
 /** #623 ③: how many rows the first paint confirms per branch. */
 export const PAINT_LIMIT = 30;
 
-/**
- * #1149: has this branch paged past its first window and just run out of cursor? A reader who scrolled
- * through more than one `more:` fetch watched a loading row go by more than once — ending silently reads
- * as "still going" (the report this ticket exists to fix). A branch that fit in its first window never
- * showed that ambiguity, so it gets no terminal row. One function so `assemble()` and `afterIdForMove()`
- * (below) can't drift apart on the condition.
- *
- * rev2 (review): reads the explicit `pagedPastFirstWindow` flag rather than inferring
- * from `pages.length > PAINT_LIMIT` — the count alone cannot tell "the reader scrolled through several
- * fetches" apart from "the server's default page size happened to exceed 30 in a single fetch" (branch
- * expand and `loadMore` never send `limit`, so `BRANCH_PAGE_LIMIT`=100 governs, not `PAINT_LIMIT`=30).
- */
-function branchJustFinishedPaging(branch: BranchAnswer): boolean {
-  return !branch.nextCursor && !!branch.pagedPastFirstWindow;
-}
-
 export function branchKey(spaceId: string, parentId: string | null): (string | null)[] {
   return ["pages", spaceId, "branch", parentId ?? ROOT];
 }
 
 /**
- * #1149 rev2: `loadMore`'s merge, pulled out so a test can exercise it with a `BranchAnswer` shaped the
- * way the real, limit-less `/pages/branch?cursor=…` fetch actually returns one (up to
- * `BRANCH_PAGE_LIMIT` rows, not `PAINT_LIMIT`) — a caller building `BranchAnswer` fixtures directly for
- * `buildLazyNodes` cannot exercise the count-vs-limit mismatch this ticket's rev1 shipped with
- * (review). Exported for that test; `useLazyPageTree`'s `loadMore` is the only
- * production caller.
+ * `loadMore`'s merge, pulled out so a test can exercise it directly rather than only via
+ * `buildLazyNodes`'s `BranchAnswer` fixtures. `useLazyPageTree`'s `loadMore` is the only production
+ * caller.
  *
- * §8: a restarted read REPLACES what is held — appending would double what is already shown, and a
- * restart discards the accumulated view along with it, so `pagedPastFirstWindow` resets too: a reader
- * whose walk restarted and now completes in one fresh fetch never watched multiple loading rows for
- * THIS pass, whatever they saw before the restart.
+ * §8: a restarted read REPLACES what is held — appending would double what is already shown.
  * #1077 review C5: no `placeholders` field to carry forward here either (see the paint queryFn's
  * comment) — `byParent` supplies it at read time from `placeholderQueries`, not from this cache.
  */
@@ -98,9 +66,6 @@ export function mergeLoadMoreAppend(have: BranchAnswer, fresh: BranchAnswer): Br
     ...fresh,
     pages: [...(have.pages ?? []), ...fresh.pages],
     reachedWindow: have.reachedWindow,
-    // THIS function is the only place a reader's own `more:` click lands — the one real signal that
-    // they watched a loading row for a continuation, independent of row counts.
-    pagedPastFirstWindow: true,
   };
 }
 
@@ -335,8 +300,6 @@ export const MORE_PREFIX = "more:";
 /** #1141 / ADR-220 §4.2 rev13: more of this branch's invisible territory remains — resumable, the same
  * shape as `MORE_PREFIX`, not a dead end. Superseded `PLACEHOLDERS_EXHAUSTED_PREFIX` (#1079). */
 export const PLACEHOLDERS_MORE_PREFIX = "ph-more:";
-/** #1149: a branch that paged past its first window has just run out of cursor — say so once. */
-export const PAGING_DONE_PREFIX = "paging-done:";
 
 /**
  * Assemble react-arborist nodes from the loaded branches.
@@ -352,9 +315,8 @@ export function buildLazyNodes(args: {
   byParent: ReadonlyMap<string | null, BranchAnswer>;
   pinnedPageIds: ReadonlySet<string>;
   placeholderName: string;
-  pagingDoneLabel: string;
 }): PageTreeNode[] {
-  const { spaceId, byParent, pinnedPageIds, placeholderName, pagingDoneLabel } = args;
+  const { spaceId, byParent, pinnedPageIds, placeholderName } = args;
 
   const pageNode = (p: Page): PageTreeNode => ({
     id: `page:${p.id}`,
@@ -436,14 +398,9 @@ export function buildLazyNodes(args: {
         id: `${MORE_PREFIX}${parentId ?? ROOT}:${branch.nextCursor}`, name: "", pageId: "", spaceId,
         published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
       });
-    } else if (branchJustFinishedPaging(branch)) {
-      // #1149: the "more" row above just disappeared for good — the same row shape, but there is
-      // nothing left to ask for. Rendered only for a branch that actually paged (see the function).
-      rows.push({
-        id: `${PAGING_DONE_PREFIX}${parentId ?? ROOT}`, name: pagingDoneLabel, pageId: "", spaceId,
-        published: true, unpublished: false, private: false, taskDone: 0, taskTotal: 0, children: [],
-      });
     }
+    // #1149 (ruling): no terminal row when the cursor runs out — a branch that finishes paging
+    // just stops growing. The reader sees rows arrive as they scroll and nothing announces the end.
     // #1092: this is the reached-window group (#899), appended LAST — after every synthetic row above,
     // not just after `branch.pages`. The render order for a branch with a reached window is therefore
     // real (primary) … synthetic … real (reached), never a single unbroken block of real rows.
@@ -504,8 +461,7 @@ export function afterIdForMove(args: {
   // a row here — a nested placeholder is a CHILD of one of those rows, not a sibling at this level, so
   // it must not inflate this count.
   const direct = (branch.placeholders ?? []).filter((ph) => ph.parentToken === null && ph.under === parentPageId).length;
-  const synthetic = direct + (branch.placeholderCursor ? 1 : 0)
-    + (branch.nextCursor ? 1 : 0) + (branchJustFinishedPaging(branch) ? 1 : 0);
+  const synthetic = direct + (branch.placeholderCursor ? 1 : 0) + (branch.nextCursor ? 1 : 0);
 
   // #1080 rev2 (review): `index` is react-arborist's position in the RENDERED children
   // array, which still holds the dragged row at its ORIGINAL slot (compute-drop.ts's `walkUpFrom` builds

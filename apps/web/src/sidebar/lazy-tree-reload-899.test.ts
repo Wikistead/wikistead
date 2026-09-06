@@ -32,7 +32,6 @@ describe("#899 a reloaded deep page does not replace the branch head", () => {
       byParent: new Map([[null, root]]),
       pinnedPageIds: new Set(),
       placeholderName: "Hidden",
-      pagingDoneLabel: "No more pages",
     });
 
     expect(nodes.map((node) => node.id)).toEqual([

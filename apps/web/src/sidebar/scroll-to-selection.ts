@@ -91,10 +91,6 @@ export type BranchWindow = {
   pages: readonly { id: string }[];
   nextCursor?: string | null;
   reachedWindow?: BranchWindow;
-  /** #1149 rev2: client-side bookkeeping (see `lazy-tree.ts`'s `BranchAnswer`) — carried through a
-   * tail-preserving merge (the reader's accumulated scroll position is still the authoritative view),
-   * dropped when a fresh single fetch supersedes it wholesale (see `mergePaintedWindow` below). */
-  pagedPastFirstWindow?: boolean;
 };
 
 /** Keep a non-adjacent target window without pretending it follows the first window. */
@@ -136,7 +132,7 @@ export function mergePaintedWindow<T extends BranchWindow>(existing: T | undefin
   // shortened window ends earlier.
   if (fresh.nextCursor == null) return fresh;
   if (existing.pages.length <= fresh.pages.length) {
-    return { ...fresh, reachedWindow: existing.reachedWindow, pagedPastFirstWindow: existing.pagedPastFirstWindow } as T;
+    return { ...fresh, reachedWindow: existing.reachedWindow } as T;
   }
   const last = fresh.pages[fresh.pages.length - 1];
   if (!last) return fresh;
@@ -148,13 +144,10 @@ export function mergePaintedWindow<T extends BranchWindow>(existing: T | undefin
   if (tail.length === 0) return fresh;
   // ⚠️ The cursor comes from the EXISTING entry: it points past the tail we are keeping, while the
   // fresh one points just past the first window and would re-fetch rows already on screen.
-  // #1149 rev2: `pagedPastFirstWindow` carries the same way — the reader's accumulated, still-unfinished
-  // multi-fetch view is what this branch represents, not the fresh single window alone.
   return {
     ...fresh,
     pages: [...fresh.pages, ...tail],
     nextCursor: existing.nextCursor,
     reachedWindow: existing.reachedWindow,
-    pagedPastFirstWindow: existing.pagedPastFirstWindow,
   } as T;
 }
