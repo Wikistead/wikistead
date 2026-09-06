@@ -401,6 +401,7 @@
     "public": "公开访问",
     "moderation": "审核",
     "billing": "账单",
+    "usage": "用量",
     "orphans": "孤立草稿",
     "webhooks": "Webhook",
     "audit": "审计日志",
@@ -461,7 +462,7 @@
   },
   "billing": {
     "title": "账单",
-    "selfHosted": "这是一个自托管工作区。所有功能均已包含，没有方案限制或账单。",
+    "selfHosted": "这是一个自托管工作区。没有方案限制，也没有账单。",
     "usageTitle": "本计费周期",
     "usedOf": "{{used}} / {{allowance}}",
     "usedUnlimited": "{{used}}（无限制）",

@@ -401,6 +401,7 @@
     "public": "Openbare toegang",
     "moderation": "Moderatie",
     "billing": "Facturering",
+    "usage": "Gebruik",
     "orphans": "Verweesde concepten",
     "webhooks": "Webhooks",
     "audit": "Auditlog",
@@ -461,7 +462,7 @@
   },
   "billing": {
     "title": "Facturering",
-    "selfHosted": "Dit is een zelf-gehoste werkruimte. Alle functies zijn inbegrepen, zonder planlimieten of facturering.",
+    "selfHosted": "Dit is een zelf-gehoste werkruimte. Er zijn geen planlimieten en geen facturering.",
     "usageTitle": "Deze factureringsperiode",
     "usedOf": "{{used}} van {{allowance}}",
     "usedUnlimited": "{{used}} (geen limiet)",

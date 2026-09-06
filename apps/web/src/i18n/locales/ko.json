@@ -401,6 +401,7 @@
     "public": "공개 접근",
     "moderation": "모더레이션",
     "billing": "결제",
+    "usage": "사용량",
     "orphans": "고아 초안",
     "webhooks": "웹훅",
     "audit": "감사 로그",
@@ -461,7 +462,7 @@
   },
   "billing": {
     "title": "결제",
-    "selfHosted": "이는 셀프 호스팅 워크스페이스입니다. 요금제 제한이나 결제 없이 모든 기능이 포함되어 있습니다.",
+    "selfHosted": "이는 셀프 호스팅 워크스페이스입니다. 요금제 제한이나 결제가 없습니다.",
     "usageTitle": "이번 결제 기간",
     "usedOf": "{{allowance}} 중 {{used}}",
     "usedUnlimited": "{{used}} (제한 없음)",

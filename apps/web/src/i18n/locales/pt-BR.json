@@ -401,6 +401,7 @@
     "public": "Acesso público",
     "moderation": "Moderação",
     "billing": "Faturamento",
+    "usage": "Uso",
     "orphans": "Rascunhos órfãos",
     "webhooks": "Webhooks",
     "audit": "Log de auditoria",
@@ -461,7 +462,7 @@
   },
   "billing": {
     "title": "Faturamento",
-    "selfHosted": "Este é um espaço de trabalho auto-hospedado. Todos os recursos estão incluídos, sem limites de plano ou faturamento.",
+    "selfHosted": "Este é um espaço de trabalho auto-hospedado. Não há limites de plano nem faturamento.",
     "usageTitle": "Este período de faturamento",
     "usedOf": "{{used}} de {{allowance}}",
     "usedUnlimited": "{{used}} (sem limite)",

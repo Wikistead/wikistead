@@ -401,6 +401,7 @@
     "public": "Öffentlicher Zugriff",
     "moderation": "Moderation",
     "billing": "Abrechnung",
+    "usage": "Nutzung",
     "orphans": "Verwaiste Entwürfe",
     "webhooks": "Webhooks",
     "audit": "Prüfprotokoll",
@@ -461,7 +462,7 @@
   },
   "billing": {
     "title": "Abrechnung",
-    "selfHosted": "Dies ist ein selbst gehosteter Arbeitsbereich. Alle Funktionen sind enthalten, ohne Plangrenzen oder Abrechnung.",
+    "selfHosted": "Dies ist ein selbst gehosteter Arbeitsbereich. Es gibt keine Plangrenzen und keine Abrechnung.",
     "usageTitle": "Dieser Abrechnungszeitraum",
     "usedOf": "{{used}} von {{allowance}}",
     "usedUnlimited": "{{used}} (kein Limit)",

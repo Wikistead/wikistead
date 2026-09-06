@@ -401,6 +401,7 @@
     "public": "Public access",
     "moderation": "Moderation",
     "billing": "Billing",
+    "usage": "Usage",
     "orphans": "Orphaned drafts",
     "webhooks": "Webhooks",
     "audit": "Audit log",
@@ -461,7 +462,7 @@
   },
   "billing": {
     "title": "Billing",
-    "selfHosted": "This is a self-hosted workspace. All features are included, with no plan limits or billing.",
+    "selfHosted": "This is a self-hosted workspace. There are no plan limits and no billing.",
     "usageTitle": "This billing period",
     "usedOf": "{{used}} of {{allowance}}",
     "usedUnlimited": "{{used}} (no limit)",

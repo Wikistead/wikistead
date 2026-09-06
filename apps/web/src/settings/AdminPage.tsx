@@ -20,7 +20,7 @@ import { AdminBillingTab } from "./AdminBillingTab";
 import { AdminOrphanDraftsTab } from "./AdminOrphanDraftsTab";
 import { AdminModerationTab } from "./AdminModerationTab"; // #491
 import { SettingsShell, SettingsDenied, type SettingsTab } from "./SettingsShell";
-import { useAdminSurfaces } from "../data/queries";
+import { useAdminSurfaces, useEntitlements } from "../data/queries";
 import { FullPageLoader } from "../ui/FullPageLoader"; // #1169
 
 // Tenant admin console (Phase 5a). The admin-screen leak rule is 403 (not 404): a tenant having an
@@ -35,6 +35,17 @@ import { FullPageLoader } from "../ui/FullPageLoader"; // #1169
 // Adding a verb server-side needs no edit here.
 function useAdminTabs(): SettingsTab[] {
   const { t } = useTranslation();
+  // #1175: on a self-hosted install there is nothing to bill, so the tab that opens /admin/billing is
+  // named for what the screen actually shows there — usage — and never "Billing". The condition is a
+  // DEPLOYMENT fact, not a lever (#864: every lever is UNLIMITED both self-hosted and on a top Cloud
+  // plan; `selfHosted` is the resolver registration the edition performs at composition time,
+  // ADR-015). Undefined (the query has not answered, or an older server does not send it) shows NO
+  // tab rather than a guessed name: a wrong word here is a billing prompt on a self-host, or a usage
+  // tab hiding a paying tenant's plan.
+  const selfHosted = useEntitlements().data?.selfHosted;
+  const billingTab: SettingsTab[] = selfHosted === undefined ? [] : [
+    { key: "billing", label: t(selfHosted ? "adminNav.usage" : "adminNav.billing"), to: "/admin/billing" },
+  ];
   return [
     { key: "members", label: t("adminNav.members"), to: "/admin/members" },
     { key: "spaces", label: t("adminNav.spaces"), to: "/admin/spaces" },
@@ -50,7 +61,7 @@ function useAdminTabs(): SettingsTab[] {
     { key: "embeds", label: t("adminNav.embeds"), to: "/admin/embeds" },
     { key: "public", label: t("adminNav.public"), to: "/admin/public" },
     { key: "moderation", label: t("adminNav.moderation"), to: "/admin/moderation" }, // #491
-    { key: "billing", label: t("adminNav.billing"), to: "/admin/billing" },
+    ...billingTab,
     { key: "orphans", label: t("adminNav.orphans"), to: "/admin/orphan-drafts" },
   ];
 }

@@ -401,6 +401,7 @@
     "public": "Accès public",
     "moderation": "Modération",
     "billing": "Facturation",
+    "usage": "Utilisation",
     "orphans": "Brouillons orphelins",
     "webhooks": "Webhooks",
     "audit": "Journal d'audit",
@@ -461,7 +462,7 @@
   },
   "billing": {
     "title": "Facturation",
-    "selfHosted": "Ceci est un espace de travail auto-hébergé. Toutes les fonctionnalités sont incluses, sans limites de forfait ni facturation.",
+    "selfHosted": "Ceci est un espace de travail auto-hébergé. Il n’y a ni limites de forfait ni facturation.",
     "usageTitle": "Cette période de facturation",
     "usedOf": "{{used}} sur {{allowance}}",
     "usedUnlimited": "{{used}} (aucune limite)",

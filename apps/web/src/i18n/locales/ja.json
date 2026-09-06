@@ -400,6 +400,7 @@
     "public": "公開設定",
     "moderation": "モデレーション",
     "billing": "課金",
+    "usage": "使用状況",
     "orphans": "孤立した下書き",
     "webhooks": "Webhook",
     "audit": "監査ログ",
@@ -460,7 +461,7 @@
   },
   "billing": {
     "title": "課金",
-    "selfHosted": "これはセルフホストのワークスペースです。すべての機能が使え、プラン制限も課金もありません。",
+    "selfHosted": "これはセルフホストのワークスペースです。プラン制限も課金もありません。",
     "usageTitle": "今期の使用量",
     "usedOf": "{{used}} / {{allowance}}",
     "usedUnlimited": "{{used}}（上限なし）",

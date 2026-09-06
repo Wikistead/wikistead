@@ -4,9 +4,11 @@ import { Button } from "../ui/Button";
 import { notify } from "../ui/toast";
 import { SettingsPane } from "./SettingsShell"; // #735: the pane draws the frame AND the heading
 
-// Billing (Phase 5g, /admin/billing, tenant#admin). On self-host (billing disabled)
-// it shows the "all features included" state. On Cloud it shows the current plan +
-// Upgrade (Checkout) / Manage billing (Customer Portal). Team is contact-sales.
+// Billing (Phase 5g, /admin/billing, tenant#admin). On self-host (billing disabled) it is the USAGE
+// screen: no plan, no billing, only what this deployment has used (#1175 — it used to be titled
+// "Billing" and say "all features are included", which a CE build cannot honestly claim: the
+// EE-composed features are not in it at all). On Cloud it shows the current plan + Upgrade (Checkout)
+// / Manage billing (Customer Portal). Team is contact-sales.
 // #231: the counters `recordUsage` has been writing since #383, with nothing reading them back. What
 // this deliberately does NOT do: warn, nag, or colour anything. What counts as "too much" is a
 // pricing ruling (#127), and a screen that decided it first would be deciding it.
@@ -59,10 +61,10 @@ export function AdminBillingTab() {
 
   if (status.isLoading) return <SettingsPane width="form" title={t("billing.title")}><p className="mt-0 text-sm text-fg-dim">{t("common.loading")}</p></SettingsPane>;
 
-  // Self-host / CE: no billing.
+  // Self-host / CE: no billing. Titled as the tab is (#1175): the reader came here through "Usage".
   if (!status.data?.billingEnabled) {
     return (
-      <SettingsPane width="form" testId="admin-billing" title={t("billing.title")}
+      <SettingsPane width="form" testId="admin-billing" title={t("adminNav.usage")}
         description={<span data-testid="billing-selfhosted">{t("billing.selfHosted")}</span>}>
         {/* Metering runs on self-host too, and "what has this deployment used" is a real question
             even when nothing is billed for it. */}
