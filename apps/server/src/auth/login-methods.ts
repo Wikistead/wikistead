@@ -586,6 +586,20 @@ function subjectHasMintDerivedEntrance(sub: string, effective: readonly LoginCon
   return effective.some((c) => connectionAdmitsSubject(c, sub))
 }
 
+// #1163 / ADR-283 §2: the three exclusion shapes are mutually exclusive by construction, not by
+// convention — `?: never` on each arm's siblings makes passing two of them (e.g. `excludeLinkOnly` AND
+// `excludeLinkId`) a TypeScript error rather than a silently-collapsing `??` preference. A plain
+// optional-fields object would NOT enforce this (excess-property checking only rejects a literal
+// matching none of the union's members, not one that happens to satisfy more than one).
+type MemberHasAnotherWayInOpts =
+  | { env?: string | undefined; excludeConnectionId: string; excludeLinkOnly?: never; excludeLinkId?: never }
+  | { env?: string | undefined; excludeLinkOnly: string; excludeConnectionId?: never; excludeLinkId?: never }
+  // #1163 / ADR-283 §2: row-scoped exclusion — the admin route deletes exactly ONE link (§1's
+  // `unlinkMemberIdentityById`), not every row for a connection (self-service's `excludeLinkOnly`
+  // shape). A sibling link to the SAME connection must still count as another way in.
+  | { env?: string | undefined; excludeLinkId: string; excludeConnectionId?: never; excludeLinkOnly?: never }
+  | { env?: string | undefined; excludeConnectionId?: never; excludeLinkOnly?: never; excludeLinkId?: never }
+
 export async function memberHasAnotherWayIn(
   db: TenantDb,
   tenant: { id: string; plan: string },
@@ -596,12 +610,12 @@ export async function memberHasAnotherWayIn(
   // is untouched, so it must stay in the mint-derived half. Passing both for the same id would be a
   // caller bug (the connection can't be simultaneously "gone" and "still there to mint from") — kept as
   // two names rather than one so a caller cannot reach for the wrong one by accident.
-  opts: { env?: string | undefined; excludeConnectionId?: string; excludeLinkOnly?: string } = {},
+  opts: MemberHasAnotherWayInOpts = {},
 ): Promise<boolean> {
-  const excludeLink = opts.excludeConnectionId ?? opts.excludeLinkOnly
+  const excludeConnection = opts.excludeConnectionId ?? opts.excludeLinkOnly
   const [link] = await db.sql<{ id: string }[]>`
     SELECT id FROM member_identities WHERE tenant_id = ${tenant.id} AND member_sub = ${sub}
-      ${excludeLink ? db.sql`AND connection_id <> ${excludeLink}` : db.sql``}
+      ${excludeConnection ? db.sql`AND connection_id <> ${excludeConnection}` : opts.excludeLinkId ? db.sql`AND id <> ${opts.excludeLinkId}` : db.sql``}
     LIMIT 1`
   if (link) return true
 

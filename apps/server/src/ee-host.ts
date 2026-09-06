@@ -57,6 +57,9 @@ export { registerMemberIdentities } from './member-identities-sink.js'
 // #1107 / ADR-280 §1: ordinary CE data-access utilities the EE route needs — additive re-exports, no
 // EE dependency added, the same shape the SCIM/analytics re-exports above already use.
 export { listMemberIdentityLinksForAdmin, nameConnectionForAdmin } from './auth/member-identities.js'
+// #1163 / ADR-283 §2: ONE new export carries the whole admin-unlink sequence (guard/delete/audit/
+// revoke) — the EE route is a thin HTTP wrapper with no authz/business logic of its own.
+export { adminUnlinkMemberIdentity, type AdminUnlinkResult } from './auth/member-identities.js'
 // #715 / ADR-229: the funnel collector seam. The report calls stay in CE; only the recording is EE.
 export { registerFunnelCollector, funnelRegistered, resetFunnelCollector, reportLinkVisit, reportWorkspaceCreated } from './funnel/sink.js'
 export { createApiKey } from './routes/api-keys.js'
