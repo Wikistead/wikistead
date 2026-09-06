@@ -66,7 +66,16 @@ describe("#645: no locale key without a reader", () => {
     // Plural SUFFIXES are excluded, because languages disagree about them by design: i18next gives
     // English `_one` and `_other` and Japanese only `_other`, so demanding identical sets would ask ja
     // for a form its grammar does not have — and Russian, added tomorrow, for four it does.
-    const stem = (k: string) => k.replace(/_(?:zero|one|two|few|many|other)$/, "");
+    //
+    // #1180: `_zero` is deliberately NOT in that list. It is not a CLDR plural category tied to a
+    // language's grammar (every language, ja included, resolves a bare count of 0 the same way its
+    // grammar resolves any other count) — it is i18next's own opt-in special case for count===0, and a
+    // key that defines one in en.json is making a DELIBERATE content choice ("say something different
+    // when nobody is affected") that has nothing to do with the target language's plural rules. Stemming
+    // it away here let a locale miss the word entirely and still read as "the same set as en" — de was
+    // missing `stanceConfirmSweep_zero` and fell through to `_other` with `{{count}}` filled by a literal
+    // 0, which reads as the opposite of what the English `_zero` string says.
+    const stem = (k: string) => k.replace(/_(?:one|two|few|many|other)$/, "");
     const mine = new Set(leaves(read(lang)).map(stem));
     const theirs = new Set(en.map(stem));
     const missing = [...theirs].filter((k) => !mine.has(k)).sort();

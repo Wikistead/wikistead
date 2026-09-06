@@ -616,6 +616,7 @@
     "stanceAny": "Ein Passkey oder eine Authentifikator-App",
     "stancePasskey": "Nur Passkeys",
     "stanceTotp": "Nur Authentifikator-Apps",
+    "stanceConfirmSweep_zero": "Kein Mitglied bleibt zurück, das dies nicht erfüllen kann.",
     "stanceConfirmSweep_one": "Ein Mitglied kann dies nicht erfüllen und wird jetzt abgemeldet und beim nächsten Anmelden zur Registrierung aufgefordert.",
     "stanceConfirmSweep_other": "{{count}} Mitglieder können dies nicht erfüllen und werden jetzt abgemeldet und beim nächsten Anmelden zur Registrierung aufgefordert.",
     "stancePasskeyWarning": "Passkeys können nicht exportiert werden: Gehen die Schlüssel verloren, führt der Weg zurück nur über den Operator.",
