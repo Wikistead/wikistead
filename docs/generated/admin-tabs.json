@@ -60,6 +60,10 @@
       "en": "Spaces",
       "ja": "スペース"
     },
+    "usage": {
+      "en": "Usage",
+      "ja": "使用状況"
+    },
     "webhooks": {
       "en": "Webhooks",
       "ja": "Webhook"
