@@ -14,6 +14,16 @@
 // `LANG_DESC` already use elsewhere — so a language added to `LANGS` is a compile error here until
 // every entry gets a translation, rather than silently falling through to English the way the old
 // `lang === 'ja' ? ja : en` binary did for every language between #713-S1 and this ticket.
+//
+// ⚠️ ADR-228's non-negotiable condition — "a machine-translated string must carry a mark on repo that
+// says so" — applies here too, in spirit: every `de`/`fr`/`es`/`it`/`nl`/`pt-BR`/`ru`/`uk`/`zh-Hans`/`ko`
+// entry below is LLM-translated, unreviewed by a human speaker of that language, same as the ten
+// languages `apps/web/src/i18n/machine-translated.json` marks for the web UI's own locale JSON. That
+// manifest's own mechanism (a JSON file walking `apps/web/src/i18n/locales/*.json`) does not reach this
+// file — it is scoped to locale JSON, and this is TypeScript source holding a different asset (mail
+// prose, not UI copy) — so this comment is this file's own mark until/unless a shared mechanism is
+// built. Do not remove this note for a language without it actually having been proofed by a human
+// speaker, the same discipline the JSON manifest documents for itself.
 import type { Lang } from '../locale.js'
 
 function byLang<Args extends unknown[]>(
