@@ -293,7 +293,14 @@
      No language -> face TABLE: the chain lets the browser resolve per glyph, so adding a language is
      adding one family to the chain rather than a branch to maintain (ADR-217).
      Font (glyph) is ORTHOGONAL to #158-C2 code highlight (colour). */
-  --font: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  /* #713-S3: "this product grows those languages" (above) has arrived for the PROPORTIONAL chain —
+     Noto Sans SC (simplified Chinese) and Noto Sans KR (Korean) added the same way Noto Sans JP was,
+     one family in the chain, no per-language branch. --font-body-vim is UNCHANGED and is a KNOWN GAP:
+     UDEV Gothic has no zh-Hans/ko coverage, so vim's column grid still degrades to the fallback chain's
+     ratio for those readers. The comment above already named the fix (Sarasa Gothic) and already named
+     why it is not done here (a new font dependency needs its own license-gate review) — that review is
+     still outstanding, tracked as a follow-up rather than decided unilaterally in this slice. */
+  --font: "Inter", "Noto Sans JP", "Noto Sans SC", "Noto Sans KR", system-ui, sans-serif;
   --font-ui: var(--font);
   --font-body: var(--font);
   --font-body-vim: "UDEV Gothic", ui-monospace, SFMono-Regular, Menlo, monospace;
