@@ -1298,7 +1298,13 @@
     "identitiesSourceLocal": "password",
     "identitiesEmpty": "Nessun'altra identità collegata.",
     "identitiesLoadFailed": "Impossibile caricare le identità collegate.",
-    "identitiesConnectionGone": "(connessione rimossa)"
+    "identitiesConnectionGone": "(connessione rimossa)",
+    "identitiesUnlink": "Scollega",
+    "identitiesUnlinkConfirm": "Scollegare l'accesso di {{name}} tramite {{connection}}? Le sue sessioni termineranno immediatamente e avrà bisogno di un altro modo per accedere.",
+    "identitiesUnlinkDone": "Identità scollegata",
+    "identitiesUnlinkFailed": "Impossibile scollegare questa identità.",
+    "identitiesUnlinkLastWayIn": "Questo è l'unico modo per {{name}} di accedere. Sospendilo invece, oppure chiedigli di aggiungere prima un altro metodo di accesso.",
+    "identitiesUnlinkSelfRefused": "Scollega le tue identità dalle impostazioni dell'account, dove l'azione ti autentica di nuovo."
   },
   "commentsPanel": {
     "readOnlyReason": "Commentare è disattivato per te su questa pagina.",

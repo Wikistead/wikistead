@@ -1306,7 +1306,13 @@
     "identitiesSourceLocal": "пароль",
     "identitiesEmpty": "Немає додаткових пов'язаних облікових записів.",
     "identitiesLoadFailed": "Не вдалося завантажити пов'язані облікові записи.",
-    "identitiesConnectionGone": "(з'єднання видалено)"
+    "identitiesConnectionGone": "(з'єднання видалено)",
+    "identitiesUnlink": "Відв'язати",
+    "identitiesUnlinkConfirm": "Відв'язати вхід {{name}} через {{connection}}? Їхні сеанси негайно завершаться, і їм знадобиться інший спосіб входу.",
+    "identitiesUnlinkDone": "Особу відв'язано",
+    "identitiesUnlinkFailed": "Не вдалося відв'язати цю особу.",
+    "identitiesUnlinkLastWayIn": "Це єдиний спосіб для {{name}} увійти. Замість цього призупиніть їх, або попросіть спочатку додати інший спосіб входу.",
+    "identitiesUnlinkSelfRefused": "Відв'яжіть власні профілі в налаштуваннях облікового запису, де ця дія повторно вас автентифікує."
   },
   "commentsPanel": {
     "readOnlyReason": "Коментування вимкнено для вас на цій сторінці.",

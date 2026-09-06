@@ -1298,7 +1298,13 @@
     "identitiesSourceLocal": "senha",
     "identitiesEmpty": "Nenhuma identidade vinculada adicional.",
     "identitiesLoadFailed": "Falha ao carregar identidades vinculadas.",
-    "identitiesConnectionGone": "(conexão removida)"
+    "identitiesConnectionGone": "(conexão removida)",
+    "identitiesUnlink": "Desvincular",
+    "identitiesUnlinkConfirm": "Desvincular o login de {{name}} via {{connection}}? As sessões dele terminarão imediatamente, e ele precisará de outra forma de entrar.",
+    "identitiesUnlinkDone": "Identidade desvinculada",
+    "identitiesUnlinkFailed": "Não foi possível desvincular esta identidade.",
+    "identitiesUnlinkLastWayIn": "Esta é a única forma de {{name}} entrar. Suspenda-o em vez disso, ou peça que adicione outro método de login primeiro.",
+    "identitiesUnlinkSelfRefused": "Desvincule suas próprias identidades nas configurações da conta, onde a ação exige que você se autentique novamente."
   },
   "commentsPanel": {
     "readOnlyReason": "Comentar está desativado para você nesta página.",

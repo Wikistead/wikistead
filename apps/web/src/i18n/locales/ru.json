@@ -1306,7 +1306,13 @@
     "identitiesSourceLocal": "пароль",
     "identitiesEmpty": "Нет дополнительных связанных учётных записей.",
     "identitiesLoadFailed": "Не удалось загрузить связанные учётные записи.",
-    "identitiesConnectionGone": "(подключение удалено)"
+    "identitiesConnectionGone": "(подключение удалено)",
+    "identitiesUnlink": "Отвязать",
+    "identitiesUnlinkConfirm": "Отвязать вход {{name}} через {{connection}}? Их сеансы немедленно завершатся, и им понадобится другой способ входа.",
+    "identitiesUnlinkDone": "Личность отвязана",
+    "identitiesUnlinkFailed": "Не удалось отвязать эту личность.",
+    "identitiesUnlinkLastWayIn": "Это единственный способ для {{name}} войти. Приостановите его вместо этого, или попросите сначала добавить другой способ входа.",
+    "identitiesUnlinkSelfRefused": "Отвяжите свои собственные учётные данные в настройках аккаунта, где это действие повторно вас аутентифицирует."
   },
   "commentsPanel": {
     "readOnlyReason": "Комментирование отключено для вас на этой странице.",

@@ -2471,6 +2471,21 @@ export function useMemberIdentityLinks(sub: string, enabled: boolean) {
   });
 }
 
+// #1163 / ADR-283: an admin removes ONE of a member's linked sign-in identities, by the link's own row
+// id. A 409 `last_way_in` means this is the member's only door (server has already refused the write —
+// nothing here to roll back). A 409 `reset_self` fires when the admin targets their OWN row — reachable
+// from this UI (MembersPage does not hide an admin's own row from the roster), so the caller handles
+// the code explicitly rather than folding it into a generic failure message.
+export function useAdminUnlinkMemberIdentity(sub: string) {
+  const { token } = useSession();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (linkId: string) =>
+      apiFetch<void>(`/admin/members/${encodeURIComponent(sub)}/identities/${encodeURIComponent(linkId)}`, token, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-member-identities", sub] }),
+  });
+}
+
 // #537 Slice 3: the admin's login-methods view + the platform-login toggle (ruling 4).
 export interface LoginMethodState { inCeiling: boolean; configured: boolean; selected: boolean; effective: boolean; blockedByStance?: boolean }
 export interface LoginMethodsDTO {

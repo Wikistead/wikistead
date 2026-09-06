@@ -1298,7 +1298,13 @@
     "identitiesSourceLocal": "wachtwoord",
     "identitiesEmpty": "Geen extra gekoppelde identiteiten.",
     "identitiesLoadFailed": "Kon gekoppelde identiteiten niet laden.",
-    "identitiesConnectionGone": "(verbinding verwijderd)"
+    "identitiesConnectionGone": "(verbinding verwijderd)",
+    "identitiesUnlink": "Ontkoppelen",
+    "identitiesUnlinkConfirm": "De aanmelding van {{name}} via {{connection}} ontkoppelen? Hun sessies eindigen onmiddellijk en ze hebben een andere manier nodig om aan te melden.",
+    "identitiesUnlinkDone": "Identiteit ontkoppeld",
+    "identitiesUnlinkFailed": "Kon deze identiteit niet ontkoppelen.",
+    "identitiesUnlinkLastWayIn": "Dit is de enige manier waarop {{name}} kan aanmelden. Schors deze persoon in plaats daarvan, of vraag hen eerst een andere aanmeldmethode toe te voegen.",
+    "identitiesUnlinkSelfRefused": "Ontkoppel uw eigen identiteiten vanuit de accountinstellingen, waar de actie u opnieuw verifieert."
   },
   "commentsPanel": {
     "readOnlyReason": "Opmerken is uitgeschakeld voor u op deze pagina.",

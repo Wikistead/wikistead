@@ -1297,7 +1297,13 @@
     "identitiesSourceLocal": "Passwort",
     "identitiesEmpty": "Keine weiteren verknüpften Identitäten.",
     "identitiesLoadFailed": "Verknüpfte Identitäten konnten nicht geladen werden.",
-    "identitiesConnectionGone": "(Verbindung entfernt)"
+    "identitiesConnectionGone": "(Verbindung entfernt)",
+    "identitiesUnlink": "Verknüpfung aufheben",
+    "identitiesUnlinkConfirm": "Die Anmeldung von {{name}} über {{connection}} entkoppeln? Ihre Sitzungen enden sofort, und sie benötigen einen anderen Weg zur Anmeldung.",
+    "identitiesUnlinkDone": "Identität entkoppelt",
+    "identitiesUnlinkFailed": "Diese Identität konnte nicht entkoppelt werden.",
+    "identitiesUnlinkLastWayIn": "Dies ist der einzige Weg, wie sich {{name}} anmelden kann. Sperren Sie die Person stattdessen, oder bitten Sie sie, zuerst eine weitere Anmeldemethode hinzuzufügen.",
+    "identitiesUnlinkSelfRefused": "Heben Sie die Verknüpfung Ihrer eigenen Identitäten in den Kontoeinstellungen auf, wo die Aktion Sie erneut authentifiziert."
   },
   "commentsPanel": {
     "readOnlyReason": "Das Kommentieren ist für Sie auf dieser Seite deaktiviert.",

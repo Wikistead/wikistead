@@ -1298,7 +1298,13 @@
     "identitiesSourceLocal": "비밀번호",
     "identitiesEmpty": "추가로 연결된 신원이 없습니다.",
     "identitiesLoadFailed": "연결된 신원을 로드하지 못했습니다.",
-    "identitiesConnectionGone": "(연결 제거됨)"
+    "identitiesConnectionGone": "(연결 제거됨)",
+    "identitiesUnlink": "연결 해제",
+    "identitiesUnlinkConfirm": "{{connection}}을(를) 통한 {{name}}의 로그인 연결을 해제하시겠습니까? 세션이 즉시 종료되며, 다른 로그인 방법이 필요합니다.",
+    "identitiesUnlinkDone": "신원이 연결 해제되었습니다",
+    "identitiesUnlinkFailed": "이 신원을 연결 해제할 수 없습니다.",
+    "identitiesUnlinkLastWayIn": "이것이 {{name}}이(가) 로그인할 수 있는 유일한 방법입니다. 대신 정지시키거나, 먼저 다른 로그인 방법을 추가하도록 요청하세요.",
+    "identitiesUnlinkSelfRefused": "본인의 신원은 계정 설정에서 연결 해제하세요. 그곳의 작업은 본인 인증을 다시 요구합니다."
   },
   "commentsPanel": {
     "readOnlyReason": "이 페이지에서 회원님의 댓글 달기가 비활성화되어 있습니다.",

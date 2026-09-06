@@ -1298,7 +1298,13 @@
     "identitiesSourceLocal": "mot de passe",
     "identitiesEmpty": "Aucune autre identité liée.",
     "identitiesLoadFailed": "Échec du chargement des identités liées.",
-    "identitiesConnectionGone": "(connexion supprimée)"
+    "identitiesConnectionGone": "(connexion supprimée)",
+    "identitiesUnlink": "Dissocier",
+    "identitiesUnlinkConfirm": "Dissocier la connexion de {{name}} via {{connection}} ? Ses sessions se terminent immédiatement, et elle aura besoin d'un autre moyen de se connecter.",
+    "identitiesUnlinkDone": "Identité dissociée",
+    "identitiesUnlinkFailed": "Impossible de dissocier cette identité.",
+    "identitiesUnlinkLastWayIn": "C'est le seul moyen pour {{name}} de se connecter. Suspendez-la plutôt, ou demandez-lui d'ajouter d'abord un autre moyen de connexion.",
+    "identitiesUnlinkSelfRefused": "Dissociez vos propres identités depuis les paramètres du compte, où l'action vous réauthentifie."
   },
   "commentsPanel": {
     "readOnlyReason": "Commenter est désactivé pour vous sur cette page.",
