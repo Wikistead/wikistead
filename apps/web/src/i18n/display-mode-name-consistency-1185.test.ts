@@ -32,3 +32,20 @@ describe("#1185: every language names Live/Source the SAME way in the button and
       .toContain(json.page.modeSource);
   });
 });
+
+// Owner's ruling (2026-09-06, #1185 review bounce): the two symptoms are distinct. The tests
+// above fix cross-screen disagreement WITHIN a language; they pass even when a language leaves both
+// words as the literal untranslated English "Live"/"Source" (ko/ru/uk did exactly that, and de/it/nl
+// left one of the two words untranslated) — a fully-translated Korean or Russian screen with "Live" /
+// "Source" sitting in Latin script reads as unfinished. Ruling: translate in every locale (WYSIWYG is
+// the one exception, kept as the industry proper noun) — so this asserts the button's own words never
+// equal the literal English ones, for every language but English itself.
+describe("#1185: Live/Source are translated, not left as the English word, in every non-English language", () => {
+  const nonEnglish = LANGS.filter((lang) => lang !== "en");
+  it.each(nonEnglish)("%s: modeLive is not the literal English \"Live\"", (lang) => {
+    expect(read(lang).page.modeLive, `${lang}: modeLive should be translated, not left as "Live"`).not.toBe("Live");
+  });
+  it.each(nonEnglish)("%s: modeSource is not the literal English \"Source\"", (lang) => {
+    expect(read(lang).page.modeSource, `${lang}: modeSource should be translated, not left as "Source"`).not.toBe("Source");
+  });
+});
