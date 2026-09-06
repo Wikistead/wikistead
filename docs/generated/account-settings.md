@@ -38,6 +38,15 @@
 | `en` | Mail from this workspace is written in English. |
 | `ja` | Mail from this workspace is written in Japanese. |
 | `de` | Mail from this workspace is written in German. |
+| `fr` | Mail from this workspace is written in French. |
+| `es` | Mail from this workspace is written in Spanish. |
+| `it` | Mail from this workspace is written in Italian. |
+| `nl` | Mail from this workspace is written in Dutch. |
+| `pt-BR` | Mail from this workspace is written in Portuguese (Brazil). |
+| `ru` | Mail from this workspace is written in Russian. |
+| `uk` | Mail from this workspace is written in Ukrainian. |
+| `zh-Hans` | Mail from this workspace is written in Simplified Chinese. |
+| `ko` | Mail from this workspace is written in Korean. |
 
 Unset falls back to the workspace default, then English.
 

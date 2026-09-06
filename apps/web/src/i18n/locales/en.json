@@ -166,7 +166,16 @@
     "label": "Language",
     "en": "English",
     "ja": "日本語",
-    "de": "Deutsch"
+    "de": "Deutsch",
+    "fr": "Français",
+    "es": "Español",
+    "it": "Italiano",
+    "nl": "Nederlands",
+    "pt-BR": "Português (Brasil)",
+    "ru": "Русский",
+    "uk": "Українська",
+    "zh-Hans": "简体中文",
+    "ko": "한국어"
   },
   "nav": {
     "toggleSidebar": "Toggle sidebar",
@@ -273,6 +282,15 @@
       "language_en": "English",
       "language_ja": "Japanese",
       "language_de": "German",
+      "language_fr": "French",
+      "language_es": "Spanish",
+      "language_it": "Italian",
+      "language_nl": "Dutch",
+      "language_pt-BR": "Portuguese (Brazil)",
+      "language_ru": "Russian",
+      "language_uk": "Ukrainian",
+      "language_zh-Hans": "Chinese (Simplified)",
+      "language_ko": "Korean",
       "defaultMask": "Default event types",
       "defaultMaskHint": "Applied to watches without their own type filter. All types are on by default."
     },
@@ -1062,7 +1080,16 @@
     "defaultLangHint": "The fallback language for mail this workspace sends, used for members who have not chosen their own (Settings → Notifications → Mail language).",
     "defaultLang_en": "English",
     "defaultLang_ja": "Japanese",
-    "defaultLang_de": "German"
+    "defaultLang_de": "German",
+    "defaultLang_fr": "French",
+    "defaultLang_es": "Spanish",
+    "defaultLang_it": "Italian",
+    "defaultLang_nl": "Dutch",
+    "defaultLang_pt-BR": "Portuguese (Brazil)",
+    "defaultLang_ru": "Russian",
+    "defaultLang_uk": "Ukrainian",
+    "defaultLang_zh-Hans": "Chinese (Simplified)",
+    "defaultLang_ko": "Korean"
   },
   "accent": {
     "blue": "Blue",

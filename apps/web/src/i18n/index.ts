@@ -3,6 +3,15 @@ import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
 import de from "./locales/de.json";
+import fr from "./locales/fr.json";
+import es from "./locales/es.json";
+import it from "./locales/it.json";
+import nl from "./locales/nl.json";
+import ptBR from "./locales/pt-BR.json";
+import ru from "./locales/ru.json";
+import uk from "./locales/uk.json";
+import zhHans from "./locales/zh-Hans.json";
+import ko from "./locales/ko.json";
 import { LANGS, isKnownLang, type Lang } from "@wikistead/i18n-shared";
 
 // i18n foundation (Phase 3b-1). Default locale is English; Japanese is available.
@@ -39,7 +48,11 @@ const initial = detectLang();
 if (typeof document !== "undefined") document.documentElement.lang = initial;
 
 void i18n.use(initReactI18next).init({
-  resources: { en: { translation: en }, ja: { translation: ja }, de: { translation: de } },
+  resources: {
+    en: { translation: en }, ja: { translation: ja }, de: { translation: de }, fr: { translation: fr },
+    es: { translation: es }, it: { translation: it }, nl: { translation: nl }, "pt-BR": { translation: ptBR },
+    ru: { translation: ru }, uk: { translation: uk }, "zh-Hans": { translation: zhHans }, ko: { translation: ko },
+  },
   lng: initial,
   fallbackLng: "en",
   interpolation: { escapeValue: false }, // React already escapes

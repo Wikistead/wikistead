@@ -121,7 +121,18 @@ export async function tenantDefaultLang(db: TenantDb): Promise<Lang> {
 const PERSONAL_SPACE_PHRASING: Record<Lang, { generic: string; possessive: (name: string) => string }> = {
   en: { generic: 'Personal Space', possessive: (name) => `${name}'s Space` },
   ja: { generic: 'マイスペース', possessive: (name) => `${name}のスペース` },
+  // #713-S2: possessive forms that avoid declining an arbitrary display name (a raw string, not
+  // grammatically parseable) use a colon/particle construction instead of a genitive suffix.
   de: { generic: 'Persönlicher Bereich', possessive: (name) => `${name}s Bereich` },
+  fr: { generic: 'Espace personnel', possessive: (name) => `Espace de ${name}` },
+  es: { generic: 'Espacio personal', possessive: (name) => `Espacio de ${name}` },
+  it: { generic: 'Spazio personale', possessive: (name) => `Spazio di ${name}` },
+  nl: { generic: 'Persoonlijke ruimte', possessive: (name) => `Ruimte van ${name}` },
+  'pt-BR': { generic: 'Espaço pessoal', possessive: (name) => `Espaço de ${name}` },
+  ru: { generic: 'Личное пространство', possessive: (name) => `Личное пространство: ${name}` },
+  uk: { generic: 'Особистий простір', possessive: (name) => `Особистий простір: ${name}` },
+  'zh-Hans': { generic: '个人空间', possessive: (name) => `${name}的个人空间` },
+  ko: { generic: '개인 스페이스', possessive: (name) => `${name}의 스페이스` },
 }
 
 // An empty display name falls back to the language-appropriate generic.
