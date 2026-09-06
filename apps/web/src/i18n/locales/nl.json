@@ -1303,7 +1303,9 @@
     "identitiesUnlinkDone": "Identiteit ontkoppeld",
     "identitiesUnlinkFailed": "Kon deze identiteit niet ontkoppelen.",
     "identitiesUnlinkLastWayIn": "Dit is de enige manier waarop {{name}} kan aanmelden. Schors deze persoon in plaats daarvan, of vraag hen eerst een andere aanmeldmethode toe te voegen.",
-    "identitiesUnlinkSelfRefused": "Ontkoppel uw eigen identiteiten vanuit de accountinstellingen, waar de actie u opnieuw verifieert."
+    "identitiesUnlinkSelfRefused": "Ontkoppel uw eigen identiteiten vanuit de accountinstellingen, waar de actie u opnieuw verifieert.",
+    "identitiesConnectionGone": "(verbinding verwijderd)",
+    "identityLinkInactive": "(niet meer actief)"
   },
   "commentsPanel": {
     "readOnlyReason": "Opmerken is uitgeschakeld voor u op deze pagina.",

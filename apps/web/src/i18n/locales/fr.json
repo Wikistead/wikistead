@@ -1303,7 +1303,9 @@
     "identitiesUnlinkDone": "Identité dissociée",
     "identitiesUnlinkFailed": "Impossible de dissocier cette identité.",
     "identitiesUnlinkLastWayIn": "C'est le seul moyen pour {{name}} de se connecter. Suspendez-la plutôt, ou demandez-lui d'ajouter d'abord un autre moyen de connexion.",
-    "identitiesUnlinkSelfRefused": "Dissociez vos propres identités depuis les paramètres du compte, où l'action vous réauthentifie."
+    "identitiesUnlinkSelfRefused": "Dissociez vos propres identités depuis les paramètres du compte, où l'action vous réauthentifie.",
+    "identitiesConnectionGone": "(connexion supprimée)",
+    "identityLinkInactive": "(non actif)"
   },
   "commentsPanel": {
     "readOnlyReason": "Commenter est désactivé pour vous sur cette page.",

@@ -1303,7 +1303,9 @@
     "identitiesUnlinkDone": "身份已取消关联",
     "identitiesUnlinkFailed": "无法取消关联此身份。",
     "identitiesUnlinkLastWayIn": "这是 {{name}} 唯一的登录方式。请改为将其停用，或请其先添加其他登录方式。",
-    "identitiesUnlinkSelfRefused": "请在账户设置中取消关联您自己的身份，该操作会重新验证您的身份。"
+    "identitiesUnlinkSelfRefused": "请在账户设置中取消关联您自己的身份，该操作会重新验证您的身份。",
+    "identitiesConnectionGone": "（连接已移除）",
+    "identityLinkInactive": "（已不再有效）"
   },
   "commentsPanel": {
     "readOnlyReason": "此页面上您的评论功能已被禁用。",

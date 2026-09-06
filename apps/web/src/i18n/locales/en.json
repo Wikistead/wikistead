@@ -1254,6 +1254,7 @@
     "identitiesUnlinkFailed": "Could not unlink this identity.",
     "identitiesUnlinkLastWayIn": "This is the only way {{name}} can sign in. Suspend them instead, or ask them to add another sign-in method first.",
     "identitiesUnlinkSelfRefused": "Unlink your own identities from account settings, where the action re-authenticates you.",
+    "identityLinkInactive": "(no longer active)",
     "removeConfirm": "Remove {{name}} from this workspace? Their access, API keys and sessions end immediately.",
     "revokeConfirm": "Revoke the invite for {{email}}? The sent link stops working.",
     "filterPlaceholder": "Filter members…",

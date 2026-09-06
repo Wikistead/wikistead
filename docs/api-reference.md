@@ -115,11 +115,12 @@ AND the caller is a tenant admin, so the member-row expand section (never a popo
 whether to offer its toggle without ever calling a route that would 404 on a CE build.
 
 `GET /admin/members/{sub}/identities` (EE, `requireTenantAdmin`) resolves one member's linked sign-in
-identities — `{ primaryIdentitySource, links: [{linkId, connectionId, connectionName, linkedAt}] }`.
-Two fields disclosed per link only (`connectionName`, `linkedAt`; `linkId` is an opaque list key, not
-a disclosure): never `external_subject` (the raw upstream identifier), never a live-effectiveness flag
-(deferred to a follow-up ticket once a correct display predicate exists — the ADR's own rev3/rev4 found
-the obvious one wrong). An unknown or cross-tenant `sub` 404s identically to every other admin member
+identities — `{ primaryIdentitySource, links: [{linkId, connectionId, connectionName, linkedAt,
+connectionEffective}] }`. `linkId` is an opaque list key, not a disclosure; never `external_subject`
+(the raw upstream identifier). `connectionEffective` is a structural fact only — is this connection
+currently a live login door for the tenant — never a claim that this specific member can still
+authenticate through it (that depends on the upstream identity provider's own state, which this
+product cannot observe). An unknown or cross-tenant `sub` 404s identically to every other admin member
 route (existence-hiding).
 
 `DELETE /admin/members/{sub}/identities/{linkId}` (EE, `requireTenantAdmin`) removes ONE of a member's

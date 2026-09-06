@@ -1303,7 +1303,9 @@
     "identitiesUnlinkDone": "신원이 연결 해제되었습니다",
     "identitiesUnlinkFailed": "이 신원을 연결 해제할 수 없습니다.",
     "identitiesUnlinkLastWayIn": "이것이 {{name}}이(가) 로그인할 수 있는 유일한 방법입니다. 대신 정지시키거나, 먼저 다른 로그인 방법을 추가하도록 요청하세요.",
-    "identitiesUnlinkSelfRefused": "본인의 신원은 계정 설정에서 연결 해제하세요. 그곳의 작업은 본인 인증을 다시 요구합니다."
+    "identitiesUnlinkSelfRefused": "본인의 신원은 계정 설정에서 연결 해제하세요. 그곳의 작업은 본인 인증을 다시 요구합니다.",
+    "identitiesConnectionGone": "(연결 제거됨)",
+    "identityLinkInactive": "(더 이상 활성 상태 아님)"
   },
   "commentsPanel": {
     "readOnlyReason": "이 페이지에서 회원님의 댓글 달기가 비활성화되어 있습니다.",

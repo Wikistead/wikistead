@@ -11,9 +11,15 @@ import { ApiError } from "../data/apiClient";
 
 // #1107 / ADR-280 (rev6): the expand-in-place section a member's row reveals — never a popover (the
 // ruling's own reasoning: a face reachable only by hover cannot be linked, shared, or reached by
-// keyboard). Two fields per link (`connectionName`, `linkedAt`); `primaryIdentitySource` restates the
-// roster's own fact so an empty link list never reads as "no way in" for an ordinary member who has
-// never linked anything additional.
+// keyboard). `connectionName`, `linkedAt`, `connectionEffective` per link; `primaryIdentitySource`
+// restates the roster's own fact so an empty link list never reads as "no way in" for an ordinary
+// member who has never linked anything additional.
+//
+// #1162 / ADR-282: `connectionEffective === false` gets a small, deliberately unalarming dim label —
+// not a colored/warning treatment, since no security claim is being made (a member whose linked
+// connection the tenant has since reconfigured is an ordinary lifecycle event, not an incident). Never
+// shown alongside `identitiesConnectionGone` (a fully-deleted connection is already `connectionName:
+// null`, which reads that way on its own — the two states are not independently rendered).
 //
 // #1163 / ADR-283 §7: each row gains a small, deliberately unalarming unlink icon-button — the same
 // destructive-icon treatment `IconButton`'s own `variant="danger"` gives every other icon-only delete
@@ -70,7 +76,14 @@ export function MemberIdentityLinksSection({ sub, name }: { sub: string; name: s
         <ListBox>
           {links.map((link) => (
             <ListRow key={link.linkId} className="justify-between" data-testid="member-identity-link-row">
-              <span>{nameOf(link)}</span>
+              <span className="flex items-center gap-1.5">
+                {nameOf(link)}
+                {link.connectionName && !link.connectionEffective ? (
+                  <span className="text-fg-dim" data-testid="member-identity-link-inactive">
+                    {t("members.identityLinkInactive")}
+                  </span>
+                ) : null}
+              </span>
               <span className="flex items-center gap-2">
                 <span className="text-fg-dim">{new Date(link.linkedAt).toLocaleDateString(i18n.language)}</span>
                 <IconButton aria-label={t("members.identitiesUnlink")} data-testid="member-identity-unlink"

@@ -1250,6 +1250,7 @@
     "identitiesUnlinkFailed": "この連携を解除できませんでした。",
     "identitiesUnlinkLastWayIn": "これは {{name}} が唯一サインインできる方法です。代わりに停止するか、別のサインイン方法を先に追加するよう伝えてください。",
     "identitiesUnlinkSelfRefused": "自分自身の連携はアカウント設定から解除してください。そちらの操作では再認証が行われます。",
+    "identityLinkInactive": "（現在は無効）",
     "removeConfirm": "{{name}} をこのワークスペースから削除しますか？アクセス・API キー・セッションは即座に失効します。",
     "revokeConfirm": "{{email}} への招待を取り消しますか？送信済みのリンクは使えなくなります。",
     "filterPlaceholder": "メンバーを絞り込む…",

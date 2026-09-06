@@ -227,6 +227,21 @@ export async function resolveLoginConnections(
   return out
 }
 
+// #1162 / ADR-282: the tenant-wide "is this id still a live door" fact, without exposing
+// `LoginConnection` or `resolveLoginConnections` itself through the EE seam — the one caller
+// (`packages/ee-server/src/member-identities/mount.ts`) never needs a connection's name/label/brand
+// for this question, only a yes/no per id. This answers ONLY "is this connection currently effective
+// for the tenant" (structural fact) — it is NOT a claim that any specific member can still
+// authenticate through it, which depends on the upstream identity provider's own state and is
+// unknowable here (see `WayIn.usable: 'unknown'` above, for the same limit).
+export async function effectiveConnectionIds(
+  db: TenantDb,
+  tenant: { plan: string },
+  env?: string | undefined,
+): Promise<Set<string>> {
+  return new Set((await resolveLoginConnections(db, tenant, env)).map((c) => c.id))
+}
+
 // #554 S4 review F2/F3: the per-connection lockout guard, SHARED by the connections surface and
 // the legacy /admin/oidc card so the same operation cannot get opposite answers. It honors the
 // ADR-195 ruling-4 platform LAPSE: when the write would remove the last own-IdP connection, a

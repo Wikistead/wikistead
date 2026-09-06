@@ -1303,7 +1303,9 @@
     "identitiesUnlinkDone": "Identità scollegata",
     "identitiesUnlinkFailed": "Impossibile scollegare questa identità.",
     "identitiesUnlinkLastWayIn": "Questo è l'unico modo per {{name}} di accedere. Sospendilo invece, oppure chiedigli di aggiungere prima un altro metodo di accesso.",
-    "identitiesUnlinkSelfRefused": "Scollega le tue identità dalle impostazioni dell'account, dove l'azione ti autentica di nuovo."
+    "identitiesUnlinkSelfRefused": "Scollega le tue identità dalle impostazioni dell'account, dove l'azione ti autentica di nuovo.",
+    "identitiesConnectionGone": "(connessione rimossa)",
+    "identityLinkInactive": "(non più attivo)"
   },
   "commentsPanel": {
     "readOnlyReason": "Commentare è disattivato per te su questa pagina.",

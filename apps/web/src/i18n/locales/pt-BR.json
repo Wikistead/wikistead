@@ -1303,7 +1303,9 @@
     "identitiesUnlinkDone": "Identidade desvinculada",
     "identitiesUnlinkFailed": "Não foi possível desvincular esta identidade.",
     "identitiesUnlinkLastWayIn": "Esta é a única forma de {{name}} entrar. Suspenda-o em vez disso, ou peça que adicione outro método de login primeiro.",
-    "identitiesUnlinkSelfRefused": "Desvincule suas próprias identidades nas configurações da conta, onde a ação exige que você se autentique novamente."
+    "identitiesUnlinkSelfRefused": "Desvincule suas próprias identidades nas configurações da conta, onde a ação exige que você se autentique novamente.",
+    "identitiesConnectionGone": "(conexão removida)",
+    "identityLinkInactive": "(não está mais ativo)"
   },
   "commentsPanel": {
     "readOnlyReason": "Comentar está desativado para você nesta página.",

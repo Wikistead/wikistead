@@ -2449,8 +2449,8 @@ export function useMemberIdentitiesEnabled() {
   });
 }
 
-// #1107 / ADR-280 §1 (rev6): one member's linked sign-in identities — two fields per link
-// (`connectionName`, `linkedAt`), plus `primaryIdentitySource` restating the roster's own fact so an
+// #1107 / ADR-280 §1 (rev6): one member's linked sign-in identities — `connectionName`, `linkedAt`,
+// `connectionEffective`, per link — plus `primaryIdentitySource` restating the roster's own fact so an
 // empty link list is never misread as "no way in". On-demand only (`enabled`): a per-row expand
 // section, not fetched for every roster row on every page load.
 export interface MemberIdentityLink {
@@ -2458,6 +2458,10 @@ export interface MemberIdentityLink {
   connectionId: string;
   connectionName: { kind: "oidc" | "platform"; label: string | null; brand: string | null } | null;
   linkedAt: string;
+  // #1162 / ADR-282 (owner ruling, accepted): a structural fact only — "is this connection currently a
+  // live login door for the tenant". NOT a claim that this member can still sign in through it (that
+  // depends on the upstream identity provider's own state, which this product cannot observe).
+  connectionEffective: boolean;
 }
 export interface MemberIdentityLinksDTO { primaryIdentitySource: string; links: MemberIdentityLink[] }
 
