@@ -109,35 +109,6 @@ could read anything out of. It carries a fixed byte budget (~4KB, `tree-placehol
 `CURSOR_BYTE_BUDGET`) so it survives the smallest deployed proxy header limit measured in this repo;
 minting one that would exceed it throws rather than silently truncating the walk.
 
-`GET /admin/surfaces` carries a `memberIdentitiesEnabled` boolean alongside its
-existing `surfaces` list — true only where this build has composed the EE member-identity-links route
-AND the caller is a tenant admin, so the member-row expand section (never a popover — see below) knows
-whether to offer its toggle without ever calling a route that would 404 on a CE build.
-
-`GET /admin/members/{sub}/identities` (EE, `requireTenantAdmin`) resolves one member's linked sign-in
-identities — `{ primaryIdentitySource, links: [{linkId, connectionId, connectionName, linkedAt,
-connectionEffective}] }`. `linkId` is an opaque list key, not a disclosure; never `external_subject`
-(the raw upstream identifier). `connectionEffective` is a structural fact only — is this connection
-currently a live login door for the tenant — never a claim that this specific member can still
-authenticate through it (that depends on the upstream identity provider's own state, which this
-product cannot observe). An unknown or cross-tenant `sub` 404s identically to every other admin member
-route (existence-hiding).
-
-`DELETE /admin/members/{sub}/identities/{linkId}` (EE, `requireTenantAdmin`) removes ONE of a member's
-linked sign-in identities, by the link's own row id — not every link to a connection (self-service's
-`DELETE /me/connections/{connectionId}/link` deletes every row for a connection; this route deletes
-exactly the row an admin selected in the identities list above). Refused (409 `last_way_in`, no
-override) if this link is the member's only way in, counting a working local password the same way
-self-service does. Refused (409 `reset_self`) if the admin names their own `sub` — this route has no
-re-authentication step, on the premise that actor and target are different people. On success, every
-one of the target member's sessions ends immediately (not the admin's own), and the connection's
-group-slice contribution is revoked only if no sibling link to the same connection survives the
-removal. Writes the same `member.identity_unlinked` audit action self-service uses, disambiguated by
-actor/target. An unknown or cross-tenant `sub` 404s with `{ error: 'member not found' }`, the same body
-the sibling GET uses; a `linkId` naming a different member, already-removed, or never-existent link all
-404 with one shared `{ error: 'not found' }` body instead, so a caller cannot tell those three cases
-apart (existence-hiding).
-
 `POST /admin/connections/{id}/supersede` declares that `{id}` (a live connection)
 supersedes another connection given as `oldConnectionId` in the body — the recreate-an-IdP-connection
 rescue: it links every member the retiring connection minted to the same subject under the new
