@@ -14,7 +14,7 @@
   --wks-border: #d0d7de;
   --wks-accent: #2563eb;
   --wks-accent-fg: #ffffff;
-  --wks-font: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  --wks-font: "Inter", "Noto Sans JP", "Noto Sans SC", "Noto Sans KR", system-ui, sans-serif;
   --wks-font-mono: "Wikistead Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --wks-font-wordmark: "Plus Jakarta Sans", var(--wks-font);
 }
