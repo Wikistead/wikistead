@@ -49,6 +49,45 @@ describe("callout inline editUI (#174 slice 4b)", () => {
     expect(save).toHaveBeenLastCalledWith(":::warning\nbody line 1\nbody line 2\n:::");
 
     ctrl.destroy();
+  });
+
+  // #1170: the chip only had a `mousedown` listener, so a reader who tabbed onto it and pressed Enter
+  // or Space — which fire `click`, not `mousedown`, on a real <button> — changed nothing. Mouse was the
+  // only way in. Also the break-check for the click handler's `stopPropagation`: `activate` rebuilds
+  // the whole button row (`renderTypes`) WHILE this click is still bubbling, and without it the event
+  // reached a freshly-inserted SIBLING button's own listener too (measured: a bare dispatch here called
+  // `save` a second time with the wrong type, last-call assertion below would see that second call).
+  it("a type chip responds to keyboard activation (Enter/Space), exactly once", () => {
+    const container = document.createElement("div");
+    const save = vi.fn();
+    const ctrl = infoCallout.editUI!.mount(container, asMacroSource(":::info\nx\n:::"), ctx, save);
+    const dangerChip = container.querySelector('[data-testid="callout-edit-type-danger"]') as HTMLButtonElement;
+
+    // A browser fires `click` with detail 0 for a keyboard-triggered activation on a focused button
+    // no mousedown precedes it.
+    dangerChip.dispatchEvent(new MouseEvent("click", { detail: 0, bubbles: true }));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenLastCalledWith(":::danger\nx\n:::");
+    expect((container.querySelector('[data-testid="callout-edit-type-danger"]') as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+
+    ctrl.destroy();
+  });
+
+  // The ordinary mouse path: mousedown applies the change; click still reaches the same listener
+  // (browsers fire both), and `activate`'s own `type === ty` guard makes that second call a no-op
+  // rather than a double commit.
+  it("a real mouse click (mousedown, then its own click) commits the type change exactly once", () => {
+    const container = document.createElement("div");
+    const save = vi.fn();
+    const ctrl = infoCallout.editUI!.mount(container, asMacroSource(":::info\nx\n:::"), ctx, save);
+    const tipChip = container.querySelector('[data-testid="callout-edit-type-tip"]') as HTMLButtonElement;
+
+    tipChip.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    tipChip.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenLastCalledWith(":::tip\nx\n:::");
+
+    ctrl.destroy();
     expect(container.querySelector('[data-testid="callout-edit-type"]')).toBeNull();
   });
 

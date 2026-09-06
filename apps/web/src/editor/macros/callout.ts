@@ -52,14 +52,29 @@ const calloutEditUI: EditUI = {
       for (const ty of CALLOUT_TYPES) {
         const b = calloutTypeOption(ty, ty === type);
         b.setAttribute("data-testid", `callout-edit-type-${ty}`);
-        // mousedown (not click) + preventDefault so the panel's focus/selection is not disturbed.
-        b.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
+        const activate = () => {
           if (type === ty) return;
           type = ty;
           commit();
           renderTypes(); // re-render so the pressed state moves to the new type
+        };
+        // mousedown (not click) + preventDefault so the panel's focus/selection is not disturbed.
+        b.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          activate();
+        });
+        // #1170: a native <button> fires `click` for Enter/Space too, but nothing here was listening,
+        // so a reader tabbed onto a chip and pressing either key did nothing — mouse was the only way
+        // to change type. A real mouse click still reaches this listener too (mousedown above already
+        // ran `activate()` by then), but `activate`'s own `type === ty` guard makes that redundant call
+        // a no-op, so this needs no click-vs-keyboard distinction of its own. stopPropagation matters
+        // here independently of that: `renderTypes()` (inside `activate`) rebuilds the button row while
+        // this click is still bubbling, and letting it continue can hand a FRESH sibling button's click
+        // listener the same event (measured in the panel's own test).
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          activate();
         });
         typeGroup.appendChild(b);
       }

@@ -5520,6 +5520,16 @@ const livePreviewBaseTheme = EditorView.baseTheme({
   ".cm-lp-callout-edit-types": { display: "flex", gap: "0.4em", flexWrap: "wrap" },
   ".cm-lp-callout-edit-label": { width: "100%", boxSizing: "border-box", minWidth: "6em", fontSize: "0.85em", padding: "0.3em 0.5em", border: "1px solid var(--border, #888)", borderRadius: "6px", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-callout-edit-body": { width: "100%", boxSizing: "border-box", minHeight: "5em", resize: "vertical", fontFamily: "var(--font-code, monospace)", fontSize: "0.85em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
+  // #1170: the rule above only ever matched the plain <textarea> a host without `mountSurface` falls
+  // back to (in practice, only the unit tests) — the SHIPPED body editor is a nested CM island
+  // (`editEnv.mountSurface`, #456 S5), whose own root carries none of this: `slotIslandTheme` makes it
+  // deliberately transparent/borderless so a wrapper can supply the box, and nothing did. The result
+  // was a Content field with no visible edit surface at all (and a height that collapsed to nothing
+  // when empty) next to a Type row and a Header input that both look editable. `.cm-lp-callout-edit-field`
+  // wraps exactly one field's caption + control, and only a BODY field ever mounts a nested `.cm-editor`
+  // inside it (the Type row is buttons, Header is a plain `<input>`), so this reaches the island without
+  // a new class or touching callout.ts/layout-directives.ts (both share this wrapper).
+  ".cm-lp-callout-edit-field .cm-editor": { width: "100%", boxSizing: "border-box", minHeight: "5em", border: "1px solid var(--border, #888)", borderRadius: "6px", padding: "0.5em", background: "var(--bg, #fff)", color: "var(--fg, inherit)" },
   ".cm-lp-macro-error": {
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     color: "var(--danger, #c00)",
