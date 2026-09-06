@@ -1,0 +1,4 @@
+{
+  "_comment": "#713-S2 / ADR-228: the one non-negotiable condition the owner's ruling attached to shipping machine translation before a community exists to proof it — a machine-translated string must carry a mark on repo that says so, so 'reviewed' and 'generated' are never indistinguishable. This is that mark, at the whole-locale granularity: every language listed here is 100% LLM-translated from en.json, unreviewed by a human speaker. Removing a language from this file is the record of it having been proofed (in whole or in part) by a human — do that in the same change that actually proofs it, never speculatively.",
+  "de": true
+}

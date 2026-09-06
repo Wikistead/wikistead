@@ -121,6 +121,7 @@ export async function tenantDefaultLang(db: TenantDb): Promise<Lang> {
 const PERSONAL_SPACE_PHRASING: Record<Lang, { generic: string; possessive: (name: string) => string }> = {
   en: { generic: 'Personal Space', possessive: (name) => `${name}'s Space` },
   ja: { generic: 'マイスペース', possessive: (name) => `${name}のスペース` },
+  de: { generic: 'Persönlicher Bereich', possessive: (name) => `${name}s Bereich` },
 }
 
 // An empty display name falls back to the language-appropriate generic.

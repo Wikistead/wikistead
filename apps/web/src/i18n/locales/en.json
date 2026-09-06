@@ -165,7 +165,8 @@
   "language": {
     "label": "Language",
     "en": "English",
-    "ja": "日本語"
+    "ja": "日本語",
+    "de": "Deutsch"
   },
   "nav": {
     "toggleSidebar": "Toggle sidebar",
@@ -271,6 +272,7 @@
       "language_workspace": "Follow the workspace default",
       "language_en": "English",
       "language_ja": "Japanese",
+      "language_de": "German",
       "defaultMask": "Default event types",
       "defaultMaskHint": "Applied to watches without their own type filter. All types are on by default."
     },
@@ -1059,7 +1061,8 @@
     "defaultLang": "Workspace mail language",
     "defaultLangHint": "The fallback language for mail this workspace sends, used for members who have not chosen their own (Settings → Notifications → Mail language).",
     "defaultLang_en": "English",
-    "defaultLang_ja": "Japanese"
+    "defaultLang_ja": "Japanese",
+    "defaultLang_de": "German"
   },
   "accent": {
     "blue": "Blue",

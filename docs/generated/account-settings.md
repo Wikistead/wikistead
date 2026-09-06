@@ -37,6 +37,7 @@
 |---|---|
 | `en` | Mail from this workspace is written in English. |
 | `ja` | Mail from this workspace is written in Japanese. |
+| `de` | Mail from this workspace is written in German. |
 
 Unset falls back to the workspace default, then English.
 

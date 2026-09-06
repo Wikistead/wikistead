@@ -2,6 +2,7 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
+import de from "./locales/de.json";
 import { LANGS, isKnownLang, type Lang } from "@wikistead/i18n-shared";
 
 // i18n foundation (Phase 3b-1). Default locale is English; Japanese is available.
@@ -38,7 +39,7 @@ const initial = detectLang();
 if (typeof document !== "undefined") document.documentElement.lang = initial;
 
 void i18n.use(initReactI18next).init({
-  resources: { en: { translation: en }, ja: { translation: ja } },
+  resources: { en: { translation: en }, ja: { translation: ja }, de: { translation: de } },
   lng: initial,
   fallbackLng: "en",
   interpolation: { escapeValue: false }, // React already escapes

@@ -6,7 +6,13 @@
 // The supported locale set. apps/web's i18n/index.ts and apps/server's locale.ts both re-export this
 // rather than declaring their own copy — a second list is exactly the drift ADR-260 §2 forbids, now
 // for locale CODES rather than prose.
-export const LANGS = ['en', 'ja'] as const
+// #713-S2: the owner ruling (2026-09-06) fixed the language list — de/fr/es/it/nl/pt-BR/ru/uk/zh-Hans/ko
+// added to en/ja. Landing one language at a time (this revision: 'de' only) rather than all eleven in
+// one commit — each addition is independently a compile error (Record<Lang, ...> below and its
+// siblings) until every entry is filled, which is the forcing function ADR-228 relies on; filling ten
+// languages' worth of every such record in one commit would be exactly the kind of change too large to
+// review, contradicting the project design notes's own "one commit, one concern."
+export const LANGS = ['en', 'ja', 'de'] as const
 export type Lang = (typeof LANGS)[number]
 
 export function isKnownLang(v: string | null | undefined): v is Lang {
@@ -47,5 +53,15 @@ export const EVENT_TYPE_LABELS: Record<Lang, Record<FeedEventType, string>> = {
     'page.made_non_public': '一般公開の解除',
     'comment.created': '新しいコメント',
     'attachment.confirmed': 'ファイル添付',
+  },
+  // #713-S2: verbatim copies of de.json's eventTypes.* — see the comment above on why this cannot be
+  // an import.
+  de: {
+    'page.published': 'Seite veröffentlicht',
+    'page.restored': 'Seite wiederhergestellt',
+    'page.made_public': 'Seite öffentlich gemacht',
+    'page.made_non_public': 'Seite nicht mehr öffentlich',
+    'comment.created': 'Neuer Kommentar',
+    'attachment.confirmed': 'Datei angehängt',
   },
 }

@@ -165,7 +165,8 @@
   "language": {
     "label": "言語",
     "en": "English",
-    "ja": "日本語"
+    "ja": "日本語",
+    "de": "Deutsch"
   },
   "nav": {
     "toggleSidebar": "サイドバーを切り替え",
@@ -271,6 +272,7 @@
       "language_workspace": "ワークスペースの既定に従う",
       "language_en": "English",
       "language_ja": "日本語",
+      "language_de": "ドイツ語",
       "defaultMask": "既定のイベント種別",
       "defaultMaskHint": "種別フィルタを持たないウォッチに適用されます。既定では全種別オンです。"
     },
@@ -1057,7 +1059,8 @@
     "defaultLang": "ワークスペースのメール言語",
     "defaultLangHint": "このワークスペースが送るメールの既定の言語です。メンバーが自分で選んでいない場合（設定 → 通知 → メールの言語）に使われます。",
     "defaultLang_en": "English",
-    "defaultLang_ja": "日本語"
+    "defaultLang_ja": "日本語",
+    "defaultLang_de": "ドイツ語"
   },
   "accent": {
     "blue": "ブルー",

@@ -69,6 +69,7 @@ const DISPLAY_DESC: Record<DisplayModePref, string> = {
 const LANG_DESC: Record<Lang, string> = {
   en: 'Mail from this workspace is written in English.',
   ja: 'Mail from this workspace is written in Japanese.',
+  de: 'Mail from this workspace is written in German.',
 }
 
 const HEADER = `<!--
